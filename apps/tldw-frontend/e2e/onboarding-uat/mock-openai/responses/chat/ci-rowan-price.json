@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-ci-rowan-price",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The source does not provide the ticket price at Rowan Observatory. [1]"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 100,
+    "completion_tokens": 100,
+    "total_tokens": 200
+  }
+}

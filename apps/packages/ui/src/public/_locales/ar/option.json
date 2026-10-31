@@ -2728,5 +2728,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "أصبحت الدردشة والأدوات متاحة الآن في صفحة الخيارات وفي اللوحة الجانبية."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "الحفظ دون اتصال غير متاح حتى يتم تأكيد حسابك والتخزين المحلي. تبقى تغييراتك غير محفوظة."
   }
 }

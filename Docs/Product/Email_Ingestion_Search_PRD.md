@@ -1,10 +1,108 @@
 # PRD: Email Ingestion and Search Modernization (MsgVault-Inspired)
 
 - Title: Email Ingestion and Search Modernization
-- Owner: Backend and Search Team
+- Owner: Project owner / maintainer (single owner)
 - Status: Draft
 - Target Version: v0.2.x
-- Last Updated: 2026-02-10
+- Last Updated: 2026-09-26
+
+## Release Scope and Evidence (2026-09-26)
+
+Core email functionality is file-based ingestion, persistence, operator/text search,
+and message retrieval. Gmail synchronization is an **optional connector** with a
+separate validation and enablement gate. Pending live Gmail validation does not
+block the core gate. One owner handles implementation, operations and release
+approval; no separate backend/SRE/product approvals are required.
+
+Development and validation use synthetic email only. Do not connect the owner's
+personal Gmail or send personal email to an LLM. Upload processing is not assumed
+to be model-free: `/media/add` defaults `perform_analysis` to true, embeddings and
+LLM-assisted chunking have separate switches, and claims extraction can inherit
+server settings. The tested offline options and intercepted call boundaries are
+recorded in `Docs/Operations/Email_Core_Validation_2026-09-13.md` (TASK-13250).
+
+The milestone checkmarks below are implementation records, not deployment
+certification. The 2026-09-13 follow-up fixes the identical-body identity collision
+(TASK-13251), preserves parsed email metadata, and adds opt-in cursor pagination
+(TASK-13253) while retaining offset clients. Synthetic EML, ZIP and MBOX regressions
+now require separate identities. See the follow-up section of the validation record
+for fresh results and remaining environment gates.
+
+TASK-13255 additionally validates real API-key authentication and per-user SQLite
+isolation, including main-app test-mode request middleware and route registration. See
+`Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`. TASK-13256 adds
+authenticated synthetic EML upload, API-key scope/role rejection, organization
+storage-quota behavior and matching search tenancy in local ASGI/SQLite; see
+`Docs/Operations/Email_Authenticated_Upload_Validation_2026-09-25.md`.
+Subsequent guarded loopback HTTP probes validate full-app startup/shutdown,
+API-key uploads, scoped search/detail/media search and PostgreSQL forced-RLS
+isolation. Their reports are `Docs/Operations/Email_Live_SQLite_Validation_2026-09-25.md`
+and `Docs/Operations/Email_Live_PostgreSQL_Validation_2026-09-25.md`. JWT login is
+outside those probes.
+
+TASK-13376 closes the remaining core implementation and validation work against a
+local reference deployment: one loopback Uvicorn worker, SQLite first and then
+PostgreSQL. Historical 10,000-message search runs and three 100-message archive
+batches establish bounded correctness and measurements; they do not certify the
+1,000,000-message search target or sustained ingestion throughput. Final scale,
+parity, flag-reload and rollback evidence is recorded separately in
+`Docs/Operations/Email_Release_Checklist_and_Rollback.md`; all core technical gates
+are now verified with retained final artifacts. This local scope does not
+claim validation of another deployment topology or a process-restart rollout.
+
+Stage 1 implementation is committed as `b880be1b53`: attachment policy, bounded
+metrics and sensitive logging. The combined core suite passed 328 tests with two
+optional real-PST fixture skips; the focused logging/pool/access-log suite passed
+83 tests. Additional legacy-search diagnostics have six sentinel paths and 24
+selected regressions. SQLite's complete million-message certificate passes at
+warm aggregate p50 202.23 ms / p95 725.74 ms; sustained HTTP ingestion passes at
+130.54 messages/sec with complete parity, rollback and live metrics. Its generated
+temporary roots are confirmed absent. Final PostgreSQL certificates at
+`880d690a93` pass search at p50 220.92 ms / p95 495.49 ms and sustained HTTP at
+61.71 messages/sec over 61.5734 request seconds, with exact parity, retry, RLS,
+live metrics and local rollback/restore checks. PostgreSQL's batch diagnostic is
+false (3 of 38 below 50; minimum 38.96); sustained acceptance uses the minute-wide
+aggregate. All probe-owned cleanup is verified. The evidence record is
+`Docs/Operations/Email_Core_Closeout_Validation_2026-09-26.md`.
+
+PostgreSQL query/archive tuning is committed as `aac02e68e8`, preserving substring
+semantics and forced-RLS isolation. The selected per-connection profile uses
+`PGOPTIONS='-c work_mem=64 MB'`, expression statistics and a native multicolumn
+trigram index, with no global service configuration change. Its short diagnostic
+comparison and bounded archive profiles do not certify final PostgreSQL search
+or sustained throughput; the full attempt aborted during fixture parity before
+timing. Commit `1fee95629a` addresses that local Docker shared-memory limit with
+serial verification within its transaction, preserving complete parity/security
+checks and restoring two workers / 64 MB before search timing. The closeout record
+retains the failed initial run and maintenance provenance. The next full run
+passed parity but failed repeated label COUNT; `455fad64fb` adds a
+transaction-local custom-plan correction that preserves parameters, predicates
+and RLS and restores session settings.
+The generic-plan transition is inferred from the prepared-execution boundary.
+Its bounded pooled comparison and 22 passing regressions do not close gates
+alone. The earlier complete PostgreSQL certificate at frozen `455fad64fb` passed with
+all ten populated classes, meaningful negation, unchanged 21 source hashes,
+complete fixture parity, forced RLS and zero guard attempts. The fresh HTTP
+attempt then failed throughput and legacy/native parity (0 versus 1,700).
+Legacy parameter/phrase/rank fixes, bounded SQL rewrite/placeholder caches and
+identity round-trip reductions are committed as `ae46f643ab`. The full HTTP
+rerun passes with 5,600 exact legacy/native IDs, quoted title/body parity 1/1,
+`auto_email`, rollback/restore, zero guards and 22 stable source hashes. Final
+combined regressions are 211 passed. The later fresh shared-service run failed
+with POSIX shared-memory SQLSTATE 53100 at 64 MiB; that diagnostic and earlier
+455/ae46 results are historical. Final probe configuration `880d690a93` uses a
+dedicated loopback 5435 PostgreSQL 18.6 service with 256 MiB shared memory, the same
+image digest and 64 MB connection budget, preserving shared 5434 and production
+queries/RLS. Fresh search and HTTP both pass with 23 stable hashes. Final quality
+is Ruff/Bandit clean, 62 compiled files/38 production-probe paths and 91 helper
+regressions; all 55 exact roots and five scoped database/role/manifest targets,
+plus only the owned container/volume, are cleaned. The 27.87 failed HTTP and
+bounded profiling results remain historical; single-owner approval is unrecorded.
+
+Optional live Gmail, staging sync lag and actual OST files remain unverified.
+TASK-13377 executes both native PST endpoint tests with a pinned public synthetic
+container; see `Docs/Operations/Email_Real_PST_Validation_2026-09-26.md`. Synthetic
+adapter tests and deterministic missing-parser errors are separate evidence. None of the optional live Gmail checks blocks core release.
 
 ## Summary
 
@@ -41,7 +139,10 @@ These gaps make email archives difficult to use at scale and prevent parity with
 2. Knowledge workers connecting live inboxes and running repeated queries over new mail.
 3. Operators triaging ingestion errors or duplicates with source-level observability and sync checkpoints.
 
-## Current State (Baseline)
+## Original Baseline (Historical)
+
+This describes the original problem definition. For the current code audit and
+verification limits, use the dated release evidence above.
 
 1. Email parsing is already robust and includes core metadata extraction:
    - `tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py`
@@ -110,6 +211,22 @@ System must persist mailbox labels/folders and attachment metadata with message 
 
 All currently supported upload formats (`.eml`, `.zip`, `.mbox`, and `.pst/.ost` when parser backend is enabled) must write through the same normalized persistence path to guarantee consistent query behavior. When `.pst/.ost` parsing is not available, the API must return deterministic, informative errors and perform no partial normalized writes for those messages.
 
+#### FR-INGEST-005: Attachment Extraction Policy
+
+Attachment metadata is retained even when extraction is disabled. Explicit
+`extract_attachments=false` keeps metadata only and overrides the legacy
+`ingest_attachments` switch; omission inherits that switch. Extraction supports
+nested EML only. Default selection is `message/rfc822` plus the legacy `.eml`
+filename fallback; an explicit MIME allowlist uses declared types instead.
+Deny rules take precedence. Unsupported binaries and PST/OST attachment payloads
+remain metadata-only. Depth, count and size bounds still apply, and skipped child
+mail must not enter its parent's body. Descriptor status explains captured or
+skipped extraction without implying processing success or binary storage.
+
+The multipart fields, MIME syntax, precedence and status reasons are documented in
+`Docs/API-related/Email_Attachment_Policy_13376.md`; implementation rationale is in
+`Docs/Design/Email_Attachment_Policy_13376_2026-09-26.md` (TASK-13376.3).
+
 #### FR-SEARCH-001: Gmail-Style Query Operators (v1)
 
 Search must support:
@@ -144,7 +261,7 @@ System must provide a dedicated endpoint:
 
 And a compatibility bridge:
 
-1. `GET /api/v1/media/search` with `media_type=email` and optional `email_query_mode=operators`
+1. `POST /api/v1/media/search` with `media_types=["email"]` and optional `email_query_mode=operators` (current compatibility surface).
 
 #### FR-SEARCH-004: Boolean Semantics and Pagination Contract
 
@@ -194,16 +311,26 @@ Email data lifecycle must be enforceable:
 
 #### NFR-PERF-001: Search Latency
 
-For a 1M-message mailbox benchmark (single tenant), email operator queries should target:
+For an actual 1,000,000-message mailbox benchmark (single tenant), the warm-pass
+aggregate over the complete ten-class query mix must meet:
 
 1. p50 <= 250 ms
 2. p95 <= 900 ms
 
-for common filters (`from`, `subject`, date range, label, has:attachment), excluding cold-start migration windows.
+The ten classes and warm/cold methodology are fixed in
+`Docs/Product/Email_Search_Benchmark_Protocol.md`. Every required case must match
+stored messages; per-query latency is diagnostic rather than a separate SLO gate.
+The cold pass opens a fresh MediaDatabase handle for each query; backend pools may
+reuse physical connections. Host filesystem and PostgreSQL server caches remain
+unchanged, so these are handle-reopen diagnostics rather than proof of cache-cold
+performance. Cold-start migration windows are outside the warm SLO claim.
 
 #### NFR-PERF-002: Ingestion Throughput
 
 Batch archive ingestion should sustain at least 50 messages/sec on reference dev hardware for metadata-only persistence (no heavy attachment OCR).
+Record authenticated HTTP request duration, total wall time, batch/message counts
+and retry/isolation checks for each backend. A fixture loader's setup rate or three
+short archive batches cannot satisfy this sustained-ingestion gate.
 
 #### NFR-REL-001: Idempotency
 
@@ -397,7 +524,7 @@ Exit Criteria:
 ## Security and Compliance Considerations
 
 1. Enforce tenant and user scoping for all email source/message reads and writes.
-2. Avoid logging raw message bodies or sensitive headers in info-level logs.
+2. Avoid logging raw bodies, headers, attachment filenames, credentials or metadata in INFO-and-higher email diagnostics, including echoed dependency failures and traceback locals. Use bounded stage/outcome/error-type fields; preserve error propagation and rollback behavior.
 3. Apply existing secret management patterns for provider credentials.
 4. Enforce documented retention and hard-delete workflows for email content in both legacy and normalized stores during migration.
 
@@ -431,7 +558,7 @@ Exit Criteria:
 1. Should v1 include IMAP generic source, or only Gmail connector plus upload archives?
 2. Should conversation/thread reconstruction be required for v1 search results, or deferred?
 3. What bounded replay window should be used before escalating cursor recovery to full backfill?
-4. Should attachment text extraction be enabled by default for specific MIME types?
+4. Binary attachment text extraction is deferred. The v1 nested-EML-only default and MIME policy are resolved by FR-INGEST-005 and `Docs/API-related/Email_Attachment_Policy_13376.md`.
 
 ## Implementation Checklist and Milestone Tickets
 
@@ -439,9 +566,9 @@ Exit Criteria:
 
 1. Ticket IDs use `EMAIL-M{milestone}-{nnn}`.
 2. Status tracking uses markdown checkboxes:
-   - `[ ]` not started
+   - `[ ]` incomplete implementation, verification or approval
    - `[x]` complete
-3. Milestone closure requires all `Must` tickets complete and milestone exit criteria met.
+3. Milestone closure requires all `Must` tickets in the selected rollout scope complete and milestone exit criteria met. M2 and live Gmail portions of M4 apply only to optional Gmail enablement.
 
 ### Milestone M0: Quick-Win Hardening (Phase 0)
 
@@ -449,20 +576,21 @@ Milestone Goal: Eliminate highest-risk ingestion/search correctness gaps without
 
 Must Tickets:
 
-- [ ] `EMAIL-M0-001` Persist parsed email metadata fields in safe persistence path.
+- [x] `EMAIL-M0-001` Persist parsed email metadata fields in safe persistence path.
   Depends On: None.
   Deliverables: Update metadata allowlist and persistence tests so `from/to/cc/bcc/subject/date/message_id/headers_map/attachments` survive ingest.
   Acceptance: Existing email ingest tests pass; new assertions confirm persisted metadata completeness.
 
-- [ ] `EMAIL-M0-002` Implement dedupe precedence for message identity.
+- [x] `EMAIL-M0-002` Implement dedupe precedence for message identity.
   Depends On: `EMAIL-M0-001`.
   Deliverables: Dedupe order `(source_id, source_message_id)` -> `(source_id, message_id)` -> hash fallback.
   Acceptance: Regression tests demonstrate distinct messages with same body are no longer merged.
 
-- [ ] `EMAIL-M0-003` Add ingestion metrics for dedupe and parse outcomes.
+- [x] `EMAIL-M0-003` Add ingestion metrics for dedupe and parse outcomes.
   Depends On: None.
   Deliverables: Counters/timers for parsed messages, dedupe matches, parse failures, persistence failures.
   Acceptance: Metrics visible in existing monitoring path and covered by unit/integration checks.
+  Closeout: TASK-13376.1 adds bounded parse/dedupe/persistence observations; registry tests and both guarded sustained HTTP reports retain actual parse/Media/native successes, dedupe matches and native-search duration/result observations in the core release record.
 
 - [x] `EMAIL-M0-004` Add feature flags for staged rollout.
   Depends On: None.
@@ -471,17 +599,18 @@ Must Tickets:
 
 Should Tickets:
 
-- [ ] `EMAIL-M0-005` Update `Docs/API-related/Email_Processing_API.md` with metadata persistence behavior.
+- [x] `EMAIL-M0-005` Update `Docs/API-related/Email_Processing_API.md` with metadata persistence behavior.
   Depends On: `EMAIL-M0-001`.
   Acceptance: Docs reflect actual persisted fields and fallback behavior.
 
-- [ ] `EMAIL-M0-006` Add audit logging guardrails for sensitive fields.
+- [x] `EMAIL-M0-006` Add audit logging guardrails for sensitive fields.
   Depends On: None.
-  Acceptance: No raw message body or sensitive headers in info-level logs.
+  Acceptance: No raw message body, sensitive headers, filenames, credentials or metadata in INFO-and-higher diagnostics across the verified upload/storage/search/access-log failure paths.
+  Validation (2026-09-26): TASK-13376.2 is implemented in `b880be1b53`; the focused logging/pool/access-log suite passed 83 tests, including real lower-backend schema failures with preserved exception causes. Additional legacy-search success/fallback/failure sentinel paths and 24 selected regressions passed; Ruff/Bandit reported no findings in the touched scope. Audit: `Docs/Operations/Email_Sensitive_Logging_Audit_13376_2_2026-09-26.md`.
 
 Milestone Exit Gate:
 
-- [ ] M0 Gate approved by backend owner and test suite passes for email ingestion modules.
+- [ ] M0 Gate approved by the owner with ingestion correctness, metrics and logging criteria validated for the selected rollout scope.
 
 ### Milestone M1: Email-Native Storage and Operator Search (Phase 1)
 
@@ -624,7 +753,8 @@ Must Tickets:
   Depends On: `EMAIL-M1-009`, `EMAIL-M3-002`.
   Deliverables: Index tuning and planner optimizations documented and benchmarked (`tldw_Server_API/app/core/DB_Management/Media_DB_v2.py`, `Helper_Scripts/benchmarks/email_search_bench.py`, `Docs/Product/Email_Search_M3_003_Index_Tuning.md`).
   Acceptance: NFR latency targets met on benchmark corpus.
-  Validation (2026-02-10): `warm_p50_ms=9.51`, `warm_p95_ms=10.89` with trace-driven query mix (`workload_top_n=5`), and query-plan capture reported `queries_with_index_hits=5/5`.
+  Historical implementation validation (2026-02-10): `warm_p50_ms=9.51`, `warm_p95_ms=10.89` with trace-driven query mix (`workload_top_n=5`), and query-plan capture reported `queries_with_index_hits=5/5`. This smaller five-query run does not certify the complete ten-class, 1,000,000-message NFR gate. TASK-13376.4 records final SQLite and PostgreSQL scale evidence.
+  Final validation (2026-09-26): Complete 1,000,000-message certificates pass at warm aggregate SQLite 202.23/725.74 ms and PostgreSQL 220.92/495.49 ms, with all ten populated cases and meaningful negation. Final PostgreSQL uses `880d690a93` on the dedicated 256 MiB service; earlier455/shared 64 MiB results are historical. See `Docs/Operations/Email_Core_Closeout_Validation_2026-09-26.md`.
 
 - [x] `EMAIL-M3-004` Finalize `/media/search` delegation strategy and default behavior.
   Depends On: `EMAIL-M1-008`, `EMAIL-M3-002`.
@@ -640,14 +770,15 @@ Must Tickets:
 
 Should Tickets:
 
-- [ ] `EMAIL-M3-006` Add attachment extraction policy toggles and MIME-specific defaults.
+- [x] `EMAIL-M3-006` Add attachment extraction policy toggles and MIME-specific defaults.
   Depends On: `EMAIL-M1-003`.
   Acceptance: Extraction behavior configurable and documented.
+  Validation (2026-09-26): TASK-13376.3 is implemented in `b880be1b53`. The FR-INGEST-005 contract, parser policy and persisted nested-child paths are included in the 328-pass core suite; two optional real-PST fixtures are skipped, with fake-adapter metadata-only behavior and missing-parser errors separately tested. See `Docs/API-related/Email_Attachment_Policy_13376.md` and `Docs/Operations/Email_Core_Closeout_Validation_2026-09-26.md`. TASK-13377 subsequently passes both native real-PST endpoint cases; provenance and limits are in `Docs/Operations/Email_Real_PST_Validation_2026-09-26.md`.
 
 Milestone Exit Gate:
 
-- [x] M3 Gate approved after production-like load test, cutover rehearsal, and retention/deletion validation.
-  Validation Checklist: `Docs/Product/Email_Ingestion_Search_PRD.md`.
+- [ ] M3 Gate approved by the owner after the selected local reference scope has full-scale search, sustained ingestion, parity/cutover/rollback and retention/deletion evidence.
+  Prior bounded tests and implementation checkmarks are historical evidence, not this release approval. Validation checklist: `Docs/Operations/Email_Release_Checklist_and_Rollback.md` (TASK-13376).
 
 ### Milestone M4: Release Readiness and Documentation
 
@@ -658,7 +789,7 @@ Must Tickets:
 - [x] `EMAIL-M4-001` Publish operator query user guide.
   Depends On: `EMAIL-M1-007`.
   Deliverables: New guide in `Docs/User_Guides/Server/Email_Operator_Search_Guide.md` (mirrored to `Docs/Published/User_Guides/Server/Email_Operator_Search_Guide.md`) with examples and troubleshooting.
-  Acceptance: Guide content published with operator syntax, endpoint usage, and error handling references; product/support review pending rollout sign-off.
+  Acceptance: Guide content published with operator syntax, endpoint usage, and error handling references; owner review pending the selected rollout scope's sign-off.
 
 - [x] `EMAIL-M4-002` Publish email search architecture and developer integration docs.
   Depends On: `EMAIL-M1-006`, `EMAIL-M2-003`.
@@ -667,21 +798,23 @@ Must Tickets:
 
 - [x] `EMAIL-M4-003` Create production runbook for sync operations and incident response.
   Depends On: `EMAIL-M2-006`, `EMAIL-M2-007`.
-  Deliverables: Ops runbook covering retries, cursor repair, and quota incidents (`Docs/Product/Email_Ingestion_Search_PRD.md`).
-  Acceptance: Runbook published with staging dry-run checklist and concrete incident playbooks; staging execution with live Gmail traffic remains required before final M4 gate closure.
+  Deliverables: Ops runbook covering core offline validation and optional Gmail retries, cursor repair, and quota incidents (`Docs/Operations/Email_Sync_Operations_Runbook.md`).
+  Acceptance: Runbook published with synthetic core validation and connector incident playbooks. Live Gmail execution is deferred and required only for the optional Gmail enablement gate.
   Validation (2026-02-10): Focused endpoint/worker regression slice passed (`10 passed`) covering source status/sync APIs, cursor recovery (bounded replay/full-backfill-required), label/message-state deltas, retry backoff, retry-budget exhaustion, and large Gmail fixture edge cases.
 
 - [x] `EMAIL-M4-004` Final release checklist and rollback plan.
   Depends On: `EMAIL-M3-004`.
-  Deliverables: Feature-flag rollout sequence and rollback triggers (`Docs/Product/Email_Ingestion_Search_PRD.md`).
-  Acceptance: Checklist and rollback plan published; backend/SRE/product sign-offs are tracked in the document and required for M4 gate closure.
+  Deliverables: Feature-flag rollout sequence and rollback triggers (`Docs/Operations/Email_Release_Checklist_and_Rollback.md`).
+  Acceptance: Separate core and optional Gmail checklists and rollback steps published; one owner records approval for each enabled scope.
   Validation (2026-02-10): Rollout phase checklist, objective rollback triggers, and ordered rollback execution steps documented with explicit ownership and sign-off gates.
 
 Milestone Exit Gate:
 
-- [ ] M4 Gate approved and feature enabled for target rollout scope.
-  Blocker (2026-02-23): Live Gmail source validation is pending because no connected Gmail account is currently available for staging/demo testing.
-  Unblock Criteria: Execute the staging live-source sync checklist (`EMAIL-M4-003`) with a real Gmail connection and complete backend/SRE/product sign-offs (`EMAIL-M4-004`).
+- [ ] M4 Core gate approved and file ingestion/search enabled for target rollout scope.
+  Current status (2026-09-26): All core technical gates pass for the selected local reference scope: SQLite then dedicated PostgreSQL, complete search/sustained HTTP/metrics/parity/rollback and cleanup. Final PostgreSQL source is `880d690a93`, with aggregate throughput61.71 messages/sec; three slow batches remain diagnostics. Owner sign-off is separate, unrecorded and not inferred from implementation checkmarks.
+  Closure criteria: Record the selected scope's final technical artifacts and remaining limits, then record the single owner's release approval in the core release checklist.
+- [ ] M4 Optional Gmail enablement gate approved (deferred; not a core dependency).
+  Live OAuth, provider behavior, backfill/incremental sync and staging lag remain unverified. Mocked tests and fixture metrics are separate evidence. Any future live work requires an explicitly authorized dedicated synthetic test mailbox and a downstream processing audit. The owner's personal Gmail is excluded.
 
 ### Critical Path Summary
 

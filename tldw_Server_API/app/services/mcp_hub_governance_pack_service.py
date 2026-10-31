@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
 from tldw_Server_API.app.core.MCP_unified.governance_packs import (
     ApprovalTemplate,
     AssignmentTemplate,
@@ -130,7 +131,7 @@ class GovernancePackUpgradeExecutionResult(BaseModel):
     imported_object_counts: dict[str, int] = Field(default_factory=dict)
 
 
-class GovernancePackAlreadyExistsError(ValueError):
+class GovernancePackAlreadyExistsError(TransactionPassthroughError, ValueError):
     """Raised when a governance pack identity already exists in the target scope."""
 
     def __init__(
@@ -158,8 +159,12 @@ class GovernancePackUpgradeConflictError(ValueError):
     """Raised when an upgrade plan has blocking conflicts."""
 
 
-class GovernancePackUpgradeStaleError(ValueError):
-    """Raised when execute-upgrade inputs no longer match current planner state."""
+class GovernancePackUpgradeStaleError(TransactionPassthroughError, ValueError):
+    """Raised when execute-upgrade inputs no longer match current planner state.
+
+    Passthrough so it survives the AuthNZ transaction boundary, which otherwise
+    sanitizes to ``TransactionError`` without a ``__cause__`` (d7bab343d3).
+    """
 
 
 def _is_duplicate_governance_pack_error(exc: Exception) -> bool:

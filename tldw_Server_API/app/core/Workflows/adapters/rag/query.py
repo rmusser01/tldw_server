@@ -18,7 +18,11 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
 from tldw_Server_API.app.core.testing import is_test_mode
-from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
+from tldw_Server_API.app.core.Workflows.adapters._common import (
+    extract_openai_content,
+    resolve_context_user_id,
+    workflow_chroma_manager,
+)
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.rag._config import (
     HyDEGenerateConfig,
@@ -55,16 +59,19 @@ _QUERY_ADAPTER_EXCEPTIONS = (
 _QUERY_JSON_PARSE_EXCEPTIONS = (TypeError, ValueError, json.JSONDecodeError)
 
 
-def _get_workflow_chroma_manager():
-    """Resolve the default ChromaDB manager for workflow adapters."""
-    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import get_default_chroma_manager
+def _get_workflow_chroma_manager(user_id: str):
+    """Resolve the ChromaDB manager for one account.
 
-    return get_default_chroma_manager()
+    Chroma isolates by directory, so this has to be built per account. The
+    process-global default was pinned to the single-user id, which put every
+    account's cached answers in one collection queried with no tenant filter.
+    """
+    return workflow_chroma_manager(user_id)
 
 
-def _get_semantic_cache_collection(collection_name: str) -> tuple[Any, Any]:
+def _get_semantic_cache_collection(collection_name: str, user_id: str) -> tuple[Any, Any]:
     """Resolve semantic-cache collection and return (manager, collection)."""
-    manager = _get_workflow_chroma_manager()
+    manager = _get_workflow_chroma_manager(user_id)
     if not manager:
         return None, None
     collection = manager.get_or_create_collection(collection_name=collection_name)
@@ -430,6 +437,12 @@ async def run_semantic_cache_check_adapter(config: dict[str, Any], context: dict
     if not query:
         return {"cache_hit": False, "query": "", "error": "missing_query"}
 
+    user_id = resolve_context_user_id(context)
+    if not user_id:
+        # Without an account there is no cache partition to consult; the old
+        # default read and wrote user 1's store for everybody.
+        return {"cache_hit": False, "query": query, "error": "missing_user_id"}
+
     cache_collection = config.get("cache_collection", "semantic_cache")
     similarity_threshold = float(config.get("similarity_threshold", 0.9))
     max_age_seconds = int(config.get("max_age_seconds", 3600))
@@ -437,7 +450,7 @@ async def run_semantic_cache_check_adapter(config: dict[str, Any], context: dict
     try:
         import time
 
-        manager, collection = _get_semantic_cache_collection(cache_collection)
+        manager, collection = _get_semantic_cache_collection(cache_collection, user_id)
         if not collection:
             return {"cache_hit": False, "query": query, "error": "chroma_unavailable"}
 

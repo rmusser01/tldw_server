@@ -2,6 +2,7 @@
 
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { extractPipelineErrorMessage, OverviewTab } from "../OverviewTab"
 
@@ -108,12 +109,44 @@ const readyPipelineAction = async (name: string) => {
   return button
 }
 
+const openPipelineWithSources = async (triggerName = "Test now") => {
+  const sourceFetchesBeforeOpen = mocks.fetchSources.mock.calls.length
+  fireEvent.click(await screen.findByRole("button", { name: triggerName }))
+  await screen.findByRole("dialog", { name: "Set up briefing" })
+  await waitFor(() => {
+    expect(mocks.fetchSources).toHaveBeenCalledTimes(sourceFetchesBeforeOpen + 1)
+    expect(pipeline().queryByText("Loading sources...")).not.toBeInTheDocument()
+    expect(pipeline().getByLabelText("AI Feed")).toBeEnabled()
+  })
+}
+
+const setExistingSourceSelected = async (sourceName: string, selected: boolean) => {
+  // Click-and-verify inside one waitFor: loaded CI runners can swallow a
+  // single click during re-render, so waiting alone never converges. The
+  // click is state-guarded, so retries are idempotent (#2911).
+  await waitFor(
+    () => {
+      const source = pipeline().getByLabelText(sourceName)
+      if ((source as HTMLInputElement).checked !== selected) {
+        fireEvent.click(source)
+      }
+      const currentSource = pipeline().getByLabelText(sourceName)
+      if (selected) expect(currentSource).toBeChecked()
+      else expect(currentSource).not.toBeChecked()
+    },
+    { timeout: 15_000 }
+  )
+}
+
 const reachTestStep = async () => {
-  fireEvent.click(pipeline().getByLabelText("AI Feed"))
+  await setExistingSourceSelected("AI Feed", true)
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+  await waitFor(() => expect(pipeline().getByLabelText("Monitor name")).toBeInTheDocument())
   fireEvent.change(pipeline().getByLabelText("Monitor name"), { target: { value: "Morning Brief" } })
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+  await waitFor(() => expect(pipeline().getByRole("button", { name: "Next: Delivery" })).toBeInTheDocument())
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+  await waitFor(() => expect(pipeline().getByRole("button", { name: "Next: Test" })).toBeInTheDocument())
   fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
   await waitFor(() => {
     expect(pipeline().getByRole("button", { name: "Generate 60-second sample" })).toBeInTheDocument()
@@ -170,7 +203,12 @@ describe("extractPipelineErrorMessage", () => {
   })
 })
 
-describe("OverviewTab canonical setup", () => {
+// Suite-scoped timeout: these tests drive the full PipelineWizard antd
+// tree through many userEvent interactions under jsdom; individual tests
+// legitimately take 20-30s (no timers or hangs involved - see the
+// per-suite precedent in sidepanel-flashcards.test.tsx). describe options
+// keep the raised timeout from leaking into other files.
+describe("OverviewTab canonical setup", { timeout: 60_000 }, () => {
   it("keeps setup scoped to a selected Watchlist", async () => {
     mocks.selectedWatchlistId = null
     render(<OverviewTab />)
@@ -226,10 +264,10 @@ describe("OverviewTab canonical setup", () => {
 
   it("adapts advanced schedule previews through the authenticated service", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
-    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    await openPipelineWithSources()
+    await setExistingSourceSelected("AI Feed", true)
     fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    await waitFor(() => expect(pipeline().getByLabelText("Schedule")).toBeInTheDocument())
 
     fireEvent.mouseDown(pipeline().getByLabelText("Schedule"))
     fireEvent.click(await screen.findByText("Advanced cron", {
@@ -248,16 +286,14 @@ describe("OverviewTab canonical setup", () => {
   it("tests an inactive monitor and activates the same id without creating a duplicate", async () => {
     render(<OverviewTab />)
 
-    const trigger = await screen.findByRole("button", { name: "Test now" })
-    fireEvent.click(trigger)
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
-    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    await openPipelineWithSources()
+    await setExistingSourceSelected("AI Feed", true)
     fireEvent.click(pipeline().getByRole("button", { name: "Test source" }))
     await waitFor(() => expect(mocks.testSource).toHaveBeenCalledWith(
       { url: "https://example.com/ai.xml", source_type: "rss" },
       { limit: 6 }
     ))
-    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    await setExistingSourceSelected("AI Feed", false)
     await reachTestStep()
 
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
@@ -275,12 +311,11 @@ describe("OverviewTab canonical setup", () => {
     fireEvent.click(await readyPipelineAction("Activate schedule"))
     await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(303, { active: true }))
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
-  }, 20_000)
+  })
 
   it("applies a safe test contract and restores full delivery on activation", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await openPipelineWithSources()
     await reachTestStep()
     fireEvent.click(pipeline().getByRole("button", { name: "Delivery" }))
     fireEvent.click(pipeline().getByRole("switch", { name: "Email" }))
@@ -315,12 +350,11 @@ describe("OverviewTab canonical setup", () => {
         })
       })
     ))
-  }, 20_000)
+  })
 
   it("updates the inactive job with the current existing source selection", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await openPipelineWithSources()
     await reachTestStep()
 
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
@@ -340,7 +374,7 @@ describe("OverviewTab canonical setup", () => {
       expect.objectContaining({ scope: { sources: [12] }, active: false })
     ))
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
-  }, 20_000)
+  })
 
   it("updates a persisted new source when its draft identity changes", async () => {
     mocks.fetchOverview.mockResolvedValue(overview(0, 0))
@@ -376,12 +410,11 @@ describe("OverviewTab canonical setup", () => {
       expect.objectContaining({ scope: { sources: [501] }, active: false })
     )
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
-  }, 20_000)
+  })
 
   it("never updates a pre-existing source when switching from existing to new", async () => {
     render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Test now" }))
-    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await openPipelineWithSources()
     await reachTestStep()
     fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
     await waitFor(() => expect(mocks.createJob).toHaveBeenCalledTimes(1))
@@ -402,7 +435,7 @@ describe("OverviewTab canonical setup", () => {
       303,
       expect.objectContaining({ scope: { sources: [501] }, active: false })
     )
-  }, 20_000)
+  })
 
   it("rebinds a wizard-created source job to the current existing selection", async () => {
     mocks.fetchOverview.mockResolvedValue(overview(0, 0))
@@ -433,5 +466,5 @@ describe("OverviewTab canonical setup", () => {
       expect.objectContaining({ scope: { sources: [12] }, active: false })
     ))
     expect(mocks.updateSource).not.toHaveBeenCalled()
-  }, 20_000)
+  })
 })

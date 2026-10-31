@@ -11,6 +11,8 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+
 
 class DocumentVersionsRepository:
     """Repository for document version persistence and lookup."""
@@ -19,7 +21,7 @@ class DocumentVersionsRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "DocumentVersionsRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> DocumentVersionsRepository:
         return cls(session=db)
 
     def create(
@@ -48,7 +50,8 @@ class DocumentVersionsRepository:
                     return db._fetchone_with_connection(conn, query, params)
 
                 media_info = _fetchone(
-                    "SELECT uuid FROM Media WHERE id = ? AND deleted = 0",
+                    "SELECT uuid FROM Media WHERE id = ? AND deleted = 0 "
+                    "AND system_operation_id IS NULL",
                     (media_id,),
                 )
                 if not media_info:
@@ -181,32 +184,19 @@ class DocumentVersionsRepository:
                             except DatabaseError:
                                 pass
                 except Exception as exc:
-                    logger.warning(
-                        "Could not populate identifiers for version_id={}: {}",
-                        version_id,
-                        exc,
-                    )
+                    logger.warning("Document version identifiers skipped (error_type={})", exception_type_for_log(exc))
 
                 db._log_sync_event(conn, "DocumentVersions", new_uuid, "create", new_version, insert_data)
         except (InputError, DatabaseError, sqlite3.Error) as exc:
             if "foreign key constraint failed" in str(exc).lower():
-                logger.exception(
-                    "Failed create document version: Media ID {} not found.",
-                    media_id,
-                    exc_info=False,
-                )
+                logger.error("Document version creation failed (error_type={})", exception_type_for_log(exc))
                 raise InputError(f"Cannot create document version: Media ID {media_id} not found.") from exc  # noqa: TRY003
-            logger.error("DB error creating document version for media {}: {}", media_id, exc, exc_info=True)
+            logger.error("Document version creation failed (error_type={})", exception_type_for_log(exc))
             if isinstance(exc, (InputError, DatabaseError)):
                 raise
             raise DatabaseError(f"Failed create document version: {exc}") from exc  # noqa: TRY003
         except Exception as exc:
-            logger.error(
-                "Unexpected error creating document version for media {}: {}",
-                media_id,
-                exc,
-                exc_info=True,
-            )
+            logger.error("Document version creation failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Unexpected error creating document version: {exc}") from exc  # noqa: TRY003
         else:
             return {
@@ -251,7 +241,8 @@ class DocumentVersionsRepository:
             params: list[Any] = [media_id]
             query_base = (
                 "FROM DocumentVersions dv JOIN Media m ON dv.media_id = m.id "
-                "WHERE dv.media_id = ? AND dv.deleted = 0 AND m.deleted = 0"
+                "WHERE dv.media_id = ? AND dv.deleted = 0 AND m.deleted = 0 "
+                "AND m.system_operation_id IS NULL"
             )
             order_limit = ""
             if version_number is None:
@@ -330,7 +321,11 @@ class DocumentVersionsRepository:
             select_clause = ", ".join(select_cols_list)
 
             params: list[Any] = [media_id]
-            where_conditions = ["dv.media_id = ?", "m.deleted = 0"]
+            where_conditions = [
+                "dv.media_id = ?",
+                "m.deleted = 0",
+                "m.system_operation_id IS NULL",
+            ]
             if not include_deleted:
                 where_conditions.append("dv.deleted = 0")
 
@@ -389,7 +384,8 @@ class DocumentVersionsRepository:
                     "SELECT dv.id, dv.media_id, dv.version, m.uuid as media_uuid "
                     "FROM DocumentVersions dv "
                     "JOIN Media m ON dv.media_id = m.id "
-                    "WHERE dv.uuid = ? AND dv.deleted = 0",
+                    "WHERE dv.uuid = ? AND dv.deleted = 0 "
+                    "AND m.system_operation_id IS NULL",
                     (version_uuid,),
                 )
                 if not version_info:

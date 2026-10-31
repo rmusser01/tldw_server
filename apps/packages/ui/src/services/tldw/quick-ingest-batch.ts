@@ -1,5 +1,5 @@
 import { browser } from "wxt/browser";
-import { bgRequest, bgUpload } from "@/services/background-proxy";
+import { assertQuickIngestRequestCurrent, scopedQuickIngestRequest, scopedQuickIngestUpload, type QuickIngestRequestContext } from "./quick-ingest-request-scope";
 import {
   getProcessPathForType,
   inferIngestTypeFromUrl,
@@ -77,7 +77,7 @@ type QuickIngestFilePayload = {
   conferenceOverride?: ConferenceItemMetadataOverride;
 };
 
-type QuickIngestBatchInput = {
+type QuickIngestBatchInput = QuickIngestRequestContext & {
   entries: QuickIngestEntry[];
   files: QuickIngestFilePayload[];
   storeRemote: boolean;
@@ -147,7 +147,7 @@ export type QuickIngestStartAck = {
   error?: string;
 };
 
-export type QuickIngestCancelInput = {
+export type QuickIngestCancelInput = QuickIngestRequestContext & {
   sessionId: string;
   reason?: string;
   batchIds?: string[];
@@ -256,6 +256,7 @@ const isDirectSessionCancelled = (sessionId: string | undefined) => {
 };
 
 const cancelDirectSessionBatches = async (
+  input: QuickIngestRequestContext,
   sessionId: string | undefined,
   reason: string,
 ): Promise<void> => {
@@ -265,7 +266,7 @@ const cancelDirectSessionBatches = async (
   if (!tracker) return;
 
   await tracker.cancelTrackedBatches(async (batchId) => {
-    await bgRequest<any>({
+    await scopedQuickIngestRequest<any>(input, {
       path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(
         batchId,
       )}&reason=${encodeURIComponent(reason || "user_cancelled")}`,
@@ -411,7 +412,7 @@ const serializeUploadFields = (
   return serialized;
 };
 
-const submitPersistentAdd = async ({
+const submitPersistentAdd = async (input: QuickIngestRequestContext, {
   fields,
   file,
 }: {
@@ -423,7 +424,7 @@ const submitPersistentAdd = async ({
   };
 }): Promise<any> =>
   normalizePersistentAddResponse(
-    await bgUpload<any>({
+    await scopedQuickIngestUpload<any>(input, {
       path: "/api/v1/media/add",
       method: "POST",
       fields: serializeUploadFields(fields),
@@ -523,7 +524,7 @@ const buildFields = ({
   return fields;
 };
 
-const processWebScrape = async ({
+const processWebScrape = async (input: QuickIngestRequestContext, {
   url,
   entry,
   common,
@@ -574,7 +575,7 @@ const processWebScrape = async ({
     }
   }
 
-  return await bgRequest<any>({
+  return await scopedQuickIngestRequest<any>(input, {
     path: "/api/v1/media/process-web-scraping",
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -653,7 +654,7 @@ const createPlannedConferenceCollection = async (
   if (selectedEntries.length === 0) return null;
 
   const collection = normalizeMediaCollectionResponse(
-    await bgRequest<ApiMediaCollection>({
+    await scopedQuickIngestRequest<ApiMediaCollection>(input, {
       path: "/api/v1/media/collections",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -669,7 +670,7 @@ const createPlannedConferenceCollection = async (
   const itemsByEntryId = new Map<string, PlannedConferenceCollectionItem>();
   for (const entry of selectedEntries) {
     const item = normalizeMediaCollectionItem(
-      await bgRequest<ApiMediaCollectionItem>({
+      await scopedQuickIngestRequest<ApiMediaCollectionItem>(input, {
         path: `/api/v1/media/collections/${encodeURIComponent(String(collection.id))}/items`,
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -697,11 +698,12 @@ const createPlannedConferenceCollection = async (
 };
 
 const patchConferenceCollectionItem = async (
+  input: QuickIngestRequestContext,
   planned: PlannedConferenceCollectionItem | undefined,
   payload: Record<string, unknown>,
 ): Promise<void> => {
   if (!planned) return;
-  await bgRequest<ApiMediaCollectionItem>({
+  await scopedQuickIngestRequest<ApiMediaCollectionItem>(input, {
     path: `/api/v1/media/collections/${encodeURIComponent(
       String(planned.collectionId),
     )}/items/${encodeURIComponent(String(planned.itemId))}`,
@@ -749,7 +751,7 @@ const runDirectQuickIngestBatch = async (
       ? input.fileDefaults
       : {};
   const shouldStoreRemote =
-    Boolean(input.storeRemote) && !Boolean(input.processOnly);
+    Boolean(input.storeRemote) && !input.processOnly;
   const directSessionId =
     String(input.__quickIngestSessionId || "").trim() || undefined;
 
@@ -759,6 +761,7 @@ const runDirectQuickIngestBatch = async (
     try {
       conferencePlan = await createPlannedConferenceCollection(input, entries);
     } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
       console.warn("[tldw] Conference collection planning failed", error);
     }
   }
@@ -772,7 +775,7 @@ const runDirectQuickIngestBatch = async (
       timeoutMs,
       pollIntervalMs: DIRECT_REMOTE_POLL_INTERVAL_MS,
       fetchJob: async (trackedJobId) =>
-        (await bgRequest<any>({
+        (await scopedQuickIngestRequest<any>(input, {
           path: `/api/v1/media/ingest/jobs/${trackedJobId}`,
           method: "GET",
           timeoutMs: DIRECT_REMOTE_POLL_INTERVAL_MS + 3000,
@@ -783,7 +786,7 @@ const runDirectQuickIngestBatch = async (
           | undefined,
       isCancelled: () => isDirectSessionCancelled(directSessionId),
       onCancel: async () => {
-        await cancelDirectSessionBatches(directSessionId, "user_cancelled");
+        await cancelDirectSessionBatches(input, directSessionId, "user_cancelled");
       },
     });
 
@@ -807,6 +810,7 @@ const runDirectQuickIngestBatch = async (
     }
 
     for (const entry of entries) {
+      assertQuickIngestRequestCurrent(input);
       if (isDirectSessionCancelled(directSessionId)) {
         break;
       }
@@ -833,7 +837,7 @@ const runDirectQuickIngestBatch = async (
           plannedConferenceItem &&
           !duplicatePolicyResolution.shouldSubmitJob
         ) {
-          await patchConferenceCollectionItem(plannedConferenceItem, {
+          await patchConferenceCollectionItem(input, plannedConferenceItem, {
             status: duplicatePolicyResolution.plannedStatus,
             retry_count: 0,
           });
@@ -860,7 +864,7 @@ const runDirectQuickIngestBatch = async (
         let resultPersisted = false;
         if (resolvedType === "html") {
           localProcessingAttempted = true;
-          data = await processWebScrape({
+          data = await processWebScrape(input, {
             url,
             entry,
             common: input.common,
@@ -883,7 +887,7 @@ const runDirectQuickIngestBatch = async (
             shouldStoreRemote &&
             !resultError &&
             webScrapeResponseIndicatesPersisted(data, resultMediaId);
-          await patchConferenceCollectionItem(plannedConferenceItem, {
+          await patchConferenceCollectionItem(input, plannedConferenceItem, {
             status: getConferenceTerminalStatus(htmlDuplicate, Boolean(resultError)),
             media_id: resultMediaId,
             error_summary: resultError,
@@ -907,7 +911,7 @@ const runDirectQuickIngestBatch = async (
           applyPlannedConferenceFields(fields, plannedConferenceItem);
           fields.urls = [url];
           try {
-            const submitData = await bgUpload<any>({
+            const submitData = await scopedQuickIngestUpload<any>(input, {
               path: "/api/v1/media/ingest/jobs",
               method: "POST",
               fields: serializeUploadFields(fields),
@@ -918,7 +922,7 @@ const runDirectQuickIngestBatch = async (
             const firstJobId = jobIds[0];
             jobSubmitted = true;
             latestJobId = firstJobId;
-            await patchConferenceCollectionItem(plannedConferenceItem, {
+            await patchConferenceCollectionItem(input, plannedConferenceItem, {
               status: "processing",
               latest_job_id: String(firstJobId),
             });
@@ -965,7 +969,7 @@ const runDirectQuickIngestBatch = async (
               resultError =
                 extractCompletedIngestJobError(pollResult.data) || "Ingest failed";
             }
-            await patchConferenceCollectionItem(plannedConferenceItem, {
+            await patchConferenceCollectionItem(input, plannedConferenceItem, {
               status: getConferenceTerminalStatus(
                 completedDuplicate,
                 Boolean(resultError),
@@ -975,10 +979,11 @@ const runDirectQuickIngestBatch = async (
               error_summary: resultError,
             });
           } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
             if (!shouldFallbackToPersistentAdd(error)) {
               throw error;
             }
-            await patchConferenceCollectionItem(plannedConferenceItem, {
+            await patchConferenceCollectionItem(input, plannedConferenceItem, {
               status: jobSubmitted ? "failed" : "submit_failed",
               latest_job_id:
                 typeof latestJobId === "number" ? String(latestJobId) : undefined,
@@ -989,7 +994,7 @@ const runDirectQuickIngestBatch = async (
               fields.media_ingest_job_id = String(latestJobId);
             }
             localProcessingAttempted = true;
-            data = await submitPersistentAdd({ fields });
+            data = await submitPersistentAdd(input, { fields });
             resultMediaId = extractCompletedIngestJobMediaId(data);
             const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
             if (fallbackDuplicate) {
@@ -999,7 +1004,7 @@ const runDirectQuickIngestBatch = async (
               resultError =
                 extractCompletedIngestJobError(data) || "Ingest failed";
             }
-            await patchConferenceCollectionItem(plannedConferenceItem, {
+            await patchConferenceCollectionItem(input, plannedConferenceItem, {
               status: getConferenceTerminalStatus(
                 fallbackDuplicate,
                 Boolean(resultError),
@@ -1026,7 +1031,7 @@ const runDirectQuickIngestBatch = async (
           });
           fields.urls = [url];
           localProcessingAttempted = true;
-          data = await bgUpload<any>({
+          data = await scopedQuickIngestUpload<any>(input, {
             path: getProcessPathForType(resolvedType),
             method: "POST",
             fields: serializeUploadFields(fields),
@@ -1058,9 +1063,10 @@ const runDirectQuickIngestBatch = async (
           idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
         const outcome =
           jobSubmitted || localProcessingAttempted ? "failed" : "submit_failed";
-        await patchConferenceCollectionItem(plannedConferenceItem, {
+        await patchConferenceCollectionItem(input, plannedConferenceItem, {
           status: outcome,
           latest_job_id:
             typeof latestJobId === "number" ? String(latestJobId) : undefined,
@@ -1087,6 +1093,7 @@ const runDirectQuickIngestBatch = async (
     }
 
     for (const file of files) {
+      assertQuickIngestRequestCurrent(input);
       if (isDirectSessionCancelled(directSessionId)) {
         break;
       }
@@ -1116,7 +1123,7 @@ const runDirectQuickIngestBatch = async (
         };
         if (shouldStoreRemote) {
           try {
-            const submitData = await bgUpload<any>({
+            const submitData = await scopedQuickIngestUpload<any>(input, {
               path: "/api/v1/media/ingest/jobs",
               method: "POST",
               fields: serializeUploadFields(fields),
@@ -1159,10 +1166,11 @@ const runDirectQuickIngestBatch = async (
               persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType),
             });
           } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
             if (!shouldFallbackToPersistentAdd(error)) {
               throw error;
             }
-            const data = await submitPersistentAdd({
+            const data = await submitPersistentAdd(input, {
               fields,
               file: uploadFile,
             });
@@ -1181,7 +1189,7 @@ const runDirectQuickIngestBatch = async (
           continue;
         }
 
-        const data = await bgUpload<any>({
+        const data = await scopedQuickIngestUpload<any>(input, {
           path: getProcessPathForType(mediaType),
           method: "POST",
           fields: serializeUploadFields(fields),
@@ -1202,6 +1210,7 @@ const runDirectQuickIngestBatch = async (
           persisted: false,
         });
       } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
         out.push({
           id,
           status: "error",
@@ -1215,27 +1224,35 @@ const runDirectQuickIngestBatch = async (
       }
     }
 
+    assertQuickIngestRequestCurrent(input);
     return { ok: true, results: out };
   } finally {
     clearDirectSessionTracking(directSessionId);
   }
 };
 
+const runtimePayload = (input: QuickIngestBatchInput) => {
+  const { signal: _signal, assertCurrent: _assertCurrent, onTrackingMetadata: _tracking, ...payload } = input;
+  return payload;
+};
+
 export const submitQuickIngestBatch = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestBatchResponse> => {
+  assertQuickIngestRequestCurrent(input);
   if (
     !isDirectQuickIngestSessionId(input?.__quickIngestSessionId) &&
     (await canUseExtensionMessagingRuntime())
   ) {
     try {
       const result =
-        await sendExtensionMessageWithTimeout<QuickIngestBatchResponse>({
+        await (assertQuickIngestRequestCurrent(input), sendExtensionMessageWithTimeout<QuickIngestBatchResponse>({
           type: "tldw:quick-ingest-batch",
-          payload: input,
-        });
+          payload: runtimePayload(input),
+        }));
       return result;
-    } catch {
+    } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
       // Fall through to the direct path when runtime messaging is unavailable
       // even though the extension context still exists.
     }
@@ -1247,13 +1264,16 @@ export const submitQuickIngestBatch = async (
 export const startQuickIngestSession = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestStartAck> => {
+  assertQuickIngestRequestCurrent(input);
   if (!shouldPreferDirectQuickIngestSession() && (await canUseExtensionMessagingRuntime())) {
     try {
+      assertQuickIngestRequestCurrent(input);
       return await sendExtensionMessageWithTimeout<QuickIngestStartAck>({
         type: "tldw:quick-ingest/start",
-        payload: input,
+        payload: runtimePayload(input),
       });
-    } catch {
+    } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
       // Fall through to the direct session ack when the runtime exists
       // but message delivery is unhealthy.
     }
@@ -1270,6 +1290,7 @@ export const startQuickIngestSession = async (
 export const cancelQuickIngestSession = async (
   input: QuickIngestCancelInput,
 ): Promise<QuickIngestCancelResponse> => {
+  assertQuickIngestRequestCurrent(input);
   const sessionId = String(input?.sessionId || "").trim();
   const tracking = input?.tracking;
   if (!sessionId) {
@@ -1281,14 +1302,17 @@ export const cancelQuickIngestSession = async (
     (await canUseExtensionMessagingRuntime())
   ) {
     try {
+      assertQuickIngestRequestCurrent(input);
       return await sendExtensionMessageWithTimeout<QuickIngestCancelResponse>({
         type: "tldw:quick-ingest/cancel",
         payload: {
+          requestScope: input.requestScope,
           sessionId,
           reason: input?.reason,
         },
       });
-    } catch {
+    } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
       // Fall through to the direct cancellation path when runtime messaging
       // stops responding in packaged extension contexts.
     }
@@ -1296,6 +1320,7 @@ export const cancelQuickIngestSession = async (
 
   directQuickIngestCancelledSessions.add(sessionId);
   await cancelDirectSessionBatches(
+    input,
     sessionId,
     input?.reason || "user_cancelled",
   );
@@ -1305,7 +1330,7 @@ export const cancelQuickIngestSession = async (
     ...(tracking?.batchIds || []),
   ])) {
     try {
-      await bgRequest<any>({
+      await scopedQuickIngestRequest<any>(input, {
         path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(
           batchId,
         )}&reason=${encodeURIComponent(input?.reason || "user_cancelled")}`,
@@ -1314,7 +1339,8 @@ export const cancelQuickIngestSession = async (
         returnResponse: true,
         ...DIRECT_QUICK_INGEST_TRANSPORT,
       });
-    } catch {
+    } catch (error) {
+      assertQuickIngestRequestCurrent(input, error);
       // best effort cancellation for resumed sessions without in-memory trackers
     }
   }

@@ -5,16 +5,326 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to Some kind of Versioning
 
-
 ## [Unreleased]
 
 ### Added
 
+
 ### Changed
+
 
 ### Fixed
 
+
 ### Removed
+
+## [0.1.46] - 2026-10-01
+
+Promotes development changes since 0.1.45 through PR #3073. See the
+[change inventory](Docs/Development/releases/0.1.46-change-inventory.md).
+
+### Added
+
+- **Ambient Persona Buddy:** idle-only companion modes, global and per-Persona preferences, accessible controls, reduced-motion support, and visual-pack review, activation and fork workflows. The companion does not make runtime model calls (#2817, #3056).
+- **Workspace Persona startup:** preserve strict startup receipts and selected Persona context (#3041).
+- **VN recovery and media feedback:** recover VN commands and show source hints when extraction fails (#3028, #3050).
+- **Authenticated Email uploads:** include the merged upload, tenancy, privacy and search work (#3023).
+- **Agent-task message storage:** keep raw messages in a separate encrypted, owner-scoped store while automation tables remain metadata-only. This release includes the storage/authoring slice; executor integration remains separately tracked (#3039).
+
+### Changed
+
+- **Python 3.12 or newer is required.** FastAPI is updated to 0.142.1; upgrade the runtime before installing (#3053, #3065).
+- **Resource Governance:** use one enable switch and the shared policy resolver. Disabled governance does not construct a governor; authentication fallback and safety-net relief follow that policy (#3066, #3068, #3070).
+- Reuse the shared SSE adapter helpers and move root implementation plans into `Docs/Plans/` (#3040, #2979).
+
+### Fixed
+
+- **Chat account isolation and persistence:** bind drafts, retries, saved images, Character/Knowledge QA settings and conversations to the correct account across navigation and reconnects; repair stale requests, temporary-mode reads and mirror deletion (#2979, #3038, #3046, #3062, #3064).
+- **PostgreSQL reliability:** repair authentication, Notes/search, profile updates, Sync, Jobs startup, saved-view conflicts and connection handling while preserving existing transaction and write-guard behavior (#2979).
+- **Personal Context Sync progress:** finish an authority row once it is staged, so a relay deadline cannot strand a pending envelope and block later pushes or pulls (TASK-13410, #3078).
+- **Authentication and diagnostics:** enforce capability-disclosure and llama.cpp authentication, preserve AuthNZ startup causes and profile-version reasons, and protect Audio status routes (#3003, #3008, #3047, #3063, #3058).
+- **AuthNZ setup privacy:** automatic key generation no longer prints secret values; explicitly requested interactive generation retains manual-copy output.
+- **Workflow reliability:** repair Study, evaluation, World Book, media/audio and command-palette findings from the merged engineering sweep (#2979, #3011).
+- **CI and platform checks:** repair admission/shard reporting, latent frontend tests, Buddy browser acceptance, and macOS guest boot/payload cleanup (#3036, #3044, #3054, #3056, #3022, #3051).
+
+Broader certification and remaining UAT/native follow-ups stay separately tracked;
+this release does not claim a fresh full certification pass.
+
+## [0.1.45] - 2026-09-27
+
+> Patch release. Rolls up the dev changes merged after 0.1.44 (#3029, #3030, #3032).
+> See the [change inventory](Docs/Development/releases/0.1.45-change-inventory.md) and
+> [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.45-plan.md). The protected
+> frontend source is unchanged since 0.1.44.
+
+### Fixed
+
+- **Trusted license gate no longer posts a false policy failure for runs that never produced a verdict.** A run cancelled before or during evaluation, by hand or by the workflow's own cancel-in-progress when a newer run starts, posted `failure` on `frontend-license-policy/trusted/*` and blocked the PR. The publisher now runs only when evaluation reached a verdict, so those runs leave `pending`, which is still fail-closed. The gate runs on `pull_request_target`, which executes the default branch's workflow file, so this release is what puts the fix into effect (#3029, #3032; TASK-13361).
+- **SQLite users bootstrap under sqlglot 30.20.0.** This is dev's equivalent of the fix 0.1.44 shipped, reconciled on merge to keep 0.1.44's backend-scoped check. The canonical SQLite users DDL is now one module constant shared by startup and its tests, and a positive test pins it (#3030).
+
+### Changed
+
+- Backlog ledger: six core-review tasks closed after verification against the code, and TASK-13386 filed (#3029).
+
+## [0.1.44] - 2026-09-27
+
+> Draft release candidate. Includes all 272 commits and 37 merged PRs
+> after `v0.1.43` through `35d6dd90d4c3b703a753efdbd926e30af4f9eac5` (PR #3025),
+> plus the prior closure records. See the [complete change inventory](Docs/Development/releases/0.1.44-change-inventory.md)
+> and [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.44-plan.md).
+
+### Added
+
+- **Chat Macros v1.1** — Guided and YAML authoring, import/export, cloning, validation and named output-profile editors; built-ins remain immutable (#2951).
+- **Workspace Persona provenance** — Persist local startup selection, opt-out and origin together, redact inaccessible origins and prevent forged import provenance (#2963).
+- **Chat history and fork foundations** — Owner-validated history selection and independent local-copy identities/assets in the WebUI and full-page extension (#2968). Native fork contracts, retained-context projection and operation storage are groundwork; no public native-fork flow is exposed yet (#3002).
+- **VN generation recipes** — Snapshot generation settings at acceptance and replay failed-slot recipes on Retry; Regenerate uses current settings (#3015).
+
+### Changed
+
+- **Authentication and tenant isolation** — Enforce cross-user ownership across endpoints, storage, workflow and worker access; PostgreSQL core-chat RLS, owner-isolation tests and auth/scope/RLS ratchets. Audio diagnostics and warm-up require admin access; provider-initializing TTS health/catalog requires authentication (#2985, #2986, #2991, #2993, #2995, #2998, #2999, #3005, #2968).
+- **CI and licensing** — Separate event concurrency so required gates report, run licensing admission before dependent gates, reduce audit clone depth, add Kanban/ACP/MCP coverage and timezone guards, and ship the canonical MCP GPL text (#2981, #2987–#2990, #2997, #3004, #3007, #3010, #3013).
+- **Release records** — Carry completed 0.1.43 post-publication review records and prepare consistent 0.1.44 metadata, source manifest and proposed legal dates. Update architecture/workflow inventories and record reproducible missing-agent macOS VM startup recovery (#3014, #3017).
+
+### Fixed
+
+- **Release review** — Verify named PostgreSQL chat-isolation policies at startup, enforce isolation ratchets in required CI, reject stale/timed-out merge checks, return bounded errors for corrupt selected history metadata, retain invalidated history leases during automatic restore, and localize macro settings controls. See [review follow-up](Docs/Development/releases/0.1.44-review-follow-up.md).
+- **Post-release review repairs** — Clear denied chat selection safely, improve sign-in recovery copy, normalize image detail, restore readiness compatibility, include production configuration in packages, and isolate test fixtures and diagnostics (#2978).
+- **Core reliability** — Correct share-link signing/error handling, PostgreSQL Notes slides candidates, duplicate RAG metric counting, MCP tab/carriage-return preservation, UTC timestamp interpretation, MLX cache ownership and other independently reproduced core defects (#2980).
+- **Cancellation, OCR and Sync** — Propagate cancellation, preserve OCR input until consumed, keep withheld Sync envelopes reachable, and expire abandoned blob uploads so quota is released (#2982, #3006).
+- **MCP and integration** — Remove ineffective SQL denylist filtering while retaining parameterized-query boundaries; fix MCP test failures and media auth import boundaries; remove production branching on pytest environment state (#2996, #2997, #3012, #2983).
+
+- **Audio resampling and MCP tests** — Actually resample buffered audio through the existing fallback when librosa is unavailable; correct MCP assertions and parser requirements (#3024, #3025).
+- **SQLite bootstrap compatibility** — Validate the canonical AUTOINCREMENT constraint structurally so sqlglot 30.20.0 can initialize the users database; retain the guard’s schema and write boundaries.
+
+### Upgrade requirements and limits
+
+- Chat NetworkError status/retry translation remains a separately tracked known defect (#3026, TASK-13381).
+- Back up persistent data and **drain all API, worker and direct database writers** before registered per-user schema migrations. Restart only compatible binaries. Mixed-version rolling upgrades and data-preserving rollback to old binaries are unsupported (#2963, #2968, #3002).
+- PostgreSQL application credentials must use a **NOSUPERUSER, NOBYPASSRLS role that does not own content tables**; migrations still run as the owner. Existing deployments using a privileged application role will fail startup until corrected. Existing pgvector tables require owner-prefixed migration to be listed; previously issued ownerless Chatbook signed URLs stop verifying (#2985).
+- Native fork storage/projection is preparatory; later fork recovery/synchronization remains separate. Broader UAT and certification are separately tracked; targeted regressions do not establish a fresh full-matrix pass. See [#2963](https://github.com/rmusser01/tldw_server/pull/2963), [#2985](https://github.com/rmusser01/tldw_server/pull/2985), and [#3002](https://github.com/rmusser01/tldw_server/pull/3002) for migration/compatibility details.
+
+## [0.1.43] - 2026-09-20
+
+> Published release. Includes all 616 development commits after `v0.1.42`
+> through `d72b1d2850ea947b6d12cac19f6b95867b68a580` (PR #2970), plus release
+> reconciliation. See the [complete change inventory](Docs/Development/releases/0.1.43-change-inventory.md)
+> and [release plan](Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md).
+
+### Added
+
+- **OSCE and advanced quizzes** — Added scenario-based OSCE practice, advanced
+  profile contract fixtures, and generation observability metrics (#2943–#2946,
+  #2948).
+- **Prompt recipes and writing** — Added structured single-text prompt recipes,
+  the compact composer Improve action, and configurable Writing Predict/Fill
+  service prompts. Generation and persistence retain their selected account,
+  source revision and request ownership (#2947, #2931).
+- **Visual-novel asset recovery** — Added generation preflight and targeted
+  recovery aligned with effective worker/model configuration (#2954).
+
+### Changed
+
+- **Scheduled tasks** — Bound model overrides to usable configured providers
+  during authoring, with explicit feedback for unavailable choices (#2942,
+  #2949).
+- **Navigation** — Exposed Explainer in WebUI and extension navigation (#2953).
+- **macOS sandbox validation** — Added reproducible real-guest failure drills
+  for readiness timeout, capability/protocol/workspace mismatches and launchd
+  restart recovery; preserve guest output and bound cancellation cleanup
+  (#2955, #2960, #2962, #2964, #2965).
+- **Release metadata** — Prepared package, FastAPI, README, documentation and
+  protected frontend source records for 0.1.43. The 0.1.42 record remains immutable.
+
+### Fixed
+
+- **Release review repairs** — Preserve image detail on retry/regeneration; clear
+  missing-chat loading state; retire media requests, bulk mutations and Undo on
+  account changes; scope local collections/favorites; redact anonymous local-model
+  paths while retaining setup resume; enforce finite OSCE request admission and
+  clean up focus lifetimes. Original-release transport, scheduled execution,
+  webhook, clone receipt, Notes and client contract fixes are tracked in the
+  [Qodo ledger](Docs/superpowers/plans/2026-09-20-release-qodo-remediation.md).
+  Unscoped legacy collections/favorites remain stored but are not assigned to an
+  account automatically.
+- **Authentication and account isolation** — Serialized credential mutations,
+  preserved workspace identity during login, prevented private conversation,
+  draft, Character selection/default, notification and study-source state from
+  crossing accounts, and enforced tenant ownership for shared prompt records
+  (#2967, #2969, #2970).
+- **Chat and provider behavior** — Preserved tab-specific drafts and restore
+  targets, selected providers/models, canonical saved turns and regeneration
+  variants; recovered safely from browser-storage and streaming failures.
+  Required saved setup models and discovered external llama.cpp vision
+  capabilities. Retained source evidence and truthful partial-retrieval errors
+  (#2967, #2969, #2970).
+- **PostgreSQL and data lifecycle** — Repaired portable queries, timestamps,
+  migration/sync-trigger compatibility, sequence allocation, ownership checks
+  and transaction lifetimes across Notes/Graph, Characters, World Books,
+  Flashcards/Study Packs, media, prompts, auth and MCP. Removed request-time
+  schema writes that caused repeated initialization and shutdown failures
+  (#2967, #2969, #2970).
+- **Study, ingestion and interface recovery** — Restored Study Pack worker
+  startup and pending/failure feedback, review analytics and billing usage;
+  fixed Notes/Media handoffs, literal searches, source links, Quick Ingest
+  singular wording, password-rule guidance and overlapping controls
+  (#2967, #2969, #2970).
+- **Verification** — Retained fresh SQLite/PostgreSQL single-/multi-user UAT
+  evidence, repaired historical fixtures and frontend coverage/workflow checks,
+  and reconciled the release transport security tests with newer persistence
+  behavior. The prior complete UAT matrix remains a failed historical run;
+  targeted repairs do not constitute a fresh full-matrix pass.
+
+### Upgrade and release qualifications
+
+- **Review follow-ups** — Rejected transport-owned credential headers and malformed
+  JSON-RPC replies; repaired refresh cancellation, browser speech fallback, batch
+  ingest identifiers, presentation recovery translations, readiness compatibility
+  fields and deleted-link pagination. Scheduled runs now retain execution claims
+  across lease replacement and retry terminal-write failures; macro final replies
+  commit atomically and destructive Personal Context requests validate strictly.
+  See the [Qodo disposition ledger](Docs/superpowers/plans/2026-09-20-release-qodo-remediation.md).
+- Back up persistent databases and files before upgrading; review the included
+  migrations and verify the selected SQLite/PostgreSQL deployment after upgrade.
+- UAT261's exact-output criterion remains open by requester direction. A fresh
+  complete four-configuration UAT pass has not been established for this candidate.
+- Broader supply-chain, lifecycle, capacity and global frontend strictness work
+  remains separately tracked (TASK-13013.7/.8/.9 and TASK-12116).
+- Protected frontend source remains under PolyForm Perimeter 1.0.1. The proposed
+  release-specific Countdown grant adds AGPL-3.0-only on September 20, 2028 at
+  12:00 UTC, subject to requester review before publication. No protected
+  frontend binary is included in server PyPI or GHCR publications.
+
+## [0.1.42] - 2026-09-10
+
+> Rollup coverage: frozen `dev` commit
+> `6c4bdcbc48f4fe4bab7019d59ad8cf962ab240da`, through PR #2941, plus
+> the trusted license-gate bootstrap on `main`. This refresh includes the
+> original July candidate and the subsequent merged development train.
+
+### Added
+
+- **Chat And Service Prompts** — Added chat macros, prompt improvement/review
+  workflows, scoped conversation history, resumable character-chat contracts,
+  and service-prompt customization for titles, ingestion, summaries, document
+  insights, study assistance, and writing (#2618, #2771, #2799, #2833, #2811,
+  #2812, #2867, #2868, #2880–#2882, #2887, #2901, #2904, #2907, #2913,
+  #2914, #2923, #2926, #2930).
+- **Notes And Personal Context** — Added notes/link/organization/attachment and
+  task-activity synchronization, personal-context profile and ongoing sync
+  surfaces, and shared-workspace cloning (#2775, #2781, #2782, #2784–#2788,
+  #2793, #2794, #2813, #2818, #2823, #2844, #2845, #2886).
+- **Research And Presentations** — Expanded article extraction, ClinicalTrials
+  and PMC discovery, and Research Workspace workflows. Added default-off
+  standalone HTML presentations with Jobs generation, immutable versions,
+  strong-ETag editing, attachment downloads, and a text-only outline; the WebUI
+  does not execute or preview generated HTML (#2769, #2776, #2792, #2800,
+  #2802, #2808, #2809).
+- **Audio, Persona And MCP** — Added OpenRouter/generic TTS gateways,
+  audio.cpp TTS support, a realtime speech endpoint, Migu/persona voice and
+  buddy workflows, and MCP Unified HTTP/SSE transports (#2751, #2599, #2572,
+  #2861, #2884, #2902, #2906, #2908, #2927, #2928, #2933, #2934).
+- **Administration And Automation** — Added durable webhook delivery and
+  producer activation, admin workflow improvements, automation-definition and
+  agent-task execution surfaces, and a production reference deployment with
+  health, backup, and rollback checks (#2806, #2798, #2801, #2803, #2804,
+  #2840, #2841, #2842, #2846, #2879, #2900, #2905, #2925).
+
+- **Embeddings Workflow Architecture** — Added the inline embeddings workflow
+  facade and hardened its runtime and CI contracts.
+- **Skills Live Certification** — Added strict live-integration certification
+  for Skills discovery and execution.
+- **Capacity Measurements** — Added a reusable HTTP steady/overload/recovery
+  runner with explicit workload thresholds, artifact identity checks and fresh
+  queue, pool and storage observations. A passing profile measures only its
+  configured operating envelope.
+
+### Changed
+
+- **Provider Credentials** — Consolidated server-side provider credential
+  resolution across Chat, RAG, embeddings, and audio, with fail-closed BYOK
+  handling and safer streaming behavior.
+- **Frontend Licensing And CI Admission** — Applied the protected frontend
+  source-available boundary, bootstrapped the trusted license gate, repaired
+  protected-branch prerequisites, and prepared license-first PR sequencing.
+- **Jobs Admission** — Hardened admission transactions, quotas, idempotency,
+  and concurrent capacity enforcement.
+- **Release Metadata** — Bumped package, FastAPI, README, release-note, and
+  MkDocs metadata to `0.1.42`.
+
+### Fixed
+
+- **Buddy Artwork Credits** — Preserve and validate artwork attribution across
+  Buddy copies and native visual-pack exports/imports. Added lifecycle coverage
+  for bounded visual-pack loads across live route updates (#2940, #2941).
+
+- **Release Hardening** — Repaired worker package/configuration inputs and added
+  backend image import checks. Enforced SQLite foreign keys during erasure and
+  removed raw exception details from DSR logs, ACP health, and embedding requeue
+  warnings. Aligned shared frontend dependency majors and added strict checks
+  for URL/API-key guards and request timeout selection. Restored shared UI hook
+  enforcement, corrected moderation/workflow clocks, validated local model
+  directories before loading, and honored manual CI comparison base commits.
+- **Voice And Privacy Follow-up** — Prevented delayed voice-message saves from
+  discarding newer turns, reset empty-conversation token totals, and removed raw
+  exception text from additional DSR preview and erasure diagnostics.
+
+- **Authentication And Data Integrity** — Hardened trusted-proxy identity and
+  login lockout isolation, embeddings authentication/metrics access, SQLite
+  migration atomicity and recovery, media-original cleanup, and session-schema
+  compatibility (#2838, #2857, #2859, #2627, #2612, #2939).
+- **Runtime And CI** — Reduced repeated provider probes and schema setup,
+  restored required CI enforcement on dev, addressed stale security findings,
+  and repaired frontend test and live-UAT regressions (#2834, #2836, #2837,
+  #2847, #2848, #2849, #2854, #2822, #2911, #2924).
+
+- **Release Candidate Repairs** — Excluded unexpected credential fields from
+  persisted speech settings, restored missing extension role-play error copy,
+  restored media artifact dictionaries used by full-account export, and
+  prevented quadratic slash-command parsing on malformed multiline input.
+- **API Container Packaging** — Include the local Personal Context core package
+  required at startup and check local package imports while building the image.
+- **Frontend Type Safety** — Repaired WebUI type errors and added a required
+  nonincremental TypeScript check to the frontend CI gate.
+- **Notification And Storage Follow-Ups** — Unread counts recover after account
+  changes without displaying the previous account's data. Notification adapters
+  preserve shared APIs, and web-clipper extension storage is checked under strict
+  TypeScript while retaining callback and Promise compatibility.
+- **DSR Preview Coverage** — Query only requested data categories and report
+  unavailable embedding counts instead of zero or partial totals. Failed coverage
+  prevents intake records from storing a misleading preview.
+- **RAG Hook Validation** — Keep the search input ref in its owning component,
+  preserving focus behavior while clearing the search-state refs diagnostic cluster.
+
+### Upgrade And Release Readiness
+
+- Repository entries for 0.1.39–0.1.41 describe development rollups, not proof
+  of distribution publication. At candidate preparation, GitHub's latest
+  release and GHCR app `latest` were 0.1.38, while public PyPI listed 0.1.32.
+  Verify the installed artifact's version and digest before selecting a
+  migration or rollback baseline.
+- Back up databases, uploaded content, and configuration before upgrading. The
+  accumulated release train changes authentication, conversation, notes-sync,
+  personal-context, presentation, and webhook schemas. Rollback must restore a
+  compatible data snapshot; do not assume binary-only downgrade is safe. See
+  `Docs/Deployment/Production_Reference_Deployment.md` and
+  `Docs/Admin_Webhooks_Migration_Runbook.md`.
+- Standalone HTML presentation generation remains disabled by default. Follow
+  `Docs/Deployment/Standalone_HTML_Presentations.md` before enabling it;
+  downloaded HTML may execute JavaScript when opened outside tldw.
+- Candidate preparation is not release certification: final-head CI and the
+  open release-readiness dependencies are tracked in TASK-13013.3 and
+  `Docs/superpowers/plans/2026-09-10-pr2761-release-refresh-plan.md`.
+
+### Licensing
+
+- The tagged source release contains protected frontend source under PolyForm
+  Perimeter 1.0.1. Its release-specific Countdown grant adds
+  `AGPL-3.0-only` as an additional option beginning
+  `2028-09-10T12:00:00Z`; see `LICENSES/releases/0.1.42/`.
+- No WebUI, Admin UI, shared UI, or extension binary is published in this
+  release. PyPI and the `app`, `worker`, and `audio-worker` images remain
+  server-only and GPL-3.0-only.
 
 
 ## [0.1.41] - 2026-07-16

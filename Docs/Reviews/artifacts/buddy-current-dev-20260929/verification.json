@@ -1,0 +1,31 @@
+{
+  "production_base": "0da68530e80c713ed3a323a741998e1fed37e3e9",
+  "red": {
+    "existing_workspace_collection_assertions": 2
+  },
+  "green": {
+    "workspace_domain_contracts": 37,
+    "redirect_security": 13,
+    "buddy_management_components": 37,
+    "route_lifecycle": 1
+  },
+  "diagnostics": {
+    "sandbox_redirect_listener": "EPERM on 3 real-loopback tests; final rerun outside sandbox passed all13",
+    "management_timeout": "one test timed out twice while Next compiled; same test passed2202ms and complete component pair passed after owned runtime stopped",
+    "eslint": "1 error and52 warnings identical to exact HEAD baseline; zero new diagnostics",
+    "prettier": "all3 files have baseline formatting debt; formatted before/after differ only by canonical slash",
+    "bandit": "N/A: no Python changes",
+    "independent_review": "no actionable findings"
+  },
+  "artifact_sha256": {
+    "static-summary.json": "6763380a5c0fe396d57a6b6d9daa17887d819956a257b40233a3d69dc4e2c059",
+    "watchlists-dynamic-buddy.jpg": "39d12c9cdb8583e244c996bf451946aeccd698250192b148213b4edcb0815a64",
+    "browser-receipt.json": "89a799844b98887e9da3f54b4b708fc0fabc67175596669716fd04c7cededa83",
+    "workspace-redirect-before.jpg": "4b5d8169c180faa42dc77387e709111d23208da8a201628bede5edae9400815d",
+    "watchlists-static-buddy.jpg": "4fc31471e56913b485ad401a14dacfe515c04a4698c698a793beb70e78aa261b",
+    "workspace-choice-after.jpg": "ca73c1fe9a69e662710c97b547ef223e1052836149fe239e9df58b8fab9bfcd1",
+    "watchlists-visible-buddy.jpg": "84c4356739cc93f4eaa0c4559231770d91f50dfc18a99fb304e1fac19504cfe7"
+  },
+  "full_suite_run": false,
+  "raw_logs_retained": "Local disposable test artifacts only; not published"
+}

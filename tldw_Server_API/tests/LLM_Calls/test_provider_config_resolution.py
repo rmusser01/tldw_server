@@ -1,12 +1,29 @@
+"""Focused contracts for provider catalog configuration resolution."""
+
 from __future__ import annotations
 
 import asyncio
+from configparser import ConfigParser
 from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_endpoint_env_keys,
+    custom_openai_model_env_keys,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    has_custom_openai_env_configuration,
+    provider_config_value,
+    resolve_provider_api_key_value,
+    resolve_provider_endpoint_url,
+    resolve_provider_model_value,
+    valid_provider_api_key,
+    valid_provider_config_value,
+)
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 
@@ -421,3 +438,291 @@ def test_generic_direct_adapter_caller_inherits_local_scope(
 
     assert captured["configured_endpoint"] is trusted.scope
     assert captured["url"].startswith(trusted.base_url)
+
+
+@pytest.fixture(autouse=True)
+def _clear_custom_openai_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep host custom-provider configuration out of these unit tests."""
+    for number in (1, 2, 3, 37):
+        env_keys = (
+            *custom_openai_endpoint_env_keys(number),
+            *custom_openai_model_env_keys(number),
+            *custom_openai_api_key_env_keys(number),
+        )
+        for env_key in env_keys:
+            monkeypatch.delenv(env_key, raising=False)
+
+
+def _config(**values: str) -> ConfigParser:
+    parser = ConfigParser(interpolation=None)
+    parser.add_section("API")
+    for field_name, value in values.items():
+        parser.set("API", field_name, value)
+    return parser
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "   ",
+        "<YOUR_VALUE>",
+        "  <replace-me>  ",
+        "CHANGE_ME",
+        "change_me_for_this_deployment",
+        "REPLACE-ME",
+        123,
+    ],
+)
+def test_valid_provider_config_value_rejects_empty_or_placeholder_values(
+    value: object,
+) -> None:
+    assert valid_provider_config_value(value) is None  # type: ignore[arg-type]  # nosec B101
+
+
+def test_valid_provider_config_value_trims_real_values() -> None:
+    assert valid_provider_config_value("  https://provider.example/v1  ") == (  # nosec B101
+        "https://provider.example/v1"
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "replace-me",
+        "REPLACE_ME",
+        "your_api_key",
+        "<YOUR_API_KEY_HERE>",
+        "api_key",
+        "Change_Me",
+        "change_me_for_this_deployment",
+        "changeme",
+    ],
+)
+def test_valid_provider_api_key_rejects_known_placeholders(value: str) -> None:
+    assert valid_provider_api_key(f"  {value}  ") is None  # nosec B101
+
+
+def test_valid_provider_api_key_trims_real_keys() -> None:
+    assert valid_provider_api_key("  sk-real-key  ") == "sk-real-key"  # nosec B101
+
+
+def test_provider_config_value_trims_and_rejects_placeholders() -> None:
+    parser = _config(endpoint="  https://config.example/v1  ", model=" <MODEL> ")
+
+    assert provider_config_value(parser, "API", "endpoint") == (  # nosec B101
+        "https://config.example/v1"
+    )
+    assert provider_config_value(parser, "API", "model") is None  # nosec B101
+    assert provider_config_value(parser, "API", "missing") is None  # nosec B101
+    assert provider_config_value(parser, None, "endpoint") is None  # nosec B101
+
+
+def test_resolvers_keep_endpoint_model_and_api_key_fields_separate() -> None:
+    parser = _config(
+        endpoint="  https://config.example/v1  ",
+        model="  config-model  ",
+        api_key="  CHANGE_ME_TO_SECURE_API_KEY  ",
+    )
+
+    assert resolve_provider_endpoint_url(  # nosec B101
+        "custom-openai-api-2", parser, "API", "endpoint"
+    ) == "https://config.example/v1"
+    assert resolve_provider_model_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "model"
+    ) == "config-model"
+    assert (  # nosec B101
+        resolve_provider_api_key_value(
+            "custom-openai-api-2", parser, "API", "api_key"
+        )
+        is None
+    )
+
+
+def test_numbered_custom_openai_env_aliases_use_documented_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config(endpoint="config-endpoint", model="config-model", api_key="config-key")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_IP", "  https://primary.example/v1  ")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_URL_2", "https://secondary.example/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_MODEL", "primary-model")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_2_MODEL", "secondary-model")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_KEY", "primary-key")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_2_API_KEY", "secondary-key")
+
+    assert resolve_provider_endpoint_url(  # nosec B101
+        "custom-openai-api-2", parser, "API", "endpoint"
+    ) == "https://primary.example/v1"
+    assert resolve_provider_model_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "model"
+    ) == "primary-model"
+    assert resolve_provider_api_key_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "api_key"
+    ) == "primary-key"
+
+
+def test_numbered_custom_openai_env_precedence_skips_unusable_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config()
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_IP", " <YOUR_ENDPOINT> ")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_BASE", "  https://usable.example/v1  ")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_MODEL", "   ")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL_2", "  usable-model  ")
+
+    assert resolve_provider_endpoint_url(  # nosec B101
+        "custom-openai-api-2", parser, "API", "endpoint"
+    ) == "https://usable.example/v1"
+    assert resolve_provider_model_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "model"
+    ) == "usable-model"
+
+
+def test_numbered_custom_openai_endpoint_and_model_aliases_skip_change_me(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config()
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_IP", "CHANGE_ME")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_BASE", "https://usable.example/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_MODEL", "change_me_for_this_deployment")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL_2", "usable-model")
+
+    assert resolve_provider_endpoint_url(  # nosec B101
+        "custom-openai-api-2", parser, "API", "endpoint"
+    ) == "https://usable.example/v1"
+    assert resolve_provider_model_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "model"
+    ) == "usable-model"
+
+
+def test_numbered_custom_openai_env_aliases_are_slot_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config(endpoint="slot-2-endpoint", model="slot-2-model", api_key="slot-2-key")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_URL", "https://slot-1.example/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL", "slot-1-model")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "slot-1-key")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_URL_3", "https://slot-3.example/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL_3", "slot-3-model")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_3", "slot-3-key")
+
+    assert resolve_provider_endpoint_url(  # nosec B101
+        "custom-openai-api-2", parser, "API", "endpoint"
+    ) == "slot-2-endpoint"
+    assert resolve_provider_model_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "model"
+    ) == "slot-2-model"
+    assert resolve_provider_api_key_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "api_key"
+    ) == "slot-2-key"
+    assert not has_custom_openai_env_configuration("custom-openai-api-2")  # nosec B101
+
+
+def test_high_numbered_custom_openai_aliases_resolve_only_their_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config()
+    monkeypatch.setenv("CUSTOM_OPENAI37_API_URL", "https://slot-37.example/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_37_MODEL", "slot-37-model")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_37_API_KEY", "slot-37-key")
+
+    assert resolve_provider_endpoint_url(  # nosec B101
+        "custom-openai-api-37", parser, "API", "endpoint"
+    ) == "https://slot-37.example/v1"
+    assert resolve_provider_model_value(  # nosec B101
+        "custom-openai-api-37", parser, "API", "model"
+    ) == "slot-37-model"
+    assert resolve_provider_api_key_value(  # nosec B101
+        "custom-openai-api-37", parser, "API", "api_key"
+    ) == "slot-37-key"
+
+
+def test_api_key_placeholder_alias_does_not_mask_later_valid_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser = _config()
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_KEY", "CHANGE_ME_TO_SECURE_API_KEY")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_2", "slot-2-real-key")
+
+    assert resolve_provider_api_key_value(  # nosec B101
+        "custom-openai-api-2", parser, "API", "api_key"
+    ) == "slot-2-real-key"
+
+
+def test_has_custom_openai_env_configuration_checks_key_aliases_past_placeholders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_KEY", "CHANGE_ME_TO_SECURE_API_KEY")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_2", "slot-2-real-key")
+
+    assert has_custom_openai_env_configuration("custom-openai-api-2")  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("env_name", "value"),
+    [
+        ("CUSTOM_OPENAI2_API_URL", "https://slot-2.example/v1"),
+        ("CUSTOM_OPENAI2_API_MODEL", "slot-2-model"),
+        ("CUSTOM_OPENAI2_API_KEY", "slot-2-key"),
+    ],
+)
+def test_has_custom_openai_env_configuration_accepts_any_usable_field(
+    monkeypatch: pytest.MonkeyPatch,
+    env_name: str,
+    value: str,
+) -> None:
+    monkeypatch.setenv(env_name, value)
+
+    assert has_custom_openai_env_configuration("custom_openai_api_2")  # nosec B101
+
+
+def test_has_custom_openai_env_configuration_rejects_unusable_or_other_provider_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_URL", " <YOUR_ENDPOINT> ")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_MODEL", " <YOUR_MODEL> ")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_KEY", " CHANGE_ME ")
+
+    assert not has_custom_openai_env_configuration("custom-openai-api-2")  # nosec B101
+    assert not has_custom_openai_env_configuration("openai")  # nosec B101
+
+
+def test_provider_catalog_includes_env_only_numbered_custom_openai_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import llm_providers
+
+    parser = ConfigParser(interpolation=None)
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_URL", "https://slot-2.example/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_MODEL", "slot-2-model")
+    monkeypatch.setenv("CUSTOM_OPENAI2_API_KEY", "slot-2-key")
+    monkeypatch.setattr(llm_providers, "load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
+    monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: None)
+    monkeypatch.setattr(llm_providers, "_llm_registry_capability_envelopes", lambda: {})
+    monkeypatch.setattr(llm_providers, "_configured_endpoint_probe_enabled", lambda: False)
+    monkeypatch.setattr(
+        llm_providers,
+        "_resolve_model_tokenizer_support",
+        lambda *_args, **_kwargs: {
+            "available": False,
+            "tokenizer": None,
+            "kind": None,
+            "source": None,
+            "detokenize": False,
+            "count_accuracy": "unavailable",
+            "strict_mode_effective": False,
+        },
+    )
+
+    result = llm_providers.get_configured_providers()
+
+    slot = next(
+        provider
+        for provider in result["providers"]
+        if provider["name"] == "custom-openai-api-2"
+    )
+    assert slot["endpoint"] == "https://slot-2.example/v1"
+    assert slot["models"] == ["slot-2-model"]
+    assert slot["is_configured"] is True

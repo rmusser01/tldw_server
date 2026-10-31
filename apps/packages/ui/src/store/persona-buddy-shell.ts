@@ -20,10 +20,12 @@ type PersonaBuddyShellPositions = Record<
 
 type PersonaBuddyShellStoreState = {
   isOpen: boolean
+  firstUseHintDismissed: boolean
   positions: PersonaBuddyShellPositions
   setOpen: (open: boolean) => void
   toggleOpen: () => void
   resetSessionState: () => void
+  dismissFirstUseHint: () => void
   setPosition: (
     bucket: PersonaBuddyPositionBucket,
     position: PersonaBuddyShellPosition
@@ -37,8 +39,9 @@ type PersonaBuddyShellStoreState = {
 export const PERSONA_BUDDY_SHELL_STORAGE_KEY = "tldw-persona-buddy-shell"
 
 export const DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS: PersonaBuddyShellPositions = {
-  "web-desktop": { x: 1120, y: 640 },
-  "sidepanel-desktop": { x: 1120, y: 640 }
+  // Start below global navigation, clear of the bottom composer controls.
+  "web-desktop": { x: 1120, y: 96 },
+  "sidepanel-desktop": { x: 1120, y: 96 }
 }
 
 const DEFAULT_SHELL_MARGIN = 16
@@ -146,10 +149,12 @@ export const usePersonaBuddyShellStore =
     persist(
       (set, get) => ({
         isOpen: false,
+        firstUseHintDismissed: false,
         positions: normalizePersonaBuddyShellPositions(undefined),
         setOpen: (open) => set({ isOpen: open }),
         toggleOpen: () => set({ isOpen: !get().isOpen }),
         resetSessionState: () => set({ isOpen: false }),
+        dismissFirstUseHint: () => set({ firstUseHintDismissed: true }),
         setPosition: (bucket, position) =>
           set((state) => ({
             positions: {
@@ -179,7 +184,8 @@ export const usePersonaBuddyShellStore =
           typeof window !== "undefined" ? localStorage : createMemoryStorage()
         ),
         partialize: (state) => ({
-          positions: state.positions
+          positions: state.positions,
+          firstUseHintDismissed: state.firstUseHintDismissed
         })
       }
     )

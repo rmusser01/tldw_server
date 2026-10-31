@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -199,6 +198,27 @@ async def test_shutdown_mcp_server_handles_runtime_guard_exception() -> None:
         heavy_startup_handles=SimpleNamespace(mcp_server=_MCPServer()),
         guard_exceptions=(RuntimeError,),
     )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_mcp_server_waits_for_deferred_module_completion() -> None:
+    shutdown_resources = _import_shutdown_resource_cleanup()
+    calls: list[str] = []
+
+    class _MCPServer:
+        async def shutdown(self) -> None:
+            calls.append("shutdown")
+
+        async def wait_for_shutdown_completion(self) -> bool:
+            calls.append("wait-for-completion")
+            return True
+
+    await shutdown_resources._shutdown_mcp_server(
+        heavy_startup_handles=SimpleNamespace(mcp_server=_MCPServer()),
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert calls == ["shutdown", "wait-for-completion"]
 
 
 @pytest.mark.asyncio

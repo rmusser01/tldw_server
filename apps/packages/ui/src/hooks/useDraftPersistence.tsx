@@ -27,7 +27,7 @@ type DraftPayload = {
 
 type DraftValue = string | DraftPayload
 
-const draftBucket = createLocalRegistryBucket<DraftValue>({
+const durableDraftBucket = createLocalRegistryBucket<DraftValue>({
   prefix: DRAFT_BUCKET_PREFIX,
   ttlMs: DRAFT_TTL_MS
 })
@@ -109,6 +109,11 @@ const clearLegacyDraft = (storageKey: string) => {
 
 interface DraftPersistenceOptions {
   storageKey: string
+  tabScoped?: boolean
+  /** Discard this older, unowned key instead of migrating its private content. */
+  legacyStorageKey?: string
+  /** Captures the owner of this render, including synchronous logout invalidation. */
+  isCurrent?: () => boolean
   getValue: () => string
   setValue: (value: string) => void
   getMetadata?: () => DraftMetadata | undefined
@@ -118,6 +123,8 @@ interface DraftPersistenceOptions {
 
 interface DraftPersistenceResult {
   draftSaved: boolean
+  /** True only after this owner/key has finished restoring its saved draft. */
+  draftReady: boolean
   clearDraft: () => void
 }
 
@@ -131,16 +138,24 @@ interface DraftPersistenceResult {
  */
 export const useDraftPersistence = ({
   storageKey,
+  tabScoped = false,
+  legacyStorageKey,
+  isCurrent,
   getValue,
   setValue,
   getMetadata,
   setValueWithMetadata,
   enabled = true
 }: DraftPersistenceOptions): DraftPersistenceResult => {
+  const draftBucket = React.useMemo(() => tabScoped
+    ? createLocalRegistryBucket<DraftValue>({ prefix: DRAFT_BUCKET_PREFIX, ttlMs: DRAFT_TTL_MS, tabScoped: true })
+    : durableDraftBucket, [tabScoped])
   const [draftSaved, setDraftSaved] = React.useState(false)
-  const [hydrated, setHydrated] = React.useState(!enabled)
+  const identity = React.useMemo(() => ({ storageKey, enabled, isCurrent }), [storageKey, enabled, isCurrent])
+  const [hydrated, setHydrated] = React.useState<object | null>(null)
   const draftSavedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingPersistRef = React.useRef<(() => void) | null>(null)
   const setValueRef = React.useRef(setValue)
   const setValueWithMetadataRef = React.useRef(setValueWithMetadata)
   const getMetadataRef = React.useRef(getMetadata)
@@ -154,7 +169,7 @@ export const useDraftPersistence = ({
     setValueWithMetadataRef.current = setValueWithMetadata
   }, [setValueWithMetadata])
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     getMetadataRef.current = getMetadata
   }, [getMetadata])
 
@@ -162,16 +177,24 @@ export const useDraftPersistence = ({
   React.useEffect(() => {
     if (!enabled) return
     let cancelled = false
-    setHydrated(false)
+    const current = () => !cancelled && (!isCurrent || isCurrent())
+    setHydrated(null)
+    setDraftSaved(false)
     lastPersistedSignatureRef.current = null
     const restoreDraft = async () => {
+      if (legacyStorageKey) {
+        clearLegacyDraft(legacyStorageKey)
+        await durableDraftBucket.remove(legacyStorageKey)
+        if (!current()) return
+      }
       const record = await draftBucket.get(storageKey)
+      if (!current()) return
       const storedValue = record?.value ?? null
       let draftValue = normalizeDraftValue(storedValue)
       const hasInvalidRecord = storedValue != null && draftValue === null
 
       if (!hasDraftContent(draftValue)) {
-        const legacyDraft = readLegacyDraft(storageKey)
+        const legacyDraft = legacyStorageKey ? null : readLegacyDraft(storageKey)
         if (legacyDraft && legacyDraft.trim().length > 0) {
           await draftBucket.set(storageKey, legacyDraft)
           clearLegacyDraft(storageKey)
@@ -185,6 +208,8 @@ export const useDraftPersistence = ({
         clearLegacyDraft(storageKey)
       }
 
+      if (!current()) return
+
       if (hasDraftContent(draftValue)) {
         lastPersistedSignatureRef.current = buildDraftSignature(
           draftValue.content,
@@ -194,7 +219,7 @@ export const useDraftPersistence = ({
         lastPersistedSignatureRef.current = null
       }
 
-      if (!cancelled && hasDraftContent(draftValue)) {
+      if (current() && hasDraftContent(draftValue)) {
         const setValueWithMetadata = setValueWithMetadataRef.current
         if (setValueWithMetadata) {
           setValueWithMetadata(draftValue.content, draftValue.metadata)
@@ -203,8 +228,8 @@ export const useDraftPersistence = ({
         }
       }
 
-      if (!cancelled) {
-        setHydrated(true)
+      if (current()) {
+        setHydrated(identity)
       }
     }
 
@@ -212,21 +237,28 @@ export const useDraftPersistence = ({
     return () => {
       cancelled = true
     }
-  }, [storageKey, enabled])
+  }, [storageKey, legacyStorageKey, enabled, identity, isCurrent, draftBucket])
 
   React.useEffect(() => {
     if (!enabled) return
     void draftBucket.cleanup()
-  }, [enabled])
+  }, [enabled, draftBucket])
 
   // Get current value for effect dependency
   const currentValue = getValue()
 
+  React.useLayoutEffect(() => () => {
+    // In-app navigation has no pagehide event. Flush before the persistence
+    // cleanup cancels this write and passive owner teardown revokes its lease.
+    pendingPersistRef.current?.()
+  }, [])
+
   // Persist draft whenever the message changes
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!enabled) return
-    if (!hydrated) return
+    if (hydrated !== identity || (isCurrent && !isCurrent())) return
     let cancelled = false
+    const current = () => !cancelled && (!isCurrent || isCurrent())
     const value = currentValue
     if (persistTimeoutRef.current) {
       clearTimeout(persistTimeoutRef.current)
@@ -247,8 +279,14 @@ export const useDraftPersistence = ({
       }
       return
     }
-    persistTimeoutRef.current = setTimeout(() => {
+    const persist = () => {
+      if (pendingPersistRef.current === persist) pendingPersistRef.current = null
+      if (persistTimeoutRef.current) {
+        clearTimeout(persistTimeoutRef.current)
+        persistTimeoutRef.current = null
+      }
       void (async () => {
+        if (!current()) return
         let metadata: DraftMetadata | undefined
         try {
           metadata = getMetadataRef.current?.() ?? undefined
@@ -266,19 +304,22 @@ export const useDraftPersistence = ({
         const nextValue: DraftValue =
           metadata === undefined ? value : { content: value, metadata }
         await draftBucket.set(storageKey, nextValue)
+        if (!current()) return
         clearLegacyDraft(storageKey)
         lastPersistedSignatureRef.current = nextSignature
-        if (cancelled) return
 
         setDraftSaved(true)
         draftSavedTimeoutRef.current = setTimeout(() => {
           setDraftSaved(false)
         }, COMPOSER_CONSTANTS.DRAFT_SAVED_DISPLAY_MS)
       })()
-    }, COMPOSER_CONSTANTS.DRAFT_SAVE_DEBOUNCE_MS)
+    }
+    pendingPersistRef.current = persist
+    persistTimeoutRef.current = setTimeout(persist, COMPOSER_CONSTANTS.DRAFT_SAVE_DEBOUNCE_MS)
 
     return () => {
       cancelled = true
+      if (pendingPersistRef.current === persist) pendingPersistRef.current = null
       if (persistTimeoutRef.current) {
         clearTimeout(persistTimeoutRef.current)
         persistTimeoutRef.current = null
@@ -288,7 +329,22 @@ export const useDraftPersistence = ({
         draftSavedTimeoutRef.current = null
       }
     }
-  }, [currentValue, storageKey, enabled, hydrated])
+  }, [currentValue, storageKey, enabled, hydrated, identity, isCurrent, draftBucket])
+
+  React.useEffect(() => {
+    // The tab-scoped bucket pins the record synchronously before its durable
+    // write awaits a lock, so a reload cannot drop the pending debounce edit.
+    const flush = () => pendingPersistRef.current?.()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flush()
+    }
+    window.addEventListener("pagehide", flush)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", flush)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [])
 
   // Cleanup timeout on unmount
   React.useEffect(() => {
@@ -303,14 +359,21 @@ export const useDraftPersistence = ({
   }, [])
 
   const clearDraft = React.useCallback(() => {
+    if (isCurrent && !isCurrent()) return
+    pendingPersistRef.current = null
+    if (persistTimeoutRef.current) {
+      clearTimeout(persistTimeoutRef.current)
+      persistTimeoutRef.current = null
+    }
     void draftBucket.remove(storageKey)
     clearLegacyDraft(storageKey)
     lastPersistedSignatureRef.current = null
     setDraftSaved(false)
-  }, [storageKey])
+  }, [storageKey, isCurrent, draftBucket])
 
   return {
     draftSaved,
+    draftReady: enabled && hydrated === identity && (!isCurrent || isCurrent()),
     clearDraft
   }
 }

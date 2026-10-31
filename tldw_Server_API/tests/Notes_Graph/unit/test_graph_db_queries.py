@@ -13,7 +13,7 @@ pytestmark = pytest.mark.unit
 def db(tmp_path):
     """Fresh DB for each test."""
     db_path = tmp_path / "test_graph_queries.db"
-    _db = CharactersRAGDB(str(db_path), client_id="test_graph")
+    _db = CharactersRAGDB(str(db_path), client_id="u1")
     yield _db
 
 

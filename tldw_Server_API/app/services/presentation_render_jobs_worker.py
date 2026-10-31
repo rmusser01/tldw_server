@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Slides.presentation_rendering import (
     load_presentation_render_snapshot,
     render_presentation_video,
 )
+from tldw_Server_API.app.core.Slides.presentation_service import STRUCTURED_SLIDES
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
 
 _DOMAIN = "presentation_render"
@@ -159,6 +160,18 @@ async def process_presentation_render_job(
 
     slides_db = _create_slides_db(user_id)
     try:
+        try:
+            kind = slides_db.get_presentation_kind(presentation_id)
+        except KeyError as exc:
+            raise PresentationRenderJobError(
+                "presentation_render_version_not_found",
+                retryable=False,
+            ) from exc
+        if kind.content_kind != STRUCTURED_SLIDES:
+            raise PresentationRenderJobError(
+                "operation_not_supported_for_content_kind",
+                retryable=False,
+            )
         snapshot = load_presentation_render_snapshot(
             slides_db,
             presentation_id=presentation_id,

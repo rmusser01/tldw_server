@@ -297,6 +297,165 @@ python Helper_Scripts/voice_latency_harness/examples/ws_tts_realtime_client.py -
 ffplay -f s16le -ar 24000 -ac 1 out_ws_tts_realtime.pcm
 ```
 
+OpenAI-Compatible Realtime Speech
+---------------------------------
+
+The realtime speech endpoint exposes a Stage 1 OpenAI-compatible JSON event
+protocol over WebSocket. It bridges committed PCM16 input audio through the
+existing STT -> chat -> TTS pipeline and emits OpenAI-style realtime events.
+
+This is an experimental compatibility subset, not a drop-in implementation of
+the complete OpenAI GA protocol. In particular, Stage 1 requires 16 kHz input
+instead of upstream's 24 kHz PCM input, supports manual turns, and emits both
+text and audio. Clients must use the advertised capabilities and input rate.
+
+### Routes
+
+- `WS /api/v1/audio/realtime`: native tldw route using the OpenAI-compatible event shape.
+- `WS /v1/realtime`: OpenAI-compatible route for clients that expect the upstream path.
+- `GET /api/v1/audio/realtime/capabilities`: runtime metadata for supported routes, events, audio formats, limits,
+  close codes, and unsupported features.
+
+Both WebSocket routes are guarded by the `audio-realtime` route toggle and use the `audio.realtime` AuthNZ endpoint id.
+
+### Authentication
+
+Stage 1 realtime speech authenticates during the WebSocket handshake and does not consume an initial protocol frame
+for auth.
+
+- Single-user mode accepts `Authorization: Bearer <SINGLE_USER_API_KEY>` or `X-API-KEY: <SINGLE_USER_API_KEY>`.
+- Multi-user mode accepts `Authorization: Bearer <JWT>` or `X-API-KEY: <virtual API key>`.
+- Legacy `?token=` query-string auth remains disabled by default and is only accepted when
+  `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`.
+- `/v1/realtime` does not accept first-message auth such as `{"type":"auth","token":"..."}`. Unauthenticated
+  connections close with `4401`.
+
+### Audio Contract
+
+- Input audio: mono PCM16, 16 kHz, little-endian, base64 encoded in `input_audio_buffer.append.audio`.
+- Output audio: mono PCM16, 24 kHz, base64 encoded in the `delta` field of `response.output_audio.delta` events.
+- Maximum JSON frame size: 262144 bytes.
+- Maximum buffered input audio: 30 seconds, 960000 bytes.
+- Maximum output audio delta chunk: 65536 bytes.
+
+### Supported Client Events
+
+- `session.update`
+- `input_audio_buffer.append`
+- `input_audio_buffer.commit`
+- `input_audio_buffer.clear`
+- `response.create`
+- `response.cancel`
+
+Manual turn flow:
+
+1. Connect with auth headers.
+2. Receive `session.created` and `rate_limits.updated`.
+3. Optionally send `session.update`.
+4. Send one or more `input_audio_buffer.append` frames with base64 PCM16 audio.
+5. Send `input_audio_buffer.commit`.
+6. Send `response.create` to run STT, chat generation, and TTS for the committed turn.
+7. Read streamed text, transcript, audio deltas, and `response.done`.
+
+`response.create` accepts the default/empty response object in Stage 1. Response-scoped overrides such as
+`modalities`, `model`, `voice`, `instructions`, and `audio` are rejected; apply supported session configuration with
+`session.update` before creating a response.
+
+### Supported Server Events
+
+- `session.created`
+- `session.updated`
+- `input_audio_buffer.speech_started`
+- `input_audio_buffer.speech_stopped`
+- `input_audio_buffer.committed`
+- `conversation.item.created`
+- `conversation.item.done`
+- `response.created`
+- `response.output_item.added`
+- `response.content_part.added`
+- `response.output_text.delta`
+- `response.output_text.done`
+- `response.output_audio.delta`
+- `response.output_audio.done`
+- `response.output_audio_transcript.delta`
+- `response.output_audio_transcript.done`
+- `response.content_part.done`
+- `response.output_item.done`
+- `response.done`
+- `rate_limits.updated`
+- `error`
+
+`rate_limits.updated` is emitted for tldw quota compatibility. It is not an OpenAI quota-parity guarantee.
+
+### Unsupported In Stage 1
+
+- `conversation.item.create`
+- Tool calls
+- Server-side VAD turn detection
+- Client-selected `input_audio_format`
+- Client-selected `output_audio_format`
+- Response-scoped overrides (`modalities`, `model`, `voice`, `instructions`, `audio`)
+- Binary WebSocket audio frames
+
+Unsupported client events return an `error` event while keeping the WebSocket open when the frame is otherwise valid.
+
+### Persistence And Capabilities
+
+Built-in routes are ephemeral and advertise `persistence.supported=false` because they
+use `NoopRealtimePersistenceAdapter`. The adapter interface supports explicit
+`metadata.tldw.persist=true` with a non-empty string or integer `conversation_id`;
+durable storage requires an adapter that authorizes the target conversation. Metadata
+alone does not enable storage on the built-in endpoints. Stage 1 does not persist raw audio.
+
+Completed turns retain the last 20 conversation messages in memory for subsequent
+responses. Persistence metadata is captured when a response starts, so a concurrent
+session update cannot redirect that turn to another conversation.
+
+The production pipeline uses the existing per-user audio concurrency and daily-minute
+controls, STT transcript redaction policy, and scoped chat/TTS provider credentials.
+Provider disable settings and model allowlists apply before dispatch. Outbound queues
+apply backpressure; cancellation drops queued output from the cancelled response.
+
+Output configuration accepts `audio.output.format={"type":"audio/pcm","rate":24000}`
+and `audio.output.voice`. Audio deltas and their transcript share one content part.
+Text and audio are interleaved when the TTS provider supports incremental synthesis;
+the buffered TTS fallback still waits for the full text before starting synthesis.
+
+Use `GET /api/v1/audio/realtime/capabilities` to discover persistence metadata, optional/deferred events, audio
+limits, close codes, and route support.
+
+### Manual Provider Smoke
+
+Configure and start the server with the intended STT, chat, and TTS providers. To
+exercise that deployment, activate the project virtual environment, set
+`TLDW_REALTIME_LIVE_SMOKE_AUTH_TOKEN` (or `SINGLE_USER_API_KEY`), and run:
+
+```bash
+python Helper_Scripts/Testing-related/realtime_speech_smoke.py --audio /path/to/spoken-16khz-mono.wav
+```
+
+The input must be a nonempty 16 kHz mono PCM16 WAV containing at most 30 seconds
+of speech. The command splits audio into frames below the server limit. Use `--url`
+to select a server other than `ws://127.0.0.1:8000/v1/realtime`. The command checks
+the manual turn lifecycle through a completed `response.done`; it can consume
+paid provider usage. Provider selection belongs to the running server's normal
+configuration. No credentials or transcript text are printed by the command.
+
+TASK-12089 moved provider verification out of pytest in response to Qodo's test
+policy review. Automated realtime and smoke-command tests use fake providers or
+fake transport and require no provider credentials or environment-driven skips.
+
+### Provider Hints
+
+The default realtime pipeline uses the existing configured STT, chat, and TTS provider stacks. Optional env overrides:
+
+- `REALTIME_CHAT_MODEL`: default chat model.
+- `REALTIME_TTS_MODEL`: default TTS model.
+- `REALTIME_TTS_VOICE`: default TTS voice.
+- `REALTIME_CHAT_PROVIDER_HINT`: provider hint for chat generation.
+- `REALTIME_TTS_PROVIDER_HINT`: provider hint for realtime/buffered TTS.
+- `REALTIME_PROVIDER_HINT`: compatibility fallback used when a chat- or TTS-specific hint is not set.
+
 WebSocket Voice Chat v1
 -----------------------
 

@@ -228,6 +228,14 @@ Suggested degraded reason codes:
 - `invalid_default`
 - `unsupported_assistant_kind`
 
+### Effective-Default Failure Semantics
+
+- An inaccessible or missing Persona returns `permission_denied` with null effective kind, id, label, and memory mode. The settings-authorized stored view retains the saved reference for repair or clearing.
+- Owned deleted and inactive Personas remain distinguishable as `persona_deleted` and `persona_unavailable`; their effective label is null and the saved reference remains available to the owner.
+- When Persona support is disabled, reads return `persona_feature_disabled` without looking up profiles or exposing effective identity. Saving a non-null default returns HTTP 503; clearing a default and other Workspace operations remain available.
+- SQL NULL or a missing defaults column/value means unset. Malformed persisted JSON, non-object JSON (including the JSON text `null`), and invalid default objects return `invalid_default`, not a successful unset result. The DB corruption indicator is computed during row loading and is neither persisted nor exposed as an API field.
+- Validation diagnostics do not log payload values, input keys, raw Workspace ids, or validation exception text. Transient lookup failures preserve their mapped HTTP error rather than degrading to `none`.
+
 ## V1 Acceptance Boundary
 
 V1 is complete when:

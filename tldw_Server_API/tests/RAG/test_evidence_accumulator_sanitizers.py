@@ -7,6 +7,10 @@ import pytest
 from tldw_Server_API.app.core.RAG.rag_service import evidence_accumulator
 from tldw_Server_API.app.core.RAG.rag_service.evidence_accumulator import EvidenceAccumulator
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+    _install_explicit_chat_capture,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -140,3 +144,82 @@ async def test_llm_assessment_call_failure_log_is_sanitized(monkeypatch: pytest.
         evidence_accumulator.logger.remove(sink_id)
 
     _assert_sanitized(records, ["LLM assessment call failed"])
+
+
+@pytest.mark.asyncio
+async def test_evidence_accumulator_uses_explicit_runtime_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    captured = _install_explicit_chat_capture(
+        monkeypatch,
+        "STATUS: SUFFICIENT\nREASON: Evidence covers the query.",
+    )
+    accumulator = EvidenceAccumulator(
+        max_rounds=1,
+        enable_gap_assessment=True,
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=runtime,
+    )
+    documents = [
+        Document(
+            id="doc-runtime",
+            content="Credential runtime evidence covers credential precedence.",
+            metadata={},
+            score=0.9,
+        )
+    ]
+
+    result = await accumulator.accumulate(
+        query="credential runtime precedence",
+        initial_results=documents,
+        retrieval_fn=lambda *_args: [],
+    )
+
+    assert result.is_sufficient is True
+    assert result.metadata["verification_available"] is True
+    assert runtime.resolved == ["anthropic"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["kwargs"]["api_key"] == "runtime-only-key"
+    assert captured["kwargs"]["app_config"] == runtime.handle.app_config
+    assert captured["kwargs"]["credentials_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_evidence_accumulator_runtime_failure_lowers_trust_without_failover() -> None:
+    class FailingRuntime:
+        def __init__(self) -> None:
+            self.resolved: list[str] = []
+
+        async def resolve(self, provider, *, model=None):
+            del model
+            self.resolved.append(provider)
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    runtime = FailingRuntime()
+    accumulator = EvidenceAccumulator(
+        max_rounds=1,
+        enable_gap_assessment=True,
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=runtime,
+    )
+    result = await accumulator.accumulate(
+        query="credential runtime precedence",
+        initial_results=[
+            Document(
+                id="doc-runtime-failure",
+                content="A single low-confidence document.",
+                metadata={},
+                score=0.1,
+            )
+        ],
+        retrieval_fn=lambda *_args: [],
+    )
+
+    assert runtime.resolved == ["anthropic"]
+    assert result.metadata["verification_available"] is False
+    assert result.metadata["failure_code"] == "provider_unavailable"
+    assert "secret-key" not in str(result.metadata)
+    assert "/private/" not in str(result.metadata)

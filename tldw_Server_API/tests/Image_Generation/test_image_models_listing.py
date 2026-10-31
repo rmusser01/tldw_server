@@ -116,6 +116,38 @@ def test_list_image_models_unconfigured_missing_model(monkeypatch, tmp_path):
     assert entry["is_configured"] is False
 
 
+@pytest.mark.parametrize(
+    ("preferred_exists", "legacy_exists", "configured"),
+    [(False, True, False), (True, False, True), (True, True, True)],
+)
+def test_list_image_models_validates_preferred_diffusion_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    preferred_exists: bool,
+    legacy_exists: bool,
+    configured: bool,
+) -> None:
+    """Do not hide an invalid preferred model behind an unused legacy model."""
+    binary = _touch(tmp_path / "sd-cli")
+    preferred = tmp_path / "diffusion.gguf"
+    legacy = tmp_path / "legacy.gguf"
+    if preferred_exists:
+        _touch(preferred)
+    if legacy_exists:
+        _touch(legacy)
+    cfg = _make_config(
+        sd_cpp_binary_path=str(binary),
+        sd_cpp_diffusion_model_path=str(preferred),
+        sd_cpp_model_path=str(legacy),
+    )
+    monkeypatch.setattr(listing, "get_image_generation_config", lambda: cfg)
+    monkeypatch.setattr(listing, "get_registry", lambda: _FakeRegistry(["stable_diffusion_cpp"]))
+
+    models = listing.list_image_models_for_catalog()
+
+    assert models[0]["is_configured"] is configured
+
+
 def test_list_image_models_swarmui_configured(monkeypatch):
     cfg = _make_config(enabled_backends=["swarmui"], swarmui_base_url="http://localhost:7801")
 

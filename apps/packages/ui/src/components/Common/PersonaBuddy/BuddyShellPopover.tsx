@@ -1,12 +1,13 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Mic, MicOff, Palette, Send, Square, Sparkles } from "lucide-react"
+import { Mic, MicOff, Palette, Send, Square, Sparkles, X } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import type {
   PersonaBuddyLiveControlView,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
+import type { PersonaAmbientMode } from "@/types/persona-visuals"
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route"
 
 import {
@@ -19,6 +20,14 @@ type BuddyShellPopoverProps = {
   personaId?: string | null
   visualDiagnostic?: PersonaVisualDiagnostic | null
   liveControl?: PersonaBuddyLiveControlView | null
+  globalAmbientMode?: PersonaAmbientMode
+  personaAmbientMode?: PersonaAmbientMode | null
+  effectiveAmbientMode?: PersonaAmbientMode
+  ambientSurface?: "web" | "sidepanel"
+  ambientPreferenceMessage?: string | null
+  onGlobalAmbientModeChange?: (mode: PersonaAmbientMode) => void
+  onPersonaAmbientModeChange?: (mode: PersonaAmbientMode | null) => void
+  onClose?: () => void
 }
 
 const generateDraftClientMessageId = () => {
@@ -34,12 +43,22 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   buddySummary,
   personaId = null,
   visualDiagnostic = null,
-  liveControl = null
+  liveControl = null,
+  globalAmbientMode = "expressive",
+  personaAmbientMode = null,
+  effectiveAmbientMode = "off",
+  ambientSurface = "web",
+  ambientPreferenceMessage = null,
+  onGlobalAmbientModeChange,
+  onPersonaAmbientModeChange,
+  onClose
 }) => {
   const { t } = useTranslation("common")
   const [draft, setDraft] = React.useState("")
-  const [draftClientMessageId, setDraftClientMessageId] =
-    React.useState<string | null>(null)
+  const draftRevisionRef = React.useRef(0)
+  const [draftClientMessageId, setDraftClientMessageId] = React.useState<
+    string | null
+  >(null)
   const [sendError, setSendError] = React.useState<string | null>(null)
   const [sending, setSending] = React.useState(false)
   const normalizedPersonaId = String(personaId ?? "").trim()
@@ -49,29 +68,42 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         tab: "visuals"
       })
     : null
+  const focusedSession = liveControl?.focusedSession ?? null
   const liveRoute = normalizedPersonaId
     ? buildPersonaGardenRoute({
         personaId: normalizedPersonaId,
-        tab: "live"
+        tab: "live",
+        sessionId: focusedSession?.sessionId
       })
     : buildPersonaGardenRoute({ tab: "live" })
-  const focusedSession = liveControl?.focusedSession ?? null
-  const needsApproval = (focusedSession?.pendingApprovalCount ?? 0) > 0
+  const feedback =
+    liveControl?.feedback &&
+    liveControl.feedback.sessionId === focusedSession?.sessionId &&
+    liveControl?.feedback?.personaId === focusedSession?.personaId &&
+    (!normalizedPersonaId || normalizedPersonaId === focusedSession?.personaId)
+      ? liveControl.feedback
+      : null
+  const needsApproval =
+    (focusedSession?.pendingApprovalCount ?? 0) > 0 ||
+    feedback?.status === "review"
   const sessionOptions = liveControl?.sessions ?? []
   const voiceCapable = Boolean(
     focusedSession &&
-      (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
+    (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
   )
-  const voiceState = String(liveControl?.voiceState ?? "").trim().toLowerCase()
+  const voiceState = String(liveControl?.voiceState ?? "")
+    .trim()
+    .toLowerCase()
   const isListening =
     liveControl?.voiceIsListening === true || voiceState === "listening"
-  const voiceActionLabel = isListening
-    ? t("personaBuddy.voiceStop", "Stop listening")
-    : t("personaBuddy.voiceListen", "Listen")
+  const voiceActionLabel = !voiceCapable
+    ? t("personaBuddy.voiceSetup", "Set up voice")
+    : isListening
+      ? t("personaBuddy.voiceStop", "Stop listening")
+      : t("personaBuddy.voiceListen", "Listen")
 
-  const handleDraftChange = (
-    event: React.ChangeEvent<HTMLTextAreaElement>
-  ) => {
+  const handleDraftChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    draftRevisionRef.current += 1
     setDraft(event.target.value)
     setDraftClientMessageId(null)
     setSendError(null)
@@ -80,6 +112,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   const handleSend = async () => {
     const trimmed = draft.trim()
     if (!trimmed || !liveControl || sending) return
+    const draftRevision = draftRevisionRef.current
     setSending(true)
     setSendError(null)
     const clientMessageId =
@@ -90,6 +123,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
         await liveControl.startTextSession(normalizedPersonaId || null)
       }
       const result = await liveControl.sendText(trimmed, { clientMessageId })
+      if (draftRevisionRef.current !== draftRevision) return
       if (result.ok) {
         setDraft("")
         setDraftClientMessageId(null)
@@ -108,8 +142,16 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   return (
     <div
       data-testid="persona-buddy-popover"
-      className="min-w-[220px] rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
+      className="relative min-h-0 min-w-[220px] overflow-y-auto rounded-2xl border border-border bg-bg/95 p-3 shadow-xl backdrop-blur"
     >
+      <button
+        type="button"
+        aria-label="Close Buddy controls"
+        onClick={onClose}
+        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <X aria-hidden="true" className="h-4 w-4" />
+      </button>
       <div className="text-xs uppercase tracking-[0.18em] text-text-muted">
         {t("personaBuddy.title", "Persona Buddy")}
       </div>
@@ -127,30 +169,85 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
           data-severity={visualDiagnostic.severity}
           className={`mt-3 rounded-lg border px-2.5 py-2 text-xs leading-5 ${getPersonaVisualDiagnosticToneClassName(visualDiagnostic.severity)}`}
         >
-          <div className="font-medium text-inherit">{visualDiagnostic.title}</div>
+          <div className="font-medium text-inherit">
+            {visualDiagnostic.title}
+          </div>
           <div>{visualDiagnostic.message}</div>
         </div>
       ) : null}
+      <div className="mt-3 space-y-3 border-t border-border pt-3 text-xs">
+        <fieldset>
+          <legend className="font-medium text-text">Buddy behavior</legend>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {(["off", "expressive", "roaming"] as PersonaAmbientMode[]).map((mode) => (
+              <label key={mode} className="inline-flex items-center gap-1 text-text-muted">
+                <input
+                  type="radio"
+                  name="buddy-global-mode"
+                  value={mode}
+                  checked={globalAmbientMode === mode}
+                  onChange={() => onGlobalAmbientModeChange?.(mode)}
+                />
+                {mode[0].toUpperCase() + mode.slice(1)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend className="font-medium text-text">For this Persona</legend>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {([
+              [null, "Use global"],
+              ["off", "Off"],
+              ["expressive", "Expressive"],
+              ["roaming", "Roaming"]
+            ] as Array<[PersonaAmbientMode | null, string]>).map(([mode, label]) => (
+              <label key={mode ?? "global"} className="inline-flex items-center gap-1 text-text-muted">
+                <input
+                  type="radio"
+                  name="buddy-persona-mode"
+                  value={mode ?? "global"}
+                  checked={personaAmbientMode === mode}
+                  onChange={() => onPersonaAmbientModeChange?.(mode)}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div data-testid="persona-buddy-effective-mode" className="text-text-muted">
+          Effective: {effectiveAmbientMode[0].toUpperCase() + effectiveAmbientMode.slice(1)}
+          {ambientSurface === "sidepanel" && (personaAmbientMode ?? globalAmbientMode) === "roaming"
+            ? " · Roaming is limited to Expressive in the sidepanel."
+            : ""}
+        </div>
+        {ambientPreferenceMessage ? (
+          <div role="status" className="text-warning">{ambientPreferenceMessage}</div>
+        ) : null}
+      </div>
       {liveControl ? (
         <div className="mt-3 space-y-2 border-t border-border pt-3">
           {sessionOptions.length > 1 ? (
-            <select
-              data-testid="persona-buddy-session-select"
-              value={liveControl.focusedSessionId ?? ""}
-              onChange={(event) => {
-                const sessionId = event.target.value
-                if (sessionId) {
-                  void liveControl.focusSession(sessionId)
-                }
-              }}
-              className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
-            >
-              {sessionOptions.map((session) => (
-                <option key={session.sessionId} value={session.sessionId}>
-                  {session.personaName}
-                </option>
-              ))}
-            </select>
+            <label className="block text-xs font-medium text-text">
+              Connected session
+              <select
+                data-testid="persona-buddy-session-select"
+                value={liveControl.focusedSessionId ?? ""}
+                onChange={(event) => {
+                  const sessionId = event.target.value
+                  if (sessionId) {
+                    void liveControl.focusSession(sessionId)
+                  }
+                }}
+                className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
+              >
+                {sessionOptions.map((session) => (
+                  <option key={session.sessionId} value={session.sessionId}>
+                    {session.personaName}
+                  </option>
+                ))}
+              </select>
+            </label>
           ) : null}
 
           {needsApproval ? (
@@ -159,6 +256,17 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 text-xs font-medium text-text"
             >
               Needs approval
+            </div>
+          ) : null}
+
+          {feedback ? (
+            <div
+              data-testid="persona-buddy-stream-feedback"
+              role={feedback.status === "error" ? "alert" : "status"}
+              aria-live={feedback.status === "error" ? "assertive" : "polite"}
+              className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-text"
+            >
+              {feedback.text}
             </div>
           ) : null}
 
@@ -175,7 +283,9 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => void liveControl.stopSession(focusedSession?.sessionId)}
+              onClick={() =>
+                void liveControl.stopSession(focusedSession?.sessionId)
+              }
               disabled={!focusedSession}
               className="inline-flex flex-1 items-center justify-center gap-1 rounded-md border border-border bg-surface px-2 py-1.5 text-xs font-medium text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -183,7 +293,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               Stop
             </button>
           </div>
-          {voiceCapable ? (
+          {focusedSession ? (
             <Link
               data-testid="persona-buddy-voice-link"
               to={liveRoute}
@@ -198,14 +308,17 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
             </Link>
           ) : null}
 
-          <textarea
-            data-testid="persona-buddy-text-input"
-            value={draft}
-            onChange={handleDraftChange}
-            rows={3}
-            className="w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
-            placeholder="Message your buddy"
-          />
+          <label className="block text-xs font-medium text-text">
+            Message your Buddy
+            <textarea
+              data-testid="persona-buddy-text-input"
+              value={draft}
+              onChange={handleDraftChange}
+              rows={3}
+              className="w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
+              placeholder="Message your buddy"
+            />
+          </label>
           {sendError ? (
             <div className="text-xs font-medium text-danger">{sendError}</div>
           ) : null}

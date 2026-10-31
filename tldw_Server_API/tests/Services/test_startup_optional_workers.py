@@ -46,6 +46,7 @@ def test_optional_worker_specs_match_legacy_worker_contract() -> None:
     specs = _specs_by_name(startup_workers)
 
     expected = {
+        "admin_webhook_delivery_runtime_task": "jobs",
         "jobs_metrics_reconcile_task": "jobs",
         "jobs_crypto_rotate_task": "jobs",
         "jobs_webhooks_task": "jobs",
@@ -73,6 +74,7 @@ def test_optional_worker_spec_factories_delegate_to_existing_worker_services(
 ) -> None:
     startup_workers = _import_startup_optional_workers()
     service_by_name = {
+        "admin_webhook_delivery_runtime_task": "_run_admin_webhook_delivery_runtime_service",
         "jobs_metrics_reconcile_task": "_run_jobs_metrics_reconcile_service",
         "jobs_crypto_rotate_task": "_run_jobs_crypto_rotate_service",
         "jobs_webhooks_task": "_run_jobs_webhooks_worker_service",
@@ -125,7 +127,70 @@ def test_optional_worker_spec_predicates_match_legacy_gates(
     assert enabled_envs == [
         "JOBS_METRICS_RECONCILE_ENABLE",
         "JOBS_WEBHOOKS_ENABLED",
+        "JOBS_EVENTS_OUTBOX",
     ]
+
+
+def test_jobs_webhooks_worker_spec_rejects_disabled_outbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://hooks.test/jobs")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+
+    specs = _specs_by_name(startup_workers)
+
+    assert specs["jobs_webhooks_task"].enabled(_context()) is False
+
+
+@pytest.mark.parametrize(
+    ("mode", "legacy", "runtime_enabled"),
+    [
+        ("off", "false", False),
+        ("migrate", "false", False),
+        ("on", "false", True),
+        ("off", "true", False),
+        ("invalid", "false", False),
+    ],
+)
+def test_canonical_admin_webhook_runtime_spec_uses_only_validated_on_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    legacy: str,
+    runtime_enabled: bool,
+) -> None:
+    monkeypatch.setenv("TLDW_ADMIN_WEBHOOKS_MODE", mode)
+    monkeypatch.setenv("TLDW_ADMIN_WEBHOOKS_LEGACY_COMPAT", legacy)
+    monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://hooks.test/jobs")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    startup_workers = _import_startup_optional_workers()
+
+    specs = _specs_by_name(startup_workers)
+
+    assert "admin_webhook_delivery_runtime_task" in specs
+    runtime = specs["admin_webhook_delivery_runtime_task"]
+    assert runtime.task_name == "admin_webhook_delivery_runtime_task"
+    assert runtime.enabled(_context()) is runtime_enabled
+    assert specs["jobs_webhooks_task"].enabled(_context()) is (not runtime_enabled)
+
+
+def test_canonical_runtime_factory_calls_only_new_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    calls: list[object] = []
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_admin_webhook_delivery_runtime_service",
+        lambda stop_event: calls.append(stop_event) or "canonical-runtime-coro",
+    )
+
+    spec = _specs_by_name(startup_workers)["admin_webhook_delivery_runtime_task"]
+
+    assert spec.factory(_context(), "canonical-stop") == "canonical-runtime-coro"
+    assert calls == ["canonical-stop"]
 
 
 @pytest.mark.asyncio
@@ -250,6 +315,39 @@ async def test_start_jobs_webhooks_worker_skips_without_url(
 
 
 @pytest.mark.asyncio
+async def test_start_jobs_webhooks_worker_skips_without_outbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    created: list[str] = []
+
+    monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://example.test/jobs-webhooks")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+    monkeypatch.setattr(
+        startup_workers,
+        "_make_event",
+        lambda: created.append("event") or object(),
+    )
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_jobs_webhooks_worker_service",
+        lambda _stop_event: "webhook-worker",
+    )
+    monkeypatch.setattr(
+        startup_workers,
+        "_create_task",
+        lambda _awaitable: created.append("task") or object(),
+    )
+
+    stop_event, task = await startup_workers._start_jobs_webhooks_worker()
+
+    assert stop_event is None
+    assert task is None
+    assert created == []
+
+
+@pytest.mark.asyncio
 async def test_start_jobs_webhooks_worker_registers_background_inventory_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -266,6 +364,7 @@ async def test_start_jobs_webhooks_worker_registers_background_inventory_when_en
 
     monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://example.test/jobs-webhooks")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setattr(
         startup_workers,
         "_run_jobs_webhooks_worker_service",

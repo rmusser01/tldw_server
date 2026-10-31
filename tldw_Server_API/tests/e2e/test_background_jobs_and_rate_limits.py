@@ -26,12 +26,49 @@ def _is_redis_unavailable_error(exc: Exception) -> bool:
 
 
 @pytest.mark.critical
+def test_upload_media_forwards_analysis_opt_out(tmp_path):
+    """The upload-only embedding flow must explicitly avoid provider analysis."""
+    observed: dict[str, bytes] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["body"] = request.content
+        return httpx.Response(
+            200,
+            json={"results": [{"status": "Success", "db_id": 1}]},
+        )
+
+    upload_path = tmp_path / "upload.txt"
+    upload_path.write_text("upload fixture control", encoding="utf-8")
+    client = APIClient(
+        client=httpx.Client(transport=httpx.MockTransport(handler), base_url="http://testserver"),
+        auto_auth=False,
+    )
+    try:
+        response = client.upload_media(
+            file_path=str(upload_path),
+            title="Upload fixture control",
+            perform_analysis=False,
+        )
+    finally:
+        client.close()
+
+    assert response["results"][0]["status"] == "Success"
+    assert b'name="perform_analysis"\r\n\r\nfalse\r\n' in observed["body"]
+
+
+@pytest.mark.critical
 def test_embedding_jobs_list_and_progression(api_client):
     # Upload a small text doc
     token = f"EMB_JOB_{uuid.uuid4().hex[:6]}"
     fp = create_test_file(f"Embedding job test content {token}")
     try:
-        up = api_client.upload_media(file_path=fp, title=f"Emb Job {token}", media_type="document", generate_embeddings=False)
+        up = api_client.upload_media(
+            file_path=fp,
+            title=f"Emb Job {token}",
+            media_type="document",
+            generate_embeddings=False,
+            perform_analysis=False,
+        )
         media_id = AssertionHelpers.assert_successful_upload(up)
     finally:
         cleanup_test_file(fp)

@@ -3,6 +3,7 @@
 import React from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { FormInstance } from "antd"
 import type { TFunction } from "i18next"
 
 const {
@@ -11,6 +12,10 @@ const {
 } = vi.hoisted(() => ({
   formItemSpy: vi.fn(),
   modalConfirmMock: vi.fn()
+}))
+
+vi.mock("@/hooks/useAntdModal", () => ({
+  useAntdModal: () => ({ confirm: modalConfirmMock })
 }))
 
 vi.mock("@heroicons/react/24/outline", () => ({
@@ -106,7 +111,7 @@ vi.mock("antd", () => {
         rules?: unknown[]
         initialValue?: unknown
       }) => {
-        formItemSpy({ label, name, rules })
+        formItemSpy({ label, name, rules, initialValue })
         const testId =
           typeof label === "string"
             ? `form-item-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
@@ -114,7 +119,9 @@ vi.mock("antd", () => {
         const controlledChild =
           name === "rememberApiKey" && React.isValidElement(children)
             ? React.cloneElement(children as React.ReactElement<{ checked?: boolean }>, {
-                checked: Boolean(initialValue)
+                // These tests render the child settings section without its
+                // owning Form. Mirror the parent's documented default here.
+                checked: initialValue === undefined ? true : Boolean(initialValue)
               })
             : children
         return <div data-testid={testId}>{controlledChild}</div>
@@ -192,7 +199,7 @@ vi.mock("antd", () => {
 })
 
 vi.mock("@/config/platform", () => ({
-  isFirefoxTarget: () => false
+  isFirefoxTarget: false
 }))
 
 import { TldwBillingSettings } from "../TldwBillingSettings"
@@ -211,7 +218,7 @@ const createConnectionProps = (
   t,
   form: {
     setFieldValue: vi.fn()
-  } as any,
+  } as unknown as FormInstance,
   configuredServerUrl: "https://api.example.test/path",
   authSource: "manual",
   rememberApiKey: true,
@@ -221,6 +228,7 @@ const createConnectionProps = (
   setAuthMode: vi.fn(),
   isLoggedIn: false,
   setIsLoggedIn: vi.fn(),
+  refreshLoginStatus: vi.fn(async () => {}),
   loginMethod: "magic-link",
   setLoginMethod: vi.fn(),
   magicEmail: "persisted@example.com",
@@ -284,6 +292,13 @@ const createBillingProps = (
 })
 
 describe("settings PR review fixes", () => {
+  it("offers a working Disconnect action for a configured manual single-user connection", () => {
+    const props = createConnectionProps()
+    render(<TldwConnectionSettings {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+    expect(props.onLogout).toHaveBeenCalledTimes(1)
+  })
+
   beforeEach(() => {
     formItemSpy.mockClear()
     modalConfirmMock.mockReset()
@@ -294,6 +309,21 @@ describe("settings PR review fixes", () => {
 
   afterEach(() => {
     cleanup()
+  })
+
+  it("switches an empty connection form without confirming credential loss", () => {
+    const props = createConnectionProps({ magicEmail: "", magicToken: "", magicSent: false })
+    render(<TldwConnectionSettings {...props} />)
+    fireEvent.change(screen.getByRole("combobox", { name: "segmented" }), {
+      target: { value: "multi-user" }
+    })
+    expect(modalConfirmMock).not.toHaveBeenCalled()
+    expect(props.setAuthMode).toHaveBeenCalledWith("multi-user")
+  })
+
+  it("does not offer extension site permission controls in the WebUI", () => {
+    render(<TldwConnectionSettings {...createConnectionProps()} />)
+    expect(screen.queryByRole("button", { name: "Grant Site Access" })).not.toBeInTheDocument()
   })
 
   it("clears both password and magic-link credentials when auth mode changes", () => {
@@ -364,6 +394,16 @@ describe("settings PR review fixes", () => {
     fireEvent.click(remember)
 
     expect(screen.getByText("Keep signed in until this browser closes.")).toBeInTheDocument()
+  })
+
+  it("leaves rememberApiKey initialization to the owning Form", () => {
+    render(<TldwConnectionSettings {...createConnectionProps()} />)
+
+    const rememberField = formItemSpy.mock.calls
+      .map(([props]) => props)
+      .find((props) => props.name === "rememberApiKey")
+
+    expect(rememberField).toMatchObject({ initialValue: undefined })
   })
 
   it("reveals manual key controls when a cookie session changes to a remote origin", () => {
@@ -475,6 +515,18 @@ describe("settings PR review fixes", () => {
       "aria-busy",
       "true"
     )
+  })
+
+  it("updates the actual connection notices when the owner changes login status", () => {
+    const props = createConnectionProps({ authMode: "multi-user", isLoggedIn: false })
+    const { rerender } = render(<TldwConnectionSettings {...props} />)
+    expect(screen.getByText("Login Required")).toBeInTheDocument()
+    rerender(<TldwConnectionSettings {...props} isLoggedIn />)
+    expect(screen.queryByText("Login Required")).not.toBeInTheDocument()
+    expect(screen.getByText("Logged In")).toBeInTheDocument()
+    rerender(<TldwConnectionSettings {...props} isLoggedIn={false} />)
+    expect(screen.queryByText("Logged In")).not.toBeInTheDocument()
+    expect(screen.getByText("Login Required")).toBeInTheDocument()
   })
 
   it("offers cookie-session logout through the production auth handler", () => {

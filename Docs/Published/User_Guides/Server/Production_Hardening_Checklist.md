@@ -45,7 +45,7 @@ CORS & CSRF
 
 Rate Limiting & Abuse Prevention
 - RG (rate gating) global rate limiter is enabled by default in production unless you disable it with `RG_ENABLED=0` or in `config.txt`; in test environments, RG is disabled by default unless you explicitly enable it (for example via `RG_ENABLED=1` or `config.txt`).
-- Treat `RG_ENABLED=0` as an emergency/debug-only setting; AuthNZ dependency limiters are diagnostics-only and do not provide equivalent abuse-limiter fallback enforcement when RG is disabled.
+- Treat `RG_ENABLED=0` as an emergency/debug-only setting. RG enforcement and the general `check_rate_limit` fallback are off, but several independent layers stay on regardless (ADR-056): the auth brute-force floor (`check_auth_rate_limit`, 30/min, `AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`); the AuthNZ login lockout ("Too many failed login attempts...", 429, `MAX_LOGIN_ATTEMPTS`/`LOCKOUT_DURATION_MINUTES`); the audio daily-minutes 402 (`AUDIO_TIER_LIMITS_JSON`); the Evaluations legacy cost caps (`max_cost_per_day`/`max_cost_per_month` in `evaluations_config.yaml`); and the kanban per-action limiter (`KANBAN_RATE_LIMIT_*`). Layers entirely outside RG (RBAC rate classes, billing plan limits, virtual-key budgets) also keep their own switches; see `Docs/Operations/Rate_Limits_Troubleshooting.md`.
 - Tune per-module rate limiters (Chat/RAG/Evals) via their respective settings.
 - Consider a network-level rate limit at the reverse proxy for additional protection.
 

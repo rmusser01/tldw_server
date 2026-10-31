@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   uploadCustomVoice: vi.fn(),
   encodeCustomVoice: vi.fn(),
   deleteCustomVoice: vi.fn(),
-  synthesizeSpeech: vi.fn(),
+  synthesizeSpeechDetailed: vi.fn(),
   notificationError: vi.fn(),
   notificationSuccess: vi.fn()
 }))
@@ -58,7 +58,8 @@ vi.mock("@/services/tldw/voice-cloning", async () => {
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    synthesizeSpeech: (...args: unknown[]) => mocks.synthesizeSpeech(...args)
+    synthesizeSpeechDetailed: (...args: unknown[]) =>
+      mocks.synthesizeSpeechDetailed(...args)
   }
 }))
 
@@ -133,7 +134,10 @@ describe("VoiceCloningManager", () => {
       provider: customVoice.provider
     })
     mocks.deleteCustomVoice.mockResolvedValue(undefined)
-    mocks.synthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
+    mocks.synthesizeSpeechDetailed.mockResolvedValue({
+      buffer: new ArrayBuffer(8),
+      fallbackUsed: false
+    })
   })
 
   it("sanitizes upload failure notifications", async () => {
@@ -184,7 +188,7 @@ describe("VoiceCloningManager", () => {
     expectSanitizedDescription()
 
     mocks.notificationError.mockClear()
-    mocks.synthesizeSpeech.mockRejectedValueOnce(
+    mocks.synthesizeSpeechDetailed.mockRejectedValueOnce(
       rawServerError("POST", "/api/v1/audio/speech", "preview")
     )
     await user.click(screen.getByRole("button", { name: /preview/i }))
@@ -213,6 +217,31 @@ describe("VoiceCloningManager", () => {
       )
     })
     expectSanitizedDescription()
+  })
+
+  it("keeps cloned-voice previews on legacy routing without a gateway override", async () => {
+    const user = userEvent.setup()
+    renderVoiceCloningManager()
+
+    await screen.findByText("Lab voice")
+    await user.click(screen.getByRole("button", { name: /preview/i }))
+
+    await waitFor(() => {
+      expect(mocks.synthesizeSpeechDetailed).toHaveBeenCalledWith(
+        "Hello, this is a preview of your custom voice.",
+        {
+          model: "chatterbox",
+          voice: "custom:voice-1",
+          responseFormat: "mp3"
+        }
+      )
+    })
+    expect(mocks.synthesizeSpeechDetailed.mock.calls[0]?.[1]).not.toHaveProperty(
+      "backend"
+    )
+    expect(mocks.synthesizeSpeechDetailed.mock.calls[0]?.[1]).not.toHaveProperty(
+      "allowFallback"
+    )
   })
 
   it("renders disabled provider guidance with the design-system Alert primitive", async () => {

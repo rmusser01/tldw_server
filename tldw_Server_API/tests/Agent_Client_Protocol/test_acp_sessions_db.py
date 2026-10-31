@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,44 @@ def db():
         path = os.path.join(tmp, "acp_sessions.db")
         instance = ACPSessionsDB(db_path=path)
         yield instance
+        instance.close()
+
+
+@pytest.mark.unit
+def test_default_database_path_uses_environment_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The profile-owned environment path is used when no path is explicit."""
+    environment_path = tmp_path / "environment" / "acp_sessions.db"
+    monkeypatch.setenv("ACP_SESSIONS_DB_PATH", str(environment_path))
+
+    instance = ACPSessionsDB()
+    try:
+        instance.list_sessions(user_id=1)
+        assert instance._db_path == str(environment_path.resolve())
+        assert environment_path.exists()
+    finally:
+        instance.close()
+
+
+@pytest.mark.unit
+def test_explicit_database_path_precedes_environment_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit ACP sessions path takes precedence over the environment."""
+    environment_path = tmp_path / "environment" / "acp_sessions.db"
+    explicit_path = tmp_path / "explicit" / "acp_sessions.db"
+    monkeypatch.setenv("ACP_SESSIONS_DB_PATH", str(environment_path))
+
+    instance = ACPSessionsDB(db_path=str(explicit_path))
+    try:
+        instance.list_sessions(user_id=1)
+        assert instance._db_path == str(explicit_path.resolve())
+        assert explicit_path.exists()
+        assert not environment_path.exists()
+    finally:
         instance.close()
 
 

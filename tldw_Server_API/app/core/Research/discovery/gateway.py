@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     ExactQueryValuePolicy,
     JSONBodyPair,
     LiteralTermsQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
     OperationKind,
     PathSlot,
     PathSlotKind,
@@ -119,7 +120,7 @@ class _BindingSnapshot:
     operation_kind: OperationKind
     path: str
     allowed_query_keys: tuple[str, ...]
-    query_pairs: tuple[tuple[str, str], ...]
+    query_pairs: tuple[tuple[str, str], ...] = field(repr=False)
     query_keys: tuple[str, ...]
     json_body_pairs: tuple[tuple[str, str | int], ...]
     timeout_ms: int
@@ -270,7 +271,8 @@ def _snapshot_query_value_policies(
         ExactQueryValuePolicy
         | BoundedDecimalQueryValuePolicy
         | LiteralTermsQueryValuePolicy
-        | BoundedTextQueryValuePolicy,
+        | BoundedTextQueryValuePolicy
+        | OpaqueCursorQueryValuePolicy,
         ...,
     ]
     | None
@@ -282,6 +284,7 @@ def _snapshot_query_value_policies(
         | BoundedDecimalQueryValuePolicy
         | LiteralTermsQueryValuePolicy
         | BoundedTextQueryValuePolicy
+        | OpaqueCursorQueryValuePolicy
     ] = []
     try:
         for policy in policies:
@@ -299,6 +302,8 @@ def _snapshot_query_value_policies(
                 )
             elif type(policy) is BoundedTextQueryValuePolicy:
                 snapshot = BoundedTextQueryValuePolicy(policy.name, policy.max_chars, policy.required)
+            elif type(policy) is OpaqueCursorQueryValuePolicy:
+                snapshot = OpaqueCursorQueryValuePolicy(policy.name, policy.max_chars, policy.required)
             else:
                 return None
             snapshots.append(snapshot)
@@ -313,6 +318,7 @@ def _valid_query_policy_value(
         | BoundedDecimalQueryValuePolicy
         | LiteralTermsQueryValuePolicy
         | BoundedTextQueryValuePolicy
+        | OpaqueCursorQueryValuePolicy
     ),
     value: str,
 ) -> bool:
@@ -327,7 +333,7 @@ def _valid_query_policy_value(
     if type(policy) is LiteralTermsQueryValuePolicy:
         if not value.endswith(policy.fixed_suffix):
             return False
-        literal_expression = value[: -len(policy.fixed_suffix)]
+        literal_expression = value if policy.fixed_suffix == "" else value[: -len(policy.fixed_suffix)]
         terms = literal_expression.split(" AND ")
         if not 1 <= len(terms) <= policy.max_terms:
             return False
@@ -342,6 +348,12 @@ def _valid_query_policy_value(
             ):
                 return False
         return True
+    if type(policy) is OpaqueCursorQueryValuePolicy:
+        return (
+            type(value) is str
+            and 1 <= len(value) <= policy.max_chars
+            and all("!" <= character <= "~" for character in value)
+        )
     return (
         1 <= len(value) <= policy.max_chars
         and unicodedata.normalize("NFKC", value) == value

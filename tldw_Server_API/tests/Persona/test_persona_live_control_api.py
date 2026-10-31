@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Persona import live_control as live_control_module
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import PersonaExemplarPromptAssembly
 from tldw_Server_API.app.core.Persona.exemplar_runtime import PersonaExemplarRuntimeContext
 from tldw_Server_API.app.core.Persona.live_control import persona_live_stream_registry
+from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
 pytestmark = pytest.mark.unit
@@ -93,6 +94,40 @@ def _create_session(
 
 def _session_ids(payload: dict) -> list[str]:
     return [item["session_id"] for item in payload["sessions"]]
+
+
+def test_voice_capability_requires_preparation_and_stop_invalidates(persona_db):
+    _create_profile(persona_db, user_id="1", persona_id="voice-migu")
+    _create_session(persona_db, user_id="1", persona_id="voice-migu", session_id="voice-session")
+    key = {"user_id": "1", "session_id": "voice-session", "connection_id": "voice-connection"}
+    stopped = []
+    persona_live_stream_registry.mark_connected(**key, on_stop=lambda: stopped.append(True))
+    try:
+        row = persona_db.get_persona_session("voice-session", user_id="1")
+        summary = live_control_module.build_live_session_summary(persona_db, user_id="1", row=row, is_focused=False)
+        assert summary["capabilities"]["voice"] is False
+        token = persona_live_voice_registry.begin_preparation(**key)
+        assert persona_live_voice_registry.complete_preparation(**key, token=token)
+        summary = live_control_module.build_live_session_summary(persona_db, user_id="1", row=row, is_focused=False)
+        assert summary["capabilities"]["voice"] is True
+        stopped_summary = live_control_module.stop_live_session(persona_db, user_id="1", session_id="voice-session")
+        assert stopped_summary["capabilities"]["voice"] is False
+        assert not persona_live_voice_registry.is_ready(user_id="1", session_id="voice-session")
+        assert stopped == [True]
+    finally:
+        persona_live_voice_registry.clear(**key)
+        persona_live_stream_registry.mark_disconnected(**key)
+
+
+def test_stream_stop_notifies_only_matching_owner_and_live_connection():
+    registry = live_control_module.PersonaLiveStreamRegistry()
+    notices = []
+    registry.mark_connected(user_id="1", session_id="s", connection_id="gone", on_stop=lambda: notices.append("gone"))
+    registry.mark_connected(user_id="1", session_id="s", connection_id="live", on_stop=lambda: notices.append("live"))
+    registry.mark_connected(user_id="2", session_id="s", connection_id="other", on_stop=lambda: notices.append("other"))
+    registry.mark_disconnected(user_id="1", session_id="s", connection_id="gone")
+    registry.stop(user_id="1", session_id="s")
+    assert notices == ["live"]
 
 
 def _recv_until(client, predicate, timeout=2.0):
@@ -774,15 +809,29 @@ def test_voice_commit_message_preserves_bounded_client_message_id():
     assert payload["client_message_id"] == "x" * 128
 
 
-def test_persona_stream_voice_commit_records_bounded_client_message_id(monkeypatch):
+def test_persona_stream_voice_commit_records_bounded_client_message_id(monkeypatch, persona_db: CharactersRAGDB):
+    from tldw_Server_API.tests.Persona.test_persona_ws import (
+        _prepare_test_voice,
+        _stub_persona_conversation,
+    )
+
+    _stub_persona_conversation(monkeypatch)
+    async def unavailable_test_audio(*args, **kwargs):
+        raise RuntimeError("Test audio is unavailable")
+
+    monkeypatch.setattr(persona_ep, "_generate_persona_live_tts_audio", unavailable_test_audio)
     manager = SessionManager()
     persisted_turns: list[dict[str, object]] = []
     _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
     session_id = "sess-voice-commit-ws"
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
+    _create_profile(persona_db, user_id="1", persona_id="research_assistant")
+    _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
 
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
+            _prepare_test_voice(ws, session_id, configure=True)
             ws.send_text(
                 json.dumps(
                     {
@@ -799,13 +848,15 @@ def test_persona_stream_voice_commit_records_bounded_client_message_id(monkeypat
                 and data.get("reason_code") == "VOICE_TURN_COMMITTED"
                 and data.get("session_id") == session_id,
             )
-            plan = _recv_until(
+            reply = _recv_until(
                 ws,
-                lambda data: data.get("event") == "tool_plan" and data.get("session_id") == session_id,
+                lambda data: data.get("event") == "assistant_delta" and data.get("session_id") == session_id,
             )
 
     assert committed["transcript"] == "Please summarize this session"
-    assert plan["session_id"] == session_id
+    assert reply["session_id"] == session_id
+    assert reply["text_delta"] == "Test conversational reply"
+    assert reply["client_message_id"] == "v" * 128
     turns = manager.list_turns(session_id=session_id, user_id="1", limit=10)
     voice_turn = next(turn for turn in turns if turn["type"] == "voice_commit")
     assert voice_turn["metadata"]["client_message_id"] == "v" * 128
@@ -1151,6 +1202,9 @@ def test_persona_stream_user_message_preserves_private_live_control_preferences(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
+    from tldw_Server_API.tests.Persona.test_persona_ws import _stub_persona_conversation
+
+    _stub_persona_conversation(monkeypatch)
     manager = SessionManager()
     _install_persona_stream_test_stubs(monkeypatch, manager)
     monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
@@ -1179,11 +1233,12 @@ def test_persona_stream_user_message_preserves_private_live_control_preferences(
                     }
                 )
             )
-            _recv_until(
+            reply = _recv_until(
                 ws,
-                lambda data: data.get("event") == "tool_plan" and data.get("session_id") == session_id,
+                lambda data: data.get("event") == "assistant_delta" and data.get("session_id") == session_id,
             )
 
+            assert reply["text_delta"] == "Test conversational reply"
             row = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
 
     assert row is not None

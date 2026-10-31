@@ -248,6 +248,7 @@ def _explicit_claims_for_unit(unit: ArtifactVerificationUnit, *, claims_max: int
                 span=None,
                 claim_type=claim_type,
                 extracted_values=extracted_values,
+                requires_semantic_verification=bool(unit.metadata.get("requires_semantic_verification")),
             )
         )
     return claims

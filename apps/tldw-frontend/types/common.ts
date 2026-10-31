@@ -32,8 +32,14 @@ export interface ApiRequestConfigWithMetadata extends ApiRequestConfig {
 }
 
 /** Standard API error response structure */
+export interface ApiErrorDetail {
+  code?: string;
+  error_code?: string;
+  message?: string;
+}
+
 export interface ApiErrorResponse {
-  detail?: string;
+  detail?: string | ApiErrorDetail;
   message?: string;
 }
 

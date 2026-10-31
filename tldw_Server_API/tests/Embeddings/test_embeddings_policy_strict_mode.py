@@ -33,7 +33,7 @@ def _override_user(admin=False):
 
 
 @pytest.mark.unit
-def test_policy_strict_blocks_admin(client):
+def test_policy_strict_blocks_admin(client, monkeypatch):
     os.environ["TESTING"] = "true"
     os.environ["EMBEDDINGS_ENFORCE_POLICY"] = "true"
     os.environ["EMBEDDINGS_ENFORCE_POLICY_STRICT"] = "true"
@@ -45,7 +45,11 @@ def test_policy_strict_blocks_admin(client):
         settings["ALLOWED_EMBEDDING_PROVIDERS"] = ["huggingface"]
         settings["ALLOWED_EMBEDDING_MODELS"] = ["sentence-transformers/all-MiniLM-L6-v2"]
 
-        app.dependency_overrides[get_request_user] = _override_user(admin=True)
+        monkeypatch.setitem(
+            app.dependency_overrides,
+            get_request_user,
+            _override_user(admin=True),
+        )
         r = client.post(
             "/api/v1/embeddings",
             json={"input": "txt", "model": "text-embedding-3-small"},

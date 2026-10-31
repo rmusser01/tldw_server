@@ -42,11 +42,6 @@ _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _now_iso() -> str:
-    import datetime as _dt
-    return _dt.datetime.utcnow().isoformat()
-
-
 def _env_bool(name: str, default: bool = False) -> bool:
     v = os.getenv(name, "")
     if not v:

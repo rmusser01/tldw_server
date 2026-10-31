@@ -169,8 +169,8 @@ describe("TldwApiClient chat mutations", () => {
     expect(request.timeoutMs).toBe(180_000)
   })
 
-  it("sanitizes leaky background payload fields when creating a chat completion", async () => {
-    mocks.bgRequest.mockResolvedValue({
+  it("preserves successful background payloads even when they discuss errors and paths", async () => {
+    const completion = {
       id: "resp-1",
       object: "chat.completion",
       error: "trace=/Users/private/stack.txt",
@@ -179,7 +179,8 @@ describe("TldwApiClient chat mutations", () => {
         traceback: "Traceback: /Users/private/stack.txt",
         items: [{ exception: "boom" }]
       }
-    })
+    }
+    mocks.bgRequest.mockResolvedValue(completion)
 
     const client = new TldwApiClient()
     const response = await client.createChatCompletion({
@@ -189,9 +190,6 @@ describe("TldwApiClient chat mutations", () => {
 
     const payload = await response.json()
 
-    expect(payload.error).not.toContain("/Users/private")
-    expect(payload.details).toBeUndefined()
-    expect(payload.nested.traceback).toBeUndefined()
-    expect(payload.nested.items[0].exception).toBeUndefined()
+    expect(payload).toEqual(completion)
   })
 })

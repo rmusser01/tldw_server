@@ -1,16 +1,18 @@
 import { ChatTldw } from "./ChatTldw"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
   getAllDefaultModelSettings,
   getModelSettings
 } from "@/services/model-settings"
 import { getDefaultApiProvider } from "@/services/tldw-server"
 import { tldwModels } from "@/services/tldw"
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption, type ToolChoice } from "@/store/option"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
-import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
+import { parseProviderQualifiedModelSelection, resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 
 const isValidReasoningEffort = (
   value: unknown
@@ -19,6 +21,7 @@ const isValidReasoningEffort = (
 }
 
 type PageAssistModelOptions = {
+  clientManagedHistory?: boolean
   model: string
   toolChoice?: ToolChoice
   tools?: Record<string, unknown>[]
@@ -31,6 +34,11 @@ type PageAssistModelOptions = {
   extraHeaders?: string
   extraBody?: string
   researchContext?: ChatResearchContext
+  requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
+  refreshImageCapability?: boolean
+  clientMessageId?: string
+  regenerateFromMessageId?: string
 }
 
 const parseJsonObject = (value?: string) => {
@@ -49,6 +57,7 @@ const parseJsonObject = (value?: string) => {
 }
 
 export const pageAssistModel = async ({
+  clientManagedHistory,
   model,
   toolChoice,
   tools,
@@ -60,7 +69,12 @@ export const pageAssistModel = async ({
   apiProvider,
   extraHeaders,
   extraBody,
-  researchContext
+  researchContext,
+  requestScope,
+  retryFailedTurn,
+  refreshImageCapability,
+  clientMessageId,
+  regenerateFromMessageId
 }: PageAssistModelOptions): Promise<ChatTldw> => {
   const currentChatModelSettings = useStoreChatModelSettings.getState()
   const {
@@ -75,11 +89,36 @@ export const pageAssistModel = async ({
     healthState: mcpHealthState
   } = useMcpToolsStore.getState()
   const resolvedToolChoice = toolChoice ?? storedToolChoice
-  const normalizedModelId = String(model || "").replace(/^tldw:/, "")
+  const selectedModel = parseProviderQualifiedModelSelection(model)
+  const normalizedModelId = selectedModel.modelId.replace(/^tldw:/, "")
+  const rawProvider = apiProvider ?? currentChatModelSettings.apiProvider
+  const explicitProvider =
+    typeof rawProvider === "string" && rawProvider.trim().length > 0
+      ? rawProvider.trim()
+      : undefined
+  const defaultApiProvider =
+    !explicitProvider ? await getDefaultApiProvider() : null
+  const normalizedApiProvider = await resolveApiProviderForModel({
+    modelId: model,
+    explicitProvider: explicitProvider ?? defaultApiProvider ?? undefined
+  })
   let modelSupportsTools = false
   let modelSupportsMultimodal = false
   try {
-    const modelInfo = await tldwModels.getModel(normalizedModelId)
+    const matchesModel = (info: { id: string; provider?: string }) =>
+      info.id === normalizedModelId &&
+      (!normalizedApiProvider ||
+        normalizeProviderAvailabilityKey(info.provider) ===
+          normalizeProviderAvailabilityKey(normalizedApiProvider))
+    let modelInfo = selectedModel.provider
+      ? (await tldwModels.getModels()).find(matchesModel)
+      : await tldwModels.getModel(normalizedModelId)
+    if (modelInfo && !matchesModel(modelInfo)) {
+      modelInfo = (await tldwModels.getModels()).find(matchesModel)
+    }
+    if (refreshImageCapability && !modelInfo?.capabilities?.includes("vision")) {
+      modelInfo = (await tldwModels.getModels(true, { requireFresh: true })).find(matchesModel)
+    }
     modelSupportsTools = Boolean(modelInfo?.capabilities?.includes("tools"))
     modelSupportsMultimodal = Boolean(
       modelInfo?.capabilities?.includes("vision")
@@ -103,11 +142,11 @@ export const pageAssistModel = async ({
   const resolvedConversationId =
     conversationId && conversationId.trim().length > 0
       ? conversationId.trim()
-      : serverChatId ?? undefined
+      : (serverChatId ?? undefined)
   const resolvedSaveToDb =
     typeof saveToDb === "boolean"
       ? saveToDb
-      : Boolean(resolvedConversationId) && !temporaryChat
+      : !temporaryChat
   const finalConversationId = resolvedSaveToDb
     ? resolvedConversationId
     : undefined
@@ -133,17 +172,6 @@ export const pageAssistModel = async ({
     resolvedSlashInjectionMode && resolvedSlashInjectionMode.trim().length > 0
       ? resolvedSlashInjectionMode.trim()
       : undefined
-  const rawProvider = apiProvider ?? currentChatModelSettings.apiProvider
-  const explicitProvider =
-    typeof rawProvider === "string" && rawProvider.trim().length > 0
-      ? rawProvider.trim()
-      : undefined
-  const defaultApiProvider =
-    !explicitProvider ? await getDefaultApiProvider() : null
-  const normalizedApiProvider = await resolveApiProviderForModel({
-    modelId: model,
-    explicitProvider: explicitProvider ?? defaultApiProvider ?? undefined
-  })
   const resolvedExtraHeadersBase = parseJsonObject(
     extraHeaders ?? currentChatModelSettings.extraHeaders
   )
@@ -218,7 +246,11 @@ export const pageAssistModel = async ({
       userDefaultModelSettings?.reasoningEffort
   }
 
-  const modelSettings = await getModelSettings(model)
+  let modelSettings = await getModelSettings(model)
+  if (selectedModel.provider && Object.keys(modelSettings).length === 0) {
+    // Normal Chat previously stored these settings under the unqualified ID.
+    modelSettings = await getModelSettings(selectedModel.modelId)
+  }
 
   const _keepAlive = modelSettings?.keepAlive || keepAlive || ""
   const payload = {
@@ -241,7 +273,8 @@ export const pageAssistModel = async ({
 
   // Default to tldw_server chat model
   return new ChatTldw({
-    model,
+    clientManagedHistory,
+    model: normalizedModelId,
     temperature: payload.temperature,
     topP: payload.topP,
     maxTokens: payload.numPredict,
@@ -263,6 +296,10 @@ export const pageAssistModel = async ({
     extraHeaders: resolvedExtraHeaders,
     extraBody: resolvedExtraBody,
     researchContext,
+    requestScope,
+    retryFailedTurn,
+    clientMessageId,
+    regenerateFromMessageId,
     chatDebugMetadata: {
       toolChoice: toolRequest.toolChoice,
       toolOmissionReason: toolRequest.omittedReason,

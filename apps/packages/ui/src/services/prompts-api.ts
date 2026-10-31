@@ -87,12 +87,131 @@ export type StructuredPromptPreviewRequest = {
 export type StructuredPromptPreviewResponse = {
   prompt_format: "legacy" | "structured"
   prompt_schema_version?: number | null
+  rendered_text?: string | null
   assembled_messages: Array<{
     role: string
     content: string
   }>
   legacy_system_prompt: string
   legacy_user_prompt: string
+}
+
+export type PromptImprovementLimits = {
+  max_request_bytes: number
+  max_draft_chars: number
+  max_candidate_chars: number
+  max_raw_output_chars: number
+  max_findings: number
+  max_finding_text_chars: number
+  max_provider_chars: number
+  max_model_chars: number
+  max_meta_prompt_version_chars: number
+  max_warning_chars: number
+  max_warnings: number
+  max_protected_tokens: number
+  max_protected_token_kind_chars: number
+  max_protected_token_chars: number
+  max_protected_token_occurrences: number
+  max_protected_token_total_chars: number
+}
+
+export type PromptCapabilities = {
+  availability: "available" | "unavailable"
+  prompt_improvement_v1: {
+    supported: boolean
+    limits: PromptImprovementLimits | null
+  }
+  single_text_recipe_v2: {
+    supported: boolean
+  }
+  prompt_persistence?: {
+    create_authorized: boolean | null
+    update_authorized: boolean | null
+  }
+}
+
+const unavailablePromptCapabilities = (): PromptCapabilities => ({
+  availability: "unavailable",
+  prompt_improvement_v1: { supported: false, limits: null },
+  single_text_recipe_v2: { supported: false },
+  prompt_persistence: {
+    create_authorized: null,
+    update_authorized: null
+  }
+})
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+const PROMPT_LIMIT_KEYS = [
+  "max_request_bytes",
+  "max_draft_chars",
+  "max_candidate_chars",
+  "max_raw_output_chars",
+  "max_findings",
+  "max_finding_text_chars",
+  "max_provider_chars",
+  "max_model_chars",
+  "max_meta_prompt_version_chars",
+  "max_warning_chars",
+  "max_warnings",
+  "max_protected_tokens",
+  "max_protected_token_kind_chars",
+  "max_protected_token_chars",
+  "max_protected_token_occurrences",
+  "max_protected_token_total_chars"
+] as const satisfies readonly (keyof PromptImprovementLimits)[]
+
+const parsePromptImprovementLimits = (
+  value: unknown
+): PromptImprovementLimits | null => {
+  if (!isRecord(value)) return null
+  if (
+    !PROMPT_LIMIT_KEYS.every(
+      (key) => Number.isInteger(value[key]) && Number(value[key]) > 0
+    )
+  ) {
+    return null
+  }
+  return Object.fromEntries(
+    PROMPT_LIMIT_KEYS.map((key) => [key, Number(value[key])])
+  ) as PromptImprovementLimits
+}
+
+const parsePromptCapabilities = (value: unknown): PromptCapabilities | null => {
+  if (!isRecord(value)) return null
+  const improvement = value.prompt_improvement_v1
+  const recipe = value.single_text_recipe_v2
+  const persistence = value.prompt_persistence
+  if (!isRecord(improvement) || !isRecord(recipe)) return null
+  if (
+    typeof improvement.supported !== "boolean" ||
+    typeof recipe.supported !== "boolean"
+  ) {
+    return null
+  }
+  const limits = parsePromptImprovementLimits(improvement.limits)
+  if (!limits) return null
+  return {
+    availability: "available",
+    prompt_improvement_v1: {
+      supported: improvement.supported,
+      limits
+    },
+    single_text_recipe_v2: { supported: recipe.supported },
+    prompt_persistence: {
+      create_authorized:
+        isRecord(persistence) &&
+        typeof persistence.create_authorized === "boolean"
+          ? persistence.create_authorized
+          : null,
+      update_authorized:
+        isRecord(persistence) &&
+        typeof persistence.update_authorized === "boolean"
+          ? persistence.update_authorized
+          : null
+    }
+  }
 }
 
 export const buildPromptSearchQuery = ({
@@ -166,7 +285,9 @@ export async function exportPromptsServer(
   )
 }
 
-export async function listPromptCollectionsServer(): Promise<PromptCollection[]> {
+export async function listPromptCollectionsServer(): Promise<
+  PromptCollection[]
+> {
   const response = await apiSend<PromptCollectionListResponse>({
     path: toAllowedPath("/api/v1/prompts/collections"),
     method: "GET"
@@ -226,4 +347,28 @@ export async function previewStructuredPromptServer(
   }
 
   return response.data
+}
+
+export const fetchPromptCapabilities = (): Promise<PromptCapabilities> =>
+  requestPromptCapabilities(true)
+
+/** Authorization revalidation must not reuse an earlier in-flight transport. */
+export const revalidatePromptCapabilities = (): Promise<PromptCapabilities> =>
+  requestPromptCapabilities(false)
+
+async function requestPromptCapabilities(
+  coalesce: boolean
+): Promise<PromptCapabilities> {
+  try {
+    const response = await apiSend<unknown>(
+      { path: toAllowedPath("/api/v1/prompts/capabilities"), method: "GET" },
+      { coalesce }
+    )
+    if (!response.ok) return unavailablePromptCapabilities()
+    return (
+      parsePromptCapabilities(response.data) ?? unavailablePromptCapabilities()
+    )
+  } catch {
+    return unavailablePromptCapabilities()
+  }
 }

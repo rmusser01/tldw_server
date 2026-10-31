@@ -1,4 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import {
   mergeGlobalAndScopedSettings,
   normalizeModelSettingsScope,
@@ -124,7 +125,7 @@ type ChatModelSettingsStore = ChatModelSettings & {
   setVocabOnly: (value: boolean) => void;
   setSeed: (value: number | undefined) => void;
   setMinP: (value: number) => void;
-  setSystemPrompt: (value: string) => void;
+  setSystemPrompt: (value: string | undefined) => void;
   setReasoningEffort: (value: string) => void;
   setThinking: (value: boolean) => void;
   setOcrLanguage: (value: string) => void;
@@ -488,6 +489,27 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
       set((state) => applyActiveSettingsUpdate(state, { jsonMode: value }))
   })
 )
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (!invalidated) return
+  // Inactive models must not resurrect another account's instructions later.
+  const withoutPrompt = (settings: ChatModelSettings): ChatModelSettings => {
+    const next = { ...settings }
+    delete next.systemPrompt
+    delete next.systemPromptTemplateId
+    return next
+  }
+  useStoreChatModelSettings.setState((state) => ({
+    systemPrompt: undefined,
+    systemPromptTemplateId: undefined,
+    globalSettings: withoutPrompt(state.globalSettings),
+    scopedSettingsByModelKey: Object.fromEntries(
+      Object.entries(state.scopedSettingsByModelKey).map(([key, settings]) => [key, withoutPrompt(settings)])
+    )
+  }))
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)
 
 // Expose for Playwright tests and debugging (development only)
 if (typeof window !== "undefined" && import.meta?.env?.DEV) {

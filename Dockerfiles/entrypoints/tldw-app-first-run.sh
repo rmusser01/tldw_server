@@ -388,7 +388,7 @@ done
 
 should_run_auth_init=0
 case "$*" in
-  *uvicorn*|*tldw_Server_API.app.main:app*)
+  *uvicorn*|*tldw_Server_API.app.main:app*|*tldw_Server_API.scripts.run_server_guarded_mcp*)
     should_run_auth_init=1
     ;;
 esac

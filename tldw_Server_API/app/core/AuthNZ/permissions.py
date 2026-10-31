@@ -12,7 +12,7 @@ from typing import Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.db_config import get_configured_user_database
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_mode
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
@@ -315,6 +315,9 @@ CHAT_WORKFLOWS_RUN = "chat_workflows.run"
 NOTES_GRAPH_READ = "notes.graph.read"
 NOTES_GRAPH_WRITE = "notes.graph.write"
 NOTES_GRAPH_ADMIN = "notes.graph.admin"
+NOTES_GRAPH_SUGGEST = "notes.graph.suggest"
+NOTES_LINK_KEYWORD = "notes.link_keyword"
+KEYWORDS_CREATE = "keywords.create"
 
 # Evaluations permissions
 EVALS_MANAGE = "evals.manage"

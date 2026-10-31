@@ -130,8 +130,9 @@ def test_rg_refund_on_streaming_error(monkeypatch, test_client, auth_headers):
 
     try:
         response = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
-        assert response.status_code == status.HTTP_200_OK
-        assert "data:" in response.text
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
+        assert response.json()["detail"]["error_code"] == "provider_unavailable"
+        assert "boom" not in response.text
     finally:
         test_client.app.state.rg_governor = None
         test_client.app.state.rg_policy_loader = None

@@ -102,6 +102,7 @@ export interface UsePlaygroundQueueManagementDeps {
   clearSelectedDocuments: () => void
   clearUploadedFiles: () => void
   textAreaFocus: () => void
+  onEnqueueSuccess?: () => void
   notificationApi: {
     error: (opts: Record<string, any>) => void
     warning: (opts: Record<string, any>) => void
@@ -195,6 +196,7 @@ export function usePlaygroundQueueManagement(
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
+    onEnqueueSuccess,
     notificationApi,
     t
   } = deps
@@ -508,7 +510,7 @@ export function usePlaygroundQueueManagement(
 
   const handleEnqueueSuccess = React.useCallback(
     (isStreamingAtEnqueue: boolean) => {
-      form.reset()
+      onEnqueueSuccess?.()
       clearSelectedDocuments()
       clearUploadedFiles()
       textAreaFocus()
@@ -533,6 +535,7 @@ export function usePlaygroundQueueManagement(
       clearUploadedFiles,
       form,
       notificationApi,
+      onEnqueueSuccess,
       t,
       textAreaFocus
     ]

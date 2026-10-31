@@ -3,13 +3,21 @@ from __future__ import annotations
 import importlib
 import json
 import types
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
-from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
-
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
+from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    FetchResponse,
+    PolicyDecision,
+    RuntimeRequestContext,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -57,13 +65,6 @@ def _article_test_config(*, preflight: bool = False) -> dict[str, Any]:
     }
 
 
-def _force_article_default_plan(monkeypatch: pytest.MonkeyPatch, article: Any) -> None:
-    def raise_rules(_path: str) -> list[Any]:
-        raise FileNotFoundError("rules disabled for no-network test")
-
-    monkeypatch.setattr(article.ScraperRouter, "load_rules_from_yaml", raise_rules)
-
-
 def _successful_article(url: str, content: str = "Example content") -> dict[str, Any]:
     return {
         "url": url,
@@ -86,6 +87,40 @@ def _sample_analysis(*, js_required: bool = False, tls_active: bool = False) -> 
     }
 
 
+def _allowed_article_target(url: str) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=True,
+            mode="compat",
+            reason="allowed",
+            stage="pre_fetch",
+            source="article_extract",
+        ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+    )
+
+
+def _enhanced_target(
+    url: str,
+    *,
+    allowed: bool = True,
+    reason: str = "allowed",
+    mode: str = "compat",
+) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=allowed,
+            mode=mode,  # type: ignore[arg-type]
+            reason=reason,
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        ),
+        request_context=RuntimeRequestContext(source="enhanced_scrape", stage="pre_fetch"),
+    )
+
+
 class _FakeArticlePolicyChecker:
     def __init__(self, decision: PolicyDecision):
         self.decision = decision
@@ -104,6 +139,58 @@ class _FakeArticleFetchClient:
         if isinstance(self.response, BaseException):
             raise self.response
         return self.response
+
+
+def _install_article_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config: dict[str, Any],
+    target: PreflightTarget,
+    fetch_client: Any,
+    extract: Any,
+    backend: str = "auto",
+    run_preflight: Any | None = None,
+    browser_acquire: Any | None = None,
+) -> Any:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+        ArticleLimits,
+        ArticlePlan,
+        DirectBrowserProfile,
+    )
+
+    async def evaluate_target(*_args: Any, **_kwargs: Any) -> PreflightTarget:
+        return target
+
+    async def unavailable_browser(*_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError("browser should not run")
+
+    default_dependencies = canonical._build_default_dependencies
+
+    def build_dependencies(cookies: Any) -> Any:
+        plan = ArticlePlan(
+            url=target.url,
+            domain="example.com",
+            backend=backend,
+            browser=DirectBrowserProfile("test", tuple(cookies), 1, 1_000, False, 0),
+            limits=ArticleLimits(),
+        )
+        dependencies = default_dependencies(cookies)
+        return replace(
+            dependencies,
+            load_config=lambda: config,
+            resolve_plan=lambda _url, _config: plan,
+            evaluate_target=evaluate_target,
+            run_preflight=run_preflight or dependencies.run_preflight,
+            fetch_client=fetch_client,
+            browser=types.SimpleNamespace(acquire=browser_acquire or unavailable_browser),
+            extract=extract,
+            convert_content=lambda content: content,
+            js_required=lambda *_args, **_kwargs: False,
+        )
+
+    monkeypatch.setattr(canonical, "_build_default_dependencies", build_dependencies)
+    return canonical
 
 
 def test_inventory_recorded_web_scraping_imports_remain_resolvable() -> None:
@@ -140,25 +227,27 @@ async def test_scrape_article_policy_denial_keeps_public_blocked_shape(
     mode: str,
     expected_error: str,
 ) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
-
-    _force_article_default_plan(monkeypatch, article)
-    monkeypatch.setattr(article, "load_and_log_configs", lambda: _article_test_config())
-    monkeypatch.setattr(
-        article,
-        "_ARTICLE_POLICY_CHECKER",
-        _FakeArticlePolicyChecker(
-            PolicyDecision(
-                allowed=False,
-                mode=mode,  # type: ignore[arg-type]
-                reason=reason,
-                stage="pre_fetch",
-                source="article_extract",
-            )
+    url = "https://example.com/blocked"
+    target = PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=False,
+            mode=mode,  # type: ignore[arg-type]
+            reason=reason,
+            stage="pre_fetch",
+            source="article_extract",
         ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+    )
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_test_config(),
+        target=target,
+        fetch_client=_FakeArticleFetchClient(AssertionError("fetch should not run")),
+        extract=lambda *_args, **_kwargs: pytest.fail("extraction should not run"),
     )
 
-    result = await article.scrape_article("https://example.com/blocked")
+    result = await canonical.scrape_article(url)
 
     assert result == {
         "url": "https://example.com/blocked",
@@ -189,22 +278,41 @@ async def test_enhanced_scrape_policy_denial_keeps_public_blocked_shape(
     expected_error: str,
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import WebOutboundPolicyDecision
 
     scraper = enhanced.EnhancedWebScraper(config={})
     monkeypatch.setattr(scraper.rate_limiter, "acquire", lambda: _noop_async())
     monkeypatch.setattr(scraper, "_resolve_scrape_plan", lambda _url: (_enhanced_plan(), "auto", ""))
+    decision = PolicyDecision(
+        allowed=False,
+        mode=mode,  # type: ignore[arg-type]
+        reason=reason,
+        stage="pre_fetch",
+        source="enhanced_scrape",
+    )
+    monkeypatch.setattr(enhanced, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(
+            return_value=_enhanced_target(
+                "https://example.com/blocked",
+                allowed=False,
+                reason=reason,
+                mode=mode,
+            )
+        ),
+    )
 
-    async def deny(_url: str, **kwargs: Any) -> WebOutboundPolicyDecision:
-        return WebOutboundPolicyDecision(
-            allowed=False,
-            mode=mode,  # type: ignore[arg-type]
-            reason=reason,
-            stage=str(kwargs.get("stage", "pre_fetch")),
-            source=str(kwargs.get("source", "enhanced_scrape")),
+    async def deny_legacy(_url: str, **_kwargs: Any) -> Any:
+        return enhanced.WebOutboundPolicyDecision(
+            allowed=decision.allowed,
+            mode=decision.mode,
+            reason=decision.reason,
+            stage=decision.stage,
+            source=decision.source,
         )
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny)
+    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy)
 
     result = await scraper.scrape_article("https://example.com/blocked")
 
@@ -242,27 +350,7 @@ def _enhanced_plan() -> types.SimpleNamespace:
 
 
 async def test_article_preflight_tls_advice_is_attached_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-
     analysis = _sample_analysis(tls_active=True)
-    _force_article_default_plan(monkeypatch, article)
-    monkeypatch.setattr(article, "load_and_log_configs", lambda: _article_test_config(preflight=True))
-    monkeypatch.setattr(scraper_analyzers, "run_analysis", lambda *_args, **_kwargs: analysis)
-    monkeypatch.setattr(article, "convert_html_to_markdown", lambda content: content)
-    monkeypatch.setattr(
-        article,
-        "_ARTICLE_POLICY_CHECKER",
-        _FakeArticlePolicyChecker(
-            PolicyDecision(
-                allowed=True,
-                mode="compat",
-                reason="allowed",
-                stage="pre_fetch",
-                source="article_extract",
-            )
-        ),
-    )
     fetch_client = _FakeArticleFetchClient(
         FetchResponse(
             url="https://example.com/article",
@@ -272,15 +360,16 @@ async def test_article_preflight_tls_advice_is_attached_without_network(monkeypa
             backend="curl",
         )
     )
-    monkeypatch.setattr(article, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(article, "http_fetch", lambda *_args, **_kwargs: pytest.fail("http_fetch should not run"))
-    monkeypatch.setattr(
-        article,
-        "extract_article_with_pipeline",
-        lambda _html, url, **_kwargs: _successful_article(url),
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_test_config(preflight=True),
+        target=_allowed_article_target("https://example.com/article"),
+        fetch_client=fetch_client,
+        extract=lambda _html, url, **_kwargs: _successful_article(url),
+        run_preflight=AsyncMock(return_value=PreflightResult(analysis=analysis)),
     )
 
-    result = await article.scrape_article("https://example.com/article")
+    result = await canonical.scrape_article("https://example.com/article")
 
     assert fetch_client.requests[0].backend == "curl"
     assert result["preflight_analysis"] == {
@@ -290,38 +379,23 @@ async def test_article_preflight_tls_advice_is_attached_without_network(monkeypa
 
 
 async def test_article_preflight_js_advice_is_attached_without_browser(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-
     analysis = _sample_analysis(js_required=True)
-    _force_article_default_plan(monkeypatch, article)
-    monkeypatch.setattr(article, "load_and_log_configs", lambda: _article_test_config(preflight=True))
-    monkeypatch.setattr(scraper_analyzers, "run_analysis", lambda *_args, **_kwargs: analysis)
-    monkeypatch.setattr(article, "async_playwright", lambda: _FakePlaywright())
-    monkeypatch.setattr(article, "convert_html_to_markdown", lambda content: content)
-    monkeypatch.setattr(
-        article,
-        "_ARTICLE_POLICY_CHECKER",
-        _FakeArticlePolicyChecker(
-            PolicyDecision(
-                allowed=True,
-                mode="compat",
-                reason="allowed",
-                stage="pre_fetch",
-                source="article_extract",
-            )
-        ),
-    )
     fetch_client = _FakeArticleFetchClient(AssertionError("lightweight fetch should not run"))
-    monkeypatch.setattr(article, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(article, "http_fetch", lambda *_args, **_kwargs: pytest.fail("http_fetch should not run"))
-    monkeypatch.setattr(
-        article,
-        "extract_article_with_pipeline",
-        lambda _html, url, **_kwargs: _successful_article(url, content="Rendered content"),
+
+    async def acquire(*_args: Any, **_kwargs: Any) -> str:
+        return "<html><body>Rendered content</body></html>"
+
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config=_article_test_config(preflight=True),
+        target=_allowed_article_target("https://example.com/spa"),
+        fetch_client=fetch_client,
+        extract=lambda _html, url, **_kwargs: _successful_article(url, content="Rendered content"),
+        run_preflight=AsyncMock(return_value=PreflightResult(analysis=analysis)),
+        browser_acquire=acquire,
     )
 
-    result = await article.scrape_article("https://example.com/spa")
+    result = await canonical.scrape_article("https://example.com/spa")
 
     assert fetch_client.requests == []
     assert result["preflight_analysis"] == {
@@ -331,12 +405,12 @@ async def test_article_preflight_js_advice_is_attached_without_browser(monkeypat
 
 
 class _FakePlaywright:
-    chromium: "_FakeChromium"
+    chromium: _FakeChromium
 
     def __init__(self) -> None:
         self.chromium = _FakeChromium()
 
-    async def __aenter__(self) -> "_FakePlaywright":
+    async def __aenter__(self) -> _FakePlaywright:
         return self
 
     async def __aexit__(self, *_args: Any) -> None:
@@ -344,12 +418,12 @@ class _FakePlaywright:
 
 
 class _FakeChromium:
-    async def launch(self, **_kwargs: Any) -> "_FakeBrowser":
+    async def launch(self, **_kwargs: Any) -> _FakeBrowser:
         return _FakeBrowser()
 
 
 class _FakeBrowser:
-    async def new_context(self, **_kwargs: Any) -> "_FakeContext":
+    async def new_context(self, **_kwargs: Any) -> _FakeContext:
         return _FakeContext()
 
     async def close(self) -> None:
@@ -360,7 +434,7 @@ class _FakeContext:
     async def add_cookies(self, _cookies: list[dict[str, Any]]) -> None:
         return None
 
-    async def new_page(self) -> "_FakePage":
+    async def new_page(self) -> _FakePage:
         return _FakePage()
 
 
@@ -382,7 +456,6 @@ async def test_enhanced_preflight_js_and_tls_advice_is_attached_without_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import WebOutboundPolicyDecision
 
     analysis = _sample_analysis(js_required=True, tls_active=True)
     scraper = enhanced.EnhancedWebScraper(
@@ -393,23 +466,34 @@ async def test_enhanced_preflight_js_and_tls_advice_is_attached_without_network(
     )
     monkeypatch.setattr(scraper.rate_limiter, "acquire", lambda: _noop_async())
     monkeypatch.setattr(scraper, "_resolve_scrape_plan", lambda _url: (_enhanced_plan(), "auto", ""))
-    monkeypatch.setattr(scraper, "_run_preflight_analysis", lambda _url: _return_async(analysis))
+    monkeypatch.setattr(enhanced, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_enhanced_target("https://example.com/spa")),
+    )
+    monkeypatch.setattr(preflight_facade, "build_execution_context", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        preflight_facade,
+        "run_preflight",
+        AsyncMock(return_value=PreflightResult(analysis=analysis)),
+    )
     monkeypatch.setattr(
         scraper,
         "_scrape_with_playwright",
         lambda url, *_args, **_kwargs: _return_async(_successful_article(url, content="Rendered content")),
     )
 
-    async def allow(_url: str, **kwargs: Any) -> WebOutboundPolicyDecision:
-        return WebOutboundPolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
-            stage=str(kwargs.get("stage", "pre_fetch")),
-            source=str(kwargs.get("source", "enhanced_scrape")),
+    async def deny_legacy(_url: str, **_kwargs: Any) -> Any:
+        return enhanced.WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_legacy_path",
+            stage="pre_fetch",
+            source="enhanced_scrape",
         )
 
-    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", allow)
+    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy)
 
     result = await scraper.scrape_article("https://example.com/spa")
 

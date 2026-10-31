@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +13,9 @@ from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.PrivilegeMaps.introspection import RouteMetadata
 from tldw_Server_API.app.core.PrivilegeMaps.service import PrivilegeMapService
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+# These service fixtures never authenticate their seeded users.
 
 
 async def _fetch_id(pool, query: str, value: str) -> int:
@@ -70,7 +74,17 @@ async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypat
 
     pool = await get_db_pool()
 
-    # Seed roles, permissions, users, and memberships.
+    # Seed roles, permissions, users, and memberships. Users go through UsersDB:
+    # raw users writes are rejected by the profile-write guard (5f31630280).
+    user_ids = {}
+    for username, email, primary_role in [
+        ("admin-user", "admin@example.com", "admin"),
+        ("media-manager", "media@example.com", "media_manager"),
+        ("analyst-user", "analyst@example.com", "analyst"),
+        ("researcher-user", "researcher@example.com", "researcher"),
+    ]:
+        user_ids[username] = await ensure_test_user(pool, username, email, role=primary_role)
+
     async with pool.transaction() as conn:
         for role_name, is_system in [
             ("admin", 1),
@@ -94,24 +108,10 @@ async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypat
                 (perm_name, f"{perm_name} permission", "test"),
             )
 
-        for username, email, primary_role in [
-            ("admin-user", "admin@example.com", "admin"),
-            ("media-manager", "media@example.com", "media_manager"),
-            ("analyst-user", "analyst@example.com", "analyst"),
-            ("researcher-user", "researcher@example.com", "researcher"),
-        ]:
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, is_active, role)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (username, email, "hashed", 1, primary_role),
-            )
-
-    admin_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "admin-user")
-    media_manager_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "media-manager")
-    analyst_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "analyst-user")
-    researcher_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "researcher-user")
+    admin_id = user_ids["admin-user"]
+    media_manager_id = user_ids["media-manager"]
+    analyst_id = user_ids["analyst-user"]
+    researcher_id = user_ids["researcher-user"]
 
     role_ids = {}
     for role_name in ["admin", "media_manager", "analyst", "viewer", "researcher"]:
@@ -248,14 +248,8 @@ async def test_privilege_service_honors_expiry_and_explicit_permission_denies(tm
     ensure_authnz_tables(Path(db_path))
 
     pool = await get_db_pool()
+    user_id = await ensure_test_user(pool, "effective-user", "effective@example.com", role="viewer")
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            ("effective-user", "effective@example.com", "hashed", 1, "viewer"),
-        )
         for role_name in ["active-role", "expired-role"]:
             await conn.execute(
                 "INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, 0)",
@@ -272,7 +266,6 @@ async def test_privilege_service_honors_expiry_and_explicit_permission_denies(tm
                 (permission_name, f"{permission_name} permission", "test"),
             )
 
-    user_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "effective-user")
     active_role_id = await _fetch_id(pool, "SELECT id FROM roles WHERE name = ?", "active-role")
     expired_role_id = await _fetch_id(pool, "SELECT id FROM roles WHERE name = ?", "expired-role")
     permission_ids = {
@@ -362,31 +355,14 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
     ensure_authnz_tables(Path(db_path))
 
     pool = await get_db_pool()
-    async with pool.transaction() as conn:
-        for username, email, primary_role in [
-            ("org-user-1", "org1@example.com", "viewer"),
-            ("org-user-2", "org2@example.com", "viewer"),
-            ("org-user-3", "org3@example.com", "viewer"),
-        ]:
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, is_active, role)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (username, email, "hashed", 1, primary_role),
-            )
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, role)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            ("org-user-4", "org4@example.com", "hashed", None, "viewer"),
-        )
-
-    user1_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-1")
-    user2_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-2")
-    user3_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-3")
-    user4_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-4")
+    user1_id, user2_id, user3_id, user4_id = [
+        await ensure_test_user(pool, f"org-user-{n}", f"org{n}@example.com", role="viewer")
+        for n in range(1, 5)
+    ]
+    # org-user-4 carries a damaged NULL activity flag, which the app never writes
+    # and the guarded pool refuses; set it the way out-of-band damage would.
+    with sqlite3.connect(db_path) as damaged:
+        damaged.execute("UPDATE users SET is_active = NULL WHERE id = ?", (user4_id,))
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -481,21 +457,8 @@ async def test_privilege_service_team_filter_uses_active_memberships_and_teams(t
     ensure_authnz_tables(Path(db_path))
 
     pool = await get_db_pool()
-    async with pool.transaction() as conn:
-        for username, email in [
-            ("team-user-1", "team1@example.com"),
-            ("team-user-2", "team2@example.com"),
-        ]:
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, is_active, role)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (username, email, "hashed", 1, "viewer"),
-            )
-
-    user1_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "team-user-1")
-    user2_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "team-user-2")
+    user1_id = await ensure_test_user(pool, "team-user-1", "team1@example.com", role="viewer")
+    user2_id = await ensure_test_user(pool, "team-user-2", "team2@example.com", role="viewer")
 
     async with pool.transaction() as conn:
         await conn.execute(

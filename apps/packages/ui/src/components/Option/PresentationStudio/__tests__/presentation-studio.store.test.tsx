@@ -8,6 +8,7 @@ import {
 
 const sampleProject = {
   id: "pres-123",
+  content_kind: "structured_slides" as const,
   title: "Deck",
   description: null,
   theme: "black",

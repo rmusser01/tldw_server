@@ -58,7 +58,6 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_db_pool
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     is_single_user_ip_allowed,
     resolve_client_ip,
@@ -70,7 +69,6 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.scope_context import get_scope as _get_scope
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import TemplateValidationError
 from tldw_Server_API.app.core.Personalization.companion_activity import (
@@ -103,13 +101,12 @@ from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefi
 from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_rss_feed,
     fetch_site_items_with_rules,
-    validate_selector_rules,
 )
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _evaluate_filters
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
 from tldw_Server_API.app.core.Watchlists.opml import generate_opml, parse_opml
 from tldw_Server_API.app.core.Watchlists.output_enrichment_handler import schedule_output_enrichment
-from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
+from tldw_Server_API.app.core.Watchlists.pipeline import org_requires_include_default, run_watchlist_job
 from tldw_Server_API.app.core.Watchlists.report_evidence import (
     build_legacy_live_only_readiness,
     build_report_evidence_snapshot,
@@ -118,6 +115,7 @@ from tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics import (
     record_onboarding_ingest_result,
     record_summary_request,
 )
+from tldw_Server_API.app.core.Web_Scraping.selectors import validate_selector_rules
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as _DatabaseError
 from tldw_Server_API.app.services.outputs_service import (
     _build_output_filename,
@@ -288,7 +286,6 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
 )
 
 _WATCHLISTS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -3753,31 +3750,6 @@ async def preview_job(
         raw_filters = {}
     job_filters = _normalize_job_filters(raw_filters)
 
-    async def _org_require_include_default() -> bool:
-        try:
-            scope_ctx = _get_scope()
-            org_id = getattr(scope_ctx, "effective_org_id", None) if scope_ctx else None
-            if org_id is not None:
-                pool = await _get_db_pool()
-                row = await pool.fetchone("SELECT metadata FROM organizations WHERE id = ?", int(org_id))
-                if row is not None:
-                    meta = row.get("metadata")
-                    if isinstance(meta, str):
-                        meta = json.loads(meta)
-                    if isinstance(meta, dict):
-                        watch = meta.get("watchlists") if isinstance(meta.get("watchlists"), dict) else {}
-                        if isinstance(watch, dict) and isinstance(watch.get("require_include_default"), bool):
-                            return bool(watch.get("require_include_default"))
-                        flat = meta.get("watchlists_require_include_default")
-                        if isinstance(flat, bool):
-                            return flat
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            pass
-        try:
-            return _is_truthy(os.getenv("WATCHLISTS_REQUIRE_INCLUDE_DEFAULT", ""))
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            return False
-
     include_rules_exist = any((str(f.get("action")) == "include") for f in job_filters)
     job_require_include = None
     if isinstance(raw_filters, dict) and "require_include" in raw_filters:
@@ -3785,7 +3757,7 @@ async def preview_job(
             job_require_include = bool(raw_filters.get("require_include"))
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             job_require_include = None
-    org_default = await _org_require_include_default()
+    org_default = await org_requires_include_default()
     effective_require_include = job_require_include if (job_require_include is not None) else org_default
     include_gating_active = bool(effective_require_include and include_rules_exist)
 

@@ -1,13 +1,13 @@
 import os
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps as deps
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def test_db():
 
 
 @pytest.fixture
-def override_db_dependency(test_db):
+def override_db_dependency(app, test_db):
     async def _override_db():
         return test_db
 
@@ -57,7 +57,7 @@ def override_db_dependency(test_db):
     app.dependency_overrides.pop(deps.get_prompt_studio_db, None)
 
 
-def test_create_evaluation_async_schedules_with_request_id(monkeypatch, override_db_dependency):
+def test_create_evaluation_async_schedules_with_request_id(app, monkeypatch, override_db_dependency):
 
 
     called = {"request_id": None}
@@ -74,11 +74,29 @@ def test_create_evaluation_async_schedules_with_request_id(monkeypatch, override
 
     monkeypatch.setattr(eval_ep, "run_evaluation_async", fake_run_evaluation_async, raising=True)
 
+    class _ResolvedRuntime:
+        async def resolve(self, provider, *, model=None):
+            return SimpleNamespace(
+                provider=provider,
+                api_key="test-openai-key",
+                app_config={},
+                credentials_resolved=True,
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        eval_ep,
+        "ProviderCredentialRuntime",
+        lambda **_kwargs: _ResolvedRuntime(),
+        raising=True,
+    )
+
     client = TestClient(app)
     api_key = get_settings().SINGLE_USER_API_KEY or os.getenv("SINGLE_USER_API_KEY", "THIS-IS-A-SECURE-KEY-123-REPLACE-ME")
     # Ensure the app sees the expected API key in environment for single-user auth
     monkeypatch.setenv("SINGLE_USER_API_KEY", api_key)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
 
     resp = client.post(
         "/api/v1/prompt-studio/evaluations",

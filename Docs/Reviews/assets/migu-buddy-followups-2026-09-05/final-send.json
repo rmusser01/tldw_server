@@ -1,0 +1,15 @@
+{
+  "href": "/persona?persona_id=e0a442a5-3861-4529-a332-a5391626f51f&tab=live&session_id=5463d886-f01d-4943-91ce-52a8f3e6caa8",
+  "frames": [
+    {
+      "event": "notice",
+      "session_id": "eb144d9be7e440e1ad73b61a20b83cb5"
+    },
+    {
+      "event": "tool_plan",
+      "session_id": "5463d886-f01d-4943-91ce-52a8f3e6caa8",
+      "plan_id": "11938e31a16240d28e51d762e235c8d2",
+      "client_message_id": "persona-buddy-draft:34536d4f-38ef-4998-880c-3cc260e6c086"
+    }
+  ]
+}

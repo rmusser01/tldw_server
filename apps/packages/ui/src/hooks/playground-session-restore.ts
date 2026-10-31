@@ -2,6 +2,10 @@ export type PlaygroundRestoreDecisionInput = {
   hasPersistedSession: boolean
   persistedHistoryId: string | null
   persistedServerChatId: string | null
+  initialHistoryId?: string | null
+  initialServerChatId?: string | null
+  initialMessagesLength?: number
+  initialHistoryLength?: number
   currentHistoryId: string | null
   currentServerChatId: string | null
   currentMessagesLength: number
@@ -16,12 +20,28 @@ export const shouldRestorePersistedPlaygroundSession = ({
   hasPersistedSession,
   persistedHistoryId,
   persistedServerChatId,
+  initialHistoryId,
+  initialServerChatId,
+  initialMessagesLength,
+  initialHistoryLength,
   currentHistoryId,
   currentServerChatId,
   currentMessagesLength,
   currentHistoryLength
 }: PlaygroundRestoreDecisionInput): boolean => {
   if (!hasPersistedSession) return false
+
+  const conversationChangedAfterMount =
+    (initialHistoryId !== undefined &&
+      initialHistoryId !== currentHistoryId) ||
+    (initialServerChatId !== undefined &&
+      initialServerChatId !== currentServerChatId) ||
+    (initialMessagesLength !== undefined &&
+      initialMessagesLength !== currentMessagesLength) ||
+    (initialHistoryLength !== undefined &&
+      initialHistoryLength !== currentHistoryLength)
+
+  if (conversationChangedAfterMount) return false
 
   const hasCurrentConversation =
     currentMessagesLength > 0 ||

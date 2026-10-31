@@ -366,15 +366,6 @@ export const NOTES_STUDIO_HANDWRITING_OPTIONS: Array<{
   { value: 'off', labelKey: 'option:notesSearch.notesStudioHandwritingOff', defaultLabel: 'Off' },
 ]
 
-export const shouldIgnoreGlobalShortcut = (target: EventTarget | null): boolean => {
-  if (!(target instanceof Element)) return false
-  const element = target as HTMLElement
-  if (element.isContentEditable) return true
-  const tag = (element.tagName || '').toLowerCase()
-  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
-  return Boolean(element.closest('input,textarea,select,[contenteditable="true"]'))
-}
-
 export const isWithinRegion = (target: EventTarget | null, regionId: string): boolean => {
   if (!(target instanceof Element)) return false
   return Boolean((target as Element).closest(`#${regionId}`))
@@ -519,7 +510,39 @@ export type ExportProgressState = {
   fetchedPages: number
   failedBatches: number
 }
-export type NotesListViewMode = 'list' | 'timeline' | 'inbox' | 'moodboard'
+export type NotesListViewMode = 'list' | 'timeline' | 'inbox' | 'moodboard' | 'graph'
+export const resolveNotesGraphFocusNoteId = <
+  TRecent extends { id: string | number },
+  TVisible extends { id: string | number; deleted?: boolean | null }
+>(
+  selectedId: string | number | null,
+  recentNotes: TRecent[],
+  visibleNotes: TVisible[]
+): string | null => {
+  const selected = normalizeGraphNoteId(selectedId)
+  if (selected) return selected
+
+  const activeVisibleNotes = visibleNotes.filter((note) => note.deleted !== true)
+  const activeIds = new Set(
+    activeVisibleNotes.map((note) => normalizeGraphNoteId(note.id))
+  )
+  const recent = recentNotes.find((note) =>
+    activeIds.has(normalizeGraphNoteId(note.id))
+  )
+  return normalizeGraphNoteId(recent?.id ?? activeVisibleNotes[0]?.id) || null
+}
+export const hasNotesGraphActiveNotes = <
+  TVisible extends { id: string | number; deleted?: boolean | null }
+>(
+  selectedId: string | number | null,
+  activeNoteTotal: number,
+  visibleNotes: TVisible[]
+): boolean =>
+  Boolean(
+    normalizeGraphNoteId(selectedId) ||
+      activeNoteTotal > 0 ||
+      visibleNotes.some((note) => note.deleted !== true)
+  )
 export type MoodboardSummary = {
   id: number
   name: string

@@ -215,11 +215,10 @@ describe('ACPAgentsPage', () => {
 
     render(<ACPAgentsPage />);
 
-    await waitFor(() => {
-      expect(apiMock.getACPPermissionPolicies).toHaveBeenCalledTimes(1);
+    const policiesTab = await screen.findByRole('button', {
+      name: /Permission Policies \(1\)/i,
     });
-
-    await user.click(screen.getByRole('button', { name: /Permission Policies \(1\)/i }));
+    await user.click(policiesTab);
 
     expect(screen.getByText('Write Guard')).toBeInTheDocument();
     expect(screen.getByText('Require explicit approval for file writes')).toBeInTheDocument();

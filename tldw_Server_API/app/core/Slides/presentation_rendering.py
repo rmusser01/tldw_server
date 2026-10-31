@@ -11,15 +11,17 @@ import re
 import shutil
 import subprocess  # nosec B404
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
 from loguru import logger
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.Slides.presentation_service import STRUCTURED_SLIDES
 from tldw_Server_API.app.core.Slides.slides_assets import (
     MAX_RESOLVED_SLIDE_ASSET_BYTES,
     SlidesAssetError,
@@ -96,6 +98,13 @@ def load_presentation_render_snapshot(
     presentation_version: int,
 ) -> PresentationRenderSnapshot:
     """Load a specific version snapshot for rendering."""
+
+    try:
+        kind = db.get_presentation_kind(presentation_id)
+    except KeyError as exc:
+        raise PresentationRenderError("presentation_render_version_not_found") from exc
+    if kind.content_kind != STRUCTURED_SLIDES:
+        raise PresentationRenderError("operation_not_supported_for_content_kind")
 
     try:
         version_row = db.get_presentation_version(
@@ -208,8 +217,7 @@ def _run_ffmpeg_command(command: list[str], *, output_path: Path, timeout_second
         subprocess.run(
             command,
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=resolved_timeout,
         )  # nosec B603
     except FileNotFoundError as exc:
@@ -250,13 +258,8 @@ def _validate_render_slides_before_ffmpeg(slides: list[dict[str, Any]]) -> None:
     if len(slides) > MAX_RENDER_SLIDES:
         raise PresentationRenderError("presentation_render_slides_too_many")
     for slide in slides:
-        manual_duration_seconds = _duration_seconds_from_ms(
-            _slide_studio_metadata(slide).get("manual_duration_ms")
-        )
-        if (
-            manual_duration_seconds is not None
-            and manual_duration_seconds > MAX_RENDER_SLIDE_DURATION_SECONDS
-        ):
+        manual_duration_seconds = _duration_seconds_from_ms(_slide_studio_metadata(slide).get("manual_duration_ms"))
+        if manual_duration_seconds is not None and manual_duration_seconds > MAX_RENDER_SLIDE_DURATION_SECONDS:
             raise PresentationRenderError("presentation_render_duration_too_long")
 
 
@@ -267,10 +270,7 @@ def _validate_resolved_render_duration(
 ) -> None:
     if slide_duration_seconds > MAX_RENDER_SLIDE_DURATION_SECONDS:
         raise PresentationRenderError("presentation_render_duration_too_long")
-    if (
-        total_duration_seconds is not None
-        and total_duration_seconds > MAX_RENDER_TOTAL_DURATION_SECONDS
-    ):
+    if total_duration_seconds is not None and total_duration_seconds > MAX_RENDER_TOTAL_DURATION_SECONDS:
         raise PresentationRenderError("presentation_render_duration_too_long")
 
 
@@ -293,8 +293,7 @@ def _probe_media_duration_seconds(media_path: Path) -> float | None:
         completed = subprocess.run(  # nosec B603
             command,
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=_DEFAULT_FFPROBE_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
@@ -347,9 +346,7 @@ def _guess_suffix(*, mime: str | None, filename: str | None, fallback: str) -> s
 
 
 @contextmanager
-def _collections_db_context(
-    *, user_id: int | None, collections_db: Any | None
-) -> Iterator[Any | None]:
+def _collections_db_context(*, user_id: int | None, collections_db: Any | None) -> Iterator[Any | None]:
     if collections_db is not None:
         yield collections_db
         return
@@ -387,7 +384,9 @@ def _materialize_slide_image(
             )
         except SlidesAssetError as exc:
             raise PresentationRenderError("presentation_render_asset_unavailable") from exc
-        raw_bytes = _decode_data_b64(str(resolved.get("data_b64") or ""), error_code="presentation_render_asset_invalid")
+        raw_bytes = _decode_data_b64(
+            str(resolved.get("data_b64") or ""), error_code="presentation_render_asset_invalid"
+        )
         suffix = _guess_suffix(
             mime=str(resolved.get("mime") or ""),
             filename=str(resolved.get("filename") or ""),
@@ -802,9 +801,7 @@ def _build_transition_video_command(
             next_label = f"{index}:v"
             cumulative_offset += effective_durations_seconds[index - 1]
             if boundary_transition == "cut":
-                filter_parts.append(
-                    f"[{current_label}][{next_label}]concat=n=2:v=1:a=0[{output_label}]"
-                )
+                filter_parts.append(f"[{current_label}][{next_label}]concat=n=2:v=1:a=0[{output_label}]")
             else:
                 filter_parts.append(
                     f"[{current_label}][{next_label}]xfade=transition={boundary_transition}:duration={_TRANSITION_DURATION_SECONDS:.2f}:offset={cumulative_offset:.2f}[{output_label}]"
@@ -923,14 +920,9 @@ def render_presentation_video(
                     )
                 )
 
-        boundary_transitions = [
-            _resolve_slide_transition_filter(prepared.slide)
-            for prepared in prepared_slides[1:]
-        ]
+        boundary_transitions = [_resolve_slide_transition_filter(prepared.slide) for prepared in prepared_slides[1:]]
         has_visual_transitions = any(transition != "cut" for transition in boundary_transitions)
-        total_expected_duration_seconds = sum(
-            prepared.effective_duration_seconds for prepared in prepared_slides
-        )
+        total_expected_duration_seconds = sum(prepared.effective_duration_seconds for prepared in prepared_slides)
         _validate_resolved_render_duration(
             slide_duration_seconds=0.0,
             total_duration_seconds=total_expected_duration_seconds,
@@ -981,9 +973,7 @@ def render_presentation_video(
 
             for slide_index, prepared in enumerate(prepared_slides):
                 outgoing_transition = (
-                    boundary_transitions[slide_index]
-                    if slide_index < len(boundary_transitions)
-                    else "cut"
+                    boundary_transitions[slide_index] if slide_index < len(boundary_transitions) else "cut"
                 )
                 visual_duration_seconds = prepared.effective_duration_seconds + (
                     _TRANSITION_DURATION_SECONDS if outgoing_transition != "cut" else 0.0
@@ -1026,9 +1016,7 @@ def render_presentation_video(
             transitioned_video_command = _build_transition_video_command(
                 ffmpeg_path=ffmpeg_path,
                 video_paths=visual_paths,
-                effective_durations_seconds=[
-                    prepared.effective_duration_seconds for prepared in prepared_slides
-                ],
+                effective_durations_seconds=[prepared.effective_duration_seconds for prepared in prepared_slides],
                 boundary_transitions=boundary_transitions,
                 output_path=transitioned_video_path,
                 output_format=normalized_format,

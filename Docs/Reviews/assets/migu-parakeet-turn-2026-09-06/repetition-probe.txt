@@ -1,0 +1,62 @@
+"""Exercise normal Parakeet ONNX selection with local synthetic speech only."""
+import asyncio
+import json
+import re
+import hashlib
+import subprocess
+import time
+from pathlib import Path
+
+import httpx
+import numpy as np
+from dotenv import dotenv_values
+from tldw_Server_API.app.core.Persona.live_stt import create_persona_live_stt_transcriber, persona_live_transcript_snapshot
+
+async def main():
+    env=dotenv_values('/private/tmp/migu-server-uat/runtime.env')
+    async with httpx.AsyncClient(timeout=60) as client:
+        response=await client.post('http://127.0.0.1:9101/api/v1/audio/speech',headers={'X-API-KEY':env['SINGLE_USER_API_KEY']},
+          json={'model':'kokoro','input':'Say ready ready.','voice':'af_heart','response_format':'mp3'})
+        response.raise_for_status()
+    pcm=subprocess.run(['ffmpeg','-v','error','-i','pipe:0','-af','atempo=0.7','-f','f32le','-ar','16000','-ac','1','pipe:1'],input=response.content,capture_output=True,check=True).stdout
+    audio=np.concatenate([np.zeros(48000,dtype=np.float32),np.frombuffer(pcm,dtype=np.float32),np.zeros(48000,dtype=np.float32)])
+    transcriber=create_persona_live_stt_transcriber(voice_runtime={'stt_model':'parakeet-onnx','stt_language':'en'})
+    await asyncio.to_thread(transcriber.initialize)
+    silent_frames=[]
+    for _ in range(24):
+        started=time.monotonic()
+        result=await transcriber.process_audio_chunk(np.zeros(4096,dtype=np.float32).tobytes())
+        if result is not None and result['text']: silent_frames.append(result['text'])
+        await asyncio.sleep(max(0, 0.256 - (time.monotonic() - started)))
+    silent_history=transcriber.get_full_transcript()
+    while transcriber.recognition_pending:
+        await asyncio.sleep(0.01)
+    silent_history=transcriber.get_full_transcript()
+    transcriber.reset()
+    snapshots,latencies=[],[]
+    try:
+        for offset in range(0,len(audio),4096):
+            started=time.monotonic()
+            result=await transcriber.process_audio_chunk(audio[offset:offset+4096].tobytes())
+            latencies.append(round((time.monotonic()-started)*1000,3))
+            if result is not None:
+                snapshots.append({'type':result.get('type'), 'text':result.get('text'), 'history':transcriber.get_full_transcript(), 'snapshot':persona_live_transcript_snapshot(transcriber=transcriber,result=result)})
+            await asyncio.sleep(max(0, 0.256 - (time.monotonic() - started)))
+        while transcriber.recognition_pending or transcriber._decoded_samples < len(audio):
+            result=await transcriber.process_audio_chunk(b'')
+            if result is not None:
+                snapshots.append({'type':result.get('type'), 'text':result.get('text'), 'history':transcriber.get_full_transcript(), 'snapshot':persona_live_transcript_snapshot(transcriber=transcriber,result=result)})
+            await asyncio.sleep(0.01)
+        result=await transcriber.process_audio_chunk(b'')
+        if result is not None:
+            snapshots.append({'type':result.get('type'), 'text':result.get('text'), 'history':transcriber.get_full_transcript(), 'snapshot':persona_live_transcript_snapshot(transcriber=transcriber,result=result)})
+        report={'microphone_used':False,'external_provider_used':False,'selection':'parakeet-onnx','device':'cpu',
+                'model':'istupakov/parakeet-tdt-0.6b-v3-onnx','snapshots':snapshots,'callback_duration_ms':latencies,'silence_frame_count':len(silent_frames),'silence_history':silent_history,'source_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path('tldw_Server_API/app/core/Persona')/name for name in ['turn_transcriber.py','parakeet_transcriber.py','live_stt.py']]}}
+        Path('/private/tmp/migu-parakeet-repetition-result.json').write_text(json.dumps(report,indent=2)+'\n')
+        print(json.dumps(report),flush=True)
+        assert silent_frames == [] and silent_history == ''
+        assert re.findall(r'[a-z]+', snapshots[-1]['snapshot'].lower()) == ['say', 'ready', 'ready']
+    finally:
+        transcriber.cleanup()
+
+asyncio.run(main())

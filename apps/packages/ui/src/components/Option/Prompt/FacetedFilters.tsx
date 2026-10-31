@@ -1,4 +1,5 @@
 import React, { useState } from "react"
+import { useTranslation } from "react-i18next"
 import type { TagMatchMode } from "./custom-prompts-utils"
 
 type Props = {
@@ -20,6 +21,21 @@ const TYPE_OPTIONS = [
   { value: "system", label: "System" },
   { value: "quick", label: "Quick" },
   { value: "mixed", label: "Mixed" },
+  {
+    value: "recipe",
+    label: "Recipes",
+    translationKey: "managePrompts.recipe.filters.all",
+  },
+  {
+    value: "recipe_system",
+    label: "System recipes",
+    translationKey: "managePrompts.recipe.filters.system",
+  },
+  {
+    value: "recipe_user",
+    label: "User recipes",
+    translationKey: "managePrompts.recipe.filters.user",
+  },
 ]
 
 const SYNC_OPTIONS = [
@@ -45,6 +61,7 @@ export const FacetedFilters: React.FC<Props> = ({
   onTagMatchModeChange,
   tagCounts,
 }) => {
+  const { t } = useTranslation(["settings"])
   const [showAllTags, setShowAllTags] = useState(false)
   const sortedTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1])
   const visibleTags = showAllTags
@@ -80,7 +97,11 @@ export const FacetedFilters: React.FC<Props> = ({
                   : "text-text-muted hover:bg-surface2 hover:text-text"
               }`}
             >
-              <span>{opt.label}</span>
+              <span>
+                {"translationKey" in opt
+                  ? t(opt.translationKey, { defaultValue: opt.label })
+                  : opt.label}
+              </span>
               {typeCounts[opt.value] != null && (
                 <span className="text-xs tabular-nums">
                   {typeCounts[opt.value]}

@@ -6,21 +6,30 @@ import {
   buildChatLorebookDebugPath
 } from "../route-paths"
 
-const routeRegistryPathCandidates = [
-  "src/routes/route-registry.tsx",
-  "../packages/ui/src/routes/route-registry.tsx",
-  "apps/packages/ui/src/routes/route-registry.tsx"
+// The option route registry is split into deferred per-area registries
+// (see deferred-options-route.tsx); /chat lives in option-chat-route-registry.
+const routeRegistryFileNames = [
+  "route-registry.tsx",
+  "option-chat-route-registry.tsx"
 ]
 
-const routeRegistryPath = routeRegistryPathCandidates.find((candidate) =>
-  existsSync(candidate)
+const routeRegistryDirCandidates = [
+  "src/routes",
+  "../packages/ui/src/routes",
+  "apps/packages/ui/src/routes"
+]
+
+const routeRegistryDir = routeRegistryDirCandidates.find((candidate) =>
+  existsSync(`${candidate}/route-registry.tsx`)
 )
 
-if (!routeRegistryPath) {
+if (!routeRegistryDir) {
   throw new Error("Unable to locate route-registry.tsx for route-path contract test")
 }
 
-const routeRegistrySource = readFileSync(routeRegistryPath, "utf8")
+const routeRegistrySource = routeRegistryFileNames
+  .map((fileName) => readFileSync(`${routeRegistryDir}/${fileName}`, "utf8"))
+  .join("\n")
 
 describe("route-paths lorebook debug entrypoint", () => {
   it("builds chat lorebook diagnostics path with expected query params", () => {

@@ -3,18 +3,22 @@ Validate character chat streaming under STREAMS_UNIFIED=1 with two providers
 by monkeypatching the provider call to emit deterministic SSE chunks.
 """
 
-import tempfile
-import shutil
 import json as _json
+import shutil
+import tempfile
 
-import pytest
 import httpx
+import pytest
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 
 @pytest.mark.asyncio
-async def test_complete_v2_streaming_unified_flag_two_providers(monkeypatch):
+async def test_complete_v2_streaming_unified_flag_two_providers(
+    monkeypatch,
+    healthy_absent_provider_override_snapshot,
+    character_provider_adapter_boundary,
+):
     # Force unified streams and minimal app footprint
     monkeypatch.setenv("STREAMS_UNIFIED", "1")
     monkeypatch.setenv("MINIMAL_TEST_APP", "1")
@@ -50,11 +54,14 @@ async def test_complete_v2_streaming_unified_flag_two_providers(monkeypatch):
     stream_chunks.append("data: [DONE]")
 
     import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as chat_sessions_mod
+    provider_calls, bind_provider_call = character_provider_adapter_boundary
 
     def _fake_perform_chat_api_call(*args, **kwargs):
+        assert not args
+        bind_provider_call(kwargs)
+
         def _generator():
-            for chunk in stream_chunks:
-                yield chunk
+            yield from stream_chunks
 
         return _generator()
 
@@ -111,5 +118,9 @@ async def test_complete_v2_streaming_unified_flag_two_providers(monkeypatch):
                     "data: [DONE]",
                 ]
                 assert collected == expected
+            assert [call["api_endpoint"] for call in provider_calls] == [
+                "openai",
+                "groq",
+            ]
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

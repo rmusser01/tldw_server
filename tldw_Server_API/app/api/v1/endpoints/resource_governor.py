@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
-from tldw_Server_API.app.main import app as _app
 
 router = APIRouter()
 
@@ -34,12 +33,9 @@ def _safe_int(value: Any, default: int = 0) -> int:
 
 def _get_app():
     """Return the current app instance, accommodating reloads in tests."""
-    try:
-        from tldw_Server_API.app import main as _main
+    from tldw_Server_API.app.main import app
 
-        return getattr(_main, "app", _app)
-    except ImportError:
-        return _app
+    return app
 
 
 def _get_or_init_governor() -> Any | None:
@@ -60,7 +56,10 @@ def _get_or_init_governor() -> Any | None:
             loader = getattr(app.state, "rg_policy_loader", None)
             if loader is not None:
                 gov = MemoryResourceGovernor(policy_loader=loader)
-                app.state.rg_governor = gov
+                from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+                if bool(_rg_enabled_flag(True)):
+                    app.state.rg_governor = gov  # diagnostics only when disabled
         except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             # Keep behavior consistent with previous code path: best-effort only.
             logger.debug("Resource governor lazy-init skipped")
@@ -573,10 +572,31 @@ async def rg_diag_capabilities():
     dependencies=[Depends(RequireRole("admin"))],
     summary="Resource Governor endpoint coverage audit",
 )
-async def rg_coverage_audit():
+async def rg_coverage_audit(
+    limit: int = Query(
+        50,
+        ge=1,
+        le=5000,
+        description=(
+            "Maximum entries returned in each route list. Counts always "
+            "reflect full totals; compare list length against the counts "
+            "(or route_list_limit) to detect truncation."
+        ),
+    ),
+) -> JSONResponse:
     """Report which endpoints are governor-protected and which are excluded.
 
-    Returns coverage percentage and lists of protected/unprotected routes.
+    Args:
+        limit: Maximum number of entries returned in each of the
+            ``protected_routes`` / ``unprotected_routes`` lists (1-5000,
+            default 50). The ``*_count`` fields always reflect full totals,
+            so clients can detect a truncated list by comparing lengths
+            against the counts or the echoed ``route_list_limit`` (#2890).
+
+    Returns:
+        JSONResponse with total/protected/unprotected counts, coverage
+        percentage, excluded prefixes, the applied ``route_list_limit``,
+        and the (possibly limited) route lists.
     """
     try:
         from tldw_Server_API.app.core.Resource_Governance.coverage_audit import (
@@ -584,7 +604,7 @@ async def rg_coverage_audit():
         )
 
         app = _get_app()
-        result = audit_governor_coverage(app)
+        result = audit_governor_coverage(app, route_limit=limit)
         return JSONResponse(result)
     except Exception:  # noqa: BLE001 - generic 500 handler
         logger.exception("rg_coverage_audit failed")

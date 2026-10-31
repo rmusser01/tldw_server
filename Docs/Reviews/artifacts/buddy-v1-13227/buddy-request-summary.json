@@ -1,0 +1,131 @@
+{
+  "classification": "Current disposable full-server process only; aggregate log counts do not establish polling interval or reproduce the historical incident.",
+  "request_count": 2723,
+  "status_counts": {
+    "200": 2720,
+    "202": 2,
+    "422": 1
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/0abf3f95caa2482d8034610366ce5690/content",
+      "status": "200",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/1575d67cd6af4d7a9ae0100c9c4722f1/content",
+      "status": "200",
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/74f2f130e58647319ddc496a014591d8/content",
+      "status": "200",
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/803d1619773440e399ad200d8678978b/content",
+      "status": "200",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/a414fcb2339541a592ffac71574518e1/content",
+      "status": "200",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/ce9248e7502546d2ad9fbc2d44fa4c45/content",
+      "status": "200",
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/e278c5a5a80b4a69afbd2bd268c769d1/content",
+      "status": "200",
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/e94b875dd4c145cc98a5263331404546/content",
+      "status": "200",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/eb908727bb6d46c0b5820d29cd3fcbeb/content",
+      "status": "200",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/f2c7f078b47c4717abe9043a3ca242e8/content",
+      "status": "200",
+      "count": 3
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/f3b907007c30471b813066ea7a0b455c/content",
+      "status": "200",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/386eee6c4e2c4192bd3fe72f838ce5f2/assets/f75c6593b03a4af29b78765afa096e9e/content",
+      "status": "200",
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/attachment",
+      "status": "200",
+      "count": 806
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/attachment/activity",
+      "status": "200",
+      "count": 540
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/attachment/conversations",
+      "status": "200",
+      "count": 273
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/buddies/turns",
+      "status": "200",
+      "count": 1079
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/buddies/attachment/acknowledgements",
+      "status": "200",
+      "count": 1
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/buddies/turns",
+      "status": "202",
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/buddies/turns",
+      "status": "422",
+      "count": 1
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/buddies/attachment",
+      "status": "200",
+      "count": 2
+    }
+  ]
+}

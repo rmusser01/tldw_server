@@ -2,9 +2,195 @@ import hashlib
 import os
 import tempfile
 
+import psycopg
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+
+
+def test_rebuild_claims_uses_jobs_when_enabled(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **kwargs: calls.append(kwargs) or {"id": 99},
+    )
+
+    result = claims_service.rebuild_claims(media_id=42, user_id=None, current_user=_User(), db=_Db())
+
+    assert result == {"status": "accepted", "media_id": 42, "job_id": "99"}
+    assert calls[0]["owner_user_id"] == "1"
+    assert calls[0]["media_id"] == 42
+
+
+def test_rebuild_claims_jobs_pg_enqueue_failure_returns_503(monkeypatch):
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **_kwargs: (_ for _ in ()).throw(psycopg.Error("jobs database unavailable")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.rebuild_claims(media_id=42, user_id=None, current_user=_User(), db=_Db())
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Claims rebuild job enqueue failed"
+
+
+def test_rebuild_helper_falls_back_when_jobs_owner_missing(monkeypatch):
+    submissions: list[tuple[int, str]] = []
+
+    class _FakeSvc:
+        def submit(self, media_id: int, db_path: str):
+            submissions.append((int(media_id), db_path))
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("Jobs enqueue should not run")),
+    )
+    monkeypatch.setattr(claims_service, "get_claims_rebuild_service", lambda: _FakeSvc())
+
+    claims_service._enqueue_claim_rebuild_if_needed(
+        media_id=42,
+        db_path="/tmp/user-1/Media_DB_v2.db",
+        owner_user_id=None,
+    )
+
+    assert submissions == [(42, "/tmp/user-1/Media_DB_v2.db")]
+
+
+def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="claims_rebuild_jobs_")
+    db_path = os.path.join(tmpdir, "media.db")
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    db.initialize_db()
+    media_id, _, _ = db.add_media_with_keywords(
+        title="Doc",
+        media_type="text",
+        content="A claimable sentence.",
+        keywords=None,
+    )
+    enqueued: list[dict[str, object]] = []
+    legacy_submissions: list[tuple[int, str]] = []
+
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _FakeSvc:
+        def submit(self, media_id: int, db_path: str):
+            legacy_submissions.append((int(media_id), db_path))
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **kwargs: enqueued.append(kwargs) or {"id": 100},
+    )
+    monkeypatch.setattr(claims_service, "get_claims_rebuild_service", lambda: _FakeSvc())
+    monkeypatch.setattr(claims_service.time, "time", lambda: 600.0)
+
+    try:
+        result = claims_service.rebuild_all_media(
+            policy="missing",
+            user_id=None,
+            current_user=_User(),
+            db=db,
+        )
+    finally:
+        db.close_connection()
+
+    assert result == {"status": "accepted", "enqueued": 1, "policy": "missing"}
+    assert enqueued[0] == {
+        "media_id": media_id,
+        "owner_user_id": "1",
+        "idempotency_scope": "rebuild_all:missing:2",
+    }
+    assert legacy_submissions == []
+
+
+def test_rebuild_all_media_jobs_retry_uses_bounded_idempotency_scope(monkeypatch):
+    enqueued: list[dict[str, object]] = []
+    seen_keys: set[tuple[int, str, str]] = set()
+    now_seconds = 600.0
+
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+    class _FakeSvc:
+        def submit(self, media_id: int, db_path: str):
+            raise AssertionError(f"legacy submit should not run for {media_id} at {db_path}")
+
+    def _enqueue(**kwargs):
+        media_id = int(kwargs["media_id"])
+        if media_id == 22:
+            raise RuntimeError("second media enqueue failed")
+        scope = str(kwargs.get("idempotency_scope") or "")
+        key = (media_id, str(kwargs["owner_user_id"]), scope)
+        if scope and key in seen_keys:
+            return {"id": 100}
+        seen_keys.add(key)
+        enqueued.append(kwargs)
+        return {"id": 100}
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(claims_service.claims_jobs, "enqueue_claims_rebuild_media", _enqueue)
+    monkeypatch.setattr(claims_service, "get_claims_rebuild_service", lambda: _FakeSvc())
+    monkeypatch.setattr(
+        claims_service,
+        "list_claims_rebuild_media_ids",
+        lambda *_args, **_kwargs: [11, 22],
+    )
+    monkeypatch.setattr(claims_service.time, "time", lambda: now_seconds)
+
+    for _attempt in range(2):
+        with pytest.raises(HTTPException) as exc_info:
+            claims_service.rebuild_all_media(
+                policy="missing",
+                user_id=None,
+                current_user=_User(),
+                db=_Db(),
+            )
+        assert exc_info.value.status_code == 503
+
+    assert enqueued == [{"media_id": 11, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing:2"}]
+
+    now_seconds = 901.0
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.rebuild_all_media(
+            policy="missing",
+            user_id=None,
+            current_user=_User(),
+            db=_Db(),
+        )
+    assert exc_info.value.status_code == 503
+    assert enqueued[-1] == {"media_id": 11, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing:3"}
 
 
 def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):
@@ -55,9 +241,9 @@ def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):
     ])
 
     # Build app and override dependencies
-    from tldw_Server_API.app.main import app as fastapi_app
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+    from tldw_Server_API.app.main import app as fastapi_app
 
     class _User:
         def __init__(self):

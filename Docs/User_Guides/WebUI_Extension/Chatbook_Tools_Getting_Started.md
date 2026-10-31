@@ -51,6 +51,7 @@ Optional defaults in config.txt:
 ```ini
 [Chat-Templating]
 allow_random = false
+allow_external_calls = false
 max_output_chars = 2000
 render_timeout_ms = 250
 default_timezone = UTC
@@ -70,7 +71,8 @@ injection_mode = system   # or: preface | replace
 commands_rate_limit_user = 10    # per-user per-command RPM
 commands_rate_limit_global = 100 # global per-command RPM
 commands_max_chars = 300         # max injected chars per command result
-require_permissions = false
+# Deprecated compatibility flag; declared command permissions are enforced when commands are enabled.
+# require_permissions = false
 default_location =        # fallback for /weather
 ```
 
@@ -96,7 +98,7 @@ Replace-mode example:
 - Final user message text sent to the model: `[/weather] Boston: 42°F, clear skies`
 
 Discovery endpoint:
-- `GET /api/v1/chat/commands` → list of commands with `name`, `description`, `required_permission`, `usage`, `args`, `requires_api_key`, `rate_limit`, and `rbac_required` (RBAC filtered if enabled).
+- `GET /api/v1/chat/commands` → list of commands with `name`, `description`, `required_permission`, `usage`, `args`, `requires_api_key`, `rate_limit`, and `rbac_required` (filtered to commands the current user can invoke).
   - When commands are disabled (`commands_enabled=false`), this endpoint returns an empty list. Clients should fetch this endpoint on each session or page load rather than caching the list long-term, since RBAC and configuration may change which commands are available (e.g., enabling/disabling `/weather`).
 
 Moderation ordering:

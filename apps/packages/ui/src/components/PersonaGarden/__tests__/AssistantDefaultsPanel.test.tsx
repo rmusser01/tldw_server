@@ -1,9 +1,10 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
+  bgRequestClient: vi.fn(),
   resolvedDefaults: {
     sttLanguage: "en-US",
     sttModel: "parakeet",
@@ -20,6 +21,10 @@ const mocks = vi.hoisted(() => ({
     turnStopSecs: 0.2,
     minUtteranceSecs: 0.4
   }
+}))
+
+vi.mock("@/services/background-proxy", () => ({
+  bgRequestClient: mocks.bgRequestClient
 }))
 
 vi.mock("react-i18next", () => ({
@@ -208,6 +213,7 @@ describe("AssistantDefaultsPanel", () => {
       configurable: true,
       value: vi.fn()
     })
+    mocks.bgRequestClient.mockReset().mockResolvedValue({ providers: { piper: {} } })
     mocks.fetchWithAuth.mockReset()
     mocks.resolvedDefaults = {
       sttLanguage: "en-US",
@@ -261,6 +267,7 @@ describe("AssistantDefaultsPanel", () => {
           ok: true,
           json: async () => ({
             id: "persona-1",
+            version: 2,
             voice_defaults: init?.body?.voice_defaults
           })
         })
@@ -271,6 +278,112 @@ describe("AssistantDefaultsPanel", () => {
         json: async () => ({})
       })
     })
+  })
+
+  it.each(["empty catalog", "request error"])(
+    "recovers from %s without resetting saved or edited defaults",
+    async (failure) => {
+      if (failure === "request error") {
+        mocks.bgRequestClient.mockRejectedValueOnce(new Error("network unavailable"))
+      } else {
+        mocks.bgRequestClient.mockResolvedValueOnce(null)
+      }
+      let resolveRetry!: (value: unknown) => void
+      mocks.bgRequestClient.mockImplementationOnce(() => new Promise((resolve) => {
+        resolveRetry = resolve
+      }))
+      mocks.fetchWithAuth.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: "persona-1",
+          voice_defaults: { tts_provider: "custom-server", tts_model: "saved-model" }
+        })
+      })
+      render(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive />)
+      await waitFor(() => expect(screen.getByLabelText("TTS provider")).toHaveValue("custom-server"))
+      expect(screen.getByRole("alert")).toHaveTextContent(/unable to load.*speech providers/i)
+      fireEvent.change(screen.getByLabelText("TTS model"), { target: { value: "edited-model" } })
+      fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+      expect(screen.getByRole("button", { name: /retry/i })).toBeDisabled()
+      await act(async () => resolveRetry({ providers: { piper: {} } }))
+      expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument()
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      expect(screen.getByLabelText("TTS provider")).toHaveValue("custom-server")
+      expect(screen.getByLabelText("TTS model")).toHaveValue("edited-model")
+    }
+  )
+
+  it.each(["success", "failure"])(
+    "ignores a stale catalog %s after the panel reopens",
+    async (completion) => {
+      let resolveOld!: (value: unknown) => void
+      let rejectOld!: (error: Error) => void
+      mocks.bgRequestClient.mockImplementationOnce(() => new Promise((resolve, reject) => {
+        resolveOld = resolve
+        rejectOld = reject
+      }))
+      const { rerender } = render(
+        <AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive />
+      )
+      rerender(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive={false} />)
+      rerender(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive />)
+      await waitFor(() => expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument())
+      await act(async () => {
+        if (completion === "success") resolveOld({ providers: { "stale-provider": {} } })
+        else rejectOld(new Error("old request failed"))
+      })
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: "stale-provider" })).not.toBeInTheDocument()
+      expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument()
+    }
+  )
+
+  it("offers server providers and preserves a saved provider absent from the catalog", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "persona-1",
+        voice_defaults: {
+          tts_provider: "custom-server",
+          tts_model: "custom-model"
+        }
+      })
+    })
+    render(
+      <AssistantDefaultsPanel
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Helper"
+        isActive
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText("TTS provider")).toHaveValue("custom-server")
+    )
+    expect(screen.getByRole("option", { name: "piper" })).toBeInTheDocument()
+    expect(screen.getByLabelText("TTS model")).toHaveValue("custom-model")
+    fireEvent.change(screen.getByLabelText("TTS provider"), {
+      target: { value: "piper" }
+    })
+    fireEvent.change(screen.getByLabelText("TTS model"), {
+      target: { value: "en_US-lessac-medium" }
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save assistant defaults" })
+    )
+    await waitFor(() =>
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/persona-1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.objectContaining({
+            voice_defaults: expect.objectContaining({
+              tts_provider: "piper",
+              tts_model: "en_US-lessac-medium"
+            })
+          })
+        })
+      )
+    )
   })
 
   it("loads persona defaults, explains fallback behavior, and saves edits", async () => {
@@ -364,6 +477,7 @@ describe("AssistantDefaultsPanel", () => {
               stt_language: "fr-FR",
               stt_model: "whisper-1",
               tts_provider: "openai",
+              tts_model: null,
               tts_voice: "nova",
               confirmation_mode: "destructive_only",
               voice_chat_trigger_phrases: [
@@ -391,8 +505,39 @@ describe("AssistantDefaultsPanel", () => {
     expect(onSaved).toHaveBeenCalledWith(
       expect.objectContaining({
         stt_language: "fr-FR"
-      })
+      }),
+      expect.objectContaining({ id: "persona-1", version: 2 })
     )
+  })
+
+  it("ignores a defaults save that finishes after switching personas", async () => {
+    let resolveSave!: (value: unknown) => void
+    const onSaved = vi.fn()
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      if (init?.method === "PATCH") {
+        return new Promise((resolve) => { resolveSave = resolve })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          id: path.endsWith("persona-2") ? "persona-2" : "persona-1",
+          version: 1,
+          voice_defaults: { stt_language: path.endsWith("persona-2") ? "fr-FR" : "en-US" }
+        })
+      })
+    })
+    const view = render(<AssistantDefaultsPanel selectedPersonaId="persona-1" selectedPersonaName="Helper" isActive onSaved={onSaved} />)
+    await waitFor(() => expect(screen.getByLabelText("STT language")).toHaveValue("en-US"))
+    fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+    view.rerender(<AssistantDefaultsPanel selectedPersonaId="persona-2" selectedPersonaName="Scout" isActive onSaved={onSaved} />)
+    await waitFor(() => expect(screen.getByLabelText("STT language")).toHaveValue("fr-FR"))
+    await act(async () => {
+      resolveSave({ ok: true, json: async () => ({ id: "persona-1", version: 2, voice_defaults: { stt_language: "en-US" } }) })
+    })
+    expect(screen.getByLabelText("STT language")).toHaveValue("fr-FR")
+    expect(screen.queryByText("Assistant defaults saved.")).not.toBeInTheDocument()
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Save assistant defaults" })).toBeEnabled()
   })
 
   it("clears the previous persona defaults before a new persona load resolves", async () => {

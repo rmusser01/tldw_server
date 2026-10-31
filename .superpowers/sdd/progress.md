@@ -109,3 +109,31 @@
 - Task 3 self-review RED exposed missing full public hop ceilings and a malformed injected-header tuple escaping as raw `ValueError` (2 failed, 12 passed); both regressions are GREEN at 14/14 after the response boundary was hardened.
 - Task 3 final verification passed 286/286 gateway, TASK-12971, contract, planner, registry, and legacy tests. Compileall, Ruff, Black, Python 3.10 AST parsing, and `git diff --check` passed; Bandit reported zero findings and zero errors across 253 gateway production LOC.
 - Task 3 / Stage 3 is Complete; overall TASK-12968.2 remains In Progress for Tasks 4-9.
+
+## 2026-07-20 — TASK-12976 conservative frontend licensing cutoff
+
+- Execution worktree: `.worktrees/frontend-licensing-cutoff` on `codex/frontend-licensing-cutoff`.
+- Approved plan: `Docs/superpowers/plans/2026-07-20-conservative-frontend-licensing-cutoff-implementation-plan.md`.
+- Branch baseline after Backlog ID repair: `4ac5e2a1ebe8dedc7cf3cdc263157d2126f93929`.
+- Re-verified public refs: `main` `7a23be3202e360f2d8e7cfe208e13ba406cf0507`; `dev` `29acaca8c781213e27b12066372df13855e2e7a6`; draft PR #2727 head `60ce244fb6a65a79489b3f77299340afa501be24`.
+- Baseline verification: 19/19 focused workflow, release, Docker, and OpenAPI cache tests passed; two existing environment/config warnings were emitted.
+- Task 1: complete (commits fee1783..26ed722, review clean)
+- Task 2: complete (commits e835efb..624896d, review clean)
+- Task 3: complete (commits 4501e10..99fdd18, review clean)
+
+## 2026-07-20 — TASK-12977 base-controlled frontend license gate
+
+- Task 1: complete (commits 7a23be3..e66028e, review clean; isolated `main` bootstrap worktree ready; baseline 1/1 passed). Backlog MCP hung and the CLI serializer corrupted empty final-summary markers, so the canonical task record was preserved and the execution evidence remains in the SDD report.
+- Task 2: complete (commits e66028e..6dd2d64, review clean; RED missing-module evidence captured; GREEN 16/16; Ruff, Black, Bandit, and diff checks clean).
+- Task 3: complete (commits 6dd2d64..66f4aea, final review clean; 27/27 focused tests, actionlint 1.7.12, Ruff, Black, Bandit, and diff checks clean). Robert approved the scoped marker-preserving TASK-12977 edit after Backlog MCP/CLI failures; AC #3 and plan Stages 1–3 are recorded complete.
+- Task 3 hardening: complete through `dc9c6146fc`. Review identified and fixed cross-base status reuse with branch-qualified `/main` and `/dev` contexts plus `edited`; exact workflow/job surfaces are contract-locked. Robert then approved exact-commit authorization after review clarified that static required statuses are SHA/base-scoped rather than PR-author-scoped. The design records identical-SHA transferability and fail-safe denial of service, and the rollout now observes real source-bound `/main` and `/dev` results before either ruleset changes. Focused and complete independent reviews are clean with no Critical, Important, or Minor findings. Fresh controller verification: 29/29 tests, actionlint 1.7.12, Ruff, Black, Bandit, marker integrity, stale scans, full diff check, and clean worktree all passed. Draft bootstrap PR is approved to open; merge/activation remain gated on Robert's human-written Change summary and live source evidence.
+- Task 4 technical rollout and Task 5 local reconciliation are complete. PR #2753 merged to `main`; PR #2754 proved `/main` and was closed unmerged; PR #2755 proved `/dev`; rulesets `5653432` and `19362594` now require their matching source-bound contexts from App `15368` without bypass actors. The rejected PR-controlled/newline gate was removed, the trusted files match merged `main`, and `frontend-required.yml` matches `origin/dev`. Fresh verification passed 40/40 plus actionlint 1.7.12, Ruff, Black, Bandit, deterministic cases, evidence assertions, and diff checks; independent security and corrected-plan reviews were CLEAN. PR #2753's missing human-written Change summary remains recorded policy noncompliance. TASK-12977 awaits the committed reconciliation head's live `/dev` result before closure.
+- TASK-12977 complete. Reconciled code commit `f7c635d34749663fcb52a5ee93561d8013bad022` passed `frontend-license-policy/trusted/dev` in run `29813192487` / job `88578513698` from App `15368`. TASK-12976 Task 4 is complete and execution continues with image/publication isolation and final cutoff verification; PR #2755 stays draft and PR #2727 remains held.
+
+## 2026-07-21 — TASK-12976 final licensing cutoff
+
+- Task 5 complete in `7a4967d3c0`: the production API Dockerfile excludes all protected roots and bundles the legal corpus; `publish-ghcr-main` is backend-only while frontend images remain build-checked. TDD reproduced both policy failures, 20/20 focused tests passed, and independent review was CLEAN.
+- Final verification passed 62/62 targeted Python tests, 2/2 protected About tests, Ruff, Black, pinned actionlint 1.7.12, stale-language and whitespace checks, and Bandit with zero findings/errors across 2,554 LOC.
+- The production API image built successfully as `sha256:1e44c831aef0790cf7b6a392df1991efaac27be7c1abba24fc011221b9a2b1ed`; runtime assertions proved all four protected roots absent and the required legal files present.
+- Full-branch review caught an overbroad nested-notice phrase and stale PR #2727 evidence. The strengthened tests failed 2/2 before correction; all four notices now mirror the root categories and preserve Markdown as GPL, the evidence records current head `e8bcc4c8b705df50a5f7e6299335ba8001ff4811`, 10/10 policy tests pass, and final re-review is CLEAN.
+- TASK-12976 is technically complete and PR #2755 remains the draft cutoff PR into `dev`; PR #2727 remains open, draft, and blocked behind it. The required human-authored PR #2755 Change summary is still empty, so the PR is not merge-ready. Counsel terms, custom grants, frontend CLA, completed Countdown grants, and protected artifact publishing remain deferred.

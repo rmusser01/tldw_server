@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -77,4 +78,37 @@ async def test_list_data_subject_requests_passes_org_scope_to_repo(monkeypatch) 
             "org_ids": [99],
             "resolved_user_ids": [],
         }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_erase_notes_removes_graph_edges_before_notes(monkeypatch) -> None:
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    captured: list[tuple[str, tuple]] = []
+    monkeypatch.setattr(
+        service.DatabasePaths,
+        "get_chacha_db_path",
+        lambda _user_id: Path("/tmp/user-notes.db"),
+    )
+
+    def _capture(_path: Path, statements: list[tuple[str, tuple]]) -> int:
+        captured.extend(statements)
+        return len(statements)
+
+    monkeypatch.setattr(service, "_sqlite_hard_delete_sync", _capture)
+
+    assert await service._erase_notes(7) == 3
+    assert captured == [
+        (
+            "DELETE FROM note_edges WHERE from_note_id IN (SELECT id FROM notes) "
+            "OR to_note_id IN (SELECT id FROM notes)",
+            (),
+        ),
+        (
+            "DELETE FROM note_wikilink_edges WHERE source_note_id IN (SELECT id FROM notes) "
+            "OR target_note_id IN (SELECT id FROM notes)",
+            (),
+        ),
+        ("DELETE FROM notes", ()),
     ]

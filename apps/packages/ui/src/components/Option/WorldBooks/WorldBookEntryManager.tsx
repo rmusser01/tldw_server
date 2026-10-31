@@ -12,6 +12,7 @@ import {
   getPriorityBand,
   getPriorityTagColor,
   normalizeKeywordList,
+  normalizeWorldBookEntryIdentifier,
   validateRegexKeywords
 } from "./worldBookEntryUtils"
 import {
@@ -236,6 +237,10 @@ export const WorldBookEntryManager: React.FC<{
   }, [])
 
   const qc = useQueryClient()
+  const invalidateEntryAndParentQueries = React.useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['tldw:listWorldBookEntries', worldBookId] })
+    qc.invalidateQueries({ queryKey: ['tldw:listWorldBooks'] })
+  }, [qc, worldBookId])
   const screens = Grid.useBreakpoint()
   const notification = useAntdNotification()
   const confirmDanger = useConfirmDanger()
@@ -331,10 +336,11 @@ export const WorldBookEntryManager: React.FC<{
   })
   const { entries, totalEntryCount } = React.useMemo(() => {
     if (Array.isArray(entryQueryData)) {
-      return { entries: entryQueryData, totalEntryCount: entryQueryData.length }
+      const normalizedEntries = entryQueryData.map(normalizeWorldBookEntryIdentifier)
+      return { entries: normalizedEntries, totalEntryCount: normalizedEntries.length }
     }
     const normalizedEntries = Array.isArray((entryQueryData as any)?.entries)
-      ? (entryQueryData as any).entries
+      ? (entryQueryData as any).entries.map(normalizeWorldBookEntryIdentifier)
       : []
     const parsedTotal = Number((entryQueryData as any)?.total)
     const normalizedTotal =
@@ -380,7 +386,7 @@ export const WorldBookEntryManager: React.FC<{
         keywords: normalizeKeywords(v.keywords),
         group: normalizeEntryGroup(v?.group)
       }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tldw:listWorldBookEntries', worldBookId] }); form.resetFields() },
+    onSuccess: () => { invalidateEntryAndParentQueries(); form.resetFields() },
     onError: (e: any) => notification.error({ message: 'Error', description: e?.message || 'Failed to add entry' })
   })
   const { mutate: updateEntry, isPending: updating } = useMutation({
@@ -392,18 +398,18 @@ export const WorldBookEntryManager: React.FC<{
             group: normalizeEntryGroup(v?.group)
           })
         : Promise.resolve(null),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tldw:listWorldBookEntries', worldBookId] }); setEditingEntry(null); editForm.resetFields() },
+    onSuccess: () => { invalidateEntryAndParentQueries(); setEditingEntry(null); editForm.resetFields() },
     onError: (e: any) => notification.error({ message: 'Error', description: e?.message || 'Failed to update entry' })
   })
   const { mutate: deleteEntry } = useMutation({
     mutationFn: (id: number) => tldwClient.deleteWorldBookEntry(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tldw:listWorldBookEntries', worldBookId] })
+    onSuccess: invalidateEntryAndParentQueries
   })
   const { mutateAsync: bulkOperate, isPending: bulkPending } = useMutation({
     mutationFn: (payload: { entry_ids: number[]; operation: string; priority?: number }) =>
       tldwClient.bulkWorldBookEntries(payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tldw:listWorldBookEntries', worldBookId] })
+      invalidateEntryAndParentQueries()
       setSelectedRowKeys([])
     },
     onError: (e: any) => notification.error({ message: 'Error', description: e?.message || 'Bulk operation failed' })
@@ -674,6 +680,10 @@ export const WorldBookEntryManager: React.FC<{
         }
       }
 
+      if (copiedCount > 0) {
+        qc.invalidateQueries({ queryKey: ['tldw:listWorldBooks'] })
+      }
+
       let deletedCount = 0
       if (copiedSourceIds.length > 0) {
         const deleteResponse = await bulkOperate({ entry_ids: copiedSourceIds, operation: "delete" })
@@ -721,7 +731,7 @@ export const WorldBookEntryManager: React.FC<{
 
       setBulkFailures(result.failures)
       if (result.succeeded > 0) {
-        qc.invalidateQueries({ queryKey: ['tldw:listWorldBookEntries', worldBookId] })
+        invalidateEntryAndParentQueries()
       }
 
       if (result.failed === 0) {

@@ -112,10 +112,28 @@ describe("useConversationContextComposition", () => {
     })
 
     expect(send.composition.readiness).toBe("ready")
-    expect(send.requestOverrides.historyForModel).toEqual([])
-    expect(send.requestOverrides.messageForModel).toBe("Hello")
+    expect(send.requestOverrides).toEqual({})
     expect(primitives.processDictionary).not.toHaveBeenCalled()
     expect(primitives.processWorldBookContext).not.toHaveBeenCalled()
+  })
+
+  it("omits no-op overrides for a character continuation with selected history", async () => {
+    const primitives = buildPrimitives()
+    const { result } = renderHook(() => useConversationContextComposition({
+      draftMessage: "Continue", selection: { characterId: 7, chatId: "native", worldBookIds: [], dictionaryIds: [] }, primitives
+    }))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    expect((await result.current.composeForSend({ message: "Continue", history: [{ role: "user", content: "Earlier" }] })).requestOverrides).toEqual({})
+  })
+
+  it.each(["explicit", "inherited"])("retains %s unmatched optional context as an explicit override", async origin => {
+    const primitives = buildPrimitives()
+    primitives.processWorldBookContext = vi.fn(async () => ({ injected_content: "", entries_matched: 0, tokens_used: 0, books_used: 0, entry_ids: [] }))
+    const { result } = renderHook(() => useConversationContextComposition({
+      draftMessage: "Hello", selection: { characterId: 7, worldBookIds: origin === "explicit" ? [3] : [], dictionaryIds: [] }, inheritedWorldBookIds: origin === "inherited" ? [3] : [], primitives
+    }))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    expect((await result.current.composeForSend({ message: "Hello", history: [] })).requestOverrides).toEqual({ historyForModel: [], messageForModel: "Hello" })
   })
 
   it("debounces preview composition while keeping send composition immediate", async () => {

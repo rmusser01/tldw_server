@@ -14,7 +14,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
 
@@ -45,7 +44,7 @@ def fetch_media_for_keywords(
         return {}
 
     placeholders = ",".join("?" * len(unique_clean_keywords))
-    media_conditions = ["m.deleted = ?"]
+    media_conditions = ["m.deleted = ?", "m.system_operation_id IS NULL"]
     media_params: list[Any] = [False]
     if not include_trash:
         media_conditions.append("m.is_trash = ?")

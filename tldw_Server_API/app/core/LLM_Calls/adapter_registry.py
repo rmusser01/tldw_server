@@ -12,19 +12,36 @@ Initial version ships without default adapters; providers can be registered
 by initialization code or tests. Future phases may add defaults.
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.custom_openai_providers import (
-    custom_openai_aliases,
     custom_openai_provider_name,
     iter_custom_openai_provider_numbers,
 )
 from tldw_Server_API.app.core.Infrastructure.provider_registry import ProviderRegistryBase
 
+from .provider_identity import PROVIDER_ALIASES, canonical_provider_name
 from .providers.base import ChatProvider
 from .providers.custom_openai_adapter import make_custom_openai_adapter_class
+
+
+@dataclass(frozen=True, slots=True)
+class AuditedCallPolicyTransport:
+    """Adapter-owned transport guarantees available to strict opt-in calls."""
+
+    maximum_transport_attempts: int
+    enforces_configured_endpoint_scope: bool
+    enforces_maximum_timeout: bool
+
+
+_OPENAI_STRICT_TRANSPORT = AuditedCallPolicyTransport(
+    maximum_transport_attempts=1,
+    enforces_configured_endpoint_scope=True,
+    enforces_maximum_timeout=True,
+)
 
 
 class ChatProviderRegistry:
@@ -80,37 +97,7 @@ class ChatProviderRegistry:
         }
     )
 
-    DEFAULT_ALIASES: dict[str, tuple[str, ...]] = {
-        "openai": ("oai",),
-        "bedrock": ("aws-bedrock", "amazon-bedrock"),
-        "custom-openai-api": (
-            "custom_openai_api",
-            "custom-openai",
-            "openai-compatible",
-            "customopenai",
-        ),
-        "custom-openai-api-2": (
-            "custom_openai_api_2",
-            "custom-openai-2",
-            "openai-compatible-2",
-            "customopenai2",
-        ),
-        "novita": ("novita-ai",),
-        "poe": ("poe-api",),
-        "together": ("together-ai", "togetherai"),
-        "llama.cpp": ("llama-cpp", "llama_cpp", "llamacpp"),
-        "kobold": ("kobold-cpp", "kobold_cpp", "koboldcpp"),
-        "ooba": ("oobabooga", "text-generation-webui", "text_generation_webui"),
-        "tabbyapi": ("tabby-api", "tabby_api", "tabby"),
-        "local-llm": ("local_llm",),
-        "zai": ("z-ai", "z.ai"),
-    }
-    DEFAULT_ALIASES.update(
-        {
-            custom_openai_provider_name(number): custom_openai_aliases(number)
-            for number in iter_custom_openai_provider_numbers(start=3)
-        }
-    )
+    DEFAULT_ALIASES: dict[str, tuple[str, ...]] = dict(PROVIDER_ALIASES)
 
     @staticmethod
     def _parse_optional_bool(value: Any) -> bool | None:
@@ -203,6 +190,20 @@ class ChatProviderRegistry:
             return None
         return adapter
 
+    def get_audited_call_policy_transport(
+        self,
+        name: str,
+    ) -> AuditedCallPolicyTransport | None:
+        """Return strict transport guarantees audited for the concrete adapter."""
+        provider_name = self.resolve_provider_name(name)
+        adapter = self.get_adapter(provider_name)
+        if provider_name == "openai" and adapter is not None:
+            from .providers.openai_adapter import OpenAIAdapter
+
+            if type(adapter) is OpenAIAdapter:
+                return _OPENAI_STRICT_TRANSPORT
+        return None
+
     def resolve_provider_name(self, name: str | None) -> str:
         """Return the canonical provider name after registry alias resolution."""
         return self._base.resolve_provider_name(name)
@@ -234,6 +235,14 @@ class ChatProviderRegistry:
     def list_providers(self) -> list[str]:
         """Return a sorted list of registered provider names."""
         return self._base.list_providers(include_disabled=True)
+
+
+def canonical_builtin_llm_provider_name(name: str | None) -> str:
+    """Return a built-in LLM adapter identity or reject unsupported input."""
+    canonical = canonical_provider_name(str(name or ""))
+    if not canonical or canonical not in ChatProviderRegistry.DEFAULT_ADAPTERS:
+        raise ValueError("Unsupported LLM provider")
+    return canonical
 
 
 _registry: ChatProviderRegistry | None = None

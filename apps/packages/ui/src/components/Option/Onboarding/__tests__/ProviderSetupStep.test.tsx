@@ -122,6 +122,9 @@ describe("ProviderSetupStep", () => {
     fireEvent.change(screen.getByLabelText(/ollama base url/i), {
       target: { value: "http://127.0.0.1:11434/v1" },
     });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ollama model", exact: true }), {
+      target: { value: "llama3.1" },
+    });
     fireEvent.change(screen.getByLabelText(/default model/i), {
       target: { value: "gpt-4.1-mini" },
     });
@@ -143,6 +146,7 @@ describe("ProviderSetupStep", () => {
       expect.objectContaining({
         provider_key: "ollama",
         base_url: "http://127.0.0.1:11434/v1",
+        model: "llama3.1",
         make_default: false,
       }),
     );
@@ -339,7 +343,7 @@ describe("ProviderSetupStep", () => {
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
   });
 
-  it("saves non-default selected providers without validating them", async () => {
+  it("saves a typed non-default local model without requiring discovery", async () => {
     const onValidateProvider = vi.fn().mockResolvedValue({
       provider_key: "openai",
       status: "accepted",
@@ -358,6 +362,9 @@ describe("ProviderSetupStep", () => {
 
     fillDefaultOpenAI();
     fireEvent.click(screen.getByLabelText(/ollama/i));
+    fireEvent.change(screen.getByRole("textbox", { name: "Ollama model", exact: true }), {
+      target: { value: "manual-local-model" },
+    });
     fireEvent.change(screen.getByLabelText(/ollama base url/i), {
       target: { value: "http://127.0.0.1:11434/v1" },
     });
@@ -366,10 +373,77 @@ describe("ProviderSetupStep", () => {
     fireEvent.click(screen.getByRole("button", { name: /save provider/i }));
 
     await waitFor(() => expect(onSaveProvider).toHaveBeenCalledTimes(2));
+    expect(onSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
+      provider_key: "ollama", model: "manual-local-model", make_default: false,
+    }));
     expect(onValidateProvider).toHaveBeenCalledTimes(1);
     expect(onValidateProvider).toHaveBeenCalledWith(
       expect.objectContaining({ provider_key: "openai" }),
     );
+  });
+
+  it("requires explicit selection of a discovered non-default local model before any save", async () => {
+    const onValidateProvider = vi.fn().mockImplementation(async payload => ({
+      provider_key: payload.provider_key, status: "ready", models: ["gemma-real-model"],
+      validation_level: "live_non_generative", can_gate_first_chat: true,
+    }));
+    const { onSaveProvider } = renderProviderStep({ onValidateProvider });
+    fillDefaultOpenAI();
+    fireEvent.click(screen.getByLabelText("Select Ollama"));
+    fireEvent.click(screen.getByRole("button", { name: "Validate Ollama", exact: true }));
+    await screen.findByRole("button", { name: "gemma-real-model", exact: true });
+    fireEvent.click(screen.getByRole("button", { name: "Save providers", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Ollama.*model/i);
+    expect(onSaveProvider).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Ollama model", exact: true })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "gemma-real-model", exact: true }));
+    expect(screen.getByRole("textbox", { name: "Ollama model", exact: true })).toHaveValue("gemma-real-model");
+    fireEvent.click(screen.getByRole("button", { name: "Save providers", exact: true }));
+    await waitFor(() => expect(onSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
+      provider_key: "ollama", model: "gemma-real-model", make_default: false,
+    })));
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("gpt-4.1-mini");
+  });
+
+  it("does not continue with an empty selected local model after saving the default", async () => {
+    renderProviderStep();
+    fillDefaultOpenAI();
+    fireEvent.click(screen.getByRole("button", { name: "Validate OpenAI", exact: true }));
+    await screen.findByText(/first chat verifies/i);
+    fireEvent.click(screen.getByRole("button", { name: "Save providers", exact: true }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeEnabled());
+    fireEvent.click(screen.getByLabelText("Select Ollama"));
+    expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Select Ollama"));
+    expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
+  });
+
+  it("keeps a model optional for non-default hosted credentials", async () => {
+    const { onSaveProvider } = renderProviderStep();
+    fireEvent.click(screen.getByLabelText("Select Ollama"));
+    fireEvent.change(screen.getByLabelText(/default model/i), { target: { value: "llama3.1" } });
+    fireEvent.click(screen.getByLabelText("Select OpenAI"));
+    fireEvent.change(screen.getByLabelText(/openai api key/i), { target: { value: "test-api-key-value" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save providers", exact: true }));
+    await waitFor(() => expect(onSaveProvider).toHaveBeenCalledWith(expect.objectContaining({
+      provider_key: "openai", model: null, make_default: false,
+    })));
+  });
+
+  it("requires saving a selected non-default model before Continue", async () => {
+    renderProviderStep();
+    fillDefaultOpenAI();
+    fireEvent.click(screen.getByRole("button", { name: "Validate OpenAI", exact: true }));
+    await screen.findByText(/first chat verifies/i);
+    fireEvent.click(screen.getByRole("button", { name: "Save providers", exact: true }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeEnabled());
+    fireEvent.click(screen.getByLabelText("Select Ollama"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Ollama model", exact: true }), { target: { value: "gemma-real-model" } });
+    expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save providers", exact: true }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeEnabled());
+    fireEvent.change(screen.getByRole("textbox", { name: "Ollama model", exact: true }), { target: { value: "another-model" } });
+    expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
   });
 
   it("preserves concurrent validation results for multiple providers", async () => {
@@ -490,11 +564,12 @@ describe("ProviderSetupStep", () => {
     fireEvent.change(screen.getByLabelText(/ollama base url/i), {
       target: { value: "http://127.0.0.1:11434/v1" },
     });
-    fireEvent.change(screen.getByLabelText(/default model/i), {
-      target: { value: "temporary-discovery-model" },
-    });
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("");
     fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
     await screen.findByText("llama3.1");
+    expect(onValidateProvider).toHaveBeenCalledWith(expect.objectContaining({
+      provider_key: "ollama", model: null, base_url: "http://127.0.0.1:11434/v1"
+    }));
 
     fireEvent.click(screen.getByRole("button", { name: "qwen2.5" }));
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
@@ -567,7 +642,7 @@ describe("ProviderSetupStep", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
 
-    expect(onValidateProvider).not.toHaveBeenCalled();
+    expect(onValidateProvider).toHaveBeenCalledWith(expect.objectContaining({ model: null }));
     expect(onSaveProvider).not.toHaveBeenCalled();
     expect(
       screen.getByRole("button", { name: /save provider/i }),

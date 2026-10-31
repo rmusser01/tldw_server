@@ -75,7 +75,7 @@ from tldw_Server_API.app.core.Audio_Studio.migration import (
 from tldw_Server_API.app.core.Audio_Studio.providers.registry import build_audio_studio_provider_registry
 from tldw_Server_API.app.core.Audio_Studio.render import build_render_plan
 from tldw_Server_API.app.core.AuthNZ.db_config import AuthDatabaseConfig
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     AudioStudioArtifactRow,
     AudioStudioClipRow,
@@ -857,18 +857,7 @@ def _section_text_for_generation(
 ) -> str | None:
     if target_resource_kind != "section":
         return None
-    row = collections_db.backend.execute(
-        "SELECT body_text FROM audio_studio_sections "
-        "WHERE project_row_id = ? AND section_id = ? AND deleted = ?",
-        (
-            project_row_id,
-            target_resource_id,
-            collections_db._coerce_bool_flag(  # noqa: SLF001
-                False,
-                postgres=collections_db.backend.backend_type == BackendType.POSTGRESQL,
-            ),
-        ),
-    ).first
+    row = collections_db.get_live_audio_studio_section_text(project_row_id, target_resource_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="audio_studio_section_not_found")
     return row.get("body_text")

@@ -24,5 +24,15 @@ def test_sqlite_schema_additional_tables_and_indexes(tmp_path):
         assert any("idx_jobs_status_available_at" in x for x in idxs)
         # Partial unique idempotency index present
         assert any("idx_jobs_idempotent" in x for x in idxs)
+        columns = {
+            row[1]: (row[3], row[4])
+            for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        assert columns["expired_lease_policy"] == (1, "'consume_retry'")
+        assert columns["quarantine_threshold"] == (0, None)
+        assert columns["no_attempt_recovery_fingerprint"] == (0, None)
+        ensure_jobs_tables(db_path)
+        assert has_table("job_events")
+        assert has_table("job_queue_controls")
     finally:
         conn.close()

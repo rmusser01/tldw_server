@@ -20,7 +20,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 _COLLECTIONS_DB = load_collections_database_cls()
 
@@ -45,7 +44,8 @@ def apply_synced_document_content_update(
         with self.transaction() as conn:
             media_info = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version, title, content FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version, title, content FROM Media WHERE id = ? "
+                "AND deleted = 0 AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -69,7 +69,7 @@ def apply_synced_document_content_update(
                     client_id = ?,
                     chunking_status = 'pending',
                     vector_processing = 0
-                WHERE id = ? AND version = ?
+                WHERE id = ? AND version = ? AND system_operation_id IS NULL
                 """,
                 (
                     content,
@@ -94,7 +94,7 @@ def apply_synced_document_content_update(
 
             updated_media_data = self._fetchone_with_connection(
                 conn,
-                "SELECT * FROM Media WHERE id = ?",
+                "SELECT * FROM Media WHERE id = ? AND system_operation_id IS NULL",
                 (media_id,),
             ) or {}
             updated_media_data["created_doc_ver_uuid"] = new_doc_version_info.get("uuid")

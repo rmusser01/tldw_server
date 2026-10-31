@@ -14,7 +14,15 @@
 // `AllowlistWarnHooks` so the shared logic stays free of console side effects for
 // its other callers (which silently ignore malformed URLs, as before).
 
-export type AllowlistConfig = Record<string, unknown> | null | undefined
+// Any config-shaped object may be passed; only `serverUrl` and
+// `absoluteUrlAllowlist` are read (defensively, tolerating any value type).
+// The structural arm admits interface-typed configs (e.g. TldwConfig), which
+// lack the implicit index signature `Record<string, unknown>` requires.
+export type AllowlistConfig =
+  | Readonly<{ serverUrl?: unknown; absoluteUrlAllowlist?: unknown }>
+  | Record<string, unknown>
+  | null
+  | undefined
 
 // Optional diagnostics hooks. When omitted, malformed URLs are silently ignored
 // (the behaviour the background handlers rely on). request-core supplies these

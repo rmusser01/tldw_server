@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     iter_custom_openai_provider_numbers,
 )
 from tldw_Server_API.app.core.exceptions import TokenizerUnavailable
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import encode_provider_model_path
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -400,8 +401,15 @@ class GoogleCountOnlyHTTPAdapter:
 
     def _candidate_urls(self) -> tuple[str, ...]:
         model_segment = self.model
-        if not model_segment.startswith("models/"):
-            model_segment = f"models/{model_segment}"
+        if model_segment.startswith("models/"):
+            model_segment = model_segment[len("models/") :]
+        try:
+            model_segment = encode_provider_model_path(model_segment)
+        except ValueError as exc:
+            raise TokenizerUnavailable(
+                "Invalid Google tokenizer model identifier"
+            ) from exc
+        model_segment = f"models/{model_segment}"
 
         base = self.base_url
         if "/v1beta" in base or base.endswith("/v1beta") or "/v1/" in base or base.endswith("/v1"):
@@ -418,6 +426,14 @@ class GoogleCountOnlyHTTPAdapter:
             header_auth["x-goog-api-key"] = self.api_key
         allow_query_key_fallback = _truthy(
             str(os.getenv("GOOGLE_COUNTTOKENS_ALLOW_QUERY_KEY_FALLBACK", "")).strip().lower()
+        )
+        try:
+            hostname = (urlparse(self.base_url).hostname or "").rstrip(".").casefold()
+        except (TypeError, ValueError):
+            hostname = ""
+        allow_query_key_fallback = (
+            allow_query_key_fallback
+            and hostname != "generativelanguage.googleapis.com"
         )
         payload = {
             "contents": [
@@ -924,6 +940,35 @@ def resolve_tiktoken_encoding(model: str) -> Any:
     if not normalized_model:
         raise TokenizerUnavailable("Model is required")
     return _resolve_tiktoken_encoding_cached(normalized_model)
+
+
+@lru_cache(maxsize=128)
+def _resolve_tiktoken_encoding_or_default_cached(model: str) -> Any:
+    import tiktoken  # type: ignore
+
+    if model:
+        try:
+            return tiktoken.encoding_for_model(model)
+        except Exception:  # noqa: BLE001 - any resolution failure degrades to the default
+            pass
+    return tiktoken.get_encoding("cl100k_base")
+
+
+def resolve_tiktoken_encoding_or_default(model: Any) -> Any:
+    """Lenient twin of :func:`resolve_tiktoken_encoding`.
+
+    The strict version raises ``TokenizerUnavailable`` deliberately, so the
+    strict-token-counting machinery can refuse an approximate count. That is exactly why
+    eleven call sites re-implemented the ``encoding_for_model`` -> ``cl100k_base``
+    fallback by hand rather than adopting it, and three of those caught only ``KeyError``
+    while tiktoken raises ``AttributeError`` for a non-string model -- so a workflow step
+    written ``model: null`` crashed instead of degrading.
+
+    This twin never raises for a bad model name: it normalizes anything falsy or
+    unresolvable to ``cl100k_base``. ``ImportError`` still propagates, because callers
+    already fall back to a character-count estimate when tiktoken is absent.
+    """
+    return _resolve_tiktoken_encoding_or_default_cached(str(model or "").strip())
 
 
 def _resolve_tiktoken_tokenizer_name(model: str) -> str | None:

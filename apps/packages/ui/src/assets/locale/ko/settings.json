@@ -1003,10 +1003,11 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "로그인 설정을 열 수 없습니다. 다시 시도해 주세요.",
     "title": "환영합니다 — 연결을 시작해볼까요",
     "description": "서버와 인증을 설정합니다. 연결과 RAG 상태를 바로 확인합니다.",
     "learnMoreTldw": "tldw 서버가 어떻게 작동하는지 알아보기",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "예: http://127.0.0.1:8000",
       "help": "예: http://127.0.0.1:8000",

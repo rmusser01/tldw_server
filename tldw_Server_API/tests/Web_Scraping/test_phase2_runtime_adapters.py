@@ -106,6 +106,49 @@ def test_default_fetch_client_uses_response_mode_for_httpx_security(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("backend", ["httpx", "curl"])
+def test_default_fetch_client_forwards_bounded_requests_to_simple_fetch_path(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_fetch(url: str, **kwargs: object) -> dict[str, object]:
+        calls["url"] = url
+        calls["kwargs"] = kwargs
+        return {
+            "status": 200,
+            "headers": {},
+            "text": "<html>ok</html>",
+            "url": url,
+            "backend": backend,
+        }
+
+    monkeypatch.setattr(runtime_fetch, "http_fetch", fake_fetch)
+
+    response = DefaultFetchClient().fetch(
+        FetchRequest(
+            url="https://example.com/article",
+            backend=backend,
+            max_response_bytes=64,
+        )
+    )
+
+    assert calls["url"] == "https://example.com/article"
+    assert calls["kwargs"] == {
+        "headers": None,
+        "cookies": None,
+        "timeout": None,
+        "backend": backend,
+        "follow_redirects": True,
+        "impersonate": None,
+        "proxies": None,
+        "max_response_bytes": 64,
+    }
+    assert response.backend == backend
+
+
+@pytest.mark.unit
 def test_default_fetch_client_measures_elapsed_with_monotonic_clock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

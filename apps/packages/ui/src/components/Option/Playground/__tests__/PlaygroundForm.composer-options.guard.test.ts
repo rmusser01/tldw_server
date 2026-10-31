@@ -29,7 +29,12 @@ describe("PlaygroundForm composer options guard", () => {
     const source = fs.readFileSync(sourcePath, "utf8")
 
     expect(source).toContain("grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2")
-    expect(source).toContain("col-span-2 flex shrink-0 justify-end self-end")
+    const mobileSendClasses = source.match(
+      /data-testid="composer-inline-send-control"\s+className=\{\s*isMobileViewport\s*\? "([^"]+)"/
+    )?.[1].split(/\s+/)
+    expect(mobileSendClasses).toEqual(
+      expect.arrayContaining(["col-span-2", "flex", "shrink-0", "justify-end", "self-end"])
+    )
     expect(source).not.toContain("grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2")
   })
 

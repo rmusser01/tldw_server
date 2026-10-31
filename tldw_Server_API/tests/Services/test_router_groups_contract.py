@@ -22,6 +22,7 @@ from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.api.v1.router_registry import register_router_specs
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.unit
 
@@ -346,7 +347,7 @@ def _install_fake_router_module(
         or not getattr(fake_module, "_router_test_fake", False)
     ):
         fake_module = ModuleType(module_name)
-        setattr(fake_module, "_router_test_fake", True)
+        fake_module._router_test_fake = True
     setattr(fake_module, attr_name, router)
     monkeypatch.setitem(sys.modules, module_name, fake_module)
     return router
@@ -355,7 +356,7 @@ def _install_fake_router_module(
 def _first_router_path(router: APIRouter | Callable[[], APIRouter]) -> str:
     if not isinstance(router, APIRouter):
         router = router()
-    for route in router.routes:
+    for route in iter_served_routes(router.routes):
         route_path = getattr(route, "path", None)
         if route_path is not None:
             return str(route_path)
@@ -435,6 +436,11 @@ def _install_minimal_required_router_modules(monkeypatch: pytest.MonkeyPatch) ->
         "tldw_Server_API.app.api.v1.endpoints.workspaces",
         path="/workspaces",
     )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.service_prompts",
+        path="/service-prompts",
+    )
 
 
 def test_install_fake_router_module_does_not_mutate_existing_real_module(
@@ -453,7 +459,7 @@ def test_install_fake_router_module_does_not_mutate_existing_real_module(
 
     assert not hasattr(real_module, "router")
     assert sys.modules[module_name] is not real_module
-    assert getattr(sys.modules[module_name], "router") is router
+    assert sys.modules[module_name].router is router
 
 
 def test_append_imported_router_spec_preserves_metadata(
@@ -657,7 +663,7 @@ def test_append_imported_router_spec_defers_module_import_until_registration(
     enabled_app = FastAPI()
     assert register_router_specs(enabled_app, specs) == 1
     assert import_count == 1
-    assert "/api/v1/policy-gated" in {route.path for route in enabled_app.routes}
+    assert "/api/v1/policy-gated" in {route.path for route in iter_served_routes(enabled_app.routes)}
 
 
 def test_append_imported_router_spec_skips_optional_import_error_at_registration(
@@ -1317,7 +1323,7 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.jobs_admin": "/jobs/status",
         "tldw_Server_API.app.api.v1.endpoints.org_invites": "/orgs/invites",
     }
-    access_count = {module_name: 0 for module_name in router_definitions}
+    access_count = dict.fromkeys(router_definitions, 0)
     real_import_module = importlib.import_module
 
     def _guarded_import_module(module_name: str, package: str | None = None) -> ModuleType:
@@ -1351,11 +1357,11 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_admin_router_specs())
-    assert access_count == {module_name: 0 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert set(router_definitions.values()).issubset(by_first_path)
-    assert access_count == {module_name: 1 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 1)
 
 
 def test_iter_core_router_specs_raises_crashing_chat_import(
@@ -1410,7 +1416,7 @@ def test_iter_core_router_specs_raises_crashing_chat_import(
     with pytest.raises(RuntimeError, match="chat loop crashed during import"):
         register_router_specs(app, chat_specs)
 
-    chat_paths = {route.path for route in app.routes}
+    chat_paths = {route.path for route in iter_served_routes(app.routes)}
 
     assert "/api/v1/chat/chat/completions" in chat_paths
     assert "/api/v1/chats/conversations" not in chat_paths
@@ -1439,7 +1445,7 @@ def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyP
     )
 
     assert count == 0
-    assert "/api/v1/health" not in {route.path for route in app.routes}
+    assert "/api/v1/health" not in {route.path for route in iter_served_routes(app.routes)}
 
 
 def test_register_router_specs_resolves_lazy_router_after_route_policy(
@@ -1479,7 +1485,7 @@ def test_register_router_specs_resolves_lazy_router_after_route_policy(
     assert disabled_count == 0
     assert enabled_count == 1
     assert calls == 1
-    assert "/api/v1/lazy" in {route.path for route in app.routes}
+    assert "/api/v1/lazy" in {route.path for route in iter_served_routes(app.routes)}
 
 
 def test_register_router_specs_raises_unexpected_resolution_failures(
@@ -1572,7 +1578,7 @@ def test_register_router_specs_fails_closed_when_route_policy_errors(
     )
 
     assert count == 0
-    assert "/api/v1/guarded" not in {route.path for route in app.routes}
+    assert "/api/v1/guarded" not in {route.path for route in iter_served_routes(app.routes)}
 
 
 def test_register_router_specs_deduplicates_factory_routers_by_stable_identity(
@@ -1599,7 +1605,7 @@ def test_register_router_specs_deduplicates_factory_routers_by_stable_identity(
     assert register_router_specs(app, [spec]) == 1
     assert register_router_specs(app, [spec]) == 0
     assert calls == 1
-    assert [route.path for route in app.routes].count("/api/v1/factory") == 1
+    assert [route.path for route in iter_served_routes(app.routes)].count("/api/v1/factory") == 1
 
 
 def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1885,6 +1891,28 @@ def test_iter_content_router_specs_uses_canonical_rag_key_and_single_web_scrapin
     assert web_scraping_specs[0].prefix == "/api/v1"
 
 
+def test_iter_content_router_specs_registers_skills_api() -> None:
+    skills_specs = [
+        spec for spec in iter_content_router_specs() if spec.name == "skills"
+    ]
+
+    assert [
+        (spec.prefix, spec.tags, spec.route_key, spec.default_stable)
+        for spec in skills_specs
+    ] == [("/api/v1/skills", ("skills",), "skills", True)]
+
+
+def test_registered_skills_routes_apply_ingress_rate_limit() -> None:
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
+    from tldw_Server_API.app.api.v1.endpoints import skills
+
+    assert skills.router.routes
+    for route in skills.router.routes:
+        assert check_rate_limit in [
+            dependency.call for dependency in route.dependant.dependencies
+        ]
+
+
 def test_iter_content_router_specs_registers_audio_studio_as_stable_route(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1975,7 +2003,7 @@ def test_iter_content_router_specs_defers_discovery_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.research_runs": "/research-runs",
         "tldw_Server_API.app.api.v1.endpoints.paper_search": "/paper-search",
     }
-    access_count = {module_name: 0 for module_name in router_definitions}
+    access_count = dict.fromkeys(router_definitions, 0)
 
     for module_name, path in router_definitions.items():
         router = APIRouter()
@@ -2001,11 +2029,11 @@ def test_iter_content_router_specs_defers_discovery_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_content_router_specs())
-    assert access_count == {module_name: 0 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert set(router_definitions.values()).issubset(by_first_path)
-    assert access_count == {module_name: 1 for module_name in router_definitions}
+    assert access_count == dict.fromkeys(router_definitions, 1)
 
 
 def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
@@ -2347,7 +2375,7 @@ def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.chat_workflows": "/chat/workflows",
         "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows": "/scheduler/workflows",
     }
-    access_count = {module_name: 0 for module_name in module_paths}
+    access_count = dict.fromkeys(module_paths, 0)
 
     for module_name, path in module_paths.items():
         router = APIRouter()
@@ -2373,7 +2401,7 @@ def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_content_router_specs())
-    assert access_count == {module_name: 0 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert by_first_path["/workflows"].prefix == ""
@@ -2387,7 +2415,7 @@ def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
     assert by_first_path["/scheduler/workflows"].tags == ("scheduler",)
     assert by_first_path["/scheduler/workflows"].route_key == ""
     assert by_first_path["/scheduler/workflows"].default_stable is False
-    assert access_count == {module_name: 1 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 1)
 
 
 def test_iter_content_router_specs_defers_processing_router_attr_lookup(
@@ -2647,7 +2675,7 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.outputs_templates": "/outputs/templates",
         "tldw_Server_API.app.api.v1.endpoints.outputs": "/outputs",
     }
-    access_count = {module_name: 0 for module_name in module_paths}
+    access_count = dict.fromkeys(module_paths, 0)
 
     for module_name, path in module_paths.items():
         router = APIRouter()
@@ -2673,7 +2701,7 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
     specs = list(iter_content_router_specs())
-    assert access_count == {module_name: 0 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 0)
 
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
     assert by_first_path["/outputs/templates"].prefix == "/api/v1"
@@ -2682,7 +2710,7 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
     assert by_first_path["/outputs"].prefix == "/api/v1"
     assert by_first_path["/outputs"].tags == ("outputs",)
     assert by_first_path["/outputs"].route_key == "outputs"
-    assert access_count == {module_name: 1 for module_name in module_paths}
+    assert access_count == dict.fromkeys(module_paths, 1)
 
 
 def test_iter_content_router_specs_defers_notes_router_attr_lookup(
@@ -4251,6 +4279,9 @@ def test_iter_minimal_test_router_specs_populates_expected_specs(monkeypatch: py
     assert by_first_path["/workspaces"].prefix == "/api/v1/workspaces"
     assert by_first_path["/workspaces"].tags == ("workspaces",)
     assert by_first_path["/workspaces"].route_key == "workspaces"
+    assert by_first_path["/service-prompts"].prefix == "/api/v1"
+    assert by_first_path["/service-prompts"].tags == ("service-prompts",)
+    assert by_first_path["/service-prompts"].route_key == ""
 
 
 def test_iter_minimal_test_router_specs_includes_health_and_auth(
@@ -4302,6 +4333,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
         "tldw_Server_API.app.api.v1.endpoints.research",
         "tldw_Server_API.app.api.v1.endpoints.research_workspace",
         "tldw_Server_API.app.api.v1.endpoints.research_runs",
+        "tldw_Server_API.app.api.v1.endpoints.service_prompts",
         "tldw_Server_API.app.api.v1.endpoints.vn_play",
         "tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
         "tldw_Server_API.app.api.v1.endpoints.workspaces",
@@ -4356,7 +4388,7 @@ def test_minimal_test_router_specs_participate_in_route_policy(
     actual_counts = Counter(route_policy_calls)
     expected_counts = Counter(expected_policy_calls)
 
-    assert registered_count == 0
+    assert registered_count == sum(not spec.route_key for spec in specs)
     assert expected_counts - actual_counts == Counter()
     assert set(actual_counts) - set(expected_counts) == set()
 
@@ -4911,6 +4943,13 @@ def test_iter_minimal_optional_router_specs_defers_auxiliary_attr_lookup(
             "path": "/claims",
             "prefix": "/api/v1",
             "tags": ("claims",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",
+            "expected_name": "prompt_studio_websocket",
+            "path": "/api/v1/prompt-studio/ws",
+            "prefix": "",
+            "tags": ("prompt-studio",),
         },
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.text2sql",
@@ -10878,6 +10917,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.service_prompts",
+        path="/service-prompts",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.outputs",
         path="/list",
     )
@@ -11173,8 +11217,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
         path="/chatbooks",
     )
     fake_chatbooks = sys.modules["tldw_Server_API.app.api.v1.endpoints.chatbooks"]
-    setattr(fake_chatbooks, "_persist_completed_sync_export_job", lambda **_kwargs: None)
-    setattr(fake_chatbooks, "get_chatbook_service", lambda: None)
+    fake_chatbooks._persist_completed_sync_export_job = lambda **_kwargs: None
+    fake_chatbooks.get_chatbook_service = lambda: None
     _install_fake_router_module(
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.workflows",
@@ -11307,6 +11351,9 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["rag-health"].tags == ("rag-health",)
     assert by_key["prompts"].prefix == "/api/v1/prompts"
     assert by_key["prompts"].tags == ("prompts",)
+    assert by_first_path["/service-prompts"].prefix == "/api/v1"
+    assert by_first_path["/service-prompts"].tags == ("service-prompts",)
+    assert by_first_path["/service-prompts"].route_key == ""
     assert by_key["outputs"].prefix == "/api/v1"
     assert by_key["outputs"].tags == ("outputs",)
     assert by_key["claims"].prefix == "/api/v1"

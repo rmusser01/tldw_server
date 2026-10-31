@@ -66,6 +66,23 @@ class MetricsCollector:
         {"allow", "warn", "require_approval", "deny", "error", "unknown"}
     )
     _ALLOWED_GOVERNANCE_ROLLOUT_MODES = frozenset({"off", "shadow", "enforce"})
+    _ALLOWED_IDEMPOTENCY_DEGRADED_STAGES = frozenset(
+        {
+            "serialization",
+            "result_size",
+            "local_commit",
+            "redis_connect",
+            "redis_binding",
+            "redis_result_read",
+            "redis_lock_acquire",
+            "redis_result_write",
+            "redis_release",
+            "finalize_timeout",
+            "finalizer_stuck",
+            "shutdown_execution_timeout",
+            "unknown",
+        }
+    )
 
     def __init__(self, enable_prometheus: bool = True):
         self.enable_prometheus = enable_prometheus and PROMETHEUS_AVAILABLE
@@ -218,6 +235,12 @@ class MetricsCollector:
             'mcp_idempotency_misses_total',
             'Total idempotent cache misses for write tools',
             ['module', 'tool'],
+            registry=self.registry
+        )
+        self.idempotency_degraded = Counter(
+            'mcp_idempotency_degraded_total',
+            'Total degraded idempotency persistence events',
+            ['stage'],
             registry=self.registry
         )
 
@@ -418,6 +441,23 @@ class MetricsCollector:
         self._metrics["idempotency_miss"].append(metric)
         if self.enable_prometheus:
             self.idempotency_misses.labels(module=module, tool=tool).inc()
+
+    def record_idempotency_degraded(self, stage: str) -> None:
+        """Record a degradation using a bounded stage label."""
+        normalized_stage = (
+            stage
+            if stage in self._ALLOWED_IDEMPOTENCY_DEGRADED_STAGES
+            else "unknown"
+        )
+        metric = MetricData(
+            name="idempotency_degraded",
+            type=MetricType.COUNTER,
+            value=1,
+            labels={"stage": normalized_stage},
+        )
+        self._metrics["idempotency_degraded"].append(metric)
+        if self.enable_prometheus:
+            self.idempotency_degraded.labels(stage=normalized_stage).inc()
 
     @staticmethod
     def _normalize_governance_label(

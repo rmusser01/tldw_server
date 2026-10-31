@@ -48,7 +48,7 @@ from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
 )
 
 from ...tool_observability import build_execution_eval_metadata
-from ..base import BaseModule, ModuleConfig, create_tool_definition
+from ..base import CONTROL_CHARS_RE, BaseModule, ModuleConfig, create_tool_definition
 from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
 from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 from .notebook_files import apply_cell_edit, parse_notebook_payload, summarize_notebook
@@ -70,6 +70,22 @@ def _file_policy_metadata(action: str) -> dict[str, str]:
         "file_policy_action": metadata.action,
         "file_policy_action_family": metadata.family,
     }
+
+
+# Arguments that carry file content verbatim and must never be sanitized: they are
+# written to disk byte-for-byte, or matched against bytes already there. The base
+# sanitizer strips the remaining control characters, and "\x0b"/"\x0c" are legitimate
+# in real source files -- a form feed is the conventional page separator in Python,
+# Lisp and C, and fs.write silently dropped it while fs.edit's strings were exempt.
+# Stripping either corrupts the file and still reports success, because the
+# expected_sha256 receipt hashes the on-disk pre-image rather than what we wrote.
+# fs.patch is handled separately: its "diff" goes through _sanitize_patch_diff.
+_VERBATIM_ARGS: dict[str, frozenset[str]] = {
+    "fs.edit": frozenset({"old_string", "new_string"}),
+    "fs.write": frozenset({"content"}),
+    "fs.write_text": frozenset({"content"}),
+    "notebook.edit_cell": frozenset({"source"}),
+}
 
 
 class FilesystemModule(BaseModule):
@@ -604,21 +620,24 @@ class FilesystemModule(BaseModule):
             grep_tool,
         ]
 
+    def verbatim_argument_keys(self, tool_name: str | None) -> frozenset[str]:
+        """File-content arguments the upstream hardening pass must not strip (TASK-13294)."""
+        return _VERBATIM_ARGS.get(tool_name or "", frozenset())
+
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
+        # The upstream hardening pass honours the same _VERBATIM_ARGS table through
+        # verbatim_argument_keys, so these values arrive byte-exact; this local pass
+        # covers direct callers of execute_tool that skip the protocol.
         raw_args = arguments or {}
-        if tool_name == "fs.edit":
-            args = {
-                key: value if key in {"old_string", "new_string"} else self.sanitize_input(value)
-                for key, value in raw_args.items()
-            }
-        elif tool_name == "notebook.edit_cell":
-            args = {
-                key: value if key == "source" else self.sanitize_input(value)
-                for key, value in raw_args.items()
-            }
-        elif tool_name == "fs.patch":
+        verbatim = _VERBATIM_ARGS.get(tool_name, frozenset())
+        if tool_name == "fs.patch":
             args = {
                 key: self._sanitize_patch_diff(value) if key == "diff" else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
+        elif verbatim:
+            args = {
+                key: value if key in verbatim else self.sanitize_input(value)
                 for key, value in raw_args.items()
             }
         else:
@@ -1462,19 +1481,10 @@ class FilesystemModule(BaseModule):
                 )
         return candidates
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Sanitize filesystem inputs while allowing portable glob syntax."""
-
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        if isinstance(input_data, str):
-            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
+    # No sanitize_input override. It existed to allow portable glob syntax past the
+    # base SQL-injection denylist, which is gone (TASK-13294). Keeping it meant keeping
+    # a second copy of the char predicate in sync with the base -- the drift that left
+    # fs.write corrupting tab-significant files after the base was already fixed.
 
     @staticmethod
     def _sanitize_patch_diff(input_data: Any) -> Any:
@@ -1482,7 +1492,8 @@ class FilesystemModule(BaseModule):
 
         if not isinstance(input_data, str):
             return input_data
-        return "".join(ch for ch in input_data if ch >= " " or ch in {"\n", "\r", "\t"})
+        # Same rule as BaseModule.sanitize_input, from the one shared definition.
+        return CONTROL_CHARS_RE.sub("", input_data)
 
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
@@ -1716,6 +1727,32 @@ class FilesystemModule(BaseModule):
         limit: int,
         walk_entry_limit: int,
     ) -> dict[str, Any]:
+        """Walk ``base`` and return the entries matching ``pattern`` for ``fs.glob``.
+
+        Args:
+            workspace_root: Root that returned paths are made relative to.
+            base: Directory to walk; must exist and be a directory.
+            pattern: Portable glob matched against workspace-relative paths.
+            include_hidden: Include dot-files and dot-directories.
+            include_files: Include regular files.
+            include_directories: Include directories.
+            follow_symlinks: Descend into symlinked directories.
+            case_sensitive: Match ``pattern`` case-sensitively.
+            respect_gitignore: Skip paths ignored by the workspace's ignore rules.
+            sort_by: ``"path"`` for path order; otherwise newest-modified first.
+            limit: Maximum number of matches returned.
+            walk_entry_limit: Maximum entries visited before the walk is truncated.
+
+        Returns:
+            ``{"base_path", "pattern", "matches", "truncated", "remaining_count",
+            "eval"}``. Each match is ``{"path", "type"}`` plus ``"size"`` for files; an
+            entry whose metadata cannot be read is still listed, with ``"size": None``
+            and ``"size_unavailable": True``, rather than failing the whole glob.
+
+        Raises:
+            FileNotFoundError: ``base`` does not exist.
+            NotADirectoryError: ``base`` is not a directory.
+        """
         if not base.exists():
             raise FileNotFoundError(f"path not found: {base}")
         if not base.is_dir():
@@ -1775,7 +1812,22 @@ class FilesystemModule(BaseModule):
                     is_directory=candidate_kind == "directory",
                 ):
                     continue
-                is_symlink = candidate.is_symlink()
+                try:
+                    is_symlink = candidate.is_symlink()
+                except OSError as exc:
+                    # An entry whose metadata cannot be read must still be listed. On
+                    # 3.12 Path.is_symlink() goes through Path.stat(follow_symlinks=
+                    # False), the same call the size block below already tolerates -- so
+                    # leaving this one bare made fs.glob raise for the whole pattern
+                    # instead of marking one entry size_unavailable. Fall back to the
+                    # kind os.walk already reported. See TASK-13291.
+                    logger.debug(
+                        "Unable to determine fs.glob symlink status for workspace path "
+                        "{}; using the walk-reported kind: {}",
+                        rel_path,
+                        exc.__class__.__name__,
+                    )
+                    is_symlink = False
                 if is_symlink:
                     candidate_type = "symlink"
                 else:
@@ -2595,11 +2647,14 @@ class FilesystemModule(BaseModule):
             existing_mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
         fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
         tmp_path = Path(tmp_name)
+        fchmod = getattr(os, "fchmod", None)
         try:
             with os.fdopen(fd, "wb") as handle:
-                if existing_mode is not None:
-                    os.fchmod(handle.fileno(), existing_mode)
+                if existing_mode is not None and fchmod is not None:
+                    fchmod(handle.fileno(), existing_mode)
                 handle.write(text.encode("utf-8"))
+            if existing_mode is not None and fchmod is None:
+                os.chmod(tmp_path, existing_mode)
             os.replace(tmp_path, target)
         finally:
             with suppress(OSError):

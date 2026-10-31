@@ -4,9 +4,9 @@ import importlib
 import sys
 from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -14,6 +14,70 @@ pytestmark = pytest.mark.unit
 def _import_startup_heavy_init():
     sys.modules.pop("tldw_Server_API.app.services.startup_heavy_init", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_heavy_init")
+
+
+@pytest.mark.asyncio
+async def test_init_tts_service_uses_canonical_gateway_config_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_heavy = _import_startup_heavy_init()
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.TTS import adapter_registry, tts_config, tts_service_v2, voice_manager
+    from tldw_Server_API.app.core.TTS.adapters.openai_compatible_speech_adapter import (
+        OpenAICompatibleSpeechAdapter,
+    )
+    from tldw_Server_API.app.core.TTS.gateway_config import normalize_gateway_specs
+    from tldw_Server_API.app.core.TTS.tts_config import TTSConfig, TTSConfigManager
+
+    definition = {
+        "enabled": True,
+        "base_url": "https://speech.example/v1/",
+        "speech_path": "audio/speech",
+        "api_key": "admin-key",
+        "default_model": "Vendor/Exact",
+        "default_voice": "Narrator",
+        "allowed_models": ["Vendor/Exact"],
+    }
+    manager = TTSConfigManager.__new__(TTSConfigManager)
+    manager._config = TTSConfig(gateways={"startup": definition})
+    manager._gateway_specs = normalize_gateway_specs({}, {"startup": definition})
+    manager._sources = {}
+    legacy_config = {"adapter_failure_retry_seconds": 9.0}
+    config_loader = MagicMock(
+        return_value=SimpleNamespace(get_tts_config=lambda: legacy_config)
+    )
+    circuit_factory = AsyncMock(return_value=MagicMock())
+    voice_init = AsyncMock()
+    original_get_service = tts_service_v2.get_tts_service_v2
+    service_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    services = []
+
+    async def _record_get_service(*args: object, **kwargs: object):
+        service_calls.append((args, kwargs))
+        service = await original_get_service(*args, **kwargs)
+        services.append(service)
+        return service
+
+    monkeypatch.setattr(adapter_registry, "_factory_instance", None)
+    monkeypatch.setattr(tts_service_v2, "_service_instance", None)
+    monkeypatch.setattr(adapter_registry, "get_tts_config_manager", lambda: manager)
+    monkeypatch.setattr(tts_config, "get_tts_config_manager", lambda: manager)
+    monkeypatch.setattr(core_config, "load_comprehensive_config_with_tts", config_loader)
+    monkeypatch.setattr(tts_service_v2, "get_circuit_manager", circuit_factory)
+    monkeypatch.setattr(tts_service_v2, "get_tts_service_v2", _record_get_service)
+    monkeypatch.setattr(voice_manager, "init_voice_manager", voice_init)
+
+    await startup_heavy._init_tts_service(deferred=True)
+
+    assert service_calls == [((), {})]
+    assert len(services) == 1
+    registry = services[0].factory.registry
+    assert registry.config_manager is manager
+    assert registry.resolve_provider_key("gateway:startup") == "gateway:startup"
+    assert registry._adapter_specs["gateway:startup"] is OpenAICompatibleSpeechAdapter
+    config_loader.assert_called_once_with()
+    circuit_factory.assert_awaited_once_with(legacy_config)
+    voice_init.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
@@ -186,10 +250,10 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
     async def _fake_to_thread(fn: Callable[..., object], *args: object, **kwargs: object) -> object:
         return fn(*args, **kwargs)
 
+    from tldw_Server_API.app.api.v1 import endpoints as endpoints_package
     from tldw_Server_API.app.core import Local_LLM as local_llm_package
     from tldw_Server_API.app.core import config as config_module
     from tldw_Server_API.app.core.Local_LLM import llamacpp_runtime_reconciler
-    from tldw_Server_API.app.api.v1 import endpoints as endpoints_package
 
     llamacpp_endpoint_module = ModuleType("tldw_Server_API.app.api.v1.endpoints.llamacpp")
     monkeypatch.setattr(config_module, "get_llamacpp_handler_config", lambda: object())

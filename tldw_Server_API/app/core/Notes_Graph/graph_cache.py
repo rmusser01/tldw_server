@@ -49,6 +49,27 @@ class GraphCache:
         raw = user_id + "|" + json.dumps(query_params, sort_keys=True, default=str)
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
+    @staticmethod
+    def make_revision_key(
+        *,
+        user_id: str,
+        dataset_id: str,
+        graph_revision: int,
+        parser_version: int,
+        query_params: dict,
+    ) -> str:
+        """Build a cache key that cannot survive a graph-visible mutation."""
+
+        return GraphCache.make_cache_key(
+            user_id,
+            {
+                "dataset_id": dataset_id,
+                "graph_revision": graph_revision,
+                "parser_version": parser_version,
+                "query": query_params,
+            },
+        )
+
     # ------------------------------------------------------------------
     # Core API
     # ------------------------------------------------------------------

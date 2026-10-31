@@ -169,13 +169,19 @@ class RAGHealthChecker:
         try:
             import sqlite3
 
-            # Quick SQLite connectivity test
+            # Quick SQLite connectivity test, off the event loop.
             db_path = self._resolve_sqlite_db_path()
-            conn = sqlite3.connect(db_path, timeout=1.0)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
-            conn.close()
+
+            def _probe() -> None:
+                conn = sqlite3.connect(db_path, timeout=1.0)
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.close()
+                finally:
+                    conn.close()
+
+            await asyncio.to_thread(_probe)
 
             response_time = time.time() - start
 
@@ -248,20 +254,25 @@ class RAGHealthChecker:
         try:
             import sqlite3
 
-            # Check FTS5 index
+            # Check FTS5 index, off the event loop.
             db_path = self._resolve_sqlite_db_path()
-            conn = sqlite3.connect(db_path, timeout=1.0)
-            cursor = conn.cursor()
 
-            # Check if FTS table exists and is accessible
-            cursor.execute("""
-                SELECT COUNT(*) FROM sqlite_master
-                WHERE type='table' AND name LIKE '%fts%'
-            """)
-            fts_tables = cursor.fetchone()[0]
+            def _probe() -> int:
+                conn = sqlite3.connect(db_path, timeout=1.0)
+                try:
+                    cursor = conn.cursor()
+                    # Check if FTS table exists and is accessible
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM sqlite_master
+                        WHERE type='table' AND name LIKE '%fts%'
+                    """)
+                    count = cursor.fetchone()[0]
+                    cursor.close()
+                    return count
+                finally:
+                    conn.close()
 
-            cursor.close()
-            conn.close()
+            fts_tables = await asyncio.to_thread(_probe)
 
             response_time = time.time() - start
 

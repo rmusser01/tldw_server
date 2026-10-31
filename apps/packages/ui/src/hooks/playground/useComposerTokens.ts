@@ -44,10 +44,9 @@ export function useComposerTokens({
     [estimateTokensForText, message]
   )
 
-  const conversationTokenCountRef = React.useRef(0)
-  const conversationTokenCount = React.useMemo(() => {
+  const estimatedConversationTokenCount = React.useMemo(() => {
     if (isSending) {
-      return conversationTokenCountRef.current
+      return null
     }
     const convoMessages: ChatMessage[] = []
     const trimmedSystem = systemPrompt?.trim()
@@ -67,10 +66,19 @@ export function useComposerTokens({
       }
     })
     if (convoMessages.length === 0) return 0
-    const count = tldwChat.estimateTokens(convoMessages)
-    conversationTokenCountRef.current = count
-    return count
+    return tldwChat.estimateTokens(convoMessages)
   }, [isSending, messages, systemPrompt])
+  const [conversationTokenCount, setConversationTokenCount] = React.useState(
+    estimatedConversationTokenCount ?? 0
+  )
+  // Keep the last non-streaming total, including an empty conversation's zero.
+  // Adjust state only when the non-streaming estimate changes.
+  if (
+    estimatedConversationTokenCount !== null &&
+    conversationTokenCount !== estimatedConversationTokenCount
+  ) {
+    setConversationTokenCount(estimatedConversationTokenCount)
+  }
 
   const promptTokenLabel = React.useMemo(
     () =>

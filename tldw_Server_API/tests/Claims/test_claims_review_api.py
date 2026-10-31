@@ -1,16 +1,20 @@
 import hashlib
 import os
 import tempfile
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
 from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN, CLAIMS_REVIEW
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+
+pytestmark = pytest.mark.unit
 
 
 def _seed_review_db() -> tuple[str, int, int]:
@@ -264,3 +268,240 @@ def test_claims_review_corrected_text_updates_span():
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
         fastapi_app.dependency_overrides.pop(get_request_user, None)
         fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)
+
+
+async def test_review_notification_enqueue_failure_does_not_rollback_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN, CLAIMS_REVIEW
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    class _User:
+        id = 1
+        username = "reviewer"
+        is_admin = False
+
+    db_path, claim_id, _media_id = _seed_review_db()
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject="reviewer",
+        token_type="access",
+        jti=None,
+        roles=["reviewer"],
+        permissions=[CLAIMS_REVIEW, CLAIMS_ADMIN],
+        is_admin=False,
+        org_ids=[],
+        team_ids=[],
+    )
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_review_notification",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("jobs unavailable")),
+    )
+    dispatch_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        claims_service,
+        "dispatch_claim_review_notifications",
+        lambda **kwargs: dispatch_calls.append(kwargs),
+    )
+
+    try:
+        result = await claims_service.review_claim(
+            claim_id=claim_id,
+            payload={"status": "approved", "review_version": 1},
+            user_id=None,
+            principal=principal,
+            current_user=_User(),
+            db=db,
+        )
+        reviewed = db.get_claim_with_media(claim_id, include_deleted=True)
+    finally:
+        db.close_connection()
+
+    assert result["review_status"] == "approved"
+    assert reviewed["review_status"] == "approved"
+    assert len(dispatch_calls) == 1
+
+
+def test_bulk_review_jobs_notification_uses_jobs_not_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _User:
+        id = 1
+        username = "reviewer"
+        is_admin = False
+
+    db_path, claim_id, _media_id = _seed_review_db()
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject="reviewer",
+        token_type="access",
+        jti=None,
+        roles=["reviewer"],
+        permissions=[CLAIMS_REVIEW, CLAIMS_ADMIN],
+        is_admin=False,
+        org_ids=[],
+        team_ids=[],
+    )
+    enqueued: list[dict[str, object]] = []
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_review_notification",
+        lambda **kwargs: enqueued.append(kwargs) or {"id": 88},
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "dispatch_claim_review_notifications",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy dispatch should not run")),
+    )
+
+    try:
+        result = claims_service.bulk_review_claims(
+            payload={"claim_ids": [claim_id], "status": "approved"},
+            user_id=None,
+            principal=principal,
+            current_user=_User(),
+            db=db,
+        )
+    finally:
+        db.close_connection()
+
+    assert result["updated"] == [claim_id]
+    assert len(enqueued) == 1
+    assert enqueued[0]["owner_user_id"] == "1"
+    assert isinstance(enqueued[0]["notification_ids"], list)
+
+
+def test_bulk_review_jobs_notifications_group_by_claim_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _User:
+        id = 1
+        username = "reviewer"
+        is_admin = True
+
+    db_path, claim_id, _media_id = _seed_review_db()
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    media_id_two, _, _ = db.add_media_with_keywords(
+        title="Owner Two Doc",
+        media_type="text",
+        content="D.",
+        keywords=None,
+        owner_user_id=2,
+    )
+    db.upsert_claims(
+        [
+            {
+                "media_id": media_id_two,
+                "chunk_index": 0,
+                "span_start": None,
+                "span_end": None,
+                "claim_text": "D.",
+                "confidence": 0.8,
+                "extractor": "heuristic",
+                "extractor_version": "v1",
+                "chunk_hash": hashlib.sha256(b"D.").hexdigest(),
+            }
+        ]
+    )
+    second = db.execute_query(
+        "SELECT id FROM Claims WHERE media_id = ? AND deleted = 0 ORDER BY id ASC LIMIT 1",
+        (media_id_two,),
+    ).fetchone()
+    claim_id_two = int(second["id"])
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject="reviewer",
+        token_type="access",
+        jti=None,
+        roles=["reviewer"],
+        permissions=[CLAIMS_REVIEW, CLAIMS_ADMIN],
+        is_admin=True,
+        org_ids=[],
+        team_ids=[],
+    )
+    enqueued: list[dict[str, object]] = []
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_review_notification",
+        lambda **kwargs: enqueued.append(kwargs) or {"id": len(enqueued) + 1},
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "dispatch_claim_review_notifications",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy dispatch should not run")),
+    )
+
+    try:
+        result = claims_service.bulk_review_claims(
+            payload={"claim_ids": [claim_id, claim_id_two], "status": "approved"},
+            user_id=None,
+            principal=principal,
+            current_user=_User(),
+            db=db,
+        )
+    finally:
+        db.close_connection()
+
+    assert result["updated"] == [claim_id, claim_id_two]
+    assert [call["owner_user_id"] for call in enqueued] == ["1", "2"]
+
+
+def test_bulk_review_jobs_notification_enqueue_failure_does_not_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _User:
+        id = 1
+        username = "reviewer"
+        is_admin = False
+
+    db_path, claim_id, _media_id = _seed_review_db()
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject="reviewer",
+        token_type="access",
+        jti=None,
+        roles=["reviewer"],
+        permissions=[CLAIMS_REVIEW, CLAIMS_ADMIN],
+        is_admin=False,
+        org_ids=[],
+        team_ids=[],
+    )
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_review_notification",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("jobs unavailable")),
+    )
+    dispatch_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        claims_service,
+        "dispatch_claim_review_notifications",
+        lambda **kwargs: dispatch_calls.append(kwargs),
+    )
+
+    try:
+        result = claims_service.bulk_review_claims(
+            payload={"claim_ids": [claim_id], "status": "approved"},
+            user_id=None,
+            principal=principal,
+            current_user=_User(),
+            db=db,
+        )
+        reviewed = db.get_claim_with_media(claim_id, include_deleted=True)
+    finally:
+        db.close_connection()
+
+    assert result["updated"] == [claim_id]
+    assert reviewed["review_status"] == "approved"
+    assert len(dispatch_calls) == 1

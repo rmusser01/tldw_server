@@ -66,7 +66,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
     sttState.model = "parakeet"
   })
 
-  it("prefers persona defaults and falls back to browser values for missing fields", () => {
+  it("keeps explicit Persona provider voice unset while inheriting non-voice browser settings", () => {
     const { result } = renderHook(() =>
       useResolvedPersonaVoiceDefaults({
         stt_language: "fr-FR",
@@ -87,7 +87,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
       sttLanguage: "fr-FR",
       sttModel: "parakeet",
       ttsProvider: "openai",
-      ttsVoice: "alloy",
+      ttsVoice: "",
       confirmationMode: "always",
       voiceChatTriggerPhrases: ["bonjour helper"],
       wakeBehavior: "continuous",
@@ -101,7 +101,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
     })
   })
 
-  it("uses Kitten-backed defaults when persona values are absent", () => {
+  it("inherits the browser provider without overriding its server voice default", () => {
     storageState.values.ttsProvider = "elevenlabs"
     voiceChatState.voiceChatTriggerPhrases = ["okay helper", "status check"]
     voiceChatState.voiceChatAutoResume = false
@@ -114,7 +114,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
       sttLanguage: "en-US",
       sttModel: "whisper-1",
       ttsProvider: "elevenlabs",
-      ttsVoice: "voice-eleven",
+      ttsVoice: "",
       confirmationMode: "destructive_only",
       voiceChatTriggerPhrases: ["okay helper", "status check"],
       wakeBehavior: "one_shot",
@@ -128,7 +128,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
     })
   })
 
-  it("materializes the canonical fresh-profile Kitten baseline", () => {
+  it("leaves the fresh-profile voice to the selected provider", () => {
     storageState.values = {
       speechToTextLanguage: "en-US"
     }
@@ -136,8 +136,29 @@ describe("useResolvedPersonaVoiceDefaults", () => {
     const { result } = renderHook(() => useResolvedPersonaVoiceDefaults(null))
 
     expect(result.current.ttsProvider).toBe("tldw")
-    expect(result.current.ttsVoice).toBe("Bella")
+    expect(result.current.ttsVoice).toBe("")
     expect(result.current.wakeBehavior).toBe("one_shot")
+  })
+
+  it.each(["browser", "kokoro", "piper", "custom-server"])(
+    "does not borrow the tldw voice for %s",
+    (provider) => {
+      const { result } = renderHook(() =>
+        useResolvedPersonaVoiceDefaults({ tts_provider: provider })
+      )
+      expect(result.current.ttsVoice).toBe("")
+      expect(result.current.ttsProvider).toBe(provider)
+    }
+  )
+
+  it("resolves an optional persona TTS model without borrowing another provider model", () => {
+    const { result } = renderHook(() =>
+      useResolvedPersonaVoiceDefaults({
+        tts_provider: "piper",
+        tts_model: " en_US-lessac-medium "
+      })
+    )
+    expect(result.current.ttsModel).toBe("en_US-lessac-medium")
   })
 
   it("resolves explicit persona wake behavior", () => {
@@ -149,4 +170,15 @@ describe("useResolvedPersonaVoiceDefaults", () => {
 
     expect(result.current.wakeBehavior).toBe("push_to_talk_after_wake")
   })
+})
+
+
+it.each(["openai", "elevenlabs", "tldw"])("keeps a blank %s voice unset instead of injecting browser preferences", provider => {
+  const {result}=renderHook(()=>useResolvedPersonaVoiceDefaults({tts_provider:provider,tts_voice:"   "}))
+  expect(result.current.ttsVoice).toBe("")
+})
+
+it("preserves an explicit Persona voice",()=>{
+ const {result}=renderHook(()=>useResolvedPersonaVoiceDefaults({tts_provider:"openai",tts_voice:" nova "}))
+ expect(result.current.ttsVoice).toBe("nova")
 })

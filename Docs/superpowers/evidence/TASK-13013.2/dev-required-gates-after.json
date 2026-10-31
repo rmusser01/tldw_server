@@ -1,0 +1,118 @@
+{
+  "ruleset_created_at": "2026-08-29T22:03:22.739Z",
+  "repository": "rmusser01/tldw_server",
+  "dev_head": "41bd5dda336c70259595ebf3ce3fb4a6a5b549db",
+  "created_ruleset": {
+    "id": 21824526,
+    "name": "dev-core-required-gates",
+    "target": "branch",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "current_user_can_bypass": "never",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/heads/dev"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": true,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            {
+              "context": "backend-required",
+              "integration_id": 15368
+            },
+            {
+              "context": "security-required",
+              "integration_id": 15368
+            },
+            {
+              "context": "coverage-required",
+              "integration_id": 15368
+            },
+            {
+              "context": "frontend-required",
+              "integration_id": 15368
+            },
+            {
+              "context": "e2e-required",
+              "integration_id": 15368
+            },
+            {
+              "context": "container-build-check",
+              "integration_id": 15368
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "preserved_ruleset": {
+    "id": 19362594,
+    "name": "frontend-license-gate-dev",
+    "normalized_policy_matches_before": true
+  },
+  "effective_dev_rules": [
+    {
+      "type": "required_status_checks",
+      "ruleset_id": 21824526,
+      "strict_required_status_checks_policy": true,
+      "required_status_checks": [
+        {
+          "context": "backend-required",
+          "integration_id": 15368
+        },
+        {
+          "context": "security-required",
+          "integration_id": 15368
+        },
+        {
+          "context": "coverage-required",
+          "integration_id": 15368
+        },
+        {
+          "context": "frontend-required",
+          "integration_id": 15368
+        },
+        {
+          "context": "e2e-required",
+          "integration_id": 15368
+        },
+        {
+          "context": "container-build-check",
+          "integration_id": 15368
+        }
+      ]
+    },
+    {
+      "type": "pull_request",
+      "ruleset_id": 19362594,
+      "required_approving_review_count": 0,
+      "dismiss_stale_reviews_on_push": true,
+      "require_extra_approval_for_unattributed_changes": true
+    },
+    {
+      "type": "required_status_checks",
+      "ruleset_id": 19362594,
+      "strict_required_status_checks_policy": false,
+      "required_status_checks": [
+        {
+          "context": "frontend-license-policy/trusted/dev",
+          "integration_id": 15368
+        }
+      ]
+    }
+  ],
+  "rollback": {
+    "action": "disable_only",
+    "ruleset_id": 21824526,
+    "existing_ruleset_id": 19362594,
+    "existing_ruleset_must_remain_unchanged": true
+  }
+}

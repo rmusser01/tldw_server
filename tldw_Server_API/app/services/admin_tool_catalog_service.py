@@ -251,7 +251,7 @@ async def create_tool_catalog(db, *, name: str, description: str | None, org_id:
             if exists:
                 raise ToolCatalogConflictError("Catalog already exists")
             await db.execute(
-                "INSERT INTO tool_catalogs (name, description, org_id, team_id, is_active) VALUES ($1,$2,$3,$4,$5)",
+                "INSERT INTO tool_catalogs (name, description, org_id, team_id, is_active) VALUES ($1, $2, $3, $4, $5)",
                 name, description, org_id, team_id, is_active,
             )
             row = await db.fetchrow(
@@ -358,7 +358,7 @@ async def add_tool_catalog_entry(db, catalog_id: int, tool_name: str, module_id:
     pg = _is_postgres_connection(db)
     try:
         if pg:
-            await db.execute("INSERT INTO tool_catalog_entries (catalog_id, tool_name, module_id) VALUES ($1,$2,$3) ON CONFLICT (catalog_id, tool_name) DO NOTHING", catalog_id, tool_name, module_id)
+            await db.execute("INSERT INTO tool_catalog_entries (catalog_id, tool_name, module_id) VALUES ($1, $2, $3) ON CONFLICT (catalog_id, tool_name) DO NOTHING", catalog_id, tool_name, module_id)
             row = await db.fetchrow("SELECT catalog_id, tool_name, module_id FROM tool_catalog_entries WHERE catalog_id = $1 AND tool_name = $2", catalog_id, tool_name)
             return dict(row) if row else {"catalog_id": catalog_id, "tool_name": tool_name, "module_id": module_id}
         cur = await db.execute("SELECT catalog_id, tool_name, module_id FROM tool_catalog_entries WHERE catalog_id = ? AND tool_name = ?", (catalog_id, tool_name))

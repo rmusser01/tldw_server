@@ -61,7 +61,7 @@ export const DeferredOptionsRoute = ({
   description
 }: DeferredOptionsRouteProps) => {
   const location = useLocation()
-  const [routes, setRoutes] = React.useState<RouteDefinition[] | null>(null)
+  const [loaded, setLoaded] = React.useState<{ pathname: string; routes: RouteDefinition[] } | null>(null)
 
   React.useEffect(() => {
     let active = true
@@ -69,11 +69,11 @@ export const DeferredOptionsRoute = ({
     void loadOptionRoutesForPath(location.pathname)
       .then((module) => {
         if (!active) return
-        setRoutes(module)
+        setLoaded({ pathname: location.pathname, routes: module })
       })
       .catch(() => {
         if (!active) return
-        setRoutes([])
+        setLoaded({ pathname: location.pathname, routes: [] })
       })
 
     return () => {
@@ -81,11 +81,11 @@ export const DeferredOptionsRoute = ({
     }
   }, [location.pathname])
 
-  if (routes == null) {
+  if (!loaded || loaded.pathname !== location.pathname) {
     return <PageAssistLoader label={label} description={description} />
   }
 
-  const visibleRoutes = routes.filter(
+  const visibleRoutes = loaded.routes.filter(
     (route) =>
       (!route.targets || route.targets.includes(platformConfig.target)) &&
       (!isHostedTldwDeployment() || isHostedVisibleOptionPath(route.path))

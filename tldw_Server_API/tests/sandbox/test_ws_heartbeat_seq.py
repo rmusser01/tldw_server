@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import asyncio as _asyncio
 import time
 from typing import Any, Dict
 from uuid import uuid4
@@ -53,17 +52,9 @@ def _client(monkeypatch) -> TestClient:
 
 
 @pytest.mark.unit
-def test_ws_heartbeats_include_seq(monkeypatch: pytest.MonkeyPatch, ws_flush) -> None:
-    # Speed up heartbeats by monkeypatching the sandbox asyncio.sleep
-    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
-
-    _orig_sleep = _asyncio.sleep
-
-    async def _fast_sleep(_n: float) -> None:  # pragma: no cover - trivial
-        await _orig_sleep(0.01)
-
-    monkeypatch.setattr(sb.asyncio, "sleep", _fast_sleep, raising=True)
-
+def test_ws_heartbeats_include_seq(
+    monkeypatch: pytest.MonkeyPatch, ws_flush, patch_sandbox_heartbeat_sleep,
+) -> None:
     with _client(monkeypatch) as client:
         body: Dict[str, Any] = {
             "spec_version": "1.0",
@@ -96,16 +87,9 @@ def test_ws_heartbeats_include_seq(monkeypatch: pytest.MonkeyPatch, ws_flush) ->
 
 
 @pytest.mark.unit
-def test_ws_heartbeats_stop_after_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
-
-    _orig_sleep = _asyncio.sleep
-
-    async def _fast_sleep(_n: float) -> None:  # pragma: no cover - trivial
-        await _orig_sleep(0.01)
-
-    monkeypatch.setattr(sb.asyncio, "sleep", _fast_sleep, raising=True)
-
+def test_ws_heartbeats_stop_after_end(
+    monkeypatch: pytest.MonkeyPatch, patch_sandbox_heartbeat_sleep,
+) -> None:
     with _client(monkeypatch) as client:
         run_id = f"run-{uuid4()}"
         hub = get_hub()

@@ -1,0 +1,15 @@
+{
+  "revision": "2270153980c95f17af0b3bc85eb041ef62750387",
+  "started_at": 1788650885.660224,
+  "pid": 52683,
+  "wrapper_pid": 52679,
+  "source_root": "/private/tmp/tldw-server-migu-buddy-uat",
+  "microphone_opened_by_launcher": false,
+  "source_hashes": {
+    "tldw_Server_API/app/api/v1/endpoints/persona.py": "6107443039677ce5cb32dd344223b59f01477845f9503adc75b5db5b7421f446",
+    "tldw_Server_API/app/core/Persona/live_conversation.py": "480f7608e4655b88e0a4df00dcdc7ff73239f7e49dfb47d91f626643e5309dab",
+    "tldw_Server_API/app/core/Persona/live_control.py": "82a778826f5f0b659c4dbf7bcfd9e9730f969bc0fa2b9cf0b4562dacb5d6130c",
+    "tldw_Server_API/app/core/Persona/live_voice_runtime.py": "7190b44be0c5a6a6090a33622e2b510cf7a5f1ad0545d74104f8d53004189240",
+    "tldw_Server_API/app/core/TTS/adapters/kokoro_adapter.py": "3631e3c40cf44c4cea22a3518eba34dd40f3e4eaaab9c0df960274cbddb0fbe0"
+  }
+}

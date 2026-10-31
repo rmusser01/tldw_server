@@ -107,24 +107,22 @@ export const FloatingProgressWidget: React.FC = () => {
     [t]
   )
 
-  // Compute counts and overall progress
+  // Count confirmed terminal items; elapsed time is not evidence of completion.
   const { completedCount, totalCount, overallPercent } = useMemo(() => {
     const items = processingState.perItemProgress
     if (items.length === 0) return { completedCount: 0, totalCount: 0, overallPercent: 0 }
 
     let completed = 0
-    let percentSum = 0
     for (const p of items) {
       if (p.status === "complete" || p.status === "failed" || p.status === "cancelled") {
         completed++
       }
-      percentSum += p.progressPercent
     }
 
     return {
       completedCount: completed,
       totalCount: items.length,
-      overallPercent: Math.round(percentSum / items.length),
+      overallPercent: Math.round((completed / items.length) * 100),
     }
   }, [processingState.perItemProgress])
 
@@ -292,8 +290,8 @@ export const FloatingProgressWidget: React.FC = () => {
         {!terminalPresentation && (
           <p className="text-[11px] leading-tight text-text-muted">
             {qi(
-              "widget.processingHint",
-              "Processing and indexing content..."
+              "widget.waitingHint",
+              "Waiting for server results. Open the wizard to see elapsed time."
             )}
           </p>
         )}
@@ -306,9 +304,16 @@ export const FloatingProgressWidget: React.FC = () => {
           </p>
         )}
 
-        {/* Progress bar + percentage + Open button */}
+        {/* Finished-item count bar and Open button */}
         <div className="flex items-center gap-2">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface2">
+          <div
+            role="progressbar"
+            aria-label={qi("processing.finishedItems", "Finished items")}
+            aria-valuemin={0}
+            aria-valuemax={totalCount || 1}
+            aria-valuenow={completedCount}
+            className="h-2 flex-1 overflow-hidden rounded-full bg-surface2"
+          >
             <div
               className={`h-full rounded-full transition-all duration-300 ${
                 terminalPresentation?.barClassName || "bg-primary"
@@ -316,9 +321,6 @@ export const FloatingProgressWidget: React.FC = () => {
               style={{ width: `${overallPercent}%` }}
             />
           </div>
-          <span className="w-8 text-right text-xs tabular-nums text-text-muted">
-            {overallPercent}%
-          </span>
           <button
             type="button"
             onClick={handleOpen}

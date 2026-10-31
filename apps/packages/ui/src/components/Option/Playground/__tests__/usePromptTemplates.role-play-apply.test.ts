@@ -21,8 +21,7 @@ const createDeps = (
   setSelectedSystemPrompt: vi.fn(),
   setSelectedQuickPrompt: vi.fn(),
   setSystemPrompt: vi.fn(),
-  setSelectedCharacter: vi.fn(),
-  setSelectedAssistant: vi.fn(async () => undefined),
+  applyAssistantSelection: vi.fn(async () => undefined),
   setRagPinnedResults: vi.fn(),
   updateChatModelSettings: vi.fn(),
   compareModeActive: false,
@@ -33,7 +32,7 @@ const createDeps = (
 })
 
 describe("usePromptTemplates role-play setup apply", () => {
-  it("preserves behavior template identity when applying a saved setup", () => {
+  it("preserves behavior template identity when applying a saved setup", async () => {
     const deps = createDeps()
     const setup = createStartupTemplateBundle({
       name: "Detective setup",
@@ -71,8 +70,8 @@ describe("usePromptTemplates role-play setup apply", () => {
 
     const { result } = renderHook(() => usePromptTemplates(deps))
 
-    act(() => {
-      result.current.handleApplySavedRolePlaySetup(setup)
+    await act(async () => {
+      await result.current.handleApplySavedRolePlaySetup(setup)
     })
 
     expect(deps.updateChatModelSettings).toHaveBeenCalledWith(
@@ -80,21 +79,20 @@ describe("usePromptTemplates role-play setup apply", () => {
         systemPromptTemplateId: "detective-template"
       })
     )
-    expect(deps.setSelectedCharacter).toHaveBeenCalledWith(
+    expect(deps.applyAssistantSelection).toHaveBeenCalledWith(
       expect.objectContaining({
+        kind: "character",
         id: "char-mira",
         name: "Mira"
       })
     )
-    expect(deps.setSelectedAssistant).toHaveBeenCalledWith(null)
+    expect(deps.applyAssistantSelection).toHaveBeenCalledTimes(1)
   })
 
-  it("restores persona identity through selected assistant state", () => {
-    const setSelectedAssistant = vi.fn(async () => undefined)
-    const setSelectedCharacter = vi.fn()
+  it("restores persona identity through selected assistant state", async () => {
+    const applyAssistantSelection = vi.fn(async () => undefined)
     const deps = createDeps({
-      setSelectedAssistant,
-      setSelectedCharacter
+      applyAssistantSelection
     })
     const setup = createStartupTemplateBundle({
       name: "Persona setup",
@@ -117,17 +115,17 @@ describe("usePromptTemplates role-play setup apply", () => {
 
     const { result } = renderHook(() => usePromptTemplates(deps))
 
-    act(() => {
-      result.current.handleApplySavedRolePlaySetup(setup)
+    await act(async () => {
+      await result.current.handleApplySavedRolePlaySetup(setup)
     })
 
-    expect(setSelectedAssistant).toHaveBeenCalledWith(
+    expect(applyAssistantSelection).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "persona",
         id: "persona-guide",
         name: "Patient Guide"
       })
     )
-    expect(setSelectedCharacter).toHaveBeenCalledWith(null)
+    expect(applyAssistantSelection).toHaveBeenCalledTimes(1)
   })
 })

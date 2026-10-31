@@ -15,10 +15,15 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_daemon_with_timeout,
+)
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim, align_claim_span
 from tldw_Server_API.app.core.Claims_Extraction.analyze_types import ClaimsAnalyzeCallable
 from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
@@ -26,13 +31,6 @@ from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
     ClaimsJobContext,
     estimate_claims_tokens,
     resolve_claims_job_budget,
-)
-from tldw_Server_API.app.core.RAG.rag_service.types import (
-    ClaimType,
-    Document,
-    MatchLevel,
-    SourceAuthority,
-    VerificationStatus,
 )
 from tldw_Server_API.app.core.Claims_Extraction.extractor_registry import (
     extract_heuristic_claims_texts,
@@ -74,10 +72,16 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
 from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
     resolve_claims_llm_config as resolve_runtime_llm_config,
 )
+from tldw_Server_API.app.core.RAG.rag_service.types import (
+    ClaimType,
+    Document,
+    MatchLevel,
+    SourceAuthority,
+    VerificationStatus,
+)
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -97,6 +101,24 @@ _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
+CLAIMS_PROVIDER_CALL_TIMEOUT_SECONDS = 60.0
+
+
+async def _run_bounded_claims_analyze(
+    analyze_fn: ClaimsAnalyzeCallable,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Run one remote claims adapter with shared capacity and one deadline."""
+    return await await_bounded_daemon_with_timeout(
+        partial(analyze_fn, *args, **kwargs),
+        pool=SYNC_ADAPTER_CALL_POOL,
+        name="claims-provider-analyze",
+        timeout_seconds=CLAIMS_PROVIDER_CALL_TIMEOUT_SECONDS,
+        timeout_message="Claims provider call timed out",
+        drain_after_timeout=True,
+    )
+
 
 # --------------------------- Data Models ---------------------------
 
@@ -108,6 +130,7 @@ class Claim:
     span: tuple[int, int] | None = None
     claim_type: ClaimType = ClaimType.GENERAL
     extracted_values: dict[str, Any] = field(default_factory=dict)
+    requires_semantic_verification: bool = False
 
 
 @dataclass
@@ -445,7 +468,7 @@ def determine_verification_status(
         return VerificationStatus.UNVERIFIED, 0.0, "No evidence available"
 
     # Quote verification
-    if claim.claim_type == ClaimType.QUOTE:
+    if claim.claim_type == ClaimType.QUOTE and not claim.requires_semantic_verification:
         if quote_match is True:
             return VerificationStatus.VERIFIED, 0.95, "Quote matches source"
         elif quote_match is False:
@@ -485,6 +508,8 @@ def determine_verification_status(
     max_score = max((e.score for e in evidence_snippets), default=0.0)
     max_authority = max((e.authority.value for e in evidence_snippets), default=1)
 
+    if claim.requires_semantic_verification:
+        return VerificationStatus.UNVERIFIED, nli_confidence, "The question and answer require semantic evidence support"
     if max_score >= 0.8 and max_authority >= 3:
         return VerificationStatus.VERIFIED, max_score, "High-quality evidence from authoritative source"
     elif max_score >= 0.6:
@@ -809,7 +834,7 @@ class LLMBasedClaimExtractor:
                 return await HeuristicSentenceExtractor().extract(answer, max_claims)
         try:
             start_time = time.time()
-            raw = await asyncio.to_thread(
+            raw = await _run_bounded_claims_analyze(
                 self._analyze,
                 provider or "openai",
                 answer,
@@ -1174,7 +1199,7 @@ class HybridClaimVerifier:
                 )
         try:
             start_time = time.time()
-            raw = await asyncio.to_thread(
+            raw = await _run_bounded_claims_analyze(
                 self._analyze,
                 provider or "openai",
                 claim_text,
@@ -1458,7 +1483,8 @@ class ClaimsEngine:
                     "model_override": model_override,
                 },
             )
-            prop_chunks = strategy.chunk(
+            prop_chunks = await _run_bounded_claims_analyze(
+                strategy.chunk,
                 text=answer,
                 max_size=1,
                 overlap=0,

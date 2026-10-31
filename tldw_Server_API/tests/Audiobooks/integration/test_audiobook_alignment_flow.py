@@ -1,16 +1,18 @@
 import base64
+import copy
 import json
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
+from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import get_usage_event_logger
 from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
 from tldw_Server_API.app.api.v1.endpoints.audio.audiobooks import router as audiobooks_router
-from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import get_usage_event_logger
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 pytestmark = pytest.mark.integration
 
@@ -22,6 +24,14 @@ class _NullUsageLogger:
 
 @pytest.fixture()
 def client_audio_audiobooks():
+    """Build a standalone audio app with a healthy empty override snapshot."""
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original_overrides = copy.deepcopy(llm_provider_overrides._OVERRIDE_CACHE)
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_enabled = (
+            not llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
     app = FastAPI()
     app.include_router(audio_endpoints.router, prefix="/api/v1/audio")
     app.include_router(audiobooks_router, prefix="/api/v1")
@@ -44,6 +54,11 @@ def client_audio_audiobooks():
             yield client
     finally:
         app.dependency_overrides.clear()
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original_overrides,
+            healthy=original_healthy,
+            ttl_enabled=original_ttl_enabled,
+        )
 
 
 def test_audio_speech_alignment_to_subtitles(client_audio_audiobooks):

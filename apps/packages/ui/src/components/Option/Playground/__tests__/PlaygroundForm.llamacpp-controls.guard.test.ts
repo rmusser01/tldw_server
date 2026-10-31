@@ -1,21 +1,77 @@
-import fs from "node:fs"
-import path from "node:path"
-import { describe, expect, it } from "vitest"
+// @vitest-environment jsdom
+import { act, renderHook } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import {
+  usePlaygroundRawPreview,
+  type UsePlaygroundRawPreviewDeps
+} from "../hooks/usePlaygroundRawPreview"
+
+vi.mock("@/utils/resolve-api-provider", () => ({
+  resolveApiProviderForModel: vi.fn(async () => "llama.cpp")
+}))
 
 describe("PlaygroundForm llama.cpp controls guard", () => {
-  it("keeps first-class llama.cpp fields in the preview request payload", () => {
-    const formSourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
-    const formSource = fs.readFileSync(formSourcePath, "utf8")
+  it.each(["library", "inline", "none"])(
+    "keeps first-class llama.cpp fields in the %s preview request payload",
+    async (grammarMode) => {
+      const deps: UsePlaygroundRawPreviewDeps = {
+        composerModels: [{ id: "llama.cpp:local", capabilities: [] }],
+        selectedModel: "llama.cpp:local",
+        compareModeActive: false,
+        compareSelectedModels: [],
+        compareMaxModels: 4,
+        currentChatModelSettings: {
+          apiProvider: "llama.cpp",
+          llamaThinkingBudgetTokens: 256,
+          llamaGrammarMode: grammarMode,
+          llamaGrammarId: "json-grammar",
+          llamaGrammarInline: 'root ::= "yes" | "no"',
+          llamaGrammarOverride: 'root ::= "confirmed"'
+        },
+        history: [],
+        systemPrompt: undefined,
+        hasMcp: false,
+        mcpHealthState: "unavailable",
+        mcpTools: [],
+        toolChoice: "auto",
+        temporaryChat: true,
+        serverChatId: null,
+        serverChatState: null,
+        serverChatSource: null,
+        selectedCharacter: null,
+        messageSteeringMode: "none",
+        messageSteeringForceNarrate: false,
+        ragMediaIds: null,
+        selectedKnowledge: null,
+        contextFiles: [],
+        documentContext: [],
+        selectedDocuments: [],
+        imageBackendDefaultTrimmed: "",
+        resolveSubmissionIntent: (message) => ({ message, isImageCommand: false }),
+        formImage: "",
+        formMessage: "Answer yes or no",
+        notificationApi: { error: vi.fn() },
+        t: (key, fallback) => typeof fallback === "string" ? fallback : key,
+        setToolsPopoverOpen: vi.fn()
+      }
+      const { result } = renderHook(() => usePlaygroundRawPreview(deps))
 
-    expect(formSource).toContain("thinking_budget_tokens:")
-    expect(formSource).toContain("grammar_mode:")
-    expect(formSource).toContain("grammar_id:")
-    expect(formSource).toContain("grammar_inline:")
-    expect(formSource).toContain("grammar_override:")
-    expect(formSource).toContain("currentChatModelSettings.llamaThinkingBudgetTokens")
-    expect(formSource).toContain("currentChatModelSettings.llamaGrammarMode")
-    expect(formSource).toContain("currentChatModelSettings.llamaGrammarId")
-    expect(formSource).toContain("currentChatModelSettings.llamaGrammarInline")
-    expect(formSource).toContain("currentChatModelSettings.llamaGrammarOverride")
-  })
+      await act(async () => {
+        await result.current.refreshRawRequestSnapshot()
+      })
+
+      expect(result.current.rawRequestSnapshot).toEqual(expect.objectContaining({
+        endpoint: "/api/v1/chat/completions",
+        body: expect.objectContaining({
+          api_provider: "llama.cpp",
+          thinking_budget_tokens: 256,
+          grammar_mode: grammarMode,
+          grammar_id: "json-grammar",
+          grammar_inline: 'root ::= "yes" | "no"',
+          grammar_override: 'root ::= "confirmed"'
+        })
+      }))
+      expect(deps.notificationApi.error).not.toHaveBeenCalled()
+    }
+  )
 })

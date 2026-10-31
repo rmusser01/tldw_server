@@ -1,0 +1,116 @@
+"""Transaction diagnostics must preserve the failure and rollback decision."""
+
+import sqlite3
+
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def transaction_db(request, tmp_path):
+    backend = None
+    if request.param == "postgres":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    db = CharactersRAGDB(tmp_path / "transactions.db", client_id="2", backend=backend)
+    try:
+        yield db
+    finally:
+        db._get_thread_connection().rollback()
+        db.close_all_connections()
+        if backend is not None:
+            backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("message", ["ordinary failure", "synthetic {missing_key} failure"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_error_text_preserves_original_exception_and_real_rollback(transaction_db, message, nested):
+    db = transaction_db
+    failure = ValueError(message)
+    with pytest.raises(ValueError) as caught:
+        with db.transaction():
+            db.add_keyword("Must roll back")
+            if nested:
+                with db.transaction():
+                    db.add_keyword("Nested must roll back")
+                    raise failure
+            raise failure
+    assert caught.value is failure
+    connection = db._get_thread_connection()
+    if db.backend_type.value == "sqlite":
+        assert not connection.in_transaction
+    else:
+        assert connection.info.transaction_status.name == "IDLE"
+    assert db.get_keyword_by_text("Must roll back") is None
+    assert db.get_keyword_by_text("Nested must roll back") is None
+
+
+class _FailureConnection:
+    """Inject driver failure at commit/rollback while retaining the real writes."""
+
+    def __init__(self, connection, *, commit_error=None, rollback_error=None):
+        self.connection = connection
+        self.commit_error = commit_error
+        self.rollback_error = rollback_error
+        self.commit_calls = 0
+        self.rollback_calls = 0
+
+    def commit(self):
+        self.commit_calls += 1
+        if self.commit_error is not None:
+            raise self.commit_error
+        self.connection.commit()
+
+    def rollback(self):
+        self.rollback_calls += 1
+        if self.rollback_error is not None:
+            raise self.rollback_error
+        self.connection.rollback()
+
+
+@pytest.mark.parametrize("transaction_db", ["sqlite"], indirect=True)
+@pytest.mark.parametrize("rollback_fails", [False, True])
+@pytest.mark.parametrize("commit_message", ["ordinary commit failure", "commit {missing_key} failure"])
+def test_commit_failure_keeps_original_cause_and_attempts_rollback(transaction_db, rollback_fails, commit_message):
+    db = transaction_db
+    manager = db.transaction()
+    failure = sqlite3.OperationalError(commit_message)
+    rollback_failure = sqlite3.OperationalError("rollback {other_key} failure") if rollback_fails else None
+    with pytest.raises(CharactersRAGDBError) as caught:
+        with manager:
+            db.add_keyword("Commit failure pending")
+            proxy = _FailureConnection(manager.conn, commit_error=failure, rollback_error=rollback_failure)
+            manager.conn = proxy
+    assert caught.value.__cause__ is failure
+    assert proxy.commit_calls == 1 and proxy.rollback_calls == 1
+    assert proxy.connection.in_transaction is rollback_fails
+    proxy.connection.rollback()
+    assert db.get_keyword_by_text("Commit failure pending") is None
+
+
+@pytest.mark.parametrize("transaction_db", ["sqlite"], indirect=True)
+def test_rollback_failure_diagnostic_does_not_replace_original_error(transaction_db):
+    db = transaction_db
+    manager = db.transaction()
+    failure = ValueError("ordinary triggering error")
+    with pytest.raises(ValueError) as caught:
+        with manager:
+            db.add_keyword("Rollback failure pending")
+            proxy = _FailureConnection(manager.conn, rollback_error=sqlite3.OperationalError("rollback {missing_key}"))
+            manager.conn = proxy
+            raise failure
+    assert caught.value is failure
+    assert proxy.rollback_calls == 1
+    assert proxy.connection.in_transaction
+    proxy.connection.rollback()
+    assert db.get_keyword_by_text("Rollback failure pending") is None
+
+
+def test_successful_transaction_still_commits(transaction_db):
+    db = transaction_db
+    with db.transaction():
+        db.add_keyword("Successful committed keyword")
+    assert db.get_keyword_by_text("Successful committed keyword") is not None

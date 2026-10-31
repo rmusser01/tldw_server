@@ -2,15 +2,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.schemas.ocr_schemas import OCRBackendsResponse
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry import (
     list_backends as _list_backends,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
 
-router = APIRouter(prefix="/ocr", tags=["ocr"])
+# Applied at the router rather than per route: both routes need it, and a
+# route added here later inherits it instead of being public by omission.
+# /points/preload loads a transformers model into the server's memory and
+# /backends reports backend health, so neither should answer anonymously.
+router = APIRouter(
+    prefix="/ocr",
+    tags=["ocr"],
+    dependencies=[Depends(get_request_user), Depends(check_rate_limit)],
+)
 
 _OCR_NONCRITICAL_EXCEPTIONS = (
     AttributeError,

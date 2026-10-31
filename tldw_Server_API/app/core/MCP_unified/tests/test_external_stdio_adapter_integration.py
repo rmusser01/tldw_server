@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
 from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import (
     ExternalMCPServerConfig,
     ExternalStdioConfig,
@@ -15,11 +16,12 @@ from tldw_Server_API.app.core.MCP_unified.external_servers.transports.stdio_adap
     StdioExternalMCPAdapter,
 )
 
-
 _STUB_SERVER_SCRIPT = """\
 import json
 import sys
 import time
+
+time.sleep(float(sys.argv[1]))
 
 
 def _send(payload):
@@ -185,14 +187,17 @@ def _write_stub_server(tmp_path: Path) -> str:
 
 
 @pytest.mark.asyncio
-async def test_stdio_adapter_subprocess_roundtrip_error_and_timeout(tmp_path: Path) -> None:
+@pytest.mark.parametrize("startup_delay", [0.0, 0.2], ids=["immediate-start", "delayed-start"])
+async def test_stdio_adapter_subprocess_roundtrip_error_and_timeout(
+    tmp_path: Path, startup_delay: float
+) -> None:
     script_path = _write_stub_server(tmp_path)
     cfg = ExternalMCPServerConfig(
         id="docs",
         name="Docs",
         transport=ExternalTransportType.STDIO,
-        stdio=ExternalStdioConfig(command=sys.executable, args=["-u", script_path]),
-        timeouts=ExternalTimeoutConfig(connect_seconds=1.0, request_seconds=0.1),
+        stdio=ExternalStdioConfig(command=sys.executable, args=["-u", script_path, str(startup_delay)]),
+        timeouts=ExternalTimeoutConfig(connect_seconds=1.0, request_seconds=5.0),
     )
     adapter = StdioExternalMCPAdapter(cfg)
 
@@ -229,7 +234,7 @@ async def test_stdio_adapter_subprocess_roundtrip_error_and_timeout(tmp_path: Pa
         resource = await adapter.read_resource("resource://docs/readme")
         assert resource["contents"][0]["text"] == "# Docs"
 
-        with pytest.raises(Exception):
+        with pytest.raises(ACPResponseError, match="unknown resource"):
             await adapter.read_resource("resource://docs/missing")
 
         ok = await adapter.call_tool("docs.search", {"q": "hello"})
@@ -241,6 +246,7 @@ async def test_stdio_adapter_subprocess_roundtrip_error_and_timeout(tmp_path: Pa
         assert isinstance(err.content, list)
         assert err.content[0]["text"] == "upstream failed"
 
+        cfg.timeouts.request_seconds = 0.1
         with pytest.raises(TimeoutError, match="tools/call"):
             await adapter.call_tool("docs.slow", {})
     finally:

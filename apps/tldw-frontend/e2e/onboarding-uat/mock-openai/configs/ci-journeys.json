@@ -1,0 +1,151 @@
+{
+  "response_base_dir": "../responses",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 0,
+    "cors_origins": [
+      "*"
+    ],
+    "log_requests": true,
+    "simulate_errors": false,
+    "error_rate": 0,
+    "require_auth": true
+  },
+  "streaming": {
+    "enabled": true,
+    "chunk_delay_ms": 5,
+    "words_per_chunk": 6
+  },
+  "models": [
+    {
+      "id": "gpt-4.1-mini",
+      "object": "model",
+      "owned_by": "ci-controlled-downstream"
+    }
+  ],
+  "responses": {
+    "chat_completions": {
+      "patterns": [
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
+            "system_prompt": "You are a query reformulation assistant.",
+            "content_regex": "\\n\\nFollow-up question: What\\ is\\ the\\ ticket\\ price\\ at\\ Rowan\\ Observatory\\?\\ Use\\ only\\ the\\ source;\\ state\\ when\\ it\\ does\\ not\\ provide\\ the\\ answer\\.\\n\\nStandalone reformulation:\\Z"
+          },
+          "response_file": "chat/ci-rowan-price-rewrite.json",
+          "priority": 70
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
+            "system_prompt": "You are E2E-TestBot. Always respond with exactly: BEEP BOOP.",
+            "content_regex": "\\AHello, who are you\\?\\Z"
+          },
+          "response_file": "chat/ci-testbot.json",
+          "priority": 60
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
+            "messages": [
+              {
+                "role": "system",
+                "content": "You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.",
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              },
+              {
+                "role": "user",
+                "content": "Tell me about the weather today.",
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            ]
+          },
+          "response_file": "chat/ci-pirate-weather.json",
+          "priority": 60
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
+            "messages": [
+              {
+                "role": "system",
+                "content": "You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.",
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Tell me about the weather today."
+                  }
+                ],
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            ]
+          },
+          "response_file": "chat/ci-pirate-weather.json",
+          "priority": 60
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
+            "system_prompt": "You are a precise fact-checking judge. Output strict JSON only.",
+            "content_regex": "\\n\\nCLAIM: (?:Question\\: What is the powerhouse of the cell\\?\nAnswer\\: The mitochondria\\.|Question\\: What does DNA stand for\\?\nAnswer\\: Deoxyribonucleic acid\\.|Question\\: What does photosynthesis convert light energy into\\?\nAnswer\\: Chemical energy\\.|Question\\: How many bones does the human body have\\?\nAnswer\\: 206 bones\\.|Question\\: At what temperature does water boil at sea level\\?\nAnswer\\: 100 degrees Celsius\\.)\\n\\nEVIDENCE:\\n\\[doc:flashcards-source\\] The mitochondria is the powerhouse of the cell\\.\n\nDNA stands for deoxyribonucleic acid\\.\n\nPhotosynthesis converts light energy into chemical energy\\.\n\nThe human body has 206 bones\\.\n\nWater boils at 100 degrees Celsius at sea level\\.\\Z"
+          },
+          "response_file": "chat/ci-biology-supported.json",
+          "priority": 50
+        },
+        {
+          "match": {
+            "system_prompt": "Generate 5 flashcards",
+            "content_regex": "DNA stands for deoxyribonucleic acid"
+          },
+          "response_file": "chat/ci-biology-cards.json",
+          "priority": 40
+        },
+        {
+          "match": {
+            "content_regex": "(?s)(?=.*Rowan Observatory)(?=.*What is the ticket price at Rowan Observatory)"
+          },
+          "response_file": "chat/ci-rowan-price.json",
+          "priority": 30
+        },
+        {
+          "match": {
+            "content_regex": "(?s)(?=.*Rowan Observatory)(?=.*Mira Vale)(?=.*Cedar Ridge)(?=.*18:00)"
+          },
+          "response_file": "chat/ci-rowan-facts.json",
+          "priority": 20
+        }
+      ],
+      "default": "chat/default.json"
+    },
+    "embeddings": {
+      "default": "embeddings/default.json"
+    }
+  },
+  "scenario_failures": {
+    "chat_completions": [
+      {
+        "match": {
+          "model": "gpt-4.1-mini",
+          "content_regex": "^Trigger the real provider configuration failure\\.$"
+        },
+        "status_code": 401,
+        "message": "CI controlled provider rejected credentials for the configuration-recovery scenario",
+        "type": "authentication_error",
+        "code": "invalid_api_key",
+        "times": -1
+      }
+    ]
+  }
+}

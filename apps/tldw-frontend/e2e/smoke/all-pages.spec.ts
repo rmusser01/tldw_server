@@ -82,8 +82,8 @@ const NON_CORE_ROUTE_BOUNDARY_TARGETS = [
   {
     name: 'Kanban Playground',
     path: '/kanban',
-    routeId: 'kanban-playground',
-    routeLabel: 'Kanban Playground',
+    routeId: 'kanban',
+    routeLabel: 'Kanban',
   },
   {
     name: 'Chunking Playground',
@@ -416,6 +416,23 @@ test.describe('Smoke Tests - All Pages', () => {
     expect(allowlistProblems).toContain(
       'invalid-calendar-expiry: expiresOn must be a valid YYYY-MM-DD date'
     );
+  });
+
+  test('hard-gate allowlist expires immediately after its UTC expiry day', () => {
+    const baseRule = SMOKE_HARD_GATE_ALLOWLIST[0];
+    expect(baseRule).toBeDefined();
+    const rule = {
+      ...baseRule!,
+      id: 'utc-expiry-boundary',
+      expiresOn: '2026-09-30',
+    };
+
+    expect(
+      validateSmokeHardGateAllowlist([rule], new Date('2026-09-30T23:59:59.999Z'))
+    ).toEqual([]);
+    expect(
+      validateSmokeHardGateAllowlist([rule], new Date('2026-10-01T00:00:00.000Z'))
+    ).toEqual(['utc-expiry-boundary: expired on 2026-09-30']);
   });
 
   // Generate a test for each active page
@@ -810,6 +827,36 @@ test.describe('Smoke Tests - Route Error Boundaries', () => {
       await expect(page.getByTestId('route-error-open-settings')).toBeVisible();
       await expect(page.getByTestId('route-error-reload')).toBeVisible();
       await expect(page.getByTestId('route-error-route-label')).toHaveText(target.routeLabel);
+
+      if (target.path === '/kanban') {
+        await page.evaluate(async (path) => {
+          const nextRouter = (
+            window as typeof window & {
+              next?: {
+                router?: {
+                  replace: (
+                    url: string,
+                    as?: string,
+                    options?: { shallow?: boolean }
+                  ) => Promise<boolean>;
+                };
+              };
+            }
+          ).next?.router;
+
+          if (!nextRouter) {
+            throw new Error('Next router is unavailable for route-boundary recovery');
+          }
+
+          await nextRouter.replace(path, undefined, { shallow: true });
+        }, target.path);
+        await page.keyboard.press('Escape');
+        await page.getByTestId('route-error-retry').click();
+        await expect(page.getByTestId('error-boundary')).toBeHidden();
+        await expect(
+          page.getByRole('heading', { name: 'Kanban Playground' })
+        ).toBeVisible();
+      }
 
       const issues = getCriticalIssues(diagnostics);
       const classifiedIssues = classifySmokeIssues(target.path, issues);

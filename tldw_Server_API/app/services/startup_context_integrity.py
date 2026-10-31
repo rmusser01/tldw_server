@@ -161,6 +161,25 @@ def _normalize_context_integrity_mode(mode: str) -> ContextIntegrityMode:
     return cast(ContextIntegrityMode, normalized)
 
 
+def _resolve_context_integrity_mode(mode: str | None) -> ContextIntegrityMode:
+    """Resolve an explicit mode or the deployment setting, defaulting safely."""
+    if mode is not None:
+        return _normalize_context_integrity_mode(mode)
+
+    configured_mode = os.getenv("CONTEXT_INTEGRITY_MODE")
+    if configured_mode is None:
+        return "enforce"
+
+    try:
+        return _normalize_context_integrity_mode(configured_mode)
+    except ValueError as exc:
+        raise ValueError(
+            "Invalid CONTEXT_INTEGRITY_MODE deployment setting: "
+            f"{configured_mode!r}. Expected one of "
+            f"{sorted(_SUPPORTED_CONTEXT_INTEGRITY_MODES)}."
+        ) from exc
+
+
 def _resolve_candidate_like_database_paths(
     raw_path: str | Path | None,
     *,
@@ -302,10 +321,10 @@ def produce_context_integrity_startup_warnings(
     manifest_loaded: bool | None = None,
     manifest_sequence: int | None = None,
     manifest_digest: str | None = None,
-    mode: str = "enforce",
+    mode: str | None = None,
 ) -> tuple[ContextIntegrityFinding, ...]:
     """Build inventory, verify approved state, attach resolver, and emit warnings."""
-    normalized_mode = _normalize_context_integrity_mode(mode)
+    normalized_mode = _resolve_context_integrity_mode(mode)
     current_assets: list[ContextAssetDescriptor] = []
     findings_list: list[ContextIntegrityFinding] = []
     resolved_prompts_dir = prompts_dir or resolve_prompts_dir()

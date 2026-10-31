@@ -1,3 +1,4 @@
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   listDecks,
@@ -33,9 +34,11 @@ import {
   exportFlashcardsFile,
   getFlashcardsImportLimits,
   type Deck,
+  type FlashcardsRequestOptions,
   type DeckCreateInput,
   type DeckUpdate,
   type Flashcard,
+  type FlashcardReviewContext,
   type FlashcardTemplateCreate,
   type FlashcardTemplateUpdate,
   type StudyAssistantContextResponse,
@@ -91,6 +94,18 @@ const invalidateFlashcardsQueries = (qc: ReturnType<typeof useQueryClient>) =>
       typeof query.queryKey[0] === "string" &&
       query.queryKey[0].startsWith("flashcards:")
   })
+
+const reportFlashcardMutationError = (message: string, error: unknown) => {
+  if (error instanceof Error && "status" in error &&
+    typeof error.status === "number" && Number.isInteger(error.status) &&
+    error.status >= 400 && error.status <= 599) {
+    // HTTP failures are recoverable by the Flashcards UI. Next's Pages Router turns
+    // console.error(message, Error) into a blocking runtime overlay.
+    console.warn(message, error)
+    return
+  }
+  console.error(message, error)
+}
 
 const getListTotal = (res: { total?: number | null; count?: number }) => (res.total ?? res.count ?? 0)
 const STUDY_ASSISTANT_ACTIONS = ["explain", "mnemonic", "follow_up", "fact_check", "freeform"] as const
@@ -168,15 +183,28 @@ async function fetchDueCounts(
 /**
  * Hook for fetching flashcard decks
  */
-export function useDecksQuery(options?: UseFlashcardQueriesOptions) {
+export function useDecksQuery(options?: UseFlashcardQueriesOptions & { scope?: ServicePromptSnapshot | null }) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
   const visibilityParams = buildWorkspaceVisibilityParams(options)
 
-  return useQuery({
-    queryKey: ["flashcards:decks", visibilityParams],
-    queryFn: () => listDecks(visibilityParams),
-    enabled: options?.enabled ?? flashcardsEnabled
+  const scoped = options?.scope !== undefined
+  const scope = options?.scope
+  const current = !scoped || Boolean(scope && !scope.scopeSignal.aborted)
+  const query = useQuery<Deck[]>({
+    queryKey: scoped ? ["flashcards:decks:scoped", scope?.scopeKey ?? null, visibilityParams] : ["flashcards:decks", visibilityParams],
+    queryFn: async ({ signal }) => {
+      if (!scoped) return listDecks(visibilityParams)
+      if (!scope) throw new DOMException("The deck account is unresolved.", "AbortError")
+      const combinedSignal = AbortSignal.any([signal, scope.scopeSignal])
+      combinedSignal.throwIfAborted()
+      const decks = await listDecks(visibilityParams, { requestScope: scope.requestScope, signal: combinedSignal })
+      combinedSignal.throwIfAborted()
+      return decks
+    },
+    enabled: current && (options?.enabled ?? flashcardsEnabled)
   })
+  const data: Deck[] | undefined = current ? query.data : undefined
+  return { ...query, data, isSuccess: current && query.isSuccess }
 }
 
 /**
@@ -321,8 +349,10 @@ export function useEndFlashcardReviewSessionMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:review-sessions:end"],
-    mutationFn: (reviewSessionId: number) => endFlashcardReviewSession(reviewSessionId),
-    onSuccess: async () => {
+    mutationFn: (params: number | { reviewSessionId: number; options?: FlashcardsRequestOptions }) =>
+      typeof params === "number" ? endFlashcardReviewSession(params) : endFlashcardReviewSession(params.reviewSessionId, params.options),
+    onSuccess: async (_result, params) => {
+      if (typeof params !== "number" && params.options?.signal?.aborted) return
       await invalidateFlashcardsQueries(queryClient)
     }
   })
@@ -369,6 +399,7 @@ export function useCramQueueQuery(
           deck_id: deckId ?? undefined,
           tag: tag || undefined,
           due_status: "all",
+          include_scheduler_preview: true,
           order_by: "due_at",
           limit,
           offset,
@@ -681,12 +712,13 @@ export function useCreateFlashcardMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:create"],
-    mutationFn: (payload: FlashcardCreate) => createFlashcard(payload),
+    mutationFn: ({ requestOptions, ...payload }: FlashcardCreate & { requestOptions?: FlashcardsRequestOptions }) =>
+      createFlashcard(payload, requestOptions),
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },
     onError: (error) => {
-      console.error("Failed to create flashcard:", error)
+      reportFlashcardMutationError("Failed to create flashcard:", error)
     }
   })
 }
@@ -699,7 +731,8 @@ export function useCreateFlashcardsBulkMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:create:bulk"],
-    mutationFn: (payload: FlashcardCreate[]) => createFlashcardsBulk(payload),
+    mutationFn: (payload: FlashcardCreate[] | { cards: FlashcardCreate[]; requestOptions?: FlashcardsRequestOptions }) =>
+      Array.isArray(payload) ? createFlashcardsBulk(payload) : createFlashcardsBulk(payload.cards, payload.requestOptions),
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },
@@ -724,6 +757,7 @@ export function useCreateDeckMutation() {
       review_prompt_side?: Deck["review_prompt_side"]
       scheduler_type?: Deck["scheduler_type"]
       scheduler_settings?: Deck["scheduler_settings"]
+      requestOptions?: FlashcardsRequestOptions
     }) => {
       const input: DeckCreateInput = {
         name: params.name.trim()
@@ -744,13 +778,13 @@ export function useCreateDeckMutation() {
       if (params.scheduler_settings !== undefined) {
         input.scheduler_settings = params.scheduler_settings
       }
-      return createDeck(input)
+      return createDeck(input, params.requestOptions)
     },
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },
     onError: (error) => {
-      console.error("Failed to create deck:", error)
+      reportFlashcardMutationError("Failed to create deck:", error)
     }
   })
 }
@@ -936,17 +970,21 @@ export function useReviewFlashcardMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:review"],
-    mutationFn: (params: { cardUuid: string; rating: number; answerTimeMs?: number }) =>
+    mutationFn: (params: { cardUuid: string; rating: number; answerTimeMs?: number; reviewContext?: FlashcardReviewContext; reviewSessionId?: number; options?: FlashcardsRequestOptions }) =>
       reviewFlashcard({
         card_uuid: params.cardUuid,
         rating: params.rating,
-        answer_time_ms: params.answerTimeMs
-      }),
-    onSuccess: () => {
+        answer_time_ms: params.answerTimeMs,
+        ...(params.reviewContext ? { review_context: params.reviewContext } : {}),
+        ...(params.reviewSessionId != null ? { review_session_id: params.reviewSessionId } : {})
+      }, params.options),
+    onSuccess: (_result, params) => {
+      if (params.options?.signal?.aborted) return
       invalidateFlashcardsQueries(qc)
     },
-    onError: (error) => {
-      console.error("Failed to submit flashcard review:", error)
+    onError: (error, params) => {
+      if (params.options?.signal?.aborted) return
+      reportFlashcardMutationError("Failed to submit flashcard review:", error)
     }
   })
 }
@@ -994,7 +1032,7 @@ export function useFlashcardAssistantRespondMutation() {
       )
     },
     onError: (error) => {
-      console.error("Failed to respond with flashcard assistant:", error)
+      reportFlashcardMutationError("Failed to respond with flashcard assistant:", error)
     }
   })
 }
@@ -1014,6 +1052,7 @@ export function useGenerateFlashcardsMutation() {
       focusTopics?: string[]
       provider?: string
       model?: string
+      requestOptions?: FlashcardsRequestOptions
     }) => {
       const hasCardPlan = Array.isArray(params.cardPlan) && params.cardPlan.length > 0
       return generateFlashcards({
@@ -1025,10 +1064,10 @@ export function useGenerateFlashcardsMutation() {
         focus_topics: params.focusTopics,
         provider: params.provider,
         model: params.model
-      })
+      }, params.requestOptions)
     },
     onError: (error) => {
-      console.error("Failed to generate flashcards:", error)
+      reportFlashcardMutationError("Failed to generate flashcards:", error)
     }
   })
 }

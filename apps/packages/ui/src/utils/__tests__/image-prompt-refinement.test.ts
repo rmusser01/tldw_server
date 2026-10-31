@@ -40,6 +40,39 @@ describe("image prompt refinement utilities", () => {
     expect(userContent).toContain("Mood (16%): focused and intense")
   })
 
+  it("replaces only the editable semantics while preserving locked request carriers", () => {
+    const messages = buildImagePromptRefineMessages({
+      originalPrompt: "Portrait of Lana in neon rain.",
+      strategyLabel: "Expression",
+      backend: "local-sd",
+      contextEntries: [
+        {
+          id: "character",
+          label: "Character",
+          text: "Lana Reed",
+          weight: 0.3,
+          quality: 0.9,
+          score: 0.27
+        }
+      ],
+      systemSemantics: "Custom refinement guidance.",
+      rewriteSemantics: "Custom rewrite guidance."
+    })
+
+    expect(messages[0].content).toBe(
+      "Custom refinement guidance. Output only the final refined prompt as plain text. Do not include markdown, labels, bullets, or commentary."
+    )
+    expect(messages[1].content).toBe(
+      "Prompt mode: Expression\n\nBackend: local-sd\n\nOriginal prompt:\nPortrait of Lana in neon rain.\n\n\n\nContext blend cues:\nCharacter (27%): Lana Reed\n\nCustom rewrite guidance."
+    )
+    expect(messages[0].content).not.toContain(
+      "Preserve intent while improving clarity"
+    )
+    expect(messages[1].content).not.toContain(
+      "Rewrite the prompt to be concise"
+    )
+  })
+
   it("extracts refined prompt text from fenced completion payloads", () => {
     const candidate = extractImagePromptRefineCandidate({
       choices: [

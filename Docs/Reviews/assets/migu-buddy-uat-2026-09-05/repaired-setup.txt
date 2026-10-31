@@ -1,0 +1,319 @@
+### Page
+- Page URL: http://127.0.0.1:18384/persona
+- Console: 0 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - generic [ref=e12]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - button "Expand sidebar" [ref=e16] [cursor=pointer]
+        - button "New Chat" [ref=e20] [cursor=pointer]
+        - generic [ref=e23]:
+          - button "Quick Ingest" [ref=e24] [cursor=pointer]
+          - button "Chat" [ref=e28] [cursor=pointer]
+          - button "Prompts" [ref=e31] [cursor=pointer]
+          - button "Characters" [ref=e35] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=e40] [cursor=pointer]
+          - button "World Books" [ref=e44] [cursor=pointer]
+          - button "Notes" [ref=e47] [cursor=pointer]
+          - button "Knowledge QA" [ref=e51] [cursor=pointer]
+          - button "Media" [ref=e59] [cursor=pointer]
+          - button "Document Workspace" [ref=e62] [cursor=pointer]
+          - button "Research Workspace" [ref=e68] [cursor=pointer]
+          - button "Kanban" [ref=e74] [cursor=pointer]
+          - button "Watchlists" [ref=e76] [cursor=pointer]
+        - generic [ref=e81]:
+          - button "Open Notes Dock" [ref=e82] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=e87] [cursor=pointer]
+          - button "Settings" [ref=e90] [cursor=pointer]
+      - main [ref=e94]:
+        - generic [ref=e95]:
+          - generic [ref=e98]:
+            - generic [ref=e99]:
+              - button "Expand sidebar" [ref=e100] [cursor=pointer]
+              - generic [ref=e102]:
+                - img "tldw Assistant" [ref=e103]
+                - generic [ref=e104]: tldw Assistant
+                - button "Companion Home" [ref=e105] [cursor=pointer]
+                - button "Show shortcuts" [ref=e109] [cursor=pointer]
+            - generic [ref=e112]:
+              - button "Search - Open command palette" [ref=e113] [cursor=pointer]:
+                - generic [ref=e117]: Search
+                - generic [ref=e118]: ⌘K
+              - button "Open settings" [ref=e119] [cursor=pointer]
+              - generic [ref=e131]:
+                - button "Notifications, 0 unread" [ref=e132] [cursor=pointer]
+                - status [ref=e136]: Notifications are active
+              - button "Switch to light theme" [ref=e137] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=e144] [cursor=pointer]:
+                - generic [ref=e145]: "?"
+          - generic [ref=e147]:
+            - generic [ref=e148]:
+              - generic [ref=e149]:
+                - button "Expand sidebar" [ref=e150] [cursor=pointer]
+                - button "Connected to your tldw server" [ref=e152] [cursor=pointer]
+                - generic [ref=e156]:
+                  - img "tldw Assistant" [ref=e157]
+                  - generic [ref=e158]: tldw Assistant
+                - generic "Persona Garden" [ref=e160]
+              - generic [ref=e162]:
+                - button "TTS clips" [ref=e163] [cursor=pointer]
+                - link "Open Persona Garden" [ref=e168] [cursor=pointer]:
+                  - /url: /persona
+                - button "Open dashboard" [ref=e172] [cursor=pointer]
+                - button "Open full chat in WebUI" [ref=e178] [cursor=pointer]
+                - generic [ref=e183]: Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context.
+                - link "Open settings" [ref=e184] [cursor=pointer]:
+                  - /url: /settings
+            - generic [ref=e280]:
+              - generic [ref=e281]:
+                - generic [ref=e282]:
+                  - generic [ref=e283]: Assistant Setup
+                  - generic [ref=e284]: Finish setup before using this persona in Persona Garden.
+                - button "Reset setup" [ref=e285] [cursor=pointer]
+              - generic [ref=e286]:
+                - generic [ref=e288]:
+                  - generic [ref=e289]: 1. Pick a starting point
+                  - generic [ref=e290]: pending
+                - generic [ref=e291]:
+                  - generic [ref=e292]:
+                    - generic [ref=e293]: 2. Choose persona
+                    - generic [ref=e294]: completed
+                  - generic [ref=e295]: Persona selected
+                - generic [ref=e296]:
+                  - generic [ref=e297]:
+                    - generic [ref=e298]: 3. Voice defaults
+                    - generic [ref=e299]: completed
+                  - generic [ref=e300]: Voice defaults saved
+                - generic [ref=e301]:
+                  - generic [ref=e302]:
+                    - generic [ref=e303]: 4. Starter commands
+                    - generic [ref=e304]: current
+                  - generic [ref=e434]: Pick starter commands
+                - generic [ref=e306]:
+                  - generic [ref=e307]: 5. Safety and connections
+                  - generic [ref=e308]: pending
+                - generic [ref=e310]:
+                  - generic [ref=e311]: 6. Test and finish
+                  - generic [ref=e312]: pending
+              - generic [ref=e313]: commands
+              - generic [ref=e314]: live
+              - generic [ref=e316]:
+                - generic [ref=e317]:
+                  - generic [ref=e318]:
+                    - generic [ref=e319]: Visual buddy
+                    - generic [ref=e320]: Migu UAT Repaired
+                    - generic [ref=e321]: Open the Buddy builder in Persona Garden to choose, import, review, and activate visuals.
+                  - generic [ref=e322]: optional
+                - button "Open Buddy builder" [ref=e323] [cursor=pointer]
+              - generic [ref=e435]:
+                - generic [ref=e436]:
+                  - generic [ref=e437]: Starter commands
+                  - generic [ref=e438]: Add a useful command now or continue explicitly without one.
+                - generic [ref=e439]:
+                  - button "Search Notes" [ref=e440] [cursor=pointer]:
+                    - generic [ref=e441]:
+                      - generic [ref=e442]: Search Notes
+                      - generic [ref=e443]: Find notes by spoken topic
+                  - button "Create Note" [ref=e444] [cursor=pointer]:
+                    - generic [ref=e445]:
+                      - generic [ref=e446]: Create Note
+                      - generic [ref=e447]: Save dictated notes quickly
+                  - button "Search Library" [ref=e448] [cursor=pointer]:
+                    - generic [ref=e449]:
+                      - generic [ref=e450]: Search Library
+                      - generic [ref=e451]: Search ingested media by phrase
+                - generic [ref=e452]:
+                  - generic [ref=e453]: Add MCP starter
+                  - generic [ref=e454]:
+                    - generic [ref=e455]:
+                      - text: Module
+                      - combobox "Module" [ref=e456]:
+                        - option "All modules" [selected]
+                        - option "cooking"
+                        - option "docs"
+                        - option "flashcards"
+                        - option "governance"
+                        - option "kanban"
+                        - option "knowledge"
+                        - option "mcp_discovery"
+                        - option "media"
+                        - option "notes"
+                        - option "prompts"
+                        - option "quizzes"
+                        - option "rag"
+                        - option "skills"
+                        - option "slides"
+                        - option "template"
+                    - generic [ref=e457]:
+                      - text: Tool name
+                      - combobox "Tool name" [ref=e458]:
+                        - option "Select a tool" [selected]
+                        - option "cooking.recipe_card.render"
+                        - option "delete_media"
+                        - option "docs.collections.create"
+                        - option "docs.collections.list"
+                        - option "docs.collections.set_membership"
+                        - option "docs.collections.update"
+                        - option "docs.context"
+                        - option "docs.get"
+                        - option "docs.import_path"
+                        - option "docs.keywords.apply"
+                        - option "docs.keywords.list"
+                        - option "docs.list"
+                        - option "docs.resolve"
+                        - option "docs.search"
+                        - option "docs.status"
+                        - option "docs.sync_source"
+                        - option "echo"
+                        - option "flashcards.create"
+                        - option "flashcards.create_bulk"
+                        - option "flashcards.decks.create"
+                        - option "flashcards.decks.get"
+                        - option "flashcards.decks.list"
+                        - option "flashcards.delete"
+                        - option "flashcards.export"
+                        - option "flashcards.get"
+                        - option "flashcards.list"
+                        - option "flashcards.review"
+                        - option "flashcards.tags.get"
+                        - option "flashcards.tags.set"
+                        - option "flashcards.update"
+                        - option "get_media_metadata"
+                        - option "get_transcript"
+                        - option "get-library-docs"
+                        - option "governance.query_knowledge"
+                        - option "governance.resolve_gap"
+                        - option "governance.validate_change"
+                        - option "ingest_media"
+                        - option "kanban.boards.create"
+                        - option "kanban.boards.get"
+                        - option "kanban.boards.list"
+                        - option "kanban.cards.create"
+                        - option "kanban.cards.list"
+                        - option "kanban.cards.move"
+                        - option "kanban.cards.search"
+                        - option "kanban.checklists.create"
+                        - option "kanban.checklists.delete"
+                        - option "kanban.checklists.items.create"
+                        - option "kanban.checklists.items.delete"
+                        - option "kanban.checklists.items.list"
+                        - option "kanban.checklists.items.update"
+                        - option "kanban.checklists.list"
+                        - option "kanban.checklists.update"
+                        - option "kanban.comments.create"
+                        - option "kanban.comments.delete"
+                        - option "kanban.comments.list"
+                        - option "kanban.comments.update"
+                        - option "kanban.labels.assign"
+                        - option "kanban.labels.create"
+                        - option "kanban.labels.delete"
+                        - option "kanban.labels.list"
+                        - option "kanban.labels.list_for_card"
+                        - option "kanban.labels.remove"
+                        - option "kanban.labels.update"
+                        - option "kanban.lists.create"
+                        - option "kanban.lists.list"
+                        - option "kanban.workflow.control.drain"
+                        - option "kanban.workflow.control.pause"
+                        - option "kanban.workflow.control.resume"
+                        - option "kanban.workflow.policy.get"
+                        - option "kanban.workflow.policy.upsert"
+                        - option "kanban.workflow.recovery.force_reassign"
+                        - option "kanban.workflow.recovery.list_stale_claims"
+                        - option "kanban.workflow.statuses.list"
+                        - option "kanban.workflow.task.approval.decide"
+                        - option "kanban.workflow.task.claim"
+                        - option "kanban.workflow.task.events.list"
+                        - option "kanban.workflow.task.release"
+                        - option "kanban.workflow.task.state.get"
+                        - option "kanban.workflow.task.state.patch"
+                        - option "kanban.workflow.task.transition"
+                        - option "kanban.workflow.transitions.list"
+                        - option "knowledge.get"
+                        - option "knowledge.search"
+                        - option "mcp.catalogs.list"
+                        - option "mcp.modules.list"
+                        - option "mcp.tools.list"
+                        - option "media.get"
+                        - option "media.search"
+                        - option "notes.create"
+                        - option "notes.delete"
+                        - option "notes.get"
+                        - option "notes.search"
+                        - option "notes.tags.add"
+                        - option "notes.tags.list"
+                        - option "notes.tags.remove"
+                        - option "notes.tags.set"
+                        - option "notes.tasks.create"
+                        - option "notes.tasks.delete"
+                        - option "notes.tasks.get"
+                        - option "notes.tasks.list"
+                        - option "notes.tasks.reconcile_note"
+                        - option "notes.tasks.set_status"
+                        - option "notes.tasks.update"
+                        - option "notes.update"
+                        - option "prompts.get"
+                        - option "prompts.search"
+                        - option "quizzes.attempts.get"
+                        - option "quizzes.attempts.list"
+                        - option "quizzes.attempts.start"
+                        - option "quizzes.attempts.submit"
+                        - option "quizzes.create"
+                        - option "quizzes.delete"
+                        - option "quizzes.generate"
+                        - option "quizzes.get"
+                        - option "quizzes.list"
+                        - option "quizzes.questions.create"
+                        - option "quizzes.questions.delete"
+                        - option "quizzes.questions.list"
+                        - option "quizzes.questions.update"
+                        - option "quizzes.update"
+                        - option "rag.answer"
+                        - option "rag.capabilities"
+                        - option "rag.search"
+                        - option "rag.source_health"
+                        - option "resolve-library-id"
+                        - option "search_media"
+                        - option "skills.get"
+                        - option "skills.list"
+                        - option "skills.render"
+                        - option "slides.export"
+                        - option "slides.generate.from_chat"
+                        - option "slides.generate.from_media"
+                        - option "slides.generate.from_notes"
+                        - option "slides.generate.from_prompt"
+                        - option "slides.generate.from_rag"
+                        - option "slides.presentations.create"
+                        - option "slides.presentations.delete"
+                        - option "slides.presentations.get"
+                        - option "slides.presentations.list"
+                        - option "slides.presentations.patch"
+                        - option "slides.presentations.reorder"
+                        - option "slides.presentations.restore"
+                        - option "slides.presentations.search"
+                        - option "slides.presentations.update"
+                        - option "slides.templates.get"
+                        - option "slides.templates.list"
+                        - option "slides.versions.get"
+                        - option "slides.versions.list"
+                        - option "slides.versions.restore"
+                        - option "update_media"
+                    - generic [ref=e459]:
+                      - generic [ref=e460]: Need a tool that is not listed yet?
+                      - button "Enter manually" [ref=e461] [cursor=pointer]
+                  - textbox "MCP starter phrase" [ref=e462]:
+                    - /placeholder: Phrase users can say
+                  - button "Add MCP starter" [disabled] [ref=e463]
+                - button "Continue without starter commands" [ref=e464] [cursor=pointer]
+    - generic [ref=e264]:
+      - generic [ref=e265]: Drag Buddy
+      - button "Toggle buddy for Migu UAT Repaired" [ref=e433] [cursor=pointer]:
+        - generic [ref=e267]:
+          - generic [ref=e268]: Migu UAT Repaired
+          - generic [ref=e269]: owl
+        - generic [ref=e270]: +
+  - button "Open Next.js Dev Tools" [ref=e276] [cursor=pointer]
+  - alert [ref=e10]
+```

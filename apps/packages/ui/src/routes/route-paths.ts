@@ -38,6 +38,7 @@ export const VIEWPORT_CONSTRAINED_PATHS = [
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
   RESEARCH_WORKSPACE_PATH,
+  "/media",
   "/media-multi",
 ] as const
 

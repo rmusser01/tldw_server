@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import AsyncIterator
 
 import aiosqlite
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.database import _GuardedSQLiteConnection
+from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
+    SQLITE_PROFILE_VERSION_COLUMN_SQL,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import RegistrationError
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
@@ -23,6 +27,15 @@ class _PasswordServiceStub:
 
 
 class _SQLitePool:
+    """Minimal stand-in for DatabasePool's SQLite transaction contract.
+
+    The real pool yields a _GuardedSQLiteConnection, not a bare aiosqlite
+    connection. Writes to profile-visible tables are handed to it as
+    _ProfileUserSql capability objects that only the guard knows how to unwrap,
+    so a stub that yields the raw connection fails with
+    "execute() argument 1 must be str, not _ProfileUserSql".
+    """
+
     pool = None
     backend = "sqlite"
 
@@ -30,12 +43,12 @@ class _SQLitePool:
         self.db_path = db_path
 
     @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+    async def transaction(self) -> AsyncIterator[_GuardedSQLiteConnection]:
         conn = await aiosqlite.connect(self.db_path)
         await conn.execute("PRAGMA foreign_keys = ON")
         await conn.execute("BEGIN IMMEDIATE")
         try:
-            yield conn
+            yield _GuardedSQLiteConnection(conn)
             await conn.commit()
         except Exception:
             await conn.rollback()
@@ -59,7 +72,8 @@ def _initialize_auth_db(db_path: Path) -> None:
                 is_active INTEGER NOT NULL,
                 is_verified INTEGER NOT NULL,
                 created_by INTEGER,
-                storage_quota_mb INTEGER NOT NULL
+                storage_quota_mb INTEGER NOT NULL,
+                {profile_version_column}
             );
             CREATE TABLE roles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,13 +90,14 @@ def _initialize_auth_db(db_path: Path) -> None:
                 user_id INTEGER NOT NULL,
                 password_hash TEXT NOT NULL
             );
-            CREATE TABLE audit_log (
+            CREATE TABLE audit_logs (
                 user_id INTEGER,
                 action TEXT,
-                target_type TEXT,
-                target_id INTEGER,
-                success INTEGER,
-                details TEXT
+                resource_type TEXT,
+                resource_id INTEGER,
+                status TEXT,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE registration_codes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +115,7 @@ def _initialize_auth_db(db_path: Path) -> None:
                 metadata TEXT
             );
             INSERT INTO roles (name) VALUES ('user'), ('reviewer');
-            """
+            """.format(profile_version_column=SQLITE_PROFILE_VERSION_COLUMN_SQL)
         )
 
 
@@ -141,6 +156,23 @@ def _role_memberships(db_path: Path, username: str) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
+def _registration_audit(db_path: Path, username: str) -> tuple[str, str, str] | None:
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT a.resource_type, u.username, a.status
+            FROM audit_logs a
+            JOIN users u ON u.id = a.resource_id
+            WHERE a.action = 'user_registered'
+              AND json_extract(a.details, '$.username') = ?
+            """,
+            (username,),
+        ).fetchone()
+    if row is None:
+        return None
+    return str(row[0]), str(row[1]), str(row[2])
+
+
 @pytest.mark.asyncio
 async def test_default_registration_persists_canonical_role_before_return(tmp_path: Path) -> None:
     service, db_path = _make_service(tmp_path)
@@ -153,6 +185,11 @@ async def test_default_registration_persists_canonical_role_before_return(tmp_pa
 
     assert payload["role"] == "user"
     assert _role_memberships(db_path, "default-user") == ["user"]
+    assert _registration_audit(db_path, "default-user") == (
+        "user",
+        "default-user",
+        "success",
+    )
 
 
 @pytest.mark.asyncio

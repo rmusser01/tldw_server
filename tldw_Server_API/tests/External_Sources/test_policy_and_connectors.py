@@ -10,6 +10,16 @@ from unittest.mock import MagicMock
 import pytest
 
 
+class _PersistedEmailReadStub:
+    """Expose accepted Media values for the existing connector doubles."""
+
+    def get_media_by_id(self, media_id, **kwargs):
+        return dict(self._saved_media)
+
+    def get_document_version(self, media_id, **kwargs):
+        return {"safe_metadata": self._saved_media.get("safe_metadata")}
+
+
 @pytest.mark.unit
 def test_policy_is_file_type_allowed_cases():
     from tldw_Server_API.app.core.External_Sources.policy import is_file_type_allowed
@@ -853,7 +863,7 @@ async def test_worker_gmail_initial_backfill_upserts_email_graph(monkeypatch):
 
     monkeypatch.setattr(orgs, "list_memberships_for_user", _fake_list_memberships_for_user)
 
-    class _FakeMDB:
+    class _FakeMDB(_PersistedEmailReadStub):
         instances: list["_FakeMDB"] = []
 
         def __init__(self, *a, **kw):
@@ -862,6 +872,7 @@ async def test_worker_gmail_initial_backfill_upserts_email_graph(monkeypatch):
             type(self).instances.append(self)
 
         def add_media_with_keywords(self, **kwargs):
+            self._saved_media = dict(kwargs)
             self.add_calls.append(kwargs)
             return 1, "uuid", "ok"
 
@@ -1023,7 +1034,7 @@ async def test_worker_gmail_incremental_sync_advances_cursor_and_processes_only_
 
     monkeypatch.setattr(orgs, "list_memberships_for_user", _fake_list_memberships_for_user)
 
-    class _FakeMDB:
+    class _FakeMDB(_PersistedEmailReadStub):
         sync_state: dict[tuple[str, str, str], dict] = {}
 
         def __init__(self, *a, **kw):
@@ -1079,6 +1090,7 @@ async def test_worker_gmail_incremental_sync_advances_cursor_and_processes_only_
             return dict(row)
 
         def add_media_with_keywords(self, **kwargs):
+            self._saved_media = dict(kwargs)
             return 1, "uuid", "ok"
 
         def upsert_email_message_graph(self, **kwargs):
@@ -1292,7 +1304,7 @@ async def test_worker_gmail_invalid_cursor_uses_bounded_replay_and_recovers(monk
 
     monkeypatch.setattr(orgs, "list_memberships_for_user", _fake_list_memberships_for_user)
 
-    class _FakeMDB:
+    class _FakeMDB(_PersistedEmailReadStub):
         sync_state: dict[tuple[str, str, str], dict] = {
             ("42", "gmail", "99"): {
                 "tenant_id": "42",
@@ -1343,6 +1355,7 @@ async def test_worker_gmail_invalid_cursor_uses_bounded_replay_and_recovers(monk
             return dict(row)
 
         def add_media_with_keywords(self, **kwargs):
+            self._saved_media = dict(kwargs)
             return 1, "uuid", "ok"
 
         def upsert_email_message_graph(self, **kwargs):
@@ -1529,7 +1542,7 @@ async def test_worker_gmail_invalid_cursor_escalates_full_backfill_required(monk
 
     monkeypatch.setattr(orgs, "list_memberships_for_user", _fake_list_memberships_for_user)
 
-    class _FakeMDB:
+    class _FakeMDB(_PersistedEmailReadStub):
         sync_state: dict[tuple[str, str, str], dict] = {
             ("42", "gmail", "99"): {
                 "tenant_id": "42",
@@ -1580,6 +1593,7 @@ async def test_worker_gmail_invalid_cursor_escalates_full_backfill_required(monk
             return dict(row)
 
         def add_media_with_keywords(self, **kwargs):
+            self._saved_media = dict(kwargs)
             raise AssertionError("No replay items means no ingest writes")
 
         def upsert_email_message_graph(self, **kwargs):
@@ -1764,7 +1778,7 @@ async def test_worker_gmail_incremental_applies_label_and_state_deltas_without_f
 
     monkeypatch.setattr(orgs, "list_memberships_for_user", _fake_list_memberships_for_user)
 
-    class _FakeMDB:
+    class _FakeMDB(_PersistedEmailReadStub):
         sync_state: dict[tuple[str, str, str], dict] = {
             ("42", "gmail", "99"): {
                 "tenant_id": "42",
@@ -1836,6 +1850,7 @@ async def test_worker_gmail_incremental_applies_label_and_state_deltas_without_f
             return {"applied": True, "reason": "deleted"}
 
         def add_media_with_keywords(self, **kwargs):
+            self._saved_media = dict(kwargs)
             raise AssertionError("delta-only updates should not write full media rows")
 
         def upsert_email_message_graph(self, **kwargs):
@@ -2417,7 +2432,7 @@ async def test_worker_gmail_large_fixture_backfill_handles_edge_cases(monkeypatc
 
     monkeypatch.setattr(orgs, "list_memberships_for_user", _fake_list_memberships_for_user)
 
-    class _FakeMDB:
+    class _FakeMDB(_PersistedEmailReadStub):
         instances: list["_FakeMDB"] = []
 
         def __init__(self, *a, **kw):
@@ -2426,6 +2441,7 @@ async def test_worker_gmail_large_fixture_backfill_handles_edge_cases(monkeypatc
             type(self).instances.append(self)
 
         def add_media_with_keywords(self, **kwargs):
+            self._saved_media = dict(kwargs)
             self.add_calls.append(kwargs)
             return len(self.add_calls), "uuid", "ok"
 

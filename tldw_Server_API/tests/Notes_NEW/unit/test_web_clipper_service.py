@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.Notes.organization_capture import stable_note_id
 from tldw_Server_API.app.core.WebClipper import service as web_clipper_service_module
 from tldw_Server_API.app.core.WebClipper.schemas import MAX_CAPTURE_METADATA_JSON_CHARS
 from tldw_Server_API.app.core.WebClipper.service import WebClipperService
@@ -94,6 +95,14 @@ def _save_request(
     )
 
 
+def _canonical_note(db: CharactersRAGDB, clip_id: str) -> dict:
+    document = db.get_note_clipper_document_by_clip_id(clip_id)
+    assert document is not None
+    note = db.get_note_by_id(str(document["note_id"]))
+    assert note is not None
+    return note
+
+
 def test_workspace_payload_accepts_only_needs_review_default():
     payload = WebClipperSaveRequest.WorkspacePayload(
         workspace_id="ws-1",
@@ -143,6 +152,8 @@ def test_workspace_payload_accepts_only_needs_review_default():
             }
         ),
         lambda payload: payload.update({"capture_metadata": {"oversized": "x" * 65_537}}),
+        lambda payload: payload.update({"clip_id": "   "}),
+        lambda payload: payload.update({"clip_type": "   "}),
     ],
 )
 def test_web_clipper_request_rejects_unbounded_payloads(mutation):
@@ -159,28 +170,29 @@ def test_save_clip_creates_canonical_note_and_sidecar(clipper_db):
     result = service.save_clip(_save_request())
 
     assert result.status == "saved"
-    assert result.note.id == "clip-123"
+    expected_note_id = stable_note_id("web-clipper", "1\0clip-123")
+    assert result.note.id == expected_note_id
     assert result.note.title == "Example Story"
     assert result.workspace_placement is not None
     assert result.workspace_placement.workspace_id == "ws-1"
 
-    note = clipper_db.get_note_by_id("clip-123")
-    assert note is not None
+    note = _canonical_note(clipper_db, "clip-123")
     assert note["title"] == "Example Story"
     assert "Capture date:" in note["content"]
     assert "Clip type: article" in note["content"]
 
     clip_doc = clipper_db.get_note_clipper_document_by_clip_id("clip-123")
     assert clip_doc is not None
-    assert clip_doc["note_id"] == "clip-123"
+    assert clip_doc["note_id"] == expected_note_id
 
 
 def test_save_clip_rejects_existing_non_clipper_note_id(clipper_db):
     service = WebClipperService(db=clipper_db, user_id=1)
+    canonical_note_id = stable_note_id("web-clipper", "1\0existing-note")
     clipper_db.add_note(
         title="Existing user note",
         content="This note must not be claimed by a clipper request.",
-        note_id="existing-note",
+        note_id=canonical_note_id,
     )
 
     request = _save_request(destination_mode="note", clip_id="existing-note")
@@ -188,7 +200,7 @@ def test_save_clip_rejects_existing_non_clipper_note_id(clipper_db):
     with pytest.raises(ConflictError):
         service.save_clip(request)
 
-    note = clipper_db.get_note_by_id("existing-note")
+    note = clipper_db.get_note_by_id(canonical_note_id)
     assert note is not None
     assert note["title"] == "Existing user note"
     assert note["content"] == "This note must not be claimed by a clipper request."
@@ -196,10 +208,11 @@ def test_save_clip_rejects_existing_non_clipper_note_id(clipper_db):
 
 
 def test_save_clip_rechecks_clipper_document_inside_transaction(clipper_db, monkeypatch: pytest.MonkeyPatch):
-    clipper_db.add_note(title="Existing Clip", content="Previous body", note_id="clip-race")
+    note_id = stable_note_id("web-clipper", "1\0clip-race")
+    clipper_db.add_note(title="Existing Clip", content="Previous body", note_id=note_id)
     clipper_db.upsert_note_clipper_document(
         clip_id="clip-race",
-        note_id="clip-race",
+        note_id=note_id,
         clip_type="article",
         source_url="https://example.com/story",
         source_title="Example Story",
@@ -215,7 +228,7 @@ def test_save_clip_rechecks_clipper_document_inside_transaction(clipper_db, monk
 
     assert result.status == "saved"
     assert result.note is not None
-    assert result.note.id == "clip-race"
+    assert result.note.id == note_id
 
 
 def test_save_clip_retry_reuses_note_workspace_and_attachment(clipper_db):
@@ -226,7 +239,7 @@ def test_save_clip_retry_reuses_note_workspace_and_attachment(clipper_db):
     second = service.save_clip(request)
     status = service.get_clip_status("clip-123")
 
-    assert first.note.id == second.note.id == "clip-123"
+    assert first.note.id == second.note.id == stable_note_id("web-clipper", "1\0clip-123")
     assert first.workspace_placement is not None
     assert second.workspace_placement is not None
     assert first.workspace_placement.workspace_note_id == second.workspace_placement.workspace_note_id
@@ -265,10 +278,11 @@ def test_save_clip_rejects_active_html_and_svg_attachments(clipper_db):
 
 def test_save_clip_rejects_oversized_merged_capture_metadata(clipper_db):
     existing_metadata = {"stored": "x" * (MAX_CAPTURE_METADATA_JSON_CHARS - len(json.dumps({"stored": ""})) - 64)}
-    clipper_db.add_note(title="Existing Clip", content="Previous body", note_id="clip-metadata")
+    note_id = stable_note_id("web-clipper", "1\0clip-metadata")
+    clipper_db.add_note(title="Existing Clip", content="Previous body", note_id=note_id)
     clipper_db.upsert_note_clipper_document(
         clip_id="clip-metadata",
-        note_id="clip-metadata",
+        note_id=note_id,
         clip_type="article",
         source_url="https://example.com/story",
         source_title="Example Story",
@@ -388,19 +402,18 @@ def test_save_clip_returns_partially_saved_when_workspace_creation_fails_after_n
     result = service.save_clip(_save_request())
 
     assert result.status == "partially_saved"
-    assert result.note.id == "clip-123"
+    assert result.note.id == stable_note_id("web-clipper", "1\0clip-123")
     assert any("workspace" in warning.lower() for warning in result.warnings)
-    assert clipper_db.get_note_by_id("clip-123") is not None
+    assert _canonical_note(clipper_db, "clip-123") is not None
 
 
 def test_persist_enrichment_skips_inline_writeback_on_version_mismatch_but_stores_structured_data(clipper_db):
     service = WebClipperService(db=clipper_db, user_id=1)
     save_result = service.save_clip(_save_request(destination_mode="note"))
 
-    current_note = clipper_db.get_note_by_id("clip-123")
-    assert current_note is not None
+    current_note = _canonical_note(clipper_db, "clip-123")
     clipper_db.update_note(
-        note_id="clip-123",
+        note_id=str(current_note["id"]),
         update_data={"content": f"{current_note['content']}\n\nUser edit."},
         expected_version=int(current_note["version"]),
     )
@@ -424,8 +437,7 @@ def test_persist_enrichment_skips_inline_writeback_on_version_mismatch_but_store
     assert clip_doc is not None
     assert clip_doc["analysis_json"]["ocr"]["structured_payload"]["raw_text"] == "Captured text summary."
 
-    note_after = clipper_db.get_note_by_id("clip-123")
-    assert note_after is not None
+    note_after = _canonical_note(clipper_db, "clip-123")
     assert "Captured text summary." not in note_after["content"]
     assert note_after["content"].endswith("User edit.")
 
@@ -434,10 +446,9 @@ def test_persist_enrichment_stores_ocr_and_vlm_structured_payloads_when_inline_w
     service = WebClipperService(db=clipper_db, user_id=1)
     save_result = service.save_clip(_save_request(destination_mode="note", clip_id="clip-enrichment-mismatch"))
 
-    current_note = clipper_db.get_note_by_id("clip-enrichment-mismatch")
-    assert current_note is not None
+    current_note = _canonical_note(clipper_db, "clip-enrichment-mismatch")
     clipper_db.update_note(
-        note_id="clip-enrichment-mismatch",
+        note_id=str(current_note["id"]),
         update_data={"content": f"{current_note['content']}\n\nUser edit remains."},
         expected_version=int(current_note["version"]),
     )
@@ -475,8 +486,7 @@ def test_persist_enrichment_stores_ocr_and_vlm_structured_payloads_when_inline_w
     assert clip_doc["analysis_json"]["ocr"]["structured_payload"]["raw_text"] == "OCR raw text"
     assert clip_doc["analysis_json"]["vlm"]["structured_payload"]["caption"] == "VLM caption"
 
-    note_after = clipper_db.get_note_by_id("clip-enrichment-mismatch")
-    assert note_after is not None
+    note_after = _canonical_note(clipper_db, "clip-enrichment-mismatch")
     assert "OCR machine summary." not in note_after["content"]
     assert "VLM machine summary." not in note_after["content"]
     assert note_after["content"].endswith("User edit remains.")
@@ -509,7 +519,7 @@ def test_persist_enrichment_preserves_visible_body_without_comment(clipper_db):
         ),
     )
 
-    note = clipper_db.get_note_by_id("clip-visible-preserve")
+    note = _canonical_note(clipper_db, "clip-visible-preserve")
     assert enrichment.inline_applied is True
     assert note is not None
     content_before_analysis = note["content"].split("## Web Clipper Analysis", maxsplit=1)[0]
@@ -557,7 +567,7 @@ def test_persist_enrichment_clamps_inline_summaries_to_per_type_and_combined_bud
     assert len(clip_doc["analysis_json"]["ocr"]["inline_summary"]) == 1500
     assert len(clip_doc["analysis_json"]["vlm"]["inline_summary"]) == 1000
 
-    note = clipper_db.get_note_by_id("clip-enrichment-budgets")
+    note = _canonical_note(clipper_db, "clip-enrichment-budgets")
     assert note is not None
     machine_section = note["content"].split("## Web Clipper Analysis", maxsplit=1)[1]
     ocr_section, vlm_section = machine_section.split("### VLM", maxsplit=1)
@@ -578,7 +588,7 @@ def test_save_clip_prefers_visible_body_over_full_extract(clipper_db):
 
     service.save_clip(request)
 
-    note = clipper_db.get_note_by_id("clip-visible-vs-full")
+    note = _canonical_note(clipper_db, "clip-visible-vs-full")
     clip_doc = clipper_db.get_note_clipper_document_by_clip_id("clip-visible-vs-full")
     assert note is not None
     assert clip_doc is not None
@@ -599,7 +609,7 @@ def test_save_clip_truncates_visible_body_to_content_budget(clipper_db):
 
     result = service.save_clip(request)
 
-    note = clipper_db.get_note_by_id("clip-123")
+    note = _canonical_note(clipper_db, "clip-123")
     assert note is not None
     assert result.status in {"saved", "saved_with_warnings"}
     assert "Truncated. Full extract attached." not in note["content"]
@@ -675,8 +685,8 @@ def test_save_clip_resyncs_existing_workspace_note_and_keywords(clipper_db):
         "SELECT title, content, keywords_json FROM workspace_notes WHERE workspace_id = ? AND id = ? AND deleted = 0",
         ("ws-1", int(placement["workspace_note_id"])),
     ).fetchone()
-    note = clipper_db.get_note_by_id("clip-workspace-sync")
-    keywords = [row["keyword"] for row in clipper_db.get_keywords_for_note("clip-workspace-sync")]
+    note = _canonical_note(clipper_db, "clip-workspace-sync")
+    keywords = [row["keyword"] for row in clipper_db.get_keywords_for_note(str(note["id"]))]
 
     assert result.workspace_placement is not None
     assert note is not None

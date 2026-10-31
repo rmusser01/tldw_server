@@ -65,6 +65,16 @@ def test_load_catalog_success(tmp_path: Path) -> None:
     assert [scope.id for scope in catalog.scopes] == ["test.scope"]
 
 
+def test_vn_preflight_catalog_has_finite_rate_policy() -> None:
+    """Preflight must not silently lose its catalog-backed rate limit."""
+    catalog = load_catalog()
+    scope = next(scope for scope in catalog.scopes if scope.id == "vn_assets.preflight")
+    policy = next(policy for policy in catalog.rate_limit_classes if policy.id == scope.rate_limit_class)
+
+    assert policy.requests_per_min > 0
+    assert policy.burst > 0
+
+
 def test_load_catalog_invalid_rate_limit(tmp_path: Path) -> None:
     catalog_path = _write_catalog(tmp_path, rate_limit_class="unknown")
     with pytest.raises(ValidationError):

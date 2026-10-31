@@ -4,17 +4,29 @@
 import json
 import random
 import uuid
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any, Optional
 
 import numpy as np
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.Logging.log_context import log_context
 
+from ..optimization_model_config import (
+    normalize_durable_optimization_config,
+    optimization_execution_strategy,
+    reconcile_optimization_strategy,
+    strip_sensitive_optimization_config,
+)
+from . import mcts_optimizer as mcts_optimizer_module
 from .evaluation_metrics import EvaluationMetrics
 from .mcts_optimizer import MCTSOptimizer
+from .optimization_strategies import IterativeRefinementOptimizer
 from .prompt_executor import PromptExecutor
 from .test_runner import TestRunner
 from .types_common import MetricType
@@ -74,13 +86,14 @@ class MIPROOptimizer:
         self.metrics = EvaluationMetrics()
         # Optional context populated by callers (e.g., JobProcessor)
         self.optimization_id: Optional[int] = None
-        # Model config for internal LLM calls (set during optimize())
-        self._internal_model_config: dict[str, Any] = {}
 
     async def optimize(self, initial_prompt_id: int, test_case_ids: list[int],
                        model_config: dict[str, Any], max_iterations: int = 20,
                        target_metric: MetricType = MetricType.ACCURACY,
-                       min_improvement: float = 0.01) -> dict[str, Any]:
+                       min_improvement: float = 0.01,
+                       provider_credentials: ProviderCallCredentials | None = None,
+                       on_provider_success: Callable[[], Awaitable[None]] | None = None,
+                       ) -> dict[str, Any]:
         """
         Optimize a prompt using MIPRO strategy.
 
@@ -98,14 +111,16 @@ class MIPROOptimizer:
         with log_context(ps_component="opt_engine", strategy="mipro", prompt_id=initial_prompt_id, optimization_id=getattr(self, "optimization_id", None)):
             logger.info("Starting MIPRO optimization for prompt {}", initial_prompt_id)
 
-        # Store model_config for use in internal LLM calls (instruction generation)
-        self._internal_model_config = model_config
-
         # Initialize
         current_prompt_id = initial_prompt_id
         best_prompt_id = initial_prompt_id
         best_score = await self._evaluate_prompt(
-            initial_prompt_id, test_case_ids, model_config, target_metric
+            initial_prompt_id,
+            test_case_ids,
+            model_config,
+            target_metric,
+            provider_credentials=provider_credentials,
+            on_provider_success=on_provider_success,
         )
 
         iteration_history = []
@@ -116,7 +131,12 @@ class MIPROOptimizer:
 
             # Generate instruction candidates
             candidates = await self._generate_instruction_candidates(
-                current_prompt_id, best_score, iteration
+                current_prompt_id,
+                best_score,
+                iteration,
+                model_config=model_config,
+                provider_credentials=provider_credentials,
+                on_provider_success=on_provider_success,
             )
 
             # Evaluate candidates
@@ -129,7 +149,12 @@ class MIPROOptimizer:
 
                 # Evaluate
                 score = await self._evaluate_prompt(
-                    new_prompt_id, test_case_ids, model_config, target_metric
+                    new_prompt_id,
+                    test_case_ids,
+                    model_config,
+                    target_metric,
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
                 )
 
                 candidate_scores.append((new_prompt_id, score, candidate))
@@ -183,7 +208,12 @@ class MIPROOptimizer:
 
     async def _generate_instruction_candidates(self, prompt_id: int,
                                               current_score: float,
-                                              iteration: int) -> list[str]:
+                                              iteration: int,
+                                              *,
+                                              model_config: dict[str, Any],
+                                              provider_credentials: ProviderCallCredentials | None = None,
+                                              on_provider_success: Callable[[], Awaitable[None]] | None = None,
+                                              ) -> list[str]:
         """
         Generate instruction candidates for MIPRO.
 
@@ -202,18 +232,34 @@ class MIPROOptimizer:
         candidates = []
 
         # Strategy 1: Rephrase current instruction
-        rephrased = await self._rephrase_instruction(current_instruction)
+        rephrased = await self._rephrase_instruction(
+            current_instruction,
+            model_config=model_config,
+            provider_credentials=provider_credentials,
+            on_provider_success=on_provider_success,
+        )
         if rephrased:
             candidates.append(rephrased)
 
         # Strategy 2: Add clarifying details
-        detailed = await self._add_details(current_instruction, current_score)
+        detailed = await self._add_details(
+            current_instruction,
+            current_score,
+            model_config=model_config,
+            provider_credentials=provider_credentials,
+            on_provider_success=on_provider_success,
+        )
         if detailed:
             candidates.append(detailed)
 
         # Strategy 3: Simplify instruction
         if iteration > 5:  # Try simplification after some iterations
-            simplified = await self._simplify_instruction(current_instruction)
+            simplified = await self._simplify_instruction(
+                current_instruction,
+                model_config=model_config,
+                provider_credentials=provider_credentials,
+                on_provider_success=on_provider_success,
+            )
             if simplified:
                 candidates.append(simplified)
 
@@ -230,7 +276,39 @@ class MIPROOptimizer:
 
         return candidates[:5]  # Limit to 5 candidates per iteration
 
-    async def _rephrase_instruction(self, instruction: str) -> Optional[str]:
+    async def _call_internal_llm(
+        self,
+        prompt: str,
+        *,
+        model_config: dict[str, Any],
+        parameter_overrides: dict[str, Any],
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> str:
+        parameters = dict(model_config.get("parameters") or {})
+        parameters.update(parameter_overrides)
+        result = await self.executor._call_llm(
+            provider=str(model_config["provider"]),
+            model=str(model_config["model"]),
+            prompt=prompt,
+            parameters=parameters,
+            api_key_override=model_config.get("api_key"),
+            app_config=model_config.get("app_config"),
+            credentials_resolved=model_config.get("credentials_resolved") is True,
+            provider_credentials=provider_credentials,
+            timeout_seconds=parameters.get("timeout_seconds"),
+            on_provider_success=on_provider_success,
+        )
+        return result["content"].strip()
+
+    async def _rephrase_instruction(
+        self,
+        instruction: str,
+        *,
+        model_config: dict[str, Any],
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> Optional[str]:
         """Rephrase instruction using LLM."""
         prompt = f"""Rephrase the following instruction to be clearer and more effective.
 Keep the same intent but improve clarity and specificity.
@@ -240,22 +318,23 @@ Original instruction:
 
 Rephrased instruction:"""
 
-        try:
-            # Use configured provider/model, falling back to defaults
-            provider = self._internal_model_config.get("provider", "openai")
-            model = self._internal_model_config.get("model", "gpt-3.5-turbo")
-            result = await self.executor._call_llm(
-                provider=provider,
-                model=model,
-                prompt=prompt,
-                parameters={"temperature": 0.7, "max_tokens": 500}
-            )
-            return result["content"].strip()
-        except Exception as e:
-            logger.warning(f"_rephrase_instruction failed to call LLM: error={e}")
-            return None
+        return await self._call_internal_llm(
+            prompt,
+            model_config=model_config,
+            parameter_overrides={"temperature": 0.7, "max_tokens": 500},
+            provider_credentials=provider_credentials,
+            on_provider_success=on_provider_success,
+        )
 
-    async def _add_details(self, instruction: str, current_score: float) -> Optional[str]:
+    async def _add_details(
+        self,
+        instruction: str,
+        current_score: float,
+        *,
+        model_config: dict[str, Any],
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> Optional[str]:
         """Add clarifying details to instruction."""
         prompt = f"""The following instruction achieves {current_score:.1%} accuracy.
 Add specific details and constraints to improve its effectiveness.
@@ -265,22 +344,22 @@ Current instruction:
 
 Enhanced instruction with more details:"""
 
-        try:
-            # Use configured provider/model, falling back to defaults
-            provider = self._internal_model_config.get("provider", "openai")
-            model = self._internal_model_config.get("model", "gpt-3.5-turbo")
-            result = await self.executor._call_llm(
-                provider=provider,
-                model=model,
-                prompt=prompt,
-                parameters={"temperature": 0.8, "max_tokens": 500}
-            )
-            return result["content"].strip()
-        except Exception as e:
-            logger.warning(f"_add_details failed to call LLM: error={e}")
-            return None
+        return await self._call_internal_llm(
+            prompt,
+            model_config=model_config,
+            parameter_overrides={"temperature": 0.8, "max_tokens": 500},
+            provider_credentials=provider_credentials,
+            on_provider_success=on_provider_success,
+        )
 
-    async def _simplify_instruction(self, instruction: str) -> Optional[str]:
+    async def _simplify_instruction(
+        self,
+        instruction: str,
+        *,
+        model_config: dict[str, Any],
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> Optional[str]:
         """Simplify instruction by removing unnecessary complexity."""
         prompt = f"""Simplify the following instruction while keeping its core requirements.
 Remove unnecessary words and complexity.
@@ -290,20 +369,13 @@ Complex instruction:
 
 Simplified instruction:"""
 
-        try:
-            # Use configured provider/model, falling back to defaults
-            provider = self._internal_model_config.get("provider", "openai")
-            model = self._internal_model_config.get("model", "gpt-3.5-turbo")
-            result = await self.executor._call_llm(
-                provider=provider,
-                model=model,
-                prompt=prompt,
-                parameters={"temperature": 0.5, "max_tokens": 300}
-            )
-            return result["content"].strip()
-        except Exception as e:
-            logger.warning(f"_simplify_instruction failed to call LLM: error={e}")
-            return None
+        return await self._call_internal_llm(
+            prompt,
+            model_config=model_config,
+            parameter_overrides={"temperature": 0.5, "max_tokens": 300},
+            provider_credentials=provider_credentials,
+            on_provider_success=on_provider_success,
+        )
 
     async def _add_examples(self, instruction: str) -> Optional[str]:
         """Add few-shot examples to instruction."""
@@ -329,22 +401,36 @@ Follow these examples for consistency."""
 
     async def _evaluate_prompt(self, prompt_id: int, test_case_ids: list[int],
                               model_config: dict[str, Any],
-                              target_metric: MetricType) -> float:
+                              target_metric: MetricType,
+                              *,
+                              provider_credentials: ProviderCallCredentials | None = None,
+                              on_provider_success: Callable[[], Awaitable[None]] | None = None,
+                              ) -> float:
         """Evaluate a prompt and return target metric score."""
         scores = []
 
         for test_case_id in test_case_ids:
-            result = await self.test_runner.run_single_test(
-                prompt_id=prompt_id,
-                test_case_id=test_case_id,
-                model_config=model_config,
-                metrics=[target_metric]
-            )
+            runner_kwargs = {
+                "prompt_id": prompt_id,
+                "test_case_id": test_case_id,
+                "model_config": model_config,
+                "metrics": [target_metric],
+            }
+            if provider_credentials is not None:
+                runner_kwargs["provider_credentials"] = provider_credentials
+            if on_provider_success is not None:
+                runner_kwargs.update(
+                    strict_provider_errors=True,
+                    on_provider_success=on_provider_success,
+                )
+            result = await self.test_runner.run_single_test(**runner_kwargs)
 
             if result.get("success") and "scores" in result:
                 score = result["scores"].get(target_metric.value, 0)
                 scores.append(score)
 
+        if not scores and on_provider_success is not None:
+            raise ValueError("Optimization requires one validated baseline result")
         return np.mean(scores) if scores else 0.0
 
     async def _create_prompt_variant(self, base_prompt_id: int,
@@ -427,7 +513,10 @@ class BootstrapOptimizer:
     async def optimize(self, prompt_id: int, test_case_ids: list[int],
                        model_config: dict[str, Any],
                        num_examples: int = 3,
-                       selection_strategy: str = "diverse") -> dict[str, Any]:
+                       selection_strategy: str = "diverse",
+                       provider_credentials: ProviderCallCredentials | None = None,
+                       on_provider_success: Callable[[], Awaitable[None]] | None = None,
+                       ) -> dict[str, Any]:
         """
         Optimize prompt by bootstrapping few-shot examples.
 
@@ -447,11 +536,19 @@ class BootstrapOptimizer:
         # Run initial evaluation to get examples
         test_runs = []
         for test_case_id in test_case_ids:
-            result = await self.test_runner.run_single_test(
-                prompt_id=prompt_id,
-                test_case_id=test_case_id,
-                model_config=model_config
-            )
+            runner_kwargs = {
+                "prompt_id": prompt_id,
+                "test_case_id": test_case_id,
+                "model_config": model_config,
+            }
+            if provider_credentials is not None:
+                runner_kwargs["provider_credentials"] = provider_credentials
+            if on_provider_success is not None:
+                runner_kwargs.update(
+                    strict_provider_errors=True,
+                    on_provider_success=on_provider_success,
+                )
+            result = await self.test_runner.run_single_test(**runner_kwargs)
             test_runs.append(result)
 
         # Select best examples
@@ -463,11 +560,19 @@ class BootstrapOptimizer:
         # Evaluate new prompt
         new_scores = []
         for test_case_id in test_case_ids:
-            result = await self.test_runner.run_single_test(
-                prompt_id=new_prompt_id,
-                test_case_id=test_case_id,
-                model_config=model_config
-            )
+            runner_kwargs = {
+                "prompt_id": new_prompt_id,
+                "test_case_id": test_case_id,
+                "model_config": model_config,
+            }
+            if provider_credentials is not None:
+                runner_kwargs["provider_credentials"] = provider_credentials
+            if on_provider_success is not None:
+                runner_kwargs.update(
+                    strict_provider_errors=True,
+                    on_provider_success=on_provider_success,
+                )
+            result = await self.test_runner.run_single_test(**runner_kwargs)
 
             if result.get("success") and "scores" in result:
                 new_scores.append(result["scores"].get("aggregate_score", 0))
@@ -477,6 +582,8 @@ class BootstrapOptimizer:
             run.get("scores", {}).get("aggregate_score", 0)
             for run in test_runs if run.get("success")
         ]
+        if not original_scores and on_provider_success is not None:
+            raise ValueError("Optimization requires one validated baseline result")
 
         original_mean = np.mean(original_scores) if original_scores else 0
         new_mean = np.mean(new_scores) if new_scores else 0
@@ -637,6 +744,7 @@ class OptimizationEngine:
         self.mipro = MIPROOptimizer(db, self.test_runner)
         self.bootstrap = BootstrapOptimizer(db, self.test_runner)
         self.mcts = MCTSOptimizer(db, self.test_runner)
+        self.iterative = IterativeRefinementOptimizer(db, self.test_runner)
 
     @staticmethod
     def _coerce_json_value(value: Any, default: Any) -> Any:
@@ -656,7 +764,35 @@ class OptimizationEngine:
                 return default
         return default
 
-    async def optimize(self, optimization_id: int) -> dict[str, Any]:
+    @staticmethod
+    def _terminal_optimization_result(
+        optimization_id: int,
+        optimization: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the persisted terminal state without starting provider work."""
+        return {
+            "optimization_id": optimization_id,
+            "optimized_prompt_id": optimization.get("optimized_prompt_id")
+            or optimization.get("initial_prompt_id"),
+            "iterations": int(optimization.get("iterations_completed") or 0),
+            "status": str(optimization.get("status") or "").lower(),
+        }
+
+    async def optimize(
+        self,
+        optimization_id: int,
+        *,
+        runtime_model_config: dict[str, Any] | None = None,
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        runtime_scorer_model_config: dict[str, Any] | None = None,
+        scorer_provider_credentials: ProviderCallCredentials | None = None,
+        on_scorer_provider_success: Callable[[], Awaitable[None]] | None = None,
+        before_finalize: Callable[[], Awaitable[bool]] | None = None,
+        before_completion: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        manage_failure_status: bool = True,
+        emit_completion_event: bool = True,
+    ) -> dict[str, Any]:
         """
         Run optimization based on configuration.
 
@@ -670,25 +806,51 @@ class OptimizationEngine:
         optimization = self._get_optimization(optimization_id)
         if not optimization:
             raise ValueError(f"Optimization {optimization_id} not found")
+        optimization_uuid = str(optimization.get("uuid") or "").strip()
 
         # Parse configuration
-        config = self._coerce_json_value(
+        raw_config = self._coerce_json_value(
             optimization.get("optimization_config") or optimization.get("optimizer_config"),
             {},
         )
-        if str(optimization.get("status") or "").lower() == "cancelled":
-            return {
-                "optimization_id": optimization_id,
-                "optimized_prompt_id": optimization.get("optimized_prompt_id")
-                or optimization.get("initial_prompt_id"),
-                "iterations": int(optimization.get("iterations_completed") or 0),
-                "status": "cancelled",
-            }
-        # Support both legacy "strategy" and new "optimizer_type" fields
-        strategy = (
-            config.get("strategy") or optimization.get("optimizer_type") or config.get("optimizer_type") or "mipro"
+        try:
+            config = normalize_durable_optimization_config(
+                raw_config,
+                reject_sensitive=False,
+            )
+        except ValueError:
+            scrubbed = strip_sensitive_optimization_config(raw_config)
+            scrubbed.pop("model_config", None)
+            scrubbed.pop("model_configuration", None)
+            self.db.update_optimization(
+                optimization_id,
+                {"optimization_config": scrubbed},
+            )
+            raise
+        requested_strategy = reconcile_optimization_strategy(
+            optimization.get("optimizer_type"),
+            config.get("optimizer_type"),
+            config.get("strategy"),
         )
-        strategy = str(strategy).lower()
+        config["optimizer_type"] = requested_strategy
+        config.pop("strategy", None)
+        if config != raw_config:
+            optimization = self.db.update_optimization(
+                optimization_id,
+                {"optimization_config": config},
+            )
+        if str(optimization.get("status") or "").lower() in {
+            "cancelled",
+            "completed",
+        }:
+            return self._terminal_optimization_result(optimization_id, optimization)
+        strategy = optimization_execution_strategy(requested_strategy)
+        if strategy != requested_strategy:
+            logger.info(
+                "Optimization compatibility strategy {} uses provider-bound engine {}",
+                requested_strategy,
+                strategy,
+            )
 
         test_case_ids = self._coerce_json_value(
             optimization.get("test_case_ids")
@@ -699,19 +861,28 @@ class OptimizationEngine:
         if not isinstance(test_case_ids, list):
             test_case_ids = []
 
-        model_config = self._coerce_json_value(
-            optimization.get("model_config")
-            or config.get("model_config")
-            or config.get("model_configuration"),
-            {},
-        )
-        if isinstance(model_config, list):
-            model_config = model_config[0] if model_config else {}
-        if not isinstance(model_config, dict):
-            model_config = {}
+        model_config = runtime_model_config or config["model_config"]
+
+        if not test_case_ids:
+            raise ValueError("Optimization requires at least one test case")
 
         # Update status
-        self._update_optimization_status(optimization_id, "running")
+        started_optimization = self._update_optimization_status(
+            optimization_id,
+            "running",
+        )
+        if not isinstance(started_optimization, dict):
+            # Compatibility for legacy database doubles/adapters that predate
+            # the status method's authoritative-row return contract.
+            started_optimization = self._get_optimization(optimization_id) or {}
+        started_status = str(started_optimization.get("status") or "").lower()
+        if started_status in {"cancelled", "completed"}:
+            return self._terminal_optimization_result(
+                optimization_id,
+                started_optimization,
+            )
+        if started_status != "running":
+            raise RuntimeError("Optimization failed to enter running state")
 
         try:
             # Run optimization based on strategy
@@ -721,7 +892,9 @@ class OptimizationEngine:
                     test_case_ids=test_case_ids,
                     model_config=model_config,
                     max_iterations=optimization["max_iterations"],
-                    target_metric=MetricType(config.get("target_metric", "accuracy"))
+                    target_metric=MetricType(config.get("target_metric", "accuracy")),
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
                 )
 
             elif strategy == "bootstrap":
@@ -730,7 +903,9 @@ class OptimizationEngine:
                     test_case_ids=test_case_ids,
                     model_config=model_config,
                     num_examples=config.get("num_examples", 3),
-                    selection_strategy=config.get("selection_strategy", "diverse")
+                    selection_strategy=config.get("selection_strategy", "diverse"),
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
                 )
 
             elif strategy == "mcts":
@@ -743,35 +918,91 @@ class OptimizationEngine:
                     max_iterations=optimization.get("max_iterations", 20),
                     target_metric=MetricType(config.get("target_metric", "accuracy")),
                     strategy_params=config.get("strategy_params", {}),
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
+                    scorer_model_config=runtime_scorer_model_config,
+                    scorer_provider_credentials=scorer_provider_credentials,
+                    on_scorer_provider_success=on_scorer_provider_success,
+                    emit_completion_event=False,
+                )
+
+            elif strategy == "iterative":
+                results = await self.iterative.optimize(
+                    prompt_id=optimization["initial_prompt_id"],
+                    test_case_ids=test_case_ids,
+                    model_config=model_config,
+                    max_iterations=optimization["max_iterations"],
+                    optimization_id=optimization_id,
+                    provider_credentials=provider_credentials,
+                    on_provider_success=on_provider_success,
                 )
 
             else:
                 raise ValueError(f"Unknown optimization strategy: {strategy}")
 
+            cancellation_requested = (
+                bool(await before_finalize())
+                if before_finalize is not None
+                else False
+            )
             latest = self._get_optimization(optimization_id) or {}
+            if (
+                cancellation_requested
+                and str(latest.get("status") or "").lower()
+                not in {"completed", "failed", "cancelled"}
+            ):
+                latest = self._update_optimization_status(
+                    optimization_id,
+                    "cancelled",
+                    "Cancelled by Jobs runtime",
+                ) or self._get_optimization(optimization_id) or {}
             if str(latest.get("status") or "").lower() == "cancelled":
                 self._update_cancelled_optimization_results(optimization_id, results)
             else:
+                if before_completion is not None:
+                    await before_completion(results)
                 # Update optimization with results
-                self._update_optimization_results(optimization_id, results)
+                completion_applied = self._update_optimization_results(
+                    optimization_id,
+                    results,
+                )
+                if (
+                    strategy == "mcts"
+                    and emit_completion_event
+                    and completion_applied
+                ):
+                    await self._broadcast_mcts_completion(
+                        optimization_id,
+                        results,
+                        expected_optimization_uuid=optimization_uuid,
+                    )
 
             return results
 
         except Exception as e:
-            logger.error(f"Optimization failed: {e}")
-            self._update_optimization_status(optimization_id, "failed", str(e))
+            logger.error("Optimization failed; error_type={}", type(e).__name__)
+            if manage_failure_status:
+                self._update_optimization_status(
+                    optimization_id,
+                    "failed",
+                    str(e),
+                )
             raise
 
     def _get_optimization(self, optimization_id: int) -> Optional[dict[str, Any]]:
         """Get optimization from database."""
         return self.db.get_optimization(optimization_id)
 
-    def _update_optimization_status(self, optimization_id: int, status: str,
-                                   error_message: Optional[str] = None):
+    def _update_optimization_status(
+        self,
+        optimization_id: int,
+        status: str,
+        error_message: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
         """Update optimization status."""
         mark_started = status == "running"
         mark_completed = status in {"failed", "cancelled"}
-        self.db.set_optimization_status(
+        return self.db.set_optimization_status(
             optimization_id,
             status,
             error_message=error_message,
@@ -793,20 +1024,101 @@ class OptimizationEngine:
                 logger.debug("Optimization engine failed to merge extra metric payload", exc_info=metric_merge_error)
         return final_metrics
 
-    def _update_optimization_results(self, optimization_id: int, results: dict[str, Any]):
-        """Update optimization with results."""
-        final_metrics = self._build_final_metrics(results)
+    def _update_optimization_results(
+        self,
+        optimization_id: int,
+        results: dict[str, Any],
+    ) -> bool:
+        """Update results and return whether this execution won completion."""
 
+        final_metrics = self._build_final_metrics(results)
+        completion_kwargs = {
+            "optimized_prompt_id": results.get("optimized_prompt_id"),
+            "iterations_completed": results.get("iterations", 1),
+            "initial_metrics": {"score": results.get("initial_score", 0)},
+            "final_metrics": final_metrics,
+            "improvement_percentage": results.get("improvement", 0) * 100,
+            "total_tokens": results.get("total_tokens"),
+            "total_cost": results.get("total_cost"),
+        }
+        complete_with_transition = getattr(
+            self.db,
+            "complete_optimization_with_transition",
+            None,
+        )
+        if callable(complete_with_transition):
+            _row, applied = complete_with_transition(
+                optimization_id,
+                **completion_kwargs,
+            )
+            return bool(applied)
         self.db.complete_optimization(
             optimization_id,
-            optimized_prompt_id=results.get("optimized_prompt_id"),
-            iterations_completed=results.get("iterations", 1),
-            initial_metrics={"score": results.get("initial_score", 0)},
-            final_metrics=final_metrics,
-            improvement_percentage=results.get("improvement", 0) * 100,
-            total_tokens=results.get("total_tokens"),
-            total_cost=results.get("total_cost"),
+            **completion_kwargs,
         )
+        return True
+
+    async def _broadcast_mcts_completion(
+        self,
+        optimization_id: int,
+        results: dict[str, Any],
+        *,
+        expected_optimization_uuid: str,
+    ) -> None:
+        """Publish MCTS completion only after the durable completion write."""
+
+        expected_uuid = str(expected_optimization_uuid or "").strip()
+        if not expected_uuid:
+            logger.warning(
+                "Optimization completion broadcast rejected missing row identity; "
+                "optimization_id={}",
+                optimization_id,
+            )
+            return
+        connection_manager = mcts_optimizer_module.ws_connection_manager
+        if connection_manager is None:
+            return
+        latest = self._get_optimization(optimization_id) or {}
+        latest_status = str(latest.get("status") or "").lower()
+        if latest_status != "completed":
+            return
+        latest_uuid = str(latest.get("uuid") or "").strip()
+        if latest_uuid != expected_uuid:
+            logger.warning(
+                "Optimization completion broadcast rejected stale row identity; "
+                "optimization_id={}",
+                optimization_id,
+            )
+            return
+        try:
+            broadcaster = mcts_optimizer_module.EventBroadcaster(
+                connection_manager,
+                self.db,
+            )
+            await broadcaster.broadcast_event(
+                event_type=mcts_optimizer_module.EventType.OPTIMIZATION_COMPLETED,
+                data={
+                    "optimization_id": optimization_id,
+                    "optimization_uuid": latest_uuid,
+                    "strategy": "mcts",
+                    "status": latest_status,
+                    "iterations": int(
+                        latest.get("iterations_completed")
+                        or results.get("iterations")
+                        or 0
+                    ),
+                    "final_score": results.get("final_score"),
+                    "tokens_spent": results.get("total_tokens"),
+                },
+                project_id=latest.get("project_id"),
+            )
+        except Exception as broadcast_exc:  # noqa: BLE001
+            logger.warning(
+                "Optimization completion broadcast failed; "
+                "optimization_id={} error_type={}",
+                optimization_id,
+                type(broadcast_exc).__name__,
+            )
 
     def _update_cancelled_optimization_results(self, optimization_id: int, results: dict[str, Any]) -> None:
         """Persist partial metrics for a cancelled optimization without reviving it."""

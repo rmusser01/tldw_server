@@ -16,12 +16,15 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
     get_db_transaction,
     get_password_service_dep,
     get_session_manager_dep,
     get_storage_service_dep,
     require_api_key_scope,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
     APIKeyCreateRequest,
@@ -40,6 +43,7 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     StorageQuotaResponse,
     UpdateProfileRequest,
 )
+from tldw_Server_API.app.api.v1.schemas.user_capabilities import UserCapabilities
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileCatalogResponse,
     UserProfileErrorDetail,
@@ -62,10 +66,16 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     StorageError,
     WeakPasswordError,
 )
-from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, fetch_password_hash
+from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_READ, SYSTEM_LOGS, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    ProfileVersionNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import (
@@ -225,28 +235,7 @@ async def _fetch_password_hash_for_user(db: Any, user_id: int) -> str | None:
     """
     Compatibility helper retained for backend-selection unit tests.
     """
-    if await is_postgres_backend():
-        value = await db.fetchval(
-            "SELECT password_hash FROM users WHERE id = $1",
-            user_id,
-        )
-        return str(value) if value else None
-
-    cursor = await db.execute(
-        "SELECT password_hash FROM users WHERE id = ?",
-        (user_id,),
-    )
-    row = await cursor.fetchone()
-    if not row:
-        return None
-    if isinstance(row, dict):
-        value = row.get("password_hash")
-        return str(value) if value else None
-    try:
-        value = row[0]
-    except (IndexError, KeyError, TypeError):
-        value = None
-    return str(value) if value else None
+    return await fetch_password_hash(db, user_id, is_postgres=await is_postgres_backend())
 
 
 def _require_active_verified_user(user_context: dict[str, Any]) -> None:
@@ -364,6 +353,38 @@ async def _emit_user_profile_audit_event(
 router = APIRouter(prefix="/users", tags=["users"], responses={404: {"description": "Not found"}})
 
 
+@router.get("/me/capabilities", response_model=UserCapabilities)
+async def get_current_user_capabilities(
+    response: Response,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> UserCapabilities:
+    """Report this authenticated caller's effective capability decisions."""
+    decisions: dict[str, bool] = {}
+    for field, permission in (
+        ("can_read_scheduled_tasks", TASKS_READ),
+        ("can_read_notifications", NOTIFICATIONS_READ),
+        ("can_read_monitoring_alerts", SYSTEM_LOGS),
+    ):
+        try:
+            await RequirePermission(permission)(principal)
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_403_FORBIDDEN:
+                raise
+            decisions[field] = False
+        else:
+            decisions[field] = True
+    try:
+        await RequireRole("admin")(principal)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        decisions["can_run_audio_diagnostics"] = False
+    else:
+        decisions["can_run_audio_diagnostics"] = True
+    response.headers["Cache-Control"] = "no-store"
+    return UserCapabilities(user_id=principal.user_id, **decisions)
+
+
 #######################################################################################################################
 #
 # User Profile Endpoints
@@ -401,7 +422,12 @@ async def get_user_profile_catalog(
     return response
 
 
-@router.get("/me/profile", response_model=UserProfileResponse, response_model_exclude_none=True)
+@router.get(
+    "/me/profile",
+    response_model=UserProfileResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_expected_user)],
+)
 async def get_current_user_profile_view(
     sections: Optional[str] = Query(None, description="Comma-separated list of sections to include"),
     include_sources: bool = Query(False, description="Include per-field source attribution"),
@@ -448,7 +474,11 @@ async def get_current_user_profile_view(
     return UserProfileResponse(**profile)
 
 
-@router.patch("/me/profile", response_model=UserProfileUpdateResponse)
+@router.patch(
+    "/me/profile",
+    response_model=UserProfileUpdateResponse,
+    dependencies=[Depends(require_expected_user)],
+)
 async def update_current_user_profile(
     payload: UserProfileUpdateRequest,
     http_request: Request,
@@ -582,20 +612,19 @@ async def update_user_profile(
         updates_made = False
 
         if request.email and request.email != user_context.get("email"):
-            # Update email
-            # Use Postgres-style placeholders; test adapters and SQLite shims
-            # normalize `$N` to `?` automatically.
-            execute_result = await db.execute(
-                "UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
-                request.email.lower(),
-                user_id,
-            )
-            affected_rows = _extract_affected_rows(execute_result)
-            if affected_rows == 0:
+            is_pg = await is_postgres_backend()
+            try:
+                await update_user_email(
+                    db,
+                    backend="postgres" if is_pg else "sqlite",
+                    user_id=user_id,
+                    email=request.email.lower(),
+                )
+            except ProfileVersionNotFound:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User not found",
-                )
+                ) from None
 
             updates_made = True
             user_context["email"] = request.email.lower()
@@ -694,22 +723,7 @@ async def change_password(
         new_hash = password_service.hash_password(request.new_password)
 
         # Update password in database
-        await db.execute(
-            """
-            UPDATE users
-            SET password_hash = $1,
-                password_changed_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = $2
-            """,
-            new_hash,
-            user_id,
-        )
-        await db.execute(
-            "INSERT INTO password_history (user_id, password_hash) VALUES ($1, $2)",
-            user_id,
-            new_hash,
-        )
+        await password_service.set_password(user_id, new_hash, db, is_postgres=await is_postgres_backend())
 
         logger.info(f"Password changed for user {username} (ID: {user_id})")
 
@@ -857,6 +871,8 @@ async def rotate_api_key(
             actor_kind=principal.kind,
             actor_roles=list(principal.roles or []),
         )
+    except APIKeyRotationRejected as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found") from exc
     except MandatoryAuditWriteError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

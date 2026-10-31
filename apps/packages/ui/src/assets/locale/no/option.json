@@ -477,7 +477,8 @@
     "collapseSidebar": "Skjul sidefelt",
     "titlePlaceholder": "Tittel",
     "keywordsEditorPlaceholder": "Nøkkelord (tagger)",
-    "tagsHelp": "Nøkkelord hjelper deg å finne dette notatet ved å bruke nøkkelordfilteret til venstre."
+    "tagsHelp": "Nøkkelord hjelper deg å finne dette notatet ved å bruke nøkkelordfilteret til venstre.",
+    "offlineSaveUnavailable": "Lagring uten nett er ikke tilgjengelig før kontoen din og lokal lagring er bekreftet. Endringene dine forblir ulagret."
   },
   "tts": {
     "playground": "TTS-lekeplass"

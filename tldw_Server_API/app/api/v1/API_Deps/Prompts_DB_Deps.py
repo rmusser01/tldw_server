@@ -244,12 +244,15 @@ _user_db_locks = _EvictingLRUCache(
 
 
 def _is_db_instance_alive(db_instance: PromptsDatabase) -> bool:
+    """Probe the cached database and release this worker's connection."""
     try:
         conn = db_instance.get_connection()
         conn.execute("SELECT 1")
         return True
     except (DatabaseError, OSError, RuntimeError, ValueError):
         return False
+    finally:
+        db_instance.close_connection()
 
 
 def _create_prompts_db_instance(
@@ -257,10 +260,12 @@ def _create_prompts_db_instance(
     salt: Optional[str],
     client_id: str,
 ) -> tuple[PromptsDatabase, Path]:
+    """Initialize the cached database without retaining a worker connection."""
     # Pass salt positionally so older test monkeypatches that still accept
     # (user_id, db_version) remain compatible.
     db_path = _get_prompts_db_path_for_user(user_id, salt)
     db_instance = PromptsDatabase(db_path=str(db_path), client_id=client_id)
+    db_instance.close_connection()
     return db_instance, db_path
 
 

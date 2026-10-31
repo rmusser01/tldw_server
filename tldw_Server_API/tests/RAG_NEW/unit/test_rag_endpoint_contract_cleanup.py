@@ -5,15 +5,15 @@ from pathlib import Path
 import pytest
 from fastapi import BackgroundTasks
 
-from tldw_Server_API.app.api.v1.endpoints import rag_unified
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 import tldw_Server_API.app.core.RAG.rag_service as rag_service
+import tldw_Server_API.app.core.RAG.rag_service.retrieval_plan as retrieval_plan_module
+from tldw_Server_API.app.api.v1.endpoints import rag_unified
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCallCredentials
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
-import tldw_Server_API.app.core.RAG.rag_service.retrieval_plan as retrieval_plan_module
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
-
 
 pytestmark = pytest.mark.unit
 
@@ -164,6 +164,31 @@ def test_checkpoint_config_sanitizer_drops_non_primitive_pipeline_objects() -> N
         "items": ["ok", 2],
     }
     json.dumps(sanitized)
+
+
+def test_checkpoint_config_sanitizer_rejects_direct_nested_and_cyclic_credentials() -> None:
+    handle = ProviderCallCredentials(
+        provider="openai",
+        api_key="checkpoint-secret",
+        app_config={},
+        auth_source="api_key",
+        runtime_generation=0,
+        runtime_identity=object(),
+        credential_identity=object(),
+    )
+    cyclic: dict[str, object] = {}
+    cyclic["self"] = cyclic
+    cyclic["credential"] = handle
+
+    payloads = (
+        {"credential": handle},
+        {"nested": {"items": ["safe", handle]}},
+        {"cyclic": cyclic},
+    )
+    for payload in payloads:
+        with pytest.raises(TypeError) as exc_info:
+            rag_ep._sanitize_checkpoint_config_for_persistence(payload)
+        assert str(exc_info.value) == "ProviderCallCredentials cannot be serialized"  # nosec B101
 
 
 def test_rag_endpoint_private_helpers_keep_docstrings() -> None:

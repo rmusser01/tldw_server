@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import HTTPException
@@ -14,6 +16,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, SessionError
 from tldw_Server_API.app.core.AuthNZ.mfa_service import get_mfa_service
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -26,13 +29,26 @@ from tldw_Server_API.app.services.admin_guardrails_service import verify_privile
 
 _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
+    DatabaseError,
     LookupError,
     OSError,
     RuntimeError,
+    SessionError,
     TimeoutError,
     TypeError,
     ValueError,
 )
+
+
+@asynccontextmanager
+async def _privileged_action_connection(db: Any) -> AsyncIterator[Any]:
+    """Acquire a short transaction for privileged-action verification."""
+    transaction = getattr(db, "transaction", None)
+    if callable(transaction):
+        async with transaction() as connection:
+            yield connection
+        return
+    yield db
 
 
 async def list_user_sessions(
@@ -47,7 +63,7 @@ async def list_user_sessions(
             user_id,
             require_hierarchy=False,
         )
-        sessions = await session_manager.get_user_sessions(user_id)
+        sessions = await session_manager.get_user_sessions(user_id, strict=True)
         return [
             SessionResponse(
                 id=session["id"],
@@ -61,9 +77,9 @@ async def list_user_sessions(
         ]
     except HTTPException:
         raise
-    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS:
         logger.error("Failed to list sessions")
-        raise HTTPException(status_code=500, detail="Failed to list sessions") from exc
+        raise HTTPException(status_code=500, detail="Failed to list sessions") from None
 
 
 async def revoke_user_session(
@@ -82,15 +98,23 @@ async def revoke_user_session(
             user_id,
             require_hierarchy=True,
         )
-        reason = await verify_privileged_action(
-            principal,
-            db,
-            password_service,
-            reason=getattr(request, "reason", None),
-            admin_password=unwrap_optional_secret(getattr(request, "admin_password", None)),
-            admin_reauth_token=unwrap_optional_secret(getattr(request, "admin_reauth_token", None)),
+        async with _privileged_action_connection(db) as connection:
+            reason = await verify_privileged_action(
+                principal,
+                connection,
+                password_service,
+                reason=getattr(request, "reason", None),
+                admin_password=unwrap_optional_secret(getattr(request, "admin_password", None)),
+                admin_reauth_token=unwrap_optional_secret(getattr(request, "admin_reauth_token", None)),
+            )
+        revoked = await session_manager.revoke_session(
+            session_id=session_id,
+            expected_user_id=user_id,
+            revoked_by=principal.user_id,
+            reason=reason,
         )
-        await session_manager.revoke_session(session_id=session_id, revoked_by=principal.user_id)
+        if revoked is False:
+            raise HTTPException(status_code=404, detail="Session not found")
         await _emit_admin_account_audit_event(
             actor_id=principal.user_id,
             target_user_id=user_id,
@@ -107,9 +131,9 @@ async def revoke_user_session(
         return MessageResponse(message="Session revoked")
     except HTTPException:
         raise
-    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS:
         logger.error("Failed to revoke session")
-        raise HTTPException(status_code=500, detail="Failed to revoke session") from exc
+        raise HTTPException(status_code=500, detail="Failed to revoke session") from None
 
 
 async def revoke_all_user_sessions(
@@ -127,15 +151,20 @@ async def revoke_all_user_sessions(
             user_id,
             require_hierarchy=True,
         )
-        reason = await verify_privileged_action(
-            principal,
-            db,
-            password_service,
-            reason=getattr(request, "reason", None),
-            admin_password=unwrap_optional_secret(getattr(request, "admin_password", None)),
-            admin_reauth_token=unwrap_optional_secret(getattr(request, "admin_reauth_token", None)),
+        async with _privileged_action_connection(db) as connection:
+            reason = await verify_privileged_action(
+                principal,
+                connection,
+                password_service,
+                reason=getattr(request, "reason", None),
+                admin_password=unwrap_optional_secret(getattr(request, "admin_password", None)),
+                admin_reauth_token=unwrap_optional_secret(getattr(request, "admin_reauth_token", None)),
+            )
+        await session_manager.revoke_all_user_sessions(
+            user_id=user_id,
+            reason=reason,
+            revoked_by=principal.user_id,
         )
-        await session_manager.revoke_all_user_sessions(user_id=user_id)
         await _emit_admin_account_audit_event(
             actor_id=principal.user_id,
             target_user_id=user_id,
@@ -152,9 +181,9 @@ async def revoke_all_user_sessions(
         return MessageResponse(message="All sessions revoked")
     except HTTPException:
         raise
-    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS:
         logger.error("Failed to revoke all sessions")
-        raise HTTPException(status_code=500, detail="Failed to revoke sessions") from exc
+        raise HTTPException(status_code=500, detail="Failed to revoke sessions") from None
 
 
 async def get_user_mfa_status(
@@ -169,12 +198,12 @@ async def get_user_mfa_status(
             require_hierarchy=False,
         )
         mfa_service = get_mfa_service()
-        return await mfa_service.get_user_mfa_status(user_id)
+        return await mfa_service.get_user_mfa_status(user_id, strict=True)
     except HTTPException:
         raise
-    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS:
         logger.error("Failed to fetch MFA status")
-        raise HTTPException(status_code=500, detail="Failed to fetch MFA status") from exc
+        raise HTTPException(status_code=500, detail="Failed to fetch MFA status") from None
 
 
 async def disable_user_mfa(
@@ -191,14 +220,15 @@ async def disable_user_mfa(
             user_id,
             require_hierarchy=True,
         )
-        reason = await verify_privileged_action(
-            principal,
-            db,
-            password_service,
-            reason=getattr(request, "reason", None),
-            admin_password=unwrap_optional_secret(getattr(request, "admin_password", None)),
-            admin_reauth_token=unwrap_optional_secret(getattr(request, "admin_reauth_token", None)),
-        )
+        async with _privileged_action_connection(db) as connection:
+            reason = await verify_privileged_action(
+                principal,
+                connection,
+                password_service,
+                reason=getattr(request, "reason", None),
+                admin_password=unwrap_optional_secret(getattr(request, "admin_password", None)),
+                admin_reauth_token=unwrap_optional_secret(getattr(request, "admin_reauth_token", None)),
+            )
         mfa_service = get_mfa_service()
         success = await mfa_service.disable_mfa(user_id)
         if not success:
@@ -216,6 +246,6 @@ async def disable_user_mfa(
         return MessageResponse(message="MFA disabled")
     except HTTPException:
         raise
-    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+    except _ADMIN_SESSIONS_NONCRITICAL_EXCEPTIONS:
         logger.error("Failed to disable MFA")
-        raise HTTPException(status_code=500, detail="Failed to disable MFA") from exc
+        raise HTTPException(status_code=500, detail="Failed to disable MFA") from None

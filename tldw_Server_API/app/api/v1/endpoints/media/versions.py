@@ -18,6 +18,7 @@ from fastapi import (
 )
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     AdvancedVersionUpsertRequest,
@@ -30,9 +31,9 @@ from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     VersionDetailResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     check_media_exists,
+    get_active_document_version_uuid,
     get_document_version,
     get_full_media_details_rich,
     list_document_versions,
@@ -440,20 +441,9 @@ async def delete_version(
         media_id,
     )
     try:
-        query_uuid = """
-            SELECT dv.uuid
-            FROM DocumentVersions dv
-            JOIN Media m ON dv.media_id = m.id
-            WHERE dv.media_id = ?
-              AND dv.version_number = ?
-              AND dv.deleted = 0
-              AND m.deleted = 0
-              AND m.is_trash = 0
-        """
-        cursor = db.execute_query(query_uuid, (media_id, version_number))
-        result_uuid = cursor.fetchone()
+        version_uuid = get_active_document_version_uuid(db, media_id, version_number)
 
-        if not result_uuid:
+        if not version_uuid:
             logger.warning(
                 "Active version {} for active media {} not found.",
                 version_number,
@@ -464,7 +454,6 @@ async def delete_version(
                 detail="Active media or specific active version not found.",
             )
 
-        version_uuid = result_uuid["uuid"]
         logger.debug(
             "Found UUID {} for version {} of media {}",
             version_uuid,

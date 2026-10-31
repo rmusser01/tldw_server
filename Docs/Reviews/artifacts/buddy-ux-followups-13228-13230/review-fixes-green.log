@@ -1,0 +1,10 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+ ✓ src/services/__tests__/buddies.test.ts (12 tests) 59ms
+ ✓ src/components/Common/PersonaBuddy/__tests__/buddy-conversation-labels.test.ts (3 tests) 27ms
+
+ Test Files  2 passed (2)
+      Tests  15 passed (15)
+   Start at  23:32:03
+   Duration  1.28s (transform 216ms, setup 203ms, import 200ms, tests 86ms, environment 630ms)

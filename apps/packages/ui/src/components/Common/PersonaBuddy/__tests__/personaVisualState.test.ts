@@ -179,4 +179,20 @@ describe("resolvePersonaVisualState", () => {
       })
     ).toBe("offline")
   })
+
+  it("keeps offline ahead of runtime, wake, voice, and tool activity", () => {
+    expect(
+      resolvePersonaVisualState({
+        isOffline: true,
+        wakeArmed: true,
+        liveVoiceState: "speaking",
+        activeToolStatus: "Running notes.search",
+        runtimeOverride: {
+          state: "thinking",
+          expiresAt: 2_000
+        },
+        now: 1_000
+      })
+    ).toBe("offline")
+  })
 })

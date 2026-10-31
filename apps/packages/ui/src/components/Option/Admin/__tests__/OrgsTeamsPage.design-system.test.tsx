@@ -50,4 +50,26 @@ describe("OrgsTeamsPage design-system states", () => {
       "Organization management is not available on this server."
     )
   })
+
+  it("renders orgs from the items-envelope response (#2916)", async () => {
+    apiMock.listOrgs.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          name: "alice Workspace",
+          slug: null,
+          owner_user_id: 2,
+          is_active: true,
+          created_at: "2026-09-06T02:50:34"
+        }
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0
+    })
+
+    render(<OrgsTeamsPage />)
+
+    expect(await screen.findByText("alice Workspace")).toBeInTheDocument()
+  })
 })

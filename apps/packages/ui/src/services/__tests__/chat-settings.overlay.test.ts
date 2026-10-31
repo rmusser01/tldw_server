@@ -20,6 +20,7 @@ const storageState = vi.hoisted(() => {
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
+    hasPersistentBackend: true,
     get: storageState.get,
     set: storageState.set,
     remove: storageState.remove
@@ -49,15 +50,16 @@ import {
 
 const buildOverlay = (
   overrides: Record<string, unknown> = {}
-): ChatAssistantOverlay => ({
-  kind: "persona",
-  id: "persona-7",
-  name: "Planner",
-  avatar_url: "https://example.com/avatar.png",
-  system_prompt_snapshot: "You are concise and structured.",
-  updatedAt: "2026-05-22T18:00:00.000Z",
-  ...overrides
-} as ChatAssistantOverlay)
+): ChatAssistantOverlay =>
+  ({
+    kind: "persona",
+    id: "persona-7",
+    name: "Planner",
+    avatar_url: "https://example.com/avatar.png",
+    system_prompt_snapshot: "You are concise and structured.",
+    updatedAt: "2026-05-22T18:00:00.000Z",
+    ...overrides
+  }) as ChatAssistantOverlay
 
 describe("chat settings assistant overlay", () => {
   beforeEach(() => {
@@ -481,4 +483,21 @@ describe("chat settings assistant overlay", () => {
       assistantOverlay: null
     })
   })
+})
+
+vi.mock("@/db/dexie/schema", async () => ({
+  db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory
+}))
+beforeEach(async () => {
+  const { memory } = await import(
+    "@/hooks/chat/__tests__/local-history-fixture"
+  )
+  memory.chatHistories.rows.clear()
+  for (const id of [
+    "history-overlay-1",
+    "history-overlay-preserve",
+    "history-overlay-invalid-merge",
+    "history-overlay-clear"
+  ])
+    await memory.chatHistories.put({ id })
 })

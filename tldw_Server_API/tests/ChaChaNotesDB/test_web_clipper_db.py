@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,7 +13,20 @@ from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperSaveRequest,
     WebClipperSaveResult,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
+    CharactersRAGDB,
+    ConflictError,
+    InputError,
+)
+
+
+class _EmptyCursor:
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
 
 
 @pytest.fixture
@@ -30,7 +45,7 @@ def test_web_clipper_document_round_trip_and_table_creation(db):
     assert "note_clipper_documents" in tables
     assert "note_clipper_workspace_placements" in tables
 
-    note_id = db.add_note(title="Clip", content="Visible body", note_id="clip-123")
+    note_id = db.add_note(title="Clip", content="Visible body", note_id=str(uuid4()))
     document = db.upsert_note_clipper_document(
         clip_id="clip-123",
         note_id=note_id,
@@ -56,8 +71,35 @@ def test_web_clipper_document_round_trip_and_table_creation(db):
     assert clip_doc_by_note_id["clip_id"] == "clip-123"
 
 
+def test_postgres_web_clipper_reads_bind_authenticated_owner() -> None:
+    class _PostgresBackend:
+        backend_type = BackendType.POSTGRESQL
+
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._local = type("Local", (), {})()
+    db._backend = _PostgresBackend()
+    db._uses_shared_content_backend = False
+    db.client_id = "owner-a"
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def _execute_query(query: str, params: tuple[object, ...]) -> _EmptyCursor:
+        calls.append((query, params))
+        return _EmptyCursor()
+
+    db.execute_query = _execute_query
+
+    assert db.get_note_clipper_document_by_clip_id("shared-clip") is None
+    assert db.get_note_clipper_document_by_note_id(str(uuid4())) is None
+    assert db.list_note_clipper_workspace_placements("shared-clip") == []
+
+    assert len(calls) == 3
+    for query, params in calls:
+        assert "client_id = ?" in query
+        assert params[0] == "owner-a"
+
+
 def test_web_clipper_workspace_placement_upsert_is_idempotent(db):
-    note_id = db.add_note(title="Clip", content="Visible body", note_id="clip-456")
+    note_id = db.add_note(title="Clip", content="Visible body", note_id=str(uuid4()))
     db.upsert_note_clipper_document(
         clip_id="clip-456",
         note_id=note_id,
@@ -96,7 +138,7 @@ def test_web_clipper_workspace_placement_upsert_is_idempotent(db):
 
 
 def test_web_clipper_cleanup_follows_canonical_note_deletion(db):
-    note_id = db.add_note(title="Clip", content="Visible body", note_id="clip-789")
+    note_id = db.add_note(title="Clip", content="Visible body", note_id=str(uuid4()))
     db.upsert_note_clipper_document(
         clip_id="clip-789",
         note_id=note_id,
@@ -127,7 +169,7 @@ def test_web_clipper_cleanup_follows_canonical_note_deletion(db):
 
 
 def test_web_clipper_soft_delete_invalidates_and_restore_reactivates_sidecars(db):
-    note_id = db.add_note(title="Clip", content="Visible body", note_id="clip-soft")
+    note_id = db.add_note(title="Clip", content="Visible body", note_id=str(uuid4()))
     db.upsert_note_clipper_document(
         clip_id="clip-soft",
         note_id=note_id,
@@ -183,7 +225,7 @@ def test_web_clipper_soft_delete_invalidates_and_restore_reactivates_sidecars(db
 
 
 def test_web_clipper_helpers_use_explicit_transaction_connection(db, monkeypatch: pytest.MonkeyPatch):
-    note_id = db.add_note(title="Clip", content="Visible body", note_id="clip-txn")
+    note_id = db.add_note(title="Clip", content="Visible body", note_id=str(uuid4()))
 
     monkeypatch.setattr(
         db,
@@ -217,6 +259,37 @@ def test_web_clipper_helpers_use_explicit_transaction_connection(db, monkeypatch
 
     assert document["clip_id"] == "clip-txn"
     assert placement["workspace_note_id"] == 21
+
+
+def test_web_clipper_document_mapping_is_immutable_and_placement_resolves_note(db):
+    note_id = db.add_note(title="Clip", content="Body", note_id=str(uuid4()))
+    other_note_id = db.add_note(title="Other", content="Body", note_id=str(uuid4()))
+    db.upsert_note_clipper_document(
+        clip_id="clip-immutable",
+        note_id=note_id,
+        clip_type="article",
+    )
+
+    with pytest.raises(ConflictError, match="different canonical note"):
+        db.upsert_note_clipper_document(
+            clip_id="clip-immutable",
+            note_id=other_note_id,
+            clip_type="article",
+        )
+
+    placement = db.upsert_note_clipper_workspace_placement(
+        clip_id="clip-immutable",
+        workspace_id="ws-1",
+        workspace_note_id=17,
+    )
+    assert placement["source_note_id"] == note_id
+    with pytest.raises(InputError, match="document note_id"):
+        db.upsert_note_clipper_workspace_placement(
+            clip_id="clip-immutable",
+            workspace_id="ws-1",
+            workspace_note_id=17,
+            source_note_id=other_note_id,
+        )
 
 
 def test_web_clipper_schema_models_accept_minimal_payloads():

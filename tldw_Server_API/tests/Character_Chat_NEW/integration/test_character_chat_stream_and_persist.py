@@ -5,6 +5,7 @@ Integration tests for streaming stub (offline-sim) and persist endpoint.
 from datetime import datetime, timezone
 
 import pytest
+
 pytestmark = pytest.mark.integration
 from fastapi.testclient import TestClient
 
@@ -909,3 +910,110 @@ def test_persist_streamed_message_maps_oversize_input_error_to_413(
 
     assert response.status_code == 413
     assert response.json()["detail"] == "Persist attachment exceeds maximum size"
+
+
+@pytest.mark.parametrize("limit", ["count", "size"])
+def test_versioned_legacy_persist_normalizes_tools_before_protecting_retry(
+    test_client,
+    character_db,
+    auth_headers,
+    monkeypatch,
+    limit,
+):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+    from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+
+    db = character_db
+    cid = db.add_conversation({"character_id": None, "title": "Legacy tool retry"})
+    for mid in ("old-a", "old-b"):
+        db.add_message(
+            {"id": mid, "conversation_id": cid, "sender": "user", "content": mid, "parent_message_id": None}
+        )
+    view = {
+        "view_session_id": "legacy",
+        "conversation_id": cid,
+        "interpretation": {"kind": "parent_graph_v1"},
+        "cursor": {"kind": "empty"},
+        "selection_revision": 1,
+    }
+    route = f"/api/v1/chat/conversations/{cid}/history"
+    captured = test_client.post(
+        route + "/selection", headers=auth_headers, json={"purpose": "send", "view": view}
+    ).json()
+    snapshot = captured["snapshot"]
+    confirmation = {
+        "version": 1,
+        "projection_id": "tool-legacy",
+        "owner_key": snapshot["owner_key"],
+        "conversation_id": cid,
+        "source_digest": snapshot["source_digest"],
+        "fences": snapshot["fences"],
+        "source_members": [{"id": row["id"], "revision": row["revision"]} for row in snapshot["nodes"]],
+        "ordered_path_ids": ["old-a", "old-b"],
+        "cursor": {"kind": "before_message", "message_id": "old-a"},
+        "selection_revision": 1,
+    }
+    confirmed = test_client.post(
+        route + "/legacy-projection", headers=auth_headers, json={"confirmation": confirmation}
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    view.update(
+        interpretation={"kind": "legacy_linear_v1", "projection_id": "tool-legacy"}, cursor=confirmation["cursor"]
+    )
+    captured = test_client.post(
+        route + "/selection", headers=auth_headers, json={"purpose": "send", "view": view}
+    ).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "tools")["selection"]
+    accepted = test_client.post(
+        f"/api/v1/chats/{cid}/messages",
+        headers=auth_headers,
+        json={"id": "accepted-input", "role": "user", "content": "question", "tldw_history_selection_v1": selection},
+    )
+    assert accepted.status_code == 201, accepted.text
+    admission = accepted.json()["tldw_history_admission_v1"]
+    reference = {
+        key: admission[key]
+        for key in (
+            "version",
+            "owner_key",
+            "conversation_id",
+            "input_message_id",
+            "input_message_revision",
+            "selection_digest",
+        )
+    }
+    calls = [
+        {"id": str(i), "type": "function", "function": {"name": "test", "arguments": "{}"}}
+        for i in range(endpoint.MAX_TOOL_CALLS_COUNT + 1)
+    ]
+    if limit == "size":
+        calls = [
+            {
+                "id": "huge",
+                "type": "function",
+                "function": {"name": "test", "arguments": "x" * (endpoint.MAX_TOOL_CALLS_SIZE + 1)},
+            }
+        ]
+    expected = endpoint._validate_and_truncate_tool_calls(calls)
+    payload = {
+        "assistant_message_id": "bounded-result",
+        "assistant_content": "result",
+        "tool_calls": calls,
+        "chat_rating": 4,
+        "tldw_history_admission_v1": reference,
+    }
+    first = test_client.post(f"/api/v1/chats/{cid}/completions/persist", headers=auth_headers, json=payload)
+    assert first.status_code == 200, first.text
+    metadata = db.get_message_metadata("bounded-result")
+    assert metadata["tool_calls"] == expected
+    assert db.get_message_by_id("accepted-input")["parent_message_id"] is None
+    assert db.get_conversation_by_id(cid)["rating"] == 4
+
+    def no_post_settlement_metadata(*args, **kwargs):
+        raise AssertionError("Protected result metadata must not be rewritten after settlement")
+
+    monkeypatch.setattr(endpoint, "_try_store_stream_persist_metadata", no_post_settlement_metadata)
+    replay = test_client.post(f"/api/v1/chats/{cid}/completions/persist", headers=auth_headers, json=payload)
+    assert replay.status_code == 200, replay.text
+    assert db.get_message_metadata("bounded-result") == metadata
+    assert db.count_messages_for_conversation(cid) == 4

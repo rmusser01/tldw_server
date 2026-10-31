@@ -3,11 +3,22 @@ import { buildQuery } from "../client-utils"
 import type {
   AdminUserListResponse,
   AdminUserUpdateRequest,
+  AdminUserCreateRequest,
+  AdminUserSummary,
   AdminRole,
 } from "../TldwApiClient"
 
 export const adminMethods = {
   // ── Admin Users & Roles ──
+
+  async createAdminUser(payload: AdminUserCreateRequest): Promise<AdminUserSummary> {
+    return await bgRequest<AdminUserSummary>({
+      path: "/api/v1/admin/users",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
 
   async listAdminUsers(params?: {
     page?: number
@@ -32,6 +43,29 @@ export const adminMethods = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: payload
+    })
+  },
+
+  async resetAdminUserPassword(
+    userId: number,
+    payload: {
+      temporary_password: string
+      reason: string
+      force_password_change?: boolean
+    }
+  ): Promise<{ user_id: number; force_password_change: boolean; message: string }> {
+    return await bgRequest<{
+      user_id: number
+      force_password_change: boolean
+      message: string
+    }>({
+      path: `/api/v1/admin/users/${userId}/reset-password`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        force_password_change: true,
+        ...payload
+      }
     })
   },
 
@@ -422,7 +456,14 @@ export const adminMethods = {
     return await bgRequest<any>({ path: "/api/v1/admin/backup-schedules", method: "GET" })
   },
 
-  async createBackupSchedule(payload: { dataset: string; cron?: string; retention_days?: number }): Promise<any> {
+  async createBackupSchedule(payload: {
+    dataset: string
+    target_user_id?: number
+    frequency: "daily" | "weekly" | "monthly"
+    time_of_day: string
+    timezone?: string
+    retention_count: number
+  }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/backup-schedules",
       method: "POST",
@@ -637,8 +678,12 @@ export const adminMethods = {
     })
   },
 
-  async getStorageQuotaSummary(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/storage-quotas/summary", method: "GET" })
+  async getStorageQuotaSummary(params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({
+      path: `/api/v1/admin/storage-quotas/summary${query}`,
+      method: "GET"
+    })
   },
 }
 

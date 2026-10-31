@@ -1,7 +1,7 @@
 ---
 id: TASK-2294
 title: Add skill and workflow runner tools for reusable agentic routines
-status: To Do
+status: In Progress
 labels:
 - mcp
 - skills
@@ -10,6 +10,7 @@ labels:
 - tools
 references:
 - https://code.claude.com/docs/en/tools-reference
+updated_date: 2026-07-24 00:24
 ---
 
 ## Description
@@ -25,7 +26,7 @@ Design and implement Skill/Workflow-style agentic execution tools for reusable p
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Execution work is decomposed into completed read-only catalog/render slices TASK-2294.1 and TASK-2294.2, active model-only runner TASK-2294.3, deferred canonical read-only nested execution TASK-2294.4, and deferred durable effectful execution TASK-2294.5. This sequencing prevents the existing core SkillExecutor from becoming an MCP security bypass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

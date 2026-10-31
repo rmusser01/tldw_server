@@ -207,6 +207,7 @@ async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
 async def test_unified_pipeline_coordinates_cache_hit_generation_enabled(monkeypatch):
     resolved = _resolved_request()
     plan = _retrieval_plan()
+    seen = {}
 
     class FakeCache:
         def get(self, query):  # noqa: ANN001
@@ -216,9 +217,23 @@ async def test_unified_pipeline_coordinates_cache_hit_generation_enabled(monkeyp
                 "cached": True,
             }
 
+    async def fake_generation_phase(**kwargs):
+        seen["generation_plan"] = kwargs["retrieval_plan"]
+        return {
+            "answer": "fresh answer",
+            "sources": kwargs["derived_evidence"].documents,
+            "metadata": {},
+        }
+
+    class FakeAnswerGenerator:
+        def __init__(self, *args, **kwargs):
+            pass
+
     monkeypatch.setattr(unified_pipeline, "SemanticCache", lambda *args, **kwargs: FakeCache())
     monkeypatch.setattr(unified_pipeline, "AdaptiveCache", None)
     monkeypatch.setattr(unified_pipeline, "get_shared_cache", None)
+    monkeypatch.setattr(unified_pipeline, "AnswerGenerator", FakeAnswerGenerator)
+    monkeypatch.setattr(unified_pipeline, "execute_generation_phase", fake_generation_phase)
 
     result = await unified_pipeline.unified_rag_pipeline(
         query=resolved.query,
@@ -234,7 +249,10 @@ async def test_unified_pipeline_coordinates_cache_hit_generation_enabled(monkeyp
     )
 
     assert result.cache_hit is True
-    assert result.generated_answer == "cached answer"
+    assert result.generated_answer == "fresh answer"
+    assert seen["generation_plan"] is not None
+    assert result.metadata["retrieval_cache_hit"] is True
+    assert result.metadata["generation_executed"] is True
     assert result.metadata["retrieval_plan"]["top_k"] == plan.top_k
 
 

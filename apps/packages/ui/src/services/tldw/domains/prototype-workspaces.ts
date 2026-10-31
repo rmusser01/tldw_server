@@ -1,6 +1,5 @@
 import { fetchWithTldwAuth } from "@/services/tldw/auth-fetch"
 import { buildTldwApiError } from "@/services/tldw/api-error"
-import { getTldwServerURL } from "@/services/tldw-server"
 import type {
   PrototypeCollaboratorSessionCreateInput,
   PrototypeWorkspaceDetail,
@@ -21,6 +20,7 @@ import type {
 type TldwApiClientCore = object
 
 const apiUrl = async (path: string) => {
+  const { getTldwServerURL } = await import("@/services/tldw-server")
   const base = await getTldwServerURL()
   return `${base}/api/v1${path}`
 }

@@ -13,21 +13,28 @@ from typing import Any
 
 import httpx
 
+from tldw_Server_API.app.core.exceptions import (
+    EgressPolicyError,
+    NetworkError,
+    RetryExhaustedError,
+)
+from tldw_Server_API.app.core.http_client import RetryPolicy, fetch
+
 _WEATHER_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
     ConnectionError,
+    EgressPolicyError,
     KeyError,
     LookupError,
+    NetworkError,
     OSError,
+    RetryExhaustedError,
     RuntimeError,
     TimeoutError,
     TypeError,
     ValueError,
     httpx.HTTPError,
 )
-
-# Test seam for controlled outbound behavior without patching httpx directly.
-http_client_factory = httpx.Client
 
 _MAX_LOCATION_CHARS = 120
 _MIN_LATITUDE = -90.0
@@ -217,8 +224,15 @@ class OpenWeatherClient(WeatherClient):
             )
 
         try:
-            with http_client_factory(timeout=self.timeout_seconds) as client:
-                response = client.get(self._BASE_URL, params=params)
+            response = fetch(
+                method="GET",
+                url=self._BASE_URL,
+                params=params,
+                retry=RetryPolicy(attempts=1),
+                timeout=self.timeout_seconds,
+                allow_redirects=False,
+                sensitive_observability=True,
+            )
             if response.status_code >= 400:
                 return WeatherResult(
                     ok=False,

@@ -96,7 +96,7 @@ Frontend:
 - Create: `tldw_Server_API/app/core/Chat_Macros/README.md`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py`
 
-- [ ] **Step 1: Write failing parser/model tests**
+- [x] **Step 1: Write failing parser/model tests**
 
 Add tests for:
 
@@ -114,7 +114,7 @@ def test_non_empty_tool_or_skill_permissions_rejected():
         load_macro_definition(raw)
 
 def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
-    spec = WrapupArgsSpec()
+    spec = wrapup_args_spec()
     args = parse_macro_args(
         '--preset dev_handoff --keep-forks --output-profile compact '
         '--question "What changed?" --question "What is next?"',
@@ -125,7 +125,7 @@ def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
     assert args["question"] == ["What changed?", "What is next?"]
 ```
 
-- [ ] **Step 2: Run the new tests and verify they fail**
+- [x] **Step 2: Run the new tests and verify they fail**
 
 Run:
 
@@ -136,19 +136,19 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py -v
 
 Expected: import errors for the new `Chat_Macros` modules.
 
-- [ ] **Step 3: Implement minimal models and parser**
+- [x] **Step 3: Implement minimal models and parser**
 
 Implement:
 
 - `MacroValidationError`, `MacroStorageError`, `MacroNotFoundError`, `MacroExecutionError` in `exceptions.py`.
 - Pydantic models in `models.py`: `MacroDefinition`, `MacroArgSpec`, `MacroStep`, `MacroPermissions`, `MacroExecution`, `MacroContext`, `OutputProfile`, `MacroRunRecord`, `MacroBranchRecord`.
 - `load_macro_definition(raw: str) -> MacroDefinition` in `parser.py`.
-- `parse_macro_args(raw: str | None, arg_specs: Mapping[str, MacroArgSpec], *, max_questions: int) -> dict[str, Any]` using `shlex.split`.
+- `parse_macro_args(raw: str | None, arg_specs: Mapping[str, MacroArgSpec], *, max_repeated_values: int) -> dict[str, Any]` using `shlex.split`.
 - Command validation pattern `^[a-z][a-z0-9_]{0,63}$`.
 - Permission validation that rejects non-empty `tool_calls` and `skills`.
 - Step validation that every `merge.consumes` and `post_result.consumes` target exists as a previous `output`.
 
-- [ ] **Step 4: Add the built-in `MACRO.yaml`**
+- [x] **Step 4: Add the built-in `MACRO.yaml`**
 
 Use the spec's `/wrapup` definition, with:
 
@@ -163,7 +163,7 @@ builtin_version: 1
 
 Keep `execution.branch_strategy: auto`, `max_branches: 6`, `retries_per_branch: 1`, and the four default branch prompts from the spec.
 
-- [ ] **Step 5: Run parser tests**
+- [x] **Step 5: Run parser tests**
 
 Run:
 
@@ -174,7 +174,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py
@@ -188,7 +188,7 @@ git commit -m "feat: add chat macro definition parser"
 - Create: `tldw_Server_API/app/core/Chat_Macros/repository.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Add tests that create a temporary `CharactersRAGDB` and assert:
 
@@ -207,7 +207,7 @@ assert repo.list_branches(run.run_id)[0].output_text == "S"
 
 Also test that `post_idempotency_key` is unique per run/post target and that cancellation stores `cancel_requested_at`.
 
-- [ ] **Step 2: Run repository tests and verify failure**
+- [x] **Step 2: Run repository tests and verify failure**
 
 Run:
 
@@ -218,7 +218,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py
 
 Expected: import errors or missing table errors.
 
-- [ ] **Step 3: Add schema migration**
+- [x] **Step 3: Add schema migration**
 
 In `ChaChaNotes_DB.py`:
 
@@ -232,7 +232,7 @@ In `ChaChaNotes_DB.py`:
 - Add indexes on `(user_id, command)`, `(user_id, status, created_at)`, `(run_id, step_id)`, and unique `(run_id, post_idempotency_key)` where possible.
 - Keep fields JSON-compatible as `TEXT` columns containing canonical JSON where existing DB conventions do that.
 
-- [ ] **Step 4: Implement `ChatMacroRepository`**
+- [x] **Step 4: Implement `ChatMacroRepository`**
 
 Implement methods:
 
@@ -252,7 +252,7 @@ Implement methods:
 
 Use parameterized SQL only. Do not expose raw connection usage outside this repository.
 
-- [ ] **Step 5: Run repository tests**
+- [x] **Step 5: Run repository tests**
 
 Run:
 
@@ -263,7 +263,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Chat_Macros/repository.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py
@@ -280,7 +280,7 @@ git commit -m "feat: store chat macro runs in chacha notes"
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_storage.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_service.py`
 
-- [ ] **Step 1: Write failing storage and settings tests**
+- [x] **Step 1: Write failing storage and settings tests**
 
 Cover:
 
@@ -291,7 +291,7 @@ Cover:
 - Cloning a built-in creates a user-owned macro with a non-conflicting command.
 - Default output profile renders summary/decisions/action_items/open_questions/failed_branches in order.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -305,7 +305,7 @@ python -m pytest \
 
 Expected: import errors.
 
-- [ ] **Step 3: Implement storage**
+- [x] **Step 3: Implement storage**
 
 Use the Skills service as a reference, but keep the domain separate:
 
@@ -315,7 +315,7 @@ Use the Skills service as a reference, but keep the domain separate:
 - Bound `MACRO.yaml` bytes and total supporting file bytes.
 - Compute a digest from canonical macro content plus supporting file metadata.
 
-- [ ] **Step 4: Implement service and settings**
+- [x] **Step 4: Implement service and settings**
 
 `ChatMacrosService` should:
 
@@ -327,7 +327,7 @@ Use the Skills service as a reference, but keep the domain separate:
 - Resolve output profiles from settings, with macro-local overrides bounded by global caps.
 - Reject non-empty future permissions.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run:
 
@@ -338,12 +338,20 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_storage.py tl
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros tldw_Server_API/tests/Chat_Macros/unit/test_macro_storage.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_service.py
 git commit -m "feat: add chat macro storage service"
 ```
+
+Completed in commits `80eeb8c9e1`, `a2f7ca82ee`, `8f48bd6bc8`, `c826582720`, and `9972f2b768`.
+Verification:
+- Storage/service tests: 14 passed, 3 warnings.
+- Parser/repository regressions: 26 passed, 3 warnings.
+- Bandit on `tldw_Server_API/app/core/Chat_Macros`: JSON results empty.
+- `git diff --check`: clean.
+Reviews: spec and code-quality re-reviews found no findings at `9972f2b768`.
 
 ## Task 4: Chat Macros API
 
@@ -352,9 +360,10 @@ git commit -m "feat: add chat macro storage service"
 - Create: `tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py`
 - Create: `tldw_Server_API/app/api/v1/endpoints/chat_macros.py`
 - Modify: `tldw_Server_API/app/api/v1/router_groups/core.py`
+- Modify: `tldw_Server_API/app/api/v1/router_groups/minimal.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Use the existing FastAPI test client fixtures. Cover:
 
@@ -370,7 +379,7 @@ Use the existing FastAPI test client fixtures. Cover:
 - `GET /api/v1/chat/macros/runs/{run_id}` returns run detail with branch summaries and redacted-safe errors.
 - `POST /api/v1/chat/macros/runs/{run_id}/cancel` records cancellation.
 
-- [ ] **Step 2: Run API tests and verify failure**
+- [x] **Step 2: Run API tests and verify failure**
 
 Run:
 
@@ -381,7 +390,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_
 
 Expected: 404 or import errors.
 
-- [ ] **Step 3: Implement schemas**
+- [x] **Step 3: Implement schemas**
 
 Include:
 
@@ -395,7 +404,7 @@ Include:
 
 Keep response payloads stable and frontend-friendly: status strings, run IDs, branch summaries, output profile names, and safe errors.
 
-- [ ] **Step 4: Implement dependency and endpoints**
+- [x] **Step 4: Implement dependency and endpoints**
 
 `get_chat_macros_service(...)` should use:
 
@@ -406,7 +415,7 @@ Keep response payloads stable and frontend-friendly: status strings, run IDs, br
 
 Endpoints should map domain exceptions to `400`, `404`, `409`, `413`, or `500` without leaking raw provider errors.
 
-- [ ] **Step 5: Register router**
+- [x] **Step 5: Register router**
 
 In `router_groups/core.py`, append a `RouterSpec` for:
 
@@ -417,7 +426,7 @@ tags=("chat-macros",)
 route_key="chat-macros"
 ```
 
-- [ ] **Step 6: Run API tests**
+- [x] **Step 6: Run API tests**
 
 Run:
 
@@ -428,12 +437,24 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+Verification:
+
+- `python -m pytest tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py -v` -> 3 passed.
+- `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "minimal_test_router_specs or minimal_required_router_specs" -v` -> 10 passed, 166 deselected.
+- `python -m pytest tldw_Server_API/tests/Chat_Macros -v` -> 43 passed.
+- `python -m py_compile tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py` -> passed.
+- Review fixes: broadened run/branch error redaction for bearer/header/JSON-style secrets and persisted the resolved output profile name after fallback.
+- `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/router_groups/minimal.py tldw_Server_API/app/api/v1/router_groups/core.py -f json -o /tmp/bandit_chat_macros_task4_api_reviewfix.json` -> no findings.
+- `git diff --check` -> passed.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/router_groups/core.py tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py
 git commit -m "feat: expose chat macros api"
 ```
+
+Committed as `874ef6112d`.
 
 ## Task 5: Slash Command Entry Point And Chat Completion Short-Circuit
 
@@ -443,7 +464,7 @@ git commit -m "feat: expose chat macros api"
 - Test: `tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py`
 - Test: `tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py`
 
-- [ ] **Step 1: Write failing command-router tests**
+- [x] **Step 1: Write failing command-router tests**
 
 Add tests for:
 
@@ -456,7 +477,7 @@ def test_core_parse_still_only_returns_registered_core_commands():
     assert command_router.parse_slash_command("/wrapup") is None
 ```
 
-- [ ] **Step 2: Write failing chat endpoint macro tests**
+- [x] **Step 2: Write failing chat endpoint macro tests**
 
 Add integration tests with a fake `ChatMacrosService` seam asserting:
 
@@ -465,7 +486,7 @@ Add integration tests with a fake `ChatMacrosService` seam asserting:
 - Unknown `/not_a_macro` preserves current behavior.
 - Macro invalid args return a chat-visible error without creating a run.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run:
 
@@ -479,7 +500,7 @@ python -m pytest \
 
 Expected: missing `extract_slash_candidate` and missing macro short-circuit.
 
-- [ ] **Step 4: Add slash candidate parsing**
+- [x] **Step 4: Add slash candidate parsing**
 
 In `command_router.py`:
 
@@ -487,7 +508,7 @@ In `command_router.py`:
 - Keep `parse_slash_command` unchanged for registered core commands.
 - Add a small helper exposing reserved core command names for collision checks.
 
-- [ ] **Step 5: Add chat endpoint macro short-circuit**
+- [x] **Step 5: Add chat endpoint macro short-circuit**
 
 In `chat.py`, after finding the latest user message:
 
@@ -498,7 +519,7 @@ In `chat.py`, after finding the latest user message:
 5. Do not pass macro output into `build_injection_text`.
 6. If the incoming request is streaming, return a safe non-streaming macro response or a small SSE completion compatible with existing client expectations; cover whichever behavior is chosen in tests.
 
-- [ ] **Step 6: Run command/chat tests**
+- [x] **Step 6: Run command/chat tests**
 
 Run:
 
@@ -512,7 +533,7 @@ python -m pytest \
 
 Expected: PASS for touched command and chat completion tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat/command_router.py tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py
@@ -523,13 +544,16 @@ git commit -m "feat: route chat macro slash commands"
 
 **Files:**
 - Create: `tldw_Server_API/app/core/Chat_Macros/context_snapshot.py`
+- Create: `tldw_Server_API/app/core/Chat_Macros/acp_adapter.py`
 - Create: `tldw_Server_API/app/core/Chat_Macros/branch_runner.py`
 - Create: `tldw_Server_API/app/core/Chat_Macros/executor.py`
+- Modify: `tldw_Server_API/app/core/Chat_Macros/models.py`
 - Modify: `tldw_Server_API/app/core/Chat_Macros/output_profiles.py`
+- Modify: `tldw_Server_API/app/core/Chat_Macros/builtin/wrapup/MACRO.yaml`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_executor.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_acp_adapter.py`
 
-- [ ] **Step 1: Write failing executor tests**
+- [x] **Step 1: Write failing executor tests**
 
 Use fake branch and merge callables. Cover:
 
@@ -547,7 +571,7 @@ Use fake branch and merge callables. Cover:
 - Final output is stored before post-back.
 - ACP adapter records forkability metadata, falls back to chat-native execution when ACP is unavailable, and marks `acp_fork` required branches as failed according to policy.
 
-- [ ] **Step 2: Run executor tests and verify failure**
+- [x] **Step 2: Run executor tests and verify failure**
 
 Run:
 
@@ -558,7 +582,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_executor.py -
 
 Expected: import errors.
 
-- [ ] **Step 3: Implement context snapshot builder**
+- [x] **Step 3: Implement context snapshot builder**
 
 Implement a bounded builder that accepts:
 
@@ -572,7 +596,7 @@ Implement a bounded builder that accepts:
 
 Return JSON-safe snapshot data. Never include secrets or raw provider keys.
 
-- [ ] **Step 4: Implement ACP adapter metadata seam**
+- [x] **Step 4: Implement ACP adapter metadata seam**
 
 Create `acp_adapter.py` with:
 
@@ -583,7 +607,7 @@ Create `acp_adapter.py` with:
 
 V1 does not need full retained-fork UI before chat-native execution works, but it must preserve explicit ACP capability/fallback metadata in run and branch records.
 
-- [ ] **Step 5: Implement branch runner seams**
+- [x] **Step 5: Implement branch runner seams**
 
 Define a protocol-like callable:
 
@@ -594,7 +618,7 @@ class BranchPromptRunner(Protocol):
 
 The production runner can initially call the existing chat completion/orchestrator seam with fakeable dependencies. Tests should use a fake runner and not call external providers.
 
-- [ ] **Step 6: Implement executor**
+- [x] **Step 6: Implement executor**
 
 Executor responsibilities:
 
@@ -612,7 +636,7 @@ Executor responsibilities:
 - Store final output before post-back.
 - Respect `cancel_requested_at` before starting new branches.
 
-- [ ] **Step 7: Run executor tests**
+- [x] **Step 7: Run executor tests**
 
 Run:
 
@@ -626,12 +650,19 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros/context_snapshot.py tldw_Server_API/app/core/Chat_Macros/acp_adapter.py tldw_Server_API/app/core/Chat_Macros/branch_runner.py tldw_Server_API/app/core/Chat_Macros/executor.py tldw_Server_API/app/core/Chat_Macros/output_profiles.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_executor.py tldw_Server_API/tests/Chat_Macros/unit/test_acp_adapter.py
 git commit -m "feat: execute chat macro branches"
 ```
+
+**Task 6 verification notes (2026-07-03):**
+- Reviewer re-review: no findings. Residual risk remains for real Jobs/LLM/post-back integration in later slices.
+- Focused executor/ACP suite: `29 passed, 3 warnings`.
+- Full Chat_Macros suite: `72 passed, 4 warnings`.
+- Command/chat regression slice: `50 passed, 9 skipped, 5 warnings`.
+- Static/security: `compileall` exit 0, `git diff --check` exit 0, Bandit report `/tmp/bandit_chat_macros_task6_final.json` had empty `errors` and `results`.
 
 ## Task 7: Jobs Worker, Cancellation, And Idempotent Post-Back
 
@@ -642,7 +673,7 @@ git commit -m "feat: execute chat macro branches"
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_jobs.py`
 - Test: `tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py`
 
-- [ ] **Step 1: Write failing Jobs tests**
+- [x] **Step 1: Write failing Jobs tests**
 
 Cover:
 
@@ -653,7 +684,7 @@ Cover:
 - Successful post-back persists a visible assistant message through the normal chat message path with macro metadata.
 - Duplicate post-back uses the existing visible assistant message for the same `post_idempotency_key` instead of creating a second message.
 
-- [ ] **Step 2: Run Jobs tests and verify failure**
+- [x] **Step 2: Run Jobs tests and verify failure**
 
 Run:
 
@@ -667,7 +698,7 @@ python -m pytest \
 
 Expected: import errors.
 
-- [ ] **Step 3: Implement enqueue and handler**
+- [x] **Step 3: Implement enqueue and handler**
 
 In `jobs.py`:
 
@@ -677,7 +708,7 @@ In `jobs.py`:
 - `handle_chat_macro_job(job: dict[str, Any])`.
 - `should_cancel_chat_macro_job(...)`.
 
-- [ ] **Step 4: Implement worker**
+- [x] **Step 4: Implement worker**
 
 Follow `study_pack_jobs_worker.py`:
 
@@ -686,7 +717,7 @@ Follow `study_pack_jobs_worker.py`:
 - Fetch per-user ChaChaNotes DB with `get_chacha_db_for_user_id`.
 - Close DB handles in `finally`.
 
-- [ ] **Step 5: Register startup worker**
+- [x] **Step 5: Register startup worker**
 
 In `startup_content_jobs_pollers.py`:
 
@@ -694,7 +725,7 @@ In `startup_content_jobs_pollers.py`:
 - Add a `stop_event_worker_spec` gated by `CHAT_MACROS_JOBS_WORKER_ENABLED` and route key `chat-macros`.
 - Add `_run_chat_macros_jobs_worker_service`.
 
-- [ ] **Step 6: Run Jobs tests**
+- [x] **Step 6: Run Jobs tests**
 
 Run:
 
@@ -708,7 +739,17 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+**Task 7 verification notes (2026-07-03/04):**
+- Initial RED checks failed on missing `Chat_Macros.jobs`, missing `chat_macros_jobs_worker`, missing startup registration, and later on missing enqueue from `/api/v1/chat/macros/run` plus `/wrapup`.
+- Added failing hardening tests for missing Jobs manager and malformed cancellation payload; verified all failed before implementation.
+- Focused enqueue regression: `2 passed, 5 warnings`.
+- New hardening regression: `3 passed, 5 warnings`.
+- Full Chat_Macros plus `/wrapup` Chat_NEW slice: `85 passed, 5 warnings`.
+- Startup/service worker suite: `37 passed, 3 warnings`.
+- Static/security: `compileall` exit 0, `git diff --check` exit 0, Bandit report `/tmp/bandit_chat_macros_task7.json` had empty `errors` and `results`.
+- Residual risk: the worker currently uses a conservative unavailable branch runner until the real LLM/ACP branch execution adapter is wired into the Jobs runtime.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros/jobs.py tldw_Server_API/app/services/chat_macros_jobs_worker.py tldw_Server_API/app/services/startup_content_jobs_pollers.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_jobs.py tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
@@ -727,11 +768,18 @@ git commit -m "feat: run chat macros through jobs"
 - Create: `apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx`
 - Modify: `apps/packages/ui/src/routes/option-settings-route-registry.tsx`
 - Modify: `apps/packages/ui/src/routes/route-registry.tsx`
+- Modify: `apps/packages/ui/src/components/Layouts/settings-nav-config.ts`
+- Modify: `apps/packages/ui/src/assets/locale/en/settings.json`
+- Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts`
+- Modify: `tldw_Server_API/app/api/v1/schemas/chat_macros.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/chat_macros.py`
+- Modify: `tldw_Server_API/app/core/Chat_Macros/service.py`
+- Test: `tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py`
 - Test: `apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Mock `apiSend` and verify:
 
@@ -746,7 +794,7 @@ await setChatMacroEnabled("wrapup", false)
 expect(apiSend).toHaveBeenCalledWith({ path: "/api/v1/chat/macros/wrapup", method: "PUT", body: expect.objectContaining({ enabled: false }) })
 ```
 
-- [ ] **Step 2: Write failing component tests**
+- [x] **Step 2: Write failing component tests**
 
 Cover:
 
@@ -756,7 +804,7 @@ Cover:
 - `WorkspaceChatPanel` chooses `MacroStatusCard` when `message.metadataExtra.chat_macro` is present.
 - `ChatMacrosSettings` lists macros, toggles built-ins enabled/disabled, clones `/wrapup`, edits default output profile settings, and shows validation errors from the backend.
 
-- [ ] **Step 3: Run frontend tests and verify failure**
+- [x] **Step 3: Run frontend tests and verify failure**
 
 Run:
 
@@ -772,7 +820,7 @@ bunx vitest run \
 
 Expected: missing module/component failures.
 
-- [ ] **Step 4: Implement `chat-macros.ts`**
+- [x] **Step 4: Implement `chat-macros.ts`**
 
 Export:
 
@@ -792,7 +840,7 @@ Export:
 
 Use `apiSend` and keep payload types local until generated OpenAPI types are refreshed.
 
-- [ ] **Step 5: Implement settings surface**
+- [x] **Step 5: Implement settings surface**
 
 `ChatMacrosSettings` should provide the minimal required manager from the spec:
 
@@ -805,11 +853,11 @@ Use `apiSend` and keep payload types local until generated OpenAPI types are ref
 
 This first settings surface intentionally defers full user macro authoring/editing polish beyond clone, enable/disable, validation, and settings/output-profile editing. The advanced editor can land after the backend run path and minimal manager are stable.
 
-- [ ] **Step 6: Register settings route**
+- [x] **Step 6: Register settings route**
 
 Add `/settings/chat-macros` to `option-settings-route-registry.tsx`, and mirror it in `route-registry.tsx` if that registry still defines the active options route list. Include route tests if existing route metadata tests require coverage.
 
-- [ ] **Step 7: Implement workspace chat components**
+- [x] **Step 7: Implement workspace chat components**
 
 Use existing design language in `WorkspaceChatPanel`:
 
@@ -819,7 +867,7 @@ Use existing design language in `WorkspaceChatPanel`:
 - Run detail drawer fetches run detail lazily.
 - Do not expose raw branch transcripts if backend redacts them.
 
-- [ ] **Step 8: Wire `WorkspaceChatPanel`**
+- [x] **Step 8: Wire `WorkspaceChatPanel`**
 
 When a message has macro metadata:
 
@@ -827,7 +875,7 @@ When a message has macro metadata:
 - Render normal `PlaygroundMessage` for final assistant content, with a compact macro metadata control.
 - Preserve existing non-macro message behavior.
 
-- [ ] **Step 9: Run frontend tests**
+- [x] **Step 9: Run frontend tests**
 
 Run:
 
@@ -843,12 +891,19 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/chat-macros.ts apps/packages/ui/src/services/__tests__/chat-macros.test.ts apps/packages/ui/src/components/Option/Settings/ChatMacrosSettings.tsx apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx apps/packages/ui/src/routes/option-settings-route-registry.tsx apps/packages/ui/src/routes/route-registry.tsx apps/packages/ui/src/components/Option/ChatWorkspace/MacroStatusCard.tsx apps/packages/ui/src/components/Option/ChatWorkspace/MacroRunDetailDrawer.tsx apps/packages/ui/src/components/Option/ChatWorkspace/WorkspaceChatPanel.tsx apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx
 git commit -m "feat: add chat macro frontend controls"
 ```
+
+**Task 8 verification notes (2026-07-03/04):**
+
+- Red run captured the intended missing service/component failures plus the missing workspace macro metadata branch.
+- Added the minimal chat macro UI service, settings manager, status card, lazy run-detail drawer, workspace status rendering, settings route, settings nav entry, and OpenAPI path guard entries.
+- Added a backend compatibility fix so `PUT /api/v1/chat/macros/{name}` accepts enabled-only updates for built-in and user macros; this keeps the frontend toggle from depending on full YAML replacement.
+- Verification passed: frontend macro/nav focused suite 6 files / 44 tests; backend chat macro API integration suite 6 tests; OpenAPI path verifier; `compileall` for touched backend files; `git diff --check`; Bandit `/tmp/bandit_chat_macros_task8.json` with `errors: []` and `results: []`.
 
 ## Task 9: End-To-End Verification, Security Sweep, And Docs
 
@@ -857,7 +912,7 @@ git commit -m "feat: add chat macro frontend controls"
 - Optionally modify: `Docs/Development/` or relevant chat docs if a chat command doc already exists.
 - Backlog: update implementation task with commands and results.
 
-- [ ] **Step 1: Run focused backend suite**
+- [x] **Step 1: Run focused backend suite**
 
 Run:
 
@@ -873,7 +928,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused frontend suite**
+- [x] **Step 2: Run focused frontend suite**
 
 Run:
 
@@ -889,7 +944,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched backend scope**
+- [x] **Step 3: Run Bandit on touched backend scope**
 
 Run:
 
@@ -906,7 +961,7 @@ python -m bandit -r \
 
 Expected: no new findings in touched code. Fix new findings before continuing.
 
-- [ ] **Step 4: Run OpenAPI/router smoke if backend routes changed**
+- [x] **Step 4: Run OpenAPI/router smoke if backend routes changed**
 
 Run:
 
@@ -933,16 +988,22 @@ In another terminal, send a normal chat command and a macro command against a lo
 - Cancelling a running run transitions run and job status.
 - Re-running post-back for the same run does not create duplicate final messages.
 
-- [ ] **Step 6: Update README/docs**
+Not run in this slice: a live-provider manual smoke still requires configured
+provider credentials and a running Chat Macros Jobs worker. The Jobs runtime now
+uses the canonical async chat provider service for chat-native branch execution;
+unit tests inject a fake provider call and do not contact external services.
+
+- [x] **Step 6: Update README/docs**
 
 Document:
 
 - v1 macro command names use word/underscore identifiers.
-- `/wrapup` options: `--preset`, repeated `--question`, `--output-profile`, `--keep-forks`, `--sync`, `--include-branches`.
+- `/wrapup` options: `--preset`, repeated `--question`, `--output-profile`, `--keep-forks`, `--include-branches`.
 - v1 rejects tools/skills permissions.
-- Background mode requires macro Jobs worker for async processing.
+- V1 supports background execution only and rejects reserved foreground/sync modes.
+- Background mode requires a macro Jobs worker for async processing.
 
-- [ ] **Step 7: Final commit**
+- [x] **Step 7: Final commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros/README.md Docs/Development
@@ -950,6 +1011,35 @@ git commit -m "docs: document chat macros v1"
 ```
 
 Only include docs paths that actually changed.
+
+**Task 9 verification notes (2026-07-03/04):**
+
+- Updated `tldw_Server_API/app/core/Chat_Macros/README.md` for current v1 definition, `/wrapup`, API/settings, Jobs execution, UI, and security behavior.
+- Final backend focused suite passed: `133 passed, 9 skipped, 5 warnings`.
+- Final frontend macro/nav suite passed: `6 passed` test files, `44 passed` tests.
+- OpenAPI/config smoke passed: `4 passed, 3 warnings`.
+- UI OpenAPI path verifier passed with the existing reviewed exception list only.
+- `compileall` passed for the touched backend Chat_Macros/API/jobs scope.
+- `git diff --check` passed.
+- Bandit `/tmp/bandit_chat_macros.json` had `errors: []` and `results: []`.
+
+**PR #2618 rebase/review follow-up (2026-08-23):**
+
+- Rebasing target changed from `main` to current `dev`; a second rebase is required
+  because `dev` advanced with server-chat scope isolation while review fixes were
+  being prepared.
+- Qodo findings were addressed for rate limiting, parser ownership, async endpoint
+  work, contextual logging, centralized exceptions, docstrings, pytest markers,
+  type hints, SSE framing, slash-command fallthrough, and branch timeouts.
+- Independent review additionally found and fixed the unavailable production branch
+  runner, empty chat snapshots, unsanitized REST snapshots, writes-on-read, and
+  misleading execution modes.
+- Production chat-native branches now use `perform_chat_api_call_async`; persisted
+  snapshots are bounded/redacted before storage; context token estimates are charged
+  once per branch.
+- Verification: Chat Macros unit `84 passed`; property/API `17 passed`; selected chat
+  integration `8 passed`; frontend macro/workspace `34 passed`; Ruff passed; frontend
+  ESLint completed with zero errors and five pre-existing warnings.
 
 ## Implementation Notes
 
@@ -962,9 +1052,9 @@ Only include docs paths that actually changed.
 
 ## Final Verification Checklist
 
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_Macros -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py -v`
-- [ ] `cd apps/packages/ui && bunx vitest run src/services/__tests__/chat-macros.test.ts src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx`
-- [ ] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat_Macros tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/services/chat_macros_jobs_worker.py -f json -o /tmp/bandit_chat_macros.json`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_Macros -v`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -v`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py -v`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py -v`
+- [x] `cd apps/packages/ui && bunx vitest run src/services/__tests__/chat-macros.test.ts src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx`
+- [x] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat_Macros tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/services/chat_macros_jobs_worker.py -f json -o /tmp/bandit_chat_macros.json`

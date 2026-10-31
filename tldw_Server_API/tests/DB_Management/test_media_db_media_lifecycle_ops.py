@@ -53,7 +53,10 @@ def test_soft_delete_media_cascade_unlinks_keywords_soft_deletes_children_and_us
 
     def _fetchone_with_connection(_conn, query: str, params: tuple[object, ...]):
         assert _conn is conn
-        assert query == "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0"
+        assert query == (
+            "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 "
+            "AND system_operation_id IS NULL"
+        )
         assert params == (37,)
         return {"uuid": "media-uuid", "version": 4}
 
@@ -160,7 +163,10 @@ def test_share_media_writes_expected_visibility_scope_values(
 
     def _fetchone_with_connection(_conn, query: str, params: tuple[object, ...]):
         assert _conn is conn
-        assert query == "SELECT id, uuid, version, visibility, org_id, team_id FROM Media WHERE id = ? AND deleted = 0"
+        assert query == (
+            "SELECT id, uuid, version, visibility, org_id, team_id FROM Media "
+            "WHERE id = ? AND deleted = 0 AND system_operation_id IS NULL"
+        )
         assert params == (12,)
         return {
             "id": 12,
@@ -291,7 +297,7 @@ def test_get_media_visibility_returns_payload_and_none_when_media_row_is_missing
     assert calls == [
         (
             "SELECT visibility, org_id, team_id, owner_user_id, client_id "
-            "FROM Media WHERE id = ? AND deleted = 0",
+            "FROM Media WHERE id = ? AND deleted = 0 AND system_operation_id IS NULL",
             (51,),
         )
     ]
@@ -304,14 +310,16 @@ def test_get_media_visibility_returns_payload_and_none_when_media_row_is_missing
         (
             "mark_as_trash",
             {"uuid": "media-uuid", "version": 4, "is_trash": 0},
-            "UPDATE Media SET is_trash=1, trash_date=?, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
+            "UPDATE Media SET is_trash=1, trash_date=?, last_modified=?, version=?, "
+            "client_id=? WHERE id=? AND version=? AND system_operation_id IS NULL",
             1,
             "2026-03-21T12:00:00Z",
         ),
         (
             "restore_from_trash",
             {"uuid": "media-uuid", "version": 5, "is_trash": 1},
-            "UPDATE Media SET is_trash=0, trash_date=NULL, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
+            "UPDATE Media SET is_trash=0, trash_date=NULL, last_modified=?, version=?, "
+            "client_id=? WHERE id=? AND version=? AND system_operation_id IS NULL",
             0,
             None,
         ),

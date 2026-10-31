@@ -7,8 +7,7 @@ test fail (the "would have caught it" property).
 
 * #2580 — service/DB singleton caches registered against the wrong DB
 * #2581 — Embeddings drain singletons bleeding across suites
-* #2585 — reload_app_main() swapping the app-main module identity (STILL OPEN;
-          its meta-test is xfail-with-issue-link until the fix ships)
+* #2585 — reload_app_main() swapping the app-main module identity
 """
 from __future__ import annotations
 
@@ -87,34 +86,177 @@ async def test_chacha_db_cache_rebinds_to_new_base_dir_after_reset(
 
 
 # --------------------------------------------------------------------------- #
-# #2585 — reload_app_main() swaps sys.modules['...app.main'] identity (OPEN)
+# #2585 — reload_app_main() swaps sys.modules['...app.main'] identity
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(
-    reason="#2585 open: reload_app_main() swaps the app-main module identity and "
-    "there is no autouse restore, so references held before a reload go stale. "
-    "Flip to strict (remove xfail) when #2585 ships.",
-    strict=False,
-)
-def test_app_main_identity_is_stable_across_a_reload() -> None:
-    """DESIRED invariant (currently failing → xfail): a test that reloads the app
-    main module should not leave a different module identity behind for code that
-    imported it earlier. Uses ``import_app_main()`` (never None) and restores in
-    ``finally`` so the meta-test never pollutes the rest of the session.
+def test_a_reload_does_not_outlive_the_block_that_asked_for_it() -> None:
+    """A reload is legitimate; leaving it behind for everyone else is not.
+
+    The earlier version of this test asserted ``reloaded is original``, which a
+    working reload can never satisfy -- reloading is *supposed* to produce a new
+    module. The invariant that actually protects the session is that the swap is
+    undone afterwards, so no later code sees a module identity it did not ask
+    for.
     """
     from tldw_Server_API.tests.helpers.app_main_state import (
+        app_main_isolated,
         import_app_main,
         reload_app_main,
-        restore_app_main,
+        snapshot_app_main,
     )
 
     original = import_app_main()
     assert original is not None
-    try:
+
+    with app_main_isolated():
         reloaded = reload_app_main()
-        # The hazard: a fresh module object. Asserting identity documents the fix
-        # target; while #2585 is open this fails and is xfail'd.
-        assert reloaded is original, (
-            "reload_app_main swapped the app-main module identity (#2585)"
-        )
+        assert reloaded is not original, "reload_app_main() did not reload anything"
+        assert snapshot_app_main() is reloaded, "the reload was not published"
+
+    assert snapshot_app_main() is original, (
+        "a reload outlived its block, so every later import of app.main resolves "
+        "to a module the rest of the session never saw (#2585)"
+    )
+
+
+def test_a_first_import_outlives_the_block_that_made_it() -> None:
+    """Only a swap is undone; a first import is the app everyone should share.
+
+    Unloading a first import meant the next test's ``from ...main import app``
+    imported a whole new app, one per test, each kept alive by the shared
+    endpoint routers -- enough to push several CI shards past their timeout.
+    """
+    from types import ModuleType
+
+    from tldw_Server_API.tests.helpers.app_main_state import (
+        app_main_isolated,
+        clear_app_main,
+        restore_app_main,
+        set_app_main,
+        snapshot_app_main,
+    )
+
+    original = snapshot_app_main()
+    first = ModuleType("tldw_Server_API.app.main")
+    try:
+        clear_app_main()
+        with app_main_isolated():
+            set_app_main(first)
+        assert snapshot_app_main() is first, "a first import of app.main was unloaded"
     finally:
         restore_app_main(original)
+
+
+def test_a_first_import_survives_a_collected_reload_identity_collision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reused numeric ID must not turn a plain import into a reload."""
+    import gc
+    import weakref
+    from types import ModuleType
+
+    from tldw_Server_API.tests.helpers import app_main_state as state
+
+    original = state.snapshot_app_main()
+    real_import = state.importlib.import_module
+
+    def import_stub(name: str) -> ModuleType:
+        if name == state.APP_MAIN_MODULE_NAME:
+            return ModuleType(name)
+        return real_import(name)
+
+    # Deterministically model ID reuse after the reload object is collected.
+    monkeypatch.setattr(state, "id", lambda module: 42, raising=False)
+    try:
+        state.clear_app_main()
+        with monkeypatch.context() as imports:
+            imports.setattr(state.importlib, "import_module", import_stub)
+            reloaded = state.reload_app_main()
+        retired = weakref.ref(reloaded)
+        state.clear_app_main()
+        del reloaded
+        gc.collect()
+        assert retired() is None, "reload bookkeeping retained the dead module"
+
+        first = ModuleType(state.APP_MAIN_MODULE_NAME)
+        with state.app_main_isolated():
+            state.set_app_main(first)
+        assert state.snapshot_app_main() is first, "a reused ID unloaded a plain first import"
+    finally:
+        state.restore_app_main(original)
+
+
+PROBE = """\
+from tldw_Server_API.tests.helpers.app_main_state import (
+    import_app_main,
+    reload_app_main,
+    snapshot_app_main,
+)
+
+PINNED = import_app_main()
+
+
+def test_one_reloads_app_main():
+    assert reload_app_main() is not PINNED, "reload_app_main() did not reload"
+
+
+def test_two_still_sees_the_module_it_pinned():
+    assert snapshot_app_main() is PINNED, (
+        "a reload in an earlier test leaked into this one (#2585)"
+    )
+"""
+
+
+def test_a_reload_in_one_test_does_not_leak_into_the_next() -> None:
+    """The suite-wide property, proved by running it.
+
+    Asserting that the conftest fixture calls a particular helper would pass a
+    rename and fail a harmless refactor, and would say nothing about whether the
+    fixture is autouse -- dropping that decorator disables isolation everywhere
+    while every structural check still passes.
+
+    So this runs two tests in a real pytest session instead. The probe module
+    lives under tests/ so the root conftest applies to it, and is named with a
+    leading underscore so the outer run does not collect it.
+    """
+    import os
+    import subprocess
+    import sys
+
+    # Unique per process: xdist workers running this same leaf test would
+    # otherwise write, spawn against, and unlink one shared pathname, and a hard
+    # kill leaves a stale file behind under a name the next run reuses.
+    probe = Path(__file__).parent / f"_app_main_leak_probe_{os.getpid()}.py"
+    probe.write_text(PROBE, encoding="utf-8")
+    try:
+        result = subprocess.run(
+            # no:randomly is load-bearing: pytest-randomly shuffles collection,
+            # and this probe means nothing unless the reload runs before the
+            # test that checks for it.
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(probe),
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "no:randomly",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parents[3],
+            # Under the global pytest-timeout budget (300s in pyproject), so
+            # this fires with a usable message instead of the outer test being
+            # killed first.
+            timeout=240,
+        )
+    finally:
+        probe.unlink(missing_ok=True)
+
+    assert result.returncode == 0, (
+        "a reload in one test leaked into the next, so app.main means different "
+        "things to different tests (#2585). Check that tests/conftest.py still "
+        "wraps every test in app_main_isolated() and that the fixture is "
+        f"autouse.\n\n{result.stdout[-3000:]}\n{result.stderr[-2000:]}"
+    )

@@ -11,15 +11,14 @@ Runs against both backends via the dual-backend fixture (Postgres skipped if unr
 from __future__ import annotations
 
 import uuid
-from typing import Dict, Any
+from typing import Any
 
 import pytest
-
 
 pytestmark = pytest.mark.integration
 
 
-def _headers_with_idem(key: str) -> Dict[str, str]:
+def _headers_with_idem(key: str) -> dict[str, str]:
     return {"Idempotency-Key": key, "Content-Type": "application/json"}
 
 
@@ -97,9 +96,15 @@ def test_optimization_create_idempotency_dual_backend(prompt_studio_dual_backend
     prp = client.post("/api/v1/prompt-studio/prompts/create", json=pbody)
     assert prp.status_code in (200, 201), prp.text
     prompt_id = (prp.json().get("data") or {}).get("id") or prp.json().get("id")
+    test_case = db.create_test_case(
+        project_id=project_id,
+        name=f"Case-{uuid.uuid4().hex[:6]}",
+        inputs={"q": "hello"},
+        expected_outputs={"answer": "hello"},
+    )
 
     idem_key = f"opt-{uuid.uuid4().hex}"
-    obody: Dict[str, Any] = {
+    obody: dict[str, Any] = {
         "project_id": project_id,
         "initial_prompt_id": prompt_id,
         "optimization_config": {
@@ -108,7 +113,7 @@ def test_optimization_create_idempotency_dual_backend(prompt_studio_dual_backend
             "target_metric": "accuracy",
             "early_stopping": True,
         },
-        "test_case_ids": [],
+        "test_case_ids": [test_case["id"]],
         "name": f"Opt-{uuid.uuid4().hex[:6]}",
     }
 

@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
+from uuid import uuid4
+
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.OpenWebUI_DB import (
     load_openwebui_chat_file_rows_for_chats,
@@ -573,6 +576,7 @@ def register_non_image_reference(
 
     storage_path = None
     media_file_id = None
+    copied_path = None
     try:
         media_file = media_db.get_media_file(media_id, "original")
         status = "already_registered_media" if media_file else "registered_media"
@@ -587,6 +591,7 @@ def register_non_image_reference(
                 media_id=media_id,
                 filename=filename,
             )
+            copied_path = Path(storage_root).expanduser().resolve() / storage_path
             media_file_id = str(
                 media_db.insert_media_file(
                     media_id=media_id,
@@ -599,6 +604,13 @@ def register_non_image_reference(
                 )
             )
     except Exception:
+        if copied_path is not None and media_file_id is None:
+            try:
+                copied_path.unlink(missing_ok=True)
+            except OSError:
+                logger.opt(exception=True).warning(
+                    "Failed to remove unregistered OpenWebUI original {}", copied_path,
+                )
         return _media_result_item(
             reference,
             "media_registration_failed",
@@ -951,8 +963,10 @@ def _copy_openwebui_attachment_to_storage(
     media_id: int,
     filename: str,
 ) -> str:
+    """Copy an attachment to an attempt-owned path, safe from concurrent retirement."""
     root = Path(storage_root).expanduser().resolve()
-    relative_path = Path(str(owner_user_id)) / "media" / str(media_id) / _safe_storage_filename(filename)
+    storage_name = f"original-{uuid4().hex}{Path(_safe_storage_filename(filename)).suffix}"
+    relative_path = Path(str(owner_user_id)) / "media" / str(media_id) / storage_name
     target_path = resolve_safe_local_path(root / relative_path, root)
     if target_path is None:
         raise ValueError("OpenWebUI attachment storage path is unsafe.")
@@ -964,8 +978,17 @@ def _copy_openwebui_attachment_to_storage(
         target_handle = open_safe_local_path(target_path, root, mode="wb")
         if target_handle is None:
             raise ValueError("OpenWebUI attachment storage path is unsafe.")
-        with target_handle:
-            shutil.copyfileobj(source_handle, target_handle, length=1024 * 1024)
+        try:
+            with target_handle:
+                shutil.copyfileobj(source_handle, target_handle, length=1024 * 1024)
+        except Exception:
+            try:
+                target_path.unlink(missing_ok=True)
+            except OSError:
+                logger.opt(exception=True).warning(
+                    "Failed to remove partial OpenWebUI original {}", target_path,
+                )
+            raise
     return str(relative_path)
 
 

@@ -789,7 +789,8 @@
     "collapseSidebar": "Seitenleiste einklappen",
     "titlePlaceholder": "Titel",
     "keywordsEditorPlaceholder": "Stichwörter (Tags)",
-    "tagsHelp": "Stichwörter helfen dir, diese Notiz mit dem Stichwortfilter links zu finden."
+    "tagsHelp": "Stichwörter helfen dir, diese Notiz mit dem Stichwortfilter links zu finden.",
+    "offlineSaveUnavailable": "Offline-Speichern ist erst verfügbar, wenn Ihr Konto und der lokale Speicher bestätigt sind. Ihre Änderungen bleiben ungespeichert."
   },
   "tts": {
     "playground": "TTS-Spielwiese"

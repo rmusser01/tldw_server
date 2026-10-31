@@ -1,12 +1,35 @@
+import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope";
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts";
 import { browser } from "wxt/browser";
 import { createSafeStorage } from "@/utils/safe-storage";
 import { formatErrorMessage } from "@/utils/format-error-message";
+import { sanitizeRagProviderFailure } from "@/services/rag/provider-error-contract";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
-import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential";
+import { createTokenRefreshError } from "@/services/tldw/auth-refresh-error";
+import {
+  type RecipeDeliveryReceipt,
+  RecipePersistenceRegistry,
+} from "@/services/recipe-persistence-registry";
+import {
+  assertRecipeDispatchMarker,
+  getRecipeAuthenticatedPrincipal,
+  isRecipePersistenceMessage,
+  resolveRecipeOwnerWithConfig,
+} from "@/services/recipe-persistence-uncertainty";
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode";
+import {
+  hasNewerCurrentAccessToken,
+  invalidateRefreshSessionIfCurrent,
+  resolveEffectiveTldwConfig,
+  REFRESH_ROTATION_KEY,
+  REFRESH_SESSION_INVALIDATION_PREFIX,
+  storeRefreshRotationIfCurrent,
+  waitForNewerCurrentAccessToken,
+} from "@/services/tldw/single-user-credential";
 import {
   getProcessPathForType,
   getProcessPathForUrl,
@@ -71,11 +94,21 @@ import {
   ABSOLUTE_URL_BLOCK_ERROR,
   evaluateAbsoluteUrlAccess,
 } from "@/utils/absolute-url-guard";
+import {
+  createServicePromptScopeChangedError,
+  isRequestConfigScopeChangedError,
+  isServicePromptRequestPath,
+  servicePromptPrincipalMatches,
+  servicePromptRefreshLineageMatches,
+  servicePromptSingleUserApiKeyScopeMatches,
+  servicePromptTargetsMatch,
+} from "@/services/tldw/service-prompt-scope-error";
 import { arrayBufferToBase64 } from "@/utils/compress";
 import {
   createSerializedSessionStateWriter,
   getSessionStorageArea,
   readPersistedSessionState,
+  readQuickIngestRequestScope,
   selectInterruptedIngestFunnelIds,
   serializeIngestSessions,
   serializePendingReplay,
@@ -129,6 +162,32 @@ const backgroundDiagnostics: BackgroundDiagnostics = {
 const logBackgroundError = (label: string, error: unknown) => {
   console.debug(`[tldw] background ${label} failed`, error);
 };
+
+type ServicePromptTargetLock = Readonly<{
+  serverUrl?: unknown;
+  authMode?: unknown;
+  authSource?: unknown;
+  orgId?: unknown;
+  expectedUserId?: unknown;
+  expectedRefreshToken?: unknown;
+  expectedSingleUserApiKeyScope?: unknown;
+}>;
+
+const readServicePromptTargetLock = (
+  value: unknown,
+): ServicePromptTargetLock | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? Object.freeze({
+        serverUrl: (value as Record<string, unknown>).serverUrl,
+        authMode: (value as Record<string, unknown>).authMode,
+        authSource: (value as Record<string, unknown>).authSource,
+        orgId: (value as Record<string, unknown>).orgId,
+        expectedUserId: (value as Record<string, unknown>).expectedUserId,
+        expectedRefreshToken: (value as Record<string, unknown>).expectedRefreshToken,
+        expectedSingleUserApiKeyScope:
+          (value as Record<string, unknown>).expectedSingleUserApiKeyScope,
+      })
+    : null;
 
 const waitFor = (delayMs: number): Promise<void> =>
   new Promise((resolve) => {
@@ -299,6 +358,7 @@ type IngestSession = {
 };
 
 type QuickIngestModalSession = {
+  requestScope?: ServicePromptRequestScope;
   sessionId: string;
   cancelled: boolean;
   abortControllers: Set<AbortController>;
@@ -380,6 +440,51 @@ export default defineBackground({
         persistent: storage,
         session: sessionStorage,
       });
+    const resolveCurrentServicePromptConfig = async (
+      checked: ServicePromptTargetLock,
+    ) => {
+      const current = await getEffectiveConfig();
+      const singleUserApiKeyScopeMatches = current
+        ? servicePromptSingleUserApiKeyScopeMatches(
+            current,
+            checked.expectedSingleUserApiKeyScope,
+          )
+        : true;
+      if (
+        (!current && !isHostedTldwDeployment()) ||
+        (current && !servicePromptTargetsMatch(current, checked)) ||
+        (current &&
+          checked.expectedUserId !== null &&
+          checked.expectedUserId !== undefined &&
+          current.authMode === "multi-user" &&
+          !isHostedTldwDeployment() &&
+          current.authSource !== "cookie-session" &&
+          !servicePromptPrincipalMatches(current, checked.expectedUserId)) ||
+        (current &&
+          !servicePromptRefreshLineageMatches(
+            current,
+            checked.expectedRefreshToken,
+          )) ||
+        !singleUserApiKeyScopeMatches ||
+        (current?.authMode === "multi-user" &&
+          !isHostedTldwDeployment() &&
+          current.authSource !== "cookie-session" &&
+          !String(current.accessToken || "").trim())
+      ) {
+        throw createServicePromptScopeChangedError();
+      }
+      const effective = current || checked;
+      return {
+        ...effective,
+        serverUrl: checked.serverUrl,
+        authMode: checked.authMode,
+        authSource: checked.authSource,
+        orgId: checked.orgId,
+        apiKey: current?.apiKey,
+        accessToken: current?.accessToken,
+        refreshToken: current?.refreshToken,
+      };
+    };
     let handleRuntimeMessageRef:
       | ((message: any, sender: any) => Promise<any>)
       | null = null;
@@ -477,6 +582,106 @@ export default defineBackground({
     ).__tldwBackgroundDiagnostics = buildBackgroundDiagnostics;
 
     let refreshInFlight: Promise<any> | null = null;
+    const scopedRefreshes = new Map<string, Promise<void>>();
+    const refreshScopedAuth = async (
+      checked: ServicePromptTargetLock,
+      originalConfig?: Awaited<
+        ReturnType<typeof resolveCurrentServicePromptConfig>
+      >,
+    ): Promise<void> => {
+      const cfg = originalConfig ??
+        await resolveCurrentServicePromptConfig(checked);
+      const refreshToken = String(cfg.refreshToken || "").trim();
+      const capturedAccessToken = String(cfg.accessToken || "").trim();
+      if (!refreshToken) {
+        throw new Error("Token refresh failed: no refresh token available");
+      }
+      if (
+        originalConfig &&
+        await hasNewerCurrentAccessToken(
+          storage,
+          checked,
+          capturedAccessToken,
+        )
+      ) {
+        return;
+      }
+      const current = originalConfig
+        ? await resolveCurrentServicePromptConfig(checked)
+        : cfg;
+      if (String(current.refreshToken || "").trim() !== refreshToken) {
+        throw createServicePromptScopeChangedError();
+      }
+      const key = JSON.stringify([
+        checked.serverUrl ?? null,
+        checked.authMode ?? null,
+        checked.authSource ?? null,
+        checked.orgId ?? null,
+        refreshToken,
+      ]);
+      let refresh = scopedRefreshes.get(key);
+      if (!refresh) {
+        refresh = (async () => {
+          try {
+            const response = await tldwRequest(
+              {
+                path: "/api/v1/auth/refresh",
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: { refresh_token: refreshToken },
+                noAuth: true,
+              },
+              {
+                getConfig: async () => cfg,
+                useRuntimeAuthOverride: false,
+              },
+            );
+            const tokens = response.ok
+              ? (response.data as {
+                  access_token?: string;
+                  refresh_token?: string;
+                } | null)
+              : null;
+            if (!tokens?.access_token) {
+              throw createTokenRefreshError(response);
+            }
+            const stored = await storeRefreshRotationIfCurrent(
+              storage,
+              { ...checked, accessToken: capturedAccessToken },
+              refreshToken,
+              {
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token || refreshToken,
+              },
+            );
+            if (!stored) {
+              throw createServicePromptScopeChangedError();
+            }
+          } catch (error) {
+            if (isRequestConfigScopeChangedError(error)) throw error;
+            if (
+              originalConfig &&
+              await waitForNewerCurrentAccessToken(
+                storage,
+                checked,
+                capturedAccessToken,
+              )
+            ) {
+              return;
+            }
+            if ((error as { status?: number } | null)?.status === 401 &&
+              !await invalidateRefreshSessionIfCurrent(storage, cfg)) {
+              throw createServicePromptScopeChangedError();
+            }
+            throw error;
+          } finally {
+            scopedRefreshes.delete(key);
+          }
+        })();
+        scopedRefreshes.set(key, refresh);
+      }
+      await refresh;
+    };
     let streamDebugEnabled = false;
     const ingestSessions = new Map<string, IngestSession>();
     const pendingAuthReplay = new Set<string>();
@@ -505,6 +710,38 @@ export default defineBackground({
     // in this worker; avoids a duplicate resume from the alarm/rehydrate backstop.
     const activeQuickIngestBatchSessionIds = new Set<string>();
     let sessionStateHydrated = false;
+
+    // Cancellation is meaningful only while this worker and its fetch are
+    // alive, so these controllers intentionally remain in memory rather than
+    // joining the durable ingest-session state above.
+    const runtimeRequestControllers = new Map<string, AbortController>();
+    const runCancelableRuntimeRequest = async (
+      rawRequestId: unknown,
+      run: (signal?: AbortSignal) => Promise<any>,
+    ): Promise<any> => {
+      const requestId =
+        typeof rawRequestId === "string" ? rawRequestId.trim() : "";
+      if (!requestId) return await run();
+
+      const controller = new AbortController();
+      runtimeRequestControllers.get(requestId)?.abort();
+      runtimeRequestControllers.set(requestId, controller);
+      try {
+        const response = await run(controller.signal);
+        if (controller.signal.aborted) {
+          return {
+            ok: false,
+            status: 499,
+            error: "Cancelled by user.",
+          };
+        }
+        return response;
+      } finally {
+        if (runtimeRequestControllers.get(requestId) === controller) {
+          runtimeRequestControllers.delete(requestId);
+        }
+      }
+    };
 
     // Serialize the actual storage writes so that the many rapid, fire-and-forget
     // persist calls below cannot land out of order (an older Map snapshot
@@ -1160,6 +1397,7 @@ export default defineBackground({
     const handleUpload = async (payload: {
       path?: string;
       method?: string;
+      headers?: Record<string, string>;
       fields?: Record<string, any>;
       file?: {
         fieldName?: string;
@@ -1187,17 +1425,53 @@ export default defineBackground({
       timeoutMs?: number;
       responseType?: "json" | "text" | "arrayBuffer";
       quickIngestSessionId?: string;
-    }) => {
+      servicePromptConfig?: ServicePromptTargetLock;
+      requestId?: string;
+    }, requestAbortSignal?: AbortSignal) => {
       const {
         path,
         method = "POST",
+        headers: requestHeaders = {},
         fields = {},
         file,
         files,
         fileFieldName,
         responseType,
       } = payload || {};
-      const cfg = await getEffectiveConfig();
+      const servicePromptConfig = readServicePromptTargetLock(
+        payload?.servicePromptConfig,
+      );
+      if (
+        servicePromptConfig &&
+        !isServicePromptRequestPath(path, method)
+      ) {
+        return {
+          ok: false,
+          status: 400,
+          error:
+            "A Service Prompt config can only be used with Service Prompt requests.",
+        };
+      }
+      let cfg: any;
+      try {
+        cfg = servicePromptConfig
+          ? await resolveCurrentServicePromptConfig(servicePromptConfig)
+          : await getEffectiveConfig();
+      } catch (error) {
+        if (
+          servicePromptConfig &&
+          (error as { status?: unknown })?.status === 412
+        ) {
+          const scopedError = createServicePromptScopeChangedError();
+          return {
+            ok: false,
+            status: 412,
+            error: scopedError.message,
+            data: scopedError.details,
+          };
+        }
+        throw error;
+      }
       const absoluteAccess = evaluateAbsoluteUrlAccess(path, cfg);
       const isAbsolute = absoluteAccess.isAbsolute;
       // Mirror the request-path guard: refuse cross-origin absolute URLs that
@@ -1292,7 +1566,17 @@ export default defineBackground({
             if (!result.ok) return result;
           }
         }
-        const headers: Record<string, string> = {};
+        const headers: Record<string, string> = { ...requestHeaders };
+        for (const key of Object.keys(headers)) {
+          const normalized = key.toLowerCase();
+          if (
+            normalized === "authorization" ||
+            normalized === "content-type" ||
+            normalized === "x-api-key"
+          ) {
+            delete headers[key];
+          }
+        }
         // Skip credentials for allowlisted-but-cross-origin absolute URLs,
         // matching request-core's `shouldSkipAuth` behavior.
         if (!absoluteAccess.skipAuth) {
@@ -1323,6 +1607,14 @@ export default defineBackground({
           }
         }
         const controller = new AbortController();
+        const onRequestAbort = () => controller.abort();
+        if (requestAbortSignal?.aborted) {
+          onRequestAbort();
+        } else {
+          requestAbortSignal?.addEventListener("abort", onRequestAbort, {
+            once: true,
+          });
+        }
         const quickIngestSessionId = String(
           payload?.quickIngestSessionId || "",
         ).trim();
@@ -1348,6 +1640,7 @@ export default defineBackground({
           });
         } finally {
           clearTimeout(timeout);
+          requestAbortSignal?.removeEventListener("abort", onRequestAbort);
           unregisterQuickIngestAbortController(
             quickIngestSessionId,
             controller,
@@ -1376,7 +1669,11 @@ export default defineBackground({
       } catch (e: any) {
         const raw = String(e?.message || "");
         const isAbort = raw.toLowerCase().includes("abort");
-        if (isAbort && isQuickIngestCancelled(payload?.quickIngestSessionId)) {
+        if (
+          isAbort &&
+          (requestAbortSignal?.aborted ||
+            isQuickIngestCancelled(payload?.quickIngestSessionId))
+        ) {
           return {
             ok: false,
             status: 499,
@@ -1393,44 +1690,172 @@ export default defineBackground({
       }
     };
 
-    const runTldwRequest = async (payload: any) => {
-      return tldwRequest(payload, {
-        // IMPORTANT: getConfig must fetch fresh config each time it's called
-        // (not pre-fetch once), because the config may not be seeded yet when
-        // runTldwRequest is first invoked, but may be available on retry.
-        getConfig: async () => {
-          return await getEffectiveConfig();
-        },
-        refreshAuth: async () => {
-          if (!refreshInFlight) {
-            refreshInFlight = (async () => {
-              try {
-                await tldwAuth.refreshToken();
-              } finally {
-                refreshInFlight = null;
+    const recipeRegistry = new RecipePersistenceRegistry();
+    const runTldwRequest = async (
+      payload: any,
+      requestAbortSignal?: AbortSignal,
+    ) => {
+      const rawServicePromptConfig = payload?.servicePromptConfig;
+      const requestPayload = { ...(payload || {}) };
+      delete requestPayload.servicePromptConfig;
+      delete requestPayload.requestId;
+      delete requestPayload.abortSignal;
+      if (requestAbortSignal) {
+        requestPayload.abortSignal = requestAbortSignal;
+      }
+      const servicePromptConfig = readServicePromptTargetLock(
+        rawServicePromptConfig,
+      );
+      if (servicePromptConfig) {
+        if (!isServicePromptRequestPath(requestPayload.path, requestPayload.method)) {
+          return {
+            ok: false,
+            status: 400,
+            error: "A Service Prompt config can only be used with Service Prompt requests.",
+          };
+        }
+      }
+      let originalScopedConfig: Awaited<
+        ReturnType<typeof resolveCurrentServicePromptConfig>
+      > | undefined;
+      let recipeDelivery: RecipeDeliveryReceipt | undefined;
+      try {
+        const response = await tldwRequest(requestPayload, {
+          getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
+          dispatchAuthority: {
+            markDispatched: (id, ownerId) => {
+              assertRecipeDispatchMarker(id, ownerId);
+              const operationId = crypto.randomUUID();
+              recipeRegistry.reserve(id, ownerId, operationId);
+              recipeDelivery = { id, ownerId, operationId };
+            },
+          },
+          // IMPORTANT: getConfig must fetch fresh config each time it's called
+          // (not pre-fetch once), because the config may not be seeded yet when
+          // runTldwRequest is first invoked, but may be available on retry. A
+          // scoped request freezes only the checked target and resolves current
+          // credentials at dispatch, while the expected-user header binds them.
+          getConfig: servicePromptConfig
+            ? async () => {
+                const current = await resolveCurrentServicePromptConfig(
+                  servicePromptConfig,
+                );
+                originalScopedConfig ??= current;
+                return current;
               }
-            })();
-          }
-          try {
-            await refreshInFlight;
-          } catch (error) {
-            logBackgroundError("refresh auth", error);
-          }
-        },
-      });
+            : async () => await getEffectiveConfig(),
+          ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
+          refreshAuth: servicePromptConfig
+            ? () => refreshScopedAuth(
+                servicePromptConfig,
+                originalScopedConfig,
+              )
+            : async () => {
+                if (!refreshInFlight) {
+                  refreshInFlight = (async () => {
+                    try {
+                      await tldwAuth.refreshToken();
+                    } finally {
+                      refreshInFlight = null;
+                    }
+                  })();
+                }
+                await refreshInFlight;
+              },
+        });
+        return recipeDelivery ? { ...response, recipeDelivery } : response;
+      } catch (error) {
+        if (servicePromptConfig && (error as { status?: unknown })?.status === 412) {
+          const message =
+            "The server or authenticated account changed before the request was sent.";
+          return {
+            ok: false,
+            status: 412,
+            error: message,
+            data: {
+              detail: { code: "request_config_scope_changed", message },
+            },
+          };
+        }
+        throw error;
+      }
     };
 
-    const handleTldwRequest = async (payload: any) => {
+    const handleTldwRequest = async (
+      payload: any,
+      requestAbortSignal?: AbortSignal,
+    ) => {
       const path = payload?.path;
       if (isChatEndpoint(String(path || ""))) {
-        return enqueueChatRequest(() => runTldwRequest(payload));
+        return enqueueChatRequest(() =>
+          runTldwRequest(payload, requestAbortSignal),
+        );
       }
-      return await runTldwRequest(payload);
+      return await runTldwRequest(payload, requestAbortSignal);
     };
+
+    // The worker lifetime survives popup closure. Actual authority changes stop
+    // client work synchronously; they never request cancellation of server jobs.
+    let quickIngestAuthorityRevision = 0;
+    let quickIngestCredentialRevision = 0;
+    const quickIngestAuthorityControllers = new Set<AbortController>();
+    const quickIngestAuthorityValidators = new Set<() => Promise<void>>();
+    const createQuickIngestLease = (rawScope: unknown) => {
+      const requestScope = readQuickIngestRequestScope(rawScope);
+      if (!requestScope) throw createServicePromptScopeChangedError();
+      const controller = new AbortController();
+      let active = true;
+      quickIngestAuthorityControllers.add(controller);
+      const revision = quickIngestAuthorityRevision;
+      const fields = requestScopeFields(requestScope);
+      const assertCurrent = () => {
+        if (!active || controller.signal.aborted || revision !== quickIngestAuthorityRevision) throw createServicePromptScopeChangedError();
+      };
+      let validation: { credentialRevision: number; promise: Promise<void> } | null = null;
+      const validate = async (): Promise<void> => {
+        assertCurrent();
+        if (validation?.credentialRevision === quickIngestCredentialRevision) return validation.promise;
+        const check = { credentialRevision: quickIngestCredentialRevision, promise: Promise.resolve() };
+        validation = check;
+        check.promise = (async () => {
+          try { await resolveCurrentServicePromptConfig(fields.servicePromptConfig!); }
+          catch (error) {
+            assertCurrent();
+            // A pending marker read may describe credentials superseded by a
+            // rotation. Join/recheck the latest validation before ending work.
+            if (validation !== check || check.credentialRevision !== quickIngestCredentialRevision) return validate();
+            controller.abort();
+            throw error;
+          }
+          assertCurrent();
+          if (validation !== check || check.credentialRevision !== quickIngestCredentialRevision) return validate();
+        })().finally(() => { if (validation === check) validation = null; });
+        return check.promise;
+      };
+      quickIngestAuthorityValidators.add(validate);
+      type WorkerPayload = Parameters<typeof handleUpload>[0] & { body?: unknown; abortSignal?: AbortSignal };
+      const dispatch = async (upload: boolean, payload: WorkerPayload) => {
+        await validate();
+        const request = { ...payload, ...fields, headers: { ...payload.headers, ...fields.headers } };
+        const signal = payload.abortSignal ? AbortSignal.any([controller.signal, payload.abortSignal]) : controller.signal;
+        const result = upload ? await handleUpload(request, signal) : await handleTldwRequest(request, signal);
+        await validate();
+        if (result?.status === 412) throw createServicePromptScopeChangedError();
+        return result;
+      };
+      return {
+        requestScope, assertCurrent, validate,
+        request: (payload: WorkerPayload) => dispatch(false, payload),
+        upload: (payload: WorkerPayload) => dispatch(true, payload),
+        release: () => { active = false; quickIngestAuthorityControllers.delete(controller); quickIngestAuthorityValidators.delete(validate); },
+      };
+    };
+    type QuickIngestLease = ReturnType<typeof createQuickIngestLease>;
 
     // Best-effort PATCH of a planned conference-collection item. Shared by the
     // live quick-ingest run and the post-restart resume path.
     const patchConferenceCollectionItem = async (
+      lease: QuickIngestLease,
       planned:
         | { collectionId: number; itemId: number }
         | null
@@ -1439,7 +1864,7 @@ export default defineBackground({
       timeoutMs: number,
     ) => {
       if (!planned) return;
-      await handleTldwRequest({
+      await lease.request({
         path: `/api/v1/media/collections/${encodeURIComponent(
           String(planned.collectionId),
         )}/items/${encodeURIComponent(String(planned.itemId))}`,
@@ -1448,12 +1873,14 @@ export default defineBackground({
         body,
         timeoutMs,
       }).catch((error) => {
+        lease.assertCurrent();
         logBackgroundError("quick ingest collection item patch", error);
       });
     };
 
     // Cancel the outstanding remote ingest batches tracked by `tracker`.
     const cancelRemoteIngestBatches = async (
+      lease: QuickIngestLease,
       tracker: ReturnType<
         typeof createIngestJobsTracker<QuickIngestRemoteResultMeta>
       >,
@@ -1461,7 +1888,7 @@ export default defineBackground({
     ) => {
       await tracker.cancelTrackedBatches(async (batchId) => {
         try {
-          await handleTldwRequest({
+          await lease.request({
             path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(
               batchId,
             )}&reason=${encodeURIComponent(reason || "user_cancelled")}`,
@@ -1469,6 +1896,7 @@ export default defineBackground({
             timeoutMs: 10_000,
           });
         } catch (error) {
+          lease.assertCurrent();
           logBackgroundError(`cancel quick ingest batch ${batchId}`, error);
         }
       });
@@ -1478,6 +1906,7 @@ export default defineBackground({
     // the single implementation used by both the live quick-ingest run and the
     // resume-after-restart path, so both map results identically.
     const pollRemoteIngestJobs = (opts: {
+      lease: QuickIngestLease;
       tracker: ReturnType<
         typeof createIngestJobsTracker<QuickIngestRemoteResultMeta>
       >;
@@ -1491,11 +1920,11 @@ export default defineBackground({
         pollIntervalMs: 1200,
         isCancelled: opts.isCancelled,
         onCancel: async () => {
-          await cancelRemoteIngestBatches(opts.tracker, "user_cancelled");
+          await cancelRemoteIngestBatches(opts.lease, opts.tracker, "user_cancelled");
         },
         onPendingJobIds: opts.onPendingJobIds,
         fetchJob: async (jobId) =>
-          (await handleTldwRequest({
+          (await opts.lease.request({
             path: `/api/v1/media/ingest/jobs/${jobId}`,
             method: "GET",
             timeoutMs: 4200,
@@ -1560,6 +1989,7 @@ export default defineBackground({
       if (activeQuickIngestBatchSessionIds.has(sessionId)) return;
       activeQuickIngestBatchSessionIds.add(sessionId);
 
+      const lease = createQuickIngestLease(record.requestScope);
       const isCancelled = () => isQuickIngestCancelled(sessionId);
       const totalCount = record.totalCount;
       const ingestTimeoutMs = Math.max(record.ingestTimeoutMs || 0, 60_000);
@@ -1580,6 +2010,7 @@ export default defineBackground({
       }
 
       const emitProgress = (result: any) => {
+        lease.assertCurrent();
         processedCount += 1;
         void emitBackgroundMessage(undefined, "tldw:quick-ingest/progress", {
           sessionId,
@@ -1590,6 +2021,7 @@ export default defineBackground({
       };
 
       try {
+        await lease.validate();
         const tracker =
           createIngestJobsTracker<QuickIngestRemoteResultMeta>();
         for (const job of record.remoteJobs || []) {
@@ -1616,12 +2048,14 @@ export default defineBackground({
 
         if (tracker.hasItems()) {
           const remoteResults = await pollRemoteIngestJobs({
+            lease,
             tracker,
             ingestTimeoutMs,
             isCancelled,
           });
           for (const result of remoteResults) {
             await patchConferenceCollectionItem(
+              lease,
               plannedItems.get(String(result?.id || "")),
               {
                 status: result?.status === "ok" ? "completed" : "failed",
@@ -1655,6 +2089,7 @@ export default defineBackground({
           });
         }
       } catch (error) {
+        try { await lease.validate(); } catch { return; }
         logBackgroundError(`resume quick ingest ${sessionId}`, error);
         await emitBackgroundMessage(undefined, "tldw:quick-ingest/failed", {
           sessionId,
@@ -1664,6 +2099,7 @@ export default defineBackground({
               : String(error || "Quick ingest failed."),
         });
       } finally {
+        lease.release();
         quickIngestBatchRecords.delete(sessionId);
         quickIngestModalSessions.delete(sessionId);
         activeQuickIngestBatchSessionIds.delete(sessionId);
@@ -1699,6 +2135,9 @@ export default defineBackground({
         if (!session) continue;
         activeQuickIngestBatchSessionIds.add(sessionId);
         try {
+          const lease = createQuickIngestLease(session.requestScope);
+          try { await lease.validate(); } catch { continue; } finally { lease.release(); }
+          if (quickIngestModalSessions.get(sessionId) !== session) continue;
           if (session.cancelled) {
             await emitBackgroundMessage(
               undefined,
@@ -2349,6 +2788,7 @@ export default defineBackground({
     const rehydrateSessionState = async (): Promise<void> => {
       if (sessionStateHydrated) return;
       sessionStateHydrated = true;
+      const hydrationAuthorityRevision = quickIngestAuthorityRevision;
       let state;
       try {
         state = await readPersistedSessionState();
@@ -2364,16 +2804,19 @@ export default defineBackground({
       for (const funnelId of state.pendingAuthReplay) {
         pendingAuthReplay.add(funnelId);
       }
-      for (const entry of state.quickIngestSessions) {
+      const ownedQuickIngestSessions = hydrationAuthorityRevision === quickIngestAuthorityRevision ? state.quickIngestSessions : [];
+      const ownedQuickIngestBatches = hydrationAuthorityRevision === quickIngestAuthorityRevision ? state.quickIngestBatches : [];
+      for (const entry of ownedQuickIngestSessions) {
         if (!quickIngestModalSessions.has(entry.sessionId)) {
           quickIngestModalSessions.set(entry.sessionId, {
             sessionId: entry.sessionId,
+            requestScope: entry.requestScope,
             cancelled: entry.cancelled,
             abortControllers: new Set(),
           });
         }
       }
-      for (const batch of state.quickIngestBatches) {
+      for (const batch of ownedQuickIngestBatches) {
         if (!quickIngestBatchRecords.has(batch.sessionId)) {
           quickIngestBatchRecords.set(batch.sessionId, batch);
         }
@@ -2381,7 +2824,7 @@ export default defineBackground({
       // Quick-ingest modal sessions restored from a previous worker that have no
       // resumable remote-job batch were interrupted during their (non-resumable)
       // upload phase — report those once so the sidepanel is not left stuck.
-      const interruptedUploadSessionIds = state.quickIngestSessions
+      const interruptedUploadSessionIds = ownedQuickIngestSessions
         .map((entry) => entry.sessionId)
         .filter((sessionId) => !quickIngestBatchRecords.has(sessionId));
       // Snapshot the ingest sessions that were interrupted mid pre-submission
@@ -2402,6 +2845,9 @@ export default defineBackground({
       payload: any,
       runtimeContext?: QuickIngestSessionRunContext,
     ): Promise<{ ok: boolean; results: any[] }> => {
+      const lease = createQuickIngestLease(payload?.requestScope);
+      try {
+      await lease.validate();
       const entries = Array.isArray(payload?.entries)
         ? payload.entries.filter(
             (entry: any) => entry?.conferenceOverride?.selected !== false,
@@ -2583,7 +3029,7 @@ export default defineBackground({
 
         let collectionId: number | null = null;
         try {
-          const collectionResp = (await handleTldwRequest({
+          const collectionResp = (await lease.request({
             path: "/api/v1/media/collections",
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2607,6 +3053,7 @@ export default defineBackground({
           }
           collectionId = parsedCollectionId;
         } catch (error) {
+          lease.assertCurrent();
           console.debug("[tldw] conference collection planning failed", error);
           return;
         }
@@ -2614,7 +3061,7 @@ export default defineBackground({
 
         for (const entry of selectedEntries) {
           try {
-            const itemResp = (await handleTldwRequest({
+            const itemResp = (await lease.request({
               path: `/api/v1/media/collections/${encodeURIComponent(
                 String(collectionId),
               )}/items`,
@@ -2647,6 +3094,7 @@ export default defineBackground({
               });
             }
           } catch (error) {
+          lease.assertCurrent();
             console.debug(
               "[tldw] conference collection item planning failed",
               { collectionId, entryId: entry?.id },
@@ -2660,7 +3108,7 @@ export default defineBackground({
         planned: PlannedConferenceCollectionItem | undefined,
         body: Record<string, unknown>,
       ) => {
-        await patchConferenceCollectionItem(planned, body, ingestTimeoutMs);
+        await patchConferenceCollectionItem(lease, planned, body, ingestTimeoutMs);
       };
 
       const applyPlannedConferenceFields = (
@@ -2732,7 +3180,7 @@ export default defineBackground({
         registerQuickIngestAbortController(sessionId, controller);
         runtimeContext?.registerAbortController(controller);
         try {
-          const resp = (await handleTldwRequest({
+          const resp = (await lease.request({
             path: "/api/v1/media/process-web-scraping",
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2753,6 +3201,7 @@ export default defineBackground({
       };
 
       const emitProgress = (result: any) => {
+        lease.assertCurrent();
         processedCount += 1;
         const progressPayload = {
           result,
@@ -2777,6 +3226,7 @@ export default defineBackground({
               logBackgroundError("quick ingest progress message", error);
             });
         } catch (error) {
+          lease.assertCurrent();
           logBackgroundError("quick ingest progress message", error);
         }
       };
@@ -2807,7 +3257,7 @@ export default defineBackground({
             | string;
         };
       }) => {
-        const fallbackResp = await handleUpload({
+        const fallbackResp = await lease.upload({
           path: "/api/v1/media/add",
           method: "POST",
           fields,
@@ -2837,6 +3287,7 @@ export default defineBackground({
       // (also used by the post-restart resume path) so both map results the same.
       const pollQueuedRemoteJobs = async (): Promise<any[]> =>
         pollRemoteIngestJobs({
+          lease,
           tracker: queuedRemoteJobs,
           ingestTimeoutMs,
           isCancelled,
@@ -2851,7 +3302,7 @@ export default defineBackground({
       const persistQuickIngestBatchRecord = () => {
         if (!sessionId) return;
         quickIngestBatchRecords.set(sessionId, {
-          sessionId,
+          sessionId, requestScope: lease.requestScope,
           totalCount,
           processedCount,
           ingestTimeoutMs,
@@ -2886,6 +3337,7 @@ export default defineBackground({
       await createPlannedConferenceItems();
 
       for (const r of entries) {
+        lease.assertCurrent();
         if (isCancelled()) break;
         const url = String(r?.url || "").trim();
         if (!url) continue;
@@ -2912,7 +3364,7 @@ export default defineBackground({
             );
             applyPlannedConferenceFields(fields, plannedConferenceItem);
             fields.urls = [url];
-            const resp = await handleUpload({
+            const resp = await lease.upload({
               path: "/api/v1/media/ingest/jobs",
               method: "POST",
               fields,
@@ -2955,7 +3407,7 @@ export default defineBackground({
                 : fileDefaults;
             const fields = buildFields(t, r, resolvedDefaults);
             fields.urls = [url];
-            const resp = await handleUpload({
+            const resp = await lease.upload({
               path: getProcessPathForType(t),
               method: "POST",
               fields,
@@ -2972,6 +3424,7 @@ export default defineBackground({
           out.push(result);
           emitProgress(result);
         } catch (e: any) {
+          lease.assertCurrent();
           if (isCancelled()) break;
           await patchPlannedConferenceItem(plannedConferenceItem, {
             status: jobSubmitted ? "failed" : "submit_failed",
@@ -2992,6 +3445,7 @@ export default defineBackground({
       }
 
       for (const f of files) {
+        lease.assertCurrent();
         if (isCancelled()) break;
         const id = f?.id || crypto.randomUUID();
         const name = f?.name || "upload";
@@ -3008,7 +3462,7 @@ export default defineBackground({
               undefined,
               resolvedFileDefaults,
             );
-            const resp = await handleUpload({
+            const resp = await lease.upload({
               path: "/api/v1/media/ingest/jobs",
               method: "POST",
               fields,
@@ -3047,7 +3501,7 @@ export default defineBackground({
               undefined,
               resolvedFileDefaults,
             );
-            const resp = await handleUpload({
+            const resp = await lease.upload({
               path: getProcessPathForType(mediaType),
               method: "POST",
               fields,
@@ -3075,6 +3529,7 @@ export default defineBackground({
           out.push(result);
           emitProgress(result);
         } catch (e: any) {
+          lease.assertCurrent();
           if (isCancelled()) break;
           const result = {
             id,
@@ -3119,7 +3574,9 @@ export default defineBackground({
         }
       }
 
+      lease.assertCurrent();
       return { ok: true, results: out };
+      } finally { lease.release(); }
     };
 
     const quickIngestSessionRuntime = createQuickIngestSessionRuntime({
@@ -3130,6 +3587,13 @@ export default defineBackground({
         };
       },
       emit: async (type, payload) => {
+        const sessionId = String(payload?.sessionId || "");
+        const owned = quickIngestModalSessions.get(sessionId);
+        if (!owned?.requestScope) return;
+        const lease = createQuickIngestLease(owned.requestScope);
+        try { await lease.validate(); if (quickIngestModalSessions.get(sessionId) !== owned) return; }
+        catch { return; }
+        finally { lease.release(); }
         await emitBackgroundMessage(undefined, type, payload);
         if (
           type === "tldw:quick-ingest/completed" ||
@@ -3147,6 +3611,70 @@ export default defineBackground({
     });
 
     handleRuntimeMessageRef = async (message: any, sender: any) => {
+      if (
+        typeof message?.type === "string" &&
+        (message.type.startsWith("tldw:recipe-owner:") ||
+          message.type.startsWith("tldw:recipe-uncertainty:"))
+      ) {
+        if (!isRecipePersistenceMessage(message)) {
+          return { ok: false, error: "Invalid recipe authority message" };
+        }
+        switch (message.type) {
+          case "tldw:recipe-uncertainty:acknowledge":
+            return {
+              ok: recipeRegistry.acknowledge(
+                message.id,
+                message.ownerId,
+                message.operationId,
+              ),
+            };
+          case "tldw:recipe-owner:resolve":
+            return await resolveRecipeOwnerWithConfig(getEffectiveConfig);
+          case "tldw:recipe-uncertainty:read":
+            return recipeRegistry.read(message.id, message.ownerId);
+          case "tldw:recipe-uncertainty:mark-scoped":
+            recipeRegistry.markScoped(message.id, message.ownerId);
+            break;
+          case "tldw:recipe-uncertainty:clear-scoped":
+            recipeRegistry.clearScoped(message.id, message.ownerId);
+            break;
+          case "tldw:recipe-uncertainty:reconcile-exact":
+            return {
+              safe: recipeRegistry.reconcileExact(
+                message.id,
+                message.ownerId,
+                message.operationId,
+              ),
+            };
+          case "tldw:recipe-uncertainty:finish-reconcile":
+            return {
+              ok: recipeRegistry.finishReconcileExact(
+                message.id,
+                message.ownerId,
+                message.operationId,
+                message.committed,
+              ),
+            };
+          case "tldw:recipe-uncertainty:begin-unlink":
+            return {
+              safe: recipeRegistry.beginExclusive(
+                message.id,
+                message.operationId,
+              ),
+            };
+          case "tldw:recipe-uncertainty:end-unlink":
+            return {
+              ok: recipeRegistry.endExclusive(message.id, message.operationId),
+            };
+          case "tldw:recipe-uncertainty:mark-unknown":
+            recipeRegistry.markUnknown(message.id);
+            break;
+          case "tldw:recipe-uncertainty:forget-unknown":
+            recipeRegistry.forgetUnknown(message.id);
+            break;
+        }
+        return { ok: true };
+      }
       // Simple ping for E2E tests - verifies message handler is working
       if (message.type === "tldw:ping") {
         return { ok: true, pong: true, timestamp: Date.now() };
@@ -3172,12 +3700,18 @@ export default defineBackground({
         return { ok: tabId != null, tabId };
       }
       if (message.type === "tldw:quick-ingest/start") {
+        let scope: ServicePromptRequestScope;
+        try {
+          const lease = createQuickIngestLease(message.payload?.requestScope);
+          try { await lease.validate(); scope = lease.requestScope; } finally { lease.release(); }
+        } catch { return { ok: false, error: "The ingest account or server changed. Reopen Quick Ingest." }; }
         const startAck = quickIngestSessionRuntime.start(
           (message.payload || {}) as Record<string, unknown>,
         );
         if (startAck?.ok && startAck.sessionId) {
           quickIngestModalSessions.set(startAck.sessionId, {
             sessionId: startAck.sessionId,
+            requestScope: scope,
             cancelled: false,
             abortControllers: new Set(),
           });
@@ -3193,6 +3727,12 @@ export default defineBackground({
         }
 
         const session = getQuickIngestModalSession(sessionId);
+        const requestedScope = readQuickIngestRequestScope(message.payload?.requestScope);
+        if (!session?.requestScope || !requestedScope || JSON.stringify(requestedScope) !== JSON.stringify(session.requestScope)) return { ok: false, error: "This ingest session belongs to a different account or server." };
+        const lease = createQuickIngestLease(requestedScope);
+        try { await lease.validate(); if (quickIngestModalSessions.get(sessionId) !== session) return { ok: false }; }
+        catch { return { ok: false, error: "The ingest account or server changed." }; }
+        finally { lease.release(); }
         if (session) {
           session.cancelled = true;
           void persistSessionState();
@@ -3217,6 +3757,18 @@ export default defineBackground({
       }
       if (message.type === "tldw:quick-ingest-batch") {
         return await runQuickIngestBatch(message.payload || {});
+      }
+      if (message.type === "tldw:cancel-request") {
+        const requestId = String(message?.payload?.requestId || "").trim();
+        if (!requestId) {
+          return { ok: false, cancelled: false, error: "Missing requestId." };
+        }
+        const controller = runtimeRequestControllers.get(requestId);
+        if (controller) {
+          runtimeRequestControllers.delete(requestId);
+          controller.abort();
+        }
+        return { ok: true, cancelled: Boolean(controller) };
       }
       if (message.type === "sidepanel") {
         try {
@@ -3271,10 +3823,16 @@ export default defineBackground({
         return { ok: false, error: "Unsupported funnel event" };
       }
       if (message.type === "tldw:upload") {
-        return handleUpload(message.payload || {});
+        return runCancelableRuntimeRequest(
+          message?.payload?.requestId,
+          (signal) => handleUpload(message.payload || {}, signal),
+        );
       }
       if (message.type === "tldw:request") {
-        return handleTldwRequest(message.payload || {});
+        return runCancelableRuntimeRequest(
+          message?.payload?.requestId,
+          (signal) => handleTldwRequest(message.payload || {}, signal),
+        );
       }
       if (message.type === "tldw:ingest") {
         try {
@@ -3322,11 +3880,23 @@ export default defineBackground({
 
     browser.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
+      if (Object.keys(changes || {}).some(key => key === "tldwConfig" || key === REFRESH_ROTATION_KEY || key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
+        quickIngestCredentialRevision += 1;
+        for (const validate of quickIngestAuthorityValidators) void validate().catch(() => {});
+      }
       if (
         !changes ||
         !Object.prototype.hasOwnProperty.call(changes, "tldwConfig")
       ) {
         return;
+      }
+      const change = changes.tldwConfig;
+      if (!connectionAuthoritiesMatch(change?.oldValue, change?.newValue)) {
+        quickIngestAuthorityRevision += 1;
+        for (const controller of quickIngestAuthorityControllers) controller.abort();
+        quickIngestModalSessions.clear();
+        quickIngestBatchRecords.clear();
+        void persistSessionState();
       }
       void replayPendingAuthSessions();
     });
@@ -3792,24 +4362,6 @@ export default defineBackground({
       }
     });
 
-    browser.commands.onCommand.addListener((command) => {
-      switch (command) {
-        case "execute_side_panel":
-          browser.tabs
-            .query({ active: true, currentWindow: true })
-            .then((tabs) => {
-              const tab = tabs[0];
-              ensureSidepanelOpen(tab?.id);
-            })
-            .catch(() => {
-              ensureSidepanelOpen();
-            });
-          break;
-        default:
-          break;
-      }
-    });
-
     // Stream handler via Port API
     browser.runtime.onConnect.addListener((port) => {
       if (!isTrustedRuntimeSender(port.sender)) {
@@ -3836,16 +4388,75 @@ export default defineBackground({
           }
         };
         const onMsg = async (msg: any) => {
+          const sanitizeRagProviderStreamError =
+            msg?.sanitizeRagProviderStreamError === true;
+          const postStreamError = (payload: {
+            event: "error";
+            message: unknown;
+            status?: unknown;
+            code?: unknown;
+            details?: unknown;
+            retryAfter?: unknown;
+          }) => {
+            if (!sanitizeRagProviderStreamError) {
+              safePost(payload);
+              return;
+            }
+            const sanitized = sanitizeRagProviderFailure({
+              status: payload.status,
+              error: formatErrorMessage(payload.message, "Stream error"),
+              data:
+                payload.details ??
+                (payload.code
+                  ? {
+                      detail: {
+                        error_code: payload.code,
+                        message: payload.message,
+                      },
+                    }
+                  : undefined),
+            });
+            const safePayload: Record<string, unknown> = {
+              event: "error",
+              message: sanitized.message,
+            };
+            if (typeof sanitized.status === "number") {
+              safePayload.status = sanitized.status;
+            }
+            if (sanitized.code) {
+              safePayload.code = sanitized.code;
+            }
+            if (sanitized.details) {
+              safePayload.details = sanitized.details;
+            }
+            safePost(safePayload);
+          };
           try {
-            const cfg = await getEffectiveConfig();
+            const servicePromptConfig = readServicePromptTargetLock(
+              msg?.servicePromptConfig,
+            );
+            const path = msg.path as string;
+            if (servicePromptConfig && !isServicePromptRequestPath(path, msg.method)) {
+              const error = new Error(
+                "A Service Prompt config can only be used with Service Prompt requests.",
+              ) as Error & { status: number };
+              error.status = 400;
+              throw error;
+            }
+            const scopedCfg = servicePromptConfig
+              ? await resolveCurrentServicePromptConfig(servicePromptConfig)
+              : null;
+            const cfg = scopedCfg ?? (await getEffectiveConfig());
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
             const baseUrl = String(cfg.serverUrl).replace(/\/$/, "");
-            const path = msg.path as string;
             const streamAccess = evaluateAbsoluteUrlAccess(path, cfg);
             // Mirror the request-path guard: refuse cross-origin absolute URLs
             // that are not explicitly allowlisted before opening the stream.
             if (streamAccess.blocked) {
-              safePost({ event: "error", message: ABSOLUTE_URL_BLOCK_ERROR });
+              postStreamError({
+                event: "error",
+                message: ABSOLUTE_URL_BLOCK_ERROR,
+              });
               return;
             }
             const url = streamAccess.isAbsolute
@@ -3863,7 +4474,7 @@ export default defineBackground({
               if (cfg.authMode === "single-user") {
                 const key = (cfg.apiKey || "").trim();
                 if (!key) {
-                  safePost({
+                  postStreamError({
                     event: "error",
                     message:
                       "Add or update your API key in Settings → tldw server, then try again.",
@@ -3875,7 +4486,7 @@ export default defineBackground({
                 const token = (cfg.accessToken || "").trim();
                 if (token) headers["Authorization"] = `Bearer ${token}`;
                 else {
-                  safePost({
+                  postStreamError({
                     event: "error",
                     message:
                       "Not authenticated. Please login under Settings > tldw.",
@@ -3887,7 +4498,8 @@ export default defineBackground({
             headers["Accept"] = "text/event-stream";
             headers["Cache-Control"] = headers["Cache-Control"] || "no-cache";
             headers["Connection"] = headers["Connection"] || "keep-alive";
-            abort = new AbortController();
+            const requestAbort = new AbortController();
+            abort = requestAbort;
             const idleMs = deriveStreamIdleTimeout(
               cfg,
               path,
@@ -3902,7 +4514,7 @@ export default defineBackground({
                   } catch (error) {
                     logBackgroundError("stream abort", error);
                   }
-                  safePost({
+                  postStreamError({
                     event: "error",
                     message: "Stream timeout: no updates received",
                   });
@@ -3921,7 +4533,7 @@ export default defineBackground({
                 typeof msg.body === "string"
                   ? msg.body
                   : JSON.stringify(msg.body),
-              signal: abort.signal,
+              signal: requestAbort.signal,
             });
             if (
               !streamAccess.skipAuth &&
@@ -3929,24 +4541,46 @@ export default defineBackground({
               cfg.authMode === "multi-user" &&
               cfg.refreshToken
             ) {
-              if (!refreshInFlight) {
-                refreshInFlight = (async () => {
-                  try {
-                    await tldwAuth.refreshToken();
-                  } finally {
-                    refreshInFlight = null;
-                  }
-                })();
-              }
               try {
-                await refreshInFlight;
+                if (servicePromptConfig) {
+                  await refreshScopedAuth(
+                    servicePromptConfig,
+                    scopedCfg ?? undefined,
+                  );
+                } else {
+                  if (!refreshInFlight) {
+                    refreshInFlight = (async () => {
+                      try {
+                        await tldwAuth.refreshToken();
+                      } finally {
+                        refreshInFlight = null;
+                      }
+                    })();
+                  }
+                  await refreshInFlight;
+                }
               } catch (error) {
+                if (
+                  servicePromptConfig &&
+                  (error as { status?: unknown })?.status === 412
+                ) {
+                  throw error;
+                }
                 logBackgroundError("refresh auth (stream)", error);
               }
-              const updated = await getEffectiveConfig();
+              if (disconnected || closed || requestAbort.signal.aborted) {
+                return;
+              }
+              const updated = servicePromptConfig
+                ? await resolveCurrentServicePromptConfig(servicePromptConfig)
+                : await getEffectiveConfig();
               if (updated?.accessToken)
                 headers["Authorization"] = `Bearer ${updated.accessToken}`;
               const retryController = new AbortController();
+              if (disconnected || closed || requestAbort.signal.aborted) {
+                retryController.abort();
+                return;
+              }
               abort = retryController;
               resp = await fetch(url, {
                 method: msg.method || "POST",
@@ -3971,7 +4605,7 @@ export default defineBackground({
                 const t = await resp.text().catch(() => null);
                 if (t) errMsg = t;
               }
-              safePost({
+              postStreamError({
                 event: "error",
                 status: resp.status,
                 message: formatErrorMessage(errMsg, `HTTP ${resp.status}`),
@@ -4051,8 +4685,12 @@ export default defineBackground({
             safePost({ event: "done" });
           } catch (e: any) {
             if (idleTimer) clearTimeout(idleTimer);
-            safePost({
+            postStreamError({
               event: "error",
+              ...(typeof e?.status === "number" ? { status: e.status } : {}),
+              ...(typeof e?.details !== "undefined"
+                ? { details: e.details }
+                : {}),
               message: formatErrorMessage(e, "Stream error"),
             });
           }

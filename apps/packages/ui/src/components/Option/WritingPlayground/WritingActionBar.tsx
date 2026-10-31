@@ -45,6 +45,7 @@ export type WritingActionBarProps = {
   target: WritingRevisionTarget
   selectedPresetId?: WritingRevisionPresetId
   isGenerating?: boolean
+  presetDisabled?: boolean
   onPresetChange?: (presetId: WritingRevisionPresetId) => void
   onRequest: (request: WritingActionBarRequest) => void
 }
@@ -104,6 +105,7 @@ export function WritingActionBar({
   target,
   selectedPresetId,
   isGenerating = false,
+  presetDisabled = false,
   onPresetChange,
   onRequest
 }: WritingActionBarProps) {
@@ -198,7 +200,9 @@ export function WritingActionBar({
       <Segmented
         size="small"
         value={activePresetId}
+        disabled={presetDisabled}
         onChange={(value) => {
+          if (presetDisabled) return
           const nextPresetId = value as WritingRevisionPresetId
           setInternalPresetId(nextPresetId)
           onPresetChange?.(nextPresetId)

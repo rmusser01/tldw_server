@@ -5,12 +5,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     default_offset_pagination_aliases,
 )
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
+    canonical_builtin_llm_provider_name,
+)
+
 from .prompt_studio_base import EvaluationStatus, JobStatus, JobType, TimestampMixin, UUIDMixin
 
 ########################################################################################################################
@@ -32,7 +36,10 @@ class EvaluationMetrics(BaseModel):
 
 class EvaluationConfig(BaseModel):
     """Configuration for evaluation"""
+    provider: Optional[str] = Field(None, max_length=100)
+    api_name: Optional[str] = Field(None, max_length=100, description="Legacy provider field")
     model_name: Optional[str] = Field(None, max_length=100)
+    model: Optional[str] = Field(None, max_length=100, description="Legacy model field")
     temperature: Optional[float] = Field(None, ge=0, le=2)
     max_tokens: Optional[int] = Field(None, ge=1, le=100000)
     top_p: Optional[float] = Field(None, ge=0, le=1)
@@ -44,6 +51,47 @@ class EvaluationConfig(BaseModel):
     retry_count: Optional[int] = Field(None, ge=0, le=10)
     parallel_requests: Optional[int] = Field(None, ge=1, le=100)
 
+    @field_validator("provider", "api_name")
+    @classmethod
+    def _validate_provider_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Provider must not be empty")
+        return canonical_builtin_llm_provider_name(value)
+
+    @field_validator("model_name", "model")
+    @classmethod
+    def _validate_model_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Model must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_legacy_aliases(self) -> "EvaluationConfig":
+        if (
+            self.provider is not None
+            and self.api_name is not None
+            and self.provider != self.api_name
+        ):
+            raise ValueError("provider and api_name conflict")
+        if (
+            self.model_name is not None
+            and self.model is not None
+            and self.model_name != self.model
+        ):
+            raise ValueError("model_name and model conflict")
+
+        provider = self.provider or self.api_name
+        model = self.model_name or self.model
+        if provider is not None and provider != "openai" and model is None:
+            raise ValueError("Model is required for an explicit non-OpenAI provider")
+        return self
+
 class EvaluationCreate(BaseModel):
     """Create evaluation request"""
     project_id: int = Field(..., description="Project ID")
@@ -53,9 +101,37 @@ class EvaluationCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=1000, description="Evaluation description")
     metrics: Optional[EvaluationMetrics] = Field(None, description="Metrics to track")
     config: Optional[EvaluationConfig] = Field(None, description="Evaluation configuration")
+    model_configs: Optional[list[EvaluationConfig]] = Field(
+        None,
+        max_length=20,
+        description="Legacy list form; the first model configuration is used",
+    )
     run_async: bool = Field(default=False, description="Run evaluation asynchronously")
     test_case_ids: Optional[list[int]] = Field(None, description="Specific test cases to run")
     tags: Optional[list[str]] = Field(None, max_length=20, description="Tags for categorization")
+
+    @staticmethod
+    def _effective_config(config: EvaluationConfig) -> dict[str, Any]:
+        data = config.model_dump(exclude_none=True)
+        provider = data.pop("provider", None) or data.pop("api_name", None) or "openai"
+        data.pop("api_name", None)
+        model = data.pop("model_name", None) or data.pop("model", None)
+        data.pop("model", None)
+        data["provider"] = provider
+        data["model"] = model or "gpt-3.5-turbo"
+        data.setdefault("temperature", 0.7)
+        data.setdefault("max_tokens", 1000)
+        return data
+
+    @model_validator(mode="after")
+    def _validate_config_shapes(self) -> "EvaluationCreate":
+        if self.config is None or not self.model_configs:
+            return self
+
+        current = self._effective_config(self.config)
+        if any(self._effective_config(item) != current for item in self.model_configs):
+            raise ValueError("config and model_configs conflict")
+        return self
 
 class EvaluationUpdate(BaseModel):
     """Update evaluation request"""
@@ -102,8 +178,32 @@ class ExecutePromptSimpleRequest(BaseModel):
 
     prompt_id: int
     inputs: dict[str, Any] = Field(default_factory=dict)
-    provider: Optional[str] = Field(default="openai")
-    model: Optional[str] = Field(default="gpt-3.5-turbo")
+    provider: Optional[str] = Field(default="openai", max_length=100)
+    model: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("provider")
+    @classmethod
+    def _normalize_provider(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Provider must not be empty")
+        try:
+            return canonical_builtin_llm_provider_name(value)
+        except ValueError:
+            # The endpoint maps bounded unsupported providers to its fixed 400 envelope.
+            return value
+
+    @field_validator("model")
+    @classmethod
+    def _normalize_model(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Model must not be empty")
+        return value
 
 ########################################################################################################################
 # Optimization Schemas

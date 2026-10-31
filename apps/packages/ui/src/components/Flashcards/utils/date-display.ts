@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next"
+
 const SECONDS_TO_MS = 1000
 // Epoch seconds remain below this until 2286; millisecond timestamps exceed it after 1970.
 const SECOND_TIMESTAMP_CUTOFF = 10_000_000_000
@@ -150,4 +152,57 @@ export const formatFlashcardTimestampWithRelative = (
     relative: formatFlashcardRelativeTimeFromMs(timestamp, options),
     timestamp
   }
+}
+
+
+type FlashcardReviewGapSchedule = {
+  interval_days: number
+  queue_state?: string | null
+  due_at?: unknown
+  last_reviewed_at?: unknown
+}
+
+/** Describe the saved schedule, never the remaining time from the current clock. */
+export const formatFlashcardReviewGap = (
+  schedule: FlashcardReviewGapSchedule,
+  t: TFunction,
+  { compact = false }: { compact?: boolean } = {}
+): string => {
+  const unavailable = () => t(
+    compact ? "option:flashcards.reviewGapUnavailableShort" : "option:flashcards.reviewGapUnavailable",
+    { defaultValue: compact ? "—" : "not available" }
+  )
+  if (schedule.queue_state === "new" || schedule.queue_state === "suspended") return unavailable()
+
+  const isLearning = schedule.queue_state === "learning" || schedule.queue_state === "relearning"
+  let count = schedule.interval_days
+  let unit: "Days" | "Hours" | "Minutes" = "Days"
+  if (isLearning || count === 0) {
+    const due = parseFlashcardTimestamp(schedule.due_at)
+    const reviewed = parseFlashcardTimestamp(schedule.last_reviewed_at)
+    if (due == null || reviewed == null || due <= reviewed) return unavailable()
+    const minutes = Math.ceil((due - reviewed) / MINUTES_TO_MS)
+    // Keep non-whole hours in minutes: a 90-minute step is not a two-hour gap.
+    if (minutes % (24 * 60) === 0) {
+      count = minutes / (24 * 60)
+    } else if (minutes % 60 === 0) {
+      count = minutes / 60
+      unit = "Hours"
+    } else {
+      count = minutes
+      unit = "Minutes"
+    }
+  } else if (!Number.isFinite(count) || count <= 0) {
+    return unavailable()
+  }
+
+  const labels = {
+    Days: { short: "{{count}}d", full: "{count, plural, one {# day} other {# days}}" },
+    Hours: { short: "{{count}} hr", full: "{count, plural, one {# hour} other {# hours}}" },
+    Minutes: { short: "{{count}} min", full: "{count, plural, one {# minute} other {# minutes}}" }
+  }
+  return t(`option:flashcards.reviewGap${unit}${compact ? "Short" : ""}`, {
+    defaultValue: compact ? labels[unit].short : labels[unit].full,
+    count
+  })
 }

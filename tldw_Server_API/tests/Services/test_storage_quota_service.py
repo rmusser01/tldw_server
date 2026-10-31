@@ -1,5 +1,3 @@
-import asyncio
-import os
 from pathlib import Path
 
 import pytest
@@ -20,11 +18,31 @@ class _DummyTransCtx:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def execute(self, *args, **kwargs):
-        return None
+    async def execute(self, query, params):
+        if str(query).lstrip().lower().startswith("with target_user as"):
+            return _DummyCursor(
+                [
+                    (
+                        "user",
+                        int(params[0]),
+                        "2026-07-26T12:00:00.000000Z",
+                    )
+                ]
+            )
+        return _DummyCursor()
 
     async def commit(self):
         return None
+
+
+class _DummyCursor:
+    rowcount = 1
+
+    def __init__(self, rows=None):
+        self._rows = rows or []
+
+    async def fetchall(self):
+        return self._rows
 
 
 class FakePool:

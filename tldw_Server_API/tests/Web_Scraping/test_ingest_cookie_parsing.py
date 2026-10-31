@@ -36,8 +36,9 @@ def _request(**overrides):
 async def test_ingest_orchestrate_accepts_cookie_dict(monkeypatch):
     captured = {}
 
-    async def fake_scrape_article(url, custom_cookies=None):
+    async def fake_scrape_article(url, custom_cookies=None, *, allow_llm_extraction=None):
         captured["cookies"] = custom_cookies
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return {
             "url": url,
             "content": "content",
@@ -60,6 +61,7 @@ async def test_ingest_orchestrate_accepts_cookie_dict(monkeypatch):
     assert isinstance(result, list)
     assert len(result) == 1
     assert captured.get("cookies") == [{"name": "session", "value": "abc"}]
+    assert captured["allow_llm_extraction"] is False
 
 
 @pytest.mark.unit
@@ -67,8 +69,9 @@ async def test_ingest_orchestrate_accepts_cookie_dict(monkeypatch):
 async def test_ingest_orchestrate_accepts_cookie_list(monkeypatch):
     captured = {}
 
-    async def fake_scrape_article(url, custom_cookies=None):
+    async def fake_scrape_article(url, custom_cookies=None, *, allow_llm_extraction=None):
         captured["cookies"] = custom_cookies
+        captured["allow_llm_extraction"] = allow_llm_extraction
         return {
             "url": url,
             "content": "content",
@@ -96,6 +99,7 @@ async def test_ingest_orchestrate_accepts_cookie_list(monkeypatch):
     assert isinstance(result, list)
     assert len(result) == 1
     assert captured.get("cookies") == cookie_payload
+    assert captured["allow_llm_extraction"] is False
 
 
 @pytest.mark.unit

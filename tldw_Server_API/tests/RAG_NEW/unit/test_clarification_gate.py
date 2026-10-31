@@ -10,9 +10,23 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_pronoun_without_context_requires_clarification():
+@pytest.mark.parametrize(
+    "query",
+    [
+        "When does Project Juniper launch, and who owns it? Cite the source.",
+        "Describe Project Juniper. When does it launch?",
+    ],
+)
+async def test_named_subject_is_context_for_later_pronoun(query):
+    decision = await assess_query_for_clarification(query, chat_history=None)
+    assert decision.required is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["Can you fix this?", "Tell Me About It", "When does it launch?"])
+async def test_pronoun_without_context_requires_clarification(query):
     d = await assess_query_for_clarification(
-        query="Can you fix this?",
+        query=query,
         chat_history=None,
         timeout_sec=0.1,
         llm_call=None,

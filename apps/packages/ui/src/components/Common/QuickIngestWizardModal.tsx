@@ -1,3 +1,5 @@
+import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
+import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Modal, Button } from "antd"
 import { useTranslation } from "react-i18next"
@@ -30,6 +32,7 @@ import {
   completedIngestJobIndicatesSkipped,
   extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
+  extractCompletedIngestJobWarning,
 } from "@/services/tldw/ingest-job-results"
 import {
   DOCUMENT_WORKSPACE_PATH,
@@ -235,6 +238,9 @@ const normalizeWizardResult = (
     type: String(item.type || "item"),
     data: item.data,
     error,
+    warning: derivedStatus === "ok"
+      ? extractCompletedIngestJobWarning(item.data) || item.warning
+      : undefined,
     title: item.title,
     durationMs: item.durationMs,
     mediaId:
@@ -761,6 +767,7 @@ const buildResultsFromReattachedJobs = (
             extractCompletedIngestJobError(job.result) ||
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
+      warning: resultStatus === "ok" ? extractCompletedIngestJobWarning(job.result) : undefined,
       collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
       retryAttempt: null,
       idempotencyKey: null,
@@ -787,9 +794,7 @@ const buildProgressFromReattachedJobs = (
     const progressPercent =
       status === "complete" || status === "failed" || status === "cancelled"
         ? 100
-        : status === "queued"
-          ? 0
-          : 50
+        : 0
     return {
       id: item?.id || `reattached-${job.jobId}`,
       status,
@@ -892,6 +897,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   replaceWithNewDraft,
   shouldAttemptPersistedReattach,
 }) => {
+  const [operation] = useState(() => quickIngestAuthority.capture())
   const { t } = useTranslation(["option"])
   const {
     state,
@@ -1036,9 +1042,18 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const recordedIngestRef = useRef(false)
 
   useEffect(() => {
+    if (!operation.isCurrent()) return
     if (state.currentStep !== 5) { recordedIngestRef.current = false; return }
     if (recordedIngestRef.current) return
     recordedIngestRef.current = true
+    const savedMediaIds = state.results.filter(item => item.status === "ok" && item.mediaId != null)
+      .map(item => Number(item.mediaId)).filter(id => Number.isFinite(id) && id > 0)
+    if (savedMediaIds.length > 0) {
+      window.dispatchEvent(new CustomEvent("tldw:quick-ingest-complete", { detail: {
+        mediaIds: [...new Set(savedMediaIds)], authorityKey: operation.authorityKey,
+        isCurrent: operation.isCurrent
+      } }))
+    }
     const newDocs = state.results
       .filter(
         (item) =>
@@ -1056,7 +1071,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     if (newDocs.length > 0) {
       addRecentlyIngestedDocs(newDocs)
     }
-  }, [state.currentStep, state.results, addRecentlyIngestedDocs])
+  }, [state.currentStep, state.results, addRecentlyIngestedDocs, operation])
 
   useEffect(() => {
     if (!open || !state.isMinimized) return
@@ -1084,105 +1099,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     return () => window.clearInterval(timer)
   }, [processingState.status, syncElapsed])
 
-  // ---------------------------------------------------------------------------
-  // Simulated progress advancement
-  //
-  // During long-running server-side processing (transcription, indexing) the
-  // UI receives no intermediate progress updates -- items stay stuck at 10%.
-  // This effect gradually advances non-terminal items through visual stages
-  // so the user sees continuous feedback while waiting.
-  //
-  // We use a ref to read the latest perItemProgress inside the interval
-  // callback so the effect only depends on `processingState.status` (avoiding
-  // a re-render feedback loop where updating progress re-triggers the effect).
-  // ---------------------------------------------------------------------------
-  const perItemProgressRef = useRef(processingState.perItemProgress)
-  useEffect(() => {
-    perItemProgressRef.current = processingState.perItemProgress
-  }, [processingState.perItemProgress])
-
-  const updateItemProgressRef = useRef(updateItemProgress)
-  useEffect(() => {
-    updateItemProgressRef.current = updateItemProgress
-  }, [updateItemProgress])
-
-  useEffect(() => {
-    if (processingState.status !== "running") return
-
-    const STAGE_ORDER: ItemProgressStatus[] = [
-      "uploading",
-      "processing",
-      "analyzing",
-      "storing",
-    ]
-    const TERMINAL = new Set<ItemProgressStatus>(["complete", "failed", "cancelled"])
-    /** Advance interval in ms -- slow enough to feel realistic. */
-    const TICK_MS = 3_000
-    /**
-     * Maximum simulated percent -- we cap at 90% so the bar never reaches
-     * 100% before the real server response arrives.
-     */
-    const MAX_SIMULATED_PERCENT = 90
-    /** Percent increment per tick. */
-    const PERCENT_STEP = 5
-
-    // TODO(i18n): extract STAGE_LABELS to i18n resources
-    const STAGE_LABELS: Record<string, string> = {
-      uploading: "Uploading",
-      processing: "Processing content... This may take a few minutes for large files.",
-      analyzing: "Processing and indexing content",
-      storing: "Storing results",
-    }
-
-    const timer = window.setInterval(() => {
-      const items = perItemProgressRef.current
-      for (const p of items) {
-        if (TERMINAL.has(p.status)) continue
-
-        const currentStageIdx = STAGE_ORDER.indexOf(p.status)
-        if (currentStageIdx < 0) continue
-
-        let nextPercent = p.progressPercent + PERCENT_STEP
-        let nextStatus = p.status
-        let nextStage = p.currentStage
-
-        // Advance to the next visual stage at certain thresholds
-        if (nextPercent >= 35 && currentStageIdx === 0) {
-          nextStatus = "processing"
-          nextStage = STAGE_LABELS.processing
-        } else if (nextPercent >= 60 && currentStageIdx <= 1) {
-          nextStatus = "analyzing"
-          nextStage = STAGE_LABELS.analyzing
-        } else if (nextPercent >= 80 && currentStageIdx <= 2) {
-          nextStatus = "storing"
-          nextStage = STAGE_LABELS.storing
-        } else {
-          nextStage = STAGE_LABELS[p.status] || p.currentStage
-        }
-
-        if (nextPercent > MAX_SIMULATED_PERCENT) {
-          nextPercent = MAX_SIMULATED_PERCENT
-        }
-
-        // Only update if something actually changed
-        if (
-          nextPercent !== p.progressPercent ||
-          nextStatus !== p.status ||
-          nextStage !== p.currentStage
-        ) {
-          updateItemProgressRef.current({
-            ...p,
-            status: nextStatus,
-            progressPercent: nextPercent,
-            currentStage: nextStage,
-          })
-        }
-      }
-    }, TICK_MS)
-
-    return () => window.clearInterval(timer)
-  }, [processingState.status])
-
   useEffect(() => {
     const persistedTracking = persistedTrackingRef.current
     const reattachQueueItems = initialTrackedQueueItemsRef.current
@@ -1202,8 +1118,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     let cancelled = false
     const pollPersistedTracking = async () => {
       const currentTracking = persistedTrackingRef.current || persistedTracking
-      const snapshot = await reattachQuickIngestSession(currentTracking)
-      if (cancelled) return
+      const snapshot = await reattachQuickIngestSession(currentTracking, operation)
+      if (cancelled || !operation.isCurrent()) return
 
       const latestTracking = persistedTrackingRef.current || currentTracking
       const perItemProgress = buildProgressFromReattachedJobs(
@@ -1224,7 +1140,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           estimatedRemaining: 0,
         })
         persistedReattachTimerRef.current = window.setTimeout(() => {
-          void pollPersistedTracking()
+          void pollPersistedTracking().catch(() => { /* Owner changes abandon client polling. */ })
         }, PERSISTED_REATTACH_POLL_INTERVAL_MS)
         return
       }
@@ -1267,10 +1183,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
     }
 
-    void pollPersistedTracking()
+    void pollPersistedTracking().catch(() => { /* Owner changes abandon client polling. */ })
 
     return () => {
       cancelled = true
+      // A replacement effect (including StrictMode replay) must own a fresh poll.
+      if (activeReattachSignatureRef.current === persistedReattachSignature) {
+        activeReattachSignatureRef.current = ""
+      }
       if (persistedReattachTimerRef.current != null) {
         window.clearTimeout(persistedReattachTimerRef.current)
         persistedReattachTimerRef.current = null
@@ -1280,6 +1200,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     goNext,
     markInterrupted,
     persistedReattachSignature,
+    operation,
     setResults,
     updateProcessingState,
   ])
@@ -1346,7 +1267,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   )
 
   const handleCancelAll = useCallback(() => {
-    if (cancelRequestedRef.current) return
+    if (!operation.isCurrent() || cancelRequestedRef.current) return
     cancelRequestedRef.current = true
 
     if (persistedReattachTimerRef.current != null) {
@@ -1361,6 +1282,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     if (sessionId) {
       cancelledSessionIdsRef.current.add(sessionId)
       cancelQuickIngestSessionBestEffort({
+        requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
         sessionId,
         batchIds: resolveTrackingBatchIds(persistedTracking),
         reason: "user_cancelled",
@@ -1368,17 +1290,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     }
 
     finalizeFailure("Cancelled by user.", "cancelled")
-  }, [finalizeFailure])
+  }, [finalizeFailure, operation])
 
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
     for (const item of validQueueItems) {
-      const initialStatus: ItemProgressStatus = item.file ? "uploading" : "processing"
       updateItemProgress({
         id: item.id,
-        status: initialStatus,
-        progressPercent: 10,
-        currentStage: initialStatus === "uploading" ? "Uploading" : "Processing",
+        status: "processing",
+        progressPercent: 0,
+        currentStage: "Waiting for server result",
         estimatedRemaining: 0,
       })
     }
@@ -1386,7 +1307,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const handleRuntimeMessage = useCallback(
     (message: QuickIngestRuntimeMessage) => {
-      if (!message || typeof message.type !== "string") return
+      if (!operation.isCurrent() || !message || typeof message.type !== "string") return
       const sessionId = String(message.payload?.sessionId || "").trim()
       if (!sessionId || sessionId !== String(activeSessionIdRef.current || "").trim()) {
         return
@@ -1430,7 +1351,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         )
       }
     },
-    [applyResults, finalizeFailure, finalizeRun]
+    [applyResults, finalizeFailure, finalizeRun, operation]
   )
 
   useEffect(() => {
@@ -1457,7 +1378,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [handleRuntimeMessage])
 
   const startRun = useCallback(async () => {
-    if (hasStartedRunRef.current || validQueueItems.length === 0) return
+    if (!operation.isCurrent() || hasStartedRunRef.current || validQueueItems.length === 0) return
     hasStartedRunRef.current = true
 
     try {
@@ -1466,7 +1387,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       } catch {
         // Best effort; background proxy handles auth for direct runtimes.
       }
-      if (cancelRequestedRef.current) return
+      if (!operation.isCurrent() || cancelRequestedRef.current) return
 
       const requestPayload = await buildQuickIngestPayload(
         validQueueItems,
@@ -1479,7 +1400,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           typeDefaults: presetConfig.typeDefaults,
         }
       )
-      if (cancelRequestedRef.current) return
+      if (!operation.isCurrent() || cancelRequestedRef.current) return
 
       const providerWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
@@ -1508,13 +1429,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       markRunActive()
 
-      const startAck = await startQuickIngestSession(requestPayload)
+      const startAck = await startQuickIngestSession({ ...requestPayload, requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent })
+      if (!operation.isCurrent()) return
       if (cancelRequestedRef.current) {
         const cancelledSessionId = String(startAck?.sessionId || "").trim()
         if (startAck?.ok && cancelledSessionId) {
           cancelledSessionIdsRef.current.add(cancelledSessionId)
           if (!cancelledSessionId.startsWith("qi-direct-")) {
             cancelQuickIngestSessionBestEffort({
+        requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
               sessionId: cancelledSessionId,
               reason: "user_cancelled",
             })
@@ -1546,8 +1469,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       const response = await submitQuickIngestBatch({
         ...requestPayload,
+        requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
         __quickIngestSessionId: sessionId,
         onTrackingMetadata: (tracking) => {
+          if (!operation.isCurrent()) return
           markProcessingTracking({
             ...tracking,
             sessionId,
@@ -1558,6 +1483,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       })
 
       if (
+        !operation.isCurrent() ||
         cancelledSessionIdsRef.current.has(sessionId) ||
         sessionId !== String(activeSessionIdRef.current || "").trim()
       ) {
@@ -1584,7 +1510,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
       finalizeRun("complete", normalizedResults)
     } catch (error) {
-      if (cancelRequestedRef.current) return
+      if (!operation.isCurrent() || cancelRequestedRef.current) return
       finalizeFailure(
         error instanceof Error ? error.message : "Quick ingest failed.",
         "failed"
@@ -1607,6 +1533,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     qi,
     updateProcessingState,
     validQueueItems,
+    operation,
   ])
 
   useEffect(() => {
@@ -1677,6 +1604,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
+    if (!operation.isCurrent()) return
     if (!isOnlineForIngest || isCheckingConnection) return
     const providerWarning = getQuickIngestAnalysisProviderWarning({
       common: presetConfig.common,
@@ -1708,6 +1636,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.common,
     qi,
     skipToProcessing,
+    operation,
   ])
 
   useEffect(() => {
@@ -1737,18 +1666,53 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
+  const [reviewError, setReviewError] = useState<string | null>(null)
+  const [reviewRetry, setReviewRetry] = useState(0)
+  const reviewCreationRef = useRef<ReturnType<typeof createReviewDraftsFromResults> | null>(null)
+  useEffect(() => {
+    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || !results.some(item => item.status === "ok")) return
+    if (!reviewCreationRef.current) {
+      setReviewError(null)
+      const files = new Map<string, File>()
+      for (const item of queueItems) if (item.file) files.set(item.id, item.file)
+      reviewCreationRef.current = createReviewDraftsFromResults({
+        results, files, operation,
+        batchId: "quick-ingest-review:" + session.id,
+        processingOptions: {
+          perform_analysis: Boolean(presetConfig.common.perform_analysis),
+          perform_chunking: Boolean(presetConfig.common.perform_chunking),
+          overwrite_existing: Boolean(presetConfig.common.overwrite_existing),
+          advancedValues: { ...presetConfig.advancedValues }
+        }
+      })
+    }
+    // Reuse the same write across rerenders and StrictMode, but only the
+    // currently open wizard may publish its completion to the UI.
+    let cancelled = false
+    void reviewCreationRef.current.then(batch => {
+      if (cancelled || !operation.isCurrent() || !batch) return
+      navigate("/content-review?batch=" + encodeURIComponent(batch.batchId))
+      onClose()
+    }).catch(error => {
+      if (!cancelled && operation.isCurrent()) setReviewError(error instanceof Error ? error.message : "Failed to save review drafts.")
+    })
+    return () => { cancelled = true }
+  }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id])
 
   const handleSearchKnowledge = useCallback(() => {
+    if (!operation.isCurrent()) return
     navigate("/knowledge")
     onClose()
-  }, [navigate, onClose])
+  }, [navigate, onClose, operation])
 
   const handleIngestMore = useCallback(() => {
+    if (!operation.isCurrent()) return
     replaceWithNewDraft()
-  }, [replaceWithNewDraft])
+  }, [replaceWithNewDraft, operation])
 
   const handleOpenWorkspace = useCallback(
     (item: WizardResultItem) => {
+      if (!operation.isCurrent()) return
       const mediaId = item.mediaId
       if (mediaId != null) {
         navigate(`${DOCUMENT_WORKSPACE_PATH}?open=${mediaId}`)
@@ -1757,11 +1721,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
       onClose()
     },
-    [navigate, onClose]
+    [navigate, onClose, operation]
   )
 
   const handleOpenMedia = useCallback(
     (item: WizardResultItem) => {
+      if (!operation.isCurrent()) return
       const mediaId = item.mediaId
       const mediaPath = mediaId != null
         ? `/media?id=${encodeURIComponent(String(mediaId))}`
@@ -1769,16 +1734,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       navigate(mediaPath)
       onClose()
     },
-    [navigate, onClose]
+    [navigate, onClose, operation]
   )
 
   const handleOpenCollection = useCallback(
     (collectionId: string) => {
+      if (!operation.isCurrent()) return
       const collectionPath = buildMediaCollectionReviewPath(collectionId)
       onClose()
       navigate(collectionPath)
     },
-    [navigate, onClose]
+    [navigate, onClose, operation]
   )
 
   // Render the current step
@@ -1812,9 +1778,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 4:
-        return <ProcessingStep onCancelAll={handleCancelAll} />
+        return <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
       case 5:
         return (
+          <>
+          {reviewError && <div role="alert">
+            <p>{reviewError}</p>
+            <Button onClick={() => { reviewCreationRef.current = null; setReviewRetry(value => value + 1) }}>
+              {qi("reviewDraftsRetry", "Retry saving review drafts")}
+            </Button>
+          </div>}
           <WizardResultsStep
             onClose={onClose}
             onIngestMore={handleIngestMore}
@@ -1823,6 +1796,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             onOpenWorkspace={handleOpenWorkspace}
             onOpenCollection={handleOpenCollection}
           />
+          </>
         )
       default:
         return null
@@ -1830,6 +1804,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     currentStep,
+    reviewError,
+    qi,
     handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,
@@ -1883,6 +1859,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   openRevision = 0,
   createNewDraft,
 }) => {
+  const authorityKey = useQuickIngestAuthority()
   const {
     session,
     upsertSession,
@@ -1908,6 +1885,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     () => (session ? buildInitialWizardState(session) : undefined),
     [session]
   )
+  const boundSessionId = session?.id
   const sessionRef = useRef(session)
   const lastPersistedSignatureRef = useRef<{
     sessionId: string
@@ -1919,19 +1897,19 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   }, [session])
 
   useEffect(() => {
-    if (!open || session) return
+    if (!authorityKey || !open || session) return
     createDraftSession({
       selectedPreset: DEFAULT_PRESET,
       customBasePreset: DEFAULT_PRESET,
       presetConfig: presetMap[DEFAULT_PRESET],
       customOptions: {},
     })
-  }, [createDraftSession, open, presetMap, session])
+  }, [authorityKey, createDraftSession, open, presetMap, session])
 
   const persistWizardState = useCallback(
     (state: IngestWizardState) => {
       const currentSession = sessionRef.current
-      if (!currentSession) return
+      if (!currentSession || currentSession.id !== boundSessionId) return
       const patch = buildSessionPatchFromWizardState(state, currentSession)
       if (patch.completedAt == null) {
         lastPersistedSignatureRef.current = null
@@ -1953,10 +1931,10 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       }
       upsertSession(patch)
     },
-    [upsertSession]
+    [boundSessionId, upsertSession]
   )
 
-  if (!session || !initialState) return null
+  if (!authorityKey || !session || !initialState) return null
 
   const providerKey = `${session.id}:${openRevision}`
 

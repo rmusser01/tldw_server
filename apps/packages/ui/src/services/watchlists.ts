@@ -144,6 +144,8 @@ export const updateWatchlist = async (
 }
 
 export interface FetchSourcesParams {
+  /** Admin-only: inspect another user's data (backend-gated). */
+  target_user_id?: number
   q?: string
   tags?: string[]
   groups?: number[]
@@ -649,6 +651,8 @@ export const addJobFilters = async (
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface FetchRunsParams {
+  /** Admin-only: inspect another user's data (backend-gated). */
+  target_user_id?: number
   q?: string
   watchlist_id?: number
   page?: number
@@ -819,6 +823,8 @@ export const exportRunTalliesCsv = async (runId: number): Promise<string> => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface FetchItemsParams extends ScrapedItemAlertFilterParams {
+  /** Admin-only: inspect another user's data (backend-gated). */
+  target_user_id?: number
   run_id?: number
   job_id?: number
   source_id?: number
@@ -846,6 +852,8 @@ export const fetchScrapedItems = async (
 }
 
 export interface FetchItemSmartCountsParams extends ScrapedItemAlertFilterParams {
+  /** Admin-only: inspect another user's data (backend-gated). */
+  target_user_id?: number
   run_id?: number
   job_id?: number
   source_id?: number

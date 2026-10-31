@@ -8,9 +8,9 @@ Program: TASK-12968
 
 Design task: TASK-12968.1
 
-Related work: TASK-12964, TASK-2336, TASK-2338, TASK-12968.5, TASK-12968.6, TASK-12968.7, TASK-12970, TASK-12971
+Related work: TASK-12964, TASK-2336, TASK-2338, TASK-12968.5, TASK-12968.6, TASK-12968.7, TASK-13101, TASK-12971
 
-Security follow-up: TASK-12969
+Security follow-up: TASK-13100
 
 Coverage seed: https://www.sourclip.com/resources/research-sources
 
@@ -35,7 +35,7 @@ This document supersedes the catalog-expansion, source-selection, execution, and
 
 It does not supersede TASK-12964 or the existing Media handoff boundary. TASK-12964 continues to own reviewed HTML full-text handoff into Media. Research Discovery does not create Media rows, chunks, embeddings, or permanent library content.
 
-TASK-12969 independently owns remediation of the current global plaintext web-scraping cookie mechanism. Credentialless structured discovery may proceed only after proving that it cannot reach that mechanism. Credentialed or browser-based retrieval is blocked on TASK-12969.
+TASK-13100 independently owns remediation of the current global plaintext web-scraping cookie mechanism. Credentialless structured discovery may proceed only after proving that it cannot reach that mechanism. Credentialed or browser-based retrieval is blocked on TASK-13100.
 
 ## Problem Statement
 
@@ -405,7 +405,7 @@ Standalone and Deep Research parity means that the same frozen execution request
 
 ### Cancellation Dependency
 
-TASK-12968.4 is blocked on TASK-12970, which owns cooperative Jobs cancellation and partial-result finalization. Cancellation is cooperative rather than preemptive: a thread-backed provider call may finish after cancellation is requested, but bounded gateway work must stop at its timeout, late candidate content must not be committed, and the sanitized attempt tombstone plus physical usage remain durable. This program makes no cancellation-correctness claim until TASK-12970 is complete and its integration tests pass.
+TASK-12968.4 is blocked on TASK-13101, which owns cooperative Jobs cancellation and partial-result finalization. Cancellation is cooperative rather than preemptive: a thread-backed provider call may finish after cancellation is requested, but bounded gateway work must stop at its timeout, late candidate content must not be committed, and the sanitized attempt tombstone plus physical usage remain durable. This program makes no cancellation-correctness claim until TASK-13101 is complete and its integration tests pass.
 
 ## Security and Trust Boundaries
 
@@ -474,7 +474,7 @@ Merging never upgrades retention. Combined artifacts inherit the most restrictiv
 
 Credentialed APIs are a later program. Authenticated browser retrieval is later still. It requires encrypted per-user opaque secret references, explicit source origin sets, isolated user-scoped browser contexts and artifacts, revocation and TTL, manual MFA/CAPTCHA handoff, and no bypass or stealth behavior.
 
-The current global plaintext cookie mechanism is prohibited and tracked by TASK-12969.
+The current global plaintext cookie mechanism is prohibited and tracked by TASK-13100.
 
 ## User Experience
 
@@ -596,7 +596,7 @@ Each route declares its certification validity window. Expired or missing eviden
    - Certify the first twelve targets on Standalone Search and prove usable controls across the 235-row frozen inventory and its ready subset.
 
 5. **New-session Deep Research bridge**
-   - Complete TASK-12970's cooperative Jobs cancellation and partial-finalization primitive first.
+   - Complete TASK-13101's cooperative Jobs cancellation and partial-finalization primitive first.
    - Freeze the canonical run envelope before enqueue.
    - Replace external academic collection only.
    - Add durable attempt-journal checkpoint/resume, indeterminate recovery, and cross-consumer parity.
@@ -618,7 +618,7 @@ Each route declares its certification validity window. Expired or missing eviden
 
 9. **Future credentialed and browser programs**
    - Credentialed APIs require a separate design and task family.
-   - Browser work depends on TASK-12969 and a separate security review.
+   - Browser work depends on TASK-13100 and a separate security review.
 
 No task or pull request both adds a provider family and migrates a consumer contract.
 
@@ -633,8 +633,8 @@ No task or pull request both adds a provider family and migrates a consumer cont
 - **TASK-12968.6**: ClinicalTrials.gov/PubMed Central route-family foundation after the shared gateway
 - **TASK-12968.7**: verify and harden the already API-key-gated OpenAlex inventory evidence before TASK-12968.2
 - Future child tasks: vertical route-family batches created from the frozen ledger
-- **TASK-12969**: independent global plaintext cookie remediation
-- **TASK-12970**: blocking cooperative Jobs cancellation and partial-result finalization for TASK-12968.4
+- **TASK-13100**: independent global plaintext cookie remediation
+- **TASK-13101**: blocking cooperative Jobs cancellation and partial-result finalization for TASK-12968.4
 - **TASK-12971**: delivered reusable connected-peer-verified streaming one-hop HTTP prerequisite for TASK-12968.2
 - **TASK-12964**: unchanged HTML Media handoff design outside this program's completion denominator
 

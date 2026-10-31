@@ -1,0 +1,34 @@
+{
+  "base_commit": "1fc19c7c8384f38eca2becdf53fb8bbcd205be7a",
+  "overlay_source_commit": "3b73d70f0f5dde12e4831c3441dccf656f64f2e6",
+  "uncommitted_review_fixes": true,
+  "overlays": {
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyInteraction.tsx": "bcaa8c4e5d6d434a14393dc828a4e0a09ff9c7cb31552cbbda9c0a12ab598d2b",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx": "44c07290779bd9b181272f07ab8553a1940b492371af81237f8a2ea0c8182b2f",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/buddy-conversation-labels.ts": "c0832171726808b68b2c2da895154a29c1a9cb7e4634ddeac199181794695563",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyManagementModal.tsx": "9fc0af3be20090f7957585cd59645916c8278c3be794b9a5ab12eb4a75841c4f",
+    "apps/packages/ui/src/services/buddies.ts": "0f25f787a62c4036970cfd024a9c5e78d2c40f678f9ccb62b34ceb6619326b83",
+    "apps/packages/ui/src/store/persona-buddy-shell.ts": "7b705a88edfb6838ed40e62217c678322297dda169dc76b961365e6d4f76404a"
+  },
+  "lock_sha256": "1e04471a55d77690e18508009448cb4fe492147ab994bdf1a7f45fb03b58b730",
+  "zip_path": "/private/tmp/tldw-buddy-chrome-prod-zy5ty355/tldw-chrome-production-buddy-qodo-reviewed.zip",
+  "zip_sha256": "2ff5e9c0b826df87c0e5033d8d0e1d19130e0933d203ee66ba7ff4ab17474dd6",
+  "file_count": 1378,
+  "manifest_targets_verified": [
+    "background.js",
+    "sidepanel.html",
+    "options.html",
+    "icon/16.png",
+    "icon/32.png",
+    "icon/48.png",
+    "icon/64.png",
+    "icon/128.png",
+    "content-scripts/copilot-popup.js",
+    "content-scripts/hf-pull.js",
+    "content-scripts/web-clipper.js"
+  ],
+  "command": "bun run build:chrome:prod",
+  "duration": "48.9s",
+  "build_log": "/private/tmp/tldw-buddy-chrome-prod-zy5ty355/build-chrome-prod-buddy-qodo-review.log",
+  "native_install_verified": false
+}

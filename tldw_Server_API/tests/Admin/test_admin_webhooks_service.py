@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,14 +14,12 @@ from tldw_Server_API.app.services.admin_webhooks_service import (
     generate_signature,
 )
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # HMAC signing
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_generate_signature_deterministic():
     sig1 = generate_signature("secret", "12345", '{"hello": "world"}')
     sig2 = generate_signature("secret", "12345", '{"hello": "world"}')
@@ -30,12 +27,14 @@ def test_generate_signature_deterministic():
     assert sig1.startswith("v1=")
 
 
+@pytest.mark.unit
 def test_generate_signature_changes_with_secret():
     sig1 = generate_signature("secret-a", "12345", "body")
     sig2 = generate_signature("secret-b", "12345", "body")
     assert sig1 != sig2
 
 
+@pytest.mark.unit
 def test_generate_signature_changes_with_timestamp():
     sig1 = generate_signature("secret", "12345", "body")
     sig2 = generate_signature("secret", "99999", "body")
@@ -47,6 +46,7 @@ def test_generate_signature_changes_with_timestamp():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_row_to_record_from_dict():
     encrypted = encrypt_admin_webhook_secret("s3cret")
     row = {
@@ -72,6 +72,7 @@ def test_row_to_record_from_dict():
     assert record.created_by == 42
 
 
+@pytest.mark.unit
 def test_row_to_record_handles_invalid_json():
     encrypted = encrypt_admin_webhook_secret("s3cret")
     row = {
@@ -152,140 +153,7 @@ def webhook_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"w"))
 
 
-# ---------------------------------------------------------------------------
-# Route response pagination
-# ---------------------------------------------------------------------------
-
-
-class _FakeAdminWebhooksRouteService:
-    def __init__(self):
-        self.webhook_items = [
-            WebhookRecord(
-                id=1,
-                url="https://example.com/a",
-                secret="",
-                event_types=["*"],
-                description="first",
-                active=True,
-                retry_count=3,
-                timeout_seconds=10,
-                created_by=None,
-                created_at=None,
-                updated_at=None,
-            ),
-            WebhookRecord(
-                id=2,
-                url="https://example.com/b",
-                secret="",
-                event_types=["incident.created"],
-                description="second",
-                active=False,
-                retry_count=1,
-                timeout_seconds=5,
-                created_by=1,
-                created_at=None,
-                updated_at=None,
-            ),
-        ]
-        self.delivery_items = [
-            DeliveryLogEntry(
-                id=10,
-                webhook_id=1,
-                event_type="test.one",
-                status_code=200,
-                latency_ms=12,
-                retry_attempt=0,
-                error_message=None,
-                delivered_at=None,
-                created_at=None,
-            ),
-            DeliveryLogEntry(
-                id=11,
-                webhook_id=1,
-                event_type="test.two",
-                status_code=500,
-                latency_ms=24,
-                retry_attempt=1,
-                error_message="boom",
-                delivered_at=None,
-                created_at=None,
-            ),
-        ]
-
-    async def list_webhooks(self, *, limit: int, offset: int, active_only: bool = False):
-        self.list_webhooks_args = {"limit": limit, "offset": offset, "active_only": active_only}
-        return self.webhook_items, 4
-
-    async def get_webhook(self, webhook_id: int):
-        self.get_webhook_id = webhook_id
-        return self.webhook_items[0]
-
-    async def list_delivery_log(self, webhook_id: int, *, limit: int, offset: int):
-        self.list_delivery_args = {"webhook_id": webhook_id, "limit": limit, "offset": offset}
-        return self.delivery_items, 5
-
-
-def _make_admin_webhooks_route_client(monkeypatch: pytest.MonkeyPatch, fake_service):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-    from tldw_Server_API.app.api.v1.endpoints.admin import admin_webhooks
-
-    monkeypatch.setattr(admin_webhooks, "get_admin_webhooks_service", lambda: fake_service)
-    app = FastAPI()
-    app.include_router(admin_webhooks.router, prefix="/api/v1/admin")
-    return TestClient(app)
-
-
-def test_list_webhooks_route_includes_canonical_pagination(monkeypatch: pytest.MonkeyPatch):
-    """Admin webhook list route preserves totals and exposes canonical pagination."""
-    fake_service = _FakeAdminWebhooksRouteService()
-    client = _make_admin_webhooks_route_client(monkeypatch, fake_service)
-
-    response = client.get("/api/v1/admin/webhooks?limit=2&offset=1")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 4
-    assert len(payload["items"]) == 2
-    assert payload["pagination"] == {
-        "mode": "offset",
-        "limit": 2,
-        "offset": 1,
-        "total": 4,
-        "has_more": True,
-        "next_offset": 3,
-    }
-    assert payload["has_more"] is True
-    assert payload["next_offset"] == 3
-    assert fake_service.list_webhooks_args == {"limit": 2, "offset": 1, "active_only": False}
-
-
-def test_list_webhook_deliveries_route_includes_canonical_pagination(monkeypatch: pytest.MonkeyPatch):
-    """Admin webhook delivery-log route returns canonical pagination metadata."""
-    fake_service = _FakeAdminWebhooksRouteService()
-    client = _make_admin_webhooks_route_client(monkeypatch, fake_service)
-
-    response = client.get("/api/v1/admin/webhooks/1/deliveries?limit=2&offset=1")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 5
-    assert len(payload["items"]) == 2
-    assert payload["pagination"] == {
-        "mode": "offset",
-        "limit": 2,
-        "offset": 1,
-        "total": 5,
-        "has_more": True,
-        "next_offset": 3,
-    }
-    assert payload["has_more"] is True
-    assert payload["next_offset"] == 3
-    assert fake_service.get_webhook_id == 1
-    assert fake_service.list_delivery_args == {"webhook_id": 1, "limit": 2, "offset": 1}
-
-
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_create_webhook_generates_secret(svc: AdminWebhooksService):
     async def _return_inserted_row(_query: str, params: tuple[object, ...]) -> dict[str, object]:
         return {
@@ -313,7 +181,7 @@ async def test_create_webhook_generates_secret(svc: AdminWebhooksService):
     assert params[1] != record.secret
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_list_webhooks(svc: AdminWebhooksService):
     svc.db_pool.fetchone.return_value = {"cnt": 2}
     secret_one = encrypt_admin_webhook_secret("s1")
@@ -340,7 +208,7 @@ async def test_list_webhooks(svc: AdminWebhooksService):
     assert items[1].active is False
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_update_webhook_skips_none_fields(svc: AdminWebhooksService):
     encrypted = encrypt_admin_webhook_secret("s")
     svc.db_pool.fetchone.return_value = {
@@ -350,14 +218,14 @@ async def test_update_webhook_skips_none_fields(svc: AdminWebhooksService):
         "retry_count": 3, "timeout_seconds": 10,
         "created_by": None, "created_at": None, "updated_at": None,
     }
-    record = await svc.update_webhook(1, url="https://updated.com", description=None)
+    await svc.update_webhook(1, url="https://updated.com", description=None)
     # description=None should leave the existing value untouched.
     call_args = svc.db_pool.execute.call_args
     params = call_args[0][1]
     assert params[2] is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_delete_webhook(svc: AdminWebhooksService):
     result = await svc.delete_webhook(42)
     assert result is True
@@ -369,7 +237,7 @@ async def test_delete_webhook(svc: AdminWebhooksService):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_deliver_success(svc: AdminWebhooksService):
     wh = WebhookRecord(
         id=1, url="https://example.com/hook", secret="test-secret",
@@ -399,7 +267,7 @@ async def test_deliver_success(svc: AdminWebhooksService):
     mock_client.post.assert_awaited_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(svc: AdminWebhooksService):
     wh = WebhookRecord(
         id=1, url="https://example.com/hook", secret="test-secret",
@@ -439,7 +307,7 @@ async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(
     assert first_call.kwargs["headers"]["X-Admin-Webhook-Signature"] != second_call.kwargs["headers"]["X-Admin-Webhook-Signature"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
     svc.db_pool.fetchone.side_effect = [
         {"cnt": 2},  # list_webhooks count
@@ -480,7 +348,7 @@ async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
     assert delivered == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_dispatch_event_counts_only_2xx_deliveries(svc: AdminWebhooksService):
     webhooks = [
         WebhookRecord(

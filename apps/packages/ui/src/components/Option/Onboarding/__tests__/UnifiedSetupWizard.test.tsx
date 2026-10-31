@@ -1,12 +1,27 @@
 // @vitest-environment jsdom
 import React from "react";
+import "@/i18n";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
+import settingsEs from "@/assets/locale/es/settings.json";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { HashRouter, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useStoreMessageOption } from "@/store/option";
 import type { FirstRunState } from "@/types/setup-onboarding";
 
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"));
+vi.mock("@plasmohq/storage/hook", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"));
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { getConfig: async () => ({ serverUrl: "http://setup.test", authMode: "single-user", apiKey: "synthetic-key" }) } }));
+
 const setupHookMocks = vi.hoisted(() => ({
+  authMode: "single_user",
+  stateAvailable: true,
+  metadataAvailable: true,
+  loadError: null as Error | null,
+  navigate: vi.fn(),
+  setConfigPartial: vi.fn(),
   saveStep: vi.fn(),
   skip: vi.fn(),
   loadProviderCatalog: vi.fn(),
@@ -26,6 +41,15 @@ const setupHookMocks = vi.hoisted(() => ({
 
 const readinessHookMocks = vi.hoisted(() => ({
   refresh: vi.fn(),
+}));
+
+vi.mock("react-router-dom", async () => ({
+  ...await vi.importActual<typeof import("react-router-dom")>("react-router-dom"),
+  useNavigate: () => setupHookMocks.navigate,
+}));
+
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionActions: () => ({ setConfigPartial: setupHookMocks.setConfigPartial }),
 }));
 
 const createDeferred = <T,>() => {
@@ -114,16 +138,16 @@ const mcpToolsCatalog = {
 
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => ({
-    state: {
+    state: setupHookMocks.stateAvailable ? {
       status: "not_started",
       completed_steps: [],
       skipped_steps: [],
       step_data: {},
       acknowledged_steps: [],
       first_chat: { completed: false },
-    },
-    metadata: {
-      auth_mode: "single_user",
+    } : null,
+    metadata: setupHookMocks.metadataAvailable ? {
+      auth_mode: setupHookMocks.authMode,
       bundled_single_user_auth_available: true,
       manual_auth_required: false,
       setup_required: true,
@@ -136,7 +160,7 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
       },
       setup_paths: [],
       multi_user_exit: { guide_path: "/docs/multi-user" },
-    },
+    } : null,
     providerCatalog: [
       {
         provider_key: "openai",
@@ -149,7 +173,7 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     mcpToolsCatalog,
     audioRecommendations: [],
     loading: false,
-    error: null,
+    error: setupHookMocks.loadError,
     refresh: setupHookMocks.refresh,
     loadProviderCatalog: setupHookMocks.loadProviderCatalog,
     loadMcpToolsCatalog: setupHookMocks.loadMcpToolsCatalog,
@@ -192,6 +216,15 @@ vi.mock("@/hooks/useSetupReadinessSummary", () => ({
 
 describe("UnifiedSetupWizard", () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    useStoreMessageOption.setState({ selectedModel: "tldw:existing-choice" });
+    setupHookMocks.authMode = "single_user";
+    setupHookMocks.stateAvailable = true;
+    setupHookMocks.metadataAvailable = true;
+    setupHookMocks.loadError = null;
+    window.location.hash = "";
+    setupHookMocks.navigate.mockReset();
+    setupHookMocks.setConfigPartial.mockReset().mockResolvedValue(undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     setupHookMocks.saveStep.mockReset();
     setupHookMocks.skip.mockReset();
@@ -343,6 +376,117 @@ describe("UnifiedSetupWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /multi-user/i }));
 
     expect(screen.getByText(/multi-user setup guide/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }));
+    expect(setupHookMocks.navigate).toHaveBeenCalledWith("/settings/tldw");
+    expect(setupHookMocks.setConfigPartial).not.toHaveBeenCalled();
+    expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+  });
+
+  it("does not offer server-managed Skip before setup state can load", async () => {
+    setupHookMocks.stateAvailable = false;
+    setupHookMocks.metadataAvailable = false;
+    setupHookMocks.loadError = new Error("tldw server not configured");
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    const onStateChange = vi.fn();
+
+    render(<UnifiedSetupWizard onStateChange={onStateChange} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("connection details may be missing");
+    expect(screen.queryByRole("button", { name: "Skip for now" })).not.toBeInTheDocument();
+    expect(setupHookMocks.skip).not.toHaveBeenCalled();
+    expect(onStateChange).not.toHaveBeenCalled();
+  });
+
+  it.each(["setup paths", "multi-user guide"])(
+    "opens native settings through the options hash route from fresh %s without writing setup progress",
+    async (entry) => {
+      setupHookMocks.stateAvailable = false;
+      setupHookMocks.metadataAvailable = false;
+      setupHookMocks.loadError = new Error("tldw server not configured");
+      const actualRouter = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+      const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+      const onStateChange = vi.fn();
+      function RoutedWizard() {
+        const navigate = actualRouter.useNavigate();
+        setupHookMocks.navigate.mockImplementation(navigate);
+        return <UnifiedSetupWizard onStateChange={onStateChange} />;
+      }
+
+      render(
+        <HashRouter>
+          <Routes>
+            <Route path="/" element={<RoutedWizard />} />
+            <Route path="/settings/tldw" element={<h1>Native connection settings</h1>} />
+          </Routes>
+        </HashRouter>,
+      );
+      if (entry === "multi-user guide") {
+        fireEvent.click(screen.getByRole("button", { name: /multi-user/i }));
+        expect(screen.getByRole("link", { name: "Open guide" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Back to setup paths" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }));
+
+      expect(await screen.findByRole("heading", { name: "Native connection settings" })).toBeInTheDocument();
+      expect(window.location.hash).toBe("#/settings/tldw");
+      expect(setupHookMocks.setConfigPartial).not.toHaveBeenCalled();
+      expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+      expect(setupHookMocks.skip).not.toHaveBeenCalled();
+      expect(onStateChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps actual server-managed Skip available when only metadata failed to load", async () => {
+    setupHookMocks.metadataAvailable = false;
+    setupHookMocks.loadError = new Error("metadata unavailable");
+    const skippedState: FirstRunState = {
+      ...initialStateForCompletedSteps(["setup_path"]),
+      status: "skipped",
+      skip_reason: "user_skip",
+    };
+    setupHookMocks.skip.mockResolvedValueOnce(skippedState);
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    const onStateChange = vi.fn();
+
+    render(<UnifiedSetupWizard onStateChange={onStateChange} />);
+
+    expect(screen.getByRole("button", { name: "Open connection settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    await waitFor(() => expect(onStateChange).toHaveBeenCalledWith(skippedState));
+    expect(setupHookMocks.skip).toHaveBeenCalledWith({ reason: "user_skip" });
+  });
+
+  it("routes an already multi-user server to login without a solo skip mutation", async () => {
+    setupHookMocks.authMode = "multi_user";
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<UnifiedSetupWizard />);
+
+    expect(screen.queryByText("Solo onboarding")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip for now" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(setupHookMocks.navigate).toHaveBeenCalledWith("/settings/tldw"));
+    expect(setupHookMocks.setConfigPartial).toHaveBeenCalledWith({ authMode: "multi-user" });
+    expect(setupHookMocks.skip).not.toHaveBeenCalled();
+    expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+  });
+
+  it.each(["configuration", "navigation"] as const)("reports safe %s sign-in diagnostics and translates the retry alert", async stage => {
+    setupHookMocks.authMode = "multi_user";
+    const failure = new TypeError("secret-api-key and private-account@example.com");
+    failure.name = "secret-error-name";
+    if (stage === "configuration") setupHookMocks.setConfigPartial.mockRejectedValueOnce(failure);
+    else setupHookMocks.navigate.mockImplementationOnce(() => { throw failure; });
+    const i18n = createInstance();
+    await i18n.init({ lng: "es", resources: { es: { settings: settingsEs } } });
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<I18nextProvider i18n={i18n}><UnifiedSetupWizard /></I18nextProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("No se pudo abrir la configuración de inicio de sesión. Inténtalo de nuevo."));
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+    expect(console.error).toHaveBeenCalledWith("Setup sign-in failed", { stage, errorType: "TypeError" });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toMatch(/secret|private-account/);
   });
 
   it("requires privacy and security acknowledgement before provider setup", async () => {

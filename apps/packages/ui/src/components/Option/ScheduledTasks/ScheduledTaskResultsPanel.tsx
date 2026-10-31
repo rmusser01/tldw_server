@@ -95,6 +95,20 @@ const hasActiveFilters = ({
   ownerFilter !== "all" ||
   reviewStateFilter !== "all"
 
+const renderResultStateBadge = (result: ScheduledTaskResultItem): React.ReactNode => {
+  const badge = (
+    <DesignSystemBadge variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}>
+      {getScheduledTaskResultStatusLabel(result)}
+    </DesignSystemBadge>
+  )
+
+  if (result.signalKind !== "running") {
+    return badge
+  }
+
+  return <span aria-live="polite">{badge}</span>
+}
+
 export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps> = ({
   results,
   taskCount,
@@ -203,13 +217,7 @@ export const ScheduledTaskResultsPanel: React.FC<ScheduledTaskResultsPanelProps>
     {
       title: "State",
       key: "state",
-      render: (_, result) => (
-        <DesignSystemBadge
-          variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}
-        >
-          {getScheduledTaskResultStatusLabel(result)}
-        </DesignSystemBadge>
-      )
+      render: (_, result) => renderResultStateBadge(result)
     },
     {
       title: "Last signal",

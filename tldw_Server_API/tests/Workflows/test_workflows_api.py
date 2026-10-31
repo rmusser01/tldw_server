@@ -217,6 +217,71 @@ def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     assert "run_completed" in types
 
 
+@pytest.mark.parametrize("tenant_id", [None, "   "])
+def test_workflow_write_endpoints_normalize_empty_tenant_to_default(
+    tmp_path,
+    auth_headers,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_id,
+) -> None:
+    """Definition, saved-run, and ad-hoc writes share default tenant resolution."""
+    db = WorkflowsDatabase(str(tmp_path / "wf-default-tenant.db"))
+
+    async def override_user():
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            roles=["admin"],
+            tenant_id=tenant_id,
+        )
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[wf_mod._get_db] = lambda: db
+    monkeypatch.setattr(wf_mod.WorkflowEngine, "submit", lambda *_args, **_kwargs: None)
+
+    definition = {
+        "name": f"default-tenant-{tenant_id!r}",
+        "version": 1,
+        "steps": [{"id": "s1", "type": "prompt", "config": {"template": "bad"}}],
+    }
+
+    try:
+        with TestClient(app, headers=auth_headers) as client:
+            create_response = client.post("/api/v1/workflows", json=definition)
+            assert create_response.status_code == 201, create_response.text
+            workflow_id = create_response.json()["id"]
+
+            saved_response = client.post(
+                f"/api/v1/workflows/{workflow_id}/run",
+                json={"inputs": {}},
+            )
+            assert saved_response.status_code == 200, saved_response.text
+
+            adhoc_response = client.post(
+                "/api/v1/workflows/run",
+                json={"definition": definition, "inputs": {}},
+            )
+            assert adhoc_response.status_code == 200, adhoc_response.text
+
+        stored_definition = db.get_definition(workflow_id)
+        saved_run = db.get_run(saved_response.json()["run_id"])
+        adhoc_run = db.get_run(adhoc_response.json()["run_id"])
+        assert stored_definition is not None
+        assert stored_definition.tenant_id == "default"
+        assert saved_run is not None
+        assert saved_run.tenant_id == "default"
+        assert {event["tenant_id"] for event in db.get_events(saved_run.run_id)} == {"default"}
+        assert {step["tenant_id"] for step in db.list_step_runs(run_id=saved_run.run_id)} == {"default"}
+        assert adhoc_run is not None
+        assert adhoc_run.tenant_id == "default"
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
 def test_get_run_normalizes_falsey_status(
     client_with_workflows_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,

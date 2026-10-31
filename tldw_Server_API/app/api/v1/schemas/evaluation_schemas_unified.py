@@ -155,6 +155,10 @@ class EvaluationMetric(BaseModel):
 
 class EvaluationSpec(BaseModel):
     """Evaluation specification"""
+    case_sensitive: bool = Field(
+        default=False,
+        description="Preserve letter case for exact_match and includes comparisons",
+    )
     # Optional sub_type for model_graded evaluations
     sub_type: Optional[Literal['summarization', 'rag', 'response_quality', 'rag_pipeline']] = Field(
         default=None,
@@ -502,6 +506,12 @@ class GEvalRequest(BaseModel):
         default=["fluency", "consistency", "relevance", "coherence"]
     )
     api_name: Optional[str] = Field("openai", description="LLM API to use")
+    model: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=512,
+        description="LLM model; defaults to the model in the resolved provider snapshot",
+    )
     api_key: Optional[str] = Field(None, description="API key if not in config")
     save_results: bool = Field(False, description="Save results to database")
 
@@ -533,6 +543,12 @@ class RAGEvaluationRequest(BaseModel):
         default=["relevance", "faithfulness", "answer_similarity", "context_precision"]
     )
     api_name: Optional[str] = Field("openai")
+    model: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=512,
+        description="LLM model; defaults to the model in the resolved provider snapshot",
+    )
 
     @field_validator('query', 'generated_response', 'ground_truth')
     @classmethod
@@ -588,6 +604,12 @@ class ResponseQualityRequest(BaseModel):
     expected_format: Optional[str] = Field(None, max_length=1000)
     evaluation_criteria: Optional[dict[str, str]] = None
     api_name: Optional[str] = Field("openai")
+    model: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=512,
+        description="LLM model; defaults to the model in the resolved provider snapshot",
+    )
 
     @field_validator('prompt', 'response', 'expected_format')
     @classmethod

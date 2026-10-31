@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import uuid
 
 import pytest
@@ -31,22 +32,22 @@ async def test_team_admin_scope_bulk_candidates(tmp_path, monkeypatch) -> None:
     pool = await get_db_pool()
     suffix = uuid.uuid4().hex[:8]
 
-    async with pool.transaction() as conn:
-        await conn.execute(
+    with sqlite3.connect(db_path) as maintenance:
+        maintenance.execute(
             """
             INSERT INTO users (username, email, password_hash, is_active)
             VALUES (?, ?, ?, 1)
             """,
             (f"team_admin_{suffix}", f"team_admin_{suffix}@example.com", "x"),
         )
-        await conn.execute(
+        maintenance.execute(
             """
             INSERT INTO users (username, email, password_hash, is_active)
             VALUES (?, ?, ?, 1)
             """,
             (f"team_member_{suffix}", f"team_member_{suffix}@example.com", "x"),
         )
-        await conn.execute(
+        maintenance.execute(
             """
             INSERT INTO users (username, email, password_hash, is_active)
             VALUES (?, ?, ?, 1)

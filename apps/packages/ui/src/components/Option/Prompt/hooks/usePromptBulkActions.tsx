@@ -1,3 +1,4 @@
+import { resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 import React, { useMemo, useState } from "react"
 import { useMutation, type QueryClient } from "@tanstack/react-query"
 import { notification } from "antd"
@@ -288,9 +289,11 @@ export function usePromptBulkActions(deps: UsePromptBulkActionsDeps) {
 
   const { mutate: bulkPushToServer, isPending: isBulkPushing } = useMutation({
     mutationFn: async (ids: string[]) => {
+      const owner = await resolveRecipePersistenceOwnerView()
+      const persistenceInput = owner ? { expectedOwnerId: owner.ownerId } : undefined
       const results = await Promise.allSettled(
         ids.map(async (id) => {
-          const result = await autoSyncPrompt(id)
+          const result = await autoSyncPrompt(id, undefined, persistenceInput)
           if (!result.success) {
             throw new Error(
               result.error ||

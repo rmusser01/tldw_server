@@ -26,7 +26,6 @@ from ..base import BaseModule, create_tool_definition
 
 
 _PERSONA_VISUALS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,

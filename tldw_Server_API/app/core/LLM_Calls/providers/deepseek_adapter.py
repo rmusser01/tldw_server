@@ -19,13 +19,10 @@ from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     log_http_400_body,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
-from tldw_Server_API.app.core.LLM_Calls.sse import (
-    finalize_stream,
-    is_done_line,
-    normalize_provider_line,
-    sse_done,
+from tldw_Server_API.app.core.LLM_Calls.streaming import (
+    iter_sse_lines_raising,
+    wrap_sync_stream,
 )
-from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 
 from .base import ChatProvider
 
@@ -38,7 +35,6 @@ def http_client_factory(*args, **kwargs):  # pragma: no cover - behavior verifie
 
 
 _DEEPSEEK_CONFIG_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError)
-_DEEPSEEK_DECODE_EXCEPTIONS = (TypeError, UnicodeDecodeError, ValueError)
 _DEEPSEEK_REDACTION_EXCEPTIONS = (re.error, TypeError, ValueError)
 
 
@@ -177,6 +173,8 @@ class DeepSeekAdapter(ChatProvider):
         api_base = None
         if cfg:
             api_base = ((cfg.get("deepseek_api") or {}).get("api_base_url"))
+        if (request or {}).get("credentials_resolved") is True:
+            return (api_base or default_base).rstrip("/")
         return (os.getenv("DEEPSEEK_BASE_URL") or api_base or default_base).rstrip("/")
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -258,6 +256,7 @@ class DeepSeekAdapter(ChatProvider):
         return meta
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -275,28 +274,19 @@ class DeepSeekAdapter(ChatProvider):
             resolved_timeout = self._resolve_timeout(request, timeout)
             with http_client_factory(timeout=resolved_timeout) as client:
                 logger.debug(
-                    "DeepSeekAdapter.chat POST {} with meta {}",
-                    url,
+                    "DeepSeekAdapter.chat request meta {}",
                     self._payload_meta(payload),
                 )
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                self._raise_if_in_band_provider_error(data, phase="chat_response")
+                return data
         except _DEEPSEEK_CLIENT_EXCEPTIONS as e:
-            # Try to log upstream response text if available
-            if is_http_status_error(e):
-                status = get_http_status_from_exception(e) or "?"
-                text = get_http_error_text(e)
-                if len(text) > 500:
-                    text = text[:500]
-                logger.error(
-                    "DeepSeekAdapter.chat upstream error {}: {}",
-                    status,
-                    text,
-                )
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="chat")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -314,45 +304,20 @@ class DeepSeekAdapter(ChatProvider):
             resolved_timeout = self._resolve_timeout(request, timeout)
             with http_client_factory(timeout=resolved_timeout) as client:
                 logger.debug(
-                    "DeepSeekAdapter.stream POST {} with meta {}",
-                    url,
+                    "DeepSeekAdapter.stream request meta {}",
                     self._payload_meta(payload),
                 )
                 with client.stream("POST", url, headers=headers, json=payload) as resp:
                     resp.raise_for_status()
-                    seen_done = False
-                    for raw in resp.iter_lines():
-                        if not raw:
-                            continue
-                        try:
-                            line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
-                        except _DEEPSEEK_DECODE_EXCEPTIONS:
-                            line = str(raw)
-                        if is_done_line(line):
-                            if not seen_done:
-                                seen_done = True
-                                yield sse_done()
-                            continue
-                        normalized = normalize_provider_line(line)
-                        if normalized is not None:
-                            yield normalized
-                    yield from finalize_stream(response=resp, done_already=seen_done)
+                    yield from iter_sse_lines_raising(resp, provider=self.name)
             return
         except _DEEPSEEK_CLIENT_EXCEPTIONS as e:
-            # Try to log upstream response text if available
-            if is_http_status_error(e):
-                status = get_http_status_from_exception(e) or "?"
-                text = get_http_error_text(e)
-                if len(text) > 500:
-                    text = text[:500]
-                logger.error(
-                    "DeepSeekAdapter.stream upstream error {}: {}",
-                    status,
-                    text,
-                )
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="stream")
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
+        """Delegate to the shared bounded error policy."""
+        return super().normalize_error(exc)
+
         def _redact_secrets(text: str) -> str:
             try:
                 # Redact Authorization bearer tokens

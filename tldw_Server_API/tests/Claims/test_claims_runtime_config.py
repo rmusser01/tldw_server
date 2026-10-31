@@ -89,6 +89,8 @@ def test_resolve_claims_prompt_validation_config_defaults_and_normalizes():
 def test_resolve_claims_context_window_chars_and_passes_are_bounded():
     assert resolve_claims_context_window_chars({"CLAIMS_CONTEXT_WINDOW_CHARS": -100}) == 0
     assert resolve_claims_context_window_chars({"CLAIMS_CONTEXT_WINDOW_CHARS": "2048"}) == 2048
+    assert resolve_claims_context_window_chars({"CLAIMS_CONTEXT_WINDOW_CHARS": "999999"}) == 20000
 
     assert resolve_claims_extraction_passes({"CLAIMS_EXTRACTION_PASSES": -1}) == 1
     assert resolve_claims_extraction_passes({"CLAIMS_EXTRACTION_PASSES": "3"}) == 3
+    assert resolve_claims_extraction_passes({"CLAIMS_EXTRACTION_PASSES": "999"}) == 10

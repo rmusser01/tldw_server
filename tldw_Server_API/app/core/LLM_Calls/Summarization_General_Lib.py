@@ -14,12 +14,23 @@
 #
 ####################
 # Import necessary libraries
+import copy
 import inspect
 import json
-import os
+import re
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatConfigurationError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_upstream_sse
 
@@ -33,12 +44,14 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    bind_provider_call_credentials,
     ensure_app_config,
     normalize_provider,
     resolve_provider_api_key_from_config,
     resolve_provider_model,
     resolve_provider_section,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logging
 
@@ -93,6 +106,58 @@ _SUMMARIZATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError,) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
+
+_SUMMARY_ERROR_CODES = frozenset(
+    {
+        "invalid_provider",
+        "adapter_unavailable",
+        "missing_model",
+        "missing_credentials",
+        "authentication",
+        "configuration",
+        "rate_limit",
+        "provider_failure",
+    }
+)
+
+
+class SummaryProviderError(Exception):
+    """Sanitized provider failure raised to runtime-bound summarization callers."""
+
+    def __init__(self, *, code: str, provider: str) -> None:
+        self.code = code if code in _SUMMARY_ERROR_CODES else "provider_failure"
+        normalized = "".join(char for char in str(provider or "").lower() if char.isalnum() or char in ".-_")[:64]
+        self.provider = normalized or "unknown"
+        super().__init__(f"Summary provider error: {self.code} ({self.provider})")
+
+
+def _summary_error_code(exc: BaseException) -> str:
+    """Map chat adapter failures to a bounded, detail-free summary taxonomy."""
+    if isinstance(exc, ChatAuthenticationError):
+        return "authentication"
+    if isinstance(exc, ChatConfigurationError):
+        return "configuration"
+    if isinstance(exc, ChatRateLimitError):
+        return "rate_limit"
+    if isinstance(exc, ChatAPIError):
+        if exc.status_code in {401, 403}:
+            return "authentication"
+        if exc.status_code == 429:
+            return "rate_limit"
+    return "provider_failure"
+
+
+def _summary_failure(
+    *,
+    code: str,
+    provider: str,
+    raise_on_error: bool,
+    legacy_message: str,
+) -> str:
+    if raise_on_error:
+        raise SummaryProviderError(code=code, provider=provider)
+    return legacy_message
 
 
 def _resolve_default_system_prompt() -> str:
@@ -139,29 +204,117 @@ def _summarize_via_adapter(
     system_message: Optional[str],
     streaming: bool,
     model_override: Optional[str],
+    app_config: Optional[dict[str, Any]],
+    credentials_resolved: bool,
+    raise_on_error: bool,
+    provider_credentials: Optional[ProviderCallCredentials] = None,
 ) -> Union[str, Generator[str, None, None], None]:
     provider = _adapter_provider_name(api_name)
     if not provider:
-        return f"Error: Invalid API Name '{api_name}'"
-    app_config = ensure_app_config(loaded_config_data)
-    adapter = get_registry().get_adapter(provider)
+        return _summary_failure(
+            code="invalid_provider",
+            provider=api_name,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: Invalid API Name '{api_name}'",
+        )
+    credential_envelope = {
+        "api_key": api_key,
+        "app_config": app_config,
+        "credentials_resolved": credentials_resolved,
+    }
+    if provider_credentials is not None:
+        credential_envelope[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
+    try:
+        credential_envelope, provider_credentials = bind_provider_call_credentials(
+            provider,
+            credential_envelope,
+            consume=False,
+        )
+    except ChatConfigurationError:
+        return _summary_failure(
+            code="configuration",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message="Error: Provider credential context is invalid.",
+        )
+
+    api_key = credential_envelope.get("api_key")
+    app_config = credential_envelope.get("app_config")
+    explicit_credentials = provider_credentials is not None
+    explicit_app_config = (
+        provider_credentials.app_config
+        if provider_credentials is not None
+        else app_config
+    )
+    if explicit_credentials:
+        effective_app_config = copy.deepcopy(explicit_app_config or {})
+        provider_section = resolve_provider_section(provider)
+        if provider_section:
+            effective_app_config.setdefault(provider_section, {})
+    else:
+        effective_app_config = ensure_app_config(app_config if app_config is not None else load_and_log_configs())
+    registry = get_registry()
+    adapter = registry.get_adapter(provider)
     if adapter is None:
-        return f"Error: LLM adapter unavailable for provider '{provider}'"
-    model = model_override or resolve_provider_model(provider, app_config)
+        return _summary_failure(
+            code="adapter_unavailable",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: LLM adapter unavailable for provider '{provider}'",
+        )
+    if model_override:
+        model = model_override
+    elif explicit_credentials:
+        provider_config = effective_app_config.get(resolve_provider_section(provider)) or {}
+        model = provider_config.get("model") or provider_config.get("model_id")
+        if provider == "mlx":
+            model = model or provider_config.get("model_path") or provider_config.get("mlx_model_path")
+    else:
+        model = resolve_provider_model(provider, effective_app_config)
     if not model:
-        return f"Error: Model is required for provider '{provider}'"
+        return _summary_failure(
+            code="missing_model",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: Model is required for provider '{provider}'",
+        )
+    resolved_api_key = (
+        provider_credentials.api_key
+        if provider_credentials is not None
+        else (
+            api_key
+            if explicit_credentials
+            else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+        )
+    )
+    if (
+        explicit_credentials
+        and provider_requires_api_key(provider)
+        and not (isinstance(resolved_api_key, str) and resolved_api_key.strip())
+    ):
+        return _summary_failure(
+            code="missing_credentials",
+            provider=provider,
+            raise_on_error=raise_on_error,
+            legacy_message=f"Error: API key is required for provider '{provider}'",
+        )
     prompt = _build_summary_prompt(text_to_summarize, custom_prompt_arg)
     request: dict[str, Any] = {
         "messages": [{"role": "user", "content": prompt}],
         "system_message": system_message,
         "model": model,
-        "api_key": api_key or resolve_provider_api_key_from_config(provider, app_config),
+        "api_key": resolved_api_key,
         "temperature": temp,
         "stream": streaming,
-        "app_config": app_config,
+        "app_config": effective_app_config,
     }
-    timeout = _resolve_adapter_timeout(provider, app_config)
+    if explicit_credentials:
+        request["credentials_resolved"] = True
+    if provider_credentials is not None:
+        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
+    timeout = _resolve_adapter_timeout(provider, effective_app_config)
     if streaming:
+
         def stream_generator() -> Generator[str, None, None]:
             gen = None
             try:
@@ -170,26 +323,69 @@ def _summarize_via_adapter(
                     line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                     text_chunk, error_payload, _done = _extract_text_from_upstream_sse(line)
                     if error_payload is not None:
-                        yield f"Error: {error_payload}"
+                        if raise_on_error:
+                            raise SummaryProviderError(code="provider_failure", provider=provider)
+                        yield "Error: Provider streaming failed."
                         return
                     if text_chunk:
                         yield text_chunk
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
-                logging.error(f"Error during adapter streaming for {provider}: {exc}", exc_info=True)
-                yield f"Error during streaming: {exc}"
+            except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
+                if raise_on_error:
+                    logging.error(f"Adapter streaming failed for {provider}")
+                    raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
+                logging.error(f"Adapter streaming failed for {provider}")
+                yield f"Error: Provider streaming failed for '{provider}'."
             finally:
                 try:
                     if gen is not None and hasattr(gen, "close"):
                         gen.close()
                 except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS:
                     pass
+
         return stream_generator()
     try:
         response = adapter.chat(request, timeout=timeout)
-        return extract_response_content(response) or str(response)
-    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logging.error(f"Error during adapter summarization for {provider}: {exc}", exc_info=True)
-        return f"Error calling API {api_name}: {exc}"
+        if isinstance(response, dict):
+            choices = response.get("choices")
+            first_choice = choices[0] if isinstance(choices, list) and choices else None
+            if isinstance(first_choice, dict) and first_choice.get("finish_reason") == "length":
+                return _summary_failure(
+                    code="provider_failure",
+                    provider=provider,
+                    raise_on_error=raise_on_error,
+                    legacy_message=(
+                        "Error: Provider analysis was truncated before completion. "
+                        "Try a shorter source or a higher output limit."
+                    ),
+                )
+        answer = extract_response_content(response)
+        if isinstance(answer, str):
+            # Strip only well-formed flat blocks. Remaining delimiters (including
+            # nested or unclosed blocks) make the final answer ambiguous.
+            reasoning_tag = r"(?:think|reason|reasoning|thought)"
+            reasoning_delimiter = rf"<\s*/?\s*{reasoning_tag}\b"
+            answer = re.sub(
+                rf"<({reasoning_tag})>(?:(?!{reasoning_delimiter}).)*</\1>",
+                "",
+                answer,
+                flags=re.IGNORECASE | re.DOTALL,
+            ).strip()
+            if re.search(reasoning_delimiter, answer, flags=re.IGNORECASE):
+                answer = None
+        if not isinstance(answer, str) or not answer:
+            return _summary_failure(
+                code="provider_failure",
+                provider=provider,
+                raise_on_error=raise_on_error,
+                legacy_message="Error: Provider returned no usable analysis. Try again or choose another model.",
+            )
+        return answer
+    except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
+        if raise_on_error:
+            logging.error(f"Adapter summarization failed for {provider}")
+            raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
+        logging.error(f"Adapter summarization failed for {provider}")
+        return f"Error: Provider request failed for '{provider}'."
 
 #######################################################################################################################
 # Helper Function Definitions
@@ -293,75 +489,6 @@ def recursive_summarize_chunks(
     return current_summary
 
 
-def extract_text_from_input(input_data: Any) -> str:
-    """Extracts usable text content from various input types."""
-    logging.debug(f"Extracting text from input of type: {type(input_data)}")
-    if isinstance(input_data, str):
-        # Check if it's a file path
-        if os.path.isfile(input_data):
-            logging.debug(f"Input is a file path: {input_data}")
-            try:
-                with open(input_data, encoding='utf-8') as f:
-                    content = f.read()
-                # Attempt to parse as JSON, otherwise return raw content
-                try:
-                    data = json.loads(content)
-                    logging.debug("File content parsed as JSON.")
-                    return extract_text_from_input(data) # Recurse with parsed data
-                except json.JSONDecodeError:
-                    logging.debug("File content is not JSON, returning raw text.")
-                    return content.strip()
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-                logging.error(f"Error reading file {input_data}: {e}")
-                return ""
-        # Check if it's a JSON string
-        elif input_data.strip().startswith('{') or input_data.strip().startswith('['):
-             logging.debug("Input is potentially a JSON string.")
-             try:
-                 data = json.loads(input_data)
-                 logging.debug("Input string parsed as JSON.")
-                 return extract_text_from_input(data) # Recurse with parsed data
-             except json.JSONDecodeError:
-                 logging.debug("Input string is not JSON, treating as plain text.")
-                 return input_data.strip()
-        # Otherwise, treat as plain text
-        else:
-            logging.debug("Input is a plain text string.")
-            return input_data.strip()
-
-    elif isinstance(input_data, dict):
-        logging.debug("Input is a dictionary.")
-        # Prioritize known structures
-        if 'transcription' in input_data:
-            logging.debug("Extracting text from 'transcription' field.")
-            return extract_text_from_segments(input_data['transcription'])
-        elif 'segments' in input_data:
-            logging.debug("Extracting text from 'segments' field.")
-            return extract_text_from_segments(input_data['segments'])
-        elif 'text' in input_data:
-             logging.debug("Extracting text from 'text' field.")
-             return str(input_data['text']).strip()
-        elif 'content' in input_data:
-             logging.debug("Extracting text from 'content' field.")
-             return str(input_data['content']).strip()
-        else:
-            # Fallback: try to convert the whole dict to string (might be noisy)
-            logging.warning("No specific text field found in dict, converting entire dict to string.")
-            try:
-                return json.dumps(input_data, indent=2)
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS:
-                 return str(input_data) # Final fallback
-
-    elif isinstance(input_data, list):
-        logging.debug("Input is a list, assuming list of segments.")
-        # Assume it's a list of segments like {'Text': '...'} or {'text': '...'}
-        return extract_text_from_segments(input_data)
-
-    else:
-        logging.warning(f"Unhandled input type: {type(input_data)}. Attempting string conversion.")
-        return str(input_data).strip()
-
-
 # --- Internal API Dispatcher ---
 def _dispatch_to_api(
     text_to_summarize: str,
@@ -372,6 +499,11 @@ def _dispatch_to_api(
     system_message: Optional[str],
     streaming: bool,
     model_override: Optional[str] = None,
+    *,
+    app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+    provider_credentials: Optional[ProviderCallCredentials] = None,
+    raise_on_error: bool = False,
 ) -> Union[str, Generator[str, None, None], None]:
     """
     Internal function to call the appropriate API-specific summarization function.
@@ -390,6 +522,10 @@ def _dispatch_to_api(
             system_message=system_message,
             streaming=streaming,
             model_override=model_override,
+            app_config=app_config,
+            credentials_resolved=credentials_resolved,
+            provider_credentials=provider_credentials,
+            raise_on_error=raise_on_error,
         )
         if adapter_result is None:
             error_msg = f"Error: LLM adapter unavailable for provider '{api_name}'"
@@ -397,9 +533,16 @@ def _dispatch_to_api(
             return error_msg
         return adapter_result
 
-    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error during dispatch to API '{api_name}': {str(e)}", exc_info=True)
-        return f"Error calling API {api_name}: {str(e)}"
+    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS:
+        if raise_on_error:
+            logging.error(f"Summary provider dispatch failed for {_adapter_provider_name(api_name)}")
+            raise SummaryProviderError(
+                code="provider_failure",
+                provider=_adapter_provider_name(api_name),
+            ) from None
+        provider = _adapter_provider_name(api_name)
+        logging.error(f"Summary provider dispatch failed for {provider}")
+        return f"Error: Provider request failed for '{provider}'."
 
 
 # --- Main Summarization Function ---
@@ -415,12 +558,18 @@ def analyze(
     chunked_summarization: bool = False, # Summarize chunks separately & combine
     chunk_options: Optional[dict] = None,
     model_override: Optional[str] = None,
+    input_is_literal_text: bool = False,
+    *,
+    app_config: Optional[dict[str, Any]] = None,
+    credentials_resolved: bool = False,
+    provider_credentials: Optional[ProviderCallCredentials] = None,
+    raise_on_error: bool = False,
 ) -> Union[str, Generator[str, None, None]]:
     """
     Performs analysis(summarization by default) using a specified API, with optional chunking strategies. Provide a system prompt to avoid summarization.
 
     Args:
-        input_data: Data to analyze(Default is summarization) (text string, file path to JSON, dict, list of dicts).
+        input_data: Data to analyze(Default is summarization) (text string, JSON object string, or dict). File paths are never read.
         custom_prompt_arg: Custom prompt instructions for the LLM.
         api_name: Name of the API service to use (e.g., 'openai', 'anthropic', 'ollama').
         api_key: Optional API key. If None, the specific API function will attempt to load from config.
@@ -435,6 +584,7 @@ def analyze(
                                Mutually exclusive with recursive_summarization.
         chunk_options: Dictionary of options for the chunking process (passed to improved_chunking_process).
                        Defaults: {'method': 'words', 'max_size': 1000, 'overlap': 100}.
+        input_is_literal_text: Treat string input as literal text instead of interpreting JSON-like content.
 
     Returns:
         - A string containing the final summary.
@@ -469,12 +619,17 @@ def analyze(
 
     try:
         # 1. Extract text content from input_data
-        text_content = extract_text_from_input(input_data)
+        if input_is_literal_text:
+            if not isinstance(input_data, str):
+                logging.error("Literal text analysis input must be a string.")
+                return "Error: Literal text analysis input must be a string."
+            text_content = input_data
+        else:
+            text_content = extract_text_from_input(input_data)
         if not text_content:
             logging.error("Could not extract text content from input data.")
             return "Error: Could not extract text content."
         logging.info(f"Extracted text content length: {len(text_content)} characters.")
-        logging.debug(f"Extracted text content (first 500 chars): {text_content[:500]}...")
 
         # --- Define helper to consume potential generators ---
         def consume_generator(gen):
@@ -490,9 +645,12 @@ def analyze(
                     final_string = "".join(result_list)
                     logging.debug("Generator consumed.")
                     return final_string
-                except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-                     logging.error(f"Error consuming generator: {e}", exc_info=True)
-                     return f"Error consuming stream: {e}"
+                except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
+                     logging.error(
+                         "LLM stream consumption failed (error_type={}).",
+                         type(exc).__name__,
+                     )
+                     return "Error: Failed to consume LLM stream."
             return gen # Return as is if not a generator
 
         # --- Chunking and Summarization Logic ---
@@ -528,7 +686,11 @@ def analyze(
                     api_key,
                     temp,
                     system_message,  # System message is handled by _dispatch_to_api
-                    streaming=False  # IMPORTANT: Force non-streaming for internal recursive steps
+                    streaming=False,  # IMPORTANT: Force non-streaming for internal recursive steps
+                    app_config=app_config,
+                    credentials_resolved=credentials_resolved,
+                    provider_credentials=provider_credentials,
+                    raise_on_error=raise_on_error,
                 )
                 # consume_generator handles both strings and generators, returning a string
                 processed_result = consume_generator(api_result)
@@ -567,6 +729,10 @@ def analyze(
                     chunk['text'], custom_prompt_arg, api_name, api_key,
                     temp, system_message, streaming=False, # Force non-streaming
                     model_override=model_override,
+                    app_config=app_config,
+                    credentials_resolved=credentials_resolved,
+                    provider_credentials=provider_credentials,
+                    raise_on_error=raise_on_error,
                 )
                 # Consume generator immediately
                 processed_chunk_summary = consume_generator(chunk_summary_result)
@@ -590,6 +756,10 @@ def analyze(
                  text_content, custom_prompt_arg, api_name, api_key,
                  temp, system_message, streaming=effective_streaming_for_api_call,
                  model_override=model_override,
+                 app_config=app_config,
+                 credentials_resolved=credentials_resolved,
+                 provider_credentials=provider_credentials,
+                 raise_on_error=raise_on_error,
             )
 
         # --- Post-processing and Return ---
@@ -608,20 +778,22 @@ def analyze(
                 logging.error("Summarization resulted in None after processing.")
                 return "Error: Summarization failed unexpectedly."
             elif isinstance(final_string_summary, str) and final_string_summary.startswith("Error:"):
-                logging.error(f"Summarization failed: {final_string_summary}")
+                logging.error("Summarization failed.")
                 return final_string_summary
             elif isinstance(final_string_summary, str):
                 logging.info(f"Summarization completed successfully. Final Length: {len(final_string_summary)}")
-                logging.debug(f"Final Summary (first 500 chars): {final_string_summary[:500]}...")
                 return final_string_summary
             else:
                 # This case should ideally not be reached if consume_generator works correctly
                 logging.error(f"Unexpected final result type after processing: {type(final_string_summary)}")
                 return f"Error: Unexpected result type {type(final_string_summary)}"
 
-    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Critical error in summarize function: {str(e)}", exc_info=True)
-        return f"Error: An unexpected error occurred during summarization: {str(e)}"
+    except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as exc:
+        logging.error(
+            "Unexpected summarization failure (error_type={}).",
+            type(exc).__name__,
+        )
+        return "Error: An unexpected error occurred during summarization."
 
 #
 # End of Analysis Function
@@ -629,56 +801,21 @@ def analyze(
 
 
 
-def extract_metadata_and_content(input_data):
-    metadata = {}
-    content = ""
+def extract_text_from_input(input_data: Any) -> str:
+    """Extract the text ``analyze()`` should send to the provider.
 
-    if isinstance(input_data, str):
-        if os.path.exists(input_data):
-            with open(input_data, encoding='utf-8') as file:
-                data = json.load(file)
-        else:
-            try:
-                data = json.loads(input_data)
-            except json.JSONDecodeError:
-                return {}, input_data
-    elif isinstance(input_data, dict):
-        data = input_data
-    else:
-        return {}, str(input_data)
-
-    # Extract metadata
-    metadata['title'] = data.get('title', 'No title available')
-    metadata['author'] = data.get('author', 'Unknown author')
-
-    # Extract content
-    if 'transcription' in data:
-        content = extract_text_from_segments(data['transcription'])
-    elif 'segments' in data:
-        content = extract_text_from_segments(data['segments'])
-    elif 'content' in data:
-        content = data['content']
-    else:
-        content = json.dumps(data)
-
-    return metadata, content
-
-
-def format_input_with_metadata(metadata, content):
-    formatted_input = f"Title: {metadata.get('title', 'No title available')}\n"
-    formatted_input += f"Author: {metadata.get('author', 'Unknown author')}\n\n"
-    formatted_input += content
-    return formatted_input
-
-
-
-def extract_text_from_input(input_data):  # noqa: F811
+    Strings are never treated as file paths: a string that names a file is
+    returned as literal text, so callers cannot make ``analyze()`` read from disk
+    (TASK-13288, superseding the TASK-2425 shadowing note). A string holding a JSON
+    object is unpacked like a dict; any other string, including scalar or array
+    JSON, is literal text.
+    """
     if isinstance(input_data, str):
         try:
-            # Try to parse as JSON
             data = json.loads(input_data)
         except json.JSONDecodeError:
-            # If not valid JSON, treat as plain text
+            return input_data
+        if not isinstance(data, dict):
             return input_data
     elif isinstance(input_data, dict):
         data = input_data
@@ -702,6 +839,10 @@ def extract_text_from_input(input_data):  # noqa: F811
     elif 'segments' in data:
         segments_text = extract_text_from_segments(data['segments'])
         text_parts.append(f"Segments: {segments_text}")
+    elif 'text' in data:
+        text_parts.append(str(data['text']).strip())
+    elif 'content' in data:
+        text_parts.append(str(data['content']).strip())
 
     return '\n\n'.join(text_parts)
 

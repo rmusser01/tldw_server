@@ -4,11 +4,17 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
-import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import type {
+  ScheduledTask,
+  ScheduledTaskResultResponse
+} from "@/services/scheduled-tasks-control-plane"
 import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 
 import { ScheduledTaskResultDetailDrawer } from "../ScheduledTaskResultDetailDrawer"
-import { projectScheduledTaskResults } from "../scheduled-task-results"
+import {
+  mapScheduledTaskApiResults,
+  projectScheduledTaskResults
+} from "../scheduled-task-results"
 
 const buildTask = (overrides: Partial<ScheduledTask> = {}): ScheduledTask => ({
   id: "watchlist_job:release",
@@ -38,6 +44,31 @@ const buildResult = () =>
   projectScheduledTaskResults([buildTask()], {
     capabilityMode: "projected_signals"
   })[0]
+
+const buildApiResult = (): ScheduledTaskResultResponse => ({
+  id: "result_1",
+  definition_id: "definition_1",
+  run_id: "run_1",
+  kind: "finding",
+  title: "Possible answer found",
+  summary: "One relevant source matched.",
+  answer: "The answer is now present in the library.",
+  answer_mode: "synthesized",
+  confidence: { label: "medium" },
+  source_refs: [
+    {
+      source_id: "media_1",
+      title: "Research note",
+      snippet: "Short redacted evidence.",
+      citation_ref: "note:7"
+    }
+  ],
+  dedupe_key: "rq:definition_1:run_1:media_1",
+  visibility_destination: { home: true, results: true },
+  review_state: "unread",
+  created_at: "2030-01-01T09:00:00Z",
+  updated_at: "2030-01-01T09:00:00Z"
+})
 
 const expectInsideDesignSystemBadge = (text: string | RegExp): HTMLElement => {
   const match = screen
@@ -150,5 +181,53 @@ describe("ScheduledTaskResultDetailDrawer", () => {
 
     expect(screen.getByRole("button", { name: "Retry run" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Mark reviewed" })).not.toBeInTheDocument()
+  })
+
+  it("shows normalized answer and evidence details from the results API", () => {
+    const [result] = mapScheduledTaskApiResults(
+      [buildApiResult()],
+      { capabilityMode: "normalized_results_mutation" }
+    )
+
+    render(
+      <ScheduledTaskResultDetailDrawer
+        open
+        result={result}
+        onClose={vi.fn()}
+        onReviewResult={vi.fn()}
+        onRetryRun={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Answer")).toBeInTheDocument()
+    expect(screen.getByText("The answer is now present in the library.")).toBeInTheDocument()
+    expect(screen.getByText("Evidence")).toBeInTheDocument()
+    expect(screen.getAllByText("Research note").length).toBeGreaterThan(0)
+    expect(screen.getByText("Short redacted evidence.")).toBeInTheDocument()
+    expect(screen.getByText("note:7")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeInTheDocument()
+  })
+
+  it("announces running status as live text in the detail drawer", () => {
+    const [result] = projectScheduledTaskResults([
+      buildTask({
+        id: "watchlist_job:running",
+        title: "Running monitor",
+        status: "running",
+        source_ref: { job_id: 42, latest_run_id: 101 }
+      })
+    ])
+
+    render(
+      <ScheduledTaskResultDetailDrawer
+        open
+        result={result}
+        onClose={vi.fn()}
+        onReviewResult={vi.fn()}
+        onRetryRun={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Running now").closest("[aria-live='polite']")).toBeTruthy()
   })
 })

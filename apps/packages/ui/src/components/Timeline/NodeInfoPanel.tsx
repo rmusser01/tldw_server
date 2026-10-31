@@ -59,11 +59,11 @@ export const NodeInfoPanel: React.FC = () => {
 
   const messageIds = useMemo(
     () => node?.message_ids ?? [],
-    [JSON.stringify(node?.message_ids)]
+    [node?.message_ids]
   )
   const historyIds = useMemo(
     () => node?.history_ids ?? [],
-    [JSON.stringify(node?.history_ids)]
+    [node?.history_ids]
   )
   const hasMessage = messageIds.length > 0
   const resolveMessageTarget = React.useCallback(async () => {

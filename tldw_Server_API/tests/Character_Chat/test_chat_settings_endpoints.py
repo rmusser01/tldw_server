@@ -47,6 +47,16 @@ async def _create_chat(client: httpx.AsyncClient, headers: dict[str, str]) -> st
     return created.json()["id"]
 
 
+async def _create_persona(client: httpx.AsyncClient, headers: dict[str, str]) -> str:
+    created = await client.post(
+        "/api/v1/persona/profiles",
+        headers=headers,
+        json={"name": "Research Guide", "mode": "persistent_scoped"},
+    )
+    assert created.status_code == 201, created.text
+    return str(created.json()["id"])
+
+
 def _create_research_run(
     *,
     owner_user_id: str = "1",
@@ -127,13 +137,14 @@ async def test_chat_settings_roundtrip_persists_assistant_overlay(monkeypatch):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             chat_id = await _create_chat(client, headers)
+            persona_id = await _create_persona(client, headers)
             payload = {
                 "settings": {
                     "schemaVersion": 2,
                     "updatedAt": "2026-05-22T20:00:00Z",
                     "assistantOverlay": {
                         "kind": "persona",
-                        "id": "persona-7",
+                        "id": persona_id,
                         "name": "Research Guide",
                         "avatar_url": "https://example.com/persona-7.png",
                         "system_prompt_snapshot": "Be concise and evidence-driven.",
@@ -158,7 +169,7 @@ async def test_chat_settings_roundtrip_persists_assistant_overlay(monkeypatch):
             assert get_response.status_code == 200, get_response.text
             stored = get_response.json()["settings"]["assistantOverlay"]
             assert stored["kind"] == "persona"
-            assert stored["id"] == "persona-7"
+            assert stored["id"] == persona_id
             assert stored["name"] == "Research Guide"
             assert stored["avatar_url"] == "https://example.com/persona-7.png"
             assert stored["system_prompt_snapshot"] == "Be concise and evidence-driven."
@@ -179,13 +190,14 @@ async def test_chat_settings_normalizes_assistant_overlay_strings(monkeypatch):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             chat_id = await _create_chat(client, headers)
+            persona_id = await _create_persona(client, headers)
             payload = {
                 "settings": {
                     "schemaVersion": 2,
                     "updatedAt": "2026-05-22T20:00:00Z",
                     "assistantOverlay": {
                         "kind": " Persona ",
-                        "id": " persona-7 ",
+                        "id": f" {persona_id} ",
                         "name": " Research Guide ",
                         "avatar_url": " https://example.com/persona-7.png ",
                         "system_prompt_snapshot": " Be concise and evidence-driven. ",
@@ -202,7 +214,7 @@ async def test_chat_settings_normalizes_assistant_overlay_strings(monkeypatch):
             assert put_response.status_code == 200, put_response.text
             stored = put_response.json()["settings"]["assistantOverlay"]
             assert stored["kind"] == "persona"
-            assert stored["id"] == "persona-7"
+            assert stored["id"] == persona_id
             assert stored["name"] == "Research Guide"
             assert stored["avatar_url"] == "https://example.com/persona-7.png"
             assert stored["system_prompt_snapshot"] == "Be concise and evidence-driven."

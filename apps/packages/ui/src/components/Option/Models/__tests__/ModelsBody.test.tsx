@@ -6,8 +6,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ModelsBody } from "../index"
 
+vi.mock("@/hooks/chat/useSelectedModel", () => ({ useSelectedModel: () => ({
+  selectedModel: "local-a", setSelectedModel: mocks.selectedModelSetter
+}) }))
+
 const mocks = vi.hoisted(() => ({
   fetchChatModels: vi.fn(),
+  getModelsMetadata: vi.fn(),
   getOpenAIOAuthStatus: vi.fn(),
   listUserProviderKeys: vi.fn(),
   startOpenAIOAuthAuthorize: vi.fn(),
@@ -82,8 +87,11 @@ vi.mock("wxt/browser", () => ({
   }
 }))
 
-vi.mock("../AvailableModelsList", () => ({
-  AvailableModelsList: () => <section>Available models</section>
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    getModelsMetadata: (...args: unknown[]) => mocks.getModelsMetadata(...args)
+  }
 }))
 
 const renderModelsBody = () => {
@@ -107,6 +115,10 @@ const renderModelsBody = () => {
 describe("ModelsBody", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getModelsMetadata.mockResolvedValue({
+      models: [{ id: "catalog-entry", provider: "openai", catalog_only: true }],
+      total: 1
+    })
     mocks.fetchChatModels.mockResolvedValue([
       {
         model: "local-a",
@@ -148,7 +160,7 @@ describe("ModelsBody", () => {
 
     const defaults = await screen.findByText("Set your defaults")
     const readiness = await screen.findByText("Provider readiness")
-    const catalog = await screen.findByText("Available models")
+    const catalog = await screen.findByText("catalog-entry")
 
     expect(
       defaults.compareDocumentPosition(readiness) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -194,6 +206,115 @@ describe("ModelsBody", () => {
     renderModelsBody()
 
     expect(await screen.findByText("Unable to load account keys")).toBeInTheDocument()
+  })
+
+  it.each(["single-user", "multi-user"])(
+    "guides %s users directly to operator documentation regardless of setup-route state",
+    async (mode) => {
+      mocks.fetchChatModels.mockResolvedValue([])
+      mocks.getModelsMetadata.mockResolvedValue({
+        models: [
+          { name: "reference-only", provider: "openai", catalog_only: true,
+            is_configured: false, provider_is_configured: false,
+            provider_enabled: false, availability: "not-configured",
+            readiness_reason_code: "provider_not_configured" },
+          { name: "unsupported-local", provider: "mlx", catalog_only: false,
+            is_configured: true, provider_is_configured: true,
+            provider_enabled: false, availability: "unavailable",
+            readiness_reason_code: "unsupported_chat_provider" }
+        ],
+        total: 2
+      })
+      if (mode === "multi-user") {
+        mocks.listUserProviderKeys.mockRejectedValue({ status: 403 })
+        mocks.getOpenAIOAuthStatus.mockRejectedValue({ status: 403 })
+      } else {
+        mocks.listUserProviderKeys.mockResolvedValue({ items: [] })
+      }
+      renderModelsBody()
+
+      expect(await screen.findByText("No chat models are ready on this server.")).toBeInTheDocument()
+      const guide = screen.getByRole("link", { name: "Provider setup guide" })
+      expect(guide).toHaveAttribute("href", "https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md")
+      expect(guide).toHaveAttribute("target", "_blank")
+      expect(guide).toHaveAttribute("rel", "noopener noreferrer")
+      expect(screen.queryByText(/through server setup/i)).not.toBeInTheDocument()
+      expect(screen.getByText(/ask your administrator/i)).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: "Model catalog reference" })).toBeInTheDocument()
+      expect(screen.getByText("reference-only")).toBeInTheDocument()
+      expect(screen.getByText("unsupported-local")).toBeInTheDocument()
+      expect(screen.queryByText(/extension could not load providers/i)).not.toBeInTheDocument()
+      expect(screen.queryByTestId("models-catalog-load-recovery")).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    { status: 401, title: "Sign in to load models" },
+    { status: 503, title: "Unable to load models from server" }
+  ])("keeps metadata $status distinct from no-ready-model guidance", async ({ status, title }) => {
+    mocks.fetchChatModels.mockResolvedValue([])
+    mocks.getModelsMetadata.mockRejectedValue(Object.assign(new Error("Metadata request failed"), { status }))
+    renderModelsBody()
+
+    expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument()
+    expect(screen.getByText(String(status))).toBeInTheDocument()
+    expect(screen.queryByText("No chat models are ready on this server.")).not.toBeInTheDocument()
+    expect(screen.queryByText(/extension could not load providers/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Provider setup guide" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(mocks.getModelsMetadata).toHaveBeenCalledTimes(1)
+  })
+
+  it("waits for metadata before presenting an empty discovery result as setup guidance", async () => {
+    let resolve!: (value: { models: unknown[]; total: number }) => void
+    mocks.fetchChatModels.mockResolvedValue([])
+    mocks.getModelsMetadata.mockReturnValue(new Promise((done) => { resolve = done }))
+    renderModelsBody()
+    await waitFor(() => expect(mocks.getModelsMetadata).toHaveBeenCalledTimes(1))
+    expect(screen.getByText("Loading models...")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Provider setup guide" })).not.toBeInTheDocument()
+    resolve({ models: [], total: 0 })
+    expect(await screen.findByRole("link", { name: "Provider setup guide" })).toBeInTheDocument()
+  })
+
+  it("keeps failed Refresh in recovery and lets Retry recover to successful empty guidance", async () => {
+    const user = userEvent.setup()
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    mocks.fetchChatModels.mockResolvedValue([])
+    mocks.getModelsMetadata.mockRejectedValue(Object.assign(new Error("Network unavailable"), { status: 503 }))
+    try {
+      renderModelsBody()
+      await screen.findByRole("button", { name: "Retry" })
+      await user.click(screen.getByRole("button", { name: "Refresh" }))
+      await waitFor(() => expect(mocks.notificationError).toHaveBeenCalled())
+      expect(mocks.notificationSuccess).not.toHaveBeenCalled()
+      expect(screen.queryByRole("link", { name: "Provider setup guide" })).not.toBeInTheDocument()
+
+      mocks.getModelsMetadata.mockResolvedValue({ models: [], total: 0 })
+      await user.click(screen.getByRole("button", { name: "Retry" }))
+      expect(await screen.findByRole("link", { name: "Provider setup guide" })).toBeInTheDocument()
+      expect(screen.queryByTestId("models-catalog-load-recovery")).not.toBeInTheDocument()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it("refreshes an empty catalog without reporting a credential failure and shows newly ready models", async () => {
+    const user = userEvent.setup()
+    mocks.fetchChatModels.mockResolvedValue([])
+    mocks.getModelsMetadata.mockResolvedValue({ models: [], total: 0 })
+    renderModelsBody()
+    await screen.findByText("No chat models are ready on this server.")
+    await user.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(mocks.notificationSuccess).toHaveBeenCalled())
+    expect(mocks.notificationError).not.toHaveBeenCalled()
+
+    mocks.fetchChatModels.mockResolvedValue([{ model: "now-ready", provider: "ollama", is_configured: true }])
+    mocks.getModelsMetadata.mockResolvedValue({ models: [{ id: "now-ready", provider: "ollama" }], total: 1 })
+    await user.click(screen.getByRole("button", { name: "Refresh" }))
+    expect(await screen.findByText("now-ready")).toBeInTheDocument()
+    expect(screen.getAllByRole("combobox")).toHaveLength(2)
+    expect(screen.queryByText("No chat models are ready on this server.")).not.toBeInTheDocument()
   })
 
   it("sanitizes refresh failure notifications before showing them", async () => {

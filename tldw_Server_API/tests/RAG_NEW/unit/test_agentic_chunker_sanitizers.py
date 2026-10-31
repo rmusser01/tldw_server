@@ -2,15 +2,20 @@
 
 import sys
 import types
+from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
+    ChatConfigurationError,
+)
 from tldw_Server_API.app.core.RAG.rag_service import agentic_chunker as ac
 from tldw_Server_API.app.core.RAG.rag_service import claims as claims_mod
 from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
 from tldw_Server_API.app.core.RAG.rag_service import generation as generation_mod
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
-
 
 pytestmark = pytest.mark.unit
 
@@ -108,6 +113,99 @@ async def test_coarse_retrieval_fallback_warning_omits_raw_exception(
 
 
 @pytest.mark.asyncio
+async def test_coarse_retrieval_fallback_does_not_attach_active_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _ExplodingRetriever)
+    log_records: list[object] = []
+    sink_id = logger.add(log_records.append)
+    try:
+        await ac.agentic_rag_pipeline(
+            query="coarse retrieval traceback sanitizer",
+            sources=["media_db"],
+            search_mode="fts",
+            agentic=ac.AgenticConfig(enable_metrics=False),
+            enable_generation=False,
+            enable_citations=False,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    coarse_failure_logs = [
+        message.record
+        for message in log_records
+        if message.record["message"] == "Agentic coarse retrieval failed"
+    ]
+    assert len(coarse_failure_logs) == 1
+    assert coarse_failure_logs[0]["exception"] is None
+    _assert_no_sensitive_log_fragments([str(message) for message in log_records])
+
+
+@pytest.mark.asyncio
+async def test_coarse_retrieval_propagates_required_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_error = ChatAuthenticationError(
+        "Embedding provider authentication failed.",
+        provider="openai",
+    )
+
+    class _ProviderFailingRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            raise provider_error
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(ac, "logger", logger_stub)
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _ProviderFailingRetriever)
+
+    with pytest.raises(ChatAuthenticationError) as exc_info:
+        await ac.agentic_rag_pipeline(
+            query="required provider failure",
+            sources=["media_db"],
+            search_mode="fts",
+            agentic=ac.AgenticConfig(enable_metrics=False),
+            enable_generation=False,
+            enable_citations=False,
+            credential_runtime=object(),
+        )
+
+    assert exc_info.value is provider_error
+    assert logger_stub.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_coarse_retrieval_keeps_legacy_typed_failure_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ProviderFailingRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            raise ChatAuthenticationError("legacy provider failure", provider="openai")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(ac, "logger", logger_stub)
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _ProviderFailingRetriever)
+
+    result = await ac.agentic_rag_pipeline(
+        query="legacy provider fallback",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=ac.AgenticConfig(enable_metrics=False),
+        enable_generation=False,
+        enable_citations=False,
+    )
+
+    assert result.documents
+    assert result.metadata["coarse_docs"] == []
+    assert any("Agentic coarse retrieval failed" in msg for msg in logger_stub.warnings)
+
+
+@pytest.mark.asyncio
 async def test_media_db_fallback_retrieval_warning_omits_raw_exception(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -179,7 +277,7 @@ async def test_vlm_late_chunking_skip_debug_omits_raw_exception(
 
 
 @pytest.mark.asyncio
-async def test_generation_fallback_warning_omits_raw_exception_but_preserves_result_error(
+async def test_generation_fallback_uses_bounded_error_and_omits_raw_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     logger_stub = _LoggerStub()
@@ -212,7 +310,8 @@ async def test_generation_fallback_warning_omits_raw_exception_but_preserves_res
     )
 
     assert result.generated_answer is None
-    assert result.errors == [_SENSITIVE_MESSAGE]
+    assert result.errors == ["Answer generation failed"]
+    assert _SENSITIVE_MESSAGE not in result.errors
     assert logger_stub.warnings == ["Agentic generation failed"]
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
 
@@ -263,3 +362,289 @@ async def test_claims_verification_skip_debug_omits_raw_exception(
     assert "claims" not in result.metadata
     assert logger_stub.debugs == ["Agentic claims verification skipped"]
     _assert_no_sensitive_log_fragments(logger_stub.debugs)
+
+
+@pytest.mark.asyncio
+async def test_agentic_pipeline_threads_runtime_to_retrieval_and_tool_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = object()
+    captured: dict[str, object] = {}
+
+    class _DocRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            captured["retrieval_runtime"] = kwargs.get("credential_runtime")
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            return [_doc()]
+
+    async def fake_tool_loop(*args: object, **kwargs: object):
+        captured["tool_runtime"] = kwargs.get("credential_runtime")
+        return "grounded chunk", [{"document_id": _doc().id, "start": 0, "end": 8}], []
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _DocRetriever)
+    monkeypatch.setattr(ac, "_tool_loop", fake_tool_loop)
+
+    result = await ac.agentic_rag_pipeline(
+        query="runtime propagation",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=ac.AgenticConfig(enable_tools=True, enable_metrics=False),
+        credential_runtime=runtime,
+        enable_generation=False,
+        enable_citations=False,
+    )
+
+    assert result.documents
+    assert captured == {
+        "retrieval_runtime": runtime,
+        "tool_runtime": runtime,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_pipeline_separates_planner_and_embedding_degradation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DocRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            return [_doc()]
+
+    async def fake_tool_loop(*args: object, **kwargs: object):
+        kwargs["stage_metadata"].update(
+            embedding_coverage="degraded",
+            failure_code="provider_configuration_invalid",
+            planner={
+                "failure_code": "credential_store_unavailable",
+                "verification_available": False,
+            },
+        )
+        return "grounded chunk", [{"document_id": _doc().id, "start": 0, "end": 8}], []
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _DocRetriever)
+    monkeypatch.setattr(ac, "_tool_loop", fake_tool_loop)
+
+    result = await ac.agentic_rag_pipeline(
+        query="stage metadata isolation",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=ac.AgenticConfig(enable_tools=True, enable_metrics=False),
+        credential_runtime=object(),
+        enable_generation=False,
+        enable_citations=False,
+    )
+
+    assert result.metadata["agentic_embeddings"] == {
+        "embedding_coverage": "degraded",
+        "failure_code": "provider_configuration_invalid",
+    }
+    assert result.metadata["agentic_planner"] == {
+        "failure_code": "credential_store_unavailable",
+        "verification_available": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_hosted_embedding_failure_uses_hash_fallback_and_bounded_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+    class _DocRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            return [_doc()]
+
+    class _FailingRuntime:
+        async def resolve(self, provider: str, *, model: str | None = None):
+            raise ByokResolutionError("credential_store_unavailable", provider)
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _DocRetriever)
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {
+            "EMBEDDING_CONFIG": {
+                "default_model_id": "openai:text-embedding-3-small",
+                "models": {
+                    "openai:text-embedding-3-small": {"provider": "openai"},
+                },
+            }
+        },
+    )
+
+    result = await ac.agentic_rag_pipeline(
+        query="attention",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=ac.AgenticConfig(
+            enable_tools=True,
+            enable_metrics=False,
+            agentic_use_provider_embeddings_within=True,
+            agentic_provider_embedding_model_id="openai:text-embedding-3-small",
+        ),
+        credential_runtime=_FailingRuntime(),
+        enable_generation=False,
+        enable_citations=False,
+    )
+
+    assert result.documents
+    assert result.metadata["agentic_embeddings"] == {
+        "embedding_coverage": "degraded",
+        "failure_code": "credential_store_unavailable",
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_outer_cache_cannot_hide_later_runtime_resolution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core import config as core_config
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+
+    class _DocRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            return [_doc()]
+
+    class _WorkingRuntime:
+        def __init__(self) -> None:
+            self.handle = SimpleNamespace(
+                provider="openai",
+                api_key="runtime-key",
+                app_config={"openai_api": {"base_url": "https://embedding.example/v1"}},
+                credentials_resolved=True,
+            )
+
+        async def resolve(self, provider: str, *, model: str | None = None):
+            return self.handle
+
+        async def mark_used(self, handle: object) -> None:
+            pass
+
+    class _FailingRuntime:
+        async def resolve(self, provider: str, *, model: str | None = None):
+            raise ByokResolutionError("credential_store_unavailable", provider)
+
+    embedding_settings = {
+        "default_model_id": "openai:text-embedding-3-small",
+        "models": {
+            "openai:text-embedding-3-small": SimpleNamespace(provider="openai"),
+        },
+    }
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _DocRetriever)
+    monkeypatch.setattr(
+        core_config,
+        "load_comprehensive_config",
+        lambda: {"EMBEDDING_CONFIG": embedding_settings},
+    )
+    monkeypatch.setattr(
+        Embeddings_Create,
+        "create_embeddings_batch",
+        lambda texts, *args, **kwargs: [[1.0, 0.0] for _ in texts],
+    )
+    cfg = ac.AgenticConfig(
+        enable_tools=True,
+        enable_metrics=False,
+        agentic_use_provider_embeddings_within=True,
+        agentic_provider_embedding_model_id="openai:text-embedding-3-small",
+    )
+
+    first = await ac.agentic_rag_pipeline(
+        query="attention",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=cfg,
+        credential_runtime=_WorkingRuntime(),
+        enable_generation=False,
+        enable_citations=False,
+    )
+    second = await ac.agentic_rag_pipeline(
+        query="attention",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=cfg,
+        credential_runtime=_FailingRuntime(),
+        enable_generation=False,
+        enable_citations=False,
+    )
+
+    assert first.documents
+    assert second.metadata["agentic_embeddings"] == {
+        "embedding_coverage": "degraded",
+        "failure_code": "credential_store_unavailable",
+    }
+
+
+@pytest.mark.asyncio
+async def test_agentic_numeric_retry_provider_failure_degrades_and_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.RAG.rag_service import guardrails as guardrails_mod
+
+    calls = 0
+    provider_error = ChatConfigurationError(
+        "secret agentic numeric retrieval detail",
+        provider="local_api",
+        error_code="provider_configuration_invalid",
+    )
+
+    class _Retriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return [_doc()]
+            raise provider_error
+
+    class _Generator:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def generate(self, *args: object, **kwargs: object) -> dict[str, str]:
+            return {"answer": "The safe completed answer contains 99."}
+
+    numeric = SimpleNamespace(
+        present=set(),
+        missing=("99", "100"),
+        union_source_numbers=set(),
+    )
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _Retriever)
+    monkeypatch.setattr(generation_mod, "AnswerGenerator", _Generator)
+    monkeypatch.setattr(
+        guardrails_mod,
+        "check_numeric_fidelity",
+        lambda *args, **kwargs: numeric,
+    )
+
+    result = await ac.agentic_rag_pipeline(
+        query="agentic numeric retry",
+        sources=["media_db"],
+        media_db_path="media.db",
+        search_mode="hybrid",
+        agentic=ac.AgenticConfig(top_k_docs=1, enable_metrics=False),
+        credential_runtime=object(),
+        enable_generation=True,
+        enable_numeric_fidelity=True,
+        numeric_fidelity_behavior="retry",
+        enable_citations=False,
+    )
+
+    assert calls == 2
+    assert result.generated_answer == "The safe completed answer contains 99."
+    assert result.metadata["numeric_fidelity"]["embedding_coverage"] == "degraded"
+    assert result.metadata["numeric_fidelity"]["failure_code"] == "provider_configuration_invalid"
+    assert "secret agentic numeric retrieval detail" not in repr(result.metadata)
+    assert "secret agentic numeric retrieval detail" not in repr(result.errors)

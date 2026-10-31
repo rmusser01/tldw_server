@@ -23,9 +23,10 @@ interface MediaBulkToolbarSelection {
 interface MediaBulkToolbarProps {
   selection: MediaBulkToolbarSelection
   t: TFunction
+  deleteDisabledReason?: string
 }
 
-export function MediaBulkToolbar({ selection, t }: MediaBulkToolbarProps) {
+export function MediaBulkToolbar({ selection, t, deleteDisabledReason }: MediaBulkToolbarProps) {
   return (
     <div
       className="border-b border-border bg-surface2 px-4 py-3 space-y-2.5"
@@ -87,7 +88,8 @@ export function MediaBulkToolbar({ selection, t }: MediaBulkToolbarProps) {
         <button
           type="button"
           onClick={() => void selection.handleBulkDelete()}
-          disabled={selection.bulkSelectedItems.length === 0}
+          disabled={selection.bulkSelectedItems.length === 0 || Boolean(deleteDisabledReason)}
+          title={deleteDisabledReason}
           className="inline-flex h-8 items-center gap-1 rounded-md border border-danger/50 px-2 text-[11px] text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
           data-testid="media-bulk-delete"
         >

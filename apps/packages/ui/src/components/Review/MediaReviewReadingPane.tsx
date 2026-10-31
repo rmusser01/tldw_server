@@ -21,8 +21,9 @@ import { InContentSearch } from "@/components/Review/InContentSearch"
 import { SectionNavigator, type ContentSection } from "@/components/Review/SectionNavigator"
 import { ComparisonSplit } from "@/components/Review/ComparisonSplit"
 import type { MediaReviewState, MediaReviewActions, MediaDetail } from "@/components/Review/media-review-types"
-import { getContent, MINIMAP_COLLAPSE_THRESHOLD } from "@/components/Review/media-review-types"
+import { getContent, includesId, MINIMAP_COLLAPSE_THRESHOLD } from "@/components/Review/media-review-types"
 import { scrollSectionIntoView } from "@/components/Review/reading-pane-section-navigation"
+import { extractMediaDetailAnalysis } from "@/utils/media-detail-content"
 
 interface MediaReviewReadingPaneProps {
   state: MediaReviewState
@@ -129,12 +130,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
     const content = shouldHideTranscriptTimings
       ? stripLeadingTranscriptTimings(rawContent)
       : rawContent
-    const analysisText =
-      d.summary ||
-      (d as any)?.analysis ||
-      (d as any)?.analysis_content ||
-      (d as any)?.analysisContent ||
-      ""
+    const analysisText = extractMediaDetailAnalysis(d)
     const hasAnalysis = analysisText.trim().length > 0
     const analysisIsLong = analysisText.length > 1600
     const contentExpanded = contentExpandedIds.has(key)
@@ -246,7 +242,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            {viewMode === "spread" && (
+            {viewMode === "spread" && includesId(selectedIds, d.id) && (
               <Tooltip title={t("mediaPage.unstackTooltip", "Remove this item from selection")}>
                 <Button size="small" onClick={() => removeFromSelection(d.id)}>
                   {t("mediaPage.unstack", "Remove from selection")}
@@ -391,7 +387,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               {isLoadingDetail ? (
                 <Skeleton active paragraph={{ rows: 2 }} title={false} />
               ) : hasAnalysis ? (
-                analysisShown
+                <ContentRenderer content={analysisShown} contentType="markdown" />
               ) : (
                 <span className="text-text-muted">{t("mediaPage.noAnalysis", "No analysis available")}</span>
               )}
@@ -434,7 +430,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               <div className="text-sm font-medium text-text">{t('mediaPage.viewer', 'Viewer')}</div>
               <div className="text-xs text-text-muted">
                 {viewMode === "spread"
-                  ? t("mediaPage.viewerCount", "{{count}} open", { count: viewerItems.length })
+                  ? t("mediaPage.viewerCount", "{{count}} open", { count: effectiveItems.length })
                   : viewMode === "list"
                     ? t("mediaPage.viewerSingle", "Single item view")
                     : t("mediaPage.viewerAll", "All items (stacked)")}

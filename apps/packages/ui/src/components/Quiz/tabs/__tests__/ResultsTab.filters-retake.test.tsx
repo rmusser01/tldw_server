@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ResultsTab } from "../ResultsTab"
 import {
@@ -80,6 +80,11 @@ if (!(globalThis as any).ResizeObserver) {
 }
 
 describe("ResultsTab filters and retake workflow", () => {
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()
@@ -169,6 +174,20 @@ describe("ResultsTab filters and retake workflow", () => {
       mutateAsync: vi.fn(),
       isPending: false
     } as any)
+  })
+
+  it("refreshes a relative date window while the results stay open", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-02-25T10:02:30Z"))
+    window.sessionStorage.setItem("quiz-results-filters-v1", JSON.stringify({
+      page: 1, pageSize: 10, quizFilterId: null, passFilter: "all", dateRangeFilter: "7d"
+    }))
+    const { unmount } = render(<ResultsTab />)
+    expect(screen.queryByText("No attempts match the selected filters.")).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(60_000))
+    expect(screen.getByText("No attempts match the selected filters.")).toBeInTheDocument()
+    unmount()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("applies persisted quiz filter to attempts query and supports retake action", () => {

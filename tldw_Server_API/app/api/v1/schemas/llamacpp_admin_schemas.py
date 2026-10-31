@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppProfileMode,
     LlamaCppRuntimeState,
 )
+from tldw_Server_API.app.core.Local_LLM.llamacpp_server_args import ServerArgs
 
 
 class LlamaCppSavedConfig(BaseModel):
@@ -81,7 +82,7 @@ class LlamaCppConfigUpdateRequest(BaseModel):
     log_output_file: str | None = None
 
     @model_validator(mode="after")
-    def reject_boolean_null_clears(self) -> "LlamaCppConfigUpdateRequest":
+    def reject_boolean_null_clears(self) -> LlamaCppConfigUpdateRequest:
         boolean_fields = {
             "enabled",
             "allow_unvalidated_args",
@@ -327,11 +328,13 @@ class LlamaCppProfileCreateRequest(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
     port_policy: LlamaCppPortPolicy = LlamaCppPortPolicy.EXPLICIT
-    server_args: dict[str, object] = Field(default_factory=dict)
+    server_args: ServerArgs = Field(default_factory=dict)
     autostart: bool = False
     restart_policy: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
     tags: list[str] = Field(default_factory=list)
+    snapshots_enabled: bool = False
+    snapshot_retention: int = Field(default=10, ge=1, le=1000)
 
 
 class LlamaCppProfileUpdateRequest(BaseModel):
@@ -348,11 +351,13 @@ class LlamaCppProfileUpdateRequest(BaseModel):
     host: str | None = None
     port: int | None = Field(default=None, ge=1, le=65535)
     port_policy: LlamaCppPortPolicy | None = None
-    server_args: dict[str, object] | None = None
+    server_args: ServerArgs | None = None
     autostart: bool | None = None
     restart_policy: dict[str, object] | None = None
     provider_alias: str | None = None
     tags: list[str] | None = None
+    snapshots_enabled: bool | None = None
+    snapshot_retention: int | None = Field(default=None, ge=1, le=1000)
 
 
 class LlamaCppProfileResponse(BaseModel):
@@ -373,6 +378,8 @@ class LlamaCppProfileResponse(BaseModel):
     restart_policy: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
     tags: list[str] = Field(default_factory=list)
+    snapshots_enabled: bool = False
+    snapshot_retention: int = Field(default=10, ge=1, le=1000)
 
 
 class LlamaCppProfileListResponse(BaseModel):
@@ -427,3 +434,78 @@ class LlamaCppLifecycleActionResponse(BaseModel):
     state: LlamaCppRuntimeState
     accepted: bool = True
     message: str | None = None
+
+
+class LlamaCppSnapshotRequest(BaseModel):
+    """Path-free v1 mutation input bound to a selected slot and launch generation."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    slot_id: int = Field(ge=0)
+    expected_launch_generation: str = Field(min_length=1, max_length=128)
+    request_id: str = Field(min_length=1, max_length=512)
+    replace_confirmed: bool = False
+
+
+class LlamaCppSnapshotSlot(BaseModel):
+    """Slot occupancy and cache size, without prompt or cache content."""
+
+    slot_id: int
+    busy: bool
+    token_count: int
+
+
+class LlamaCppSnapshotSlotsResponse(BaseModel):
+    """Snapshot capability, observed slots and token for the next mutation."""
+
+    capability: Literal["ready", "stopped", "disabled", "restart_required", "busy", "unsupported", "unavailable"]
+    reason: str | None = None
+    launch_generation: str | None = None
+    request_id: str
+    latest_operation_id: str | None = None
+    slots: list[LlamaCppSnapshotSlot] = Field(default_factory=list)
+
+
+class LlamaCppSnapshotItem(BaseModel):
+    """Public snapshot metadata and compatibility with the current runtime."""
+
+    snapshot_id: str
+    source_slot: int
+    created_at: str
+    commit_sequence: int
+    byte_count: int
+    token_count: int
+    compatibility: Literal["compatible", "incompatible", "unknown"]
+    reasons: list[str] = Field(default_factory=list)
+
+
+class LlamaCppSnapshotCatalogResponse(BaseModel):
+    """Paginated profile catalog with storage totals and retention policy."""
+
+    snapshots: list[LlamaCppSnapshotItem]
+    total: int
+    total_bytes: int
+    offset: int
+    limit: int
+    retention: int
+
+
+class LlamaCppSnapshotOperationResponse(BaseModel):
+    """Mutation progress and operator recovery guidance, excluding private receipt data."""
+
+    profile_id: str
+    operation_id: str
+    launch_generation: str
+    kind: Literal["save", "restore"]
+    state: Literal["validating", "saving", "verifying", "restoring", "complete", "failed", "outcome_unknown"]
+    snapshot_id: str | None = None
+    token_count: int | None = None
+    error_code: str | None = None
+    warning_code: str | None = None
+    recovery_action: Literal["none", "retry_manually", "stop_runtime"] = "none"
+
+
+class LlamaCppSnapshotDeleteResponse(BaseModel):
+    """Confirmation that the selected immutable snapshot was deleted."""
+
+    deleted: bool = True

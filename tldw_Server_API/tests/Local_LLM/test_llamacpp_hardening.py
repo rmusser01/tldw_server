@@ -217,7 +217,8 @@ def test_port_probe_host_maps_full_ipv6_wildcard_to_loopback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_streaming_inference_yields_sse(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("done_line", ["data: [DONE]", "data: [done]", "data:[DONE]"])
+async def test_streaming_inference_yields_sse(monkeypatch, tmp_path: Path, done_line):
     exe = tmp_path / "llama_server"
     exe.write_text("#!/bin/sh\n")
     model_dir = tmp_path / "models"
@@ -242,7 +243,7 @@ async def test_streaming_inference_yields_sse(monkeypatch, tmp_path: Path):
 
         async def aiter_lines(self):
             yield 'data: {"choices":[{"delta":{"content":"Hi"}}]}'
-            yield "data: [DONE]"
+            yield done_line
 
     class FakeClient:
         def __init__(self, *a, **k):
@@ -264,7 +265,9 @@ async def test_streaming_inference_yields_sse(monkeypatch, tmp_path: Path):
     chunks = []
     async for line in handler.stream_inference(prompt="hello"):
         chunks.append(line)
-    assert any("data: [DONE]" in c for c in chunks)
+    from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
+
+    assert [c for c in chunks if is_done_line(c)] == ["data: [DONE]\n\n"]
 
 
 # --- Tests for symlink path traversal protection ---

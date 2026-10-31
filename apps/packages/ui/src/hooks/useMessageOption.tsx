@@ -1,4 +1,5 @@
 import React from "react";
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { useQueryClient } from "@tanstack/react-query";
 import { useStoreMessageOption } from "~/store/option";
 import { useTranslation } from "react-i18next";
@@ -11,6 +12,7 @@ import { useAntdNotification } from "./useAntdNotification";
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState";
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat";
 import { useServerChatHistoryId } from "@/hooks/chat/useServerChatHistoryId";
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
 import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader";
 import { useClearChat } from "@/hooks/chat/useClearChat";
 import { useCompareMode } from "@/hooks/chat/useCompareMode";
@@ -24,7 +26,11 @@ import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
 import type { AssistantSelection } from "@/types/assistant-selection";
 import type { Character } from "@/types/character";
-import { useSelectedCharacter } from "@/hooks/useSelectedCharacter";
+import {
+  assistantSelectionToCharacter,
+  characterToAssistantSelection,
+  getAssistantSelectionMode,
+} from "@/types/assistant-selection";
 import { useSetting } from "@/hooks/useSetting";
 import { CONTEXT_FILE_SIZE_MB_SETTING } from "@/services/settings/ui-settings";
 import {
@@ -39,6 +45,8 @@ import type { ChatScope } from "@/types/chat-scope";
 type PersonaMemoryMode = "read_only" | "read_write";
 
 type UseMessageOptionOptions = {
+  /** Only the chat surface owns hydration; toolbars and settings are passive. */
+  hydrateServerChat?: boolean;
   forceCompareEnabled?: boolean;
   scope?: ChatScope;
   inheritedAssistant?: AssistantSelection | null;
@@ -74,6 +82,7 @@ const assistantSelectionsMatch = (
 export const useMessageOption = (
   opts: UseMessageOptionOptions = {},
 ) => {
+  const historySelection = useHistorySelectionContext();
   // Controllers come from Context (for aborting streaming requests)
   const { controller: abortController, setController: setAbortController } =
     usePageAssist();
@@ -189,6 +198,7 @@ export const useMessageOption = (
     compareMode,
     setCompareMode,
     compareFeatureEnabled,
+    compareFeatureReady,
     setCompareFeatureEnabled,
     compareSelectedModels,
     setCompareSelectedModels,
@@ -213,9 +223,21 @@ export const useMessageOption = (
   const currentChatModelSettings = useStoreChatModelSettings();
   const { selectedModel, setSelectedModel, selectedModelIsLoading } =
     useSelectedModel();
-  const [selectedCharacter, setSelectedCharacter] =
-    useSelectedCharacter<Character | null>(null);
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null);
+  const [selectedAssistant, setSelectedAssistant, assistantSelectionMeta] = useSelectedAssistant(null);
+  const selectedCharacter = React.useMemo(
+    () => assistantSelectionToCharacter<Character>(selectedAssistant),
+    [selectedAssistant],
+  );
+  const selectedCharacterMode = getAssistantSelectionMode(selectedAssistant);
+  const setSelectedCharacter = React.useCallback(async (next: Character | null) => {
+    const selection = characterToAssistantSelection(
+      next as (Character & Record<string, unknown>) | null,
+    );
+    if (selection && selectedCharacterMode && !getAssistantSelectionMode(selection)) {
+      selection.metadata = { ...selection.metadata, selectionMode: selectedCharacterMode };
+    }
+    await setSelectedAssistant(selection);
+  }, [selectedCharacterMode, setSelectedAssistant]);
   const [defaultInternetSearchOn] = useStorage(
     "defaultInternetSearchOn",
     false,
@@ -263,6 +285,7 @@ export const useMessageOption = (
   });
 
   useServerChatLoader({
+    enabled: opts.hydrateServerChat === true,
     ensureServerChatHistoryId,
     notification,
     t,
@@ -307,6 +330,54 @@ export const useMessageOption = (
 
   const assistantDraftSelection =
     selectedAssistant ?? inheritedAssistantSnapshot ?? inheritedAssistantCandidate;
+  const canonicalAssistantId =
+    serverChatAssistantKind === "character"
+      ? serverChatCharacterId
+      : serverChatAssistantKind === "persona"
+        ? serverChatAssistantId
+        : null;
+  const canonicalAssistantKey =
+    serverChatId && canonicalAssistantId != null
+      ? JSON.stringify([
+          serverChatId,
+          serverChatAssistantKind,
+          String(canonicalAssistantId),
+        ])
+      : null;
+  const retainedAssistant = React.useRef<{
+    key: string;
+    selection: AssistantSelection;
+    isCurrent: () => boolean;
+  } | null>(null);
+  // A saved conversation keeps its own card when another tab changes the
+  // shared picker. The captured lease also rejects logout-and-back transitions.
+  if (
+    !canonicalAssistantKey ||
+    !assistantSelectionMeta?.isCurrent?.() ||
+    (retainedAssistant.current &&
+      (retainedAssistant.current.key !== canonicalAssistantKey ||
+        !retainedAssistant.current.isCurrent()))
+  ) {
+    retainedAssistant.current = null;
+  }
+  const isPlaceholderCard = selectedAssistant?.kind === "character" &&
+    selectedAssistant.name.trim().toLowerCase() === "assistant" &&
+    !selectedAssistant.avatar_url && !selectedAssistant.system_prompt &&
+    !selectedAssistant.greeting && !Object.keys(selectedAssistant.extensions ?? {}).length;
+  if (
+    canonicalAssistantKey &&
+    assistantSelectionMeta?.isCurrent?.() &&
+    selectedAssistant?.kind === serverChatAssistantKind &&
+    String(selectedAssistant.id) === String(canonicalAssistantId) &&
+    (!isPlaceholderCard || !retainedAssistant.current)
+  ) {
+    retainedAssistant.current = {
+      key: canonicalAssistantKey,
+      selection: selectedAssistant,
+      isCurrent: assistantSelectionMeta.isCurrent,
+    };
+  }
+  const canonicalAssistant = retainedAssistant.current?.selection ?? null;
   const effectiveAssistantState = React.useMemo(
     () =>
       resolveEffectiveAssistantState({
@@ -314,6 +385,9 @@ export const useMessageOption = (
           assistantKind: serverChatAssistantKind,
           assistantId: serverChatAssistantId,
           characterId: serverChatCharacterId,
+          displayName: canonicalAssistant?.name,
+          avatarUrl: canonicalAssistant?.avatar_url,
+          systemPromptSnapshot: canonicalAssistant?.system_prompt,
         },
         settings: chatSettings ?? null,
         draftSelection: assistantDraftSelection,
@@ -321,6 +395,7 @@ export const useMessageOption = (
     [
       assistantDraftSelection,
       chatSettings,
+      canonicalAssistant,
       serverChatAssistantId,
       serverChatAssistantKind,
       serverChatCharacterId,
@@ -351,7 +426,7 @@ export const useMessageOption = (
     const matchesDraftSelection =
       selectedAssistant?.kind === effectiveAssistantState.kind &&
       selectedAssistant.id === effectiveAssistantState.id;
-    const draftMetadata = matchesDraftSelection ? selectedAssistant : null;
+    const draftMetadata = canonicalAssistant ?? (matchesDraftSelection ? selectedAssistant : null);
 
     return {
       ...draftMetadata,
@@ -367,7 +442,7 @@ export const useMessageOption = (
         draftMetadata?.system_prompt ??
         null,
     };
-  }, [effectiveAssistantState, inheritedAssistant, selectedAssistant]);
+  }, [effectiveAssistantState, inheritedAssistant, selectedAssistant, canonicalAssistant]);
   const selectedAssistantSource =
     inheritedAssistant &&
     effectiveSelectedAssistant?.kind === inheritedAssistant.kind &&
@@ -379,8 +454,17 @@ export const useMessageOption = (
 
   React.useEffect(() => {
     if (!serverChatId || temporaryChat) return;
-    void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined);
-  }, [ensureServerChatHistoryId, serverChatId, serverChatTitle, temporaryChat]);
+    const current = historySelection?.getCurrent();
+    if (!current?.settingsQualified || current.owner?.kind !== "native" || current.owner.conversation_id !== serverChatId || !current.owner.validate_lease()) return;
+    const controller = new AbortController();
+    void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined, controller.signal, {
+      ownerKey: serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope }),
+      validateLease: current.owner.validate_lease,
+    }).catch(error => {
+      if (!controller.signal.aborted) console.error("Failed to bind selected server chat mirror", error);
+    });
+    return () => controller.abort();
+  }, [ensureServerChatHistoryId, historySelection, serverChatId, serverChatTitle, temporaryChat]);
 
   usePromptPersistence({
     selectedSystemPrompt,
@@ -645,6 +729,7 @@ export const useMessageOption = (
     compareMode,
     setCompareMode,
     compareFeatureEnabled,
+    compareFeatureReady,
     setCompareFeatureEnabled,
     compareSelectedModels,
     setCompareSelectedModels,
@@ -666,6 +751,8 @@ export const useMessageOption = (
     setCompareMaxModels,
     selectedCharacter,
     setSelectedCharacter,
+    assistantSelectionMeta,
+    effectiveAssistantState,
     selectedAssistant: effectiveSelectedAssistant,
     selectedAssistantSource,
     setSelectedAssistant,

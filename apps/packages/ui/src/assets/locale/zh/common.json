@@ -555,5 +555,11 @@
     "minutesAgoShort": "{{count}}分钟前",
     "hoursAgoShort": "{{count}}小时前",
     "daysAgoShort": "{{count}}天前"
+  },
+  "help": {
+    "loadFailed": "无法加载帮助。请重新连接，保存修改，然后重新加载页面。",
+    "loading": "正在加载帮助…",
+    "confirmReload": "重新加载此页面？未保存的修改可能会丢失。",
+    "reload": "重新加载页面"
   }
 }

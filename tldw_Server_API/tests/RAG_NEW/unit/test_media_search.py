@@ -1,8 +1,17 @@
+import asyncio
+
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.RAG.rag_service import media_search as ms
-
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _install_blocking_sync_chat_adapter,
+    _install_explicit_chat_capture,
+    _RecordingCredentialRuntime,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -193,3 +202,103 @@ async def test_search_videos_fallback_log_sanitizes_exception_repr(
     assert secret not in joined_logs
     assert path not in joined_logs
     assert "RuntimeError" not in joined_logs
+
+
+@pytest.mark.asyncio
+async def test_media_reformulation_uses_explicit_runtime_credentials(monkeypatch):
+    runtime = _RecordingCredentialRuntime()
+    stage_metadata: dict[str, object] = {}
+    captured = _install_explicit_chat_capture(monkeypatch, "credential runtime diagram")
+
+    result = await ms._reformulate_query(
+        query="Show a credential runtime architecture diagram",
+        system_prompt="Optimize the media query",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=runtime,
+        stage_metadata=stage_metadata,
+    )
+
+    assert result == "credential runtime diagram"
+    assert runtime.resolved == ["anthropic"]
+    assert runtime.resolved_models == ["claude-test"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["kwargs"]["api_key"] == "runtime-only-key"
+    assert captured["kwargs"]["app_config"] == runtime.handle.app_config
+    assert captured["kwargs"]["credentials_resolved"] is True
+    assert captured["kwargs"][PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is runtime.handle
+    assert stage_metadata == {"verification_available": True}
+
+
+@pytest.mark.asyncio
+async def test_media_reformulation_cancellation_marks_completed_sync_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    entered, release = _install_blocking_sync_chat_adapter(
+        monkeypatch,
+        "runtime architecture diagram",
+    )
+    task = asyncio.create_task(
+        ms._reformulate_query(
+            query="Show the runtime architecture",
+            system_prompt="Optimize the media query",
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]
+
+
+@pytest.mark.asyncio
+async def test_image_search_preserves_results_and_reformulation_unavailability(
+    monkeypatch,
+):
+    import tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs as web_apis
+
+    class FailingRuntime:
+        async def resolve(self, _provider):
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    stage_metadata: dict[str, object] = {}
+
+    def fake_websearch(**_kwargs):
+        return {
+            "results": [
+                {
+                    "title": "Credential architecture",
+                    "url": "https://example.com/credential-architecture",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(web_apis, "perform_websearch", fake_websearch)
+
+    images = await ms.search_images(
+        "credential architecture",
+        credential_runtime=FailingRuntime(),
+        stage_metadata=stage_metadata,
+    )
+
+    assert images and images[0]["title"] == "Credential architecture"
+    assert stage_metadata == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert "secret-key" not in str(stage_metadata)
+    assert "/private/" not in str(stage_metadata)

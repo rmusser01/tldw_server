@@ -42,6 +42,8 @@ const webServerEnv = {
 };
 
 export default defineConfig({
+  // Vitest *.test files under e2e/__tests__ belong to the unit runner.
+  testMatch: '**/*.spec.?(c|m)[jt]s?(x)',
   timeout: 60_000,
   expect: {
     timeout: 15_000,
@@ -68,6 +70,20 @@ export default defineConfig({
       testDir: 'e2e',
       testIgnore: ['**/workflows/tier-*/**', '**/workflows/journeys/**'],
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'standalone-html-firefox',
+      testDir: 'e2e/workflows',
+      testMatch: 'presentation-studio-standalone-html.security.spec.ts',
+      retries: 0,
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'standalone-html-webkit',
+      testDir: 'e2e/workflows',
+      testMatch: 'presentation-studio-standalone-html.security.spec.ts',
+      retries: 0,
+      use: { ...devices['Desktop Safari'] },
     },
     {
       name: 'tier-1',

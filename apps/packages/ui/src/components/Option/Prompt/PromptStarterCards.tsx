@@ -1,10 +1,13 @@
 import React from "react"
-import { Code, FileText, Search } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { Code, FileText, Layers, Search } from "lucide-react"
+import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import type { PromptFormat, StructuredPromptDefinition } from "@/db/dexie/types"
 import {
   createStructuredPromptDefinition,
   renderStructuredPromptLegacySnapshot
 } from "./structured-prompt-utils"
+import { buildRecipePromptFields } from "./prompt-recipe-library"
 
 type StarterPrompt = {
   icon: React.ReactNode
@@ -146,12 +149,48 @@ type Props = {
     promptFormat?: PromptFormat
     promptSchemaVersion?: number
     structuredPromptDefinition?: StructuredPromptDefinition
+    recipeSource?: typeof CLEAR_TASK_RECIPE
   }) => void
 }
 
 export const PromptStarterCards: React.FC<Props> = ({ onUse }) => {
+  const { t } = useTranslation("settings")
+  const recipeFields = buildRecipePromptFields(CLEAR_TASK_RECIPE.definition)
+
   return (
-    <div className="grid gap-3 sm:grid-cols-3" data-testid="prompt-starter-cards">
+    <div
+      className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+      data-testid="prompt-starter-cards"
+    >
+      <div className="flex flex-col rounded-lg border border-primary/40 bg-primary/5 p-4 transition-colors hover:border-primary/60">
+        <div className="mb-2 flex items-center gap-2">
+          <Layers className="size-5 text-primary" />
+          <h4 className="text-sm font-medium text-text">
+            {t("managePrompts.recipe.starterTitle", "Structured recipe")}
+          </h4>
+        </div>
+        <p className="mb-3 flex-1 text-xs text-text-muted">
+          {t(
+            "managePrompts.recipe.starterDescription",
+            "Start with ordered blocks, labels, variables, and editable default instructions."
+          )}
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            onUse({
+              name: CLEAR_TASK_RECIPE.name,
+              keywords: ["recipe"],
+              ...recipeFields,
+              recipeSource: CLEAR_TASK_RECIPE
+            })
+          }
+          className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
+          data-testid="starter-use-structured-recipe"
+        >
+          {t("managePrompts.recipe.starterAction", "Build a recipe")}
+        </button>
+      </div>
       {STARTER_PROMPTS.map((sp) => (
         <div
           key={sp.title}

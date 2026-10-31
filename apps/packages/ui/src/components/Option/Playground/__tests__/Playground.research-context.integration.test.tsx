@@ -35,6 +35,15 @@ const messageOptionState = vi.hoisted(() => ({
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
     selectedAssistant: null,
+    effectiveAssistantState: {
+      mode: "plain" as const,
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none" as const
+    },
     setSelectedAssistant: vi.fn(),
     serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
     temporaryChat: false,
@@ -75,6 +84,17 @@ const smartScrollState = vi.hoisted(() => ({
 
 const mobileViewportState = vi.hoisted(() => ({
   value: false
+}))
+
+const historySelectionState = vi.hoisted(() => ({
+  status: "idle",
+  forkCandidate: null,
+  forkSettings: null,
+  settingsMode: () => "ordinary" as const,
+  getCurrent: () => ({ status: "idle", owner: null, capture: null }),
+  getStoredReference: () => null,
+  canAutomaticallyLoad: () => false,
+  fence: () => () => true
 }))
 
 const storeOptionState = vi.hoisted(() => ({
@@ -420,6 +440,17 @@ vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => messageOptionState.value
 }))
 
+vi.mock("@/hooks/chat/useHistorySelection", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/chat/useHistorySelection")>(
+    "@/hooks/chat/useHistorySelection"
+  )
+  return {
+    ...actual,
+    HistorySelectionProvider: ({ children }: { children: React.ReactNode }) => children,
+    useHistorySelectionContext: () => historySelectionState
+  }
+})
+
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => ({
     restoreSession: vi.fn(async () => false),
@@ -543,7 +574,10 @@ vi.mock("react-router-dom", async () => {
   }
 })
 
-describe("Playground research context integration", () => {
+// Integration tests render the full Playground tree (4k+ lines with many
+// children); individual tests normally take 1-3.5s but can exceed the 5s
+// default timeout under parallel CI load, so give them explicit headroom.
+describe("Playground research context integration", { timeout: 20000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.history.replaceState({}, "", "/chat")
@@ -848,6 +882,33 @@ describe("Playground research context integration", () => {
     expect(screen.getByTestId("playground-form")).toHaveAttribute(
       "data-baseline-run-id",
       ""
+    )
+  })
+
+  it("initializes to readiness under StrictMode replay (latch unlatches on teardown)", async () => {
+    chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue({
+      updatedAt: "2026-03-08T20:10:00Z",
+      deepResearchAttachment: buildPersistedAttachment(
+        "run_strict",
+        "StrictMode restored run"
+      ),
+      deepResearchAttachmentHistory: []
+    })
+
+    // StrictMode mounts, tears down, and remounts: the first effect run is
+    // cancelled, so readiness (and everything gated on it, like this
+    // persisted restore) only arrives if the init latch resets on cleanup.
+    render(
+      <React.StrictMode>
+        <Playground />
+      </React.StrictMode>
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("playground-form")).toHaveAttribute(
+        "data-attached-run-id",
+        "run_strict"
+      )
     )
   })
 

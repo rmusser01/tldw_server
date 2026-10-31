@@ -1,0 +1,52 @@
+{
+  "base_commit": "1fc19c7c8384f38eca2becdf53fb8bbcd205be7a",
+  "branch": "codex/buddy-v1-live-qualification",
+  "classification": "Synthetic local qualification; browser screenshots viewed inline in task, no filesystem WebUI screenshots; production source differs from base in the two named fixes.",
+  "source_files": {
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyInteraction.tsx": "4c1fed6dae04651e0ec31aaca56822732373b4bb717562b5d0a75de1d1b9b94f",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx": "2cef4d12366a2bc424a2a629226fe35aa24e2b82938dcd737e9c2a638c09d9b4",
+    "tldw_Server_API/app/api/v1/endpoints/llm_providers.py": "9d0e90a78c1bdc98b51495f4aa2c8522d65521faab1a03d5a2a8e7e88dd5ba12",
+    "tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_optional_metadata.py": "772a3f52a203c6103e6bb9be38e70171ee94c0b9230b7af86b5ed2d556f2c180"
+  },
+  "evidence_files": {
+    "artwork-investigation.md": "17d1de2ddf244cd2382ad7ef74139e8d3c42849465c63c704c33e551d5a9a8ca",
+    "backend-qualification.md": "95b9178f1921d5819299d7ef075023184a96f08063004e491a93091a8ba17e42",
+    "backend-tests.log": "f73d2ad32dfc4356c48823b00baa4d077fc02ee7ca29955499392a2009c713a1",
+    "buddy-catalog-final-bandit.json": "3e8ce14ed3f8cd1c0288d553b2200447c8f26c3e743c1728a6c941a2e73c2b98",
+    "buddy-catalog-final-tests.log": "e2c6c09b2d6bb155139e7fdfba610d3ff9afce26d4e4b7af37a2e3ebff28bf18",
+    "buddy-error-transcript-final-eslint.log": "05d95518975826f7a2f2fef8e052b629825a05f9f8401d86e88e099e6cf1886b",
+    "buddy-error-transcript-final-green.log": "bf87a09d9d4d863f64ae125aa78a17ebac2df5b18d61fa29cedf1bb08714c1cc",
+    "buddy-error-transcript-final-prettier.log": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+    "buddy-error-transcript-red.log": "3066e60c7605a1aa0b6a03ae51c2a45d62502b074f5f04a1b9117585e897cfaf",
+    "buddy-error-transcript-speech-eslint.log": "fd5c028a78d818b9ad0f07a193718533b3b3459285a29ef1456e01910944daf5",
+    "buddy-error-transcript-speech-green.log": "2c0330d42e7ca51a5dd89e166c5fdae5529ff11b324fc7e9c5a31dc33825a854",
+    "buddy-error-transcript-speech-prettier.log": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+    "buddy-error-transcript-speech-red.log": "99df9b4b71e9bf04eb43537779076b7d161334a322589584a42ee0dd96415d55",
+    "buddy-error-transcript-user-red.log": "bc9f4827954d1a29f8503aaa38d620c547490d10be1b3f2cdaba19819dfa5b06",
+    "buddy-request-summary.json": "d9fc8b9104b5c18bd6b5c5872dff345d49f46e60a26cdbcc1d66f64ba79388fd",
+    "chrome-build-report.md": "dbd0852bed1051d2158038b5e276a4d641a754599e61345cfdd24497183a0bfb",
+    "navigation-attachment.json": "4f12213c707807a118b667127cf537da8ac066045d47f0f0dba94a825cf39380",
+    "navigation-turns.json": "67917431a3e49e2839229a47a2ed7178a0208be628520b46c36e167d02124c51",
+    "postgres-skip.log": "c0056768f07d415dcd8b4f8ad589dcef3b53e80f4528afc8683fe187b7c87a34",
+    "shutdown.json": "c24720dfef1dfe14f883e7b2f9045049ba7e08b2214c6e2b362b380b6b3ee1ea",
+    "workspace-activity-after-ack.json": "8691e462a1dbc544937775a4385fd932f71ba39f62c5941ac888c76969dcfb52",
+    "workspace-conversations-after-reply.json": "63be97d1ab06a49fc9ce801999e43a3159e4a548513c35e23bc47adbe3dd26e0",
+    "workspace-conversations.json": "7308d9b5551fffbb92a6707790c02d17dc4824d7734e5d6c5594358e1fbad1d6"
+  },
+  "note": "Logs named speech-* cover the final shared transcript/read-aloud formatter; earlier final-green logs qualify the superseded visual-only revision. Catalog final tests/Bandit are retained; original catalog RED and artwork logs were not retained separately.",
+  "raw_log_sha256": {
+    "buddy-error-transcript-final-prettier.log": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+    "buddy-catalog-final-tests.log": "e2c6c09b2d6bb155139e7fdfba610d3ff9afce26d4e4b7af37a2e3ebff28bf18",
+    "backend-tests.log": "f73d2ad32dfc4356c48823b00baa4d077fc02ee7ca29955499392a2009c713a1",
+    "buddy-error-transcript-speech-eslint.log": "ec913857315cd68c1af88929be3bbd5727237e765640080f126ee017d758a983",
+    "buddy-error-transcript-speech-green.log": "c234a5b7238447af03dcb3f4c5cf8db3ea9d0fbc598c9543145d6584feffc1a5",
+    "buddy-error-transcript-red.log": "1395ac9d450691f3e08219d96a1a39fcfa4a74346907efa080883000be7f48d8",
+    "buddy-error-transcript-user-red.log": "15aabde6a99bc90ea2e659d59eedeb375636f0f4a50ba4269744a2586d9e235a",
+    "buddy-error-transcript-speech-red.log": "fa64f8818191d56a63bbbf020284d874c06a13f262d1df371da6891062495548",
+    "postgres-skip.log": "c0056768f07d415dcd8b4f8ad589dcef3b53e80f4528afc8683fe187b7c87a34",
+    "buddy-error-transcript-final-eslint.log": "0540420193cf7c41c57b38165030374b9b7f317a8edc99f69519b105e1fd994b",
+    "buddy-error-transcript-final-green.log": "cdd922f10502b0c663cc0a8cd7c7e359634f6aa0c014fddcaa17881ab5959ed9",
+    "buddy-error-transcript-speech-prettier.log": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+  },
+  "log_formatting": "Repository log copies normalize trailing whitespace and excess EOF blank lines; raw originals remain at the scratch paths identified by their reports."
+}

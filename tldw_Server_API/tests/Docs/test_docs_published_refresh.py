@@ -19,6 +19,7 @@ REVIEWED_PUBLISHED_JSON = (
     "Docs/Published/Evaluations/samples/dataset_quick.json",
     "Docs/Published/Evaluations/samples/rag_pipeline_eval_inline.json",
     "Docs/Published/Evaluations/samples/run_request.json",
+    "Docs/Published/Evaluations/baselines/web_retrieval_quality_v1.json",
     "Docs/Published/Monitoring/Grafana_Streaming_Basics.json",
 )
 
@@ -35,7 +36,7 @@ def _copy_docs_source(destination: Path) -> Path:
     shutil.copytree(
         REPO_ROOT / "Docs",
         destination,
-        ignore=shutil.ignore_patterns("Published", "site"),
+        ignore=shutil.ignore_patterns("Published", "_site"),
     )
     return destination
 

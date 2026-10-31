@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="/data-tables", tags=["data-tables"])
 
@@ -75,7 +76,7 @@ MAX_CACHED_JOB_MANAGER_INSTANCES = 4
 DATA_TABLE_GENERATION_FAILED_DETAIL = "Data table generation failed"
 _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
 _job_manager_lock = threading.Lock()
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _data_tables_jobs_queue() -> str:

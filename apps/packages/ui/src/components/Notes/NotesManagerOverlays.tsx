@@ -3,7 +3,6 @@ import { Button, Checkbox, Input, Modal, Select, Typography } from "antd"
 import type { TFunction } from "i18next"
 
 import KeywordPickerModal from "@/components/Notes/KeywordPickerModal"
-import NotesGraphModal from "@/components/Notes/NotesGraphModal"
 
 import { useTutorialStore } from "@/store/tutorials"
 
@@ -72,21 +71,12 @@ type ImportState = {
   pendingImportFiles: PendingImportFile[]
 }
 
-type GraphState = {
-  graphModalOpen: boolean
-  selectedId: string | number | null
-  graphMutationTick: number
-}
-
 type NotesManagerOverlaysProps = {
   kw: KeywordState
   imp: ImportState
-  graph: GraphState
   isOnline: boolean
   shortcutHelpOpen: boolean
   setShortcutHelpOpen: React.Dispatch<React.SetStateAction<boolean>>
-  closeGraphModal: () => void
-  handleSelectNote: (noteId: string | number) => Promise<boolean> | Promise<void> | void
   handleKeywordPickerCancel: () => void
   handleKeywordPickerApply: () => void
   handleKeywordPickerSortModeChange: (value: KeywordPickerSortMode) => void
@@ -101,12 +91,9 @@ type NotesManagerOverlaysProps = {
 const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
   kw,
   imp,
-  graph,
   isOnline,
   shortcutHelpOpen,
   setShortcutHelpOpen,
-  closeGraphModal,
-  handleSelectNote,
   handleKeywordPickerCancel,
   handleKeywordPickerApply,
   handleKeywordPickerSortModeChange,
@@ -557,16 +544,6 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           </div>
         </div>
       </Modal>
-
-      <NotesGraphModal
-        open={graph.graphModalOpen}
-        noteId={graph.selectedId}
-        refreshToken={graph.graphMutationTick}
-        onClose={closeGraphModal}
-        onOpenNote={(noteId) => {
-          void handleSelectNote(noteId)
-        }}
-      />
 
       <Modal
         open={shortcutHelpOpen}

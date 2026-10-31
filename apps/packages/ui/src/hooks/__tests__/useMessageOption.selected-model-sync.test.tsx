@@ -264,8 +264,8 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector?: (state: Record<string, unknown>) => unknown) =>
-    selector ? selector(storeState) : storeState
+  useStoreMessageOption: Object.assign((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(storeState) : storeState, { getState: () => storeState })
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -274,7 +274,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
       ? storageBacking.get(key)
       : defaultValue
     const [value, setValue] = React.useState(initialValue)
-    const setter = (next: unknown) => {
+    const setter = async (next: unknown) => {
       const resolved =
         typeof next === "function"
           ? (next as (current: unknown) => unknown)(value)
@@ -290,6 +290,11 @@ vi.mock("@plasmohq/storage/hook", () => ({
 import { useMessageOption } from "@/hooks/useMessageOption"
 
 describe("useMessageOption selected model sync", () => {
+  it("uses the same assistant owner for Character commits and route readiness", async () => {
+    const { result } = renderHook(() => useMessageOption())
+    await result.current.setSelectedCharacter({ id: "7", name: "Owned Archivist" } as never)
+    expect(setSelectedAssistantSpy).toHaveBeenCalledWith(expect.objectContaining({ kind: "character", id: "7", name: "Owned Archivist" }))
+  })
   beforeEach(() => {
     storageBacking.clear()
     storageSetCalls.length = 0

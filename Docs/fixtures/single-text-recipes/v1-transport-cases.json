@@ -1,0 +1,200 @@
+[
+  {
+    "name": "empty-definition-defaults-every-field",
+    "input": {},
+    "expected": {
+      "schema_version": 1,
+      "format": "structured",
+      "variables": [],
+      "blocks": [],
+      "assembly_config": {
+        "legacy_system_roles": ["system", "developer"],
+        "legacy_user_roles": ["user"],
+        "block_separator": "\n\n"
+      }
+    }
+  },
+  {
+    "name": "sparse-definition-defaults-format-and-assembly",
+    "input": {
+      "schema_version": 1,
+      "variables": [],
+      "blocks": []
+    },
+    "expected": {
+      "schema_version": 1,
+      "format": "structured",
+      "variables": [],
+      "blocks": [],
+      "assembly_config": {
+        "legacy_system_roles": ["system", "developer"],
+        "legacy_user_roles": ["user"],
+        "block_separator": "\n\n"
+      }
+    }
+  },
+  {
+    "name": "nested-fields-receive-model-defaults",
+    "input": {
+      "schema_version": 1,
+      "variables": [{ "name": "topic" }],
+      "blocks": [
+        {
+          "id": "task",
+          "name": "Task",
+          "role": "user",
+          "content": "Explain the topic.",
+          "order": 10
+        }
+      ],
+      "assembly_config": {}
+    },
+    "expected": {
+      "schema_version": 1,
+      "format": "structured",
+      "variables": [
+        {
+          "name": "topic",
+          "label": null,
+          "description": null,
+          "required": false,
+          "default_value": null,
+          "input_type": "text",
+          "options": null,
+          "max_length": null
+        }
+      ],
+      "blocks": [
+        {
+          "id": "task",
+          "name": "Task",
+          "role": "user",
+          "kind": null,
+          "content": "Explain the topic.",
+          "enabled": true,
+          "order": 10,
+          "is_template": false
+        }
+      ],
+      "assembly_config": {
+        "legacy_system_roles": ["system", "developer"],
+        "legacy_user_roles": ["user"],
+        "block_separator": "\n\n"
+      }
+    }
+  },
+  {
+    "name": "supported-string-and-numeric-coercions",
+    "input": {
+      "schema_version": "1",
+      "variables": [
+        {
+          "name": "topic",
+          "required": "yes",
+          "max_length": "3"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "task",
+          "name": "Task",
+          "role": "user",
+          "content": "Explain the topic.",
+          "enabled": "false",
+          "order": "10",
+          "is_template": 0
+        }
+      ]
+    },
+    "expected": {
+      "schema_version": 1,
+      "format": "structured",
+      "variables": [
+        {
+          "name": "topic",
+          "label": null,
+          "description": null,
+          "required": true,
+          "default_value": null,
+          "input_type": "text",
+          "options": null,
+          "max_length": 3
+        }
+      ],
+      "blocks": [
+        {
+          "id": "task",
+          "name": "Task",
+          "role": "user",
+          "kind": null,
+          "content": "Explain the topic.",
+          "enabled": false,
+          "order": 10,
+          "is_template": false
+        }
+      ],
+      "assembly_config": {
+        "legacy_system_roles": ["system", "developer"],
+        "legacy_user_roles": ["user"],
+        "block_separator": "\n\n"
+      }
+    }
+  },
+  {
+    "name": "supported-boolean-coercions",
+    "input": {
+      "schema_version": true,
+      "variables": [
+        {
+          "name": "topic",
+          "required": "0",
+          "max_length": true
+        }
+      ],
+      "blocks": [
+        {
+          "id": "task",
+          "name": "Task",
+          "role": "user",
+          "content": "Plain content.",
+          "enabled": "off",
+          "order": true,
+          "is_template": "on"
+        }
+      ]
+    },
+    "expected": {
+      "schema_version": 1,
+      "format": "structured",
+      "variables": [
+        {
+          "name": "topic",
+          "label": null,
+          "description": null,
+          "required": false,
+          "default_value": null,
+          "input_type": "text",
+          "options": null,
+          "max_length": 1
+        }
+      ],
+      "blocks": [
+        {
+          "id": "task",
+          "name": "Task",
+          "role": "user",
+          "kind": null,
+          "content": "Plain content.",
+          "enabled": false,
+          "order": 1,
+          "is_template": true
+        }
+      ],
+      "assembly_config": {
+        "legacy_system_roles": ["system", "developer"],
+        "legacy_user_roles": ["user"],
+        "block_separator": "\n\n"
+      }
+    }
+  }
+]

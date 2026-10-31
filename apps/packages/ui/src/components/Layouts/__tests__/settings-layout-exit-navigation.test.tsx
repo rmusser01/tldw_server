@@ -7,6 +7,7 @@ import {
   navigateFromSettingsExit,
   SettingsLayout,
 } from "../SettingsOptionLayout";
+import { SETTINGS_NAVIGATION_REQUEST_EVENT } from "@/utils/settings-return";
 
 const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -70,6 +71,11 @@ vi.mock("../settings-nav", () => ({
           labelToken: "settings:tldw.serverNav",
           icon: IconStub,
         },
+        {
+          to: "/settings/prompt",
+          labelToken: "settings:servicePrompts.navigationLabel",
+          icon: IconStub,
+        },
       ],
     },
   ],
@@ -96,9 +102,15 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
   };
 });
 
-vi.mock("@/utils/settings-return", () => ({
-  getSettingsReturnTo: () => settingsReturnMocks.returnTo,
-}));
+vi.mock("@/utils/settings-return", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/utils/settings-return")
+  >();
+  return {
+    ...actual,
+    getSettingsReturnTo: () => settingsReturnMocks.returnTo,
+  };
+});
 
 const renderSettingsLayout = () =>
   render(
@@ -116,15 +128,69 @@ describe("settings layout exit navigation", () => {
       .__NEXT_DATA__;
   });
 
-  it("uses flushSync when exiting to the saved return route", async () => {
+  it("requests navigation before exiting to the saved return route", async () => {
     const user = userEvent.setup();
+    const request = vi.fn();
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, request);
     renderSettingsLayout();
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    try {
+      await user.click(screen.getByRole("button", { name: "Close" }));
 
-    expect(routerMocks.navigate).toHaveBeenCalledWith("/chat", {
-      flushSync: true,
+      expect(request).toHaveBeenCalledTimes(1);
+      expect((request.mock.calls[0][0] as CustomEvent).detail).toEqual({
+        destination: "/chat",
+      });
+      expect(routerMocks.navigate).toHaveBeenCalledWith("/chat");
+    } finally {
+      window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, request);
+    }
+  });
+
+  it("cancels the extension Close when a mounted settings editor declines", async () => {
+    const user = userEvent.setup();
+    const preventNavigation = (event: Event) => event.preventDefault();
+    window.addEventListener(
+      SETTINGS_NAVIGATION_REQUEST_EVENT,
+      preventNavigation,
+    );
+    renderSettingsLayout();
+
+    try {
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      expect(routerMocks.navigate).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(
+        SETTINGS_NAVIGATION_REQUEST_EVENT,
+        preventNavigation,
+      );
+    }
+  });
+
+  it("cancels or allows the actual mobile settings section selection", async () => {
+    const user = userEvent.setup();
+    const preventNavigation = (event: Event) => event.preventDefault();
+    window.addEventListener(
+      SETTINGS_NAVIGATION_REQUEST_EVENT,
+      preventNavigation,
+    );
+    renderSettingsLayout();
+    const sectionSelect = screen.getByRole("combobox", {
+      name: "Settings section",
     });
+
+    try {
+      await user.selectOptions(sectionSelect, "/settings/prompt");
+      expect(routerMocks.navigate).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(
+        SETTINGS_NAVIGATION_REQUEST_EVENT,
+        preventNavigation,
+      );
+    }
+
+    await user.selectOptions(sectionSelect, "/settings/prompt");
+    expect(routerMocks.navigate).toHaveBeenCalledWith("/settings/prompt");
   });
 
   it("uses document navigation in the Next web app", () => {

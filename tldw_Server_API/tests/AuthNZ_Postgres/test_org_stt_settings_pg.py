@@ -4,6 +4,8 @@ import uuid
 
 import pytest
 
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -16,14 +18,7 @@ async def test_org_stt_settings_postgres(test_db_pool):
     )
 
     await ensure_authnz_core_tables_pg(pool)
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()),
-        "pg-org-stt",
-        "pg-org-stt@example.com",
-        "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pg-org-stt")
+    user_id = await ensure_test_user(pool, "pg-org-stt", "pg-org-stt@example.com")
     await pool.execute(
         """
         INSERT INTO organizations (uuid, name, slug, owner_user_id, is_active, metadata)

@@ -201,6 +201,7 @@ export const requestSetupReadinessJson = async <T,>(
     timeoutMs: init?.timeoutMs,
     abortSignal: init?.signal,
     responseType: init?.responseType,
+    noAuth: Object.values(FIRST_RUN_PATHS).includes(path),
     returnResponse: true
   })
   if (!response?.ok) {

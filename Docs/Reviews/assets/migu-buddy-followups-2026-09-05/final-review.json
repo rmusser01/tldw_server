@@ -1,0 +1,46 @@
+{
+  "status": 200,
+  "session_id": "5463d886-f01d-4943-91ce-52a8f3e6caa8",
+  "persona_id": "e0a442a5-3861-4529-a332-a5391626f51f",
+  "pending_plan": {
+    "plan_id": "11938e31a16240d28e51d762e235c8d2",
+    "steps": [
+      {
+        "idx": 0,
+        "tool": "rag_search",
+        "step_type": "rag_query",
+        "args": {
+          "query": "Synthetic final Migu review"
+        },
+        "description": "Search your knowledge base",
+        "why": "Input appears to be a knowledge query."
+      }
+    ]
+  },
+  "checks": [
+    {
+      "label": "Memory",
+      "checked": true
+    },
+    {
+      "label": "State context",
+      "checked": true
+    },
+    {
+      "label": "Companion context",
+      "checked": true
+    },
+    {
+      "label": "Profile default",
+      "checked": true
+    },
+    {
+      "label": "",
+      "checked": false
+    }
+  ],
+  "commands": [
+    "voice_config"
+  ],
+  "setupIncomplete": 1
+}

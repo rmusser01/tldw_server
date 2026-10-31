@@ -24,7 +24,7 @@ Qwen3-ASR is a state-of-the-art speech-to-text model from Alibaba's Qwen team, o
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - A working tldw_server installation
 - FFmpeg on your system path
 - For GPU: CUDA-compatible GPU with sufficient VRAM
@@ -451,7 +451,8 @@ The first transcription request loads the model into memory, which can take 30-6
 ### Health Check
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=qwen3-asr-1.7b"
+curl "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=qwen3-asr-1.7b" \
+  -H "X-API-KEY: $SINGLE_USER_API_KEY"
 ```
 
 ### Debug Logging

@@ -5,35 +5,20 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from loguru import logger
-
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
-from tldw_Server_API.app.core.LLM_Calls.sse import (
-    finalize_stream,
-    is_done_line,
-    normalize_provider_line,
-    sse_done,
+from tldw_Server_API.app.core.LLM_Calls.streaming import (
+    iter_sse_lines_raising,
+    wrap_sync_stream,
 )
-from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 
 from .base import ChatProvider
 
 # Expose a patchable factory for tests; production uses centralized client
 http_client_factory = _hc_create_client
-
-
-def _stream_debug_enabled(provider: str) -> bool:
-    value = (os.getenv("LLM_ADAPTERS_STREAM_DEBUG") or "").strip().lower()
-    if not value:
-        return False
-    if value in {"1", "true", "yes", "on", "all"}:
-        return True
-    providers = {p.strip() for p in value.split(",") if p.strip()}
-    return provider.lower() in providers
 
 
 class MistralAdapter(ChatProvider):
@@ -111,6 +96,8 @@ class MistralAdapter(ChatProvider):
                 base = mcfg.get("api_base_url")
                 if isinstance(base, str) and base.strip():
                     return base.strip().rstrip("/")
+        if request.get("credentials_resolved") is True:
+            return "https://api.mistral.ai/v1"
         return self._base_url()
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -173,6 +160,9 @@ class MistralAdapter(ChatProvider):
         return data
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
+        """Delegate to the shared bounded error policy."""
+        return super().normalize_error(exc)
+
         from tldw_Server_API.app.core.LLM_Calls.error_utils import (
             get_http_error_text,
             get_http_status_from_exception,
@@ -215,6 +205,7 @@ class MistralAdapter(ChatProvider):
         return super().normalize_error(exc)
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -233,11 +224,13 @@ class MistralAdapter(ChatProvider):
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
+                self._raise_if_in_band_provider_error(data, phase="chat_response")
                 return self._normalize_to_openai_shape(data)
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="chat")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -255,29 +248,10 @@ class MistralAdapter(ChatProvider):
             with http_client_factory(timeout=resolved_timeout) as client:
                 with client.stream("POST", url, headers=headers, json=payload) as resp:
                     resp.raise_for_status()
-                    debug_stream = _stream_debug_enabled(self.name)
-                    seen_done = False
-                    for raw in resp.iter_lines():
-                        if not raw:
-                            continue
-                        if debug_stream:
-                            logger.debug(f"{self.name} stream raw: {raw!r}")
-                        try:
-                            line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
-                        except Exception:
-                            line = str(raw)
-                        if is_done_line(line):
-                            if not seen_done:
-                                seen_done = True
-                                yield sse_done()
-                            continue
-                        normalized = normalize_provider_line(line)
-                        if normalized is not None:
-                            yield normalized
-                    yield from finalize_stream(response=resp, done_already=seen_done)
+                    yield from iter_sse_lines_raising(resp, provider=self.name)
             return
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="stream")
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.chat, request, timeout=timeout)

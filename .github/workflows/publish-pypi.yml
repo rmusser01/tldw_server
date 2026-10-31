@@ -131,12 +131,12 @@ jobs:
           )
           PY
 
-  test-suite:
-    name: Test Suite Gate
+  release-gate:
+    name: Release Contract Gate
     needs: detect-version
     if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -159,14 +159,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Run release contract tests
+        timeout-minutes: 5
+        run: |
+          python -m pytest -q \
+            tldw_Server_API/tests/CI/test_pypi_workflow_contracts.py
+
+      - name: Run minimal startup smoke
+        timeout-minutes: 5
+        run: python Helper_Scripts/ci/minimal_env_smoke.py --timeout 150
 
   build:
     name: Build Distributions
     needs:
       - detect-version
-      - test-suite
+      - release-gate
     if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media import document_references as refs_mod
 from tldw_Server_API.app.api.v1.schemas.document_references import ReferenceEntry
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 async def _allow_non_authz_dep() -> None:
@@ -24,7 +25,7 @@ app.include_router(refs_mod.router, prefix="/api/v1/media")
 
 
 def _install_route_dependency_overrides() -> None:
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue

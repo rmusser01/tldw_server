@@ -21,6 +21,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 # Treat these as local hostnames for the Host header check.
@@ -31,7 +32,7 @@ _FALSEY_ENV_VALUES = {"0", "false", "no", "off", "n"}
 _CONFIG_REMOTE_CACHE_TTL = 30.0  # seconds
 _config_remote_cached: bool | None = None
 _config_remote_cached_at = 0.0
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _SETUP_PROXY_HEADERS = (
     "x-forwarded-for",
     "forwarded",

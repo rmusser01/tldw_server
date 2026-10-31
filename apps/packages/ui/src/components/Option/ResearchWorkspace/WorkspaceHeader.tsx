@@ -1,4 +1,5 @@
 import React from "react"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import {
@@ -2315,6 +2316,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
     >
       {messageContextHolder}
+      {workspaceId ? (
+        <BuddyManagementButton target={{ scope_type: "workspace", scope_id: workspaceId }} />
+      ) : null}
       <div className="flex min-w-0 basis-full flex-wrap items-center gap-2 lg:basis-auto lg:flex-1 lg:flex-nowrap lg:gap-3">
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
           <FlaskConical className="h-4 w-4 text-primary" />

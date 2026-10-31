@@ -64,8 +64,11 @@ def has_original_file(self, media_id: int) -> bool:
 def soft_delete_media_file(
     self,
     file_id: int,
+    *,
+    hard_delete: bool = False,
 ) -> None:
-    MediaFilesRepository.from_legacy_db(self).soft_delete(file_id)
+    """Delete only the selected file registration, optionally removing its row."""
+    MediaFilesRepository.from_legacy_db(self).soft_delete(file_id, hard_delete=hard_delete)
 
 
 def soft_delete_media_files_for_media(

@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mkdocs mkdocs-material mkdocs-git-revision-date-localized-plugin
+          pip install "mkdocs>=1.6.1,<2" "mkdocs-material>=9.7.3,<10" "mkdocs-git-revision-date-localized-plugin>=1.5.1,<2"
       - name: Refresh curated docs
         run: |
           chmod +x Helper_Scripts/refresh_docs_published.sh || true

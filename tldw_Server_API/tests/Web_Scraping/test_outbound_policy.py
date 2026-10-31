@@ -3,7 +3,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -50,6 +49,117 @@ def test_web_outbound_policy_mode_reads_legacy_web_scraping_section_when_needed(
     )
 
     assert config_mod.web_outbound_policy_mode() == "strict"
+
+
+def test_web_browser_transport_mode_env_overrides_config_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefer a valid environment transport mode over config sections."""
+    monkeypatch.setenv("WEB_BROWSER_TRANSPORT_MODE", "attested_proxy")
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+    monkeypatch.setattr(
+        config_mod,
+        "load_comprehensive_config",
+        lambda: (_ for _ in ()).throw(AssertionError("config must not be read")),
+    )
+
+    assert config_mod.web_browser_transport_mode() == "attested_proxy"
+
+
+@pytest.mark.parametrize("section", ["Web-Scraper", "Web-Scraping"])
+def test_web_browser_transport_mode_reads_supported_config_sections(
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+) -> None:
+    """Read the transport mode from either supported scraper section."""
+    monkeypatch.delenv("WEB_BROWSER_TRANSPORT_MODE", raising=False)
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+
+    class _ConfigStub:
+        def has_section(self, candidate):
+            return candidate == section
+
+        def get(self, candidate, option, fallback=None):
+            if candidate == section and option == "web_browser_transport_mode":
+                return "url_guarded"
+            return fallback
+
+    monkeypatch.setattr(config_mod, "load_comprehensive_config", lambda: _ConfigStub())
+
+    assert config_mod.web_browser_transport_mode() == "url_guarded"
+
+
+def test_web_browser_transport_mode_missing_setting_returns_auto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use auto when neither environment nor config supplies a mode."""
+    monkeypatch.delenv("WEB_BROWSER_TRANSPORT_MODE", raising=False)
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+
+    class _ConfigStub:
+        def has_section(self, _section):
+            return False
+
+    monkeypatch.setattr(config_mod, "load_comprehensive_config", lambda: _ConfigStub())
+
+    assert config_mod.web_browser_transport_mode() == "auto"
+
+
+@pytest.mark.parametrize(
+    "resolver_name",
+    ["web_browser_transport_mode", "web_outbound_policy_mode"],
+)
+def test_browser_admission_config_resolvers_preserve_load_failure_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    resolver_name: str,
+) -> None:
+    """Do not turn an unreadable browser-admission config into permissive defaults."""
+    monkeypatch.delenv("WEB_BROWSER_TRANSPORT_MODE", raising=False)
+    monkeypatch.delenv("WEB_OUTBOUND_POLICY_MODE", raising=False)
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+    monkeypatch.setattr(
+        config_mod,
+        "load_comprehensive_config",
+        lambda: (_ for _ in ()).throw(OSError("config unavailable")),
+    )
+
+    assert getattr(config_mod, resolver_name)() == ""
+
+
+def test_web_outbound_policy_mode_malformed_value_preserves_invalid_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep malformed outbound policy distinguishable at browser admission."""
+    monkeypatch.setenv("WEB_OUTBOUND_POLICY_MODE", "permissive-secret-value")
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+
+    assert config_mod.web_outbound_policy_mode() == ""
+
+
+@pytest.mark.parametrize("source", ["env", "config"])
+def test_web_browser_transport_mode_malformed_value_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    """Preserve a safe invalid sentinel so admission reports config invalid."""
+    config_mod = importlib.import_module("tldw_Server_API.app.core.config")
+    if source == "env":
+        monkeypatch.setenv("WEB_BROWSER_TRANSPORT_MODE", "bogus")
+    else:
+        monkeypatch.delenv("WEB_BROWSER_TRANSPORT_MODE", raising=False)
+
+        class _ConfigStub:
+            def has_section(self, section):
+                return section == "Web-Scraper"
+
+            def get(self, section, option, fallback=None):
+                if section == "Web-Scraper" and option == "web_browser_transport_mode":
+                    return "bogus"
+                return fallback
+
+        monkeypatch.setattr(config_mod, "load_comprehensive_config", lambda: _ConfigStub())
+
+    assert config_mod.web_browser_transport_mode() == ""
 
 
 def test_web_outbound_policy_sync_denies_provider_request(monkeypatch):

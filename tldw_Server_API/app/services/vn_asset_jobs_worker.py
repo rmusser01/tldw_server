@@ -142,7 +142,6 @@ async def _should_cancel(job: dict[str, Any], *, job_manager: JobManager | None 
     if not current:
         return False
     if current.get("cancel_requested_at"):
-        jm.finalize_cancelled(int(job["id"]), reason=str(current.get("cancellation_reason") or "requested"))
         return True
     return str(current.get("status") or "").strip().lower() == "cancelled"
 

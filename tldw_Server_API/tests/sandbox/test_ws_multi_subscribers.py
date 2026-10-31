@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from types import SimpleNamespace
+from typing import Any, Dict
 
 from fastapi.testclient import TestClient
+
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 
 
@@ -66,6 +68,39 @@ def _create_run(client: TestClient) -> str:
     return r.json()["id"]
 
 
+def _receive_data_frames(websocket: Any, count: int) -> list[dict[str, Any]]:
+    """Read data frames in order, ignoring transport-only heartbeats."""
+    frames = []
+    while len(frames) < count:
+        frame = websocket.receive_json()
+        if frame.get("type") != "heartbeat":
+            frames.append(frame)
+    return frames
+
+
+def test_receive_data_frames_preserves_data_around_heartbeats() -> None:
+    data_frames = [
+        {"type": "event", "event": "start", "seq": 2},
+        {"type": "stdout", "data": "L1", "seq": 4},
+        {"type": "stderr", "data": "L2", "seq": 5},
+        {"type": "event", "event": "end", "seq": 7},
+    ]
+    messages = iter(
+        [
+            {"type": "heartbeat", "seq": 1},
+            data_frames[0],
+            {"type": "heartbeat", "seq": 3},
+            data_frames[1],
+            data_frames[2],
+            {"type": "heartbeat", "seq": 6},
+            data_frames[3],
+        ]
+    )
+    websocket = SimpleNamespace(receive_json=lambda: next(messages))
+
+    assert _receive_data_frames(websocket, 4) == data_frames
+
+
 def test_ws_multi_subscribers_receive_same_order(monkeypatch) -> None:
 
 
@@ -80,12 +115,9 @@ def test_ws_multi_subscribers_receive_same_order(monkeypatch) -> None:
 
         with client.websocket_connect(f"/api/v1/sandbox/runs/{run_id}/stream") as ws1, \
              client.websocket_connect(f"/api/v1/sandbox/runs/{run_id}/stream") as ws2:
-            frames1: List[Dict[str, Any]] = []
-            frames2: List[Dict[str, Any]] = []
-            # Read 4 frames from each (start, stdout A, stdout B, end)
-            for _ in range(4):
-                frames1.append(ws1.receive_json())
-                frames2.append(ws2.receive_json())
+            # Read 4 data frames from each (start, stdout A, stdout B, end)
+            frames1 = _receive_data_frames(ws1, 4)
+            frames2 = _receive_data_frames(ws2, 4)
             # Verify seq monotonic and identical ordering across subscribers
             seqs1 = [f.get("seq") for f in frames1]
             seqs2 = [f.get("seq") for f in frames2]
@@ -107,9 +139,8 @@ def test_ws_reconnect_drain_buffer(monkeypatch) -> None:
         hub.publish_stdout(run_id, b"X\n")
 
         with client.websocket_connect(f"/api/v1/sandbox/runs/{run_id}/stream") as ws1:
-            f1 = ws1.receive_json()
+            f1, f2 = _receive_data_frames(ws1, 2)
             assert f1.get("type") in {"event", "stdout", "stderr"}
-            f2 = ws1.receive_json()
             assert f2.get("type") in {"stdout", "stderr", "event"}
 
         # Publish more frames and connect a second subscriber later
@@ -117,7 +148,7 @@ def test_ws_reconnect_drain_buffer(monkeypatch) -> None:
         hub.publish_event(run_id, "end", {})
 
         with client.websocket_connect(f"/api/v1/sandbox/runs/{run_id}/stream") as ws2:
-            frames = [ws2.receive_json(), ws2.receive_json(), ws2.receive_json(), ws2.receive_json()]
+            frames = _receive_data_frames(ws2, 4)
             # Should receive at least the buffered frames including the latest 'end'
             types = [f.get("type") for f in frames]
             assert "event" in types and any((f.get("event") == "end") for f in frames if f.get("type") == "event")
@@ -160,11 +191,18 @@ def test_ws_multi_subs_live_stream(monkeypatch) -> None:
             t = threading.Thread(target=_publisher, daemon=True)
             t.start()
 
-            frames1 = [ws1.receive_json(), ws1.receive_json(), ws1.receive_json(), ws1.receive_json()]
-            frames2 = [ws2.receive_json(), ws2.receive_json(), ws2.receive_json(), ws2.receive_json()]
+            frames1 = _receive_data_frames(ws1, 4)
+            frames2 = _receive_data_frames(ws2, 4)
 
+            assert [(f.get("type"), f.get("event")) for f in frames1] == [
+                ("event", "start"),
+                ("stdout", None),
+                ("stdout", None),
+                ("event", "end"),
+            ]
+            assert frames1 == frames2
             seqs1 = [f.get("seq") for f in frames1]
             seqs2 = [f.get("seq") for f in frames2]
-            assert seqs1 == sorted(seqs1)
-            assert seqs2 == sorted(seqs2)
+            assert seqs1 == sorted(set(seqs1))
+            assert seqs2 == sorted(set(seqs2))
             assert seqs1 == seqs2

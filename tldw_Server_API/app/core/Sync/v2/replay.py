@@ -2,11 +2,19 @@ from __future__ import annotations
 
 """Replay and repair helpers for Sync v2 accepted envelopes."""
 
+import hashlib
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from .errors import SyncMaterializationBusyError, SyncMaterializationPredecessorError
 from .materializers import MaterializationResult, SyncMaterializer
 from .models import SyncDomain, SyncEnvelope
+from .mutation_group_validation import (
+    StoredMutationGroupValidationError,
+    materialization_group_view,
+    validate_stored_mutation_group,
+)
 from .store import SyncV2Store
 
 
@@ -89,8 +97,8 @@ class SyncReplayRepairer:
         *,
         store: SyncV2Store,
         materializers: Mapping[SyncDomain, SyncMaterializer],
-        materialize: Callable[[SyncEnvelope], MaterializationResult],
-        snapshot: Callable[[SyncEnvelope], SyncEnvelope],
+        materialize: Callable[[SyncEnvelope, SyncV2Store | None], MaterializationResult],
+        snapshot: Callable[[SyncEnvelope, SyncV2Store | None], SyncEnvelope],
         scan_limit: int,
     ) -> None:
         self.store = store
@@ -116,6 +124,9 @@ class SyncReplayRepairer:
         cursor = since_cursor
         remaining = limit
         scanned_count = 0
+        processed_groups: set[str] = set()
+        mutation_group_results: list[dict[str, object]] = []
+        result_domains = list(selected_domains)
 
         while True:
             if remaining is not None and remaining <= 0:
@@ -134,6 +145,40 @@ class SyncReplayRepairer:
                 cursor = max(cursor, envelope.server_cursor or cursor)
                 if envelope.domain not in selected:
                     continue
+                if envelope.mutation_group_id:
+                    group_id = envelope.mutation_group_id
+                    if group_id in processed_groups:
+                        continue
+                    group = self.store.list_mutation_group(dataset_id, group_id)
+                    processed_groups.add(group_id)
+                    for member in group:
+                        if member.domain not in result_domains:
+                            result_domains.append(member.domain)
+                        member_result = _accumulator(accumulators, member.domain)
+                        member_result.scanned_count += 1
+                        member_result.last_cursor = max(
+                            member_result.last_cursor,
+                            member.server_cursor or 0,
+                        )
+                    scanned_count += len(group)
+                    if remaining is not None:
+                        remaining -= len(group)
+                    cursor = max(
+                        cursor,
+                        max((member.server_cursor or 0 for member in group), default=cursor),
+                    )
+                    mutation_group_results.append(
+                        self._repair_mutation_group(
+                            dataset_id=dataset_id,
+                            group_id=group_id,
+                            group=group,
+                            failed_only=failed_only,
+                            accumulators=accumulators,
+                        )
+                    )
+                    if remaining is not None and remaining <= 0:
+                        break
+                    continue
                 scanned_count += 1
                 if remaining is not None:
                     remaining -= 1
@@ -148,26 +193,39 @@ class SyncReplayRepairer:
                 if remaining is not None and remaining <= 0:
                     break
 
-            next_cursor = max((item.server_cursor or cursor for item in page), default=cursor)
+            next_cursor = max(
+                cursor,
+                max((item.server_cursor or cursor for item in page), default=cursor),
+            )
             if next_cursor <= page_start_cursor:
                 break
             cursor = next_cursor
 
-        domain_results = [accumulators[domain].result() for domain in selected_domains if domain in accumulators]
+        domain_results = [
+            accumulators[domain].result()
+            for domain in result_domains
+            if domain in accumulators
+        ]
         attempted_count = sum(item.attempted_count for item in domain_results)
         applied_count = sum(item.applied_count for item in domain_results)
         failed_count = sum(item.failed_count for item in domain_results)
         conflict_count = sum(item.conflict_count for item in domain_results)
         skipped_count = sum(item.skipped_count for item in domain_results)
         repair_status = {
-            "status": "repair_needed" if failed_count or conflict_count else "healthy",
+            "status": (
+                "repair_needed"
+                if failed_count or conflict_count or skipped_count
+                else "healthy"
+            ),
             "failed_count": failed_count,
             "conflict_count": conflict_count,
             "skipped_count": skipped_count,
         }
+        if mutation_group_results:
+            repair_status["mutation_groups"] = mutation_group_results
         return SyncReplayRepairResult(
             dataset_id=dataset_id,
-            domains=selected_domains,
+            domains=result_domains,
             from_cursor=since_cursor,
             to_cursor=cursor,
             scanned_count=scanned_count,
@@ -180,6 +238,188 @@ class SyncReplayRepairer:
             repair_status=repair_status,
         )
 
+    def _repair_mutation_group(
+        self,
+        *,
+        dataset_id: str,
+        group_id: str,
+        group: Sequence[SyncEnvelope],
+        failed_only: bool,
+        accumulators: dict[SyncDomain, _DomainAccumulator],
+    ) -> dict[str, object]:
+        safe_group_id = _safe_group_id(group_id)
+        try:
+            with self.store.materialization_guard(group) as guarded_store:
+                refreshed = guarded_store.list_mutation_group(dataset_id, group_id)
+                return self._repair_mutation_group_guarded(
+                    dataset_id=dataset_id,
+                    group_id=group_id,
+                    group=refreshed,
+                    failed_only=failed_only,
+                    accumulators=accumulators,
+                    store=guarded_store,
+                )
+        except (SyncMaterializationBusyError, SyncMaterializationPredecessorError) as exc:
+            if group:
+                _accumulator(accumulators, group[0].domain).skipped_count += 1
+            return _group_result(
+                safe_group_id,
+                failing_step=next(
+                    (
+                        envelope.mutation_step
+                        for envelope in group
+                        if envelope.apply_status not in {"applied", "superseded"}
+                    ),
+                    None,
+                ),
+                error_code=exc.error_code,
+                retry_result="blocked",
+                state="pending",
+            )
+
+    def _repair_mutation_group_guarded(
+        self,
+        *,
+        dataset_id: str,
+        group_id: str,
+        group: Sequence[SyncEnvelope],
+        failed_only: bool,
+        accumulators: dict[SyncDomain, _DomainAccumulator],
+        store: SyncV2Store,
+    ) -> dict[str, object]:
+        safe_group_id = _safe_group_id(group_id)
+        try:
+            validate_stored_mutation_group(
+                group,
+                dataset_id=dataset_id,
+                mutation_group_id=group_id,
+            )
+            materialization_group = materialization_group_view(group)
+        except StoredMutationGroupValidationError as exc:
+            if group:
+                _accumulator(accumulators, group[0].domain).failed_count += 1
+            return _group_result(
+                safe_group_id,
+                failing_step=exc.failing_step,
+                error_code=exc.error_code,
+                retry_result="blocked",
+                state="failed",
+            )
+
+        first_unapplied = next(
+            (
+                index
+                for index, envelope in enumerate(group)
+                if envelope.apply_status not in {"applied", "superseded"}
+            ),
+            None,
+        )
+        if first_unapplied is not None and any(
+            envelope.apply_status in {"applied", "superseded"}
+            for envelope in group[first_unapplied + 1 :]
+        ):
+            _accumulator(accumulators, group[first_unapplied].domain).failed_count += 1
+            return _group_result(
+                safe_group_id,
+                failing_step=first_unapplied,
+                error_code="mutation_group_apply_order_invalid",
+                retry_result="blocked",
+                state="failed",
+            )
+        if first_unapplied is None:
+            return _group_result(
+                safe_group_id,
+                failing_step=None,
+                error_code=None,
+                retry_result="skipped",
+                state="applied",
+            )
+
+        start = 0 if first_unapplied is None else first_unapplied
+        first = group[start]
+        if first.apply_status == "conflict":
+            result = _accumulator(accumulators, first.domain)
+            result.conflict_count += 1
+            return _group_result(
+                safe_group_id,
+                failing_step=first.mutation_step,
+                error_code=_safe_error_code(first.apply_error_code, "sync_repair_conflict"),
+                retry_result="blocked",
+                state="conflict",
+            )
+
+        for envelope in materialization_group[start:]:
+            result = _accumulator(accumulators, envelope.domain)
+            if envelope.apply_status == "conflict":
+                result.conflict_count += 1
+                return _group_result(
+                    safe_group_id,
+                    failing_step=envelope.mutation_step,
+                    error_code=_safe_error_code(
+                        envelope.apply_error_code,
+                        "sync_repair_conflict",
+                    ),
+                    retry_result="blocked",
+                    state="conflict",
+                )
+            if envelope.domain not in self.materializers:
+                result.skipped_count += 1
+                return _group_result(
+                    safe_group_id,
+                    failing_step=envelope.mutation_step,
+                    error_code="sync_materializer_unavailable",
+                    retry_result="blocked",
+                    state="pending",
+                )
+
+            result.attempted_count += 1
+            materialization = self.materialize(envelope, store)
+            snapshot = self.snapshot(envelope, store)
+            status = snapshot.apply_status or materialization.status
+            if status == "applied":
+                result.applied_count += 1
+                continue
+            if status == "conflict":
+                result.conflict_count += 1
+                return _group_result(
+                    safe_group_id,
+                    failing_step=envelope.mutation_step,
+                    error_code=_safe_error_code(
+                        snapshot.apply_error_code or materialization.error_code,
+                        "sync_repair_conflict",
+                    ),
+                    retry_result="blocked",
+                    state="conflict",
+                )
+            if status == "failed":
+                result.failed_count += 1
+                return _group_result(
+                    safe_group_id,
+                    failing_step=envelope.mutation_step,
+                    error_code=_safe_error_code(
+                        snapshot.apply_error_code or materialization.error_code,
+                        "sync_repair_failed",
+                    ),
+                    retry_result="failed",
+                    state="failed",
+                )
+            result.skipped_count += 1
+            return _group_result(
+                safe_group_id,
+                failing_step=envelope.mutation_step,
+                error_code="sync_repair_step_skipped",
+                retry_result="blocked",
+                state="pending",
+            )
+
+        return _group_result(
+            safe_group_id,
+            failing_step=None,
+            error_code=None,
+            retry_result="applied",
+            state="applied",
+        )
+
     def _repair_envelope(
         self,
         envelope: SyncEnvelope,
@@ -187,20 +427,21 @@ class SyncReplayRepairer:
         failed_only: bool,
         result: _DomainAccumulator,
     ) -> None:
+        if envelope.apply_status == "superseded":
+            return
         if envelope.apply_status == "conflict":
             result.conflict_count += 1
             result.skipped_count += 1
             return
-        if failed_only and envelope.apply_status != "failed":
-            result.skipped_count += 1
+        if failed_only and envelope.apply_status == "applied":
             return
         if envelope.domain not in self.materializers:
             result.skipped_count += 1
             return
 
         result.attempted_count += 1
-        materialization = self.materialize(envelope)
-        snapshot = self.snapshot(envelope)
+        materialization = self.materialize(envelope, None)
+        snapshot = self.snapshot(envelope, None)
         status = snapshot.apply_status or materialization.status
         if status == "applied":
             result.applied_count += 1
@@ -235,9 +476,41 @@ def _error_from_envelope(
         client_envelope_id=envelope.client_envelope_id,
         domain=envelope.domain,
         object_id=envelope.object_id,
-        error_code=envelope.apply_error_code or materialization.error_code,
-        message=envelope.apply_error_message or materialization.message,
+        error_code=_safe_error_code(
+            envelope.apply_error_code or materialization.error_code,
+            "sync_repair_failed",
+        ),
+        message=None,
     )
+
+
+def _safe_group_id(group_id: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", group_id):
+        return group_id
+    return f"sha256:{hashlib.sha256(group_id.encode('utf-8')).hexdigest()}"
+
+
+def _safe_error_code(error_code: str | None, fallback: str) -> str:
+    if error_code and re.fullmatch(r"[a-z][a-z0-9_]{0,127}", error_code):
+        return error_code
+    return fallback
+
+
+def _group_result(
+    mutation_group_id: str,
+    *,
+    failing_step: int | None,
+    error_code: str | None,
+    retry_result: str,
+    state: str,
+) -> dict[str, object]:
+    return {
+        "mutation_group_id": mutation_group_id,
+        "failing_step": failing_step,
+        "error_code": error_code,
+        "retry_result": retry_result,
+        "state": state,
+    }
 
 
 __all__ = [

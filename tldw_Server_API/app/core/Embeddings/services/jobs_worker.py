@@ -48,6 +48,7 @@ from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (
 )
 from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     get_user_media_db_path,
@@ -103,7 +104,11 @@ def _jobs_manager() -> JobManager:
 def _get_user_id(job: dict[str, Any], payload: dict[str, Any]) -> str:
     owner = job.get("owner_user_id") or payload.get("user_id")
     if owner is None or str(owner).strip() == "":
-        return str(DatabasePaths.get_single_user_id())
+    # Fail rather than silently substituting user 1. resolve_user_id_value
+    # still falls back to the fixed id in single-user mode, where that is
+    # correct; in multi-user mode a job with no owner raises instead of
+    # opening another account's database.
+        return str(resolve_user_id_value(None, allow_none=False))
     return str(owner)
 
 

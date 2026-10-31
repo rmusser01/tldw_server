@@ -44,6 +44,7 @@ const createMediaItem = (id: string): MediaResultItem => ({
 } as MediaResultItem)
 
 const createDeps = (displayResults: MediaResultItem[]) => ({
+  ownerScope: "account-a",
   t: (key: string) => key,
   message: {
     error: vi.fn(),

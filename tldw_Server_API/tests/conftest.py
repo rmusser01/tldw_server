@@ -15,6 +15,7 @@ pytest_plugins = [
 
 from collections.abc import Callable
 import os
+from collections.abc import Iterator
 from pathlib import Path
 import sys
 try:
@@ -462,12 +463,21 @@ def _log_lingering_threads():
         _ = None
 
 
+# Threads already reported as lingering. Python refuses to flip ``daemon`` on a
+# running thread, so without this every later test joined each of them again
+# (1s apiece, twice per test via two autouse fixtures); a few idle executor
+# workers turned that into seconds per test and pushed whole CI shards into the
+# job timeout.
+_KNOWN_LINGERING_THREADS: "weakref.WeakSet[threading.Thread]" = weakref.WeakSet()
+
+
 def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -> None:
     """Best-effort cleanup of lingering non-daemon threads during tests.
 
     Performs a first pass join with timeout for non-daemon threads and then logs
     any remaining threads with their stack frames before marking them as daemon
-    to avoid interpreter shutdown hangs.
+    to avoid interpreter shutdown hangs. A thread is joined and reported once;
+    later calls skip it.
     """
     try:
         import sys
@@ -475,7 +485,7 @@ def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -
         current = threading.current_thread()
         # First pass: try to join all non-daemon threads with a timeout
         for t in threading.enumerate():
-            if t is current or t.daemon:
+            if t is current or t.daemon or t in _KNOWN_LINGERING_THREADS:
                 continue
             try:
                 # Cancel timers so they don't keep the interpreter alive
@@ -490,8 +500,9 @@ def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -
 
         # Second pass: log any remaining threads and mark them daemon
         for t in threading.enumerate():
-            if t is current or t.daemon:
+            if t is current or t.daemon or t in _KNOWN_LINGERING_THREADS:
                 continue
+            _KNOWN_LINGERING_THREADS.add(t)
             try:
                 stack = sys._current_frames().get(t.ident)
             except Exception:
@@ -626,15 +637,48 @@ def pytest_collection_modifyitems(config, items):  # pragma: no cover - collecti
 
 
 @pytest.fixture(autouse=True)
+def _keep_app_main_reloads_from_leaking() -> Iterator[None]:
+    """Undo any ``reload_app_main()`` the test performed.
+
+    The helper swaps ``sys.modules["tldw_Server_API.app.main"]`` for a freshly
+    imported module and never put the original back, so a single reload changed
+    what that name meant for every test after it. Modules that imported ``app``
+    at collection time kept the object they pinned, leaving the session with two
+    live apps and no way to tell which one a given piece of code was talking to.
+
+    That split is what made drain state leak: a lifespan exit drained a pinned
+    app while anything checking ``app.main`` saw the other one and reported
+    nothing wrong (#2585).
+
+    Tests that reload still get their reloaded app for the duration of the test.
+    They just do not hand it to everything downstream.
+    """
+    from tldw_Server_API.tests.helpers.app_main_state import app_main_isolated
+
+    with app_main_isolated():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_main_app_lifecycle_state_between_tests():
-    """Keep TestClient lifespan shutdown from leaking drain state across tests."""
+    """Keep TestClient lifespan shutdown from leaking drain state across tests.
+
+    Resets every app that has lifecycle state, not just the one the current
+    ``app.main`` module exports. Suites that reload ``app.main`` leave earlier
+    app objects live -- test modules that imported ``app`` at collection time
+    keep routing through the object they pinned -- and it is those pinned
+    objects a lifespan exit tends to drain. Resetting only the current one
+    leaves them draining, and ``DrainGateMiddleware`` then answers 503 to every
+    request through them.
+    """
 
     def _reset() -> None:
         try:
-            from tldw_Server_API.app.main import app as fastapi_app
-            from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+            from tldw_Server_API.app.services.app_lifecycle import (
+                reset_all_lifecycle_states,
+            )
 
-            reset_lifecycle_state(fastapi_app)
+            reset_all_lifecycle_states()
         except Exception:
             _ = None
 
@@ -810,6 +854,30 @@ def _raise_fd_limit():  # pragma: no cover - platform-dependent behavior
         # On platforms without 'resource' (e.g., Windows) or when permissions
         # disallow raising limits, silently continue.
         _ = None
+
+
+@pytest.fixture()
+def healthy_no_override_tts_credential_snapshot():
+    """Give legacy local-TTS endpoint tests one healthy empty override snapshot."""
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original_overrides = dict(llm_provider_overrides._OVERRIDE_CACHE)
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_disabled = (
+            llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original_overrides,
+            healthy=original_healthy,
+            ttl_enabled=not original_ttl_disabled,
+        )
+
 
 class _TestUsageLogger:
     def __init__(self):
@@ -1034,6 +1102,19 @@ def _shutdown_executors_and_evaluations_pool():
 
 
 @pytest.fixture(autouse=True)
+def _clear_reranker_model_cache():
+    """Reranker models are cached per process; tests stub the model classes, so start clean."""
+    def _clear() -> None:
+        mod = sys.modules.get("tldw_Server_API.app.core.RAG.rag_service.advanced_reranking")
+        if mod is not None:
+            mod.clear_reranker_model_cache()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_workflow_scheduler():
     """Reset WorkflowScheduler singleton state between tests to avoid stale queues/active counts."""
     try:
@@ -1127,3 +1208,24 @@ def bypass_api_limits(monkeypatch):
                 _ = None
 
     return _bypass
+
+
+_MAX_PARAM_ID_CHARS = 100
+
+
+def pytest_make_parametrize_id(config, val, argname):  # noqa: ANN001, ANN201 - pytest hook
+    """Keep huge string/bytes parameter values out of test ids.
+
+    pytest names a parametrized case after its value, so budget tests with MB
+    payloads produced MB-long test ids. --durations and failure reports print
+    the id, and a multi-megabyte log line stalled the CI runner's log processing
+    until the 60-minute job limit, discarding the log (core-security, 4 runs).
+    Long values get a short stable id; everything else keeps pytest's default.
+    """
+    if isinstance(val, (str, bytes)) and len(val) > _MAX_PARAM_ID_CHARS:
+        import hashlib
+
+        raw = val if isinstance(val, bytes) else val.encode("utf-8", "surrogatepass")
+        kind = "bytes" if isinstance(val, bytes) else "chars"
+        return f"{argname}-{len(val)}{kind}-{hashlib.sha256(raw).hexdigest()[:10]}"
+    return None

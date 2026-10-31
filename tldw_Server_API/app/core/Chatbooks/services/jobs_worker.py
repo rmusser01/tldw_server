@@ -36,6 +36,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     FULL_ACCOUNT_EXPORT_MODE,
     ConflictResolution,
@@ -90,9 +91,11 @@ def _jobs_manager() -> JobManager:
 
 
 def _normalize_user_id(value: Any) -> str:
-    if value is None or str(value).strip() == "":
-        return str(DatabasePaths.get_single_user_id())
-    return str(value)
+    # Fail rather than silently substituting user 1. resolve_user_id_value
+    # still falls back to the fixed id in single-user mode, where that is
+    # correct; in multi-user mode a job with no owner raises instead of
+    # opening another account's database.
+    return str(resolve_user_id_value(value, allow_none=False))
 
 
 def _coerce_int(value: Any, default: int) -> int:

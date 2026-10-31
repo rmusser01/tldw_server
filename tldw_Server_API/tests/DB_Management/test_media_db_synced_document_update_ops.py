@@ -16,7 +16,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -222,7 +221,7 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
         safe_metadata='{"source":"sync"}',
     )
 
-    expected_hash = hashlib.sha256("updated body".encode()).hexdigest()
+    expected_hash = hashlib.sha256(b"updated body").hexdigest()
 
     assert result == {
         "media_id": 9,
@@ -233,7 +232,9 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
     }
     assert execute_calls == [
         (
-            "UPDATE Media SET content = ?, content_hash = ?, last_modified = ?, version = ?, client_id = ?, chunking_status = 'pending', vector_processing = 0 WHERE id = ? AND version = ?",
+            "UPDATE Media SET content = ?, content_hash = ?, last_modified = ?, version = ?, "
+            "client_id = ?, chunking_status = 'pending', vector_processing = 0 "
+            "WHERE id = ? AND version = ? AND system_operation_id IS NULL",
             (
                 "updated body",
                 expected_hash,

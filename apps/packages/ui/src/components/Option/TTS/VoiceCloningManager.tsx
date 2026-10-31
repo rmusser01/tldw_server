@@ -250,12 +250,12 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
     setPreviewingId(voiceId)
     try {
       const text = previewText.trim() || "Hello, this is a preview of your custom voice."
-      const buffer = await tldwClient.synthesizeSpeech(text, {
+      const result = await tldwClient.synthesizeSpeechDetailed(text, {
         model: voice.provider,
         voice: `custom:${voiceId}`,
         responseFormat: "mp3"
       })
-      const blob = new Blob([buffer], { type: "audio/mpeg" })
+      const blob = new Blob([result.buffer], { type: "audio/mpeg" })
       const url = URL.createObjectURL(blob)
       if (previewUrl) {
         try {

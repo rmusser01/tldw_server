@@ -4,10 +4,8 @@
 # Imports
 import asyncio
 import json
-import sqlite3
 from dataclasses import asdict
-from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 #
 # 3rd-party imports
@@ -18,14 +16,17 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
-    Response,
     status,
 )
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_request_user,
+)
 
 #
 # Local Imports
@@ -44,6 +45,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadCreateRequest,
     SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
+    SyncConflictListResponse,
     SyncConflictRecord,
     SyncConflictResolveRejectedItem,
     SyncConflictResolveRequest,
@@ -69,6 +71,16 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncKeyRotationCommitRequest,
     SyncKeyRotationPreviewRequest,
     SyncKeyRotationResponse,
+    SyncNotesAttachmentBootstrapDiagnosticsResponse,
+    SyncPersonalContextActivationAcknowledgeRequest,
+    SyncPersonalContextActivationAcknowledgeResponse,
+    SyncPersonalContextBootstrapErrorDetail,
+    SyncPersonalContextBootstrapErrorResponse,
+    SyncPersonalContextBootstrapRequest,
+    SyncPersonalContextBootstrapResponse,
+    SyncPersonalContextLinkCompleteRequest,
+    SyncPersonalContextPurgeRequest,
+    SyncPersonalContextPurgeResponse,
     SyncProfileBootstrapRequest,
     SyncProfileBootstrapResponse,
     SyncProfileResponse,
@@ -88,16 +100,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncRetentionDryRunRequest,
     SyncRetentionDryRunResponse,
     SyncV2Envelope,
+    SyncV2EnvelopeResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
-    ALLOWED_SYNC_OPERATIONS,
-    ALLOWED_SYNC_SEND_ENTITIES,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.errors import (
-    ConflictError,
-    DatabaseError,
-    InputError,
-)
+from tldw_Server_API.app.core.Sync.server_sync_processor import ServerSyncProcessor  # noqa: F401 - re-exported for callers of the old path
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncIdempotencyConflictError,
     SyncInvalidDomainError,
@@ -110,9 +115,14 @@ from tldw_Server_API.app.core.Sync.v2.factory import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceDomainAckCreate,
     SyncEnvelopeCreate,
 )
+from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PersonalContextExchangeProof,
+)
+from tldw_Server_API.app.core.Sync.v2.profile import PersonalContextBootstrapError
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_env,
 )
@@ -184,8 +194,203 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                 "message": "Sync domain is not valid for the requested dataset.",
             },
         )
+    if isinstance(exc, PersonalContextBootstrapError):
+        personal_context_errors = {
+            "personal_context_bootstrap_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap is unavailable.",
+            ),
+            "personal_context_device_unavailable": (
+                status.HTTP_404_NOT_FOUND,
+                "Requested Sync device was not found or is not accessible.",
+            ),
+            "personal_context_authority_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "Personal Context authority identifier is invalid.",
+            ),
+            "personal_context_capability_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap capability is unavailable.",
+            ),
+            "personal_context_schema_incompatible": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context schema is incompatible with this server.",
+            ),
+            "personal_context_quota_incompatible": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context quotas are incompatible with this server.",
+            ),
+            "personal_context_key_custody_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context key custody is unavailable.",
+            ),
+            "personal_context_snapshot_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Personal Context bootstrap snapshot is unavailable.",
+            ),
+            "personal_context_snapshot_unstable": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context changed during bootstrap; retry the request.",
+            ),
+            "personal_context_projection_incomplete": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context Sync projection is incomplete; repair Sync and retry bootstrap.",
+            ),
+            "personal_context_purge_generation_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context purge generation is stale.",
+            ),
+            "personal_context_link_unavailable": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap link is unavailable.",
+            ),
+            "personal_context_link_binding_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap link binding is stale.",
+            ),
+            "personal_context_bootstrap_cursor_stale": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context bootstrap cursor is stale.",
+            ),
+            "personal_context_authority_mismatch": (
+                status.HTTP_409_CONFLICT,
+                "Personal Context authority does not match the existing profile.",
+            ),
+        }
+        reason_code = exc.reason_code
+        status_code, message = personal_context_errors.get(
+            reason_code,
+            (
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Personal Context bootstrap failed.",
+            ),
+        )
+        detail: dict[str, object] = {
+            "error_code": reason_code,
+            "message": message,
+        }
+        if exc.attention is not None:
+            try:
+                validated = SyncPersonalContextBootstrapErrorDetail.model_validate(
+                    {**detail, "attention": exc.attention}
+                )
+            except ValidationError as validation_error:
+                logger.bind(
+                    reason_code=reason_code,
+                    exception_type=type(validation_error).__name__,
+                ).warning("Discarded invalid Personal Context attention metadata")
+            else:
+                validated_attention = validated.attention
+                if validated_attention is not None:
+                    detail["attention"] = validated_attention.model_dump(mode="json")
+        return HTTPException(status_code=status_code, detail=detail)
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if lowered == "personal_context_ongoing_sync_unavailable":
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "personal_context_ongoing_sync_unavailable"},
+            )
+        if "personal_context_activation_required" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_code": "personal_context_activation_required",
+                    "message": "An active Personal Context exchange is required.",
+                },
+            )
+        notes_task_activation_errors = {
+            "notes_task_sync_domains_incomplete": (
+                status.HTTP_400_BAD_REQUEST,
+                "Both Notes task Sync domains must be requested together.",
+            ),
+            "notes_task_sync_enrollment_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "Notes task Sync requires the default personal Notes dataset.",
+            ),
+            "notes_task_sync_disable_forbidden": (
+                status.HTTP_409_CONFLICT,
+                "Active Notes task Sync domains cannot be removed by re-enrollment.",
+            ),
+            "notes_task_activation_unavailable": (
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Notes task Sync activation components are unavailable.",
+            ),
+            "notes_task_sync_not_ready": (
+                status.HTTP_409_CONFLICT,
+                "Notes task Sync is not ready for this dataset.",
+            ),
+        }
+        for error_code, (status_code, message) in notes_task_activation_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
+        pull_errors = {
+            "sync_pull_token_invalid": (
+                status.HTTP_400_BAD_REQUEST,
+                "The Sync pull token is invalid.",
+            ),
+            "sync_pull_token_too_large": (
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "The Sync pull token exceeds the server size limit.",
+            ),
+            "sync_pull_restart_required": (
+                status.HTTP_409_CONFLICT,
+                "Sync negotiation changed; restart the pull from a stable cursor.",
+            ),
+            "sync_device_adapter_version_not_supported": (
+                status.HTTP_400_BAD_REQUEST,
+                "The device and server have no mutually supported adapter version.",
+            ),
+        }
+        for error_code, (status_code, message) in pull_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
+        blob_id_ack_errors = {
+            "sync_blob_id_ack_adapter_v2_required": (
+                status.HTTP_400_BAD_REQUEST,
+                "Blob-ID acknowledgment requires negotiated attachment adapter v2.",
+            ),
+            "sync_blob_id_ack_not_authorized": (
+                status.HTTP_404_NOT_FOUND,
+                "Requested Sync blob was not found or is not accessible.",
+            ),
+            "sync_blob_id_ack_digest_mismatch": (
+                status.HTTP_400_BAD_REQUEST,
+                "Blob-ID acknowledgment digest does not match immutable blob metadata.",
+            ),
+            "sync_blob_id_ack_digest_immutable": (
+                status.HTTP_409_CONFLICT,
+                "Stored Blob-ID acknowledgment digest is immutable.",
+            ),
+        }
+        for error_code, (status_code, message) in blob_id_ack_errors.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status_code,
+                    detail={"error_code": error_code, "message": message},
+                )
+        if "reserved device identifier" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "reserved_device_id",
+                    "message": "The requested Sync device identifier is reserved.",
+                },
+            )
+        if "sync_reserved_dataset_enrollment" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_reserved_dataset_enrollment",
+                    "message": "Reserved Sync dataset capabilities require profile bootstrap.",
+                },
+            )
         if "sync_blob_transfer_not_supported" in lowered:
             return HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -205,6 +410,53 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
                     ),
                 },
             )
+        restore_limit_messages = {
+            "sync_restore_candidate_limit_exceeded": (
+                "Sync restore preview exceeds the server candidate limit."
+            ),
+            "sync_restore_action_limit_exceeded": (
+                "Sync restore preview exceeds the server action limit."
+            ),
+            "sync_restore_group_limit_exceeded": (
+                "Sync restore mutation group exceeds the server size limit."
+            ),
+        }
+        for error_code, message in restore_limit_messages.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail={"error_code": error_code, "message": message},
+                )
+        if "sync_attachment_bootstrap_sample_limit_exceeded" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "error_code": "sync_attachment_bootstrap_sample_limit_exceeded",
+                    "message": "Attachment bootstrap diagnostics exceed the sample limit.",
+                },
+            )
+        if "sync_attachment_bootstrap_sample_limit_invalid" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_attachment_bootstrap_sample_limit_invalid",
+                    "message": "Attachment bootstrap diagnostics parameters are invalid.",
+                },
+            )
+        attachment_diagnostic_limits = {
+            "sync_attachment_diagnostic_category_sample_limit_exceeded": (
+                "Attachment diagnostics exceed the per-category sample limit."
+            ),
+            "sync_attachment_diagnostic_total_sample_limit_exceeded": (
+                "Attachment diagnostics exceed the total response sample limit."
+            ),
+        }
+        for error_code, message in attachment_diagnostic_limits.items():
+            if error_code in lowered:
+                return HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail={"error_code": error_code, "message": message},
+                )
         if "attachment payload exceeds" in lowered:
             return HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -240,6 +492,7 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             or "requested unsupported domains" in lowered
             or "client_family" in lowered
             or "client_profile_id" in lowered
+            or "adapter version capabilities" in lowered
             or "key recovery bundle" in lowered
             or "key rotation" in lowered
             or "wrapping metadata" in lowered
@@ -341,12 +594,12 @@ def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
             "envelope_id",
             "server_cursor",
             "server_sequence",
-            "object_revision",
             "received_at_server",
             "server_timestamp",
             "status",
             "apply_status",
             "encryption_policy",
+            "authority",
         },
     )
     return SyncEnvelopeCreate(**payload)
@@ -356,10 +609,18 @@ def _api_envelope_from_core(
     envelope: Any,
     *,
     encryption_policy: str = "client_private_v1",
-) -> SyncV2Envelope:
+) -> SyncV2EnvelopeResponse:
     payload = asdict(envelope)
+    routing_metadata = dict(payload.get("routing_metadata") or {})
+    for key in (
+        "notes_folder_origin_provenance",
+        "notes_ingestion_expected_product_version",
+        "notes_keyword_merge_response",
+    ):
+        routing_metadata.pop(key, None)
+    payload["routing_metadata"] = routing_metadata
     payload["encryption_policy"] = encryption_policy
-    return SyncV2Envelope(**payload)
+    return SyncV2EnvelopeResponse(**payload)
 
 
 def _api_conflict_from_core(conflict: Any) -> SyncConflictRecord:
@@ -370,12 +631,62 @@ def _api_capabilities_from_core(capabilities: Any) -> SyncCapabilitiesResponse:
     return SyncCapabilitiesResponse(**asdict(capabilities))
 
 
+def _validate_personal_context_query_proof(
+    activation_epoch: str | None,
+    continuity_token: str | None,
+) -> PersonalContextExchangeProof | None:
+    """Reject incomplete version-one exchange proofs before service access."""
+
+    if (activation_epoch is None) == (continuity_token is None):
+        if activation_epoch is None:
+            return None
+        try:
+            return PersonalContextExchangeProof(
+                ongoing_sync_version=1,
+                activation_epoch=activation_epoch,
+                continuity_token=continuity_token,
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error_code": "personal_context_exchange_invalid",
+                    "message": "Personal Context exchange proof is invalid.",
+                },
+            ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "error_code": "personal_context_exchange_incomplete",
+            "message": "Personal Context activation epoch and continuity token must appear together.",
+        },
+    )
+
+
 def _api_profile_from_core(profile: Any) -> SyncProfileResponse:
     return SyncProfileResponse(**asdict(profile))
 
 
 def _api_bootstrap_profile_from_core(profile: Any) -> SyncProfileBootstrapResponse:
     return SyncProfileBootstrapResponse(**asdict(profile))
+
+
+def _api_attachment_bootstrap_diagnostics_from_core(
+    diagnostics: Any,
+) -> SyncNotesAttachmentBootstrapDiagnosticsResponse:
+    return SyncNotesAttachmentBootstrapDiagnosticsResponse(**asdict(diagnostics))
+
+
+def _api_empty_attachment_bootstrap_diagnostics(
+    *,
+    dry_run: bool,
+) -> SyncNotesAttachmentBootstrapDiagnosticsResponse:
+    """Return diagnostics without initializing Sync v2 storage."""
+
+    return SyncNotesAttachmentBootstrapDiagnosticsResponse(
+        state="not_started",
+        dry_run=dry_run,
+    )
 
 
 def _api_blob_session_from_core(session: Any) -> SyncBlobUploadSessionResponse:
@@ -493,9 +804,23 @@ def _api_key_record_export(record: Any) -> SyncKeyRecoveryBundleRecord:
     summary="Return Sync v2 protocol capabilities",
 )
 def get_sync_v2_capabilities(
+    dataset_id: str | None = Query(None),
+    user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
-    return _api_capabilities_from_core(service.capabilities())
+) -> SyncCapabilitiesResponse:
+    user_id = _sync_user_id(user)
+    try:
+        capabilities = service.capabilities(
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=dataset_id,
+        ) from exc
+    return _api_capabilities_from_core(capabilities)
 
 
 @router.get(
@@ -523,6 +848,50 @@ def get_sync_v2_profile(
             device_id=device_id,
         ) from exc
     return _api_profile_from_core(profile)
+
+
+@router.get(
+    "/profile/attachment-bootstrap",
+    response_model=SyncNotesAttachmentBootstrapDiagnosticsResponse,
+    summary="Return bounded Notes attachment bootstrap diagnostics",
+    dependencies=[Depends(check_rate_limit)],
+)
+def get_sync_v2_attachment_bootstrap_diagnostics(
+    dataset_id: str | None = Query(None),
+    sample_limit: int = Query(0),
+    dry_run: bool = Query(False),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service | None = Depends(get_sync_v2_profile_service),
+) -> SyncNotesAttachmentBootstrapDiagnosticsResponse:
+    user_id = _sync_user_id(user)
+    if sample_limit < 0:
+        raise _safe_sync_v2_http_error(
+            SyncStoreError("sync_attachment_bootstrap_sample_limit_invalid"),
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+    if sample_limit > 100:
+        raise _safe_sync_v2_http_error(
+            SyncStoreError("sync_attachment_bootstrap_sample_limit_exceeded"),
+            user_id=user_id,
+            dataset_id=dataset_id,
+        )
+    if service is None:
+        return _api_empty_attachment_bootstrap_diagnostics(dry_run=dry_run)
+    try:
+        diagnostics = service.notes_attachment_bootstrap_diagnostics(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            sample_limit=sample_limit,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=dataset_id,
+        ) from exc
+    return _api_attachment_bootstrap_diagnostics_from_core(diagnostics)
 
 
 @router.post(
@@ -554,6 +923,79 @@ def bootstrap_sync_v2_profile(
             mode=request.mode,
         ) from exc
     return _api_bootstrap_profile_from_core(profile)
+
+
+@router.post(
+    "/personal-context/bootstrap",
+    response_model=SyncPersonalContextBootstrapResponse,
+    responses={409: {"model": SyncPersonalContextBootstrapErrorResponse}},
+    summary="Bootstrap canonical Personal Context for one registered device",
+    dependencies=[Depends(check_rate_limit)],
+)
+def bootstrap_sync_v2_personal_context(
+    request: SyncPersonalContextBootstrapRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> SyncPersonalContextBootstrapResponse:
+    """Return the canonical profile snapshot and wrapped Sync integrity key."""
+
+    user_id = _sync_user_id(user)
+    try:
+        snapshot = service.bootstrap_personal_context(
+            user_id=user_id,
+            device_id=request.device_id,
+            required_schema_version=request.required_schema_version,
+            required_quotas=request.required_quotas,
+            expected_purge_generation=request.expected_purge_generation,
+            ongoing_sync_version=request.ongoing_sync_version,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(exc, user_id=user_id, device_id=request.device_id) from exc
+    return SyncPersonalContextBootstrapResponse(
+        dataset_id=snapshot.dataset_id,
+        authority_id=snapshot.authority_id,
+        manifest=snapshot.manifest.model_dump(mode="json"),
+        scopes=[item.model_dump(mode="json") for item in snapshot.scopes],
+        records=[item.model_dump(mode="json") for item in snapshot.records],
+        proposals=[item.model_dump(mode="json") for item in snapshot.proposals],
+        purge_generation=snapshot.purge_generation,
+        schema_version=snapshot.schema_version,
+        quotas=snapshot.quotas,
+        cursor=snapshot.cursor,
+        sync_transport_cursor=snapshot.sync_transport_cursor,
+        integrity_key_id=snapshot.integrity_key.integrity_key_id,
+        key_record_id=snapshot.integrity_key.key_record_id,
+        wrapped_key_blob=snapshot.integrity_key.wrapped_key_blob,
+        activation=snapshot.activation,
+        personal_context_exchange=snapshot.personal_context_exchange,
+    )
+
+
+@router.post(
+    "/personal-context/complete",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Record one device's completed Personal Context reconciliation",
+    dependencies=[Depends(check_rate_limit)],
+)
+def complete_sync_v2_personal_context(
+    request: SyncPersonalContextLinkCompleteRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> None:
+    """Commit one device's receipt for the exact reconciled profile snapshot."""
+
+    user_id = _sync_user_id(user)
+    try:
+        service.complete_personal_context_link(
+            user_id=user_id,
+            device_id=request.device_id,
+            dataset_id=request.dataset_id,
+            bootstrap_cursor=request.bootstrap_cursor,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc, user_id=user_id, dataset_id=request.dataset_id, device_id=request.device_id
+        ) from exc
 
 
 @router.post(
@@ -795,6 +1237,7 @@ def acknowledge_sync_v2_device_state(
                     dataset_id=request.dataset_id,
                     device_id=request.device_id,
                     domain=ack.domain,
+                    adapter_version=ack.adapter_version,
                     through_server_sequence=ack.through_server_sequence,
                     applied_at=ack.applied_at,
                     idempotency_key=ack.idempotency_key,
@@ -811,6 +1254,17 @@ def acknowledge_sync_v2_device_state(
                     idempotency_key=ack.idempotency_key,
                 )
                 for ack in request.blob_acks
+            ],
+            blob_id_acks=[
+                SyncDeviceBlobIdAckCreate(
+                    dataset_id=request.dataset_id,
+                    device_id=request.device_id,
+                    blob_id=ack.blob_id,
+                    payload_hash=ack.payload_hash,
+                    verified_at=ack.verified_at,
+                    idempotency_key=ack.idempotency_key,
+                )
+                for ack in request.blob_id_acks
             ],
         )
     except Exception as exc:
@@ -949,6 +1403,8 @@ def get_sync_v2_diagnostics(
     dataset_id: str = Query(...),
     device_id: str | None = Query(None),
     retention_limit: int | None = Query(None, ge=1),
+    attachment_sample_limit: int = Query(0, ge=0),
+    attachment_total_sample_limit: int = Query(500, ge=0),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
@@ -958,6 +1414,8 @@ def get_sync_v2_diagnostics(
             dataset_id=dataset_id,
             device_id=device_id,
             retention_limit=retention_limit,
+            attachment_sample_limit=attachment_sample_limit,
+            attachment_total_sample_limit=attachment_total_sample_limit,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1020,6 +1478,7 @@ def compact_sync_v2_retention(
             confirm=request.confirm,
             apply_envelope_compaction=request.apply_envelope_compaction,
             apply_tombstone_prune=request.apply_tombstone_prune,
+            apply_binding_release=request.apply_binding_release,
             apply_blob_gc=request.apply_blob_gc,
             minimum_envelope_age_seconds=request.minimum_envelope_age_seconds,
             minimum_tombstone_age_seconds=request.minimum_tombstone_age_seconds,
@@ -1195,6 +1654,7 @@ def push_sync_v2_envelopes(
             envelopes=[_core_envelope_from_api(envelope) for envelope in request.envelopes],
             base_server_cursor=request.base_server_cursor,
             stop_on_conflict=request.options.stop_on_conflict,
+            personal_context_exchange=request.personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1208,8 +1668,27 @@ def push_sync_v2_envelopes(
         dataset_id=result.dataset_id,
         accepted=[SyncPushAcceptedEnvelope(**asdict(item)) for item in result.accepted],
         rejected=[SyncPushRejectedEnvelope(**asdict(item)) for item in result.rejected],
-        conflicts=[SyncPushConflictEnvelope(**asdict(item)) for item in result.conflicts],
+        conflicts=[
+            SyncPushConflictEnvelope(
+                **{
+                    **asdict(item),
+                    "authority_candidate": (
+                        SyncV2EnvelopeResponse(
+                            **{
+                                **asdict(item.authority_candidate),
+                                "authority": item.authority_candidate.authority,
+                                "encryption_policy": "server_trusted_v1",
+                            }
+                        )
+                        if item.authority_candidate is not None
+                        else None
+                    ),
+                }
+            )
+            for item in result.conflicts
+        ],
         next_cursor=result.next_cursor,
+        personal_context_exchange=result.personal_context_exchange,
     )
 
 
@@ -1227,9 +1706,38 @@ def pull_sync_v2_envelopes(
     include_same_device_echoes: bool | None = Query(None),
     page_size: int | None = Query(None, ge=1, include_in_schema=False),
     include_own_changes: bool | None = Query(None, include_in_schema=False),
+    personal_context_activation_epoch: str | None = Query(None, min_length=16, max_length=256),
+    personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> SyncPullResponse:
+    """Return one authorized envelope page with verified Personal Context progress.
+
+    Args:
+        dataset_id: Dataset owned by the authenticated user.
+        device_id: Registered device receiving the page.
+        cursor: Opaque checkpoint from the previous pull.
+        domains: Optional domain selection.
+        limit: Maximum envelopes requested in this page.
+        include_same_device_echoes: Include envelopes from the requesting device.
+        page_size: Legacy alias used when limit is absent.
+        include_own_changes: Legacy alias for same-device echoes.
+        personal_context_activation_epoch: Activation identity, paired with token.
+        personal_context_continuity_token: Continuity proof, paired with epoch.
+        user: Authenticated request principal.
+        service: User-bound Sync service supplied by dependency injection.
+
+    Returns:
+        Envelopes, next cursor, continuation status, and verified exchange metadata.
+
+    Raises:
+        HTTPException: If proof, access, cursor, or service validation fails.
+    """
+
+    personal_context_exchange = _validate_personal_context_query_proof(
+        personal_context_activation_epoch,
+        personal_context_continuity_token,
+    )
     effective_page_size = limit if limit is not None else page_size
     effective_include_own_changes = (
         include_same_device_echoes
@@ -1245,6 +1753,7 @@ def pull_sync_v2_envelopes(
             domains=domains,
             page_size=effective_page_size,
             include_own_changes=effective_include_own_changes,
+            personal_context_exchange=personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
@@ -1267,34 +1776,75 @@ def pull_sync_v2_envelopes(
         ],
         next_cursor=result.next_cursor,
         has_more=result.has_more,
+        personal_context_relay=result.personal_context_relay,
+        personal_context_exchange=result.personal_context_exchange,
     )
 
 
 @router.get(
     "/conflicts",
-    response_model=list[SyncConflictRecord],
+    response_model=list[SyncConflictRecord] | SyncConflictListResponse,
     summary="List Sync v2 conflicts",
 )
 def list_sync_v2_conflicts(
     dataset_id: str,
     conflict_status: ConflictStatus | None = Query(None, alias="status"),
+    domain: SyncDomain | None = Query(None),
+    device_id: str | None = Query(None, min_length=1),
+    limit: int = Query(
+        20, ge=1, le=20,
+        description="Page size; advance offset until a short or empty page is returned.",
+    ),
+    offset: int = Query(
+        0, ge=0, description="Number of matching conflicts to skip in stable creation/ID order.",
+    ),
+    personal_context_activation_epoch: str | None = Query(None, min_length=16, max_length=256),
+    personal_context_continuity_token: str | None = Query(None, min_length=16, max_length=256),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
-):
+) -> list[SyncConflictRecord] | SyncConflictListResponse:
+    """Return a bounded conflict page after verifying selected Personal Context.
+
+    Returns:
+        A bare list for pages without Personal Context; otherwise conflicts,
+        dataset ID, and the verified exchange in SyncConflictListResponse.
+
+    Raises:
+        HTTPException: If access, query proof, or selected-page authorization fails.
+    """
+
+    personal_context_exchange = _validate_personal_context_query_proof(
+        personal_context_activation_epoch,
+        personal_context_continuity_token,
+    )
     try:
-        conflicts = service.list_conflicts(
+        conflicts, verified_exchange = service.list_conflicts_with_exchange(
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
             status=conflict_status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+            device_id=device_id,
+            personal_context_exchange=personal_context_exchange,
         )
     except Exception as exc:
         raise _safe_sync_v2_http_error(
             exc,
             user_id=_sync_user_id(user),
             dataset_id=dataset_id,
+            device_id=device_id,
+            domain=domain,
             conflict_status=conflict_status,
         ) from exc
-    return [_api_conflict_from_core(conflict) for conflict in conflicts]
+    api_conflicts = [_api_conflict_from_core(conflict) for conflict in conflicts]
+    if verified_exchange is None:
+        return api_conflicts
+    return SyncConflictListResponse(
+        dataset_id=dataset_id,
+        conflicts=api_conflicts,
+        personal_context_exchange=verified_exchange,
+    )
 
 
 @router.post(
@@ -1311,40 +1861,57 @@ def resolve_sync_v2_conflicts(
     resolved: list[SyncConflictResolveResolvedItem] = []
     rejected: list[SyncConflictResolveRejectedItem] = []
     server_cursors: list[int] = []
-    for resolution in request.resolutions:
-        resolution_envelope = (
-            _core_envelope_from_api(resolution.resolution_envelope)
-            if resolution.resolution_envelope is not None
-            else None
-        )
-        try:
-            conflict = service.resolve_conflict(
-                user_id=user_id,
-                dataset_id=request.dataset_id,
-                conflict_id=resolution.conflict_id,
-                action=resolution.action,
-                resolution_envelope=resolution_envelope,
-                resolved_by_device_id=request.device_id,
-                notes=None,
+    try:
+        decisions = [
+            (
+                resolution.conflict_id,
+                resolution.action,
+                (
+                    _core_envelope_from_api(resolution.resolution_envelope)
+                    if resolution.resolution_envelope is not None
+                    else None
+                ),
+                resolution.expected_local_envelope_id,
+                resolution.expected_remote_envelope_id,
+                resolution.idempotency_key,
             )
-        except Exception as exc:
-            logger.bind(
-                error_type=type(exc).__name__,
+            for resolution in request.resolutions
+        ]
+        resolution_results, rejected_indexes, verified_exchange = (
+            service.resolve_conflicts_batch(
                 user_id=user_id,
                 dataset_id=request.dataset_id,
                 device_id=request.device_id,
-                conflict_id=resolution.conflict_id,
-            ).warning("Sync v2 conflict resolution item failed")
-            rejected.append(
-                SyncConflictResolveRejectedItem(
-                    conflict_id=resolution.conflict_id,
-                    action=resolution.action,
-                    error_code="sync_conflict_resolution_failed",
-                    message="Conflict resolution could not be applied.",
-                    retryable=False,
-                )
+                resolutions=decisions,
+                personal_context_exchange=request.personal_context_exchange,
             )
-            continue
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    for index in rejected_indexes:
+        resolution = request.resolutions[index]
+        logger.bind(
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            conflict_id=resolution.conflict_id,
+        ).warning("Sync v2 conflict resolution item failed")
+        rejected.append(
+            SyncConflictResolveRejectedItem(
+                conflict_id=resolution.conflict_id,
+                action=resolution.action,
+                error_code="sync_conflict_resolution_failed",
+                message="Conflict resolution could not be applied.",
+                retryable=False,
+            )
+        )
+    for index, conflict in resolution_results:
+        resolution = request.resolutions[index]
         if conflict.server_cursor is not None:
             server_cursors.append(conflict.server_cursor)
         resolved.append(
@@ -1361,6 +1928,59 @@ def resolve_sync_v2_conflicts(
         server_cursor=max(server_cursors, default=None),
         resolved=resolved,
         rejected=rejected,
+        personal_context_exchange=verified_exchange,
+    )
+
+
+@router.post(
+    "/personal-context/activation/acknowledge",
+    response_model=SyncPersonalContextActivationAcknowledgeResponse,
+    summary="Acknowledge a Personal Context ongoing-sync activation",
+    dependencies=[Depends(check_rate_limit)],
+)
+def acknowledge_personal_context_activation(
+    request: SyncPersonalContextActivationAcknowledgeRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> SyncPersonalContextActivationAcknowledgeResponse:
+    """Acknowledge an exact installed baseline when ongoing rollout is ready."""
+
+    user_id = _sync_user_id(user)
+    if service.capabilities(user_id=user_id).personal_context.ongoing_sync_version != 1:
+        raise HTTPException(status_code=409, detail={"code": "personal_context_ongoing_sync_unavailable"})
+    try:
+        receipt, proof = service.acknowledge_personal_context_activation(
+            user_id=user_id,
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            activation_id=request.activation_id,
+            baseline_digest=request.baseline_digest,
+            local_receipt_id=request.local_receipt_id,
+            exchange=request.personal_context_exchange,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc, user_id=user_id, dataset_id=request.dataset_id, device_id=request.device_id
+        ) from exc
+    return SyncPersonalContextActivationAcknowledgeResponse(receipt=receipt, personal_context_exchange=proof)
+
+
+@router.post(
+    "/personal-context/purge",
+    response_model=SyncPersonalContextPurgeResponse,
+    summary="Purge Personal Context through Sync v2",
+    dependencies=[Depends(check_rate_limit)],
+)
+def purge_personal_context_everywhere(
+    request: SyncPersonalContextPurgeRequest,
+    service: SyncV2Service = Depends(get_sync_v2_service),
+) -> SyncPersonalContextPurgeResponse:
+    """Reserve the signed versioned purge route until the purge owner is ready."""
+
+    del request, service
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "personal_context_ongoing_sync_unavailable"},
     )
 
 
@@ -1855,372 +2475,6 @@ async def send_changes_to_client(
 
     del request, user_id
     raise _legacy_sync_replaced_error("/api/v1/sync/pull")
-
-
-class ServerSyncProcessor:
-    """Apply legacy client sync changes to a user's media database.
-
-    The legacy `/sync/send` endpoint now returns 410 in favor of Sync v2, but
-    this processor remains importable for compatibility tests and direct
-    callers that still exercise the old batch-application semantics.
-    """
-
-    def __init__(self, db: Any, user_id: str, requesting_client_id: str) -> None:
-        self.db = db
-        self.user_id = user_id
-        self.requesting_client_id = requesting_client_id
-        self._server_column_cache: dict[str, list[str]] = {}
-
-    @staticmethod
-    def _validate_entity_operation(entity: str, operation: str) -> Optional[str]:
-        if entity not in ALLOWED_SYNC_SEND_ENTITIES:
-            return f"Unsupported sync entity '{entity}'"
-        if operation not in ALLOWED_SYNC_OPERATIONS:
-            return f"Unsupported sync operation '{operation}'"
-        if entity == "MediaKeywords" and operation not in {"link", "unlink"}:
-            return "MediaKeywords only supports 'link'/'unlink' operations"
-        if entity != "MediaKeywords" and operation in {"link", "unlink"}:
-            return f"Operation '{operation}' is only valid for MediaKeywords"
-        return None
-
-    @staticmethod
-    def _parse_iso8601_timestamp_utc(timestamp_str: str, *, label: str) -> datetime:
-        if not isinstance(timestamp_str, str) or not timestamp_str.strip():
-            raise ValueError(f"{label} timestamp is empty or invalid")
-
-        parse_error: ValueError | None = None
-        for parse_format in (
-            "%Y-%m-%dT%H:%M:%S.%fZ",
-            "%Y-%m-%dT%H:%M:%SZ",
-            "%Y-%m-%dT%H:%M:%S.%f%z",
-            "%Y-%m-%dT%H:%M:%S%z",
-        ):
-            try:
-                parsed_dt = datetime.strptime(timestamp_str.strip(), parse_format)
-                if parse_format.endswith("Z") or parsed_dt.tzinfo is None:
-                    parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
-                return parsed_dt.astimezone(timezone.utc)
-            except ValueError as exc:
-                parse_error = exc
-
-        raise ValueError(
-            f"Could not parse {label} timestamp '{timestamp_str}' as ISO-8601 (Z or offset)."
-        ) from parse_error
-
-    def apply_client_changes_batch(self, changes: list[dict]) -> tuple[bool, list[str]]:
-        errors: list[str] = []
-        server_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
-        try:
-            with self.db.transaction() as conn:
-                cursor = conn.cursor()
-                for change in sorted(changes, key=lambda item: item["change_id"]):
-                    success, error_msg = self._apply_single_client_change_sync(
-                        cursor,
-                        change,
-                        server_timestamp,
-                    )
-                    if success:
-                        continue
-                    full_error = f"Failed Change ID {change.get('change_id', 'N/A')}: {error_msg}"
-                    errors.append(full_error)
-                    raise DatabaseError(
-                        f"Failed to apply change {change.get('change_id', 'N/A')}, rolling back batch."
-                    )
-        except (DatabaseError, sqlite3.Error, ConflictError) as exc:
-            if not errors:
-                errors.append(f"Transaction rolled back: {exc}")
-            return False, errors
-        except Exception as exc:
-            logger.exception(
-                "Unexpected error applying legacy sync batch for user {} from client {}",
-                self.user_id,
-                self.requesting_client_id,
-            )
-            errors.append(f"Unexpected server error: {exc}")
-            return False, errors
-
-        return True, errors
-
-    def _apply_single_client_change_sync(
-        self,
-        cursor: sqlite3.Cursor,
-        change: dict,
-        current_server_time_str: str,
-    ) -> tuple[bool, Optional[str]]:
-        entity = str(change["entity"])
-        entity_uuid = str(change["entity_uuid"])
-        operation = str(change["operation"])
-        client_version = int(change["version"])
-        originating_client_id = str(change["client_id"])
-        payload_str = change.get("payload")
-
-        validation_error = self._validate_entity_operation(entity, operation)
-        if validation_error:
-            return False, validation_error
-
-        if not payload_str and not (entity == "MediaKeywords" and operation in {"link", "unlink"}):
-            return False, f"Missing payload for incoming change: {change.get('change_id', 'N/A')}"
-
-        try:
-            payload = json.loads(payload_str) if payload_str else {}
-        except json.JSONDecodeError as exc:
-            return False, f"Failed to decode payload for change ID {change.get('change_id', 'N/A')}: {exc}"
-
-        if entity == "MediaKeywords":
-            try:
-                self._execute_server_change_sql_sync(
-                    cursor,
-                    entity,
-                    operation,
-                    payload,
-                    entity_uuid,
-                    client_version,
-                    originating_client_id,
-                    current_server_time_str,
-                )
-                return True, None
-            except (DatabaseError, sqlite3.Error, KeyError, ValueError) as exc:
-                return False, f"Error applying MediaKeywords change for {entity_uuid}: {exc}"
-
-        try:
-            cursor.execute(
-                f"SELECT version, client_id, last_modified FROM `{entity}` WHERE uuid = ?",  # nosec B608
-                (entity_uuid,),
-            )
-            server_record_info = cursor.fetchone()
-            server_version = int(server_record_info[0]) if server_record_info else 0
-            server_client_id = server_record_info[1] if server_record_info else None
-
-            if client_version <= server_version:
-                if client_version < server_version or originating_client_id == server_client_id:
-                    return True, None
-                return self._resolve_server_conflict_sync(
-                    cursor,
-                    change,
-                    server_record_info,
-                    current_server_time_str,
-                )
-
-            self._execute_server_change_sql_sync(
-                cursor,
-                entity,
-                operation,
-                payload,
-                entity_uuid,
-                client_version,
-                originating_client_id,
-                current_server_time_str,
-            )
-            return True, None
-        except ConflictError:
-            cursor.execute(
-                f"SELECT version, client_id, last_modified FROM `{entity}` WHERE uuid = ?",  # nosec B608
-                (entity_uuid,),
-            )
-            return self._resolve_server_conflict_sync(
-                cursor,
-                change,
-                cursor.fetchone(),
-                current_server_time_str,
-            )
-        except (DatabaseError, sqlite3.Error, json.JSONDecodeError, KeyError, InputError, ValueError) as exc:
-            return False, f"Error applying single change for {entity} {entity_uuid}: {exc}"
-
-    def _resolve_server_conflict_sync(
-        self,
-        cursor: sqlite3.Cursor,
-        client_change: dict,
-        server_record_info: Optional[tuple],
-        current_server_time_str: str,
-    ) -> tuple[bool, Optional[str]]:
-        if server_record_info is None:
-            return False, "Cannot resolve conflict without server record state."
-
-        entity = str(client_change["entity"])
-        entity_uuid = str(client_change["entity_uuid"])
-        operation = str(client_change["operation"])
-        client_version = int(client_change["version"])
-        originating_client_id = str(client_change["client_id"])
-        payload = json.loads(client_change.get("payload") or "{}")
-        server_last_modified = (
-            server_record_info[2]
-            if len(server_record_info) > 2 and isinstance(server_record_info[2], str)
-            else "1970-01-01T00:00:00Z"
-        )
-
-        try:
-            server_dt = self._parse_iso8601_timestamp_utc(server_last_modified, label="server")
-            authoritative_dt = self._parse_iso8601_timestamp_utc(current_server_time_str, label="authoritative")
-        except ValueError as exc:
-            return False, f"Timestamp parsing error during conflict resolution: {exc}"
-
-        if server_dt >= authoritative_dt:
-            return True, None
-
-        try:
-            self._execute_server_change_sql_sync(
-                cursor,
-                entity,
-                operation,
-                payload,
-                entity_uuid,
-                client_version,
-                originating_client_id,
-                current_server_time_str,
-                force_apply=True,
-            )
-        except (DatabaseError, sqlite3.Error, ValueError) as exc:
-            return False, f"Failed to force apply winning change: {exc}"
-        return True, None
-
-    def _execute_server_change_sql_sync(
-        self,
-        cursor: sqlite3.Cursor,
-        entity: str,
-        operation: str,
-        payload: dict,
-        uuid: str,
-        client_version: int,
-        originating_client_id: str,
-        server_timestamp: str,
-        force_apply: bool = False,
-    ) -> None:
-        if entity == "MediaKeywords":
-            self._execute_server_media_keyword_sql_sync(cursor, operation, payload)
-            return
-
-        table_columns = self._get_table_columns_sync(cursor, entity)
-        if not table_columns:
-            raise DatabaseError(f"Cannot proceed: Failed to get columns for entity '{entity}'.")
-
-        cursor.execute(f"SELECT version FROM `{entity}` WHERE uuid = ?", (uuid,))  # nosec B608
-        current_rec = cursor.fetchone()
-        current_server_version = int(current_rec[0]) if current_rec else 0
-        target_sql_version = current_server_version + 1 if force_apply else client_version
-
-        optimistic_lock_sql = ""
-        optimistic_lock_param: list[int] = []
-        expected_base_version = client_version - 1
-        if not force_apply and operation in {"update", "delete"} and expected_base_version > 0:
-            optimistic_lock_sql = " AND version = ?"
-            optimistic_lock_param = [expected_base_version]
-
-        if operation == "create":
-            target_sql_version = 1
-            all_data = {
-                **payload,
-                "uuid": uuid,
-                "last_modified": server_timestamp,
-                "version": target_sql_version,
-                "client_id": originating_client_id,
-                "deleted": 1 if payload.get("deleted", False) else 0,
-            }
-            cols_sql: list[str] = []
-            placeholders_sql: list[str] = []
-            params_list: list[Any] = []
-            for col in table_columns:
-                if col == "id" or col not in all_data:
-                    continue
-                value = all_data[col]
-                cols_sql.append(f"`{col}`")
-                placeholders_sql.append("?")
-                params_list.append(1 if isinstance(value, bool) and value else 0 if isinstance(value, bool) else value)
-            if not cols_sql:
-                raise ValueError(f"Cannot build INSERT for {entity} {uuid}: No columns")
-            sql = f"INSERT OR IGNORE INTO `{entity}` ({', '.join(cols_sql)}) VALUES ({', '.join(placeholders_sql)})"
-            params_tuple = tuple(params_list)
-        elif operation == "update":
-            set_clauses: list[str] = []
-            params_list = []
-            for col in table_columns:
-                if col in payload and col not in {"id", "uuid"}:
-                    value = payload[col]
-                    set_clauses.append(f"`{col}` = ?")
-                    params_list.append(1 if isinstance(value, bool) and value else 0 if isinstance(value, bool) else value)
-            set_clauses.extend(["`last_modified` = ?", "`version` = ?", "`client_id` = ?", "`deleted` = ?"])
-            params_list.extend(
-                [
-                    server_timestamp,
-                    target_sql_version,
-                    originating_client_id,
-                    1 if payload.get("deleted", False) else 0,
-                ]
-            )
-            where_clause = " WHERE uuid = ?" + optimistic_lock_sql
-            sql = f"UPDATE `{entity}` SET {', '.join(set_clauses)}{where_clause}"  # nosec B608
-            params_tuple = tuple(params_list + [uuid] + optimistic_lock_param)
-        elif operation == "delete":
-            where_clause = " WHERE uuid = ?" + optimistic_lock_sql
-            sql = (
-                f"UPDATE `{entity}` SET deleted = 1, last_modified = ?, "  # nosec B608
-                f"version = ?, client_id = ?{where_clause}"
-            )
-            params_tuple = tuple([server_timestamp, target_sql_version, originating_client_id, uuid] + optimistic_lock_param)
-        else:
-            raise ValueError(f"Unsupported operation '{operation}' from client for entity '{entity}'")
-
-        try:
-            cursor.execute(sql, params_tuple)
-            if not force_apply and operation in {"update", "delete"} and optimistic_lock_sql and cursor.rowcount == 0:
-                raise ConflictError("Optimistic lock failed applying client change.", entity=entity, identifier=uuid)
-
-            conn = getattr(cursor, "connection", None)
-            if conn is None:
-                raise DatabaseError("Sync write completed but cursor has no connection for FTS refresh.")
-            self.db.sync_refresh_fts_for_entity(
-                conn,
-                entity=entity,
-                entity_uuid=uuid,
-                operation=operation,
-                payload=payload,
-            )
-        except sqlite3.IntegrityError as exc:
-            raise DatabaseError(f"Integrity error applying client change: {exc}") from exc
-
-    def _get_table_columns_sync(self, cursor: sqlite3.Cursor, table_name: str) -> Optional[list[str]]:
-        if table_name in self._server_column_cache:
-            return self._server_column_cache[table_name]
-        if not table_name.replace("_", "").isalnum():
-            raise ValueError(f"Invalid table name: {table_name}")
-
-        cursor.execute(f"PRAGMA table_info(`{table_name}`)")  # nosec B608
-        columns = [row[1] for row in cursor.fetchall()]
-        if not columns:
-            return None
-        self._server_column_cache[table_name] = columns
-        return columns
-
-    def _execute_server_media_keyword_sql_sync(
-        self,
-        cursor: sqlite3.Cursor,
-        operation: str,
-        payload: dict,
-    ) -> None:
-        media_uuid = payload.get("media_uuid")
-        keyword_uuid = payload.get("keyword_uuid")
-        if not media_uuid or not keyword_uuid:
-            raise ValueError(f"Missing UUIDs for MediaKeywords {operation}")
-
-        cursor.execute("SELECT id FROM Media WHERE uuid = ?", (media_uuid,))
-        media_rec = cursor.fetchone()
-        cursor.execute("SELECT id FROM Keywords WHERE uuid = ?", (keyword_uuid,))
-        keyword_rec = cursor.fetchone()
-        if not media_rec or not keyword_rec:
-            return
-
-        if operation == "link":
-            cursor.execute(
-                "INSERT OR IGNORE INTO MediaKeywords (media_id, keyword_id) VALUES (?, ?)",
-                (media_rec[0], keyword_rec[0]),
-            )
-        elif operation == "unlink":
-            cursor.execute(
-                "DELETE FROM MediaKeywords WHERE media_id = ? AND keyword_id = ?",
-                (media_rec[0], keyword_rec[0]),
-            )
-        else:
-            raise ValueError(f"Unsupported server operation '{operation}' for MediaKeywords entity")
 
 
 #

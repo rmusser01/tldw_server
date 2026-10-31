@@ -209,6 +209,64 @@ class _EvaluationsBackendConnection:
     def close(self) -> None:
         return None
 
+def to_unix_timestamp(value: Any, *, fallback_now: bool = False) -> Optional[int]:
+    """Convert various timestamp representations to a Unix epoch int.
+
+    Supports:
+    - datetime instances (including tz-aware)
+    - numeric (int/float) epoch values
+    - strings in ISO8601 (with optional 'Z') or '%Y-%m-%d %H:%M:%S'
+    Returns None when unparsable unless fallback_now=True, in which case 'now'.
+    """
+    def _utc_now_epoch() -> int:
+        return int(datetime.now(timezone.utc).timestamp())
+
+    def _to_epoch(dt: datetime) -> int:
+        # A naive datetime here is UTC: SQLite writes CURRENT_TIMESTAMP as naive
+        # UTC, and datetime.strptime/fromisoformat return naive for such input.
+        # Calling .timestamp() on it would interpret it in the HOST's local zone,
+        # putting `created` out by the host UTC offset -- an ADR-014 violation
+        # invisible to UTC CI.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+
+    if value is None:
+        return _utc_now_epoch() if fallback_now else None
+    # Already numeric
+    if isinstance(value, (int, float)):
+        try:
+            return int(value)
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
+            return _utc_now_epoch() if fallback_now else None
+    # datetime instance
+    if isinstance(value, datetime):
+        try:
+            return _to_epoch(value)
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
+            return _utc_now_epoch() if fallback_now else None
+    # string inputs
+    if isinstance(value, str):
+        s = value.strip()
+        try:
+            # Fast path: numeric string
+            if s.isdigit():
+                return int(s)
+            # Try ISO8601, tolerate trailing 'Z'
+            try:
+                dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            except ValueError:
+                # Try legacy SQLite format (naive UTC)
+                dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+            return _to_epoch(dt)
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS as e:
+            logger.debug(f"Failed to parse timestamp value: value={value!r}, error={e}")
+            return _utc_now_epoch() if fallback_now else None
+    # Unknown type
+    logger.debug(f"Unsupported timestamp type: {type(value)} value={value!r}")
+    return _utc_now_epoch() if fallback_now else None
+
+
 class EvaluationsDatabase:
     """Database manager for evaluations system (SQLite or PostgreSQL)."""
 
@@ -2462,49 +2520,24 @@ class EvaluationsDatabase:
         }
         return RecipeRunRecord.model_validate(payload)
 
-    def _ensure_unix_timestamp(self, value: Any, *, fallback_now: bool = False) -> Optional[int]:
-        """Convert various timestamp representations to a Unix epoch int.
+    @staticmethod
+    def _utc_epoch(dt: datetime) -> int:
+        """Convert a datetime to a Unix epoch int, treating naive values as UTC.
 
-        Supports:
-        - datetime instances (including tz-aware)
-        - numeric (int/float) epoch values
-        - strings in ISO8601 (with optional 'Z') or '%Y-%m-%d %H:%M:%S'
-        Returns None when unparsable unless fallback_now=True, in which case 'now'.
+        Stored timestamps in this database are UTC: SQLite's CURRENT_TIMESTAMP emits
+        'YYYY-MM-DD HH:MM:SS' with no offset, and a driver may return a naive
+        datetime for a 'timestamp without time zone' column. Calling .timestamp()
+        directly on a naive value interprets it in the *host local* zone, which made
+        every converted value wrong by the host's UTC offset on any non-UTC
+        deployment. ADR-014 preserves these as OpenAI-compatible Unix `created`
+        values, so the error was a contract violation, not only a bug.
         """
-        if value is None:
-            return int(datetime.now().timestamp()) if fallback_now else None
-        # Already numeric
-        if isinstance(value, (int, float)):
-            try:
-                return int(value)
-            except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
-                return int(datetime.now().timestamp()) if fallback_now else None
-        # datetime instance
-        if isinstance(value, datetime):
-            try:
-                return int(value.timestamp())
-            except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
-                return int(datetime.now().timestamp()) if fallback_now else None
-        # string inputs
-        if isinstance(value, str):
-            s = value.strip()
-            try:
-                # Fast path: numeric string
-                if s.isdigit():
-                    return int(s)
-                # Try ISO8601, tolerate trailing 'Z'
-                try:
-                    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-                except ValueError:
-                    # Try legacy SQLite format
-                    dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-                return int(dt.timestamp())
-            except _EVAL_DB_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Failed to parse timestamp value: value={value!r}, error={e}")
-                return int(datetime.now().timestamp()) if fallback_now else None
-        # Unknown type
-        logger.debug(f"Unsupported timestamp type: {type(value)} value={value!r}")
-        return int(datetime.now().timestamp()) if fallback_now else None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+
+    def _ensure_unix_timestamp(self, value: Any, *, fallback_now: bool = False) -> Optional[int]:
+        return to_unix_timestamp(value, fallback_now=fallback_now)
 
     def _coerce_datetime_filter(self, value: Optional[Any]) -> Optional[str]:
         """Coerce date filter inputs into ISO-like strings for SQL comparisons."""
@@ -2577,7 +2610,18 @@ class EvaluationsDatabase:
     ) -> tuple[str, list[Any]]:
         variants = self._user_id_variants(user_id)
         if not variants:
-            return query, params
+            if user_id is None:
+                # Explicit opt-out: the caller asked for an unscoped read. Kept
+                # because workers and admin paths legitimately span accounts.
+                return query, params
+            # A scope was intended and could not be applied. Returning the query
+            # unchanged here is how a blank or unparseable user id silently
+            # turned a scoped read -- or a delete -- into one over every
+            # account's rows.
+            raise ValueError(
+                f"user_id {user_id!r} yielded no filter variants; refusing to run "
+                f"an unscoped query on {field}. Pass None to opt out explicitly."
+            )
         if len(variants) == 1:
             query += f" AND {field} = ?"
             params.append(variants[0])

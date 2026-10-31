@@ -1,11 +1,15 @@
 import pytest
 from pydantic import ValidationError
+from pydantic.json_schema import models_json_schema
 
 from tldw_Server_API.app.api.v1.schemas.chat_workflows import (
     ChatWorkflowRunResponse,
+    ChatWorkflowTemplateCreate,
+    ChatWorkflowTemplateResponse,
     ChatWorkflowTemplateStep,
     ChatWorkflowTranscriptMessage,
     GenerateDraftRequest,
+    GenerateDraftResponse,
     StartRunRequest,
     SubmitAnswerRequest,
 )
@@ -20,6 +24,29 @@ def test_generate_draft_request_requires_goal():
 
     assert req.goal == "Plan my migration"
     assert req.desired_step_count == 4
+
+
+def test_template_openapi_refs_are_stable_across_input_and_output_modes():
+    """Avoid Pydantic-version-specific ``-Input``/``-Output`` component names."""
+    _, schema = models_json_schema(
+        [
+            (ChatWorkflowTemplateCreate, "validation"),
+            (ChatWorkflowTemplateResponse, "serialization"),
+            (GenerateDraftResponse, "serialization"),
+            (StartRunRequest, "validation"),
+        ]
+    )
+
+    template_components = sorted(
+        name for name in schema["$defs"] if name.startswith("ChatWorkflowTemplate")
+    )
+
+    assert template_components == [
+        "ChatWorkflowTemplateCreate",
+        "ChatWorkflowTemplateDraft",
+        "ChatWorkflowTemplateResponse",
+        "ChatWorkflowTemplateStep",
+    ]
 
 
 def test_answer_request_rejects_empty_answer():

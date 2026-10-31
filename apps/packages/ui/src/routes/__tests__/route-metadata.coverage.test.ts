@@ -192,6 +192,7 @@ describe("route metadata coverage", () => {
       expect.arrayContaining([
         "/chat",
         "/knowledge",
+        "/explainer",
         "/media",
         "/notes",
         "/prompts",

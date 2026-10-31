@@ -29,6 +29,12 @@ def _default_offset_pagination_aliases(response):
     return response
 
 
+def _validate_optional_tts_backend(value: str | None) -> str | None:
+    if value is not None and not value.strip():
+        raise ValueError("tts_backend must not be blank")
+    return value
+
+
 class SourceRef(BaseModel):
     """Reference to an input source for audiobook processing."""
 
@@ -59,12 +65,22 @@ class ChapterSelection(BaseModel):
     chapter_id: str = Field(..., description="Chapter identifier")
     include: bool = Field(..., description="Include or exclude chapter")
     voice: str | None = Field(None, description="Voice override for this chapter")
+    tts_backend: str | None = Field(None, description="Explicit TTS gateway override")
+    tts_allow_fallback: bool | None = Field(
+        None,
+        description="Override gateway fallback permission for this chapter",
+    )
     speed: float | None = Field(
         None,
         ge=0.25,
         le=4.0,
         description="Speed override for this chapter",
     )
+
+    @field_validator("tts_backend")
+    @classmethod
+    def _validate_tts_backend(cls, value: str | None) -> str | None:
+        return _validate_optional_tts_backend(value)
 
 
 class ChapterVoiceOverride(BaseModel):
@@ -134,11 +150,18 @@ class AudiobookJobItem(BaseModel):
     source: SourceRef = Field(..., description="Source reference for this item")
     tts_provider: str | None = Field(None, description="TTS provider override")
     tts_model: str | None = Field(None, description="TTS model override")
+    tts_backend: str | None = Field(None, description="Explicit TTS gateway override")
+    tts_allow_fallback: bool | None = Field(None, description="Gateway fallback permission")
     voice_profile_id: str | None = Field(None, description="Voice profile id override")
     chapters: list[ChapterSelection] | None = Field(None, description="Per-item chapter selection")
     output: OutputOptions | None = Field(None, description="Per-item output options")
     subtitles: SubtitleOptions | None = Field(None, description="Per-item subtitle options")
     metadata: dict[str, Any] | None = Field(None, description="Additional metadata")
+
+    @field_validator("tts_backend")
+    @classmethod
+    def _validate_tts_backend(cls, value: str | None) -> str | None:
+        return _validate_optional_tts_backend(value)
 
 
 class AlignmentWord(BaseModel):
@@ -244,6 +267,8 @@ class AudiobookJobRequest(BaseModel):
     items: list[AudiobookJobItem] | None = Field(None, description="Batch items")
     tts_provider: str | None = Field(None, description="TTS provider override")
     tts_model: str | None = Field(None, description="TTS model override")
+    tts_backend: str | None = Field(None, description="Explicit TTS gateway")
+    tts_allow_fallback: bool | None = Field(None, description="Gateway fallback permission")
     voice_profile_id: str | None = Field(None, description="Voice profile id to apply")
     chapters: list[ChapterSelection] | None = Field(None, description="Chapter selection")
     output: OutputOptions | None = Field(None, description="Output options")
@@ -268,9 +293,20 @@ class AudiobookJobRequest(BaseModel):
         }
     }
 
+    @field_validator("tts_backend")
+    @classmethod
+    def _validate_tts_backend(cls, value: str | None) -> str | None:
+        return _validate_optional_tts_backend(value)
+
     @model_validator(mode="after")
     def _validate_shape(self) -> AudiobookJobRequest:
-        def _requires_subtitles(provider: str | None, model: str | None) -> bool:
+        def _requires_subtitles(
+            provider: str | None,
+            model: str | None,
+            backend: str | None = None,
+        ) -> bool:
+            if backend:
+                return False
             if provider:
                 return str(provider).strip().lower() == "kokoro"
             if model:
@@ -297,12 +333,14 @@ class AudiobookJobRequest(BaseModel):
                 for item in self.items:
                     provider = item.tts_provider or self.tts_provider
                     model = item.tts_model or self.tts_model
-                    if _requires_subtitles(provider, model) and item.subtitles is None:
+                    backend = item.tts_backend or self.tts_backend
+                    if _requires_subtitles(provider, model, backend) and item.subtitles is None:
                         raise ValueError("subtitles required for each item or at top level")
             for item in self.items:
                 provider = item.tts_provider or self.tts_provider
                 model = item.tts_model or self.tts_model
-                requires_subtitles = _requires_subtitles(provider, model)
+                backend = item.tts_backend or self.tts_backend
+                requires_subtitles = _requires_subtitles(provider, model, backend)
                 if requires_subtitles:
                     if "subtitles" in item.model_fields_set and item.subtitles is None:
                         raise ValueError("subtitles cannot be null for kokoro items")
@@ -316,9 +354,9 @@ class AudiobookJobRequest(BaseModel):
                 raise ValueError("chapters must be provided for single-source jobs")
             if self.output is None:
                 raise ValueError("output is required for single-source jobs")
-            if _requires_subtitles(self.tts_provider, self.tts_model) and self.subtitles is None:
+            if _requires_subtitles(self.tts_provider, self.tts_model, self.tts_backend) and self.subtitles is None:
                 raise ValueError("subtitles are required for single-source jobs")
-            if not _requires_subtitles(self.tts_provider, self.tts_model) and self.subtitles is not None:
+            if not _requires_subtitles(self.tts_provider, self.tts_model, self.tts_backend) and self.subtitles is not None:
                 raise ValueError("subtitles are only supported for kokoro providers")
         return self
 

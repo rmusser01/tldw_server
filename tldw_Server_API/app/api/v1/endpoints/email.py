@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from math import ceil
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from loguru import logger
@@ -10,10 +10,12 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_db_transaction,
 )
+from tldw_Server_API.app.api.v1.API_Deps.content_org_deps import select_content_org
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
@@ -21,10 +23,15 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.External_Sources.connectors_service import (
     create_import_job,
     get_source_by_id,
+)
+from tldw_Server_API.app.core.External_Sources.connectors_service import (
     list_sources as list_connector_sources,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    exception_frames_for_log,
+    exception_type_for_log,
+)
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
-from tldw_Server_API.app.core.config import settings
 
 router = APIRouter(tags=["Email"])
 
@@ -98,7 +105,7 @@ async def list_email_sources(
     try:
         rows = await list_connector_sources(db, user_id)
     except Exception as exc:
-        logger.error("Failed to list email sources")
+        logger.error("Failed to list email sources (error_type={})", exception_type_for_log(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list email sources.",
@@ -118,8 +125,8 @@ async def list_email_sources(
                     source_key=str(source_id),
                     tenant_id=tenant_id,
                 )
-            except (DatabaseError, InputError):
-                logger.warning("Failed to fetch email sync state")
+            except (DatabaseError, InputError) as exc:
+                logger.warning("Failed to fetch email sync state (error_type={})", exception_type_for_log(exc))
 
         sync_payload = {
             "state": _derive_sync_state(sync_state),
@@ -180,7 +187,7 @@ async def trigger_email_source_sync(
     try:
         job = await create_import_job(user_id, source_id, request_id=rid)
     except Exception as exc:
-        logger.error("Failed to queue email sync job")
+        logger.error("Failed to queue email sync job (error_type={})", exception_type_for_log(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to queue email sync job.",
@@ -196,6 +203,7 @@ async def trigger_email_source_sync(
 
 @router.get(
     "/search",
+    dependencies=[Depends(select_content_org)],
     status_code=status.HTTP_200_OK,
     summary="Search normalized email messages",
 )
@@ -209,6 +217,14 @@ async def search_email_messages(
     ),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    cursor: Annotated[
+        str | None,
+        Query(
+            max_length=4096,
+            description="Omit for offset pagination; use an empty value to start cursor pagination, "
+            "then pass next_cursor with the same query and offset=0.",
+        ),
+    ] = None,
     db: Any = Depends(get_media_db_for_user),
 ) -> dict[str, Any]:
     """Run Stage-1 email operator search."""
@@ -216,6 +232,27 @@ async def search_email_messages(
     _ensure_email_operator_search_enabled()
 
     try:
+        if cursor is not None:
+            rows, total, next_cursor = db.search_email_messages(
+                query=q,
+                include_deleted=False,
+                limit=limit,
+                offset=offset,
+                cursor=cursor,
+            )
+            has_more = next_cursor is not None
+            return {
+                "items": rows,
+                "pagination": {
+                    "mode": "cursor",
+                    "limit": limit,
+                    "total": total,
+                    "has_more": has_more,
+                    "next_cursor": next_cursor,
+                },
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            }
         rows, total = db.search_email_messages(
             query=q,
             include_deleted=False,
@@ -238,15 +275,22 @@ async def search_email_messages(
         }
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email search")
+            stack_frames = exception_frames_for_log(exc)
+            logger.bind(stage="email_search", stack_frames=stack_frames).error(
+                "Database error during email search (error_type={}, stack_frames={})",
+                exception_type_for_log(exc),
+                stack_frames,
+            )
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred during email search.",
+            log_error=False,
         ) from exc
 
 
 @router.get(
     "/messages/{email_message_id}",
+    dependencies=[Depends(select_content_org)],
     status_code=status.HTTP_200_OK,
     summary="Get normalized email message detail",
 )
@@ -271,8 +315,14 @@ async def get_email_message_detail(
         return detail
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email detail lookup")
+            stack_frames = exception_frames_for_log(exc)
+            logger.bind(stage="email_detail", stack_frames=stack_frames).error(
+                "Database error during email detail lookup (error_type={}, stack_frames={})",
+                exception_type_for_log(exc),
+                stack_frames,
+            )
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred while fetching email message detail.",
+            log_error=False,
         ) from exc

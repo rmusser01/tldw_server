@@ -210,6 +210,7 @@ const RUNTIME_PROFILE_PROBE_ENDPOINT = "/api/v1/users/me/profile"
 const RUNTIME_REQUEST_TIMEOUT_MS = 8_000
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const MANUAL_SESSION_API_KEY = "tldwManualSessionApiKey"
+const MANUAL_SESSION_CREDENTIAL_LOCK = "tldw:manual-session-credential"
 const LEGACY_RUNTIME_KEYS = [
   "apiKey",
   "tldwRuntimeSessionSingleUserApiKey",
@@ -341,35 +342,39 @@ const hasCompleteManualDeviceKey = (config: TldwConfig | null): boolean =>
       normalizeHttpOrigin(config.serverUrl) === config.apiKeyServerOrigin
   )
 
-const scrubMismatchedManualSessionKey = (
-  config: TldwConfig | null,
+const scrubMismatchedManualSessionKey = async (
   quickstartServerUrl: string
-): void => {
+): Promise<void> => {
+  if (typeof navigator === "undefined" || !navigator.locks?.request) return
+
   try {
-    const raw = window.sessionStorage.getItem(MANUAL_SESSION_API_KEY)
-    if (!raw) return
-    const record = JSON.parse(raw) as Record<string, unknown>
-    const serverOrigin = normalizeHttpOrigin(config?.serverUrl)
-    const quickstartOrigin = normalizeHttpOrigin(quickstartServerUrl)
-    const complete =
-      config?.authMode === "single-user" &&
-      config.credentialSource === "manual" &&
-      config.apiKeyPersistence === "session" &&
-      serverOrigin !== null &&
-      serverOrigin !== quickstartOrigin &&
-      config.apiKeyServerOrigin === serverOrigin &&
-      record.credentialSource === "manual" &&
-      record.apiKeyPersistence === "session" &&
-      typeof record.apiKey === "string" &&
-      record.apiKey.trim() &&
-      record.apiKeyServerOrigin === serverOrigin
-    if (!complete) window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
+    await navigator.locks.request(MANUAL_SESSION_CREDENTIAL_LOCK, async () => {
+      const rawConfig = window.localStorage.getItem("tldwConfig")
+      if (!rawConfig) return
+      const parsedConfig: unknown = JSON.parse(rawConfig)
+      if (!parsedConfig || typeof parsedConfig !== "object") return
+      const config = parsedConfig as TldwConfig
+      const raw = window.sessionStorage.getItem(MANUAL_SESSION_API_KEY)
+      if (!raw) return
+      const record = JSON.parse(raw) as Record<string, unknown>
+      const serverOrigin = normalizeHttpOrigin(config.serverUrl)
+      const quickstartOrigin = normalizeHttpOrigin(quickstartServerUrl)
+      const complete =
+        config.authMode === "single-user" &&
+        config.credentialSource === "manual" &&
+        config.apiKeyPersistence === "session" &&
+        serverOrigin !== null &&
+        serverOrigin !== quickstartOrigin &&
+        config.apiKeyServerOrigin === serverOrigin &&
+        record.credentialSource === "manual" &&
+        record.apiKeyPersistence === "session" &&
+        typeof record.apiKey === "string" &&
+        record.apiKey.trim() &&
+        record.apiKeyServerOrigin === serverOrigin
+      if (!complete) window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
+    })
   } catch {
-    try {
-      window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
-    } catch {
-      // Best-effort cleanup for upgraded profiles.
-    }
+    // Leave the record unreadable rather than racing a concurrent save.
   }
 }
 
@@ -412,7 +417,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()
-    scrubMismatchedManualSessionKey(existing, quickstartWebUiServerUrl)
+    await scrubMismatchedManualSessionKey(quickstartWebUiServerUrl)
   } catch {
     // Leave existing manual configuration intact if client storage is unavailable.
   }

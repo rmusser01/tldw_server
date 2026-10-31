@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "release_id": "0.1.43",
+  "product_version": "0.1.43",
+  "repository": "https://github.com/rmusser01/tldw_server",
+  "source_url": "https://github.com/rmusser01/tldw_server/tree/v0.1.43",
+  "protected_source_revision": "cca220627a8f0f9f3124126b50add2e0e88ee8a7",
+  "release_date": "2026-09-20",
+  "countdown_start": "2028-09-20T12:00:00Z",
+  "protected_paths": [
+    "admin-ui/**",
+    "apps/tldw-frontend/**",
+    "apps/extension/**",
+    "apps/packages/ui/**"
+  ],
+  "initial_license": {
+    "name": "PolyForm Perimeter License 1.0.1",
+    "path": "LICENSES/PolyForm-Perimeter-1.0.1.txt"
+  },
+  "countdown_grant": {
+    "additional_license": "AGPL-3.0-only",
+    "path": "LICENSES/releases/0.1.43/PolyForm-Countdown-1.0.0.txt"
+  },
+  "legal_file_digests": {
+    "LICENSES/PolyForm-Perimeter-1.0.1.txt": "5c7a5ccd847fcc285dda039e511ba013693fe979dfc5faee47f6fb59c7add337",
+    "LICENSES/AGPL-3.0-only.txt": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+    "LICENSES/releases/0.1.43/PolyForm-Countdown-1.0.0.txt": "9c7f2c7321c4a9ce64a1c523f86c26f5a31cd90e403bc844e49376b797ee490d"
+  },
+  "protected_file_manifest": {
+    "path": "LICENSES/releases/0.1.43/protected-files.sha256",
+    "sha256": "bfd14b9e3fb5efa6ecbe54c2e27267cd4958b51881aad9cd3e1b4ab100ecd4e1"
+  },
+  "required_notices": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.txt",
+    "admin-ui/LICENSE",
+    "apps/tldw-frontend/LICENSE",
+    "apps/extension/LICENSE",
+    "apps/packages/ui/LICENSE"
+  ],
+  "artifact_verification": {
+    "protected_source_snapshot": {
+      "manifest": "LICENSES/releases/0.1.43/protected-files.sha256",
+      "result": "verified",
+      "source_revision": "cca220627a8f0f9f3124126b50add2e0e88ee8a7"
+    },
+    "protected_binaries": {
+      "published": false,
+      "artifacts": []
+    }
+  },
+  "server_publication_boundary": {
+    "license": "GPL-3.0-only",
+    "artifacts": [
+      "PyPI tldw-server",
+      "GHCR app",
+      "GHCR worker",
+      "GHCR audio-worker"
+    ],
+    "protected_source_included": false
+  },
+  "human_review_required": true,
+  "trademark_rights_granted": false
+}

@@ -3,10 +3,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 
 import { useSttSettings } from "@/hooks/useSttSettings"
 import { useVoiceChatSettings } from "@/hooks/useVoiceChatSettings"
-import {
-  DEFAULT_TLDW_TTS_VOICE,
-  DEFAULT_TTS_PROVIDER
-} from "@/services/tts"
+import { DEFAULT_TTS_PROVIDER } from "@/services/tts"
 
 export type PersonaConfirmationMode =
   | "always"
@@ -22,6 +19,7 @@ export type PersonaVoiceDefaults = {
   stt_language?: string | null
   stt_model?: string | null
   tts_provider?: string | null
+  tts_model?: string | null
   tts_voice?: string | null
   confirmation_mode?: PersonaConfirmationMode | null
   wake_behavior?: PersonaWakeBehavior | null
@@ -39,6 +37,7 @@ export type ResolvedPersonaVoiceDefaults = {
   sttLanguage: string
   sttModel: string
   ttsProvider: string
+  ttsModel?: string
   ttsVoice: string
   confirmationMode: PersonaConfirmationMode
   wakeBehavior: PersonaWakeBehavior
@@ -53,7 +52,6 @@ export type ResolvedPersonaVoiceDefaults = {
 }
 
 const DEFAULT_STT_LANGUAGE = "en-US"
-const DEFAULT_OPENAI_VOICE = "alloy"
 const DEFAULT_CONFIRMATION_MODE: PersonaConfirmationMode = "destructive_only"
 const DEFAULT_WAKE_BEHAVIOR: PersonaWakeBehavior = "one_shot"
 export const PERSONA_TURN_DETECTION_BALANCED_DEFAULTS = {
@@ -90,22 +88,6 @@ const normalizeWakeBehavior = (
     ? value
     : DEFAULT_WAKE_BEHAVIOR
 
-const resolveDefaultTtsVoice = (
-  provider: string,
-  tldwVoice: string,
-  openAiVoice: string,
-  elevenLabsVoice: string
-): string => {
-  const normalizedProvider = String(provider || "").trim().toLowerCase()
-  if (normalizedProvider === "openai") {
-    return normalizeText(openAiVoice) || DEFAULT_OPENAI_VOICE
-  }
-  if (normalizedProvider === "elevenlabs") {
-    return normalizeText(elevenLabsVoice) || ""
-  }
-  return normalizeText(tldwVoice) || DEFAULT_TLDW_TTS_VOICE
-}
-
 export const useResolvedPersonaVoiceDefaults = (
   personaVoiceDefaults?: PersonaVoiceDefaults | null
 ): ResolvedPersonaVoiceDefaults => {
@@ -120,9 +102,6 @@ export const useResolvedPersonaVoiceDefaults = (
     DEFAULT_STT_LANGUAGE
   )
   const [ttsProvider] = useStorage("ttsProvider", DEFAULT_TTS_PROVIDER)
-  const [tldwTtsVoice] = useStorage("tldwTtsVoice", DEFAULT_TLDW_TTS_VOICE)
-  const [openAITTSVoice] = useStorage("openAITTSVoice", DEFAULT_OPENAI_VOICE)
-  const [elevenLabsVoiceId] = useStorage("elevenLabsVoiceId", "")
 
   return React.useMemo(() => {
     const resolvedProvider =
@@ -144,14 +123,10 @@ export const useResolvedPersonaVoiceDefaults = (
         normalizeText(String(sttSettings.model || "")) ||
         "",
       ttsProvider: resolvedProvider,
-      ttsVoice:
-        normalizeText(personaVoiceDefaults?.tts_voice) ||
-        resolveDefaultTtsVoice(
-          resolvedProvider,
-          String(tldwTtsVoice || ""),
-          String(openAITTSVoice || ""),
-          String(elevenLabsVoiceId || "")
-        ),
+      ttsModel: normalizeText(personaVoiceDefaults?.tts_model) || undefined,
+      // An unset voice belongs to the selected provider, not another
+      // browser surface's speech preference.
+      ttsVoice: normalizeText(personaVoiceDefaults?.tts_voice) || "",
       confirmationMode:
         personaVoiceDefaults?.confirmation_mode || DEFAULT_CONFIRMATION_MODE,
       wakeBehavior: normalizeWakeBehavior(personaVoiceDefaults?.wake_behavior),
@@ -189,12 +164,9 @@ export const useResolvedPersonaVoiceDefaults = (
           : PERSONA_TURN_DETECTION_BALANCED_DEFAULTS.minUtteranceSecs
     }
   }, [
-    elevenLabsVoiceId,
-    openAITTSVoice,
     personaVoiceDefaults,
     speechToTextLanguage,
     sttSettings.model,
-    tldwTtsVoice,
     ttsProvider,
     voiceChatAutoResume,
     voiceChatBargeIn,

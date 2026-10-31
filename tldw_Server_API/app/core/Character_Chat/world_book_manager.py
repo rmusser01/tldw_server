@@ -28,7 +28,7 @@ Features:
 import json
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
 import regex as _regex
@@ -473,8 +473,8 @@ class WorldBookService:
     Service class for managing world books in a multi-user environment.
 
     This is a request-scoped service that is instantiated per API request.
-    It works with the per-user database model where each user has their own
-    separate database instance.
+    SQLite uses per-user files. Shared PostgreSQL books are explicitly scoped
+    to the authenticated database client's owner, including child operations.
     """
 
     def __init__(self, db: CharactersRAGDB):
@@ -495,16 +495,85 @@ class WorldBookService:
         self._activation_counts: dict[int, int] = BoundedDict(MAX_BOOK_CACHE_SIZE)
         self._last_activated_at: dict[int, datetime] = BoundedDict(MAX_BOOK_CACHE_SIZE)
 
+    def _can_cache_read_result(self) -> bool:
+        """Return whether the current read is outside a caller-owned transaction."""
+        if self.db.backend_type == BackendType.SQLITE:
+            return not self.db.get_connection().in_transaction
+
+        connection = self.db.get_connection()
+        raw_connection = connection._connection
+        status = getattr(getattr(raw_connection, "info", None), "transaction_status", None)
+        return (
+            getattr(status, "name", None) == "IDLE"
+            and getattr(self.db._connection_state(), "tx_depth", 0) == 0
+            and connection._backend._tx_depth(raw_connection) == 0
+        )
+
+    def _owner_filter(self, alias: str = "") -> tuple[str, tuple[str, ...]]:
+        """Return a bound owner predicate for shared PostgreSQL book queries."""
+        if self.db.backend_type != BackendType.POSTGRESQL:
+            return "1 = 1", ()
+        column = {"": "client_id", "wb": "wb.client_id", "w": "w.client_id"}[alias]
+        return f"{column} = ?", (str(self.db.client_id),)
+
+    def _world_book_read_columns(self, table_alias: str = "") -> str:
+        """Return World Book columns with explicit response instants where known."""
+        prefix = f"{table_alias}." if table_alias else ""
+        columns = [
+            "id",
+            "name",
+            "description",
+            "scan_depth",
+            "token_budget",
+            "recursive_scanning",
+            "enabled",
+        ]
+        if self.db.backend_type == BackendType.POSTGRESQL:
+            columns.extend([
+                f"{prefix}created_at AT TIME ZONE current_setting('TimeZone') AS created_at",
+                f"{prefix}last_modified AT TIME ZONE current_setting('TimeZone') AS last_modified",
+            ])
+        else:
+            columns.extend(["created_at", "last_modified"])
+        columns.extend(["version", "deleted"])
+        return ", ".join(
+            column if " AS " in column else f"{prefix}{column}"
+            for column in columns
+        )
+
+    def _normalize_world_book_response_timestamps(
+        self,
+        row: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Attach UTC to SQLite-generated naive World Book timestamps only."""
+        result = dict(row)
+        if self.db.backend_type != BackendType.SQLITE:
+            return result
+        for field in ("created_at", "last_modified"):
+            value = result.get(field)
+            if isinstance(value, str):
+                try:
+                    value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            if (
+                isinstance(value, datetime)
+                and (value.tzinfo is None or value.utcoffset() is None)
+            ):
+                result[field] = value.replace(tzinfo=timezone.utc)
+        return result
+
     def _init_tables(self):
         """Initialize world book tables in the user's database if they don't exist."""
         backend_type = getattr(self.db, "backend_type", BackendType.SQLITE)
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 if backend_type == BackendType.POSTGRESQL:
                     conn.execute("""
                         CREATE TABLE IF NOT EXISTS world_books (
                             id SERIAL PRIMARY KEY,
-                            name TEXT NOT NULL UNIQUE,
+                            client_id TEXT,
+                            name TEXT NOT NULL,
                             description TEXT,
                             scan_depth INTEGER DEFAULT 3,
                             token_budget INTEGER DEFAULT 500,
@@ -533,6 +602,27 @@ class WorldBookService:
                             last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (world_book_id) REFERENCES world_books(id) ON DELETE CASCADE
                         )
+                    """)
+                    # Old shared books have no reliable owner provenance. Keep
+                    # their data intact and unassigned; never let the first
+                    # requester claim them during startup.
+                    owner_column = conn.execute("""
+                        SELECT 1 FROM pg_attribute
+                        WHERE attrelid = 'world_books'::regclass
+                          AND attname = 'client_id' AND NOT attisdropped
+                    """).fetchone()
+                    if owner_column is None:
+                        conn.execute("ALTER TABLE world_books ADD COLUMN IF NOT EXISTS client_id TEXT")
+                    legacy_name_constraint = conn.execute("""
+                        SELECT 1 FROM pg_constraint
+                        WHERE conrelid = 'world_books'::regclass
+                          AND conname = 'world_books_name_key'
+                    """).fetchone()
+                    if legacy_name_constraint is not None:
+                        conn.execute("ALTER TABLE world_books DROP CONSTRAINT IF EXISTS world_books_name_key")
+                    conn.execute("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_world_books_owner_name
+                        ON world_books(client_id, name)
                     """)
 
                     conn.execute("""
@@ -611,7 +701,6 @@ class WorldBookService:
                     "ON character_world_books(character_id, enabled, priority DESC)"
                 )
 
-                conn.commit()
                 logger.info("World book tables initialized")
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to initialize world book tables: {e}")
@@ -650,7 +739,7 @@ class WorldBookService:
             raise InputError("World book name cannot be empty")
 
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 insert_sql = """
                     INSERT INTO world_books
                     (name, description, scan_depth, token_budget, recursive_scanning, enabled)
@@ -665,7 +754,12 @@ class WorldBookService:
                     _coerce_metadata_bool(enabled, default=True),
                 )
                 if self.db.backend_type == BackendType.POSTGRESQL:
-                    insert_sql += " RETURNING id"
+                    insert_sql = """
+                        INSERT INTO world_books
+                        (name, description, scan_depth, token_budget, recursive_scanning, enabled, client_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+                    """
+                    params += (str(self.db.client_id),)
 
                 cursor = conn.execute(insert_sql, params)
 
@@ -677,8 +771,6 @@ class WorldBookService:
 
                 if world_book_id is None:
                     raise CharactersRAGDBError("Database did not return a world book id.")
-
-                conn.commit()
 
                 logger.info(f"Created world book '{name}' with ID {world_book_id}")
                 self._invalidate_cache()
@@ -712,33 +804,40 @@ class WorldBookService:
             return self._book_cache[world_book_id]
 
         try:
-            with self.db.get_connection() as conn:
-                if world_book_id:
-                    cursor = conn.execute(
-                        """
-                        SELECT * FROM world_books
-                        WHERE id = ? AND deleted = ?
-                        """,
-                        (world_book_id, False)
-                    )
-                elif name:
-                    cursor = conn.execute(
-                        """
-                        SELECT * FROM world_books
-                        WHERE name = ? AND deleted = ?
-                        """,
-                        (name, False)
-                    )
-                else:
-                    return None
-
-                row = cursor.fetchone()
-                if row:
-                    book_data = dict(row)
-                    if world_book_id:
-                        self._book_cache[world_book_id] = book_data
-                    return book_data
+            cache_result = self._can_cache_read_result()
+            owner_filter, owner_params = self._owner_filter()
+            if world_book_id:
+                query = (
+                    "SELECT "
+                    + self._world_book_read_columns()  # nosec B608 - fixed internal schema columns
+                    + " FROM world_books WHERE id = ? AND deleted = ? AND " + owner_filter
+                )
+                cursor = self.db.execute_query(
+                    query,
+                    (world_book_id, False, *owner_params),
+                    read_only=True,
+                )
+            elif name:
+                query = (
+                    "SELECT "
+                    + self._world_book_read_columns()  # nosec B608 - fixed internal schema columns
+                    + " FROM world_books WHERE name = ? AND deleted = ? AND " + owner_filter
+                )
+                cursor = self.db.execute_query(
+                    query,
+                    (name, False, *owner_params),
+                    read_only=True,
+                )
+            else:
                 return None
+
+            row = cursor.fetchone()
+            if row:
+                book_data = self._normalize_world_book_response_timestamps(dict(row))
+                if world_book_id and cache_result:
+                    self._book_cache[world_book_id] = book_data
+                return book_data
+            return None
 
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error fetching world book: {e}")
@@ -755,22 +854,28 @@ class WorldBookService:
             List of world book data dictionaries
         """
         try:
-            with self.db.get_connection() as conn:
-                query = "SELECT * FROM world_books WHERE deleted = ?"
-                params: list[Any] = [False]
-                if not include_disabled:
-                    query += " AND enabled = ?"
-                    params.append(True)
-                query += " ORDER BY name"
+            owner_filter, owner_params = self._owner_filter()
+            query = (
+                f"SELECT {self._world_book_read_columns()} FROM world_books "  # nosec B608 - fixed internal World Book column projection
+                "WHERE deleted = ? AND " + owner_filter
+            )
+            params: list[Any] = [False, *owner_params]
+            if not include_disabled:
+                query += " AND enabled = ?"
+                params.append(True)
+            query += " ORDER BY name"
 
-                cursor = conn.execute(query, tuple(params))
-                books = [dict(row) for row in cursor.fetchall()]
+            cursor = self.db.execute_query(query, tuple(params), read_only=True)
+            books = [
+                self._normalize_world_book_response_timestamps(dict(row))
+                for row in cursor.fetchall()
+            ]
 
-                # Cache the books
-                for book in books:
-                    self._book_cache[book['id']] = book
+            # Cache the books
+            for book in books:
+                self._book_cache[book['id']] = book
 
-                return books
+            return books
 
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error listing world books: {e}")
@@ -805,32 +910,33 @@ class WorldBookService:
                 return {}
 
         try:
-            with self.db.get_connection() as conn:
-                query = """
-                    SELECT world_book_id, COUNT(*) AS entry_count
-                    FROM world_book_entries
-                """
-                params: list[Any] = []
-                if normalized_ids is not None:
-                    placeholders = ",".join("?" for _ in normalized_ids)
-                    query += f" WHERE world_book_id IN ({placeholders})"  # nosec B608
-                    params.extend(normalized_ids)
-                query += " GROUP BY world_book_id"
+            owner_filter, owner_params = self._owner_filter("wb")
+            query = """
+                SELECT e.world_book_id, COUNT(*) AS entry_count
+                FROM world_book_entries e JOIN world_books wb ON wb.id = e.world_book_id
+                WHERE
+            """ + owner_filter  # nosec B608 - fixed owner predicate; all values remain bound
+            params: list[Any] = list(owner_params)
+            if normalized_ids is not None:
+                placeholders = ",".join("?" for _ in normalized_ids)
+                query += f" AND e.world_book_id IN ({placeholders})"  # nosec B608
+                params.extend(normalized_ids)
+            query += " GROUP BY world_book_id"
 
-                cursor = conn.execute(query, tuple(params))
-                counts: dict[int, int] = {}
-                for row in cursor.fetchall():
-                    row_dict = dict(row)
-                    try:
-                        world_book_id = int(row_dict.get("world_book_id"))
-                    except (TypeError, ValueError):
-                        continue
-                    counts[world_book_id] = int(row_dict.get("entry_count") or 0)
+            cursor = self.db.execute_query(query, tuple(params), read_only=True)
+            counts: dict[int, int] = {}
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                try:
+                    world_book_id = int(row_dict.get("world_book_id"))
+                except (TypeError, ValueError):
+                    continue
+                counts[world_book_id] = int(row_dict.get("entry_count") or 0)
 
-                if normalized_ids is not None:
-                    for world_book_id in normalized_ids:
-                        counts.setdefault(world_book_id, 0)
-                return counts
+            if normalized_ids is not None:
+                for world_book_id in normalized_ids:
+                    counts.setdefault(world_book_id, 0)
+            return counts
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error fetching world book entry counts: {e}")
             raise CharactersRAGDBError(f"Error fetching world book entry counts: {e}") from e
@@ -889,8 +995,9 @@ class WorldBookService:
 
             updates.append("last_modified = CURRENT_TIMESTAMP")
             updates.append("version = version + 1")
-            where_clause = "id = ? AND deleted = ?"
-            where_params: list[Any] = [world_book_id, False]
+            owner_filter, owner_params = self._owner_filter()
+            where_clause = "id = ? AND deleted = ? AND " + owner_filter
+            where_params: list[Any] = [world_book_id, False, *owner_params]
             if expected_version is not None:
                 if not isinstance(expected_version, int) or expected_version < 1:
                     raise InputError("expected_version must be a positive integer")
@@ -898,13 +1005,12 @@ class WorldBookService:
                 where_params.append(expected_version)
             params.extend(where_params)
 
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 set_clause = _build_safe_update_clause(updates, _WORLD_BOOK_UPDATE_FIELDS)
                 cursor = conn.execute(
                     f"UPDATE world_books SET {set_clause} WHERE {where_clause}",  # nosec B608
                     tuple(params)
                 )
-                conn.commit()
 
                 if cursor.rowcount > 0:
                     logger.info(f"Updated world book {world_book_id}")
@@ -915,8 +1021,8 @@ class WorldBookService:
                         """
                         SELECT version FROM world_books
                         WHERE id = ? AND deleted = ?
-                        """,
-                        (world_book_id, False),
+                        """ + " AND " + owner_filter,  # nosec B608 - fixed owner predicate; all values remain bound
+                        (world_book_id, False, *owner_params),
                     ).fetchone()
                     if current is not None:
                         current_version = (
@@ -953,19 +1059,18 @@ class WorldBookService:
         if kwargs.get('cascade') is True:
             hard_delete = True
         try:
-            with self.db.get_connection() as conn:
+            owner_filter, owner_params = self._owner_filter()
+            with self.db.transaction() as conn:
                 if hard_delete:
                     cursor = conn.execute(
-                        "DELETE FROM world_books WHERE id = ?",
-                        (world_book_id,)
+                        "DELETE FROM world_books WHERE id = ? AND " + owner_filter,  # nosec B608 - fixed owner predicate
+                        (world_book_id, *owner_params)
                     )
                 else:
                     cursor = conn.execute(
-                        "UPDATE world_books SET deleted = ?, last_modified = CURRENT_TIMESTAMP WHERE id = ?",
-                        (True, world_book_id)
+                        "UPDATE world_books SET deleted = ?, last_modified = CURRENT_TIMESTAMP WHERE id = ? AND " + owner_filter,  # nosec B608 - fixed owner predicate
+                        (True, world_book_id, *owner_params)
                     )
-                conn.commit()
-
                 if cursor.rowcount > 0:
                     logger.info(f"{'Hard' if hard_delete else 'Soft'} deleted world book {world_book_id}")
                     self._invalidate_cache()
@@ -1014,6 +1119,8 @@ class WorldBookService:
         # Empty content is allowed (store empty string)
         if content is None:
             content = ""
+        if self.db.backend_type == BackendType.POSTGRESQL and self.get_world_book(world_book_id) is None:
+            raise InputError("World book not found")
         # Clamp priority to [0, 100]
         try:
             priority = int(priority)
@@ -1046,7 +1153,7 @@ class WorldBookService:
         metadata_json = json.dumps(metadata or {})
 
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 insert_sql = """
                     INSERT INTO world_book_entries
                     (world_book_id, keywords, content, priority, enabled,
@@ -1077,8 +1184,6 @@ class WorldBookService:
 
                 if entry_id is None:
                     raise CharactersRAGDBError("Database did not return a world book entry id.")
-
-                conn.commit()
 
                 logger.info(f"Added entry {entry_id} to world book {world_book_id}")
                 self._invalidate_cache()
@@ -1192,14 +1297,17 @@ class WorldBookService:
             return _apply_entry_filters(entry_views)
 
         try:
-            with self.db.get_connection() as conn:
+            cache_result = self._can_cache_read_result()
+
+            def _read_entries() -> list[WorldBookEntryView]:
+                owner_filter, owner_params = self._owner_filter("wb")
                 query = """
                     SELECT e.*, wb.enabled as book_enabled
                     FROM world_book_entries e
                     JOIN world_books wb ON e.world_book_id = wb.id
-                    WHERE wb.deleted = ?
-                """
-                params: list[Any] = [False]
+                    WHERE wb.deleted = ? AND
+                """ + owner_filter  # nosec B608 - fixed owner predicate; all values remain bound
+                params: list[Any] = [False, *owner_params]
 
                 if world_book_id:
                     query += " AND e.world_book_id = ?"
@@ -1278,7 +1386,7 @@ class WorldBookService:
 
                 query += " ORDER BY e.priority DESC, e.id"
 
-                cursor = conn.execute(query, tuple(params))
+                cursor = self.db.execute_query(query, tuple(params), read_only=True)
                 entries: list[WorldBookEntry] = []
 
                 for row in cursor.fetchall():
@@ -1288,12 +1396,14 @@ class WorldBookService:
 
                 # Cache full per-book result sets only (avoid partial-cache poisoning
                 # from enabled-only or metadata-filtered reads).
-                if world_book_id and not enabled_only and not has_metadata_filters:
+                if cache_result and world_book_id and not enabled_only and not has_metadata_filters:
                     self._entry_cache[world_book_id] = entries
 
                 # Return hybrid views for legacy/new compatibility
                 entry_views = [WorldBookEntryView(e.to_api_dict()) for e in entries]
                 return _apply_entry_filters(entry_views)
+
+            return _read_entries()
 
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error fetching world book entries: {e}")
@@ -1328,15 +1438,15 @@ class WorldBookService:
                     return WorldBookEntryView(cached_entry.to_api_dict())
 
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
+                owner_filter, owner_params = self._owner_filter("wb")
                 query = """
                     SELECT e.*, wb.enabled as book_enabled
                     FROM world_book_entries e
                     JOIN world_books wb ON e.world_book_id = wb.id
-                    WHERE e.id = ? AND wb.deleted = ?
-                    LIMIT 1
-                """
-                row = conn.execute(query, (normalized_entry_id, False)).fetchone()
+                    WHERE e.id = ? AND wb.deleted = ? AND
+                """ + owner_filter + " LIMIT 1"  # nosec B608 - fixed owner predicate; all values remain bound
+                row = conn.execute(query, (normalized_entry_id, False, *owner_params)).fetchone()
                 if not row:
                     return None
                 entry = WorldBookEntry.from_dict(dict(row))
@@ -1368,6 +1478,8 @@ class WorldBookService:
         Returns:
             True if updated successfully
         """
+        if self.db.backend_type == BackendType.POSTGRESQL and self.get_entry(entry_id) is None:
+            return False
         try:
             updates = []
             params = []
@@ -1433,7 +1545,7 @@ class WorldBookService:
             updates.append("last_modified = CURRENT_TIMESTAMP")
             params.append(entry_id)
 
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 # If keywords are being updated but regex_match is omitted, inherit
                 # current regex mode from DB so invalid patterns are still blocked.
                 if keywords is not None and effective_regex_match is None:
@@ -1462,8 +1574,6 @@ class WorldBookService:
                     f"UPDATE world_book_entries SET {set_clause} WHERE id = ?",  # nosec B608
                     tuple(params)
                 )
-                conn.commit()
-
                 if cursor.rowcount > 0:
                     logger.info(f"Updated world book entry {entry_id}")
                     self._invalidate_cache()
@@ -1486,14 +1596,14 @@ class WorldBookService:
         Returns:
             True if deleted successfully
         """
+        if self.db.backend_type == BackendType.POSTGRESQL and self.get_entry(entry_id) is None:
+            return False
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 cursor = conn.execute(
                     "DELETE FROM world_book_entries WHERE id = ?",
                     (entry_id,)
                 )
-                conn.commit()
-
                 if cursor.rowcount > 0:
                     logger.info(f"Deleted world book entry {entry_id}")
                     self._invalidate_cache()
@@ -1525,58 +1635,72 @@ class WorldBookService:
         Returns:
             OpResult with 'success' indicating attachment status
         """
+        if self.db.backend_type == BackendType.POSTGRESQL and (
+            self.get_world_book(world_book_id) is None
+            or self.db.get_character_card_by_id(character_id) is None
+        ):
+            return OpResult(False)
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
+                character = conn.execute(
+                    "SELECT 1 FROM character_cards WHERE id = ?",
+                    (character_id,),
+                ).fetchone()
+                world_book = conn.execute(
+                    "SELECT 1 FROM world_books WHERE id = ?",
+                    (world_book_id,),
+                ).fetchone()
+                if character is None or world_book is None:
+                    logger.warning(
+                        f"Attach failed due to missing character_id {character_id} "
+                        f"or world_book_id {world_book_id}"
+                    )
+                    return OpResult(False)
                 params = (
                     character_id,
                     world_book_id,
                     _coerce_metadata_bool(enabled, default=True),
                     int(priority),
                 )
-                try:
-                    if self.db.backend_type == BackendType.POSTGRESQL:
-                        conn.execute(
-                            """
-                            INSERT INTO character_world_books (character_id, world_book_id, enabled, priority)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (character_id, world_book_id)
-                            DO UPDATE SET enabled = EXCLUDED.enabled,
-                                          priority = EXCLUDED.priority
-                            """,
-                            params,
-                        )
-                    else:
-                        conn.execute(
-                            """
-                            INSERT INTO character_world_books (character_id, world_book_id, enabled, priority)
-                            VALUES (?, ?, ?, ?)
-                            ON CONFLICT(character_id, world_book_id)
-                            DO UPDATE SET enabled = excluded.enabled,
-                                          priority = excluded.priority
-                            """,
-                            params,
-                        )
-                    conn.commit()
-                    logger.info(f"Attached world book {world_book_id} to character {character_id}")
-                    return OpResult(True)
-                except sqlite3.IntegrityError as e:
-                    if 'FOREIGN KEY constraint failed' in str(e):
-                        logger.warning(
-                            f"Attach failed due to missing character_id {character_id} for world_book {world_book_id}"
-                        )
-                        return OpResult(False)
-                    raise
-                except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
-                    # psycopg raises different exceptions; detect FK violation generically
-                    msg = str(e).lower()
-                    if "foreign key" in msg and "constraint" in msg:
-                        logger.warning(
-                            f"Attach failed due to missing character_id {character_id} for world_book {world_book_id}"
-                        )
-                        return OpResult(False)
-                    raise
-
+                if self.db.backend_type == BackendType.POSTGRESQL:
+                    conn.execute(
+                        """
+                        INSERT INTO character_world_books (character_id, world_book_id, enabled, priority)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (character_id, world_book_id)
+                        DO UPDATE SET enabled = EXCLUDED.enabled,
+                                      priority = EXCLUDED.priority
+                        """,
+                        params,
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO character_world_books (character_id, world_book_id, enabled, priority)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(character_id, world_book_id)
+                        DO UPDATE SET enabled = excluded.enabled,
+                                      priority = excluded.priority
+                        """,
+                        params,
+                    )
+            logger.info(f"Attached world book {world_book_id} to character {character_id}")
+            return OpResult(True)
+        except sqlite3.IntegrityError as e:
+            if 'FOREIGN KEY constraint failed' in str(e):
+                logger.warning(
+                    f"Attach failed due to missing character_id {character_id} for world_book {world_book_id}"
+                )
+                return OpResult(False)
+            raise CharactersRAGDBError(f"Error attaching world book to character: {e}") from e
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
+            # psycopg raises different exceptions; detect FK violation generically.
+            msg = str(e).lower()
+            if "foreign key" in msg and "constraint" in msg:
+                logger.warning(
+                    f"Attach failed due to missing character_id {character_id} for world_book {world_book_id}"
+                )
+                return OpResult(False)
             logger.error(f"Error attaching world book to character: {e}")
             raise CharactersRAGDBError(f"Error attaching world book to character: {e}") from e
 
@@ -1591,8 +1715,13 @@ class WorldBookService:
         Returns:
             True if detached successfully
         """
+        if self.db.backend_type == BackendType.POSTGRESQL and (
+            self.get_world_book(world_book_id) is None
+            or self.db.get_character_card_by_id(character_id) is None
+        ):
+            return OpResult(False)
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 cursor = conn.execute(
                     """
                     DELETE FROM character_world_books
@@ -1600,8 +1729,6 @@ class WorldBookService:
                     """,
                     (character_id, world_book_id)
                 )
-                conn.commit()
-
                 if cursor.rowcount > 0:
                     logger.info(f"Detached world book {world_book_id} from character {character_id}")
                     return OpResult(True)
@@ -1623,23 +1750,39 @@ class WorldBookService:
             List of world book data with attachment info
         """
         try:
-            with self.db.get_connection() as conn:
-                query = """
-                    SELECT wb.*, cwb.enabled as attachment_enabled, cwb.priority as attachment_priority
-                    FROM world_books wb
-                    JOIN character_world_books cwb ON wb.id = cwb.world_book_id
-                    WHERE cwb.character_id = ? AND wb.deleted = ?
+            owner_filter, owner_params = self._owner_filter("wb")
+            query = (
+                "SELECT "
+                + self._world_book_read_columns("wb")  # nosec B608 - fixed internal schema columns
+                + """,
+                       cwb.enabled as attachment_enabled,
+                       cwb.priority as attachment_priority
+                FROM world_books wb
+                JOIN character_world_books cwb ON wb.id = cwb.world_book_id
+                WHERE cwb.character_id = ? AND wb.deleted = ?
+                """ + " AND " + owner_filter
+            )
+            params: list[Any] = [character_id, False, *owner_params]
+            if self.db.backend_type == BackendType.POSTGRESQL:
+                query += """
+                    AND EXISTS (
+                        SELECT 1 FROM character_cards cc
+                        WHERE cc.id = cwb.character_id AND cc.client_id = ? AND cc.deleted = FALSE
+                    )
                 """
-                params: list[Any] = [character_id, False]
+                params.append(str(self.db.client_id))
 
-                if enabled_only:
-                    query += " AND cwb.enabled = ? AND wb.enabled = ?"
-                    params.extend([True, True])
+            if enabled_only:
+                query += " AND cwb.enabled = ? AND wb.enabled = ?"
+                params.extend([True, True])
 
-                query += " ORDER BY cwb.priority DESC, wb.name"
+            query += " ORDER BY cwb.priority DESC, wb.name"
 
-                cursor = conn.execute(query, tuple(params))
-                return [dict(row) for row in cursor.fetchall()]
+            cursor = self.db.execute_query(query, tuple(params), read_only=True)
+            return [
+                self._normalize_world_book_response_timestamps(dict(row))
+                for row in cursor.fetchall()
+            ]
 
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error fetching character world books: {e}")
@@ -2133,7 +2276,9 @@ class WorldBookService:
         """
         try:
             if world_book_id is not None:
-                with self.db.get_connection() as conn:
+                if self.db.backend_type == BackendType.POSTGRESQL and self.get_world_book(world_book_id) is None:
+                    raise InputError("World book not found")
+                with self.db.transaction() as conn:
                     cursor = conn.execute(
                         "SELECT COUNT(*) as total_entries, AVG(priority) as avg_priority FROM world_book_entries WHERE world_book_id = ?",
                         (world_book_id,)
@@ -2159,7 +2304,9 @@ class WorldBookService:
                         'avg_priority': float(row.get('avg_priority', 0) or 0),
                         'recursive_entries': int(recursive_entries),
                     }
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
+                owner_filter, owner_params = self._owner_filter()
+                joined_owner_filter, _ = self._owner_filter("w")
                 # Get world book counts
                 cursor = conn.execute(
                     """
@@ -2168,8 +2315,8 @@ class WorldBookService:
                         SUM(CASE WHEN enabled THEN 1 ELSE 0 END) as enabled_world_books
                     FROM world_books
                     WHERE deleted = ?
-                    """,
-                    (False,),
+                    """ + " AND " + owner_filter,  # nosec B608 - fixed owner predicate; all values remain bound
+                    (False, *owner_params),
                 )
                 book_stats = dict(cursor.fetchone())
 
@@ -2180,8 +2327,8 @@ class WorldBookService:
                     FROM world_book_entries e
                     JOIN world_books w ON e.world_book_id = w.id
                     WHERE w.deleted = ?
-                    """,
-                    (False,),
+                    """ + " AND " + joined_owner_filter,  # nosec B608 - fixed owner predicate; all values remain bound
+                    (False, *owner_params),
                 )
                 entry_stats = dict(cursor.fetchone())
 
@@ -2192,8 +2339,8 @@ class WorldBookService:
                     FROM character_world_books c
                     JOIN world_books w ON c.world_book_id = w.id
                     WHERE w.deleted = ?
-                    """,
-                    (False,),
+                    """ + " AND " + joined_owner_filter,  # nosec B608 - fixed owner predicate; all values remain bound
+                    (False, *owner_params),
                 )
                 attachment_stats = dict(cursor.fetchone())
 
@@ -2225,12 +2372,13 @@ class WorldBookService:
             List of matching entries with world book info
         """
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
+                owner_filter, owner_params = self._owner_filter("w")
                 q = [
                     "SELECT e.*, w.name as world_book_name FROM world_book_entries e JOIN world_books w ON e.world_book_id = w.id",
-                    "WHERE w.deleted = ?"
+                    "WHERE w.deleted = ? AND " + owner_filter
                 ]
-                params: list[Any] = [False]
+                params: list[Any] = [False, *owner_params]
                 if world_book_id is not None:
                     q.append("AND e.world_book_id = ?")
                     params.append(world_book_id)
@@ -2288,13 +2436,15 @@ class WorldBookService:
         try:
             if not entry_ids:
                 return 0
+            if self.db.backend_type == BackendType.POSTGRESQL and self.get_world_book(world_book_id) is None:
+                return 0
 
             updates = []
             params = []
 
             if enabled is not None:
                 updates.append("enabled = ?")
-                params.append(int(enabled))
+                params.append(bool(enabled))
 
             if priority is not None:
                 updates.append("priority = ?")
@@ -2305,7 +2455,7 @@ class WorldBookService:
 
             updates.append("last_modified = CURRENT_TIMESTAMP")
 
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 # Build the IN clause for entry IDs
                 placeholders = ','.join('?' * len(entry_ids))
                 params.extend(entry_ids)
@@ -2324,7 +2474,6 @@ class WorldBookService:
                     update_entries_sql,
                     params
                 )
-                conn.commit()
 
                 updated_count = cursor.rowcount
                 logger.info(f"Updated {updated_count} entries in world book {world_book_id}")
@@ -2367,7 +2516,7 @@ class WorldBookService:
 
             # Add entries to new world book
             if entries:
-                with self.db.get_connection() as conn:
+                with self.db.transaction() as conn:
                     for entry in entries:
                         metadata_json = json.dumps(entry.get('metadata') or {})
 
@@ -2390,7 +2539,6 @@ class WorldBookService:
                                 metadata_json,
                             ),
                         )
-                    conn.commit()
 
             logger.info(f"Cloned world book {source_wb_id} to new world book {new_wb_id} with {len(entries)} entries")
             self._invalidate_cache()
@@ -2417,16 +2565,17 @@ class WorldBookService:
     # --- Additional test-facing APIs ---
 
     def toggle_entry_enabled(self, entry_id: int) -> bool:
+        if self.db.backend_type == BackendType.POSTGRESQL and self.get_entry(entry_id) is None:
+            return False
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 cur = conn.execute("SELECT enabled FROM world_book_entries WHERE id = ?", (entry_id,))
                 row = cur.fetchone()
-                current = _coerce_metadata_bool(row[0], default=True) if row else True
+                current = _coerce_metadata_bool(row["enabled"], default=True) if row else True
                 cur = conn.execute(
                     "UPDATE world_book_entries SET enabled = ?, last_modified = CURRENT_TIMESTAMP WHERE id = ?",
                     (not current, entry_id)
                 )
-                conn.commit()
                 if cur.rowcount > 0:
                     self._invalidate_cache()
                     return True

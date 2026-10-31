@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import contextlib
+import uuid as uuid_module
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.settings import get_profile, get_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import DatabaseError, UserNotFoundError, UsersDB
 
@@ -41,7 +43,7 @@ class AuthnzUsersRepo:
 
     async def _users_db(self) -> UsersDB:
         db = UsersDB(self.db_pool)
-        await db.initialize()
+        await db.initialize(ensure_schema=False)
         return db
 
     @staticmethod
@@ -150,16 +152,16 @@ class AuthnzUsersRepo:
 
         db = await self._users_db()
         try:
-            user_id = await db.create_user(
+            user = await db.create_user(
                 username=username,
                 email=email,
                 password_hash=password_hash,
                 role=role or settings.DEFAULT_USER_ROLE,
                 is_active=is_active,
                 is_verified=is_verified,
-                user_uuid=user_uuid,
+                uuid_value=user_uuid,
             )
-            return int(user_id)
+            return int(user["id"])
         except Exception as exc:
             logger.error(f"AuthnzUsersRepo.create_user failed: {exc}")
             raise
@@ -294,7 +296,7 @@ class AuthnzUsersRepo:
             # Total count
             count_query_template = "SELECT COUNT(DISTINCT users.id) FROM users{join_clause}{where_clause}"
             count_query = count_query_template.format_map(locals())  # nosec B608
-            total = await db.db_pool.fetchval(count_query, *params)
+            total = await db.db_pool.fetchval(count_query, params)
 
             # Page of users
             if is_pg:
@@ -378,36 +380,62 @@ class AuthnzUsersRepo:
         """
         try:
             async with self.db_pool.transaction() as conn:
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
                 if self._is_postgres_backend():
-                    await conn.execute(
-                        """
-                        INSERT INTO users (id, username, email, password_hash, is_active, is_verified, role)
-                        VALUES ($1, $2, $3, $4, TRUE, TRUE, 'admin')
-                        ON CONFLICT (id) DO NOTHING
-                        """,
-                        int(user_id),
-                        str(username),
-                        str(email),
-                        str(password_hash),
+                    await gateway.insert_user(
+                        conn,
+                        values={
+                            "id": int(user_id),
+                            "username": str(username),
+                            "email": str(email),
+                            "password_hash": str(password_hash),
+                            "is_active": True,
+                            "is_verified": True,
+                            "role": "admin",
+                        },
+                        ignore_conflict=True,
                     )
-                    await conn.execute(
-                        "UPDATE users SET role = 'admin', is_active = TRUE, is_verified = TRUE WHERE id = $1",
-                        int(user_id),
+                    await gateway.execute_update(
+                        conn,
+                        user_id=int(user_id),
+                        profile_visible_fields=("role", "is_active", "is_verified"),
+                        statement=(
+                            "UPDATE users SET role = 'admin', is_active = TRUE, "
+                            "is_verified = TRUE WHERE id = $1"
+                        ),
+                        parameters=(int(user_id),),
                     )
                 else:
-                    await conn.execute(
-                        """
-                        INSERT OR IGNORE INTO users (id, username, email, password_hash, is_active, is_verified, role)
-                        VALUES (?, ?, ?, ?, 1, 1, 'admin')
-                        """,
-                        (int(user_id), str(username), str(email), str(password_hash)),
+                    # SQLite has no column default for users.uuid (unlike Postgres),
+                    # so the bootstrap row must supply one; UserSummary responses
+                    # expect it. Existing rows with NULL uuid are backfilled below.
+                    fallback_uuid = str(uuid_module.uuid4())
+                    await gateway.insert_user(
+                        conn,
+                        values={
+                            "id": int(user_id),
+                            "uuid": fallback_uuid,
+                            "username": str(username),
+                            "email": str(email),
+                            "password_hash": str(password_hash),
+                            "is_active": 1,
+                            "is_verified": 1,
+                            "role": "admin",
+                        },
+                        ignore_conflict=True,
                     )
-                    await conn.execute(
-                        "UPDATE users SET role = 'admin', is_active = 1, is_verified = 1 WHERE id = ?",
-                        (int(user_id),),
+                    await gateway.execute_update(
+                        conn,
+                        user_id=int(user_id),
+                        profile_visible_fields=("role", "is_active", "is_verified", "uuid"),
+                        statement=(
+                            "UPDATE users SET role = 'admin', is_active = 1, "
+                            "is_verified = 1, uuid = COALESCE(uuid, ?) WHERE id = ?"
+                        ),
+                        parameters=(fallback_uuid, int(user_id)),
                     )
-                    # sqlite transaction shims may require explicit commit
-                    await conn.commit()
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzUsersRepo.ensure_single_user_admin_user failed: {exc}")
             raise
@@ -451,7 +479,6 @@ class AuthnzUsersRepo:
                     "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)",
                     (int(user_id), role_id),
                 )
-                await conn.commit()
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzUsersRepo.assign_role_if_missing failed: {exc}")
             raise
@@ -537,7 +564,6 @@ class AuthnzUsersRepo:
                     """,
                     (int(user_id), role_id),
                 )
-                await conn.commit()
                 try:
                     return bool((delete_cursor.rowcount or 0) > 0)
                 except AttributeError:

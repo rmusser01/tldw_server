@@ -18,7 +18,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     require_media_database_like,
 )
 
-
 _TRANSCRIPT_CONFLICT_RETRIES = 3
 _TRANSCRIPT_UNIQUE_CONFLICT_MARKERS = (
     "duplicate key",
@@ -52,7 +51,7 @@ def _get_media_run_state(
         """
         SELECT id, uuid, version, latest_transcription_run_id, next_transcription_run_id
         FROM Media
-        WHERE id = ? AND deleted = 0
+        WHERE id = ? AND deleted = 0 AND system_operation_id IS NULL
         """,
         (media_id,),
     )
@@ -80,6 +79,7 @@ def _update_media_run_tracking(
         UPDATE Media
         SET latest_transcription_run_id = ?, next_transcription_run_id = ?, last_modified = ?, version = ?, client_id = ?
         WHERE id = ? AND next_transcription_run_id = ? AND version = ?
+          AND system_operation_id IS NULL
         """,
         (
             latest_transcription_run_id,
@@ -355,8 +355,9 @@ def soft_delete_transcript(
         with db_instance.transaction() as conn:
             info = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT t.id, t.version, m.uuid as media_uuid FROM Transcripts t JOIN Media m ON t.media_id = m.id "
-                "WHERE t.uuid = ? AND t.deleted = 0",
+                "SELECT t.id, t.version, m.uuid as media_uuid FROM Transcripts t "
+                "JOIN Media m ON t.media_id = m.id WHERE t.uuid = ? AND t.deleted = 0 "
+                "AND m.system_operation_id IS NULL",
                 (transcript_uuid,),
             )
             if not info:

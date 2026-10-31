@@ -279,16 +279,20 @@ class TestEvaluationStorageInvariants:
     def test_list_pagination_invariant(self, evaluation_manager, num_evaluations, limit):
         """Pagination must return correct number of results."""
         import asyncio
-        # Create evaluations
-        for i in range(num_evaluations):
-            asyncio.run(evaluation_manager.store_evaluation(
-                evaluation_type="test",
-                input_data={"index": i},
-                results={"score": i / (num_evaluations + 1)}
-            ))
 
-        # Test pagination
-        results = asyncio.run(evaluation_manager.list_evaluations(limit=limit))
+        async def _run():
+            # Create evaluations
+            for i in range(num_evaluations):
+                await evaluation_manager.store_evaluation(
+                    evaluation_type="test",
+                    input_data={"index": i},
+                    results={"score": i / (num_evaluations + 1)}
+                )
+
+            # Test pagination
+            return await evaluation_manager.list_evaluations(limit=limit)
+
+        results = asyncio.run(_run())
 
         # Handle both list and dict response formats
         if isinstance(results, dict) and "items" in results:

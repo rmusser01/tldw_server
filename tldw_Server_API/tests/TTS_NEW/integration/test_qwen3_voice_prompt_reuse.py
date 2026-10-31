@@ -27,7 +27,7 @@ def _make_wav_bytes() -> bytes:
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, healthy_no_override_tts_credential_snapshot):
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")

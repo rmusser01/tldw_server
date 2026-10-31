@@ -905,7 +905,7 @@ def test_run_env_file_reader_uses_descriptor_read_without_path_read_bytes(
     """Env reader should not re-open the path after descriptor validation."""
 
     env_file = tmp_path / ".env"
-    env_file.write_text("API_TOKEN=ok\n", encoding="utf-8")
+    env_file.write_text("API_TOKEN=ok\n", encoding="utf-8", newline="")
 
     def _fail_read_bytes(_path: Path) -> bytes:
         raise AssertionError("Path.read_bytes must not be used for envFile reads")

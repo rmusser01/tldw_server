@@ -3,6 +3,7 @@
  * Handles evaluation run operations and queries
  */
 
+import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
@@ -108,7 +109,7 @@ export function useRunDetail(
   const enablePolling = options?.enablePolling !== false
   const captureQuota = options?.captureQuota !== false
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ["evaluations", "run", runId],
     queryFn: async () => {
       const resp = await getRun(runId as string)
@@ -123,22 +124,21 @@ export function useRunDetail(
     refetchInterval: enablePolling
       ? (query) => {
         const status = (query?.state?.data as any)?.data?.status
-        if (!status) {
-          if (enablePolling) {
-            setIsPolling(false)
-          }
-          return false
-        }
-        const isPolling = ["running", "pending"].includes(
-          String(status).toLowerCase()
-        )
-        if (enablePolling) {
-          setIsPolling(isPolling)
-        }
-        return isPolling ? 3000 : false
+        return ["running", "pending"].includes(String(status).toLowerCase())
+          ? 3000
+          : false
       }
       : false
   })
+
+  const isPolling = !!runId && ["running", "pending"].includes(
+    String(query.data?.data?.status).toLowerCase()
+  )
+  useEffect(() => {
+    if (enablePolling) setIsPolling(isPolling)
+  }, [enablePolling, isPolling, setIsPolling])
+
+  return query
 }
 
 export function useCreateRun() {

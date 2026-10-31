@@ -231,12 +231,26 @@ async def test_external_federation_module_integration_exposes_and_executes_virtu
         external_config.write_text(json.dumps(cfg_payload), encoding="utf-8")
         monkeypatch.setattr(manager_mod, "load_external_server_registry", lambda _path=None: cfg)
 
+        async def _no_managed_credentials(**_kwargs: Any) -> None:
+            """The stub server declares no managed auth, so nothing is brokered.
+
+            `external_server_loader` and `external_credential_broker` are a pair:
+            on_initialize falls back to the DB-backed registry service and the DB-backed
+            credential broker independently, so overriding only the loader left the two
+            halves reading different sources. The broker then looked `docs` up in the
+            database, did not find the file-declared server, and raised
+            `ValueError: Unknown external server: docs` before the tool call could run.
+            See TASK-13358.
+            """
+            return None
+
         module = ExternalFederationModule(
             ModuleConfig(
                 name="external_federation",
                 settings={
                     "external_servers_config_path": str(external_config),
                     "external_server_loader": lambda: list(cfg.servers),
+                    "external_credential_broker": _no_managed_credentials,
                 },
             )
         )

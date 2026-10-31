@@ -1,13 +1,14 @@
 import pytest
-
 from fastapi import HTTPException
 
-from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_optimization as pso
+from tldw_Server_API.app.api.v1.endpoints.prompt_studio import (
+    prompt_studio_optimization as pso,
+)
+
+pytestmark = pytest.mark.unit
 
 
-def test_beam_search_length_penalty_and_reranker_ok():
-
-
+def test_beam_search_with_formerly_valid_reranker_is_rejected():
     cfg = {
         "strategy_params": {
             "beam_width": 4,
@@ -17,8 +18,8 @@ def test_beam_search_length_penalty_and_reranker_ok():
             "candidate_reranker": "hybrid",
         }
     }
-    # Should not raise
-    pso._validate_strategy_config("beam_search", cfg)
+    with pytest.raises(HTTPException, match="Unsupported optimization strategy"):
+        pso._validate_strategy_config("beam_search", cfg)
 
 
 @pytest.mark.parametrize(
@@ -33,9 +34,7 @@ def test_beam_search_length_penalty_and_reranker_invalid(cfg):
         pso._validate_strategy_config("beam_search", cfg)
 
 
-def test_anneal_step_schedule_consistency_ok():
-
-
+def test_anneal_with_formerly_valid_schedule_is_rejected():
     cfg = {
         "strategy_params": {
             "schedule": "linear",
@@ -45,13 +44,11 @@ def test_anneal_step_schedule_consistency_ok():
             "epochs": 5,
         }
     }
-    # step_size * epochs == 5 <= (10-5) => ok
-    pso._validate_strategy_config("anneal", cfg)
+    with pytest.raises(HTTPException, match="Unsupported optimization strategy"):
+        pso._validate_strategy_config("anneal", cfg)
 
 
 def test_anneal_step_schedule_consistency_invalid():
-
-
     cfg = {
         "strategy_params": {
             "schedule": "linear",
@@ -61,42 +58,42 @@ def test_anneal_step_schedule_consistency_invalid():
             "epochs": 2,
         }
     }
-    # step_size * epochs = 2 > (2-1) => invalid
     with pytest.raises(HTTPException):
         pso._validate_strategy_config("anneal", cfg)
 
 
-def test_genetic_crossover_operator_ok():
-
-
+def test_genetic_with_formerly_valid_crossover_is_rejected():
     cfg = {"strategy_params": {"crossover_operator": "two_point"}}
-    pso._validate_strategy_config("genetic", cfg)
+    with pytest.raises(HTTPException, match="Unsupported optimization strategy"):
+        pso._validate_strategy_config("genetic", cfg)
 
 
 def test_genetic_crossover_operator_invalid():
-
-
     cfg = {"strategy_params": {"crossover_operator": "bad"}}
     with pytest.raises(HTTPException):
         pso._validate_strategy_config("genetic", cfg)
 
 
-@pytest.mark.parametrize("backend", ["hyperparameter", "random_search"])
-def test_hp_and_random_max_tokens_range_ok(backend):
+@pytest.mark.parametrize("strategy", ["hyperparameter", "random_search"])
+def test_hp_and_random_with_formerly_valid_range_are_rejected(strategy):
     cfg = {"strategy_params": {"max_tokens_range": [64, 512]}}
-    pso._validate_strategy_config(backend, cfg)
+    with pytest.raises(HTTPException, match="Unsupported optimization strategy"):
+        pso._validate_strategy_config(strategy, cfg)
 
 
 @pytest.mark.parametrize(
-    "backend,cfg",
+    "strategy,cfg",
     [
         ("hyperparameter", {"strategy_params": {"max_tokens_range": [0, 100]}}),
         ("random_search", {"strategy_params": {"max_tokens_range": [100, 100]}}),
         ("random_search", {"strategy_params": {"max_tokens_range": [512, 64]}}),
-        ("hyperparameter", {"strategy_params": {"max_tokens_range": ["a", 64]}}),
+        (
+            "hyperparameter",
+            {"strategy_params": {"max_tokens_range": ["a", 64]}},
+        ),
         ("random_search", {"strategy_params": {"max_tokens_range": [64]}}),
     ],
 )
-def test_hp_and_random_max_tokens_range_invalid(backend, cfg):
+def test_hp_and_random_max_tokens_range_invalid(strategy, cfg):
     with pytest.raises(HTTPException):
-        pso._validate_strategy_config(backend, cfg)
+        pso._validate_strategy_config(strategy, cfg)

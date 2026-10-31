@@ -1520,7 +1520,6 @@ class Qwen3TTSAdapter(TTSAdapter):
                 pcm_audio = await self._generate_pcm(request, resolved_model)
                 audio_bytes = await self.convert_audio_format(
                     pcm_audio,
-                    source_format=AudioFormat.PCM,
                     target_format=request.format,
                     sample_rate=self.sample_rate,
                 )
@@ -1547,7 +1546,6 @@ class Qwen3TTSAdapter(TTSAdapter):
         pcm_audio = await self._generate_pcm(request, resolved_model)
         audio_bytes = await self.convert_audio_format(
             pcm_audio,
-            source_format=AudioFormat.PCM,
             target_format=request.format,
             sample_rate=self.sample_rate,
         )

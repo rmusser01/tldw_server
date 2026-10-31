@@ -639,6 +639,16 @@ export const PAGE_MAPPINGS: PageMapping[] = [
     checklistItems: CHECKLIST_TEMPLATES.settings
   },
   {
+    name: "Chat Macros Settings",
+    category: "settings",
+    webuiPath: "/settings/chat-macros",
+    extensionOptionsPath: "/settings/chat-macros",
+    extensionSidepanelPath: null,
+    sharedComponent: "ChatMacrosSettings",
+    session: 6,
+    checklistItems: CHECKLIST_TEMPLATES.settings
+  },
+  {
     name: "Characters Settings",
     category: "settings",
     webuiPath: "/settings/characters",

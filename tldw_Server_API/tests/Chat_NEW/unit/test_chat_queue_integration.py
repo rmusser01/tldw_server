@@ -6,9 +6,8 @@ These tests stub the request queue to validate that:
 - When the queue admits quickly, the endpoint proceeds and returns 200 with a mocked LLM response.
 """
 
-import os
-import json
 import asyncio
+import os
 import tempfile
 from contextlib import contextmanager
 from unittest.mock import patch
@@ -16,9 +15,16 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+    DEFAULT_CHARACTER_NAME,
+    get_chacha_db_for_user,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user, DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.main import app
+
+pytest_plugins = (
+    "tldw_Server_API.tests.Chat.credential_runtime_fixtures",
+)
 
 
 @contextmanager
@@ -40,8 +46,10 @@ def _test_db():
     finally:
         try:
             os.unlink(db_path)
-            if os.path.exists(db_path + "-wal"): os.unlink(db_path + "-wal")
-            if os.path.exists(db_path + "-shm"): os.unlink(db_path + "-shm")
+            if os.path.exists(db_path + "-wal"):
+                os.unlink(db_path + "-wal")
+            if os.path.exists(db_path + "-shm"):
+                os.unlink(db_path + "-shm")
         except Exception:
             _ = None
 
@@ -85,7 +93,10 @@ class _QueueStubCount:
 
 
 @pytest.mark.unit
-def test_queue_reject_returns_429(monkeypatch):
+def test_queue_reject_returns_429(
+    monkeypatch,
+    execution_scoped_provider_credentials,
+):
     # Patch TEST_MODE for deterministic auth/rate behavior
     monkeypatch.setenv("TEST_MODE", "true")
 
@@ -98,9 +109,10 @@ def test_queue_reject_returns_429(monkeypatch):
         _app = app
         _app.dependency_overrides[get_chacha_db_for_user] = lambda: db
 
-        # Patch provider key & LLM call
-        with patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-test"}, clear=False), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QueueStubReject()):
+        with patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue",
+            return_value=_QueueStubReject(),
+        ):
             body = {
                 "api_provider": "openai",
                 "model": "gpt-4o-mini",
@@ -112,7 +124,10 @@ def test_queue_reject_returns_429(monkeypatch):
 
 
 @pytest.mark.unit
-def test_queue_admit_allows_request(monkeypatch):
+def test_queue_admit_allows_request(
+    monkeypatch,
+    execution_scoped_provider_credentials,
+):
     # Patch TEST_MODE for deterministic auth/rate behavior
     monkeypatch.setenv("TEST_MODE", "true")
 
@@ -138,9 +153,16 @@ def test_queue_admit_allows_request(monkeypatch):
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         }
 
-        with patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-test"}, clear=False), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QueueStubAdmit()), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=mock_response):
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue",
+                return_value=_QueueStubAdmit(),
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                return_value=mock_response,
+            ),
+        ):
             body = {
                 "api_provider": "openai",
                 "model": "gpt-4o-mini",
@@ -155,7 +177,10 @@ def test_queue_admit_allows_request(monkeypatch):
 
 
 @pytest.mark.unit
-def test_queue_enabled_skips_admission(monkeypatch):
+def test_queue_enabled_skips_admission(
+    monkeypatch,
+    execution_scoped_provider_credentials,
+):
     monkeypatch.setenv("TEST_MODE", "true")
     queue_stub = _QueueStubCount()
 
@@ -179,11 +204,21 @@ def test_queue_enabled_skips_admission(monkeypatch):
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         }
 
-        with patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-test"}, clear=False), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.QUEUED_EXECUTION", True), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=queue_stub), \
-             patch("tldw_Server_API.app.core.Chat.chat_service.get_request_queue", return_value=queue_stub), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=mock_response):
+        with (
+            patch("tldw_Server_API.app.api.v1.endpoints.chat.QUEUED_EXECUTION", True),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue",
+                return_value=queue_stub,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Chat.chat_service.get_request_queue",
+                return_value=queue_stub,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                return_value=mock_response,
+            ),
+        ):
             body = {
                 "api_provider": "openai",
                 "model": "gpt-4o-mini",

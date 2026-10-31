@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.exceptions import ToolCatalogConflictError
 from tldw_Server_API.app.services import admin_tool_catalog_service
 from tldw_Server_API.app.services.mcp_hub_service import emit_mcp_hub_audit
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="", tags=["mcp-catalogs-scope"])
 _CATALOG_NONCRITICAL_EXCEPTIONS = (
@@ -38,7 +39,7 @@ _CATALOG_NONCRITICAL_EXCEPTIONS = (
 )
 _CATALOG_MEMBER_PARSE_EXCEPTIONS = (AttributeError, TypeError, ValueError)
 _CATALOG_PAGE_SIZE = 1000
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _is_manager(role: str | None) -> bool:

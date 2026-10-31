@@ -8,6 +8,7 @@ from sqlite3 import Error as SQLiteError
 from typing import Any
 
 from loguru import logger
+
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .audit_bridge import submit_job_audit_event
@@ -42,20 +43,19 @@ def _events_enabled() -> bool:
     return is_truthy(os.getenv("JOBS_EVENTS_ENABLED"))
 
 
-def emit_job_event(event: str, *, job: dict[str, Any] | None = None, attrs: dict[str, Any] | None = None) -> None:
-    """Best-effort no-op event emitter.
+def observe_job_event(
+    event: str,
+    *,
+    job: dict[str, Any] | None = None,
+    attrs: dict[str, Any] | None = None,
+) -> None:
+    """Run the non-durable audit and logging observers for one job event."""
 
-    If `JOBS_EVENTS_ENABLED=true`, logs a compact event line. In future this can
-    be extended to push to an SSE/Webhook bus with rate limiting.
-    """
     try:
         submit_job_audit_event(event, job=job, attrs=attrs)
     except _EVENT_AUDIT_EXCEPTIONS:
         # Audit integration is best-effort. Errors should never break job flow.
         pass
-    # Only skip entirely when neither logging nor outbox are enabled
-    if not (_events_enabled() or is_truthy(os.getenv("JOBS_EVENTS_OUTBOX"))):
-        return
     meta = {}
     if job:
         for k in ("id", "uuid", "domain", "queue", "job_type", "status"):
@@ -66,10 +66,27 @@ def emit_job_event(event: str, *, job: dict[str, Any] | None = None, attrs: dict
     if _events_enabled():
         with contextlib.suppress(_EVENT_LOG_EXCEPTIONS):
             logger.bind(job_event=True).info(f"job_event event={event} attrs={meta}")
+
+
+def emit_job_event(
+    event: str,
+    *,
+    job: dict[str, Any] | None = None,
+    attrs: dict[str, Any] | None = None,
+) -> None:
+    """Observe an event and append it to the durable outbox when enabled."""
+
+    observe_job_event(event, job=job, attrs=attrs)
+    # Admission persists job.created in the same transaction as the job row.
+    # This emitter only supplies its best-effort audit/log observers for that event.
+    if event == "job.created":
+        return
+    if not is_truthy(os.getenv("JOBS_EVENTS_OUTBOX")):
+        return
     # Outbox write (append-only) when enabled
     # Optional soft rate-limit for extremely high churn
     try:
-        if _events_enabled() or is_truthy(os.getenv("JOBS_EVENTS_OUTBOX")):
+        if is_truthy(os.getenv("JOBS_EVENTS_OUTBOX")):
             # Basic rate limiter: drop writes if exceeding JOBS_EVENTS_RATE_LIMIT_HZ
             try:
                 hz = float(os.getenv("JOBS_EVENTS_RATE_LIMIT_HZ", "0") or "0")

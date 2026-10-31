@@ -2,6 +2,7 @@ import React from 'react'
 import type { InputRef } from 'antd'
 import { Input, Typography, Select, Button, Tooltip, Popover, Spin } from 'antd'
 import {
+  Network as NetworkIcon,
   Plus as PlusIcon,
   Search as SearchIcon,
 } from 'lucide-react'
@@ -395,7 +396,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           }`}
         >
           {/* Toolbar Section */}
-          <div className="flex-shrink-0 border-b border-border p-4 bg-surface">
+          <div
+            className="min-h-0 flex-shrink overflow-y-auto border-b border-border p-4 bg-surface"
+            style={{ maxHeight: '50%' }}
+            data-testid="notes-sidebar-controls"
+          >
             {/* ---- Always visible: Header row ---- */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex min-w-0 items-baseline">
@@ -517,6 +522,19 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   >
                     {t('option:notesSearch.viewModeMoodboard', {
                       defaultValue: 'Collection'
+                    })}
+                  </Button>
+                  <Button
+                    size="small"
+                    type={listViewMode === 'graph' ? 'primary' : 'default'}
+                    onClick={() => switchViewMode('graph')}
+                    disabled={listMode !== 'active'}
+                    icon={<NetworkIcon size={14} aria-hidden="true" />}
+                    className="col-span-2"
+                    data-testid="notes-view-mode-graph"
+                  >
+                    {t('option:notesSearch.viewModeGraph', {
+                      defaultValue: 'Graph'
                     })}
                   </Button>
                 </div>
@@ -991,7 +1009,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           </div>
 
           {/* Notes List Section */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-h-[240px] flex-1 overflow-y-auto" data-testid="notes-sidebar-results">
             {listMode === 'active' && listViewMode === 'timeline' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-timeline-view">
                 {listErrorState || (isFetching && (

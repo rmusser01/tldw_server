@@ -1028,7 +1028,7 @@ export const CommandsPanel: React.FC<CommandsPanelProps> = ({
                   </div>
                   {loading ? (
                     <span className="text-xs text-text-muted">
-                      {t("common:loading", "Loading...")}
+                      {t("common:loading.title", "Loading...")}
                     </span>
                   ) : null}
                 </div>

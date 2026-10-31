@@ -188,7 +188,7 @@ The work fits existing architecture and patterns, prioritizing safety and backwa
       }
     ]
   }
-  - The list is filtered per user permissions (RBAC) and deployment configuration. When RBAC is enabled, only commands the user can invoke are returned; each entry still includes `required_permission` for client display along with optional metadata such as `usage`, `args`, `requires_api_key`, `rate_limit`, and `rbac_required` for richer client UX. Deployments may choose to hide commands whose backing providers are not configured (e.g., omit `weather` when no weather provider or API key is set) to avoid advertising unusable commands; alternatively, they may expose such commands with a configurable “unavailable” message to guide users to contact an administrator.
+  - The list is filtered per user permissions and deployment configuration. Only commands the user can invoke are returned; each entry still includes `required_permission` for client display along with optional metadata such as `usage`, `args`, `requires_api_key`, `rate_limit`, and `rbac_required` for richer client UX. Deployments may choose to hide commands whose backing providers are not configured (e.g., omit `weather` when no weather provider or API key is set) to avoid advertising unusable commands; alternatively, they may expose such commands with a configurable “unavailable” message to guide users to contact an administrator.
 
 ### 7.2 Validate Dictionary
 - Method/Path: `POST /api/v1/chat/dictionaries/validate`

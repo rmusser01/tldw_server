@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
@@ -79,6 +79,13 @@ class PresentationBase(VisualStyleSelectionMixin):
     studio_data: dict[str, Any] | None = None
     slides: list[Slide] = Field(default_factory=list)
     custom_css: str | None = None
+    content_kind: str | None = "structured_slides"
+    html_document: str | None = None
+    html_sha256: str | None = None
+    html_bytes: int | None = None
+    html_slide_count: int | None = None
+    generation_job_uuid: str | None = None
+    generation_provenance: dict[str, Any] | None = None
 
 
 class PresentationCreateRequest(PresentationBase):
@@ -105,6 +112,13 @@ class PresentationPatchRequest(VisualStyleSelectionMixin):
     studio_data: dict[str, Any] | None = None
     slides: list[Slide] | None = None
     custom_css: str | None = None
+    content_kind: str | None = None
+    html_document: str | None = None
+    html_sha256: str | None = None
+    html_bytes: int | None = None
+    html_slide_count: int | None = None
+    generation_job_uuid: str | None = None
+    generation_provenance: dict[str, Any] | None = None
 
 
 class PresentationReorderRequest(BaseModel):
@@ -113,13 +127,13 @@ class PresentationReorderRequest(BaseModel):
     order: list[int] = Field(..., min_items=1)
 
 
-class PresentationResponse(PresentationBase):
-    """Presentation response model."""
+class PresentationResponseBase(BaseModel):
+    """Fields shared by every authenticated detail representation."""
 
     id: str
-    visual_style_name: str | None = None
-    visual_style_version: int | None = None
-    visual_style_snapshot: dict[str, Any] | None = None
+    title: str
+    description: str | None = None
+    theme: str = "black"
     source_type: str | None = None
     source_ref: Any | None = None
     source_query: str | None = None
@@ -130,14 +144,78 @@ class PresentationResponse(PresentationBase):
     version: int
 
 
-class PresentationVersionSummary(BaseModel):
-    """Summary for a presentation version entry."""
+class LegacyPresentationResponse(PresentationResponseBase):
+    """Exact pre-negotiation structured Slides detail shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    marp_theme: str | None = None
+    template_id: str | None = None
+    visual_style_id: str | None = None
+    visual_style_scope: str | None = None
+    visual_style_name: str | None = None
+    visual_style_version: int | None = None
+    visual_style_snapshot: dict[str, Any] | None = None
+    settings: dict[str, Any] | None = None
+    studio_data: dict[str, Any] | None = None
+    slides: list[Slide] = Field(default_factory=list)
+    custom_css: str | None = None
+
+
+class StructuredPresentationResponse(LegacyPresentationResponse):
+    """Opted-in structured Slides detail."""
+
+    content_kind: Literal["structured_slides"]
+
+
+class StandaloneHtmlPresentationResponse(PresentationResponseBase):
+    """Standalone source detail; never rendered or executed by tldw."""
+
+    content_kind: Literal["standalone_html"]
+    html_document: str
+    html_sha256: str
+    html_bytes: int
+    html_slide_count: int
+    generation_provenance: dict[str, Any]
+
+
+DiscriminatedPresentationResponse = Annotated[
+    StructuredPresentationResponse | StandaloneHtmlPresentationResponse,
+    Field(discriminator="content_kind"),
+]
+PresentationResponse = LegacyPresentationResponse | DiscriminatedPresentationResponse
+
+
+class StandaloneHtmlTombstone(BaseModel):
+    """Source-free delete result for standalone HTML."""
+
+    id: str
+    content_kind: Literal["standalone_html"]
+    deleted_at: datetime
+
+
+PresentationDeleteResponse = PresentationResponse | StandaloneHtmlTombstone
+
+
+class LegacyPresentationVersionSummary(BaseModel):
+    """Exact pre-negotiation version-list entry."""
+
+    model_config = ConfigDict(extra="forbid")
 
     presentation_id: str
     version: int
     created_at: datetime
     title: str | None = None
     deleted: bool | None = None
+
+
+class AdditivePresentationVersionSummary(LegacyPresentationVersionSummary):
+    """Opted-in source-free version-list entry."""
+
+    content_kind: Literal["structured_slides", "standalone_html"]
+
+
+PresentationVersionSummary = LegacyPresentationVersionSummary | AdditivePresentationVersionSummary
 
 
 class PresentationVersionListResponse(BaseModel):
@@ -232,8 +310,16 @@ class VisualStyleListResponse(BaseModel):
         return _default_offset_pagination_aliases(self)
 
 
-class PresentationSummary(BaseModel):
-    """Summary item for presentation listings."""
+class PresentationProvenanceSummary(BaseModel):
+    """Bounded generation provenance safe for list and search responses."""
+
+    source_kind: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
+class PresentationSummaryBase(BaseModel):
+    """Source-free fields common to presentation summaries."""
 
     id: str
     title: str
@@ -243,6 +329,58 @@ class PresentationSummary(BaseModel):
     last_modified: datetime
     deleted: bool
     version: int
+    provenance: PresentationProvenanceSummary
+
+
+class LegacyPresentationSummary(BaseModel):
+    """Exact pre-negotiation structured list/search item."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    description: str | None = None
+    theme: str
+    created_at: datetime
+    last_modified: datetime
+    deleted: bool
+    version: int
+
+
+class StructuredPresentationSummary(PresentationSummaryBase):
+    content_kind: Literal["structured_slides"]
+    slide_count: int
+
+
+class StandaloneHtmlPresentationSummary(PresentationSummaryBase):
+    content_kind: Literal["standalone_html"]
+    html_slide_count: int
+    html_bytes: int
+
+
+DiscriminatedPresentationSummary = Annotated[
+    StructuredPresentationSummary | StandaloneHtmlPresentationSummary,
+    Field(discriminator="content_kind"),
+]
+PresentationSummary = LegacyPresentationSummary | DiscriminatedPresentationSummary
+
+
+class StructuredPresentationMetadata(StructuredPresentationSummary):
+    """Closed source-free metadata response for a structured presentation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StandaloneHtmlPresentationMetadata(StandaloneHtmlPresentationSummary):
+    """Closed source-free metadata response for a standalone HTML presentation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+PresentationMetadataResponse = Annotated[
+    StructuredPresentationMetadata | StandaloneHtmlPresentationMetadata,
+    Field(discriminator="content_kind"),
+]
 
 
 class PresentationListResponse(BaseModel):
@@ -330,6 +468,216 @@ class GenerateFromRagRequest(SlideGenerationBase):
     top_k: int | None = Field(default=8, ge=1)
 
 
+class _ClosedStandaloneModel(BaseModel):
+    """Closed public schema used by the standalone HTML transport."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StandaloneHtmlPromptSource(_ClosedStandaloneModel):
+    kind: Literal["prompt"]
+    prompt: str
+
+
+class StandaloneHtmlChatSource(_ClosedStandaloneModel):
+    kind: Literal["chat"]
+    conversation_id: str
+
+
+class StandaloneHtmlMediaSource(_ClosedStandaloneModel):
+    kind: Literal["media"]
+    media_id: int = Field(ge=1, le=9_223_372_036_854_775_807)
+
+
+class StandaloneHtmlNotesSource(_ClosedStandaloneModel):
+    kind: Literal["notes"]
+    note_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class StandaloneHtmlRagSource(_ClosedStandaloneModel):
+    kind: Literal["rag"]
+    query: str = Field(max_length=20_000)
+    top_k: int = Field(default=8, ge=1, le=100)
+
+
+StandaloneHtmlGenerationSource = Annotated[
+    StandaloneHtmlPromptSource
+    | StandaloneHtmlChatSource
+    | StandaloneHtmlMediaSource
+    | StandaloneHtmlNotesSource
+    | StandaloneHtmlRagSource,
+    Field(discriminator="kind"),
+]
+
+
+class StandaloneHtmlOptions(_ClosedStandaloneModel):
+    presentation_type: Literal[
+        "pitch-deck",
+        "tech-sharing",
+        "product-launch",
+        "weekly-report",
+        "course-module",
+        "keynote",
+        "data-report",
+        "training",
+        "social-media",
+        "case-study",
+        "comparison",
+        "roadmap",
+    ]
+    audience: str = Field(max_length=500)
+    slide_count: int = Field(ge=1, le=30)
+    visual_direction: Literal[
+        "auto",
+        "dark-technical",
+        "minimal-light",
+        "editorial",
+        "corporate",
+        "soft-pastel",
+        "bold-creative",
+        "neo-brutalist",
+    ]
+    delivery_style: Literal["speaker-led", "self-guided"]
+
+
+class StandaloneHtmlGenerationRequest(_ClosedStandaloneModel):
+    generation_mode: Literal["standalone_html"]
+    generation_config_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    source: StandaloneHtmlGenerationSource
+    html_options: StandaloneHtmlOptions
+
+
+class StandaloneHtmlGenerationPendingResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["queued", "running"]
+    status_url: str
+    presentation_id: None
+    progress_text: str | None = None
+
+
+class StandaloneHtmlGenerationCompletedResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["completed"]
+    status_url: str
+    presentation_id: str
+    content_kind: Literal["standalone_html"]
+
+
+class StandaloneHtmlGenerationFailedResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["failed"]
+    status_url: str
+    presentation_id: None
+    error_code: str
+    error_message: str
+
+
+class StandaloneHtmlGenerationCancelledResponse(_ClosedStandaloneModel):
+    generation_id: str
+    status: Literal["cancelled"]
+    status_url: str
+    presentation_id: None
+    error_code: Literal["generation_cancelled"]
+
+
+StandaloneHtmlGenerationResponse = Annotated[
+    StandaloneHtmlGenerationPendingResponse
+    | StandaloneHtmlGenerationCompletedResponse
+    | StandaloneHtmlGenerationFailedResponse
+    | StandaloneHtmlGenerationCancelledResponse,
+    Field(discriminator="status"),
+]
+
+
+class StandaloneHtmlContentLimits(_ClosedStandaloneModel):
+    max_document_bytes: int
+    max_source_write_bytes: int
+    max_draft_attachment_bytes: int
+    max_slides: int
+    max_nesting_depth: int
+
+
+class StructuredSlidesContentCapability(_ClosedStandaloneModel):
+    read: Literal[True]
+    edit: Literal[True]
+
+
+StandaloneHtmlContentCapabilityReason = Literal["validator_unavailable"]
+StandaloneHtmlGenerationCapabilityReason = Literal[
+    "feature_disabled",
+    "egress_disabled",
+    "default_model_not_configured",
+    "default_model_not_allowed",
+    "default_endpoint_not_allowed",
+    "prompt_asset_unavailable",
+    "digest_key_unavailable",
+    "generation_worker_unavailable",
+    "generation_reconciler_overloaded",
+    "validator_unavailable",
+]
+
+
+class StandaloneHtmlContentCapability(_ClosedStandaloneModel):
+    read: Literal[True]
+    edit: bool
+    export_attachment: bool
+    draft_attachment: Literal[True]
+    reason: StandaloneHtmlContentCapabilityReason | None
+    limits: StandaloneHtmlContentLimits
+
+
+class SlidesContentKindsCapability(_ClosedStandaloneModel):
+    structured_slides: StructuredSlidesContentCapability
+    standalone_html: StandaloneHtmlContentCapability
+
+
+class StructuredSlidesGenerationCapability(_ClosedStandaloneModel):
+    enabled: Literal[True]
+    transport: Literal["existing_source_endpoints"]
+
+
+class StandaloneHtmlInputLimitsResponse(_ClosedStandaloneModel):
+    max_request_bytes: int
+    max_source_chars: int
+    max_source_tokens: int
+    max_audience_chars: int
+    max_source_identifier_bytes: int
+    max_note_ids: int
+    max_rag_query_chars: int
+    max_rag_top_k: int
+
+
+class StandaloneHtmlOutputLimitsResponse(_ClosedStandaloneModel):
+    max_provider_response_bytes: int
+    max_document_bytes: int
+
+
+class StandaloneHtmlGenerationCapability(_ClosedStandaloneModel):
+    enabled: bool
+    reason: StandaloneHtmlGenerationCapabilityReason | None
+    transport: Literal["slides_generation_job"]
+    source_kinds: tuple[Literal["prompt", "chat", "media", "notes", "rag"], ...]
+    provider: str | None
+    model: str | None
+    adapter_id: str | None
+    endpoint_identity: str | None
+    generation_config_revision: str | None
+    input_limits: StandaloneHtmlInputLimitsResponse
+    output_limits: StandaloneHtmlOutputLimitsResponse
+
+
+class SlidesGenerationModesCapability(_ClosedStandaloneModel):
+    structured_slides: StructuredSlidesGenerationCapability
+    standalone_html: StandaloneHtmlGenerationCapability
+
+
+class SlidesCapabilitiesResponse(_ClosedStandaloneModel):
+    schema_version: Literal[1]
+    content_kind_request_header: Literal["X-Slides-Accept-Content-Kinds"]
+    content_kinds: SlidesContentKindsCapability
+    generation_modes: SlidesGenerationModesCapability
+
+
 class ExportFormat(str, Enum):
     """Supported presentation export formats."""
 
@@ -337,6 +685,7 @@ class ExportFormat(str, Enum):
     MARKDOWN = "markdown"
     JSON = "json"
     PDF = "pdf"
+    HTML = "html"
 
 
 class PresentationRenderFormat(str, Enum):

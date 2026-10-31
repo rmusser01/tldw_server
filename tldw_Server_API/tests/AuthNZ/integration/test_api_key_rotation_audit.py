@@ -11,22 +11,14 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditW
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, APIKeyStatus
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 pytestmark = pytest.mark.integration
 
 
 async def _create_auth_user(pool, *, prefix: str) -> int:
     uname = f"{prefix}_{uuid.uuid4().hex[:8]}"
-    email = f"{uname}@example.com"
-    await pool.execute(
-        """
-        INSERT INTO users (username, email, password_hash, is_active)
-        VALUES (?, ?, ?, 1)
-        """,
-        (uname, email, "x"),
-    )
-    user_row = await pool.fetchone("SELECT id FROM users WHERE username = ?", uname)
-    return user_row["id"] if isinstance(user_row, dict) else user_row[0]
+    return await ensure_test_user(pool, uname)
 
 
 def _install_failing_mandatory_audit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,7 +144,6 @@ async def test_api_key_rotation_preserves_allowlists_and_metadata(sqlite_authnz_
     assert metadata.get("purpose") == "rotation-test"
 
     await pool.execute("DELETE FROM api_keys WHERE user_id = ?", (user_id,))
-    await pool.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
 @pytest.mark.asyncio

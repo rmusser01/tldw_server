@@ -1,17 +1,19 @@
-import pytest
-import httpx
+import traceback
 from unittest.mock import AsyncMock, patch
 
+import httpx
+import pytest
+
 from tldw_Server_API.app.core.TTS.adapters import elevenlabs_adapter as elevenlabs_mod
-from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import ElevenLabsAdapter, ElevenLabsTTSAdapter
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import ElevenLabsAdapter
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSAuthenticationError,
     TTSGenerationError,
-    TTSRateLimitError,
-    TTSTimeoutError,
     TTSProviderError,
     TTSProviderInitializationError,
+    TTSRateLimitError,
+    TTSTimeoutError,
     TTSValidationError,
 )
 
@@ -20,6 +22,20 @@ def make_http_status_error(status_code: int, body: str = "") -> httpx.HTTPStatus
     request = httpx.Request("POST", "https://api.elevenlabs.io/v1/text-to-speech/test")
     response = httpx.Response(status_code, request=request, text=body)
     return httpx.HTTPStatusError("error", request=request, response=response)
+
+
+def assert_sanitized_error(
+    exc: TTSProviderError,
+    raw_marker: str,
+    *,
+    details: dict[str, object],
+) -> None:
+    """Assert the public adapter error retains only allowlisted metadata."""
+    assert exc.details == details
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+    rendered = repr((str(exc), vars(exc), traceback.format_exception(exc)))
+    assert raw_marker not in rendered
 
 
 class TestElevenLabsAdapterBasics:
@@ -112,7 +128,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in exc_info.value.details["error"]
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("Initialization failed" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -159,7 +179,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in exc_info.value.details["body"]
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"status": 400},
+        )
         assert any("HTTP error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -169,6 +193,10 @@ class TestElevenLabsSanitizedFallbackLogs:
         adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
         adapter.client = AsyncMock()
         adapter.client.aclose = AsyncMock(side_effect=RuntimeError(raw_marker))
+        # aclose() only runs for an adapter-owned client; a pooled one is released,
+        # not closed. This test is about sanitizing the failure log, so it needs the
+        # owned path.
+        adapter._owns_client = True
         messages, sink_id = self._capture_logs(level="WARNING")
 
         try:
@@ -220,7 +248,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in exc_info.value.details["error"]
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("generation error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -238,7 +270,7 @@ class TestElevenLabsSanitizedFallbackLogs:
 
         try:
             with patch("tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter.astream_bytes", new=fake_stream):
-                with pytest.raises(RuntimeError) as exc_info:
+                with pytest.raises(TTSProviderError) as exc_info:
                     async for _ in adapter._stream_audio_elevenlabs(
                         text=request.text,
                         voice_id="21m00Tcm4TlvDq8ikWAM",
@@ -249,7 +281,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in str(exc_info.value)
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("streaming error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -265,7 +301,7 @@ class TestElevenLabsSanitizedFallbackLogs:
                 "tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter.afetch",
                 new=AsyncMock(side_effect=RuntimeError(raw_marker)),
             ):
-                with pytest.raises(RuntimeError) as exc_info:
+                with pytest.raises(TTSProviderError) as exc_info:
                     await adapter._generate_complete_elevenlabs(
                         text=request.text,
                         voice_id="21m00Tcm4TlvDq8ikWAM",
@@ -275,7 +311,11 @@ class TestElevenLabsSanitizedFallbackLogs:
         finally:
             elevenlabs_mod.logger.remove(sink_id)
 
-        assert raw_marker in str(exc_info.value)
+        assert_sanitized_error(
+            exc_info.value,
+            raw_marker,
+            details={"error_type": "RuntimeError"},
+        )
         assert any("non-stream error" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
 
@@ -292,3 +332,120 @@ class TestElevenLabsSanitizedFallbackLogs:
         assert voice_id == adapter.DEFAULT_VOICES["rachel"].id
         assert any("Voice not found" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
+
+
+class TestElevenLabsPooledClientOwnership:
+    """The adapter borrows the shared pooled client; closing it broke the process.
+
+    HTTPConnectionPool.get_client caches one client per provider, and aclose() does
+    not evict it -- only close_pool/close_client do. So the old _cleanup_resources,
+    which unconditionally closed self.client, left a dead client in the cache: every
+    later get_http_client("elevenlabs") handed it back and raised "Cannot send a
+    request, as the client has been closed" until the process restarted. initialize()
+    reaches that path on any transient failure of _fetch_user_voices, because
+    _initialize_adapter closes the adapter in its finally-block.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cleanup_does_not_close_a_pooled_client(self):
+        adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
+        pooled = AsyncMock()
+        adapter.client = pooled
+        adapter._owns_client = False  # what initialize() sets after borrowing
+
+        await adapter._cleanup_resources()
+
+        pooled.aclose.assert_not_awaited()
+        assert adapter.client is None
+
+    @pytest.mark.asyncio
+    async def test_cleanup_closes_a_client_the_adapter_created(self):
+        adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
+        owned = AsyncMock()
+        adapter.client = owned
+        adapter._owns_client = True
+
+        await adapter._cleanup_resources()
+
+        owned.aclose.assert_awaited_once()
+        assert adapter.client is None
+        assert adapter._owns_client is False
+
+    @pytest.mark.asyncio
+    async def test_pool_still_serves_a_live_client_after_adapter_close(self):
+        """The end-to-end property: one adapter's close must not poison the pool."""
+        from tldw_Server_API.app.core.TTS.tts_resource_manager import (
+            HTTPConnectionPool,
+            ResourceMetrics,
+        )
+
+        class _StubClient:
+            def __init__(self) -> None:
+                self.is_closed = False
+
+            async def aclose(self) -> None:
+                self.is_closed = True
+
+        pool = HTTPConnectionPool()
+        stub = _StubClient()
+        pool._pools["elevenlabs"] = stub
+        pool._pool_metrics["elevenlabs"] = ResourceMetrics(created_at=0.0, last_used=0.0)
+
+        adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
+        adapter.client = await pool.get_client("elevenlabs")
+        adapter._owns_client = False
+
+        await adapter._cleanup_resources()
+
+        next_client = await pool.get_client("elevenlabs")
+        assert next_client is stub
+        assert next_client.is_closed is False
+
+    @pytest.mark.asyncio
+    async def test_convenience_api_client_is_owned_and_closed(self):
+        """fetch_voices is reachable without initialize(), so it creates its own.
+
+        The convenience API lives on the ElevenLabsTTSAdapter subclass, which is where
+        _ensure_client sits; ownership itself is inherited from the base.
+        """
+        from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import (
+            ElevenLabsTTSAdapter,
+        )
+
+        adapter = ElevenLabsTTSAdapter({"elevenlabs_api_key": "xi-test"})
+        created = AsyncMock()
+        with patch(
+            "tldw_Server_API.app.core.http_client.create_async_client",
+            return_value=created,
+        ):
+            adapter._ensure_client()
+
+        assert adapter.client is created
+        assert adapter._owns_client is True
+
+        await adapter._cleanup_resources()
+        created.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["clone_voice", "get_usage"])
+    async def test_other_convenience_calls_own_and_close_their_client(self, method):
+        """clone_voice/get_usage also self-create a client; it must be owned so close() frees it."""
+        from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import (
+            ElevenLabsTTSAdapter,
+        )
+
+        adapter = ElevenLabsTTSAdapter({"elevenlabs_api_key": "xi-test"})
+        created = AsyncMock()
+        resp = AsyncMock()
+        resp.raise_for_status = lambda: None
+        resp.json = lambda: {}
+        call = adapter.clone_voice("v", [b"x"]) if method == "clone_voice" else adapter.get_usage()
+        with patch(
+            "tldw_Server_API.app.core.http_client.create_async_client",
+            return_value=created,
+        ), patch.object(elevenlabs_mod, "afetch", AsyncMock(return_value=resp)):
+            await call
+
+        assert adapter._owns_client is True
+        await adapter._cleanup_resources()
+        created.aclose.assert_awaited_once()

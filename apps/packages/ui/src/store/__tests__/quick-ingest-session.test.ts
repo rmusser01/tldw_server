@@ -2,7 +2,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
-  createEmptyQuickIngestSession,
   createQuickIngestSessionStore,
 } from "../quick-ingest-session"
 
@@ -15,9 +14,10 @@ describe("quick ingest session store", () => {
 
   it("persists a hidden completed session and rehydrates it in the same tab", () => {
     const store = createQuickIngestSessionStore()
+    store.getState().setAuthority("verified-test-owner")
+    store.getState().createDraftSession()
 
     store.getState().upsertSession({
-      ...createEmptyQuickIngestSession(),
       lifecycle: "completed",
       visibility: "hidden",
       currentStep: 5,
@@ -42,6 +42,7 @@ describe("quick ingest session store", () => {
     expect(persistedRaw).toContain('"visibility":"hidden"')
 
     const rehydratedStore = createQuickIngestSessionStore()
+    rehydratedStore.getState().setAuthority("verified-test-owner")
     const rehydrated = rehydratedStore.getState().session
 
     expect(rehydrated?.lifecycle).toBe("completed")
@@ -52,9 +53,10 @@ describe("quick ingest session store", () => {
 
   it("removes completed sessions only when clearSession is called", () => {
     const store = createQuickIngestSessionStore()
+    store.getState().setAuthority("verified-test-owner")
+    store.getState().createDraftSession()
 
     store.getState().upsertSession({
-      ...createEmptyQuickIngestSession(),
       lifecycle: "completed",
       visibility: "hidden",
       currentStep: 5,
@@ -76,6 +78,8 @@ describe("quick ingest session store", () => {
       lastModified: 1700000000000,
     })
     const store = createQuickIngestSessionStore()
+    store.getState().setAuthority("verified-test-owner")
+    store.getState().createDraftSession()
 
     store.getState().upsertSession({
       queueItems: [
@@ -105,6 +109,8 @@ describe("quick ingest session store", () => {
 
   it("merges persisted tracking metadata across direct-session updates", () => {
     const store = createQuickIngestSessionStore()
+    store.getState().setAuthority("verified-test-owner")
+    store.getState().createDraftSession()
 
     store.getState().markProcessingTracking({
       mode: "webui-direct",
@@ -142,6 +148,8 @@ describe("quick ingest session store", () => {
 
   it("clears completed run tracking when the session returns to draft", () => {
     const store = createQuickIngestSessionStore()
+    store.getState().setAuthority("verified-test-owner")
+    store.getState().createDraftSession()
 
     store.getState().markProcessingTracking({
       mode: "webui-direct",

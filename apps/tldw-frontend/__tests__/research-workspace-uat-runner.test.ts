@@ -205,7 +205,9 @@ describe("research-workspace-uat-runner", () => {
     expect(evidence.requiredSetup).toContain(
       "Sandbox-capable backend profile with [API-Routes] stable_only = true and enable = sandbox for strict workspace sandbox diagnostics"
     )
-    expect(evidence.fallback).toContain("in-app browser/CDP")
+    expect(evidence.fallback).toContain("explicit Chrome debugging endpoint")
+    expect(evidence.fallback).toContain("chromium.connectOverCDP")
+    expect(evidence.fallback).not.toMatch(/computer[ -]?control|CUA/i)
     expect(evidence.evidencePath).toContain(
       "test-results/research-workspace-final-uat-evidence.json"
     )

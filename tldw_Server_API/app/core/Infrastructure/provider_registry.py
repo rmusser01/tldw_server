@@ -95,6 +95,7 @@ class ProviderRegistryConfig:
 class _ProviderRecord(Generic[AdapterT]):
     spec: Any
     enabled: bool = True
+    generation: int = 0
 
 
 class ProviderRegistryBase(Generic[AdapterT]):
@@ -119,6 +120,8 @@ class ProviderRegistryBase(Generic[AdapterT]):
         adapter_validator: Callable[[Any], bool] | None = None,
         adapter_materializer: Callable[[str, Any], AdapterT] | None = None,
         adapter_materializer_async: Callable[[str, Any], Awaitable[AdapterT]] | None = None,
+        adapter_disposer: Callable[[str, AdapterT], None] | None = None,
+        adapter_disposer_async: Callable[[str, AdapterT], Awaitable[None]] | None = None,
         status_mapper: Callable[[Any], Any] | None = None,
         provider_enabled_callback: Callable[[str], bool | None] | None = None,
         aliases: dict[str, str] | None = None,
@@ -129,6 +132,8 @@ class ProviderRegistryBase(Generic[AdapterT]):
         self._adapter_validator = adapter_validator
         self._adapter_materializer = adapter_materializer
         self._adapter_materializer_async = adapter_materializer_async
+        self._adapter_disposer = adapter_disposer
+        self._adapter_disposer_async = adapter_disposer_async
         self._status_mapper = status_mapper
         self._provider_enabled_callback = (
             provider_enabled_callback or self._config.provider_enabled_callback
@@ -217,7 +222,13 @@ class ProviderRegistryBase(Generic[AdapterT]):
         self._validate_registration_spec(provider_key=provider_key, spec=adapter)
 
         with self._lock:
-            self._providers[provider_key] = _ProviderRecord(spec=adapter, enabled=bool(enabled))
+            previous = self._providers.get(provider_key)
+            generation = previous.generation + 1 if previous is not None else 0
+            self._providers[provider_key] = _ProviderRecord(
+                spec=adapter,
+                enabled=bool(enabled),
+                generation=generation,
+            )
             self._invalidate_provider_state_locked(provider_key)
 
         if aliases:
@@ -260,6 +271,49 @@ class ProviderRegistryBase(Generic[AdapterT]):
         """Clear cached adapter and failure markers for a provider key."""
         self._adapter_cache.pop(provider_key, None)
         self._failed_providers.pop(provider_key, None)
+
+    def _dispose_stale_adapter(self, provider_key: str, adapter: AdapterT) -> None:
+        """Dispose one stale materialization without masking its discarded result."""
+        if self._adapter_disposer is None:
+            return
+        try:
+            self._adapter_disposer(provider_key, adapter)
+        except Exception as exc:
+            logger.warning(
+                "Failed to dispose stale adapter for provider '{}' ({})",
+                provider_key,
+                type(exc).__name__,
+            )
+
+    async def _dispose_stale_adapter_async(
+        self,
+        provider_key: str,
+        adapter: AdapterT,
+    ) -> None:
+        """Dispose one stale async materialization outside registry locks."""
+        if self._adapter_disposer_async is None:
+            self._dispose_stale_adapter(provider_key, adapter)
+            return
+        try:
+            await self._adapter_disposer_async(provider_key, adapter)
+        except Exception as exc:
+            logger.warning(
+                "Failed to dispose stale adapter for provider '{}' ({})",
+                provider_key,
+                type(exc).__name__,
+            )
+
+    def invalidate_provider(self, name: str) -> None:
+        """Invalidate one provider and supersede any in-flight materialization."""
+        provider_key = self.resolve_provider_name(name)
+        if not provider_key:
+            return
+        with self._lock:
+            record = self._providers.get(provider_key)
+            if record is None:
+                return
+            record.generation += 1
+            self._invalidate_provider_state_locked(provider_key)
 
     def _validate_registration_spec(self, *, provider_key: str, spec: Any) -> None:
         candidate_for_spec = spec
@@ -389,6 +443,7 @@ class ProviderRegistryBase(Generic[AdapterT]):
                 if cached is not None:
                     return cached
                 spec = record.spec
+                generation = record.generation
 
             try:
                 adapter = self._materialize_adapter(provider_key, spec)
@@ -396,23 +451,34 @@ class ProviderRegistryBase(Generic[AdapterT]):
                     raise TypeError(f"Adapter for provider '{provider_key}' failed validation")
             except Exception as exc:
                 with self._lock:
-                    self._mark_failure_locked(provider_key)
+                    current = self._providers.get(provider_key)
+                    if current is record and current.generation == generation:
+                        self._mark_failure_locked(provider_key)
                 logger.error("Failed to initialize adapter for provider '{}': {}", provider_key, exc)
                 return None
 
+            stale = False
             with self._lock:
-                record = self._providers.get(provider_key)
-                if record is None:
-                    return None
-                if not self._is_effectively_enabled_locked(provider_key, record):
+                current = self._providers.get(provider_key)
+                if (
+                    current is not record
+                    or current.generation != generation
+                ):
+                    stale = True
+                elif not self._is_effectively_enabled_locked(provider_key, current):
                     self._invalidate_provider_state_locked(provider_key)
                     return None
-                cached = self._adapter_cache.get(provider_key)
-                if cached is not None:
-                    return cached
-                self._adapter_cache[provider_key] = adapter
-                self._failed_providers.pop(provider_key, None)
-                return adapter
+                else:
+                    cached = self._adapter_cache.get(provider_key)
+                    if cached is not None:
+                        return cached
+                    self._adapter_cache[provider_key] = adapter
+                    self._failed_providers.pop(provider_key, None)
+                    return adapter
+
+            if stale:
+                self._dispose_stale_adapter(provider_key, adapter)
+            return None
 
     def _get_or_create_sync_lock(self, provider_key: str) -> threading.Lock:
         with self._lock:
@@ -466,6 +532,7 @@ class ProviderRegistryBase(Generic[AdapterT]):
                 if cached is not None:
                     return cached
                 spec = record.spec
+                generation = record.generation
 
             try:
                 if self._adapter_materializer_async is not None:
@@ -476,13 +543,26 @@ class ProviderRegistryBase(Generic[AdapterT]):
                     raise TypeError(f"Adapter for provider '{provider_key}' failed validation")
             except Exception as exc:
                 with self._lock:
-                    self._mark_failure_locked(provider_key)
+                    current = self._providers.get(provider_key)
+                    if current is record and current.generation == generation:
+                        self._mark_failure_locked(provider_key)
                 logger.error("Failed to initialize adapter for provider '{}': {}", provider_key, exc)
                 return None
 
+            stale = False
             with self._lock:
-                self._adapter_cache[provider_key] = adapter
-                self._failed_providers.pop(provider_key, None)
+                current = self._providers.get(provider_key)
+                if (
+                    current is not record
+                    or current.generation != generation
+                ):
+                    stale = True
+                else:
+                    self._adapter_cache[provider_key] = adapter
+                    self._failed_providers.pop(provider_key, None)
+            if stale:
+                await self._dispose_stale_adapter_async(provider_key, adapter)
+                return None
             return adapter
 
     def list_providers(self, *, include_disabled: bool = True) -> list[str]:

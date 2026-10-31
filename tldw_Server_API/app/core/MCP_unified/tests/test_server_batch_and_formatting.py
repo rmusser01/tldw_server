@@ -68,7 +68,28 @@ async def test_tools_call_dict_result_is_json_content():
     content = resp.result.get("content")
     assert isinstance(content, list) and content
     assert content[0].get("type") == "json"
-    assert content[0].get("json") == {"ok": True, "x": 7}
+
+    # The subject is that a dict result travels as type "json" rather than stringified,
+    # and that the module's own fields arrive intact.
+    payload = content[0].get("json")
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["x"] == 7
+
+    # This was an exact-equality check against {"ok": True, "x": 7}, which broke when
+    # execution eval metadata was attached to tool results. Exact matching cannot work
+    # here at all now -- eval carries duration_ms, which differs every run. Assert the
+    # stable identity fields and ignore the timing. See TASK-13358.
+    eval_meta = payload["eval"]
+    assert eval_meta["tool_name"] == "dict.echo"
+    assert eval_meta["result_kind"] == "dict_result"
+    assert eval_meta["action_family"] == "dict"
+    assert eval_meta["truncated"] is False
+    assert isinstance(eval_meta["duration_ms"], (int, float))
+
+    # And nothing beyond the module's fields plus eval, so a future addition is a
+    # deliberate change to this assertion rather than a silent one.
+    assert set(payload) == {"ok", "x", "eval"}, sorted(payload)
 
     await server.shutdown()
     await reset_module_registry()

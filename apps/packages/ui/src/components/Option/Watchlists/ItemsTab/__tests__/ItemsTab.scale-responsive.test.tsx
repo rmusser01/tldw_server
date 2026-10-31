@@ -292,7 +292,7 @@ describe("ItemsTab scale and responsive behavior", () => {
 
     const initialFetchCallCount = (serviceMocks.fetchScrapedItems as Mock).mock.calls.length
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }))
 
     await waitFor(() => {
       expect((serviceMocks.fetchScrapedItems as Mock).mock.calls.length).toBeGreaterThan(

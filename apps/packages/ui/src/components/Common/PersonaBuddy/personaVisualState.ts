@@ -132,6 +132,7 @@ export const resolvePersonaVisualState = (
   const liveState = normalizeLiveVoiceState(input.liveVoiceState)
   if (input.hasError || input.recovering) return "error"
   if (input.approvalNeeded) return "approval_needed"
+  if (input.isOffline) return "offline"
 
   const now = input.now ?? Date.now()
   if (
@@ -151,6 +152,5 @@ export const resolvePersonaVisualState = (
   if (toNormalizedToken(input.activeToolStatus)) return "tool_running"
   if (input.wakeArmed && (!liveState || liveState === "idle")) return "wake_armed"
   if (liveState) return liveState
-  if (input.isOffline) return "offline"
   return "idle"
 }

@@ -188,7 +188,13 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         ej.status = ExportStatus.CANCELLED
                         ej.completed_at = datetime.now(timezone.utc)
                         svc._save_export_job(ej)
-                    jm.finalize_cancelled(int(job["id"]), reason="cancel requested before start")
+                    jm.finalize_cancelled(
+                        int(job["id"]),
+                        reason="cancel requested before start",
+                        expected_uuid=str(job["uuid"]),
+                        worker_id=worker_id,
+                        lease_id=str(lease_id),
+                    )
                     continue
                 try:
                     # Build selections
@@ -261,7 +267,13 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                                 ej.completed_at = datetime.now(timezone.utc)
                                 svc._save_export_job(ej)
                             _safe_remove_export_file(file_path)
-                            jm.finalize_cancelled(int(job["id"]), reason="cancel requested during processing")
+                            jm.finalize_cancelled(
+                                int(job["id"]),
+                                reason="cancel requested during processing",
+                                expected_uuid=str(job["uuid"]),
+                                worker_id=worker_id,
+                                lease_id=str(lease_id),
+                            )
                             continue
                         try:
                             ej = svc._get_export_job(chatbooks_job_id)
@@ -344,7 +356,13 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             ij.status = ImportStatus.CANCELLED
                             ij.completed_at = datetime.now(timezone.utc)
                             svc._save_import_job(ij)
-                        jm.finalize_cancelled(int(job["id"]), reason="cancel requested before start")
+                        jm.finalize_cancelled(
+                            int(job["id"]),
+                            reason="cancel requested before start",
+                            expected_uuid=str(job["uuid"]),
+                            worker_id=worker_id,
+                            lease_id=str(lease_id),
+                        )
                         continue
                     raw_content_selections = payload.get("content_selections")
                     cs = None if raw_content_selections is None else {}
@@ -396,7 +414,13 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                                 ij.status = ImportStatus.CANCELLED
                                 ij.completed_at = datetime.now(timezone.utc)
                                 svc._save_import_job(ij)
-                            jm.finalize_cancelled(int(job["id"]), reason="cancel requested during processing")
+                            jm.finalize_cancelled(
+                                int(job["id"]),
+                                reason="cancel requested during processing",
+                                expected_uuid=str(job["uuid"]),
+                                worker_id=worker_id,
+                                lease_id=str(lease_id),
+                            )
                             continue
                         if ij and ij.status != ImportStatus.CANCELLED:
                             ij.status = ImportStatus.COMPLETED

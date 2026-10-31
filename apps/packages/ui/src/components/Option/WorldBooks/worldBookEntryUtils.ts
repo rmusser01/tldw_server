@@ -13,6 +13,23 @@ export const normalizeKeywordList = (value: unknown): string[] => {
   return []
 }
 
+export const normalizeWorldBookEntryIdentifier = <T>(entry: T): T => {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry
+  const record = entry as T & Record<string, unknown>
+  if (record.entry_id != null) return entry
+
+  const rawCanonicalId = record.id
+  const canonicalId =
+    typeof rawCanonicalId === "number"
+      ? rawCanonicalId
+      : typeof rawCanonicalId === "string" && /^[1-9]\d*$/.test(rawCanonicalId)
+        ? Number(rawCanonicalId)
+        : null
+  if (canonicalId === null || !Number.isSafeInteger(canonicalId) || canonicalId <= 0) return entry
+
+  return { ...record, entry_id: canonicalId }
+}
+
 export const estimateEntryTokens = (content: unknown): number => {
   const chars = String(content || "").length
   if (chars === 0) return 0

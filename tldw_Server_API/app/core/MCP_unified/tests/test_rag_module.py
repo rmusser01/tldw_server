@@ -748,6 +748,8 @@ async def test_default_controls_enforce_source_tool_permission(monkeypatch: pyte
 async def test_default_controls_require_source_tool_module_registered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     protocol = MCPProtocol()
+    # Empty registry: the global one may hold a media module from earlier tests.
+    protocol.module_registry = ModuleRegistry()
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
@@ -939,6 +941,7 @@ async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPat
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     _install_source_tool_registry(protocol, "media.search")
+    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
     context = RequestContext(request_id="rag-jsonrpc-smoke", user_id="1", client_id="unit")
 
     search = await protocol.process_request(

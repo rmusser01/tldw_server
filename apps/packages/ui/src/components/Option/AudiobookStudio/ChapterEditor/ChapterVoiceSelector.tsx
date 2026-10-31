@@ -1,5 +1,5 @@
 import React, { useMemo } from "react"
-import { Select, Space, Typography } from "antd"
+import { Select, Space, Switch, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import { Mic } from "lucide-react"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -36,6 +36,12 @@ export const ChapterVoiceSelector: React.FC<ChapterVoiceSelectorProps> = ({
   })
 
   const provider = voiceConfig.provider || ttsSettings?.ttsProvider || "browser"
+  const hasLocalBackendChoice = voiceConfig.tldwBackend !== undefined
+  const configuredBackend =
+    voiceConfig.tldwBackend ?? ttsSettings?.tldwTtsBackend ?? ""
+  const configuredTldwModel =
+    voiceConfig.tldwModel ||
+    (hasLocalBackendChoice ? undefined : ttsSettings?.tldwTtsModel)
   // Infer tldw provider key from the selected model
   const inferredProviderKey = inferTldwProviderFromModel(voiceConfig.tldwModel)
 
@@ -48,6 +54,8 @@ export const ChapterVoiceSelector: React.FC<ChapterVoiceSelectorProps> = ({
     elevenLabsLoading
   } = useTtsProviderData({
     provider,
+    backend: configuredBackend || undefined,
+    model: configuredTldwModel,
     elevenLabsApiKey,
     inferredProviderKey
   })
@@ -104,8 +112,8 @@ export const ChapterVoiceSelector: React.FC<ChapterVoiceSelectorProps> = ({
     }
     if (provider === "tldw" && tldwVoiceCatalog) {
       return tldwVoiceCatalog.map((v) => ({
-        value: v.id || v.name,
-        label: v.name || v.id
+        value: v.voice_id || v.id || v.name,
+        label: v.name || v.voice_id || v.id
       }))
     }
     if (provider === "elevenlabs" && elevenLabsData?.voices) {
@@ -118,13 +126,75 @@ export const ChapterVoiceSelector: React.FC<ChapterVoiceSelectorProps> = ({
   }, [provider, voiceConfig.openAiModel, tldwVoiceCatalog, elevenLabsData])
 
   // TLDW provider key options (from providers object)
+  const explicitBackendSupported =
+    providersInfo?.supports_explicit_backend === true
   const tldwProviderOptions = useMemo(() => {
     if (!providersInfo?.providers) return []
-    return Object.entries(providersInfo.providers).map(([key, info]) => ({
-      value: key,
-      label: info.provider_name || key
-    }))
+    return [
+      { value: "", label: "Automatic (legacy model inference)" },
+      ...Object.entries(providersInfo.providers)
+        .filter(
+          ([backend, info]) =>
+            typeof info.display_name === "string" ||
+            backend === "openrouter" ||
+            backend.startsWith("gateway:")
+        )
+        .map(([key, info]) => ({
+          value: key,
+          label: info.display_name || key
+        }))
+    ]
   }, [providersInfo])
+
+  const handleBackendChange = (backend: string) => {
+    const capabilities = providersInfo?.providers?.[backend]
+    const model =
+      capabilities?.default_model || capabilities?.models?.[0] || undefined
+    const modelCapabilities = model
+      ? capabilities?.model_capabilities?.[model]
+      : undefined
+    const firstVoice = capabilities?.voices?.[0]
+    const voice =
+      modelCapabilities?.default_voice ||
+      modelCapabilities?.voices?.[0] ||
+      firstVoice?.voice_id ||
+      firstVoice?.id ||
+      firstVoice?.name ||
+      undefined
+
+    onChange({
+      ...voiceConfig,
+      provider: "tldw",
+      tldwBackend: backend,
+      tldwAllowFallback: voiceConfig.tldwAllowFallback ?? true,
+      tldwModel: model,
+      tldwVoice: voice
+    })
+  }
+
+  const gatewayControls =
+    provider === "tldw" && explicitBackendSupported ? (
+      <>
+        <div aria-label="Chapter TTS backend">
+          <Select
+            size={compact ? "small" : "middle"}
+            value={configuredBackend}
+            onChange={handleBackendChange}
+            options={tldwProviderOptions}
+            style={compact ? { minWidth: 160 } : undefined}
+            className={compact ? undefined : "w-full"}
+          />
+        </div>
+        <Switch
+          size="small"
+          aria-label="Chapter allow configured fallback"
+          checked={voiceConfig.tldwAllowFallback !== false}
+          onChange={(checked) =>
+            onChange({ ...voiceConfig, tldwAllowFallback: checked })
+          }
+        />
+      </>
+    ) : null
 
   const handleProviderChange = (value: string) => {
     // Clear all provider-specific settings when switching
@@ -206,6 +276,7 @@ export const ChapterVoiceSelector: React.FC<ChapterVoiceSelectorProps> = ({
           style={{ minWidth: 100 }}
           dropdownStyle={{ minWidth: 120 }}
         />
+        {gatewayControls}
         {modelOptions.length > 0 && (
           <Select
             size="small"
@@ -250,6 +321,15 @@ export const ChapterVoiceSelector: React.FC<ChapterVoiceSelectorProps> = ({
           className="w-full"
         />
       </div>
+
+      {gatewayControls && (
+        <div>
+          <Text type="secondary" className="text-xs block mb-1">
+            Backend
+          </Text>
+          <div className="flex items-center gap-2">{gatewayControls}</div>
+        </div>
+      )}
 
       {modelOptions.length > 0 && (
         <div>

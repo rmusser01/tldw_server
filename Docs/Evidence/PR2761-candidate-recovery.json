@@ -1,0 +1,308 @@
+{
+  "result": "passed candidate same-image backup/restore smoke; cross-version baseline remains blocked",
+  "candidate_image": "sha256:e01578be89000870b86c09164ad724160654f410a755a44fb84500857977b630",
+  "candidate_amd64_manifest": "sha256:0b957248ad6e78d7d86d1090b1687dd6989c5a190bb9292061991b04a04ac58a",
+  "source_base": "0cec0bb409ddbd2de0089e1909b4b6b718823de3",
+  "dockerfile_fix_commit": "50dcf5453b1ba10b0eabb505ff32b831f47f8185",
+  "dockerfile_patch_sha256": "6222043065a8ba0c60278f1bc5dd73cc87c211c55b8d4bc8c8e4844db3b570c4",
+  "source_scope": "Clean base archive plus Dockerfile fix; application runtime source equals fix commit, with older embedded documentation/tests/metadata. Not the final published artifact.",
+  "profile": {
+    "auth": "single_user",
+    "database": "SQLite",
+    "redis_aof": true,
+    "app_workers": 1,
+    "app_cpus": 2,
+    "app_memory_bytes": 4294967296,
+    "redis_cpus": 0.5,
+    "redis_memory_bytes": 268435456,
+    "host": "arm64 Docker Desktop; amd64 emulation",
+    "network": "internal, no published ports",
+    "providers": "offline; no external provider calls"
+  },
+  "backup_checksums": {
+    "app-data.tar": "fb001b3cd20c8bdd7eea0ff650c931cce8a5630f4f9ca89095e45f307be4787d",
+    "redis.rdb": "b336c2acf5a113090d5a1c0a1417a6f39ffb773af69f7849e17e7836d5330857"
+  },
+  "config_archive_sha256": "96b3b529a4097cb7c630b8326d66fa123b80f6e0f80fa2b059cc5d71595c45dd",
+  "acceptance": {
+    "readiness_http_status": 200,
+    "account_identity_preserved": true,
+    "note_content_preserved": true,
+    "conversation_title_preserved": true,
+    "attachment_bytes": 34,
+    "attachment_sha256": "5fc7520f7125621db3a9da5127c795e3107b39915fb3e4d2a381668618d8c1c2",
+    "runtime_config_sha256": "12252fee5b8a9c77837f8b2165e1ff5ef64a44178a5cf4bab73311f4a09520cf",
+    "runtime_config_identical": true,
+    "redis_marker_preserved": true
+  },
+  "database_integrity_before": [
+    {
+      "path": "jobs.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 12,
+      "schema_versions": {}
+    },
+    {
+      "path": "monitoring_alerts.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 4,
+      "schema_versions": {}
+    },
+    {
+      "path": "circuit_breaker_registry.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 3,
+      "schema_versions": {
+        "circuit_breaker_registry_schema_version": [
+          [
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "path": "governance.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 3,
+      "schema_versions": {}
+    },
+    {
+      "path": "users.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 108,
+      "schema_versions": {}
+    },
+    {
+      "path": "mcp_docs.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 19,
+      "schema_versions": {}
+    },
+    {
+      "path": "user_databases/1/Media_DB_v2.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 105,
+      "schema_versions": {
+        "schema_version": [
+          [
+            26
+          ]
+        ]
+      }
+    },
+    {
+      "path": "user_databases/1/Personalization.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 22,
+      "schema_versions": {}
+    },
+    {
+      "path": "user_databases/1/ChaChaNotes.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 188,
+      "schema_versions": {
+        "db_schema_version": [
+          [
+            "rag_char_chat_schema",
+            66
+          ]
+        ]
+      }
+    },
+    {
+      "path": "user_databases/1/evaluations/evaluations.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 6,
+      "schema_versions": {}
+    },
+    {
+      "path": "user_databases/1/workflows/workflows.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 11,
+      "schema_versions": {
+        "workflow_schema_version": [
+          [
+            9
+          ]
+        ]
+      }
+    },
+    {
+      "path": "user_databases/1/vector_store/vector_store_batches.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 1,
+      "schema_versions": {}
+    }
+  ],
+  "database_integrity_after": [
+    {
+      "path": "jobs.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 12,
+      "schema_versions": {}
+    },
+    {
+      "path": "monitoring_alerts.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 4,
+      "schema_versions": {}
+    },
+    {
+      "path": "circuit_breaker_registry.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 3,
+      "schema_versions": {
+        "circuit_breaker_registry_schema_version": [
+          [
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "path": "governance.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 3,
+      "schema_versions": {}
+    },
+    {
+      "path": "users.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 108,
+      "schema_versions": {}
+    },
+    {
+      "path": "mcp_docs.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 19,
+      "schema_versions": {}
+    },
+    {
+      "path": "user_databases/1/Media_DB_v2.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 105,
+      "schema_versions": {
+        "schema_version": [
+          [
+            26
+          ]
+        ]
+      }
+    },
+    {
+      "path": "user_databases/1/Personalization.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 22,
+      "schema_versions": {}
+    },
+    {
+      "path": "user_databases/1/ChaChaNotes.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 188,
+      "schema_versions": {
+        "db_schema_version": [
+          [
+            "rag_char_chat_schema",
+            66
+          ]
+        ]
+      }
+    },
+    {
+      "path": "user_databases/1/evaluations/evaluations.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 6,
+      "schema_versions": {}
+    },
+    {
+      "path": "user_databases/1/workflows/workflows.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 11,
+      "schema_versions": {
+        "workflow_schema_version": [
+          [
+            9
+          ]
+        ]
+      }
+    },
+    {
+      "path": "user_databases/1/vector_store/vector_store_batches.db",
+      "integrity": [
+        "ok"
+      ],
+      "table_count": 1,
+      "schema_versions": {}
+    }
+  ],
+  "dependency_inventory": {
+    "path": "PR2761-candidate-dependencies.txt",
+    "entries": 286,
+    "sha256": "703c3cbe5b42a7e022af812f3121595033fcf6a304d92171f08c25def4f39baa"
+  },
+  "recovery_corrections": [
+    "Load RDB with appendonly disabled, verify marker, enable AOF and finish rewrite before restart.",
+    "Restore app/config volume-root ownership to uid/gid10001; initial controller restored only file ownership."
+  ],
+  "published_baseline": {
+    "image": "ghcr.io/rmusser01/tldw_server@sha256:70fb5ef2ce0e7bd11d0c359d16ccacae5493bf3c3064a5f4eefd86d99a06f933",
+    "version": "0.1.38",
+    "startup": "failed: ModuleNotFoundError: mcp_unified"
+  },
+  "cleanup": "Rehearsal containers and internal network removed; only own test volumes, images and private temporary backup directory retained.",
+  "remaining_limits": [
+    "No working published-baseline upgrade/downgrade proved.",
+    "Not PostgreSQL/production-reference/Caddy/multi-worker certification.",
+    "Not capacity/soak certification, provider testing, encrypted personal-context or complete erasure evidence.",
+    "Floating dependency resolution remains owned by supply-chain task."
+  ],
+  "tested_date": "2026-09-10"
+}

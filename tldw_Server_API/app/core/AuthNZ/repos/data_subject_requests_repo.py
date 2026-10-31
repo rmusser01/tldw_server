@@ -9,6 +9,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import load_json
 
 
 @dataclass
@@ -41,19 +42,6 @@ class AuthnzDataSubjectRequestsRepo:
         if db_fs_path:
             ensure_authnz_tables(Path(str(db_fs_path)))
 
-    @staticmethod
-    def _parse_json_field(value: Any, *, fallback: Any) -> Any:
-        if value is None:
-            return fallback
-        if isinstance(value, (list, dict)):
-            return value
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return fallback
-        return fallback
-
     @classmethod
     def _normalize_record(cls, row: Any) -> dict[str, Any]:
         """Normalize backend row types into JSON-friendly dicts."""
@@ -70,18 +58,9 @@ class AuthnzDataSubjectRequestsRepo:
                 with contextlib.suppress(Exception):
                     record[field] = int(record[field])
 
-        record["selected_categories"] = cls._parse_json_field(
-            record.get("selected_categories"),
-            fallback=[],
-        )
-        record["preview_summary"] = cls._parse_json_field(
-            record.get("preview_summary"),
-            fallback=[],
-        )
-        record["coverage_metadata"] = cls._parse_json_field(
-            record.get("coverage_metadata"),
-            fallback={},
-        )
+        record["selected_categories"] = load_json(record.get("selected_categories"), list)
+        record["preview_summary"] = load_json(record.get("preview_summary"), list)
+        record["coverage_metadata"] = load_json(record.get("coverage_metadata"), dict)
 
         if "requested_at" in record and record["requested_at"] is not None:
             with contextlib.suppress(Exception):

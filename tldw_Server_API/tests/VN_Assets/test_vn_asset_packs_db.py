@@ -10,6 +10,8 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import (
     ensure_vn_asset_tables,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def chacha_db() -> Generator[CharactersRAGDB, None, None]:
@@ -31,6 +33,58 @@ def test_vn_asset_tables_are_created(chacha_db: CharactersRAGDB) -> None:
         "vn_asset_items",
         "vn_asset_batches",
     }.issubset(table_names)
+
+
+def test_batch_recipe_columns_migrate_and_execution_recipe_is_first_writer_wins(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "Recipe Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Recipe Pack")
+    recipe = {"version": 1, "slots": [{"slot_id": 7, "prompt": "original"}]}
+
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, recipe=recipe, source_batch_id=13,
+    )
+    first = repo.set_execution_recipe_if_absent(batch["id"], {"version": 1, "slots": [{"slot_id": 7, "backend": "a"}]})
+    second = repo.set_execution_recipe_if_absent(batch["id"], {"version": 1, "slots": [{"slot_id": 7, "backend": "b"}]})
+
+    assert json.loads(batch["recipe_json"]) == recipe
+    assert batch["source_batch_id"] == 13
+    assert json.loads(first["execution_recipe_json"])["slots"][0]["backend"] == "a"
+    assert second["execution_recipe_json"] == first["execution_recipe_json"]
+
+
+def test_existing_batch_table_receives_nullable_recipe_columns(chacha_db: CharactersRAGDB) -> None:
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "CREATE TABLE vn_asset_batches (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+            "job_batch_id TEXT, options_json TEXT)"
+        )
+        conn.execute("INSERT INTO vn_asset_batches (id, options_json) VALUES (1, '{}')")
+
+    ensure_vn_asset_tables(chacha_db)
+
+    row = chacha_db.execute_query(
+        "SELECT recipe_json, execution_recipe_json, source_batch_id FROM vn_asset_batches WHERE id = 1"
+    ).fetchone()
+    assert tuple(row) == (None, None, None)
+
+
+def test_existing_slot_table_receives_failure_batch_column(chacha_db: CharactersRAGDB) -> None:
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "CREATE TABLE vn_asset_slots (id INTEGER PRIMARY KEY, pack_id INTEGER, "
+            "depends_on_slot_id INTEGER)"
+        )
+        conn.execute("INSERT INTO vn_asset_slots (id, pack_id) VALUES (1, 2)")
+
+    ensure_vn_asset_tables(chacha_db)
+
+    row = chacha_db.execute_query(
+        "SELECT last_failed_batch_id, latest_generation_batch_id FROM vn_asset_slots WHERE id = 1"
+    ).fetchone()
+    assert tuple(row) == (None, None)
 
 
 def test_ensure_vn_asset_tables_rejects_non_sqlite_before_transaction() -> None:

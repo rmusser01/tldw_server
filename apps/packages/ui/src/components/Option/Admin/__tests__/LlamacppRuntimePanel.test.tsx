@@ -2,6 +2,10 @@ import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { LlamacppRuntimePanel } from "../LlamacppRuntimePanel"
+import i18next from "i18next"
+import { initReactI18next } from "react-i18next"
+
+void i18next.use(initReactI18next).init({ lng: "en", resources: {} })
 
 const profiles = [
   {
@@ -97,7 +101,9 @@ describe("LlamacppRuntimePanel", () => {
     expect(screen.getByText("http://127.0.0.1:8181")).toBeTruthy()
     expect(screen.getByText("8182")).toBeTruthy()
     expect(screen.getByText("stopped")).toBeTruthy()
-    expect(screen.getByText("mmproj pairing is saved but not loaded.")).toBeTruthy()
+    expect(
+      screen.getByText("mmproj pairing is saved but not loaded.")
+    ).toBeTruthy()
 
     fireEvent.click(screen.getByLabelText("Stop Qwen fixed port"))
     fireEvent.click(screen.getByLabelText("Start Vision draft"))
@@ -206,7 +212,9 @@ describe("LlamacppRuntimePanel", () => {
     expect(screen.getByText("vision")).toBeTruthy()
     expect(screen.getByText("Vision input")).toBeTruthy()
     expect(screen.getByText("mmproj-chat.gguf")).toBeTruthy()
-    expect(screen.getByText("Projector metadata is filename-derived.")).toBeTruthy()
+    expect(
+      screen.getByText("Projector metadata is filename-derived.")
+    ).toBeTruthy()
     expect(screen.getByText("Embeddings")).toBeTruthy()
     expect(screen.getByText("Rerank")).toBeTruthy()
   })
@@ -267,9 +275,9 @@ describe("LlamacppRuntimePanel", () => {
     )
 
     expect(
-      screen.getByText("Runtime inventory failed to load.").closest(
-        '[data-ds-component="Alert"]'
-      )
+      screen
+        .getByText("Runtime inventory failed to load.")
+        .closest('[data-ds-component="Alert"]')
     ).toHaveAttribute("role", "status")
   })
 })

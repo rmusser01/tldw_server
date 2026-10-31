@@ -406,9 +406,29 @@ export function ProviderSetupStep({
   const defaultSaveIsCurrent = Boolean(
     savedPayloadFingerprints[defaultProvider] === defaultValidationFingerprint,
   );
+  const localProviderMissingModel = orderedProviders.find(
+    (provider) =>
+      selectedProviders.has(provider.provider_key) &&
+      provider.provider_type === "local_endpoint" &&
+      !values[provider.provider_key]?.model.trim(),
+  );
+  const localProviderSavesAreCurrent = orderedProviders
+    .filter((provider) =>
+      selectedProviders.has(provider.provider_key) &&
+      provider.provider_type === "local_endpoint",
+    )
+    .every((provider) => {
+      const providerValues = values[provider.provider_key] ?? emptyValues;
+      return (
+        savedPayloadFingerprints[provider.provider_key] ===
+        providerFingerprint(provider, providerValues, providerValues.model.trim())
+      );
+    });
   const canContinue = Boolean(
     defaultProvider &&
       selectedDefaultModel &&
+      !localProviderMissingModel &&
+      localProviderSavesAreCurrent &&
       savedProviders[defaultProvider] &&
       savedDefaultProvider === defaultProvider &&
       defaultSaveIsCurrent &&
@@ -563,13 +583,13 @@ export function ProviderSetupStep({
       provider_key: provider.provider_key,
       api_key: apiKey,
       base_url: baseUrl,
-      model,
+      model: model || null,
       make_default: provider.provider_key === defaultProvider,
     };
   };
 
   const validateProvider = async (provider: SetupProviderCatalogEntry) => {
-    if (provider.provider_key === defaultProvider && !selectedDefaultModel) {
+    if (provider.provider_type !== "local_endpoint" && provider.provider_key === defaultProvider && !selectedDefaultModel) {
       setError("Default model is required before validation.");
       return;
     }
@@ -660,6 +680,13 @@ export function ProviderSetupStep({
 
   const saveConfiguredProviders = async () => {
     if (!defaultProvider || !defaultProviderConfig || !selectedDefaultModel) {
+      return;
+    }
+    if (localProviderMissingModel) {
+      setError(
+        `${localProviderMissingModel.label} needs a model. Select a discovered model or enter its name before saving.`,
+      );
+      focusProviderField(localProviderMissingModel.provider_key, "model");
       return;
     }
     setSavingProvider(true);
@@ -927,11 +954,20 @@ export function ProviderSetupStep({
                     </div>
                   ) : null}
 
-                  {defaultProvider === provider.provider_key ? (
+                  <div>
                     <label className="block text-sm font-medium text-text">
-                      <span>Default model</span>
+                      <span>
+                        {defaultProvider === provider.provider_key
+                          ? "Default model"
+                          : `${provider.label} model`}
+                      </span>
                       <input
                         id={`provider-${provider.provider_key}-model`}
+                        aria-describedby={`provider-${provider.provider_key}-model-help`}
+                        aria-required={
+                          defaultProvider === provider.provider_key ||
+                          provider.provider_type === "local_endpoint"
+                        }
                         ref={registerProviderField(
                           provider.provider_key,
                           "model",
@@ -950,7 +986,17 @@ export function ProviderSetupStep({
                         placeholder="Model name"
                       />
                     </label>
-                  ) : null}
+                    <p
+                      id={`provider-${provider.provider_key}-model-help`}
+                      className="mt-1 text-xs text-text-muted"
+                    >
+                      {provider.provider_type === "local_endpoint"
+                        ? "Select a discovered model or enter its name before saving this endpoint."
+                        : defaultProvider === provider.provider_key
+                          ? "Enter the model to use for your first chat."
+                          : "Optional. Set a model to use with this provider."}
+                    </p>
+                  </div>
 
                   <label className="flex items-center gap-2 text-sm text-text">
                     <input

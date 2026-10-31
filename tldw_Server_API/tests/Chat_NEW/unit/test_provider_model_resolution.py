@@ -1,14 +1,156 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import (
-    resolve_provider_and_model,
+    build_call_params_from_request,
     invalidate_model_alias_caches,
+    resolve_provider_and_model,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "api_provider, expected_provider",
+    [("llama", "llama.cpp"), ("ollama", "ollama"), ("vllm", "vllm")],
+)
+@pytest.mark.parametrize("model", [
+    "../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf",
+    "./models/model.gguf",
+    "/models/model.gguf",
+    "C:/models/model.gguf",
+    "Qwen/Qwen3-8B",
+])
+def test_local_model_ids_remain_opaque_through_request_resolution(
+    model: str, api_provider: str, expected_provider: str
+) -> None:
+    """Paths and repository namespaces are model IDs, not provider prefixes."""
+    request = ChatCompletionRequest(
+        api_provider=api_provider, model=model,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+    metrics_provider, metrics_model, provider, selected_model, _ = resolve_provider_and_model(
+        request, metrics_default_provider="openai", normalize_default_provider="openai"
+    )
+    params = build_call_params_from_request(
+        request_data=request, target_api_provider=provider, provider_api_key=None,
+        templated_llm_payload=[{"role": "user", "content": "Hello"}],
+        final_system_message=None, resolved_model=selected_model,
+    )
+    assert (metrics_provider, metrics_model, provider, selected_model, params["model"]) == (
+        expected_provider, model, expected_provider, model, model
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("prefix", ["llama/", "llama.cpp/", "llamacpp:"])
+@pytest.mark.parametrize("api_provider", [None, "llama"])
+def test_local_provider_qualification_preserves_the_entire_path_model(
+    prefix: str, api_provider: str | None
+) -> None:
+    """An actual provider prefix strips once without changing the model path."""
+    model = "../../Language_Models/model.gguf"
+    request = ChatCompletionRequest(
+        api_provider=api_provider, model=prefix + model,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+    _, _, provider, selected_model, _ = resolve_provider_and_model(
+        request, metrics_default_provider="openai", normalize_default_provider="openai"
+    )
+    assert (provider, selected_model) == ("llama.cpp", model)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "alias, canonical, model",
+    [("oai", "openai", "gpt-4o"), ("koboldcpp", "kobold", "model"), ("z-ai", "zai", "glm-4.6")],
+)
+@pytest.mark.parametrize("explicit_provider", [False, True])
+def test_registered_slash_provider_aliases_still_qualify_models(
+    monkeypatch, alias: str, canonical: str, model: str, explicit_provider: bool
+) -> None:
+    """Registered aliases keep their existing routing and prefix stripping."""
+    monkeypatch.setattr(chat_service, "_load_alias_overrides_cached", lambda: {})
+    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda _: ())
+    request = ChatCompletionRequest(
+        api_provider=canonical if explicit_provider else None,
+        model=f"{alias}/{model}",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+    _, _, provider, selected_model, _ = resolve_provider_and_model(
+        request, metrics_default_provider="openai", normalize_default_provider="openai"
+    )
+    assert (chat_service._resolve_chat_provider_name(provider), selected_model) == (canonical, model)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+def test_omitted_model_keeps_metrics_placeholder_out_of_outgoing_payload(
+    request_model: str | None,
+) -> None:
+    request = ChatCompletionRequest(
+        api_provider="local-llm",
+        model=request_model,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    metrics_provider, metrics_model, selected_provider, selected_model, _ = resolve_provider_and_model(
+        request_data=request,
+        metrics_default_provider="openai",
+        normalize_default_provider="openai",
+    )
+    params = build_call_params_from_request(
+        request_data=request,
+        target_api_provider=selected_provider,
+        provider_api_key=None,
+        templated_llm_payload=[{"role": "user", "content": "Hello"}],
+        final_system_message=None,
+        resolved_model=selected_model,
+    )
+
+    assert (metrics_provider, metrics_model) == ("local-llm", "unknown")
+    assert selected_model is None
+    assert "model" not in params
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+def test_blank_model_stays_omitted_during_execution_resolution(
+    request_model: str | None,
+) -> None:
+    request = ChatCompletionRequest(
+        api_provider="local-llm",
+        model=request_model,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    _, _, _, selected_model, _ = resolve_provider_and_model(
+        request_data=request,
+        metrics_default_provider="openai",
+        normalize_default_provider="openai",
+    )
+
+    assert selected_model is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("request_model", [None, "", "   "])
+def test_messages_shared_resolver_does_not_promote_metrics_placeholder(
+    request_model: str | None,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import messages
+
+    request = SimpleNamespace(api_provider="local-llm", model=request_model)
+
+    with pytest.raises(HTTPException) as exc_info:
+        messages._resolve_provider_and_model_for_request(request)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Model is required for provider 'local-llm'."
 
 
 @pytest.mark.unit

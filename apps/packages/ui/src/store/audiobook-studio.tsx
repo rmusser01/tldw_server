@@ -14,6 +14,9 @@ export type AudioChapter = {
   audioUrl?: string
   audioDuration?: number
   errorMessage?: string
+  requestedBackend?: string
+  actualBackend?: string
+  fallbackUsed?: boolean
 }
 
 export type SplitMode = "paragraphs" | "headings" | "custom"

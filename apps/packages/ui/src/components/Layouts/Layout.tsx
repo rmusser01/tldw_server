@@ -1,3 +1,5 @@
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
 import React, { lazy, Suspense, useContext, useState } from "react"
 
 import { Drawer, Tooltip } from "antd"
@@ -30,7 +32,6 @@ import { useLayoutEffectsOwner } from "@/hooks/useLayoutEffectsOwner"
 import { useChatSidebar } from "@/hooks/useFeatureFlags"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { ChatSidebar } from "@/components/Common/ChatSidebar"
-import { EventOnlyHosts } from "@/components/Common/EventHosts"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { setSettingsReturnTo } from "@/utils/settings-return"
@@ -41,16 +42,11 @@ import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStoreMessageOption } from "@/store/option"
 import { usePromptPaletteCommands } from "@/components/Option/Prompt/usePromptPaletteCommands"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
   import("@/components/Timeline").then((m) => ({ default: m.TimelineModal }))
-)
-
-const PageHelpModal = lazy(() =>
-  import("@/components/Common/PageHelpModal").then((m) => ({
-    default: m.PageHelpModal
-  }))
 )
 
 const TutorialRunner = lazy(() =>
@@ -75,6 +71,7 @@ import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useHelpModal } from "@/store/tutorials"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { DemoModeProvider, useDemoMode } from "@/context/demo-mode"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type OptionLayoutProps = {
   children: React.ReactNode
@@ -148,6 +145,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     !hideHeader &&
     !hideSidebar &&
     !isMobile
+  const headerSidebarCollapsed = showChatSidebar
+    ? isMobile
+      ? !sidebarOpen
+      : chatSidebarCollapsed
+    : !sidebarOpen
   const isViewportConstrainedRoute = (
     VIEWPORT_CONSTRAINED_PATHS as readonly string[]
   ).includes(location.pathname)
@@ -195,7 +197,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }
 
   React.useEffect(() => {
-    if (isMobile && !showChatSidebar) return
+    if (!showChatSidebar) return
     if (!isMobile && sidebarOpen) {
       setSidebarOpen(false)
     }
@@ -275,11 +277,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if user is typing in an input
-      const target = e.target as HTMLElement
-      const isInputField =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
+      const isInputField = isEditableTarget(e.target)
 
       // ? key to open help modal (without Ctrl/Cmd to avoid double-fire)
       if (
@@ -377,6 +375,14 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         )}
         style={chatScreenBackgroundStyle}
       >
+        {/* A bypass link is only useful as the FIRST focusable element -
+            before the sidebar and header it exists to skip (#2889). */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow"
+        >
+          Skip to main content
+        </a>
         {/* Persistent ChatSidebar when feature flag enabled */}
         {shouldRenderChatSidebar && (
           <ChatSidebar
@@ -390,56 +396,51 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           />
         )}
         <main
+          id="main-content"
+          tabIndex={-1}
           className={classNames(
-            "relative flex min-h-0 min-w-0 flex-1 flex-col",
+            "relative flex min-h-0 min-w-0 flex-1 flex-col outline-none",
             hideHeader ? "bg-bg " : ""
           )}
           data-demo-mode={demoEnabled ? "on" : "off"}
         >
-          {hideHeader ? (
-            <div className="relative flex min-h-screen flex-1 flex-col items-center justify-center px-4 py-10 sm:px-8 overflow-auto">
+          <div
+            className={
+              hideHeader
+                ? "contents"
+                : isViewportConstrainedRoute
+                  ? "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto"
+                  : "relative flex min-w-0 flex-col min-h-[135vh]"
+            }
+          >
+            {!hideHeader && (
+              <div
+                key="shell-header"
+                className={classNames(
+                  "relative z-20 w-full min-w-0",
+                  isViewportConstrainedRoute ? "shrink-0" : ""
+                )}
+              >
+                <Header
+                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
+                  sidebarCollapsed={headerSidebarCollapsed}
+                  notificationCount={notificationCount}
+                  onOpenNotifications={onOpenNotifications}
+                />
+              </div>
+            )}
+            <div
+              key="route-content"
+              className={
+                hideHeader
+                  ? "relative flex min-h-screen flex-1 flex-col items-center justify-center px-4 py-10 sm:px-8 overflow-auto"
+                  : "relative flex min-h-0 min-w-0 flex-1 flex-col"
+              }
+            >
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
-          ) : isViewportConstrainedRoute ? (
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-              <div className="relative z-20 w-full min-w-0 shrink-0">
-                <Header
-                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobile
-                      ? !sidebarOpen
-                      : chatSidebarCollapsed
-                  }
-                  notificationCount={notificationCount}
-                  onOpenNotifications={onOpenNotifications}
-                />
-              </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                {children}
-                {shortcutLoading && renderShortcutOverlay()}
-              </div>
-            </div>
-          ) : (
-            <div className="relative flex min-w-0 flex-col min-h-[135vh]">
-              <div className="relative z-20 w-full min-w-0">
-                <Header
-                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobile
-                      ? !sidebarOpen
-                      : chatSidebarCollapsed
-                  }
-                  notificationCount={notificationCount}
-                  onOpenNotifications={onOpenNotifications}
-                />
-              </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                {children}
-                {shortcutLoading && renderShortcutOverlay()}
-              </div>
-            </div>
-          )}
+          </div>
           {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
           {!hideHeader && showChatSidebar && !hideSidebar && isMobile && (
             <Drawer
@@ -469,6 +470,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 collapsed={false}
                 openResetKey={chatSidebarOpenResetKey}
                 onToggleCollapse={() => setSidebarOpen(false)}
+                onConversationSelected={() => setSidebarOpen(false)}
               />
             </Drawer>
           )}
@@ -596,16 +598,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           )}
 
           {/* Command Palette - global keyboard shortcut ⌘K */}
-          {!hideHeader && (
-            <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
-          )}
+          <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
 
           {/* Page Help Modal (Tutorials + Shortcuts) - triggered by ? */}
-          {!hideHeader && (
-            <Suspense fallback={null}>
-              <PageHelpModal />
-            </Suspense>
-          )}
+          <PageHelpModalHost />
 
           {/* Tutorial Runner - executes active tutorials */}
           {!hideHeader && (
@@ -626,11 +622,6 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           {/* Notes Dock Host - floating notes panel */}
           <NotesDockHost />
-
-          {/* Ensure event-driven modals are available even when the header is hidden */}
-          {hideHeader && (
-            <EventOnlyHosts commandPaletteProps={commandPaletteProps} />
-          )}
         </main>
       </div>
     </>
@@ -782,7 +773,7 @@ function RootLayoutShell({
     }
   }, [location.pathname, overrides?.sourcePath])
 
-  return (
+  const content = (
     <DemoModeProvider>
       <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
         <OptionLayoutInner
@@ -793,6 +784,18 @@ function RootLayoutShell({
       </LayoutShellContext.Provider>
     </DemoModeProvider>
   )
+  return location.pathname === "/chat" ? (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture)
+        useStoreMessageOption.getState().setHistory(display.history)
+        useStoreMessageOption.getState().setMessages(display.messages)
+      }}
+    >
+      {content}
+    </HistorySelectionProvider>
+  ) : content
 }
 
 export default function OptionLayout(props: OptionLayoutProps) {

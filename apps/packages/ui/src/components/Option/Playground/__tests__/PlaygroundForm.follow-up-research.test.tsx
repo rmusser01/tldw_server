@@ -151,6 +151,16 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+// Home milestone ownership is unrelated to research, image refinement, and dictation.
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({
+  useHomeMilestoneScope: () => null
+}))
+
+// Prompt Assist has its own lifecycle suites; this fixture exercises the Form flow.
+vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({
+  PromptAssistComposerAction: () => null
+}))
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
@@ -355,6 +365,13 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
+  useLocation: () => ({
+    pathname: "/chat",
+    search: "",
+    hash: "",
+    state: null,
+    key: "test"
+  }),
   useNavigate: () => vi.fn()
 }))
 
@@ -395,6 +412,7 @@ vi.mock("@/store/model", () => ({
       extraBody: "",
       jsonMode: false,
       numCtx: 8192,
+      setActiveSettingsScope: vi.fn(),
       updateSetting: vi.fn(),
       updateSettings: vi.fn()
     })
@@ -433,6 +451,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     hasMcp: false,
     healthState: "ready",
     tools: [],
+    discoveredTools: [],
+    chatTools: [],
+    toolCounts: { total: 0, enabled: 0 },
     toolsLoading: false,
     catalogs: [],
     catalogsLoading: false,
@@ -445,7 +466,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     setToolCatalog: vi.fn(),
     setToolCatalogId: vi.fn(),
     setToolModules: vi.fn(),
-    setToolCatalogStrict: vi.fn()
+    setToolCatalogStrict: vi.fn(),
+    setToolEnabled: vi.fn(),
+    resetToolFilter: vi.fn()
   })
 }))
 

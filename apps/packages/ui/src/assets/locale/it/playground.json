@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Conflitto nel trasferimento dei media",
+    "conflict": "Il campo del messaggio contiene già una bozza. Inserisci la fonte multimediale, sostituisci la bozza o annulla l'importazione.",
+    "insert": "Inserisci fonte multimediale",
+    "replace": "Sostituisci la bozza attuale",
+    "cancel": "Annulla l'importazione"
+  },
   "formError": {
     "noModel": "Seleziona un modello",
     "noEmbeddingModel": "Imposta un modello di embedding da Impostazioni > RAG"

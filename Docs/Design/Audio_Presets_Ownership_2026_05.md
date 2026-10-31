@@ -4,6 +4,8 @@ Status: Accepted for Phase 4 design. Implementation is gated to the preset CRUD 
 Owner: Audio API + shared WebUI/extension UI.
 Last verified against code: 2026-05-19.
 
+Architecture decision backfilled as [ADR-047](../ADR/047-per-user-audio-preset-ownership.md) on 2026-09-25. The original design and verification date remain historical; ADR-047 records the bounded current contract and caveats.
+
 ## Decision
 
 Reusable TTS and STT presets are per-user server state owned by the Audio API.

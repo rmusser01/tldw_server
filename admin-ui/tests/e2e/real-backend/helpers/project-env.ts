@@ -39,6 +39,31 @@ type ProjectEnvOverrides = Record<string, string | undefined>;
 export const isRealBackendProjectName = (value: string): value is RealBackendProjectName =>
   REAL_BACKEND_PROJECTS.includes(value as RealBackendProjectName);
 
+export const getRequestedRealBackendProjects = (
+  argv: readonly string[] = process.argv,
+): RealBackendProjectName[] => {
+  const requestedProjects: RealBackendProjectName[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    const projectName = argument.startsWith('--project=')
+      ? argument.slice('--project='.length)
+      : argument === '--project'
+        ? argv[index + 1]
+        : undefined;
+
+    if (
+      projectName
+      && isRealBackendProjectName(projectName)
+      && !requestedProjects.includes(projectName)
+    ) {
+      requestedProjects.push(projectName);
+    }
+  }
+
+  return requestedProjects;
+};
+
 const normalizeLoopbackUrl = (url: string): string => url.replace('localhost', '127.0.0.1');
 
 const getProjectApiOverride = (

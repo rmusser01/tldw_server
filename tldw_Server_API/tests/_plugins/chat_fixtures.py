@@ -284,18 +284,6 @@ def configure_for_mock_server(mock_openai_server, monkeypatch):
     monkeypatch.setenv("CUSTOM_OPENAI_API_IP", f"{mock_openai_server}/v1/chat/completions")
     monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "sk-mock-key-12345")
 
-    # Reload the schemas module to pick up the new environment variables
-    import importlib
-    import tldw_Server_API.app.api.v1.schemas.chat_request_schemas as chat_schemas
-    importlib.reload(chat_schemas)
-
-    # Update API_KEYS using monkeypatch for automatic cleanup
-    monkeypatch.setitem(chat_schemas.API_KEYS, 'openai', 'sk-mock-key-12345')
-    # Sync the chat endpoint's imported API_KEYS without leaving global residue
-    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-    if hasattr(chat_endpoint, 'API_KEYS'):
-        monkeypatch.setattr(chat_endpoint, 'API_KEYS', chat_schemas.API_KEYS, raising=False)
-
     # Patch the OpenAI API URL in the config
     from tldw_Server_API.app.core.config import load_and_log_configs
     config = load_and_log_configs()
@@ -354,23 +342,23 @@ def mock_user_db(tmp_path):
 
 
 @pytest.fixture
-def mock_chacha_db(tmp_path):
+def mock_chacha_db(tmp_path, test_user):
     """Create a temporary ChaChaNotes DB with a default character.
 
     Align the DB path with the API's dependency resolution so even without
     dependency overrides the server sees the same file:
       USER_DB_BASE_DIR = <tmp_path>
-      DB path = <tmp_path>/1/ChaChaNotes.db (single-user id=1)
+      DB path = <tmp_path>/<test_user.id>/ChaChaNotes.db
     """
     # Ensure API dependency resolves to our tmp_path base directory
     os.environ["USER_DB_BASE_DIR"] = str(tmp_path)
 
-    # In single-user mode, the request user id is 1
-    user_dir = tmp_path / "1"
+    # Match the authenticated owner, as the production DB dependency does.
+    user_dir = tmp_path / str(test_user.id)
     user_dir.mkdir(parents=True, exist_ok=True)
     db_path = user_dir / "ChaChaNotes.db"
 
-    db = CharactersRAGDB(str(db_path), client_id="pytest_client")
+    db = CharactersRAGDB(str(db_path), client_id=str(test_user.id))
 
     # Ensure at least one default character exists
     char_id = db.add_character_card({

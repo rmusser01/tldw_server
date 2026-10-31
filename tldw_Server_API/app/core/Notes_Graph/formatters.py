@@ -70,4 +70,5 @@ def to_cytoscape(graph: NoteGraphResponse) -> dict[str, Any]:
         "cursor": graph.cursor,
         "limits": graph.limits.model_dump(),
         "radius_cap_applied": graph.radius_cap_applied,
+        "suggestions_authorized": graph.suggestions_authorized,
     }

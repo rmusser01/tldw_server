@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from uuid import uuid4
 
 from .adapters import AdapterAccepted, AdapterConflict, AdapterDeferred, AdapterRejected
@@ -20,9 +21,40 @@ from .models import (
     SyncOperation,
     server_frontend_mutation_enabled_for_policy,
 )
+from .personal_context_ongoing_contract import PersonalContextAuthorityMetadata
 from .service import SyncV2Service
+from .store import SyncV2Store
 
 SERVER_ORIGIN_DEVICE_ID = "server-origin"
+
+
+def insert_personal_context_authority(
+    service: SyncV2Service,
+    *,
+    envelope: SyncEnvelopeCreate,
+    authority: PersonalContextAuthorityMetadata,
+    sync_store: SyncV2Store | None = None,
+) -> SyncEnvelope:
+    """Insert one internal-only already-canonical Personal Context egress row."""
+
+    if authority.role != "home_authority":
+        raise SyncStoreError("Personal Context authority role is required")
+    store = service.store if sync_store is None else sync_store
+    stored = store.insert_envelope(
+        replace(
+            envelope,
+            device_id=SERVER_ORIGIN_DEVICE_ID,
+            status="accepted",
+            apply_status="pending",
+            routing_metadata={
+                **envelope.routing_metadata,
+                "personal_context_authority": authority.model_dump(mode="json"),
+            },
+        )
+    )
+    if stored.server_cursor is None:
+        raise SyncStoreError("Personal Context authority receipt is unavailable")
+    return stored
 
 
 class SyncServerOriginMaterializationError(SyncStoreError):
@@ -51,6 +83,15 @@ class SyncServerOriginMutationNotSupportedError(SyncStoreError):
         self.error_code = CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE
 
 
+class SyncServerOriginRestoreConflictError(SyncStoreError):
+    """Raised when a server-origin restore does not target the current tombstone."""
+
+    def __init__(self, object_id: str) -> None:
+        super().__init__("Note restore requires the current deleted note version.")
+        self.object_id = object_id
+        self.error_code = "sync_server_origin_restore_conflict"
+
+
 @dataclass(frozen=True, slots=True)
 class ServerOriginCaptureResult:
     """Result of accepting and materializing a server-origin mutation."""
@@ -70,6 +111,7 @@ def capture_server_origin_mutation(
     source: str,
     parent_id: str | None = None,
     stable_key: str | None = None,
+    routing_metadata: Mapping[str, object] | None = None,
 ) -> ServerOriginCaptureResult:
     """Append and materialize one trusted server-origin Sync v2 mutation."""
 
@@ -96,8 +138,7 @@ def capture_server_origin_mutation(
                 or not _payload_matches_idempotent_replay(accepted, payload, payload_hash)
             ):
                 raise SyncServerOriginIdempotencyConflictError(accepted)
-            if accepted.apply_status in {"failed", "conflict"}:
-                raise SyncServerOriginMaterializationError(accepted)
+            accepted = _require_capture_applied(service, accepted)
             return ServerOriginCaptureResult(dataset=dataset, envelope=accepted)
 
     state = service.store.get_object_state(dataset.dataset_id, domain, object_id)
@@ -107,6 +148,15 @@ def capture_server_origin_mutation(
         stable_server_origin_envelope_id(dataset.dataset_id, domain, stable_key)
         if stable_key
         else f"server-origin-{uuid4().hex}"
+    )
+    canonical_routing_metadata = dict(routing_metadata or {})
+    canonical_routing_metadata.update(
+        {
+            "source": source,
+            "origin": "server",
+            "server_device_id": SERVER_ORIGIN_DEVICE_ID,
+            "server_owner_user_id": user_id,
+        }
     )
     envelope = SyncEnvelopeCreate(
         dataset_id=dataset.dataset_id,
@@ -128,11 +178,7 @@ def capture_server_origin_mutation(
         created_at_client=now,
         deleted=operation == "tombstone",
         encryption_metadata={"policy": DEFAULT_M1_ENCRYPTION_POLICY},
-        routing_metadata={
-            "source": source,
-            "origin": "server",
-            "server_device_id": SERVER_ORIGIN_DEVICE_ID,
-        },
+        routing_metadata=canonical_routing_metadata,
         stable_key=stable_key,
     )
 
@@ -147,11 +193,60 @@ def capture_server_origin_mutation(
         raise SyncStoreError("Sync server-origin mutation was not accepted")
 
     inserted = service.store.insert_envelope(envelope)
-    materialization = service._materialize_envelope(inserted)
-    inserted = service._envelope_snapshot(inserted)
-    if materialization.status in {"failed", "conflict"}:
-        raise SyncServerOriginMaterializationError(inserted)
+    inserted = _require_capture_applied(service, inserted)
     return ServerOriginCaptureResult(dataset=dataset, envelope=inserted)
+
+
+def _require_capture_applied(
+    service: SyncV2Service,
+    envelope: SyncEnvelope,
+) -> SyncEnvelope:
+    """Retry replayable capture debt and return only a durably applied envelope."""
+
+    if envelope.apply_status in {"conflict", "superseded"}:
+        raise SyncServerOriginMaterializationError(envelope)
+    if envelope.apply_status != "applied":
+        service._materialize_envelope(envelope)
+        envelope = service._envelope_snapshot(envelope)
+    if envelope.apply_status != "applied":
+        raise SyncServerOriginMaterializationError(envelope)
+    return envelope
+
+
+def capture_server_origin_note_restore(
+    service: SyncV2Service,
+    *,
+    user_id: str,
+    object_id: str,
+    note: Mapping[str, object],
+    expected_version: int,
+    source: str,
+) -> ServerOriginCaptureResult:
+    """Validate and capture a restore of the current Notes tombstone."""
+
+    current_version = note.get("version")
+    try:
+        version_matches = int(current_version) == int(expected_version)
+    except (TypeError, ValueError):
+        version_matches = False
+    if not bool(note.get("deleted")) or not version_matches:
+        raise SyncServerOriginRestoreConflictError(object_id)
+
+    return capture_server_origin_mutation(
+        service,
+        user_id=user_id,
+        domain="notes.note",
+        operation="upsert",
+        object_id=object_id,
+        payload={
+            "title": str(note.get("title") or ""),
+            "content": str(note.get("content") or ""),
+            "conversation_id": note.get("conversation_id"),
+            "message_id": note.get("message_id"),
+        },
+        source=source,
+        routing_metadata={"restore_intent": True},
+    )
 
 
 def server_origin_stable_key(
@@ -196,18 +291,21 @@ def stable_server_origin_envelope_id(
 
 
 def get_active_server_origin_sync_service_for_user(user_id: str) -> SyncV2Service | None:
-    """Return a Sync v2 service only when the user has an active personal profile."""
+    """Return the active personal service, preserving lookup failures."""
 
     from .factory import sync_v2_service_for_user, sync_v2_storage_exists_for_user
 
     if not sync_v2_storage_exists_for_user(user_id):
         return None
     service = sync_v2_service_for_user(user_id)
-    try:
-        _active_default_personal_dataset(service, user_id)
-    except SyncStoreError:
-        return None
-    return service
+    for dataset in service.store.list_datasets_for_user(user_id):
+        if (
+            dataset.scope_type == "personal"
+            and dataset.metadata.get("default_personal") is True
+            and dataset.metadata.get("client_family") == "chatbook"
+        ):
+            return service
+    return None
 
 
 def canonical_payload_hash(payload: dict[str, object]) -> tuple[str, int]:
@@ -253,7 +351,10 @@ __all__ = [
     "CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE",
     "SyncServerOriginMaterializationError",
     "SyncServerOriginMutationNotSupportedError",
+    "SyncServerOriginRestoreConflictError",
     "canonical_payload_hash",
+    "insert_personal_context_authority",
+    "capture_server_origin_note_restore",
     "capture_server_origin_mutation",
     "get_active_server_origin_sync_service_for_user",
 ]

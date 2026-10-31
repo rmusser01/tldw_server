@@ -1,7 +1,10 @@
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { usePlaygroundPersistence } from "../usePlaygroundPersistence"
+
+const selectedHistory = vi.hoisted(() => ({ value: null as any }))
+vi.mock('@/hooks/chat/useHistorySelection', () => ({ useHistorySelectionContext: () => selectedHistory.value }))
 
 const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -25,6 +28,18 @@ const translate = (
   const name = options?.name
   return typeof name === "string" ? value.replace("{{name}}", name) : value
 }
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => {
+    await mocks.initialize()
+    return {
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      requestScope: { config: await mocks.getConfig(), userId: null },
+      release: vi.fn()
+    }
+  }
+}))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -93,6 +108,7 @@ const buildDeps = (overrides: Record<string, unknown> = {}) => ({
 
 describe("usePlaygroundPersistence", () => {
   beforeEach(() => {
+    selectedHistory.value = null
     mocks.initialize.mockReset()
     mocks.searchCharacters.mockReset()
     mocks.listCharacters.mockReset()
@@ -109,7 +125,7 @@ describe("usePlaygroundPersistence", () => {
     mocks.listCharacters.mockRejectedValue(new Error("list failed"))
     mocks.createCharacter.mockRejectedValue(new Error("create failed"))
     mocks.createChat.mockResolvedValue({ id: "chat-1" })
-    mocks.addChatMessage.mockResolvedValue(undefined)
+    mocks.addChatMessage.mockResolvedValue({ id: "saved-message", version: 1 })
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
@@ -179,22 +195,28 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.objectContaining({
           source: "webui-chat"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: expect.anything()
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
     expect(notificationApi.error).not.toHaveBeenCalled()
 
-    rerender(
-      {
-        ...stableDeps,
-        history: [{ role: "user", content: "Hello world" }],
-      }
-    )
+    rerender({
+      ...stableDeps,
+      history: [{ role: "user", content: "Hello world" }]
+    })
 
     await waitFor(() => {
       expect(mocks.initialize).toHaveBeenCalledTimes(1)
@@ -266,6 +288,10 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.objectContaining({
           source: "webui-chat"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
@@ -325,11 +351,19 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.objectContaining({
           source: "webui-chat"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: "stale-character"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
@@ -388,12 +422,20 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: "overlay-char"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
     expect(mocks.createChat).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "webui-chat"
+      }),
+      expect.objectContaining({
+        requestScope: expect.anything(),
+        signal: expect.anything()
       })
     )
   })
@@ -420,13 +462,44 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: "overlay-char"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
     expect(mocks.createChat).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "webui-chat"
+      }),
+      expect.objectContaining({
+        requestScope: expect.anything(),
+        signal: expect.anything()
       })
     )
   })
+  it.each(['loading', 'ready'])('does not upload an H1 %s selection through legacy save', async status => {
+    selectedHistory.value = { getCurrent: () => ({ status, owner: status === 'ready' ? { kind: 'local' } : null }), fence: () => () => true }
+    const { result } = renderHook(() => usePlaygroundPersistence(buildDeps()))
+    await act(async () => { await result.current.handleSaveChatToServer() })
+    expect(mocks.createChat).not.toHaveBeenCalled()
+    expect(mocks.addChatMessage).not.toHaveBeenCalled()
+  })
+
+  it.each(['initialize', 'createChat'] as const)('does not retarget or copy after a selection replaces a draft during %s', async held => {
+    let current = true
+    selectedHistory.value = { getCurrent: () => ({ status: current ? 'idle' : 'ready' }), fence: () => () => current }
+    let release!: (value?: any) => void
+    mocks[held].mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const deps = buildDeps()
+    renderHook(() => usePlaygroundPersistence(deps))
+    await waitFor(() => expect(release).toBeTypeOf('function'))
+    current = false
+    await act(async () => { release({ id: 'late-draft' }) })
+    expect(deps.setServerChatId).not.toHaveBeenCalled()
+    expect(mocks.addChatMessage).not.toHaveBeenCalled()
+    if (held === 'initialize') expect(mocks.createChat).not.toHaveBeenCalled()
+  })
+
 })

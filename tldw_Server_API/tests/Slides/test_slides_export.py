@@ -2,6 +2,7 @@ import builtins
 import importlib
 import importlib.util
 import io
+import json
 import zipfile
 
 import pytest
@@ -10,15 +11,15 @@ from tldw_Server_API.app.core.Slides.slides_export import (
     SlidesAssetsMissingError,
     SlidesExportInputError,
     _normalize_pdf_options,
+    _sanitize_custom_css,
     _sanitize_markdown,
     export_presentation_bundle,
+    export_presentation_json,
     export_presentation_markdown,
 )
 from tldw_Server_API.app.core.Slides.visual_style_resolver import resolve_builtin_visual_style
 
-_SAMPLE_PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAn8B9XgU1b0AAAAASUVORK5CYII="
-)
+_SAMPLE_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAn8B9XgU1b0AAAAASUVORK5CYII="
 
 
 def _build_assets(tmp_path):
@@ -84,7 +85,7 @@ def test_export_bundle_includes_assets(tmp_path):
         index_html = zf.read("index.html").decode("utf-8")
         assert "assets/custom.css" in index_html
         assert "data:image/png;base64," in index_html
-        assert "alt=\"Logo\"" in index_html
+        assert 'alt="Logo"' in index_html
 
 
 def test_export_bundle_escapes_settings_for_inline_script(tmp_path):
@@ -120,6 +121,57 @@ def test_sanitize_markdown_uses_bleach_without_css_sanitizer():
     assert "<ul>" in html
     assert "<li>one</li>" in html
     assert "&lt;ul" not in html
+
+
+def test_sanitize_custom_css_preserves_safe_selector_stylesheet():
+    css = ".reveal .slides section { color: red; background-color: #fff; }"
+
+    sanitized = _sanitize_custom_css(css)
+
+    assert sanitized is not None
+    assert ".reveal .slides section" in sanitized
+    assert "color: red;" in sanitized
+    assert "background-color: #fff;" in sanitized
+
+
+@pytest.mark.parametrize(
+    "css",
+    [
+        r".slide { background: u\72l(https://example.invalid/x); }",
+        r".slide { background: var(--fallback, u\72l(https://example.invalid/x)); }",
+    ],
+)
+def test_sanitize_custom_css_rejects_escaped_and_nested_url_tokens(css):
+    with pytest.raises(SlidesExportInputError, match="custom_css_url_blocked"):
+        _sanitize_custom_css(css)
+
+
+@pytest.mark.parametrize("missing_name", ["CSSSanitizer", "tinycss2"])
+def test_sanitize_custom_css_fails_closed_when_sanitizer_dependency_is_missing(
+    monkeypatch,
+    missing_name,
+):
+    import tldw_Server_API.app.core.Slides.slides_export as slides_export_module
+
+    monkeypatch.setattr(slides_export_module, missing_name, None)
+
+    assert slides_export_module._sanitize_custom_css(".slide { color: red; }") is None
+
+
+def test_sanitize_custom_css_revalidates_sanitizer_output(monkeypatch):
+    import tldw_Server_API.app.core.Slides.slides_export as slides_export_module
+
+    class _InjectingSanitizer:
+        def __init__(self, **_kwargs):
+            pass
+
+        def sanitize_css(self, _css):
+            return "background: url(https://example.invalid/injected);"
+
+    monkeypatch.setattr(slides_export_module, "CSSSanitizer", _InjectingSanitizer)
+
+    with pytest.raises(SlidesExportInputError, match="custom_css_url_blocked"):
+        slides_export_module._sanitize_custom_css(".slide { color: red; }")
 
 
 def test_slides_export_reraises_unexpected_css_sanitizer_import_errors(monkeypatch):
@@ -177,8 +229,8 @@ def test_export_bundle_stamps_style_hooks_and_includes_builtin_pack_css(tmp_path
     assert 'data-visual-style="notebooklm-blueprint"' in index_html
     assert 'data-style-pack="technical_grid"' in index_html
     assert '[data-style-pack="technical_grid"]' in custom_css
-    assert '--surface: #0f172a;' in custom_css
-    assert 'url(' not in custom_css.lower()
+    assert "--surface: #0f172a;" in custom_css
+    assert "url(" not in custom_css.lower()
 
 
 def test_export_bundle_missing_assets(tmp_path):
@@ -449,7 +501,7 @@ def test_export_bundle_resolves_output_asset_ref(tmp_path, monkeypatch):
     with zipfile.ZipFile(io.BytesIO(bundle)) as zf:
         index_html = zf.read("index.html").decode("utf-8")
         assert "data:image/png;base64," in index_html
-        assert "alt=\"Cover\"" in index_html
+        assert 'alt="Cover"' in index_html
 
 
 def test_export_markdown_resolves_output_asset_ref(monkeypatch):
@@ -501,3 +553,22 @@ def test_normalize_pdf_options_requires_width_height():
 def test_normalize_pdf_options_rejects_invalid_format():
     with pytest.raises(SlidesExportInputError):
         _normalize_pdf_options({"format": "!!bad!!"})
+
+
+def test_export_json_preserves_html_discriminator_and_unicode_source():
+    payload = {
+        "id": "html-deck",
+        "content_kind": "standalone_html",
+        "title": "\u4e09",
+        "html_document": "<!doctype html><title>\u4e09</title>",
+        "html_sha256": "a" * 64,
+        "html_bytes": 38,
+        "html_slide_count": 1,
+    }
+
+    exported = export_presentation_json(payload)
+
+    assert json.loads(exported) == payload
+    assert '"content_kind": "standalone_html"' in exported
+    assert "\u4e09" in exported
+    assert "\\u4e09" not in exported
