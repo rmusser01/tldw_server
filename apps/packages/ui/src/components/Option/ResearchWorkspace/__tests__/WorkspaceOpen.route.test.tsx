@@ -720,7 +720,7 @@ it("does not treat an invalid Deep Research flag as an ordinary Open bypass", as
 });
 
 
-const prepareOwnedMirror = async () => {
+const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocalParent = false) => {
   prepare(true);
   useWorkspaceStore.getState().switchWorkspace(TARGET);
   const { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } = await import("@/db/dexie/server-chat-mirror");
@@ -730,11 +730,20 @@ const prepareOwnedMirror = async () => {
     { id: "server-answer", role: "assistant" as const, sender: "assistant", content: "Saved cited answer", parent_message_id: "server-user",
       created_at: "2026-10-31T00:00:01Z", version: 1 },
   ];
+  if (legacyParent) serverMessages[1].parent_message_id = null;
+  if (cited) Object.assign(serverMessages[1], { metadata_extra: { workspace_rag_sources_v1: {
+    origin: "knowledge_qa", sources: [{ originalId: 42, mediaId: 42, title: "Rowan",
+      excerpt: "Selene is the telescope.", type: "text", sourceType: "file" }],
+  } } });
   const messages = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null })
     .map((row, index) => ({ ...row, id: index ? "local-answer" : "local-user",
       name: index ? "Qwen" : "You", createdAt: index + 17, modelId: index ? "local-qwen" : undefined,
       modelName: index ? "Qwen" : undefined, reasoning_time_taken: index ? 0.15 : undefined,
-      parentMessageId: index ? "local-user" : null }));
+      parentMessageId: index && !nullLocalParent ? "local-user" : null }));
+  if (cited) Object.assign(messages[1], { sources: [{
+    name: "Rowan", type: "file", pageContent: "Selene is the telescope.", mode: "rag",
+    metadata: { media_id: "42", title: "Rowan", type: "file", displayOnly: "retained" },
+  }] });
   const ownerKey = serverChatMirrorOwnerKey({ requestScope: {
     config: { serverUrl: "https://open.example.test", authMode: "multi-user" }, userId: boundary.userId,
   } } as Parameters<typeof serverChatMirrorOwnerKey>[0]);
@@ -820,4 +829,70 @@ it.each([
   expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
   expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(preserved);
   if (kind === "edited-row") expect(mirror.messages.get("local-answer")!.content).toBe("Keep edited row");
+});
+
+
+it("retains the verified two-message mirror's legacy linear parent without inventing a canonical parent", async () => {
+  await prepareOwnedMirror(true);
+  const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
+  expect(boundary.request.mock.calls.every(([row]) => !row.method || row.method === "GET")).toBe(true);
+});
+
+
+it("verifies the producer's citation projection while retaining its exact display metadata", async () => {
+  await prepareOwnedMirror(false, true);
+  const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
+});
+
+it.each(["legacy-version", "legacy-explicit-parent", "legacy-mirror-parent", "citation-media", "citation-excerpt"])(
+  "preserves local work when %s prevents legacy/projection proof", async kind => {
+    await prepareOwnedMirror(kind.startsWith("legacy"), kind.startsWith("citation"));
+    const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+    if (kind === "legacy-mirror-parent") mirror.messages.get("local-answer")!.parent_message_id = "local-answer";
+    if (kind.startsWith("citation")) {
+      const messages = structuredClone(session.messages);
+      const sources = messages[1].sources!;
+      if (kind === "citation-media") sources[0].metadata.media_id = "43";
+      else sources[0].pageContent = "Keep changed excerpt.";
+      useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, { ...session, messages });
+    }
+    const preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+    const request = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (args: { path: string }) => {
+      const result = await request(args);
+      if (args.path.startsWith("/api/v1/chats/verified-chat/messages") && kind === "legacy-version")
+        return { ...result, messages: result.messages.map((row: Record<string, unknown>) => ({ ...row, version: 2 })) };
+      if (args.path.startsWith("/api/v1/chats/verified-chat/messages") && kind === "legacy-explicit-parent")
+        return { ...result, messages: result.messages.map((row: Record<string, unknown>, index: number) =>
+          index ? { ...row, parent_message_id: "server-answer" } : row) };
+      return result;
+    });
+    await mount("/research-workspace?source_workspace_id=" + TARGET);
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(preserved);
+  });
+
+
+it("keeps the strict proof for a canonical null-parent mirror and cache", async () => {
+  await prepareOwnedMirror(true, false, true);
+  const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
+});
+it("refuses mixed null and legacy linear local graphs", async () => {
+  await prepareOwnedMirror(true);
+  mirror.messages.get("local-answer")!.parent_message_id = null;
+  const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByRole("alert");
+  expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
 });
