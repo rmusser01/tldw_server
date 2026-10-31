@@ -26,7 +26,7 @@
   - `Docs/User_Guides/Integrations_Experiments/Getting_Started_with_ACP.md`
   - `Docs/Development/Agent_Client_Protocol.md`
   - `Docs/Development/ACP_Production_Readiness.md`
-- Update `backlog/tasks/task-2392 - Implement-ACP-support-safe-Agent-Tasks-run-summaries.md`
+- Update `backlog/tasks/task-15028 - Implement-ACP-support-safe-Agent-Tasks-run-summaries.md`
   - Record implementation notes, verification, and final summary.
 
 ## Stage 1: Backend Contract Tests
@@ -310,7 +310,7 @@ Expected: no output.
 ### Task 5: Final verification and tracking
 
 **Files:**
-- Modify: `backlog/tasks/task-2392 - Implement-ACP-support-safe-Agent-Tasks-run-summaries.md`
+- Modify: `backlog/tasks/task-15028 - Implement-ACP-support-safe-Agent-Tasks-run-summaries.md`
 
 - [ ] **Step 1: Run backend focused suite**
 
@@ -373,7 +373,7 @@ Run:
 git add \
   Docs/superpowers/specs/2026-06-19-acp-support-safe-task-run-summaries-design.md \
   Docs/superpowers/plans/2026-06-19-acp-support-safe-task-run-summaries-plan.md \
-  "backlog/tasks/task-2392 - Implement-ACP-support-safe-Agent-Tasks-run-summaries.md" \
+  "backlog/tasks/task-15028 - Implement-ACP-support-safe-Agent-Tasks-run-summaries.md" \
   tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py \
   tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py \
   apps/packages/ui/src/components/Option/AgentTasks/index.tsx \

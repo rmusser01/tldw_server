@@ -431,6 +431,7 @@ Common backlog-py commands (prefix each with the invocation above):
 - Read: `search "query" --plain`, `task list --plain`, `task <id>` (the whole file; `--plain` prints only the header and description), `board`.
 - Create: `task create "Title" -d "Why and what" --ac "Criterion" --ac "Another" -l label1,label2 --dep TASK-1 [--id TASK-N] [--notes "..."]`.
 - Edit: `task edit <id>` with `-s "In Progress"`, `-t "New title"` (renames the file), `-l labels` (replaces them), `--ac "Added criterion"`, `--remove-ac N`, `--check-ac N`, `--check-dod N`, `--append-notes "..."` (repeatable), `--notes "..."` (replaces them), `--final-summary "..."`, `--dep TASK-1`.
+- Renumber: `task renumber "<path>" --id <new id> [--append-notes "..."]` gives one task file a new id in place. It takes a path because two files can share an id, keeps the file's directory and name tail, and refuses an id that any file in `backlog/tasks`, `backlog/completed` or `backlog/archive/tasks` holds.
 - Repair: `task normalize [--check] [path...]` rewrites Node-format or nested sections into the canonical format without dropping text; every backlog-py edit already does this for the file it touches.
 
 Task ids collide when concurrent sessions each take the next local id. Before creating a task, find the highest id across `origin/dev` and all open PR branches, and pass a higher one with `--id`:
@@ -440,6 +441,8 @@ git fetch origin dev --quiet
 { git ls-tree -r --name-only origin/dev backlog/; gh pr list --state open --limit 500 --json files --jq '.[].files[].path'; } \
   | sed -nE 's|^backlog/.*task-([0-9]+)[ .].*|\1|p' | sort -n | tail -1
 ```
+
+`gh pr list` lists at most 100 files per PR, so the recipe can miss ids in a large PR. backend-required fails any PR that leaves two task files with one id (`Helper_Scripts/ci/check_backlog_task_ids.py`, backlog-only PRs included); give the newer file a free id with `task renumber`.
 
 Do not hand-edit task files unless backlog-py cannot make the change and the user explicitly approves the exception. If backlog-py itself cannot run, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
 

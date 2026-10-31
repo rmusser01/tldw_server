@@ -3,21 +3,20 @@ id: TASK-13146
 title: Advertise Personal Context Sync capabilities
 status: Done
 assignee:
-  - '@codex'
-created_date: '2026-08-30 18:44'
-updated_date: '2026-09-29 00:15'
+- '@codex'
+created_date: 2026-08-30 18:44
+updated_date: 2026-09-29 00:15
 labels:
-  - personal-context
-  - sync
-  - security
+- personal-context
+- sync
+- security
 dependencies:
-  - TASK-13145
+- TASK-15138
 references:
-  - >-
-    backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
+- backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
 documentation:
-  - Docs/Design/2026-08-30-personal-context-profile-server-design.md
-  - Docs/Plans/IMPLEMENTATION_PLAN_personal_context_sync_capabilities.md
+- Docs/Design/2026-08-30-personal-context-profile-server-design.md
+- Docs/Plans/IMPLEMENTATION_PLAN_personal_context_sync_capabilities.md
 priority: high
 ---
 
@@ -61,14 +60,14 @@ Reason: ADR-002 already governs the server authority, Personal Context Sync cont
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added all five Personal Context Sync v2 domains with exact upsert/tombstone operation maps and a typed schema-v1 capability contract covering HMAC integrity, wrapped bootstrap, cleanup acknowledgments, purge generations, authorization policy, and bounded quotas.
 - Derived availability from Shared Core schema compatibility, a valid 32-byte profile master key, server-trusted encryption readiness, and complete v1 adapter/materializer registration. Production fails closed with stable key, schema, authorization, or transport blockers until every dependency is available; unrelated Sync domains remain usable.
 - Restricted the five domains to complete personal-dataset enrollment and only advertises writable adapter versions after both capability readiness and dataset enrollment permit them.
 - Verification: 356 targeted Sync model/service/endpoint tests passed; Ruff, Python compilation, Bandit, and `git diff --check` passed. Bandit emitted only existing parser/noqa warnings around previously reviewed dynamic SQL sites.
 - Independent review found and verified fixes for premature transport availability and writable-version advertisement; final re-review returned CLEAN. The full repository suite was not run under the repository's targeted-test policy.
 - ADR required: no. Existing ADR `backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md` governs the implemented contract.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

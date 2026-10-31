@@ -3,21 +3,19 @@ id: TASK-385
 title: Implement local prompt cache diagnostics
 status: Done
 assignee: []
-created_date: '2026-05-15 16:16'
-updated_date: '2026-05-15 16:27'
+created_date: 2026-05-15 16:16
+updated_date: 2026-05-15 16:27
 labels:
-  - llm-cache
-  - local-llm
-  - cost-control
-  - implementation
+- llm-cache
+- local-llm
+- cost-control
+- implementation
 dependencies:
-  - TASK-377
-  - TASK-378
+- TASK-377
+- TASK-15207
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-15-chat-worldbook-cache-cost-control-implementation-plan.md
+- Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md
+- Docs/superpowers/plans/2026-05-15-chat-worldbook-cache-cost-control-implementation-plan.md
 priority: medium
 ---
 

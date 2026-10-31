@@ -3,23 +3,20 @@ id: TASK-13166
 title: Bind Personal Context authority confirmation identity
 status: Done
 assignee:
-  - '@codex'
-created_date: '2026-09-04 03:29'
-updated_date: '2026-09-04 05:49'
+- '@codex'
+created_date: 2026-09-04 03:29
+updated_date: 2026-09-04 05:49
 labels:
-  - personal-context
-  - sync
-  - security
-  - relay
+- personal-context
+- sync
+- security
+- relay
 dependencies:
-  - TASK-13160
+- TASK-15141
 references:
-  - >-
-    backlog/tasks/task-13161 -
-    Relay-ordered-Personal-Context-authority-publications-through-Sync-V2.md
-  - >-
-    backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
-  - Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md
+- backlog/tasks/task-13161 - Relay-ordered-Personal-Context-authority-publications-through-Sync-V2.md
+- backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
+- Docs/superpowers/specs/2026-09-02-personal-context-ongoing-sync-design.md
 priority: high
 ---
 

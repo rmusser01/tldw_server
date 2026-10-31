@@ -8,7 +8,7 @@ labels:
 - frontend
 - bug
 dependencies:
-- TASK-13560
+- TASK-15192
 ---
 
 ## Description

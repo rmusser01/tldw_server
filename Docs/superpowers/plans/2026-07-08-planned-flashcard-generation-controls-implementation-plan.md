@@ -13,7 +13,7 @@
 ## References
 
 - Spec: `Docs/superpowers/specs/2026-07-08-planned-flashcard-generation-controls-design.md`
-- Backlog task: `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md`
+- Backlog task: `backlog/tasks/task-15091 - Add-planned-flashcard-generation-types-and-counts.md`
 - Note: `TASK-12170` has stale duplicate files on `origin/dev`; update the exact planned-flashcard task path above.
 
 ## File Structure
@@ -30,7 +30,7 @@
 - Modify `apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts`: generated draft `generation_type` normalization.
 - Modify `apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx`: Advanced mix toggle, derived total, true/false preview label.
 - Modify `apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx`: advanced mix payload and preview/save assertions.
-- Modify `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md`: record plan, verification, and final summary as work progresses.
+- Modify `backlog/tasks/task-15091 - Add-planned-flashcard-generation-types-and-counts.md`: record plan, verification, and final summary as work progresses.
 
 ### Task 1: Backend Schema Contract
 
@@ -962,7 +962,7 @@ git commit -m "feat: add flashcard advanced mix controls"
 ### Task 6: Verification, Security Scan, And Backlog Closeout
 
 **Files:**
-- Modify: `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md`
+- Modify: `backlog/tasks/task-15091 - Add-planned-flashcard-generation-types-and-counts.md`
 
 - [x] **Step 1: Run backend focused tests**
 
@@ -1027,7 +1027,7 @@ Expected: no whitespace errors; only intentional files changed.
 
 - [x] **Step 6: Update Backlog task**
 
-In `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md`, record:
+In `backlog/tasks/task-15091 - Add-planned-flashcard-generation-types-and-counts.md`, record:
 
 - Implementation plan path.
 - Commits made.
@@ -1038,7 +1038,7 @@ In `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts
 - [x] **Step 7: Commit final bookkeeping**
 
 ```bash
-git add "backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md"
+git add "backlog/tasks/task-15091 - Add-planned-flashcard-generation-types-and-counts.md"
 git commit -m "docs: close planned flashcard generation task"
 ```
 

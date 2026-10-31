@@ -23,7 +23,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @main.command("task")
 @click.argument("args", nargs=-1)
 @click.option("--plain", is_flag=True, help="Print plain text output.")
-@click.option("--id", "task_id", default=None, help="Task id for task creation.")
+@click.option("--id", "task_id", default=None, help="Task id for create, or the new id for renumber.")
 @click.option("-t", "--title", default=None, help="Replace the task title (edit).")
 @click.option("-s", "--status", default=None, help="Task status for create/edit.")
 @click.option("-d", "--description", default=None, help="Task description for create/edit.")
@@ -73,6 +73,7 @@ def task_command(
     task list | task TASK_ID
     task create TITLE [options]
     task edit TASK_ID [options]
+    task renumber PATH --id NEW_ID [--append-notes TEXT]
     task normalize [--check] [PATH...]
     """
     if args and args[0] == "create":
@@ -109,6 +110,14 @@ def task_command(
             final_summary=final_summary,
             dependencies=_split_csv(dependencies) if dependencies else None,
             labels=_split_csv(labels) if labels else None,
+        )
+        click.echo(_format_task_line(task_record, plain=plain))
+        return
+    if args and args[0] == "renumber":
+        if len(args) != 2 or not task_id:
+            raise click.UsageError("Usage: task renumber PATH --id NEW_ID")
+        task_record = _mutable_repository(ctx).renumber_task(
+            Path(args[1]), task_id, note="\n".join(append_notes) or None
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return

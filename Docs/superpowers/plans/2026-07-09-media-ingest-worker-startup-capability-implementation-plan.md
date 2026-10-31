@@ -33,7 +33,7 @@
 - Modify: `Docs/Deployment/Long_Term_Admin_Guide.md`
 - Modify: `Docs/Published/Deployment/Long_Term_Admin_Guide.md`
   - Reconcile normal worker default wording.
-- Update: `backlog/tasks/task-12100 - Fix-media-ingest-worker-startup-default-and-capability-reporting.md`
+- Update: `backlog/tasks/task-15047 - Fix-media-ingest-worker-startup-default-and-capability-reporting.md`
   - Keep status, notes, changed files, and verification results current.
 
 ---
@@ -517,7 +517,7 @@ Expected: no results.
 ### Task 5: Verification And Handoff
 
 **Files:**
-- Update: `backlog/tasks/task-12100 - Fix-media-ingest-worker-startup-default-and-capability-reporting.md`
+- Update: `backlog/tasks/task-15047 - Fix-media-ingest-worker-startup-default-and-capability-reporting.md`
 
 - [x] **Step 1: Run focused regression tests**
 
@@ -633,7 +633,7 @@ git add \
   Docs/Published/API-related/Media_Ingest_Jobs_API.md \
   Docs/Deployment/Long_Term_Admin_Guide.md \
   Docs/Published/Deployment/Long_Term_Admin_Guide.md \
-  "backlog/tasks/task-12100 - Fix-media-ingest-worker-startup-default-and-capability-reporting.md"
+  "backlog/tasks/task-15047 - Fix-media-ingest-worker-startup-default-and-capability-reporting.md"
 git commit -m "fix: start media ingest worker by route default"
 ```
 
