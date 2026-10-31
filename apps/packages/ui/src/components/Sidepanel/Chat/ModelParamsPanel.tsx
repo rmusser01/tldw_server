@@ -1,3 +1,4 @@
+import { useSelectedModelSamplingSupport } from "@/hooks/useSelectedModelSamplingSupport"
 import { Checkbox, Input, InputNumber, Select, Tooltip } from "antd"
 import {
   ChevronDown,
@@ -89,6 +90,9 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
   const inherited = useInheritedSamplingDefaults()
   const isSetHere = useIsSamplingSetHere()
   const minP = useStoreChatModelSettings((s) => s.minP)
+  // Top K and Min P go only to providers that accept them (#3283).
+  const { topKUnavailableReason, minPUnavailableReason } =
+    useSelectedModelSamplingSupport(selectedModel)
   const setMinP = useStoreChatModelSettings((s) => s.setMinP)
 
   // Provider & BYOK params
@@ -366,8 +370,16 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
               onChange={(value) => updateSetting("topK", value ?? undefined)}
               placeholder={t("sidepanel:modelParams.default", "Default")}
               className="w-24"
+              precision={0}
+              disabled={Boolean(topKUnavailableReason)}
+              aria-describedby={topKUnavailableReason ? "sidepanel-topk-unavailable" : undefined}
             />
           </div>
+          {topKUnavailableReason && (
+            <p id="sidepanel-topk-unavailable" className="-mt-1 text-[11px] italic text-text-muted">
+              {topKUnavailableReason}
+            </p>
+          )}
 
           <ModelParamSliderField
             label={t("sidepanel:modelParams.minP", "Min P")}
@@ -384,6 +396,7 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
             onChange={(value) => setMinP(value)}
             isSetHere={isSetHere("minP")}
             onReset={() => resetSetting("minP")}
+            unavailableReason={minPUnavailableReason}
           />
 
           {/* Max Tokens / numPredict */}

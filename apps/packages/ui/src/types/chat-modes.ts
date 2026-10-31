@@ -78,7 +78,12 @@ export interface HistorySendTurn {
   createdAt?: number
   dispatched?: boolean
   /** The model that writes the reply, recorded with a retained reply. */
-  replyModel?: { name: string; id?: string }
+  replyModel?: {
+    name: string
+    id?: string
+    /** "model (Provider)", for messages about this reply (CC-N2). */
+    label?: string
+  }
   /**
    * How the reply ended when it should stay in the transcript instead of in
    * review (CS-04): see HistoryTurnRecovery.outcome.

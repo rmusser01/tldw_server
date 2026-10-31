@@ -3,15 +3,22 @@ import type { FormInstance } from "antd"
 import { useTranslation } from "react-i18next"
 import { useMemo, useCallback } from "react"
 
+import { useSelectedModelSamplingSupport } from "@/hooks/useSelectedModelSamplingSupport"
+
 interface AdvancedParamsTabProps {
   form: FormInstance
   providerOptions: Array<{ value: string; label: string }>
+  /** The chat's model, to say when Top K or Min P can't be used (#3283). */
+  selectedModel?: string | null
 }
 
 export function AdvancedParamsTab({
-  providerOptions
+  providerOptions,
+  selectedModel
 }: AdvancedParamsTabProps) {
   const { t } = useTranslation("common")
+  const { topKUnavailableReason, minPUnavailableReason } =
+    useSelectedModelSamplingSupport(selectedModel)
 
   const historyOrderOptions = useMemo(
     () => [
@@ -99,10 +106,13 @@ export function AdvancedParamsTab({
               <>
                 <Form.Item
                   name="topK"
-                  label={t("modelSettings.form.topK.label")}>
+                  label={t("modelSettings.form.topK.label")}
+                  extra={topKUnavailableReason}>
                   <InputNumber
                     style={{ width: "100%" }}
                     placeholder={t("modelSettings.form.topK.placeholder")}
+                    precision={0}
+                    disabled={Boolean(topKUnavailableReason)}
                   />
                 </Form.Item>
 
@@ -126,10 +136,12 @@ export function AdvancedParamsTab({
 
                 <Form.Item
                   name="minP"
-                  label={t("modelSettings.form.minP.label")}>
+                  label={t("modelSettings.form.minP.label")}
+                  extra={minPUnavailableReason}>
                   <InputNumber
                     style={{ width: "100%" }}
                     placeholder={t("modelSettings.form.minP.placeholder")}
+                    disabled={Boolean(minPUnavailableReason)}
                   />
                 </Form.Item>
 

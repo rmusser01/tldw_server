@@ -3372,7 +3372,7 @@ test.describe('/chat cockpit real-server parity', () => {
         .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}));
       const stoppedInput = originalRecoveries.find(turn => turn.input_text === prompt);
       expect(stoppedInput).toBeDefined();
-      if (emptyResponse) await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      if (emptyResponse) await expect(page.getByText('The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.', { exact: true })).toBeVisible();
       else expect(stoppedInput!.result_text.trim()).not.toBe('');
       const automaticTurnAttempts: string[] = [];
       const observeAutomaticTurn = (hit: Request) => {
@@ -3390,7 +3390,7 @@ test.describe('/chat cockpit real-server parity', () => {
           .find(turn => turn.operation_id === stoppedInput!.operation_id);
         expect(coldRecovery).toEqual(stoppedInput);
         await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
-        const savedSource = page.getByRole('list', { name: 'Complete source messages', exact: true });
+        const savedSource = page.getByRole('list', { name: 'All messages in this chat', exact: true });
         await expect(savedSource).toBeVisible();
         const reloaded = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
         expect(reloaded.status).toBe(200);
@@ -3559,7 +3559,7 @@ test('refreshes a real empty native source after late settlement without replay 
     await expect(page.getByRole("button", { name: "Review conversation history", exact: true })).toBeFocused();
     await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
     await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
-    await expect(page.getByRole('list', { name: 'Complete source messages', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
+    await expect(page.getByRole('list', { name: 'All messages in this chat', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
     const records = ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id);
     expect(records.flatMap(row => Object.values(row.pending_turns ?? {})).find(turn => turn.operation_id === recovery.operation_id)).toEqual(recovery);
     expect(attempts).toEqual([]);

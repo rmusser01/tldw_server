@@ -821,7 +821,7 @@ it.each(["unchanged", "Prompt edit", "Formatting guide", "Prompt whitespace", "g
   const options = { ...ordinaryOptions(), selectedModel: "qwen", selectedSystemPrompt: "pirate", messages: [{ id: "u-old", isBot: false, message: "old question", sources: [] }], history: [{ role: "user", content: "old question" }] }
   const { result, rerender } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
   render(<HistorySelectionReview selection={{ ...h1.controller, ...current, recoveries: [entry] }} getRetryContext={result.current.getRecoveryRetryContext} onRetryRecovery={result.current.retryRecoveredHistoryTurn} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   expect(await screen.findByText(pirate, { exact: false })).toBeVisible()
   expect(screen.getByText((_content, element) => element?.tagName === "PRE" && element.textContent === reviewedInstruction)).toBeVisible()
