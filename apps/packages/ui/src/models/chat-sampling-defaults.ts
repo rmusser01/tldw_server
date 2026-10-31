@@ -34,9 +34,9 @@ const finiteOrUndefined = (value: unknown): number | undefined =>
  * What the request sends for a parameter the current chat leaves unset,
  * given the user's saved default model settings.
  *
- * pageAssistModel falls back to the saved defaults for temperature and top_p
- * only; it never forwards penalties, so ChatTldw sends its own fallback for
- * them. Keep this in step with pageAssistModel (models/index.ts);
+ * pageAssistModel falls back to the saved defaults for temperature, top_p and
+ * both penalties (#3283); ChatTldw sends its own fallback when none is set.
+ * Keep this in step with pageAssistModel (models/index.ts);
  * pageAssistModel.sampling-defaults.test.ts fails if the two disagree.
  */
 export const resolveInheritedSampling = (
@@ -48,6 +48,10 @@ export const resolveInheritedSampling = (
   topP:
     finiteOrUndefined(savedDefaults?.topP) ??
     CHAT_REQUEST_SAMPLING_FALLBACKS.topP,
-  frequencyPenalty: CHAT_REQUEST_SAMPLING_FALLBACKS.frequencyPenalty,
-  presencePenalty: CHAT_REQUEST_SAMPLING_FALLBACKS.presencePenalty
+  frequencyPenalty:
+    finiteOrUndefined(savedDefaults?.frequencyPenalty) ??
+    CHAT_REQUEST_SAMPLING_FALLBACKS.frequencyPenalty,
+  presencePenalty:
+    finiteOrUndefined(savedDefaults?.presencePenalty) ??
+    CHAT_REQUEST_SAMPLING_FALLBACKS.presencePenalty
 })

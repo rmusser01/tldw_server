@@ -98,6 +98,27 @@ describe("model normalization helpers", () => {
     ])
   })
 
+  it("#3283: keeps the optional sampling fields each provider accepts", async () => {
+    const client = {
+      getModelsMetadata: vi.fn(async () => ({
+        models: [
+          { id: "or-model", provider: "openrouter", type: "chat", sampling_fields: ["top_k", "min_p"] },
+          { id: "gpt-4o", provider: "openai", type: "chat", sampling_fields: [] },
+          { id: "legacy", provider: "ollama", type: "chat" }
+        ]
+      })),
+      getProviders: vi.fn(async () => ({ providers: [] }))
+    }
+
+    const models = await getNormalizedTldwModels(client)
+
+    expect(models.map((model) => [model.id, model.sampling_fields])).toEqual([
+      ["or-model", ["top_k", "min_p"]],
+      ["gpt-4o", []],
+      ["legacy", undefined]
+    ])
+  })
+
   it("treats array-valued modalities as invalid metadata records", () => {
     const models = normalizeTldwModels({
       models: [

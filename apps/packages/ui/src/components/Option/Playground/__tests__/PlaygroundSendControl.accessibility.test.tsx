@@ -60,6 +60,16 @@ describe("unavailable delivery", () => {
   it("shows a disabled Send instead of offering an offline queue", () => {
     render(<PlaygroundSendControl {...baseProps} isConnectionReady={false} />)
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
-    expect(screen.queryByRole("button", { name: "Queue request" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Send after this reply" })).not.toBeInTheDocument()
+  })
+})
+
+describe("sending while a reply streams (CM-02)", () => {
+  it("keeps the Send label and says it sends after this reply, like the side panel", () => {
+    render(<PlaygroundSendControl {...baseProps} isSending />)
+    const send = screen.getByRole("button", { name: "Send after this reply" })
+    expect(send).toHaveTextContent("Send")
+    expect(send).not.toHaveTextContent(/queue/i)
+    expect(send).toHaveAttribute("title", "Sends your message after the current reply finishes.")
   })
 })

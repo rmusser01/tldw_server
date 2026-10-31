@@ -8,6 +8,10 @@ import {
 
 export const EMPTY_CHAT_MODELS: Awaited<ReturnType<typeof fetchChatModels>> = []
 
+/** The query key of the chat model catalog for one cache generation. */
+export const chatModelCatalogQueryKey = (generation: number) =>
+  ["playground:chatModels", generation] as const
+
 /** Share authoritative readiness and selection, retiring results on setup/account changes. */
 export const useChatModelCatalog = (enabled = true) => {
   const generation = useSyncExternalStore(
@@ -16,7 +20,7 @@ export const useChatModelCatalog = (enabled = true) => {
     getChatModelsCacheGeneration
   )
   const client = useQueryClient()
-  const queryKey = ["playground:chatModels", generation]
+  const queryKey = chatModelCatalogQueryKey(generation)
   const previous = client.getQueryState(queryKey)
   const previousPending = previous?.fetchStatus === "fetching"
   const previousEmpty = previous?.status === "success" && Array.isArray(previous.data) && previous.data.length === 0

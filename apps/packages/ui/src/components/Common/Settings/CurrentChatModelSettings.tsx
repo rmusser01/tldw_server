@@ -977,6 +977,7 @@ export const CurrentChatModelSettings = ({
             <AdvancedParamsTab
               form={form}
               providerOptions={providerOptions}
+              selectedModel={selectedModel}
             />
           )
         },
