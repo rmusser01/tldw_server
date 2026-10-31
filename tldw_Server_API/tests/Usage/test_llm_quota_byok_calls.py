@@ -243,6 +243,24 @@ async def test_a_trusted_callers_base_url_on_the_vendors_host_is_not_checked(ref
     assert [row["credential_source"] for row in refused] == ["user"]
 
 
+async def test_an_admitted_call_to_a_trusted_callers_off_host_base_url_counts(refused, monkeypatch) -> None:
+    """Admitted, the off-host call is recorded as ``user_unmetered``, so the user's limits count it."""
+
+    async def _admit(user_id: Any, requested_tokens: int = 1) -> None:
+        """Admit everyone."""
+        return None
+
+    monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _admit)
+    request = {
+        **REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
+        "base_url": "http://operator-gpu.internal:8000/v1",
+    }
+    with llm_call_context(user_id=7):
+        await _Provider().achat(request)
+    await llm_accounting.drain_accounting()
+    assert [row["credential_source"] for row in refused] == ["user_unmetered"]
+
+
 async def test_calls_on_the_users_own_key_are_not_checked_and_are_recorded_as_such(refused) -> None:
     """An over-limit user's four calls on their own key all run, and each row says ``user``."""
     request = {**REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user")}
