@@ -8,6 +8,9 @@ import {
   getWorkspaceUndoPendingCount
 } from "../undo-manager"
 import { WorkspaceHeader } from "../WorkspaceHeader"
+import { workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
+import type { WorkspaceArtifactApiResponse, WorkspaceArtifactCreateRequest } from "@/services/tldw/domains/workspace-api"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { ConnectionPhase, type ConnectionState } from "@/types/connection"
 import {
   FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS,
@@ -68,6 +71,49 @@ const {
   mockGetWorkspace: vi.fn(),
   mockPatchWorkspace: vi.fn()
 }))
+
+const acpPersistence = vi.hoisted(() => ({
+  loadScope: vi.fn(), request: vi.fn(), rows: [] as WorkspaceArtifactApiResponse[],
+  scope: null as unknown as ServicePromptSnapshot, heldSave: null as null | (() => Promise<void>),
+  failSave: false
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: (...args: unknown[]) => acpPersistence.loadScope(...args)
+}))
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: (...args: unknown[]) => acpPersistence.request(...args)
+}))
+
+const canonicalAcpRow = (payload: WorkspaceArtifactCreateRequest): WorkspaceArtifactApiResponse => ({
+  ...payload, status: payload.status ?? "completed", content: payload.content ?? null,
+  total_tokens: null, total_cost_usd: null, created_at: new Date().toISOString(),
+  completed_at: null, workspace_id: "workspace-alpha", version: 1
+})
+const seedCanonicalAcpVersions = () => {
+  acpPersistence.rows = mockStoreState.generatedArtifacts.map(artifact =>
+    canonicalAcpRow(workspaceArtifactDraftPayload(artifact)))
+}
+
+const installAcpHistory = (resultPreview = "Retained owned result.") => {
+  fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname
+    const payload = path.endsWith("/acp/sessions") ? { sessions: [] }
+      : path.endsWith("/projects") ? [{ id: 66, name: "Owned history", canonical_workspace: { canonical_workspace_id: "workspace-alpha" } }]
+      : path.endsWith("/projects/66/tasks") ? [{ id: 77, project_id: 66, title: "Owned task", status: "complete" }]
+      : path.endsWith("/tasks/77") ? { id: 77, project_id: 66, title: "Owned task", status: "complete", runs: [{ id: 99, task_id: 77, status: "completed", result_summary: resultPreview }] }
+      : null
+    if (payload === null) throw new Error("Unexpected history route")
+    return { ok: true, json: async () => payload } as Response
+  })
+}
+const openAcpHistory = async () => {
+  fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+  fireEvent.click(await screen.findByRole("menuitem", { name: "ACP run history" }))
+  const modal = await screen.findByRole("dialog", { name: "ACP run history" })
+  await within(modal).findByText("Owned history")
+  return modal
+}
+const renderAcpHeader = () => render(<WorkspaceHeader leftPaneOpen rightPaneOpen onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} />)
 
 const now = new Date("2026-02-18T12:00:00.000Z")
 
@@ -157,6 +203,7 @@ const mockStoreState = {
   deleteWorkspace: mockDeleteWorkspace,
   saveCurrentWorkspace: mockSaveCurrentWorkspace,
   addArtifact: mockAddArtifact,
+  restoreArtifact: mockAddArtifact,
   captureUndoSnapshot: mockCaptureUndoSnapshot,
   restoreUndoSnapshot: mockRestoreUndoSnapshot
 }
@@ -189,7 +236,7 @@ const connectionConfigState: {
   loading: boolean
   config: {
     serverUrl: string
-    authMode: "single-user"
+    authMode: "single-user" | "multi-user"
     apiKey: string
     accessToken: string
   } | null
@@ -362,7 +409,7 @@ vi.mock("@/store/workspace", () => {
     Object.assign(mockStoreState, next)
   }
 
-  return { useWorkspaceStore }
+  return { useWorkspaceStore, generateWorkspaceId: () => crypto.randomUUID(), hasResearchWorkspaceMigrationTombstone: () => true }
 })
 
 // Launcher ownership is qualified separately with the real router/store/library.
@@ -520,6 +567,38 @@ describe("WorkspaceHeader workspace browser modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockAddArtifact.mockReset()
+    const scopeController = new AbortController()
+    acpPersistence.scope = {
+      scopeKey: "test-alpha-user", capability: "unchecked", definitions: {},
+      requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: 1 },
+      scopeSignal: scopeController.signal,
+      scopeInvalidatedSignal: scopeController.signal, release: vi.fn()
+    }
+    acpPersistence.rows = []
+    acpPersistence.heldSave = null
+    acpPersistence.failSave = false
+    acpPersistence.loadScope.mockImplementation(async () => acpPersistence.scope)
+    acpPersistence.request.mockImplementation(async (request) => {
+      if (request.path.startsWith("/api/v1/agent-orchestration/") || request.path.startsWith("/api/v1/acp/")) {
+        const response = await fetchMockState.fetch("http://127.0.0.1:8000" + request.path, {
+          headers: { "X-API-KEY": "test-api-key", ...request.headers }, signal: request.abortSignal
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null)
+          const detail = payload?.detail
+          const message = typeof detail === "string" ? detail : detail?.message || detail?.code || "HTTP " + response.status
+          throw Object.assign(new Error(message + " (GET " + request.path + ")"), { status: response.status, details: payload })
+        }
+        return response.json()
+      }
+      if (request.method === "GET") return structuredClone(acpPersistence.rows)
+      if (acpPersistence.failSave) throw new Error("Save unavailable; retry saving.")
+      if (acpPersistence.heldSave) await acpPersistence.heldSave()
+      const row = canonicalAcpRow(request.body)
+      acpPersistence.rows.push(row)
+      return row
+    })
+
     translationMock.keys = []
     workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
       makeActiveWorkspaceHookResult()
@@ -2866,6 +2945,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
       throw new Error(`unexpected fetch: ${url}`)
     })
 
+    seedCanonicalAcpVersions()
     render(
       <WorkspaceHeader
         leftPaneOpen={true}
@@ -2890,7 +2970,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
 
-    expect(mockAddArtifact).toHaveBeenCalledWith(
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "report",
         status: "completed",
@@ -2929,7 +3009,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
           })
         })
       })
-    )
+    , { index: 0 }))
+    expect(acpPersistence.request).toHaveBeenCalledWith(expect.objectContaining({ method: "POST", body: expect.objectContaining({ content: expect.stringContaining("Completed synthesis") }) }))
     expect(mockSaveCurrentWorkspace).toHaveBeenCalled()
     expect(mockMessageApi.success).toHaveBeenCalledWith(
       "Agent result saved to Studio outputs."
@@ -3041,6 +3122,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
       return savedArtifact
     })
 
+    seedCanonicalAcpVersions()
     render(
       <WorkspaceHeader
         leftPaneOpen={true}
@@ -3061,9 +3143,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
 
     fireEvent.click(saveButton)
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
     fireEvent.click(saveButton)
-
-    expect(mockAddArtifact).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(2))
     expect(mockAddArtifact.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         artifactVersionId: "acp-run-101-v4",
@@ -3180,7 +3262,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
 
-    expect(mockAddArtifact).toHaveBeenCalledWith(
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Agent result: Write retained summary",
         content: "Completed retained summary.",
@@ -3192,10 +3274,215 @@ describe("WorkspaceHeader workspace browser modal", () => {
           sessionId: undefined
         })
       })
-    )
+    , { index: 0 }))
     const savedArtifact = mockAddArtifact.mock.calls[0]?.[0]
     expect(savedArtifact.completedAt).toBeInstanceOf(Date)
     expect(Number.isNaN(savedArtifact.completedAt.getTime())).toBe(false)
+  })
+
+  it("keeps ACP results pending until canonical acknowledgement and uses owned versions", async () => {
+    installAcpHistory()
+    mockStoreState.generatedArtifacts = [{ id: "foreign-cache", type: "report", rootArtifactId: "acp-run-99", version: 500 }]
+    let release!: () => void
+    acpPersistence.heldSave = () => new Promise<void>(resolve => { release = resolve })
+    renderAcpHeader()
+    const modal = await openAcpHistory()
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockMessageApi.success).not.toHaveBeenCalled()
+    expect(within(modal).getByRole("button", { name: /Save to Studio/ })).toBeDisabled()
+    release()
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
+    expect(mockAddArtifact.mock.calls[0][0]).toMatchObject({ version: 1, artifactVersionId: "acp-run-99-v1", workspaceArtifactId: acpPersistence.rows[0].id })
+    expect(acpPersistence.rows[0]).not.toHaveProperty("scope")
+    expect(acpPersistence.rows[0].version_metadata?.workspaceClient).not.toHaveProperty("scope")
+  })
+
+  it("reconciles a late ACP save receipt without posting a new version", async () => {
+    installAcpHistory()
+    acpPersistence.failSave = true
+    renderAcpHeader()
+    const modal = await openAcpHistory()
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await within(modal).findByText("Save unavailable; retry saving.")
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    const post = acpPersistence.request.mock.calls.find(([request]) => request.method === "POST")![0]
+    acpPersistence.rows.push({ ...post.body, workspace_id: "workspace-alpha", version: 1 })
+    acpPersistence.failSave = false
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
+    expect(acpPersistence.request.mock.calls.filter(([request]) => request.method === "POST")).toHaveLength(1)
+    expect(mockAddArtifact.mock.calls[0][0].workspaceArtifactId).toBe(post.body.id)
+    expect(mockAddArtifact.mock.calls[0][0].artifactVersionId).toBe("acp-run-99-v1")
+  })
+
+  it("retires ACP history before an old-account response can publish", async () => {
+    installAcpHistory()
+    let release!: (value: unknown) => void
+    const delayed = new Promise(resolve => { release = resolve })
+    const controller = new AbortController()
+    acpPersistence.scope = { ...acpPersistence.scope, scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal }
+    acpPersistence.loadScope.mockImplementation(async () => delayed)
+    renderAcpHeader()
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+    await screen.findByRole("dialog", { name: "ACP run history" })
+    controller.abort()
+    release(acpPersistence.scope)
+    await waitFor(() => expect(screen.queryByText("Owned history")).not.toBeInTheDocument())
+    expect(fetchMockState.fetch).not.toHaveBeenCalled()
+    expect(acpPersistence.request).not.toHaveBeenCalled()
+  })
+
+  it("does not publish a held ACP acknowledgement after workspace retirement", async () => {
+    installAcpHistory()
+    let release!: () => void
+    acpPersistence.heldSave = () => new Promise<void>(resolve => { release = resolve })
+    const view = renderAcpHeader()
+    const modal = await openAcpHistory()
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    mockStoreState.workspaceId = "workspace-beta"
+    view.rerender(<WorkspaceHeader leftPaneOpen rightPaneOpen onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} />)
+    release()
+    await waitFor(() => expect(acpPersistence.rows).toHaveLength(1))
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockMessageApi.success).not.toHaveBeenCalled()
+  })
+
+  it("dispatches ACP history with the verified principal rather than stale connection credentials", async () => {
+    installAcpHistory()
+    connectionConfigState.config = { ...connectionConfigState.config, authMode: "multi-user", accessToken: "stale-alice-token" }
+    acpPersistence.scope = { ...acpPersistence.scope, requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" }, userId: "bob" } }
+    renderAcpHeader()
+    await openAcpHistory()
+    const reads = acpPersistence.request.mock.calls.map(([request]) => request).filter(request => request.path.startsWith("/api/v1/agent-orchestration/"))
+    expect(reads.length).toBeGreaterThan(0)
+    for (const read of reads) {
+      expect(read.servicePromptConfig).toMatchObject({ expectedUserId: "bob", authMode: "multi-user" })
+      expect(read.headers).toEqual({ "X-TLDW-Expected-User-ID": "bob" })
+      expect(JSON.stringify(read)).not.toContain("stale-alice-token")
+    }
+  })
+
+  it("blocks an ACP POST after a workspace switch during the adapter read", async () => {
+    installAcpHistory()
+    const request = acpPersistence.request.getMockImplementation()!
+    let release!: (rows: unknown[]) => void
+    let artifactReads = 0
+    acpPersistence.request.mockImplementation(async input => {
+      if (input.path.endsWith("/artifacts") && input.method === "GET" && ++artifactReads === 2)
+        return new Promise(resolve => { release = resolve })
+      return request(input)
+    })
+    renderAcpHeader()
+    const modal = await openAcpHistory()
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    mockStoreState.workspaceId = "workspace-beta"
+    release([])
+    await waitFor(() => expect(within(modal).getByRole("button", { name: "Save to Studio" })).toBeEnabled())
+    expect(acpPersistence.request.mock.calls.filter(([input]) => input.method === "POST")).toHaveLength(0)
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+  })
+
+  it("preserves a competing ACP version and requires another explicit save", async () => {
+    installAcpHistory()
+    const request = acpPersistence.request.getMockImplementation()!
+    let competed = false
+    acpPersistence.request.mockImplementation(async input => {
+      if (input.method === "POST" && !competed) {
+        competed = true
+        acpPersistence.rows.push({ ...input.body, title: "Other tab result", workspace_id: "workspace-alpha", version: 1 })
+        throw Object.assign(new Error("Another writer saved this version. Save again for the next version."), { status: 409 })
+      }
+      return request(input)
+    })
+    renderAcpHeader()
+    const modal = await openAcpHistory()
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await within(modal).findByText("Another writer saved this version. Save again for the next version.")
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    await waitFor(() => expect(within(modal).getByRole("button", { name: "Save to Studio" })).toBeEnabled())
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
+    expect(acpPersistence.rows.map(row => row.id)).toEqual(["acp-run-99-v1", "acp-run-99-v2"])
+    expect(acpPersistence.rows[0].title).toBe("Other tab result")
+    expect(mockAddArtifact.mock.calls[0][0]).toMatchObject({ artifactVersionId: "acp-run-99-v2", previousVersionId: "acp-run-99-v1" })
+  })
+
+  it("refuses an unresolved ACP retry when the visible run result has changed", async () => {
+    installAcpHistory()
+    acpPersistence.failSave = true
+    renderAcpHeader()
+    const modal = await openAcpHistory()
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    await within(modal).findByText("Save unavailable; retry saving.")
+    fireEvent.click(within(modal).getAllByRole("button", { name: "Close" }).at(-1)!)
+    installAcpHistory("Newly revised visible result.")
+    const reopened = await openAcpHistory()
+    fireEvent.click(within(reopened).getByRole("button", { name: "Save to Studio" }))
+    await within(reopened).findByText("The run result changed. Save again to save the currently displayed result as a new version.")
+    expect(acpPersistence.request.mock.calls.filter(([input]) => input.method === "POST")).toHaveLength(1)
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    acpPersistence.failSave = false
+    await waitFor(() => expect(within(reopened).getByRole("button", { name: "Save to Studio" })).toBeEnabled())
+    fireEvent.click(within(reopened).getByRole("button", { name: "Save to Studio" }))
+    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
+    expect(mockAddArtifact.mock.calls[0][0].content).toBe("Newly revised visible result.")
+  })
+
+  it("does not publish a retired ACP history error after its response finishes", async () => {
+    installAcpHistory()
+    const request = acpPersistence.request.getMockImplementation()!
+    let reject!: (error: Error) => void
+    const held = new Promise((_resolve, rejectPromise) => { reject = rejectPromise })
+    const controller = new AbortController()
+    acpPersistence.scope = { ...acpPersistence.scope, scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal }
+    acpPersistence.request.mockImplementation(async input => {
+      if (input.path.includes("/agent-orchestration/projects?")) return held
+      return request(input)
+    })
+    renderAcpHeader()
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+    const modal = await screen.findByRole("dialog", { name: "ACP run history" })
+    await waitFor(() => expect(acpPersistence.request).toHaveBeenCalled())
+    controller.abort()
+    reject(new Error("Old account private failure"))
+    await within(modal).findByText("The account or server changed. Reopen history before saving.")
+    expect(within(modal).queryByText("Old account private failure")).not.toBeInTheDocument()
+    expect(within(modal).queryByRole("button", { name: "Save to Studio" })).not.toBeInTheDocument()
+  })
+
+  it("reports ACP timeout when task history succeeded but sessions did not finish", async () => {
+    installAcpHistory()
+    const request = acpPersistence.request.getMockImplementation()!
+    const schedule = globalThis.setTimeout
+    let expire!: () => void
+    const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, delay?: number) => {
+      if (delay === 15000) {
+        expire = callback
+        return schedule(() => {}, 60000)
+      }
+      return schedule(callback, delay)
+    }) as typeof setTimeout)
+    try {
+      acpPersistence.request.mockImplementation(async input => {
+        if (input.path.startsWith("/api/v1/acp/sessions"))
+          return new Promise((_resolve, reject) => input.abortSignal.addEventListener("abort", () => reject(new DOMException("Timed out", "AbortError")), { once: true }))
+        return request(input)
+      })
+      renderAcpHeader()
+      fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+      fireEvent.click(await screen.findByText("ACP run history"))
+      const modal = await screen.findByRole("dialog", { name: "ACP run history" })
+      await waitFor(() => expect(acpPersistence.request.mock.calls.some(([input]) => input.path.endsWith("/tasks/77"))).toBe(true))
+      expire()
+      await within(modal).findByText("Loading history exceeded 15 seconds. Reopen history to retry.")
+      expect(within(modal).queryByText("No ACP runs linked to this workspace yet")).not.toBeInTheDocument()
+    } finally { timer.mockRestore() }
   })
 
   it("shows direct workspace ACP sessions when Agent Tasks history has no runs", async () => {
