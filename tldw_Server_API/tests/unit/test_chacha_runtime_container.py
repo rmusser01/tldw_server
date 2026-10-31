@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
     ChaChaRuntimeUnavailableError,
     get_chacha_runtime,
 )
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Utils.app_services import app_services
 
 pytestmark = pytest.mark.unit
@@ -93,3 +94,100 @@ async def test_runtime_owns_the_executor_and_cache(fresh_services) -> None:
     assert fake_db.closed
     runtime.resume()
     assert runtime.executor().submit(lambda: 42).result(timeout=5) == 42
+
+
+class _RecordingRuntime(ChaChaRuntimeManager):
+    """Builds through the factory on every call and records each cache key."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.keys: list[str] = []
+
+    async def get_db(self, key, factory, *, user_id):
+        self.keys.append(key)
+        return factory()
+
+
+async def _no_default_character(*_args) -> None:
+    return None
+
+
+async def test_core_accessors_bind_the_tenant_client_id(fresh_services, monkeypatch, tmp_path) -> None:
+    """client_id is the PostgreSQL tenant key: "voice_assistant" once pooled every user into one tenant."""
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    runtime = _RecordingRuntime()
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
+    built: list[tuple[int, str]] = []
+
+    def create(user_id: int, client_id: str) -> _FakeDB:
+        built.append((user_id, client_id))
+        return _FakeDB()
+
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", create)
+    monkeypatch.setattr(chacha_db_provider, "_ensure_default_character_async", _no_default_character)
+
+    db = await chacha_db_provider.get_chacha_db_for_user_id(7, client_id="voice_assistant")
+    await chacha_db_provider.get_chacha_db_for_owner(7)
+    await chacha_db_provider.warm_chacha_db_for_user(7, "voice_assistant")
+
+    assert isinstance(db, _FakeDB)
+    assert built == [(7, "7")] * 3
+    assert runtime.keys == [str(DatabasePaths.get_user_base_directory(7))] * 3
+
+
+async def test_two_users_never_share_a_cached_handle(fresh_services, monkeypatch, tmp_path) -> None:
+    """The cache key is the user's own directory, so each user gets, and keeps, a separate handle."""
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    runtime = get_chacha_runtime()
+    monkeypatch.setattr(runtime, "_probe", lambda _db: True)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", lambda _user_id, _client_id: _FakeDB())
+    monkeypatch.setattr(chacha_db_provider, "_ensure_default_character_async", _no_default_character)
+
+    seven = await chacha_db_provider.get_chacha_db_for_user_id(7)
+    nine = await chacha_db_provider.get_chacha_db_for_user_id(9)
+
+    assert seven is not nine
+    assert await chacha_db_provider.get_chacha_db_for_user_id(7) is seven
+    assert await chacha_db_provider.get_chacha_db_for_owner(9) is nine
+    assert sorted(runtime._instances) == sorted(str(DatabasePaths.get_user_base_directory(u)) for u in (7, 9))
+
+
+async def test_core_accessor_raises_core_errors_not_http(fresh_services, monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
+
+    with pytest.raises(ValueError, match=r"^Invalid owner_user_id\.$"):
+        await chacha_db_provider.get_chacha_db_for_user_id(0)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(app_services(), "chacha_runtime", _RaisingRuntime(ChaChaInitTimeoutError()))
+    with pytest.raises(ChaChaInitTimeoutError):
+        await chacha_db_provider.get_chacha_db_for_user_id(1)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda provider: provider.get_chacha_db_for_user_id(4242),
+        lambda provider: provider.get_chacha_db_for_owner(-1),
+        lambda provider: provider.get_chacha_db_for_owner(0),
+    ],
+    ids=["user-4242", "owner-minus-1", "owner-0"],
+)
+async def test_closed_runtime_refuses_before_resolving_the_user_directory(
+    fresh_services, monkeypatch, tmp_path, call
+) -> None:
+    """Resolving the directory creates it, so a closed runtime refuses first (the 503 path)."""
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
+
+    runtime = ChaChaRuntimeManager()
+    runtime.shutdown()
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
+
+    with pytest.raises(ChaChaRuntimeUnavailableError):
+        await call(chacha_db_provider)
+
+    assert list(tmp_path.iterdir()) == []

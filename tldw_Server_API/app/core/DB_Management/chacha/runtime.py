@@ -1,7 +1,8 @@
 """ChaChaNotes runtime: the executor, per-user DB cache, init state, health counters and shutdown.
 
 One ``ChaChaRuntimeManager`` lives in the app-service container (``get_chacha_runtime()``).
-It raises core errors; ``api/v1/API_Deps/ChaCha_Notes_DB_Deps.py`` maps them to HTTP.
+It raises core errors: ``core/Character_Chat/chacha_db_provider.py`` opens per-user databases through it,
+and the API layer maps its errors to HTTP.
 """
 
 from __future__ import annotations

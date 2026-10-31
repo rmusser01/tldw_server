@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha import runtime as runtime_module
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
@@ -15,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     SchemaError,
 )
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 class _LoggerStub:
@@ -67,7 +69,7 @@ def _patch_chacha_init_failure(monkeypatch, tmp_path: Path, exc: Exception) -> N
     def fail_create(*args, **kwargs):
         raise exc
 
-    monkeypatch.setattr(deps, "_create_and_prepare_db", fail_create)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", fail_create)
 
 
 def _seed_existing_chacha_init_failure(monkeypatch, tmp_path: Path, user_id: int, exc: Exception) -> None:
@@ -208,9 +210,9 @@ def test_chacha_tuning_sanitizes_fail_open_log(monkeypatch):
         def get_connection(self):
             raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(chacha_db_provider, "logger", logger_stub)
 
-    deps._apply_sqlite_tuning(_DBInstance())
+    chacha_db_provider._apply_sqlite_tuning(_DBInstance())
 
     _assert_log_omits_raw_exception(
         logger_stub,
@@ -279,16 +281,18 @@ def test_shutdown_chacha_executor_sanitizes_shutdown_failure_log(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_warm_chacha_db_for_user_sanitizes_fail_open_log(monkeypatch):
+async def test_warm_chacha_db_for_user_sanitizes_fail_open_log(fresh_services, monkeypatch, tmp_path):
     logger_stub = _LoggerStub()
 
-    async def fail_init(*args, **kwargs):
-        raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+    class _FailingRuntime(runtime_module.ChaChaRuntimeManager):
+        async def get_db(self, *_args, **_kwargs):
+            raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
-    monkeypatch.setattr(deps, "_get_or_init_db_instance", fail_init)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(app_services(), "chacha_runtime", _FailingRuntime())
+    monkeypatch.setattr(chacha_db_provider, "logger", logger_stub)
 
-    await deps.warm_chacha_db_for_user(4242)
+    await chacha_db_provider.warm_chacha_db_for_user(4242)
 
     _assert_log_omits_raw_exception(
         logger_stub,
@@ -325,7 +329,7 @@ def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(
     """Database initialization logs omit raw parent-directory creation errors."""
     logger_stub = _LoggerStub()
     safe_db_path = tmp_path / "safe-chacha" / "ChaChaNotes.db"
-    original_mkdir = deps.Path.mkdir
+    original_mkdir = chacha_db_provider.Path.mkdir
 
     class _DBInstance:
         """Minimal database double for the path-log sanitization boundary."""
@@ -345,17 +349,17 @@ def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(
         assert owner_user_id == "4242"
         return _DBInstance()
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
-    monkeypatch.setattr(deps, "_get_chacha_db_path_for_user", lambda _user_id: safe_db_path)
-    monkeypatch.setattr(deps.Path, "mkdir", fail_parent_mkdir)
-    monkeypatch.setattr(deps, "CharactersRAGDB", make_db)
-    monkeypatch.setattr(deps, "_apply_sqlite_tuning", lambda _db_instance: None)
+    monkeypatch.setattr(chacha_db_provider, "logger", logger_stub)
+    monkeypatch.setattr(chacha_db_provider, "_get_chacha_db_path_for_user", lambda _user_id: safe_db_path)
+    monkeypatch.setattr(chacha_db_provider.Path, "mkdir", fail_parent_mkdir)
+    monkeypatch.setattr(chacha_db_provider, "CharactersRAGDB", make_db)
+    monkeypatch.setattr(chacha_db_provider, "_apply_sqlite_tuning", lambda _db_instance: None)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Visual_Identities.builtin_pixel_migu.ensure_pixel_migu_character",
         lambda _db_instance, **_kwargs: None,
     )
 
-    assert isinstance(deps._create_and_prepare_db(4242, "safe-client"), _DBInstance)
+    assert isinstance(chacha_db_provider.create_and_prepare_chacha_db(4242, "safe-client"), _DBInstance)
 
     _assert_log_omits_raw_exception(
         logger_stub,
@@ -371,10 +375,10 @@ async def test_ensure_default_character_async_sanitizes_failure_log(monkeypatch)
     def fail_default_character(_db_instance):
         raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
-    monkeypatch.setattr(deps, "_ensure_default_character", fail_default_character)
+    monkeypatch.setattr(chacha_db_provider, "logger", logger_stub)
+    monkeypatch.setattr(chacha_db_provider, "ensure_default_character", fail_default_character)
 
-    await deps._ensure_default_character_async(object(), 4242)
+    await chacha_db_provider._ensure_default_character_async(object(), 4242)
 
     _assert_log_omits_raw_exception(
         logger_stub,
@@ -406,9 +410,9 @@ def test_ensure_default_character_sanitizes_conflict_fallback_logs(monkeypatch):
                 raise ConflictError("chacha backend exploded at /private/db/path SECRET_TOKEN")
             return None
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(chacha_db_provider, "logger", logger_stub)
 
-    assert deps._ensure_default_character(_DBInstance()) is None
+    assert chacha_db_provider.ensure_default_character(_DBInstance()) is None
 
     _assert_log_omits_raw_exception(
         logger_stub,
@@ -429,9 +433,9 @@ def test_ensure_default_character_sanitizes_database_failure_log(monkeypatch):
         def ensure_character_tables_ready(self):
             raise CharactersRAGDBError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(chacha_db_provider, "logger", logger_stub)
 
-    assert deps._ensure_default_character(_DBInstance()) is None
+    assert chacha_db_provider.ensure_default_character(_DBInstance()) is None
 
     _assert_log_omits_raw_exception(
         logger_stub,
@@ -447,9 +451,9 @@ def test_ensure_default_character_sanitizes_unexpected_failure_log(monkeypatch):
         def ensure_character_tables_ready(self):
             raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(chacha_db_provider, "logger", logger_stub)
 
-    assert deps._ensure_default_character(_DBInstance()) is None
+    assert chacha_db_provider.ensure_default_character(_DBInstance()) is None
 
     _assert_log_omits_raw_exception(
         logger_stub,

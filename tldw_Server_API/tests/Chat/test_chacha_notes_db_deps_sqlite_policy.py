@@ -8,7 +8,8 @@ import pytest
 from fastapi import HTTPException, status
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager, get_chacha_runtime
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 class _DummyConnection:
@@ -33,7 +34,7 @@ class _DummySQLiteDB:
 @pytest.mark.unit
 def test_chacha_dependency_tuning_uses_shared_sqlite_policy_helper(fresh_services, monkeypatch):
     import tldw_Server_API.app.core.DB_Management.sqlite_policy as sqlite_policy
-    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 
     calls: list[dict[str, object]] = []
     conn = _DummyConnection()
@@ -44,7 +45,7 @@ def test_chacha_dependency_tuning_uses_shared_sqlite_policy_helper(fresh_service
 
     monkeypatch.setattr(sqlite_policy, "configure_sqlite_connection", fake_configure)
 
-    deps._apply_sqlite_tuning(_DummySQLiteDB(conn))
+    chacha_db_provider._apply_sqlite_tuning(_DummySQLiteDB(conn))
 
     assert calls == [
         {
@@ -87,7 +88,7 @@ def test_chacha_dependency_health_check_uses_shared_sqlite_policy_helper(fresh_s
 @pytest.mark.unit
 def test_chacha_integrity_preflight_uses_db_management_quick_check(fresh_services, monkeypatch, tmp_path):
     import tldw_Server_API.app.core.DB_Management.sqlite_policy as sqlite_policy
-    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 
     db_path = tmp_path / "ChaChaNotes.db"
     db_path.write_text("sqlite placeholder")
@@ -99,7 +100,7 @@ def test_chacha_integrity_preflight_uses_db_management_quick_check(fresh_service
 
     monkeypatch.setattr(sqlite_policy, "run_sqlite_quick_check", fake_quick_check)
 
-    deps._verify_existing_chacha_db_integrity(db_path)
+    chacha_db_provider._verify_existing_chacha_db_integrity(db_path)
 
     assert calls == [
         {
@@ -113,24 +114,24 @@ def test_chacha_integrity_preflight_uses_db_management_quick_check(fresh_service
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("user_id", [True, False, 0, -1])
-async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(monkeypatch, user_id):
+async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(fresh_services, monkeypatch, user_id):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
-    called = False
+    calls: list[str] = []
 
-    async def fake_get_or_init_db_instance(_user_id, _client_id):
-        nonlocal called
-        called = True
-        return object()
+    class _RecordingRuntime(ChaChaRuntimeManager):
+        async def get_db(self, key, factory, *, user_id):
+            calls.append(key)
+            return object()
 
-    monkeypatch.setattr(deps, "_get_or_init_db_instance", fake_get_or_init_db_instance)
+    monkeypatch.setattr(app_services(), "chacha_runtime", _RecordingRuntime())
 
     with pytest.raises(HTTPException) as exc_info:
         await deps.get_chacha_db_for_user_id(user_id)
 
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
     assert exc_info.value.detail == "Invalid owner_user_id."
-    assert called is False
+    assert calls == []
 
 
 @pytest.mark.unit
@@ -205,6 +206,7 @@ async def test_close_all_chacha_db_instances_wakes_waiters_with_shutdown_error(f
 @pytest.mark.asyncio
 async def test_shutdown_waiter_keeps_abort_sentinel_when_fresh_init_starts(fresh_services, monkeypatch):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 
     runtime = get_chacha_runtime()
 
@@ -249,7 +251,7 @@ async def test_shutdown_waiter_keeps_abort_sentinel_when_fresh_init_starts(fresh
         return _FreshDB()
 
     runtime._init_events[cache_key] = initial_event
-    monkeypatch.setattr(deps, "_create_and_prepare_db", _blocking_create)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", _blocking_create)
 
     old_waiter_task = asyncio.create_task(deps._get_or_init_db_instance(1, "client-1"))
     await asyncio.to_thread(initial_event.wait_called.wait, 1.0)

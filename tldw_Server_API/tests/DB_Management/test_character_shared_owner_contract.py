@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chats
 from tldw_Server_API.app.api.v1.endpoints import characters_endpoint as characters
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
@@ -36,9 +37,9 @@ def owners(request, tmp_path):
 
 def _seed_defaults(owners):
     """Run the actual dependency maintenance bootstrap for both owners."""
-    first = deps._ensure_default_character(owners.first)
+    first = chacha_db_provider.ensure_default_character(owners.first)
     owners.first.close_connection()
-    second = deps._ensure_default_character(owners.second)
+    second = chacha_db_provider.ensure_default_character(owners.second)
     owners.second.close_connection()
     assert first is not None and second is not None
     return first, second
@@ -84,7 +85,7 @@ def test_default_bootstrap_returns_the_current_owners_character(owners):
     card = owners.second.get_character_card_by_id(second)
     assert card["name"] == deps.DEFAULT_CHARACTER_NAME
     assert card["client_id"] == "2"
-    assert deps._ensure_default_character(owners.second) == second
+    assert chacha_db_provider.ensure_default_character(owners.second) == second
 
 
 def test_visible_bootstrap_default_can_create_a_character_chat(owners, monkeypatch):

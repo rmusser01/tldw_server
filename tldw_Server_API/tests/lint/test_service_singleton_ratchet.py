@@ -15,6 +15,10 @@ Three counts, each frozen per module in its own baseline JSON as a ceiling
     top-level, or nested in module-level ``if``/``try``/``with``/``for``/``while``; never in a
     ``def`` or ``class``.
 
+One pin has no baseline: no module under ``core/`` or ``services/`` imports
+``api/v1/API_Deps/ChaCha_Notes_DB_Deps.py``, at module or function level
+(``chacha_adapter_importers``); they use ``core/Character_Chat/chacha_db_provider.py``.
+
 Known limits. These escape the counts: getters called through an alias
 (``pool = get_db_pool; pool()``), state built by a module-level helper call, and ``global`` writes
 in comprehensions.
@@ -178,6 +182,28 @@ RATCHETS = (
     (STATE, measure_module_state),
 )
 
+_CHACHA_DEPS = "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps"
+
+
+def _imports_chacha_deps(node: ast.AST) -> bool:
+    package, _, leaf = _CHACHA_DEPS.rpartition(".")
+    if isinstance(node, ast.Import):
+        return any(alias.name == _CHACHA_DEPS for alias in node.names)
+    if isinstance(node, ast.ImportFrom):
+        return node.module == _CHACHA_DEPS or (
+            node.module == package and any(alias.name == leaf for alias in node.names)
+        )
+    return False
+
+
+def chacha_adapter_importers(root: Path = APP_ROOT) -> list[str]:
+    """Modules under core/ and services/ that import the ChaCha deps adapter, at module or function level."""
+    return sorted(
+        key
+        for key, tree in _modules(root)
+        if key.startswith(("core/", "services/")) and any(map(_imports_chacha_deps, ast.walk(tree)))
+    )
+
 
 # --- Self-tests: each seeds a tree under a fresh tmp root and runs the real scan ---------------
 
@@ -239,6 +265,22 @@ def test_growth_new_and_stale_entries_fail_and_shrinking_passes(tmp_path, ratche
     assert _ceilings.violations(ratchet, measure(root), {key: {field: 3, "reason": None}}) == []
 
 
+def test_chacha_adapter_importers_lists_every_import_shape(tmp_path: Path) -> None:
+    root = _seed(tmp_path / "app", {
+        "core/X/absolute.py": f"from {_CHACHA_DEPS} import get_chacha_db_for_user_id\n",
+        "core/X/plain.py": f"import {_CHACHA_DEPS} as deps\n",
+        "services/from_package.py": "from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps\n",
+        "services/nested.py": f"async def f():\n    from {_CHACHA_DEPS} import warm_chacha_db_for_user\n",
+        # Not listed: an in-app tests package, the api layer, and another deps module.
+        "core/X/tests/test_x.py": f"import {_CHACHA_DEPS}\n",
+        "api/v1/endpoints/e.py": f"from {_CHACHA_DEPS} import get_chacha_db_for_user\n",
+        "services/other.py": "from tldw_Server_API.app.api.v1.API_Deps import DB_Deps\n",
+    })
+    assert chacha_adapter_importers(root) == [
+        "core/X/absolute.py", "core/X/plain.py", "services/from_package.py", "services/nested.py",
+    ]
+
+
 # --- The ratchets -------------------------------------------------------------------------------
 
 _REAL = pytest.mark.parametrize(("ratchet", "measure"), RATCHETS, ids=["globals", "getters", "state"])
@@ -258,6 +300,11 @@ def test_singleton_counts_do_not_grow(ratchet, measure) -> None:
 def test_raised_singleton_ceilings_carry_a_new_reason(ratchet, measure) -> None:
     problems = _ceilings.reasonless_bumps(ratchet, measure())
     assert problems == [], "\n".join(problems)
+
+
+def test_services_and_core_do_not_import_the_chacha_deps_adapter() -> None:
+    """Workers open per-user ChaCha DBs through core.Character_Chat.chacha_db_provider (AC3)."""
+    assert chacha_adapter_importers() == []
 
 
 if __name__ == "__main__":

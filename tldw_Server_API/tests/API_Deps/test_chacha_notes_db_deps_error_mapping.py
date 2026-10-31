@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.chacha import runtime as runtime_module
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaInitAbortedError, get_chacha_runtime
 
@@ -62,7 +63,7 @@ async def test_chacha_init_uses_hard_timeout_headroom_beyond_watchdog(monkeypatc
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
     runtime = get_chacha_runtime()
     monkeypatch.setattr(runtime, "watchdog_secs", 5.0)
-    monkeypatch.setattr(chacha_deps, "_create_and_prepare_db", _create_db)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", _create_db)
     monkeypatch.setattr(runtime_module.asyncio, "wait_for", _record_wait_for)
 
     db = await chacha_deps._get_or_init_db_instance(42, "client-42")
@@ -79,7 +80,7 @@ async def test_chacha_init_sanitizes_runtime_errors(monkeypatch, tmp_path):
         raise RuntimeError("chacha backend exploded at /private/db/path")
 
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
-    monkeypatch.setattr(chacha_deps, "_create_and_prepare_db", _raise_init_error)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", _raise_init_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await chacha_deps._get_or_init_db_instance(123, "client-123")
@@ -96,7 +97,7 @@ async def test_chacha_init_classifies_sqlite_corruption_without_path_leak(monkey
         raise sqlite3.DatabaseError("database disk image is malformed at /private/db/path")
 
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
-    monkeypatch.setattr(chacha_deps, "_create_and_prepare_db", _raise_init_error)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", _raise_init_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await chacha_deps._get_or_init_db_instance(321, "client-321")
@@ -246,9 +247,9 @@ def test_create_and_prepare_db_preflight_refuses_malformed_existing_file(monkeyp
             raise AssertionError("CharactersRAGDB should not be constructed for a corrupt existing DB")
 
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_chacha_db_path", lambda _user_id: db_path)
-    monkeypatch.setattr(chacha_deps, "CharactersRAGDB", _UnexpectedCharactersRAGDB)
+    monkeypatch.setattr(chacha_db_provider, "CharactersRAGDB", _UnexpectedCharactersRAGDB)
 
     with pytest.raises(chacha_deps.ChaChaDatabaseCorruptionError) as exc_info:
-        chacha_deps._create_and_prepare_db(987, "client-987")
+        chacha_db_provider.create_and_prepare_chacha_db(987, "client-987")
 
     assert str(db_path) not in str(exc_info.value)
