@@ -99,3 +99,17 @@ def test_a_pr_file_dev_already_holds_is_removed_and_a_renamed_one_renumbered() -
         "backlog/tasks/task-7 - New.md": (kept, []),  # renumber
         "backlog/tasks/task-7 - Renamed.md": (kept, []),  # its own rename source does not count
     }
+
+
+def test_a_dead_link_names_the_citing_task_file_by_its_path_after_the_renumber() -> None:
+    old, citing = "backlog/tasks/task-7 - Old.md", "backlog/tasks/task-9 - Citing.md"
+    by_path = {old: _copy("tasks", "task-7 - Old.md", 0), citing: _copy("tasks", "task-9 - Citing.md", 1)}
+    final_path = {old: "backlog/tasks/task-15001 - Old.md", citing: "backlog/tasks/task-15000 - Citing.md"}
+    cited = {"task-7 - Old.md": [citing, "Docs/notes.md", old]}
+
+    rewrites, dead, self_links = renumber.classify_links(cited, by_path, final_path)
+
+    # Docs are rewritten; a task file is not, so the record names where the dead link now lives.
+    assert dict(rewrites) == {"Docs/notes.md": ["task-7 - Old.md"]}
+    assert dead == [("backlog/tasks/task-15000 - Citing.md", "task-7 - Old.md")]
+    assert self_links == [("backlog/tasks/task-15001 - Old.md", "task-7 - Old.md")]

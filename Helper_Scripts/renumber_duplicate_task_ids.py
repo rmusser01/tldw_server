@@ -376,6 +376,21 @@ def entry_written_in(dependency: str, lineage: list[str]) -> str:
     raise SystemExit(f"{lineage[-1]}: no commit lists {dependency}")
 
 
+def classify_links(cited: dict[str, list[str]], by_path: dict, final_path: dict[str, str]) -> tuple:
+    """Split the files citing a renamed file's old name: rewritten (outside the task directories), a dead link
+    in another task file, or a renamed file citing its own old name (review v3 M2)."""
+    rewrites, dead, self_links = defaultdict(list), [], []
+    for old_name, files in sorted(cited.items()):
+        for f in files:
+            if not f.startswith(TASK_DIRS):
+                rewrites[f].append(old_name)
+            elif by_path.get(f) is None or by_path[f].name != old_name:
+                dead.append((final_path.get(f, f), old_name))  # where the citing file lives after the renumber
+            else:
+                self_links.append((final_path[f], old_name))
+    return rewrites, dead, self_links
+
+
 def plan(root: Path, pr_cache: Path | None, refresh: bool = False) -> dict:
     tasks = load_tasks(root)
     by_id: dict[str, list[Task]] = defaultdict(list)
@@ -503,15 +518,7 @@ def plan(root: Path, pr_cache: Path | None, refresh: bool = False) -> dict:
     # File-name links to renamed files. A renamed file whose name another copy keeps leaves its links alone.
     kept_names = {c.name for c in copies if c.path not in new_id}
     renamed = {r["copy"].name: r["new_path"].rsplit("/", 1)[1] for r in rows if r["copy"].name not in kept_names}
-    rewrites, dead, self_links = defaultdict(list), [], []
-    for old_name, files in sorted(references(set(renamed)).items()):
-        for f in files:
-            if not f.startswith(TASK_DIRS):
-                rewrites[f].append(old_name)
-            elif by_path.get(f) is None or by_path[f].name != old_name:
-                dead.append((f, old_name))
-            else:  # the renamed file cites its own old name (review v3 M2)
-                self_links.append((final_path[f], old_name))
+    rewrites, dead, self_links = classify_links(references(set(renamed)), by_path, final_path)
 
     return {"head": git("rev-parse", "HEAD").strip(), "tasks": tasks, "groups": groups, "rows": rows,
             "owner_rows": owner_rows, "by_topic": by_topic, "deps": deps, "edits": edits, "left": left,
