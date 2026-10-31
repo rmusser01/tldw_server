@@ -338,13 +338,11 @@ def _acp_record_audit_event(
         "session_id": str(session_id),
         "metadata": sanitized_metadata,
     }
-    with _ACP_AUDIT_LOCK:
-        _ACP_AUDIT_EVENTS.append(event)
     # Persist to SQLite audit DB (best-effort)
     try:
         from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
         audit_db = get_acp_audit_db()
-        audit_db.record_event(
+        event = audit_db.record_event(
             action=action,
             user_id=user_id,
             session_id=session_id,
@@ -354,6 +352,9 @@ def _acp_record_audit_event(
         audit_db.flush_if_needed(threshold=10)
     except Exception:
         logger.warning("ACP audit persistence failed")
+    # Memory and durable history must use the same timestamp for deduplication.
+    with _ACP_AUDIT_LOCK:
+        _ACP_AUDIT_EVENTS.append(event)
     logger.info(
         "ACP audit event action={} user_id={} session_id={}",
         event["action"],
