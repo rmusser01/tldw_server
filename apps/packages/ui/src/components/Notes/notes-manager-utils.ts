@@ -1049,8 +1049,12 @@ export const quickNotesDraftMatchesWrite = (
   draft: Pick<OfflineDraftEntry, "title" | "content" | "keywords" | "metadata">,
   body: Record<string, unknown>,
 ): boolean => {
-  const research = resolveKnowledgeNoteProvenance(draft.metadata, draft.content)
-    .provenance?.research;
+  const resolved = resolveKnowledgeNoteProvenance(
+    draft.metadata,
+    draft.content,
+  );
+  const research = resolved.provenance?.research;
+  let contentHead: unknown = draft.metadata;
   const keywords = [
     ...draft.keywords,
     ...(research ? [`workspace:${research.workspace_id}`] : []),
@@ -1067,17 +1071,41 @@ export const quickNotesDraftMatchesWrite = (
           ) === index,
       )
       .sort();
-  if (
-    draft.metadata?.pendingKnowledgeProvenance &&
-    !knowledgeNoteProvenanceMatches(
-      draft.metadata.pendingKnowledgeProvenance,
-      body.knowledge_provenance,
+  const pending = draft.metadata?.pendingKnowledgeProvenance;
+  if (pending) {
+    const written = body.knowledge_provenance;
+    if (
+      resolved.state === "deleted" ||
+      resolved.state === "unsupported" ||
+      !knowledgeNoteProvenanceMatches(
+        pending,
+        written === undefined ? resolved.provenance : written,
+      )
     )
-  )
-    return false;
+      return false;
+    if (written !== undefined) {
+      const base = draft.metadata?.knowledge_provenance_version;
+      const expected = body.expected_provenance_version;
+      const compatibleBase =
+        typeof expected === "number" &&
+        Number.isSafeInteger(expected) &&
+        expected >= 0 &&
+        (resolved.state === "active"
+          ? typeof base === "number" &&
+            Number.isSafeInteger(base) &&
+            base > 0 &&
+            base <= expected
+          : base === undefined || base === 0);
+      if (!compatibleBase) return false;
+      contentHead = {
+        knowledge_provenance_state: "active",
+        knowledge_provenance: written,
+      };
+    }
+  }
   return (
     (draft.title || "Untitled Note") === body.title &&
-    retainKnowledgeNoteProvenance(draft.content, draft.metadata) ===
+    retainKnowledgeNoteProvenance(draft.content, contentHead) ===
       body.content &&
     JSON.stringify(normalized(keywords)) ===
       JSON.stringify(
