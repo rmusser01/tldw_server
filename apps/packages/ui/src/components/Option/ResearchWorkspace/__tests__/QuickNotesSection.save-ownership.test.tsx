@@ -643,12 +643,133 @@ it.each(["unchanged", "body", "new-history", "failed", "stale"])(
         "later citation"
       )
     else expect(current.pendingKnowledgeProvenance).toBeUndefined()
+    if (change === "unchanged") expect(current.isDirty).toBe(false)
     if (change === "body") {
       expect(current.content).toBe("later human edit")
       expect(current.isDirty).toBe(true)
     }
   }
 )
+it("marks an unchanged real cited capture saved after its canonical acknowledgement", async () => {
+  useWorkspaceStore.setState({
+    currentNote: { title: "", content: "", keywords: [], isDirty: false }
+  })
+  act(() => {
+    useWorkspaceStore.getState().captureToCurrentNote({
+      title: "Captured cited answer",
+      content:
+        "Example Domain is for documentation examples without permission [0].",
+      provenance: {
+        origin: "knowledge_qa",
+        sources: [
+          {
+            originalId: 5,
+            mediaId: 5,
+            title: "Example Domain",
+            excerpt:
+              "This domain is for use in documentation examples without needing permission.",
+            type: "document",
+            sourceType: "document",
+            url: "https://example.com/"
+          }
+        ]
+      }
+    })
+  })
+  mocks.request.mockImplementation(async (request: BgRequestInit) =>
+    request.path.includes("/search/")
+      ? []
+      : {
+          ...request.body,
+          id: request.body.id,
+          version: 1,
+          knowledge_provenance_state: "active",
+          knowledge_provenance_version: 1,
+          knowledge_provenance: request.body.knowledge_provenance
+        }
+  )
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  expect(writes()).toHaveLength(1)
+  expect(useWorkspaceStore.getState().currentNote.isDirty).toBe(false)
+  expect(screen.getByTestId("quick-notes-saved-indicator")).toBeVisible()
+  const currentId = String(useWorkspaceStore.getState().currentNote.id)
+  const queue = await readSurfaceOfflineDraftQueue(
+    createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId)
+  )
+  const retained = Object.values(queue).filter(
+    (entry) => entry.noteId === currentId
+  )
+  expect(retained).toHaveLength(1)
+  expect(retained[0]).toMatchObject({
+    noteId: currentId,
+    baseVersion: 1,
+    metadata: { quickNotesDirty: false }
+  })
+  expect(retained[0].pendingWrite).toBeUndefined()
+})
+
+it("marks a cited replacement saved after refreshing its missing Note version", async () => {
+  const replacement = {
+    origin: "knowledge_qa" as const,
+    question: "captured",
+    sources: []
+  }
+  useWorkspaceStore.setState({
+    currentNote: {
+      ...draft(),
+      knowledge_provenance_state: "active",
+      knowledge_provenance_version: 2,
+      knowledge_provenance: { ...replacement, question: "old" },
+      pendingKnowledgeProvenance: replacement
+    }
+  })
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    if (request.method === "GET")
+      return {
+        ...draft(),
+        version: 40,
+        knowledge_provenance_state: "active",
+        knowledge_provenance_version: 3,
+        knowledge_provenance: { ...replacement, question: "remote" }
+      }
+    return {
+      ...request.body,
+      id: noteId,
+      version: 41,
+      knowledge_provenance_state: "active",
+      knowledge_provenance_version: 4,
+      knowledge_provenance: request.body.knowledge_provenance
+    }
+  })
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  await waitFor(() =>
+    expect(document.querySelector("button.ant-btn-loading")).toBeNull()
+  )
+  expect(writes()).toHaveLength(1)
+  expect(writes()[0][0].body.expected_provenance_version).toBe(3)
+  expect(writes()[0][0].headers["expected-version"]).toBe("40")
+  expect(useWorkspaceStore.getState().currentNote.isDirty).toBe(false)
+  expect(screen.getByTestId("quick-notes-saved-indicator")).toBeVisible()
+  const queue = await readSurfaceOfflineDraftQueue(
+    createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId)
+  )
+  const retained = Object.values(queue).filter(
+    (entry) => entry.noteId === noteId
+  )
+  expect(retained).toHaveLength(1)
+  expect(retained[0]).toMatchObject({
+    noteId,
+    baseVersion: 41,
+    metadata: { quickNotesDirty: false, knowledge_provenance_version: 4 }
+  })
+  expect(retained[0].pendingWrite).toBeUndefined()
+})
+
 it("version read discovering removed provenance cannot resend a pending replacement", async () => {
   const history = { origin: "reviewed_sources" as const, sources: [] }
   useWorkspaceStore.setState({
