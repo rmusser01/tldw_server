@@ -102,6 +102,10 @@ jobs:
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
+      # Every PR runs this job, backlog-only ones included, while backend-required's own
+      # steps skip when no backend path changed; so the task id check lives here (TASK-13960).
+      - name: Check backlog task ids are unique
+        run: python3 Helper_Scripts/ci/check_backlog_task_ids.py .
 
   backend-required:
     name: backend-required
@@ -157,7 +161,7 @@ jobs:
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
         run: |
-          echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. Re-run the workflow."
+          echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. If its 'Check backlog task ids are unique' step failed, renumber the file it names; otherwise re-run the workflow."
           exit 1
 
       - name: No-op pass (backend unchanged)
@@ -312,6 +316,8 @@ jobs:
             tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
             tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
+            tldw_Server_API/tests/CI/test_check_backlog_task_ids.py \
+            tldw_Server_API/tests/Helper_Scripts/test_renumber_duplicate_task_ids.py \
             tools/backlog-py/tests \
             tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py \
             tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py \
