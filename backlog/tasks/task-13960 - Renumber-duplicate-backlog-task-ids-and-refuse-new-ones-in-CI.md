@@ -25,6 +25,7 @@ On 2026-10-30, 235 task ids on dev were held by more than one file (528 files; 2
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Dry run on origin/dev c251b6f978 (2026-10-31, open PRs fetched that day), exit 0: 235 duplicated ids, 293 files to renumber, 1 owner rows, 50 dependency entries (28 retargeted, 2 left to open PRs), 40 links in 39 files, 22 dead links and 33 dead self-links in task files, 68 duplicate files in open PRs (0 already on dev)
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
