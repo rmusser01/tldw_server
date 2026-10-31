@@ -80,7 +80,7 @@ async def init_auth_services() -> object:
     override_store = None
     try:
         override_store = import_module(
-            "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides"
+            "tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides"
         )
 
         await override_store.refresh_llm_provider_overrides(db_pool)
@@ -105,6 +105,7 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             return
 
         from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+            PGUsageSchemaError,
             ensure_admin_webhook_canonical_tables_pg,
             ensure_api_keys_tables_pg,
             ensure_authnz_core_tables_pg,
@@ -161,10 +162,16 @@ async def _ensure_pg_extras(db_pool: object) -> None:
         for label, ensure_fn, readiness_error in pg_ensures:
             try:
                 ok = await ensure_fn(db_pool)
-            except _STARTUP_GUARD_EXCEPTIONS:
+            except PGUsageSchemaError:
+                raise AuthStartupError("AUTHNZ_PG_USAGE_SCHEMA_NOT_READY") from None
+            except _STARTUP_GUARD_EXCEPTIONS as exc:
                 if readiness_error is not None:
                     raise AuthStartupError(readiness_error) from None
-                raise
+                logger.bind(exception_type=type(exc).__name__).warning(
+                    "App Startup: PG {} ensure failed; continuing independent schema ensures",
+                    label,
+                )
+                continue
             if ok:
                 logger.info(f"App Startup: Ensured PG {label}")
             elif readiness_error is not None:

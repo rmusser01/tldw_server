@@ -33,6 +33,7 @@ Review and dry run (2026-10-25): Moderation decision as applied in .27: global [
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-30 TASK-13950.17 Phase 1 exit figures: layering baseline 223 pairs / 528 statements / 297 modules -> 222 / 519 / 289; package SCC raw (module-level / with function-level) 92/113, folded with Provider_Credentials into AuthNZ 91/112 (unchanged); LLM_Calls -> AuthNZ 9 -> 0; AuthNZ -> LLM_Calls/Chat/TTS 27 -> 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

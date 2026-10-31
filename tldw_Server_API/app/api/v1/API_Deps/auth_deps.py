@@ -10,9 +10,7 @@ import threading
 import time
 from collections.abc import AsyncGenerator, Awaitable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Annotated, Any, Callable, Optional
-from weakref import WeakKeyDictionary
 
 #
 # 3rd-party imports
@@ -30,9 +28,7 @@ from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import (
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import (
     DatabasePool,
-    await_cancellation_safe_cleanup,
     get_db_pool,
-    select_transaction_cleanup_failure,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
@@ -50,13 +46,9 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
 )
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, get_password_service
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
-from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
-    ProfileUserWriteRejected,
-    _profile_user_backend,
-    _profile_user_connection_identity,
-)
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter, get_rate_limiter
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import (
@@ -91,15 +83,11 @@ from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
 )
 from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-)
-from tldw_Server_API.app.core.testing import (
     is_production_like_env as _is_production_like_env,
 )
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.services.registration_service import RegistrationService, get_registration_service
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 # Narrowed exception tuple for auth dependency safety (BLE001)
 _AUTH_DEPS_NONCRITICAL_EXCEPTIONS = (
@@ -120,14 +108,6 @@ _AUTH_DEPS_NONCRITICAL_EXCEPTIONS = (
     WeakPasswordError,
     InactiveUserError,
 )
-
-# Test stub shared state (persist across dependency calls under TEST_MODE/pytest)
-_TEST_SESSION_STATE: dict = {"sid": 1000, "sessions": {}}
-_TEST_SESSION_LOCKS: "WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = WeakKeyDictionary()
-_TEST_SESSION_LOCK_GUARD = threading.Lock()
-_TEST_SESSION_STATE_GUARD = threading.Lock()
-_TEST_EPHEMERAL_STATE: dict = {"values": {}}
-_TEST_EPHEMERAL_STATE_GUARD = threading.Lock()
 
 _SENSITIVE_USER_KEY_PATTERN = re.compile(
     r"(password|secret|token|api[_-]?key|ssn|totp|otp|mfa|backup_codes|recovery_codes)",
@@ -189,8 +169,10 @@ def _read_non_negative_float_env(name: str, default: float) -> float:
     return max(parsed, 0.0)
 
 
-def _authnz_busy_http_exception(retry_after_seconds: int) -> HTTPException:
-    """Create a consistent 503 response for temporary AuthNZ DB contention."""
+def _authnz_busy_http_exception(retry_after_seconds: int | None = None) -> HTTPException:
+    """Create a consistent 503, resolving live policy when no retry is supplied."""
+    if retry_after_seconds is None:
+        retry_after_seconds = get_authnz_transaction_policy().busy_retry_after_seconds
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Authentication database is busy. Please retry shortly.",
@@ -216,79 +198,6 @@ def _public_user_dict(user: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def _authenticate_api_key_from_request(request: Request, api_key: str) -> dict[str, Any]:
-    test_mode = _is_test_mode()
-    if test_mode:
-        # SECURITY: Warn loudly about TEST_MODE and block in production unless explicitly allowed
-        allow_test_in_prod = _env_flag_enabled("ALLOW_TEST_MODE_IN_PRODUCTION")
-        if _is_production_like_env():
-            if not allow_test_in_prod:
-                logger.critical(
-                    "TEST_MODE is enabled in production environment! "
-                    "This is a SEVERE security risk. Set ALLOW_TEST_MODE_IN_PRODUCTION=1 to override (NOT recommended)."
-                )
-                raise HTTPException(
-                    status_code=500,
-                    detail="Server configuration error"
-                )
-            else:
-                logger.warning(
-                    "TEST_MODE is enabled in production with explicit override. "
-                    "This bypasses normal authentication and should only be used for debugging."
-                )
-        else:
-            logger.debug("TEST_MODE is enabled for non-production environment")
-        try:
-            settings = get_settings()
-        except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-            settings = None
-        allowed_keys: set[str] = set()
-        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-        if test_key:
-            allowed_keys.add(test_key)
-        if settings and settings.SINGLE_USER_API_KEY:
-            allowed_keys.add(settings.SINGLE_USER_API_KEY)
-        if api_key in allowed_keys:
-            client_ip = resolve_client_ip(request, settings)
-            if settings and settings.AUTH_MODE == "single_user":
-                if not is_single_user_ip_allowed(client_ip, settings):
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid or missing API Key",
-                    )
-            try:
-                if settings and isinstance(settings.DATABASE_URL, str) and settings.DATABASE_URL.startswith("sqlite:///"):
-                    from pathlib import Path as _Path
-
-                    from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables as _ensure_authnz_tables
-                    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-                    _ensure_authnz_tables(_Path(db_path))
-            except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as _ensure_err:
-                logger.debug(
-                    "AuthNZ test fallback: ensure_authnz_tables skipped/failed: error_type={}",
-                    type(_ensure_err).__name__,
-                )
-            fixed_id = getattr(settings, "SINGLE_USER_FIXED_ID", 1)
-            user = {
-                "id": fixed_id,
-                "username": "single_user",
-                "email": None,
-                "role": "admin",
-                "roles": ["admin"],
-                "permissions": ["*"],
-                "is_active": True,
-                "is_verified": True,
-            }
-            user = _public_user_dict(user)
-            try:
-                request.state.user_id = fixed_id
-                request.state.team_ids = []
-                request.state.org_ids = []
-            except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as state_exc:
-                logger.debug(
-                    "API key test-mode path: unable to attach state context: {}",
-                    state_exc,
-                )
-            return user
     try:
         # Force API key manager resolution through this module so tests can
         # monkeypatch `auth_deps.get_api_key_manager` and assert error logging
@@ -309,40 +218,14 @@ async def _authenticate_api_key_from_request(request: Request, api_key: str) -> 
         # Propagate explicit HTTP errors unchanged (401/403, etc.)
         raise
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as e:
-        if _is_test_mode():
-            logger.exception("API key authentication error in get_current_user (TEST_MODE)")
-        else:
-            logger.error(
-                "API key authentication error in get_current_user (type={})",
-                type(e).__name__,
-            )
+        logger.error(
+            "API key authentication error in get_current_user (type={})",
+            type(e).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate API key",
         ) from e
-
-
-def _get_test_session_lock() -> asyncio.Lock:
-    """
-    Lazily initialize and return a test session lock scoped to the current event loop.
-
-    The lock is created on first use within the currently running event loop
-    instead of at module import time to avoid binding it to the wrong loop
-    in test environments.
-    """
-    loop = asyncio.get_running_loop()
-    with _TEST_SESSION_LOCK_GUARD:
-        lock = _TEST_SESSION_LOCKS.get(loop)
-        if lock is None:
-            lock = asyncio.Lock()
-            _TEST_SESSION_LOCKS[loop] = lock
-        return lock
-
-
-def reset_test_ephemeral_state() -> None:
-    """Clear the test-only in-process ephemeral KV store (pytest/TEST_MODE)."""
-    with _TEST_EPHEMERAL_STATE_GUARD:
-        _TEST_EPHEMERAL_STATE["values"].clear()
 
 #######################################################################################################################
 #
@@ -420,301 +303,74 @@ async def get_login_db_connection() -> AsyncGenerator[Any, None]:
 async def get_db_transaction() -> AsyncGenerator[Any, None]:
     """Get database connection in transaction mode.
 
-    Always behaves as an async generator for FastAPI compatibility. In explicit test mode,
-    yields a lightweight pool adapter backed by one request-scoped transaction.
-    Otherwise, yields a request-scoped transaction connection.
+    Always behaves as an async generator for FastAPI compatibility. Yields the
+    request-scoped transaction connection from ``db_pool.transaction()`` on every
+    backend and in every runtime.
     """
     db_pool = await get_db_pool()
 
-    # Decide whether to use the lightweight adapter (explicit test mode) or a real transaction
-    use_adapter = False
-    try:
-        if _is_test_mode():
-            use_adapter = True
-    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-        # If any detection fails, fall back to default transaction behavior
-        use_adapter = False
+    # Yield a request-scoped transaction so writes commit reliably.
+    # For SQLite lock contention, retry only transaction-entry failures.
+    policy = get_authnz_transaction_policy()
+    max_retries = policy.sqlite_lock_max_retries
+    backoff_base = policy.sqlite_lock_retry_base_seconds
+    backoff_max = policy.sqlite_lock_retry_max_seconds
+    retry_after = policy.busy_retry_after_seconds
+    entry_attempt = 0
+    txn_cm = None
+    conn = None
 
-    if use_adapter:
-        # Keep a single connection open for the request lifetime so cursors remain valid
-        is_postgres_backend = bool(getattr(db_pool, "pool", None) is not None)
-        conn_cm = db_pool.acquire()
-        conn = await conn_cm.__aenter__()
-        transaction_cm = None
-        transaction_entered = False
-
-        # NOTE: This adapter normalizes asyncpg-style ($1, fetch*) and SQLite-style
-        # query/return semantics for tests. If other modules need similar behavior,
-        # it can be extracted into the DB_Management layer.
-        class _ConnAdapter:
-            def __init__(self, _conn: Any, *, is_postgres: bool) -> None:
-                self._conn = _conn
-                self._is_sqlite = not is_postgres
-                self._dollar_param = re.compile(r"\$\d+")
-                expected_backend = "postgres" if is_postgres else "sqlite"
-                managed_backend = _profile_user_backend(_conn)
-                if (
-                    managed_backend is not None
-                    and managed_backend != expected_backend
-                ):
-                    raise ProfileUserWriteRejected()
-                self._authnz_profile_user_backend = expected_backend
-                self._authnz_profile_user_guard_identity = (
-                    _profile_user_connection_identity(_conn)
-                )
-
-            def _normalize_sqlite_sql(self, query: Any) -> Any:
-                if (
-                    not self._is_sqlite
-                    or type(query) is not str
-                    or "$" not in query
-                ):
-                    return query
-                # Replace $1, $2 ... with '?'
-                return self._dollar_param.sub("?", query)
-
-            async def execute(self, query: Any, *args: object) -> Any:
-                # Postgres (asyncpg) supports variadic args; SQLite expects a sequence
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    return await self._conn.execute(query, *args)
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    return await self._conn.execute(q, params)
-
-            async def fetchval(self, query: str, *args: object) -> Any | None:
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    return await self._conn.fetchval(query, *args)
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    cur = await self._conn.execute(q, params)
-                    row = await cur.fetchone()
-                    return row[0] if row else None
-
-            async def fetch(self, query: str, *args: object) -> list[Any]:
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    rows = await self._conn.fetch(query, *args)
-                    return [dict(r) for r in rows]
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    cur = await self._conn.execute(q, params)
-                    rows = await cur.fetchall()
-                    normalized_rows: list[Any] = []
-                    for row in rows:
-                        try:
-                            keys = row.keys()  # sqlite3.Row / aiosqlite.Row
-                            normalized_rows.append({key: row[key] for key in keys})
-                            continue
-                        except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        normalized_rows.append(row)
-                    return normalized_rows
-
-            async def fetchrow(self, query: str, *args: object) -> Any | None:
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    return await self._conn.fetchrow(query, *args)
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    cur = await self._conn.execute(q, params)
-                    row = await cur.fetchone()
-                    try:
-                        if not row:
-                            return None
-                        keys = row.keys()  # sqlite3.Row / aiosqlite.Row
-                        return {key: row[key] for key in keys}
-                    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-                        return row
-
-            async def commit(self) -> None:
-                # Callers historically commit after individual operations. The explicit
-                # SQLite test adapter owns the transaction and finalizes it on dependency
-                # exit so multi-statement gateways remain atomic.
-                return None
-
-        adapter: _ConnAdapter | None = None
-        after_commit_token = begin_after_commit_scope()
-        primary_failure: BaseException | None = None
-        transaction_committed = False
-
-        def _merge_cleanup_failure(
-            primary: BaseException | None,
-            cleanup: BaseException,
-            *,
-            operation: str,
-        ) -> BaseException:
-            selected, should_log = select_transaction_cleanup_failure(
-                primary,
-                cleanup,
-            )
-            if primary is None and isinstance(cleanup, Exception):
-                should_log = True
-            if should_log:
-                logger.bind(
-                    operation=operation,
-                    exception_type=type(cleanup).__name__,
-                ).warning("Test DB adapter cleanup failed")
-            return selected
-
+    while True:
+        txn_cm = db_pool.transaction(
+            acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
+        )
         try:
-            if is_postgres_backend:
-                transaction_cm = conn.transaction()
-                await transaction_cm.__aenter__()
-                transaction_entered = True
-            adapter = _ConnAdapter(conn, is_postgres=is_postgres_backend)
-            yield adapter
-        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve control flow
-            primary_failure = exc
-            if transaction_entered and transaction_cm is not None:
-                try:
-                    await await_cancellation_safe_cleanup(
-                        transaction_cm.__aexit__(
-                            type(primary_failure),
-                            primary_failure,
-                            primary_failure.__traceback__,
-                        )
-                    )
-                except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-                    primary_failure = _merge_cleanup_failure(
-                        primary_failure,
-                        cleanup_exc,
-                        operation="postgres_rollback",
-                    )
-            elif adapter is not None and not is_postgres_backend:
-                try:
-                    await await_cancellation_safe_cleanup(conn.rollback())
-                except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-                    primary_failure = _merge_cleanup_failure(
-                        primary_failure,
-                        cleanup_exc,
-                        operation="sqlite_rollback",
-                    )
-        else:
-            if is_postgres_backend and transaction_cm is not None:
-                try:
-                    await await_cancellation_safe_cleanup(
-                        transaction_cm.__aexit__(None, None, None)
-                    )
-                except BaseException as exc:  # noqa: BLE001 - preserve commit cancellation
-                    primary_failure = exc
-                else:
-                    transaction_committed = True
-            else:
-                try:
-                    await conn.commit()
-                except BaseException as exc:  # noqa: BLE001 - rollback after any commit failure
-                    primary_failure = exc
-                    try:
-                        await await_cancellation_safe_cleanup(conn.rollback())
-                    except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-                        primary_failure = _merge_cleanup_failure(
-                            primary_failure,
-                            cleanup_exc,
-                            operation="sqlite_rollback",
-                        )
-                else:
-                    transaction_committed = True
-
-        try:
-            await await_cancellation_safe_cleanup(
-                conn_cm.__aexit__(
-                    type(primary_failure) if primary_failure is not None else None,
-                    primary_failure,
-                    primary_failure.__traceback__
-                    if primary_failure is not None
-                    else None,
-                )
-            )
-        except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-            primary_failure = _merge_cleanup_failure(
-                primary_failure,
-                cleanup_exc,
-                operation="connection_release",
-            )
-
-        try:
-            await finish_after_commit_scope(
-                after_commit_token,
-                committed=transaction_committed,
-            )
-        except BaseException as cleanup_exc:  # noqa: BLE001 - preserve primary control failure
-            primary_failure = _merge_cleanup_failure(
-                primary_failure,
-                cleanup_exc,
-                operation="after_commit_hooks",
-            )
-
-        if primary_failure is not None:
-            raise primary_failure
-    else:
-        # Default: yield a request-scoped transaction so writes commit reliably.
-        # For SQLite lock contention, retry only transaction-entry failures.
-        policy = get_authnz_transaction_policy()
-        max_retries = policy.sqlite_lock_max_retries
-        backoff_base = policy.sqlite_lock_retry_base_seconds
-        backoff_max = policy.sqlite_lock_retry_max_seconds
-        retry_after = policy.busy_retry_after_seconds
-        entry_attempt = 0
-        txn_cm = None
-        conn = None
-
-        while True:
-            txn_cm = db_pool.transaction(
-                acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
-            )
-            try:
-                conn = await txn_cm.__aenter__()
-                break
-            except DatabaseLockError:
-                if entry_attempt >= max_retries:
-                    logger.warning(
-                        "AuthNZ DB lock contention exhausted entry retries (attempts={})",
-                        entry_attempt + 1,
-                    )
-                    raise _authnz_busy_http_exception(retry_after) from None
-                sleep_seconds = min(backoff_base * (2 ** entry_attempt), backoff_max)
-                logger.debug(
-                    "AuthNZ DB lock contention on transaction entry; retrying (attempt={} sleep={}s)",
+            conn = await txn_cm.__aenter__()
+            break
+        except DatabaseLockError:
+            if entry_attempt >= max_retries:
+                logger.warning(
+                    "AuthNZ DB lock contention exhausted entry retries (attempts={})",
                     entry_attempt + 1,
-                    sleep_seconds,
                 )
-                entry_attempt += 1
-                await asyncio.sleep(sleep_seconds)
-            except ConnectionPoolExhaustedError:
                 raise _authnz_busy_http_exception(retry_after) from None
-
-        if txn_cm is None:
-            raise RuntimeError("AuthNZ transaction context manager was not initialized")
-
-        after_commit_token = begin_after_commit_scope()
-        committed = False
-        try:
-            yield conn
-        except BaseException as exc:
-            try:
-                await txn_cm.__aexit__(type(exc), exc, exc.__traceback__)
-            except DatabaseLockError:
-                if isinstance(exc, asyncio.CancelledError):
-                    raise exc from None
-                raise _authnz_busy_http_exception(retry_after) from None
-            raise
-        else:
-            try:
-                await txn_cm.__aexit__(None, None, None)
-            except DatabaseLockError:
-                raise _authnz_busy_http_exception(retry_after) from None
-            committed = True
-        finally:
-            await finish_after_commit_scope(
-                after_commit_token,
-                committed=committed,
+            sleep_seconds = min(backoff_base * (2 ** entry_attempt), backoff_max)
+            logger.debug(
+                "AuthNZ DB lock contention on transaction entry; retrying (attempt={} sleep={}s)",
+                entry_attempt + 1,
+                sleep_seconds,
             )
+            entry_attempt += 1
+            await asyncio.sleep(sleep_seconds)
+        except ConnectionPoolExhaustedError:
+            raise _authnz_busy_http_exception(retry_after) from None
+
+    if txn_cm is None:
+        raise RuntimeError("AuthNZ transaction context manager was not initialized")
+
+    after_commit_token = begin_after_commit_scope()
+    committed = False
+    try:
+        yield conn
+    except BaseException as exc:
+        try:
+            await txn_cm.__aexit__(type(exc), exc, exc.__traceback__)
+        except DatabaseLockError:
+            if isinstance(exc, asyncio.CancelledError):
+                raise exc from None
+            raise _authnz_busy_http_exception(retry_after) from None
+        raise
+    else:
+        try:
+            await txn_cm.__aexit__(None, None, None)
+        except DatabaseLockError:
+            raise _authnz_busy_http_exception(retry_after) from None
+        committed = True
+    finally:
+        await finish_after_commit_scope(
+            after_commit_token,
+            committed=committed,
+        )
 
 
 async def get_password_service_dep() -> PasswordService:
@@ -728,188 +384,7 @@ async def get_jwt_service_dep() -> JWTService:
 
 
 async def get_session_manager_dep() -> SessionManager:
-    """Get session manager dependency"""
-    # In explicit pytest runtime + test mode, return a lightweight stub to avoid heavy init.
-    # Never use this stub in production-like environments.
-    try:
-        force_real = _env_flag_enabled("AUTHNZ_FORCE_REAL_SESSION_MANAGER")
-        in_production_like = bool(_is_production_like_env())
-        if (
-            not force_real
-            and not in_production_like
-            and _is_explicit_pytest_runtime()
-            and _is_test_mode()
-        ):
-            class _StubSessionManager:
-                enabled = True
-
-                async def is_token_blacklisted(
-                    self,
-                    token: str,
-                    jti: Optional[str] = None,
-                    *,
-                    token_type: Optional[str] = None,
-                    user_id: Optional[int] = None,
-                ) -> bool:
-                    return False
-
-                async def create_session(
-                    self,
-                    user_id: int,
-                    access_token: str,
-                    refresh_token: str,
-                    ip_address: Optional[str] = None,
-                    user_agent: Optional[str] = None,
-                    device_id: Optional[str] = None,
-                    expires_at_override: Optional[datetime] = None,
-                    refresh_expires_at_override: Optional[datetime] = None,
-                    **_kwargs: Any,
-                ) -> dict[str, Any]:
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            _TEST_SESSION_STATE["sid"] += 1
-                            sid = _TEST_SESSION_STATE["sid"]
-                            now = datetime.now(timezone.utc)
-                            expires_at = expires_at_override or now
-                            refresh_expires_at = refresh_expires_at_override or now
-                            sess = {
-                                "id": sid,
-                                "session_id": sid,
-                                "user_id": user_id,
-                                "ip_address": ip_address or "",
-                                "user_agent": user_agent or "",
-                                "device_id": device_id,
-                                "created_at": now,
-                                "last_activity": now,
-                                "expires_at": expires_at,
-                                "refresh_expires_at": refresh_expires_at,
-                                "is_active": True,
-                                "is_revoked": False,
-                            }
-                            _TEST_SESSION_STATE["sessions"][sid] = sess
-                            return sess
-
-                async def update_session_tokens(
-                    self,
-                    _session_id: int = 0,
-                    _access_token: str = "",
-                    _refresh_token: str = "",
-                    **_kwargs: object,
-                ) -> bool:
-                    # No-op in stub
-                    return True
-
-                async def refresh_session(self, *_args: object, **kwargs: object) -> dict[str, Any]:
-                    return {
-                        "session_id": kwargs.get("session_id") or 1,
-                        "user_id": kwargs.get("user_id") or 1,
-                        "expires_at": datetime.now(timezone.utc).isoformat(),
-                    }
-
-                async def get_user_sessions(
-                    self,
-                    user_id: int,
-                    *,
-                    strict: bool = False,
-                ) -> list[dict[str, Any]]:
-                    del strict
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            sessions = list(_TEST_SESSION_STATE["sessions"].values())
-                        return [
-                            s
-                            for s in sessions
-                            if s.get("user_id") == user_id and s.get("is_active") is True
-                        ]
-
-                async def revoke_session(
-                    self,
-                    session_id: int,
-                    revoked_by: Optional[int] = None,
-                    reason: Optional[str] = None,
-                    expected_user_id: Optional[int] = None,
-                ) -> bool:
-                    del revoked_by, reason
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            sess = _TEST_SESSION_STATE["sessions"].get(session_id)
-                            if sess is None or (
-                                expected_user_id is not None
-                                and sess.get("user_id") != expected_user_id
-                            ):
-                                return False
-                            sess["is_revoked"] = True
-                            sess["is_active"] = False
-                            return True
-
-                async def revoke_all_user_sessions(
-                    self,
-                    user_id: int,
-                    except_session_id: Optional[int] = None,
-                    reason: str = "User requested logout from all devices",
-                    revoked_by: Optional[int] = None,
-                ) -> int:
-                    del reason, revoked_by
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            changed = 0
-                            for s in _TEST_SESSION_STATE["sessions"].values():
-                                if (
-                                    s.get("user_id") == user_id
-                                    and s.get("session_id") != except_session_id
-                                ):
-                                    s["is_revoked"] = True
-                                    s["is_active"] = False
-                                    changed += 1
-                            return changed
-
-                async def store_ephemeral_value(self, key: str, value: str, ttl_seconds: int) -> None:
-                    ttl = max(int(ttl_seconds), 1)
-                    now = time.monotonic()
-                    expires_at = now + ttl
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        # Opportunistic pruning to keep long-running test suites bounded.
-                        values = _TEST_EPHEMERAL_STATE["values"]
-                        for k, (_v, exp) in list(values.items()):
-                            if exp <= now:
-                                values.pop(k, None)
-                        values[key] = (value, expires_at)
-
-                async def get_ephemeral_value(self, key: str) -> Optional[str]:
-                    now = time.monotonic()
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        entry = _TEST_EPHEMERAL_STATE["values"].get(key)
-                        if not entry:
-                            return None
-                        value, expires_at = entry
-                        if expires_at <= now:
-                            _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-                            return None
-                        return value
-
-                async def consume_ephemeral_value(self, key: str) -> Optional[str]:
-                    now = time.monotonic()
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        entry = _TEST_EPHEMERAL_STATE["values"].get(key)
-                        if not entry:
-                            return None
-                        value, expires_at = entry
-                        if expires_at <= now:
-                            _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-                            return None
-                        _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-                        return value
-
-                async def delete_ephemeral_value(self, key: str) -> None:
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-
-            return _StubSessionManager()  # type: ignore[return-value]
-    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "get_session_manager_dep: test stub resolution failed; falling back to real SessionManager: {}",
-            exc,
-        )
+    """Get the app's session manager (the same in every runtime; tests inject a fake)."""
     return await get_session_manager()
 
 
@@ -2145,10 +1620,6 @@ async def _enforce_auth_deps_ingress_guard(
     # Claim-first governor hook (primarily for test invariants)
     await get_auth_governor()
 
-    # In test mode, bypass rate limiting entirely for deterministic tests.
-    if _is_test_mode():
-        return
-
     try:
         fallback_limit = _read_non_negative_int_env(fallback_limit_env, fallback_limit_default)
         fallback_window = _read_non_negative_float_env(fallback_window_env, fallback_window_default)
@@ -2823,10 +2294,6 @@ def require_token_scope(
                     env_primary_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
                     if env_primary_key:
                         allowed_keys.add(env_primary_key)
-                    if _is_test_mode():
-                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                        if test_key:
-                            allowed_keys.add(test_key)
                     if api_key in allowed_keys:
                         client_ip = resolve_client_ip(request, settings)
                         if not is_single_user_ip_allowed(client_ip, settings):

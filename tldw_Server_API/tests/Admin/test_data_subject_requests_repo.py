@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 import pytest
 
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
@@ -16,16 +17,15 @@ def _setup_env(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_repo_create_request_is_idempotent(tmp_path):
+async def test_repo_create_request_is_idempotent(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
@@ -73,16 +73,15 @@ async def test_repo_create_request_is_idempotent(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch):
+async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
@@ -100,16 +99,15 @@ async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_repo_list_requests_scopes_by_org_ids(tmp_path):
+async def test_repo_list_requests_scopes_by_org_ids(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
@@ -128,13 +126,17 @@ async def test_repo_list_requests_scopes_by_org_ids(tmp_path):
     )
     org_row = await pool.fetchone("SELECT id FROM organizations WHERE slug = ?", "scoped-org")
     org_id = int(org_row["id"])
-    await pool.execute(
-        "INSERT INTO org_members (org_id, user_id, role, status) VALUES (?, ?, ?, ?)",
-        org_id,
-        subject_id,
-        "member",
-        "active",
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
     )
+
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            "INSERT INTO org_members (org_id, user_id, role, status) VALUES (?, ?, ?, ?)",
+            (org_id, subject_id, "member", "active"),
+            backend="sqlite",
+        )
 
     await repo.create_or_get_request(
         client_request_id="dsr-org-1",

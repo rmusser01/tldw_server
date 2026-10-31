@@ -9,11 +9,6 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    apply_llm_provider_overrides_to_listing,
-    get_override_model_priority,
-)
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_and_model,
@@ -34,7 +29,13 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
 )
-from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    apply_llm_provider_overrides_to_listing,
+    get_override_model_priority,
+)
+from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source, llm_call_context
 
 _NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -177,15 +178,26 @@ async def _select_auto_llm_router_choice(
         user_id = None
         api_key_id = None
 
+    router_credential_source: str | None = None  # whose key the router call used, for its usage row
+
     async def execute_router_call(router_model: Any, router_messages: list[dict[str, str]]) -> Any:
+        nonlocal router_credential_source
         byok_resolution = await resolve_byok_credentials_fn(
             router_model.provider,
             user_id=user_id_int,
             request=request,
             fallback_resolver=fallback_resolver,
         )
+        # The adapter takes a raw key here, so its base URL is the app_config's or else the environment's
+        # (in the snapshot): both decide whether a user key is the user's own spend (ADR-083).
+        router_credential_source = billed_credential_source(
+            router_model.provider,
+            getattr(byok_resolution, "source", None),
+            getattr(byok_resolution, "app_config", None),
+            load_server_config_snapshot(),
+        )
         try:
-            with llm_call_context(records_itself=True):
+            with llm_call_context(records_itself=True, credential_source=router_credential_source):
                 return await perform_chat_api_call_async_fn(
                     api_endpoint=router_model.provider,
                     messages_payload=router_messages,
@@ -217,6 +229,7 @@ async def _select_auto_llm_router_choice(
                 total_tokens=usage["total_tokens"],
                 latency_ms=latency_ms,
                 estimated=usage["total_tokens"] == 0,
+                credential_source=router_credential_source,
             )
         except _NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Auto chat router usage logging skipped: {}", exc)

@@ -70,7 +70,7 @@ Published API reference: `Docs/Published/API-related/Chat_Workflows_API.md`
   - `prompt_template_manager.py` (+ `prompt_templates/`) - Prompt templating utilities
 
 Related:
-- API schemas: `tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py`
+- API schemas: `tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py` (re-exports `ChatCompletionRequest`, defined in `tldw_Server_API/app/core/Chat/chat_request_schemas.py`)
 - LLM provider calls: `tldw_Server_API/app/core/LLM_Calls/` (both cloud and local backends)
 - Character sessions & world books: `tldw_Server_API/app/api/v1/endpoints/characters_endpoint.py`, notes DB
 - Chat dictionaries: `Config_Files` + `core/config.py` (Chat-Dictionaries section)

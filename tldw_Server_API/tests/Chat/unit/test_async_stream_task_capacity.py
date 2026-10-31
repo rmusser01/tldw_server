@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Chat.request_queue import (
     RequestQueue,
 )
 from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
 
 
 class _ResistantAsyncIterator:
@@ -508,9 +509,9 @@ async def test_direct_initial_capacity_failure_closes_adapter_and_finalizes(
         assert wire.count("data: [DONE]\n\n") == 1
         assert adapter.started is False
         assert adapter.closed is True
-        assert finalized == [
-            {"success": False, "cancelled": False, "error": True}
-        ]
+        (outcome,) = finalized
+        assert isinstance(outcome.pop("stream_usage"), _StreamUsage)  # what the stream received (TASK-13953)
+        assert outcome == {"success": False, "cancelled": False, "error": True}
     finally:
         await streaming_utils.cancel_stream_tasks_bounded([lease], timeout=0.01)
         release.set()
@@ -568,9 +569,9 @@ async def test_midstream_capacity_failure_finalizes_as_provider_error_once(
         assert '"code": "provider_unavailable"' in wire
         assert "second output" not in wire
         assert wire.count("data: [DONE]\n\n") == 1
-        assert finalized == [
-            {"success": False, "cancelled": False, "error": True}
-        ]
+        (outcome,) = finalized
+        assert isinstance(outcome.pop("stream_usage"), _StreamUsage)  # what the stream received (TASK-13953)
+        assert outcome == {"success": False, "cancelled": False, "error": True}
     finally:
         release.set()
         for lease in leases:

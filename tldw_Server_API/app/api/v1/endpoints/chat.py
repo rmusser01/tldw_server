@@ -56,7 +56,8 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     LegacyHistoryProjectionV1,
     LegacyProjectionConfirmEnvelopeV1,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
     get_llm_provider_override,
@@ -65,7 +66,6 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_override_model_priority,
     validate_provider_override,
 )
-from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
@@ -117,16 +117,11 @@ from tldw_Server_API.app.api.v1.schemas.chat_knowledge_schemas import (
     KnowledgeSaveResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    API_KEYS as SCHEMAS_API_KEYS,
-)
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
     RagContext,
-    get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
 )
 from tldw_Server_API.app.api.v1.schemas.chat_validators import (
     validate_character_id,
@@ -234,6 +229,9 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
 )
+from tldw_Server_API.app.core.config_llm_providers import (
+    get_api_keys,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -307,7 +305,11 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota, users_own_key_serves
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
+    enforce_llm_quota,
+    enforce_llm_quota_if_the_router_was_refused,
+    users_own_key_serves,
+)
 from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import ChatCommandInfo, ChatCommandsListResponse
 from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryRequest,
@@ -315,23 +317,9 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidationIssue,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
-from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
+from tldw_Server_API.app.core.Usage.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-    configured_provider_model_from_snapshot,
-    mark_provider_credential_used,
-)
 from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
 from tldw_Server_API.app.core.Chat import command_router
@@ -358,6 +346,20 @@ from tldw_Server_API.app.core.Persona.exemplar_runtime import (
     append_persona_exemplar_sections,
 )
 from tldw_Server_API.app.core.Persona.memory_integration import persist_persona_turn
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+    configured_provider_model_from_snapshot,
+    mark_provider_credential_used,
+)
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
@@ -414,6 +416,16 @@ def _derive_endpoint_provenance(
     return credentials.endpoint_provenance
 
 
+async def _own_key_before_the_hosted_plan(current_user: Any, provider: str, billing_org_id: Any) -> bool | None:
+    """Whether the user's own key serves ``provider``; None when the hosted plan does not check this request.
+
+    Asked once per request: ``enforce_llm_quota`` reuses the answer (ADR-083).
+    """
+    if not enforcement_enabled() or billing_org_id is None:
+        return None
+    return await users_own_key_serves(getattr(current_user, "id", None), provider)
+
+
 def _request_has_endpoint_override(request_data: Any) -> bool:
     """Return whether parsed request data contains an explicit endpoint override."""
     return any(
@@ -428,11 +440,6 @@ def _request_has_endpoint_override(request_data: Any) -> bool:
 # ---------------------------------------------------------------------------
 # Constants & helpers
 # ---------------------------------------------------------------------------
-# Backward-compatibility for tests that patch API_KEYS directly (in schemas module).
-# This map is for test overrides/transitional compatibility; prefer get_api_keys()
-# / resolve_provider_api_key for new code paths.
-API_KEYS = SCHEMAS_API_KEYS
-
 router = APIRouter()
 conversations_alias_router = APIRouter()
 
@@ -1796,6 +1803,7 @@ async def _select_auto_chat_llm_router_choice(
                     total_tokens=usage["total_tokens"],
                     latency_ms=latency_ms,
                     estimated=usage["total_tokens"] == 0,
+                    credential_source=getattr(router_credential_handle, "credential_source", None),
                 )
             )
         except asyncio.CancelledError:
@@ -2874,7 +2882,6 @@ def _get_default_provider() -> str:
     return get_default_provider(
         config_resolver=_config_default_llm_provider,
         test_mode_resolver=_shared_is_test_mode,
-        fallback_provider=DEFAULT_LLM_PROVIDER,
     )
 
 
@@ -3723,6 +3730,7 @@ async def create_chat_completion(
             if routing_decision is None:
                 candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
                 if candidate_count > 0:
+                    await enforce_llm_quota_if_the_router_was_refused(getattr(current_user, "id", None), routing_debug)
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail={
@@ -3755,7 +3763,7 @@ async def create_chat_completion(
             provider_debug,
         ) = resolve_provider_and_model(
             request_data=request_data,
-            metrics_default_provider=DEFAULT_LLM_PROVIDER,
+            metrics_default_provider=get_default_provider(),
             normalize_default_provider=_get_default_provider(),
             routing_decision=routing_decision,
         )
@@ -4404,12 +4412,8 @@ async def create_chat_completion(
 
             # Billing: LLM token enforcement via context manager (tracks actual usage). A request whose
             # provider runs on the user's own key is neither checked nor counted as plan usage (ADR-083).
-            if (
-                enforcement_enabled()
-                and billing_org_id is not None
-                and not _billing_enforcer_entered
-                and not await users_own_key_serves(getattr(current_user, "id", None), selected_provider)
-            ):
+            own_key = await _own_key_before_the_hosted_plan(current_user, selected_provider, billing_org_id)
+            if own_key is False and not _billing_enforcer_entered:
                 try:
                     _billing_enforcer = LimitEnforcer(
                         billing_org_id,
@@ -4426,7 +4430,8 @@ async def create_chat_completion(
 
             # Usage quotas (LLM usage accounting spec §4a): monthly LLM tokens, and daily and monthly LLM spend.
             await enforce_llm_quota(
-                getattr(current_user, "id", None), max(1, _estimated_request_tokens), provider=selected_provider
+                getattr(current_user, "id", None), max(1, _estimated_request_tokens), provider=selected_provider,
+                own_key=own_key,
             )
 
             # Resolve one effective model before either durable macro creation or direct dispatch.

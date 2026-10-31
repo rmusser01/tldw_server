@@ -1148,7 +1148,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 25
+    assert setup_helper_count == 26
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7
@@ -1453,10 +1453,11 @@ def test_backend_required_enforces_size_ratchets(ratchet: str) -> None:
         "tldw_Server_API/tests/lint/test_layering_contract.py",
         "tldw_Server_API/tests/lint/test_db_management_logic_imports.py",
         "tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py",
+        "tldw_Server_API/tests/lint/test_schemas_config_boundary.py",
     ],
 )
 def test_backend_required_enforces_layering_ratchets(ratchet: str) -> None:
-    """TASK-13950.9: the layering contract and its core -> api view run in a required step."""
+    """TASK-13950.9 and .14: the layering contract, its core -> api view and the schemas guard run in a required step."""
     import shlex
 
     from tldw_Server_API.tests.lint.test_layering_contract import BASE_ENV
@@ -1519,12 +1520,13 @@ def test_backend_required_enforces_isolation_ratchets():
         assert suite in gate["run"]  # nosec B101 - regression assertion
 
 
-# TASK-13950.6: the production-detector and test-seam ratchets and the startup-guard /
+# TASK-13950.6 and .19: the production-detector, test-seam and test-mode branch ratchets and the startup-guard /
 # AuthNZ-refusal tests. The contract lives here, not in the files it guards, so dropping a
 # file from the step cannot also drop its own assertion.
 TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/lint/test_production_detector_single_source.py",
     "tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py",
+    "tldw_Server_API/tests/lint/test_test_mode_branch_ratchet.py",
     "tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py",
     "tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py",
     "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
@@ -1585,6 +1587,154 @@ def test_test_seam_gate_contract_fails_when_the_step_is_continue_on_error():
     gate["continue-on-error"] = True
 
     assert _test_seam_gate_problems(workflow) == ["step is continue-on-error"]  # nosec B101
+
+
+TEST_MODE_UNSET_STEP = "Security suites with TEST_MODE unset"
+TEST_MODE_UNSET_SENTINEL = "tldw_Server_API/tests/CI/test_unset_test_flags_run.py"
+TEST_MODE_UNSET_SUITES = (
+    "tldw_Server_API/tests/http_client",
+    "tldw_Server_API/tests/AuthNZ/unit",
+    "tldw_Server_API/tests/AuthNZ_Unit",
+    "tldw_Server_API/tests/Security",
+    TEST_MODE_UNSET_SENTINEL,
+)
+_TEST_MODE_FLAGS = ("TEST_MODE", "TESTING", "TLDW_TEST_MODE")
+_NARROWING_ARGS = ("-k", "-m", "--deselect", "--ignore", "--lf", "--last-failed")
+_NARROWING_EXACT = ("--co", "--collect-only")  # exact: --cov and --confcutdir do not narrow
+_SHELL_SEPARATORS = {"||", "&&", "|", ";"}
+# "|" too: the step has no pipefail, so `| tee log` would hide pytest's exit code.
+_SWALLOWING_WORDS = {"||", "|", "+e", "exit"}
+
+
+def _shell_words(script: str) -> list[str]:
+    """shlex.split with comments dropped and operators split off, so an unspaced ``...|true`` is two tokens."""
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def _test_mode_unset_problems(workflow: dict[str, Any]) -> list[str]:
+    job = workflow["jobs"]["security-required"]
+    steps = [step for step in job["steps"] if step.get("name") == TEST_MODE_UNSET_STEP]
+    if len(steps) != 1:
+        return [f"expected one {TEST_MODE_UNSET_STEP!r} step, found {len(steps)}"]
+    step, problems = steps[0], []
+    if step.get("continue-on-error", False):
+        problems.append("step is continue-on-error")
+    if step.get("if") != "needs.changes.outputs.backend_changed == 'true'":
+        problems.append("step does not run on every backend change")
+    env = step.get("env", {})
+    # TLDW_UNSET_TEST_FLAGS also un-skips the sentinel; PYTEST_DISABLE_PLUGIN_AUTOLOAD lets the
+    # explicit -p flags load without "Plugin already registered".
+    for name in ("TLDW_UNSET_TEST_FLAGS", "TLDW_TEST_NO_DOCKER", "PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
+        if str(env.get(name)) != "1":
+            problems.append(f"step does not set {name}=1")
+    scopes = {"workflow": workflow.get("env", {}), "job": job.get("env", {}), "step": env}
+    problems += [f"{scope} env sets {flag}" for scope, values in scopes.items() for flag in (*_TEST_MODE_FLAGS, "PYTEST_ADDOPTS") if flag in values]
+    words = _shell_words(step.get("run", "").replace("\\\n", " "))
+    if "pytest" not in words:
+        return problems + ["step does not invoke pytest"]
+    args = words[words.index("pytest") + 1 :]
+    args = args[: next((i for i, word in enumerate(args) if word in _SHELL_SEPARATORS), len(args))]
+    problems += [f"step narrows the run with {arg}" for arg in args if arg.startswith(_NARROWING_ARGS) or arg in _NARROWING_EXACT]
+    problems += [f"step can swallow a failure with {word}" for word in words if word in _SWALLOWING_WORDS]
+    problems += [f"step does not run {suite}" for suite in TEST_MODE_UNSET_SUITES if suite not in args]
+    if TEST_MODE_UNSET_SENTINEL in args and args[-1] != TEST_MODE_UNSET_SENTINEL:
+        problems.append(f"step does not run {TEST_MODE_UNSET_SENTINEL} last")
+    return problems
+
+
+@pytest.mark.unit
+def test_security_required_runs_the_test_mode_unset_suites():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/security-required.yml").read_text())
+    assert _test_mode_unset_problems(workflow) == []  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+def test_root_conftest_drops_the_test_flags_under_the_unset_switch():
+    text = (REPO_ROOT / "tldw_Server_API/tests/conftest.py").read_text()
+    assert 'if os.getenv("TLDW_UNSET_TEST_FLAGS") == "1":' in text  # nosec B101 - regression assertion
+    assert 'for _flag in ("TEST_MODE", "TESTING", "TLDW_TEST_MODE"):' in text  # nosec B101 - regression assertion
+    assert (REPO_ROOT / TEST_MODE_UNSET_SENTINEL).is_file()  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+def test_test_mode_unset_contract_accepts_coverage_flags():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/security-required.yml").read_text())
+    step = next(s for s in workflow["jobs"]["security-required"]["steps"] if s.get("name") == TEST_MODE_UNSET_STEP)
+    step["run"] = step["run"].replace("pytest -q", "pytest --cov=tldw_Server_API --confcutdir=. -q")
+    assert _test_mode_unset_problems(workflow) == []  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("drop-suite", "step does not run tldw_Server_API/tests/AuthNZ_Unit"),
+        ("drop-sentinel", f"step does not run {TEST_MODE_UNSET_SENTINEL}"),
+        ("narrow-k", "step narrows the run with -k"),
+        ("narrow-m", "step narrows the run with -m"),
+        ("deselect", "step narrows the run with --deselect=tldw_Server_API/tests/Security/test_csrf_binding.py"),
+        ("ignore", "step narrows the run with --ignore=tldw_Server_API/tests/Security"),
+        ("or-true", "step can swallow a failure with ||"),
+        ("pipe-tee", "step can swallow a failure with |"),
+        ("addopts-step", "step env sets PYTEST_ADDOPTS"),
+        ("addopts-job", "job env sets PYTEST_ADDOPTS"),
+        ("addopts-workflow", "workflow env sets PYTEST_ADDOPTS"),
+        ("collect-only", "step narrows the run with --collect-only"),
+        ("set-plus-e", "step can swallow a failure with +e"),
+        ("no-pytest", "step does not invoke pytest"),
+        ("set-test-mode", "step env sets TEST_MODE"),
+        ("job-testing", "job env sets TESTING"),
+        ("no-docker-dropped", "step does not set TLDW_TEST_NO_DOCKER=1"),
+        ("unset-switch-dropped", "step does not set TLDW_UNSET_TEST_FLAGS=1"),
+        ("autoload-dropped", "step does not set PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"),
+        ("continue-on-error", "step is continue-on-error"),
+        ("narrow-if", "step does not run on every backend change"),
+    ],
+)
+def test_test_mode_unset_contract_fails_when_the_step_changes(mutation: str, expected: str):
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/security-required.yml").read_text())
+    job = workflow["jobs"]["security-required"]
+    step = next(s for s in job["steps"] if s.get("name") == TEST_MODE_UNSET_STEP)
+    edits = {
+        "drop-suite": lambda: step.update(run=step["run"].replace("tldw_Server_API/tests/AuthNZ_Unit", "")),
+        "drop-sentinel": lambda: step.update(run=step["run"].replace(TEST_MODE_UNSET_SENTINEL, "")),
+        "narrow-k": lambda: step.update(run=step["run"].replace("pytest -q", 'pytest -k "not csrf" -q')),
+        "narrow-m": lambda: step.update(run=step["run"].replace("pytest -q", 'pytest -m "not slow" -q')),
+        "deselect": lambda: step.update(run=step["run"].replace("pytest -q", "pytest --deselect=tldw_Server_API/tests/Security/test_csrf_binding.py -q")),
+        "ignore": lambda: step.update(run=step["run"].replace("pytest -q", "pytest --ignore=tldw_Server_API/tests/Security -q")),
+        "pipe-tee": lambda: step.update(run=step["run"].rstrip() + " | tee pytest.log\n"),
+        "addopts-step": lambda: step["env"].update(PYTEST_ADDOPTS="--ignore=tldw_Server_API/tests/Security"),
+        "addopts-job": lambda: job.setdefault("env", {}).update(PYTEST_ADDOPTS="-k x"),
+        "addopts-workflow": lambda: workflow.setdefault("env", {}).update(PYTEST_ADDOPTS="-k x"),
+        "collect-only": lambda: step.update(run=step["run"].replace("pytest -q", "pytest --collect-only -q")),
+        "or-true": lambda: step.update(run=step["run"].rstrip() + " || true\n"),
+        "set-plus-e": lambda: step.update(run="set +e\n" + step["run"]),
+        "no-pytest": lambda: step.update(run="echo skipped\n"),
+        "set-test-mode": lambda: step["env"].update(TEST_MODE="true"),
+        "job-testing": lambda: job.setdefault("env", {}).update(TESTING="true"),
+        "no-docker-dropped": lambda: step["env"].pop("TLDW_TEST_NO_DOCKER"),
+        "unset-switch-dropped": lambda: step["env"].pop("TLDW_UNSET_TEST_FLAGS"),
+        "autoload-dropped": lambda: step["env"].pop("PYTEST_DISABLE_PLUGIN_AUTOLOAD"),
+        "continue-on-error": lambda: step.update({"continue-on-error": True}),
+        "narrow-if": lambda: step.update({"if": "needs.changes.outputs.security_relevant_changed == 'true'"}),
+    }
+    edits[mutation]()
+    assert _test_mode_unset_problems(workflow) == [expected]  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("edit", ["mid-command", "end-of-command"])
+def test_test_mode_unset_contract_splits_unspaced_operators(edit: str):
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/security-required.yml").read_text())
+    step = next(s for s in workflow["jobs"]["security-required"]["steps"] if s.get("name") == TEST_MODE_UNSET_STEP)
+    assert "--timeout=300" in step["run"]  # nosec B101 - the mid-command edit needs it
+    if edit == "mid-command":
+        step["run"] = step["run"].replace("--timeout=300", "--timeout=300|true")
+    else:
+        step["run"] = step["run"].rstrip() + "|tee pytest.log\n"
+    assert "step can swallow a failure with |" in _test_mode_unset_problems(workflow)  # nosec B101
 
 
 # TASK-13950.10: packages/ui has no lint of its own, so these frontend-required steps are
@@ -1758,6 +1908,59 @@ def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() ->
     assert "test-results/" in upload["with"]["path"]
     assert ".tmp/frontend-e2e/" in upload["with"]["path"]
     assert upload["with"]["include-hidden-files"] is True
+
+
+MOVED_E2E_PATHS = [
+    "tldw_Server_API/app/core/Provider_Credentials/byok_runtime.py",
+    "tldw_Server_API/app/core/Provider_Credentials/repos/user_provider_secrets_repo.py",
+    "tldw_Server_API/app/core/Usage/llm_budget_guard.py",
+    "tldw_Server_API/app/core/Usage/llm_budget_middleware.py",
+    "tldw_Server_API/app/services/authnz_scheduler.py",
+]
+AUTHNZ_FLOOR_TARGETS = {
+    "tldw_Server_API/app/core/AuthNZ",
+    "tldw_Server_API/app/core/Provider_Credentials",
+    "tldw_Server_API.app.core.Usage.llm_budget_guard",
+    "tldw_Server_API.app.core.Usage.llm_budget_middleware",
+    "tldw_Server_API.app.services.authnz_scheduler",
+}
+
+
+@pytest.mark.unit
+def test_moved_provider_credential_code_keeps_authnz_ci_posture() -> None:
+    """TASK-13950.17: code moved out of core/AuthNZ keeps AuthNZ's e2e trigger and coverage floor."""
+    from Helper_Scripts.ci.path_classifier import classify_paths
+
+    assert [path for path in MOVED_E2E_PATHS if not classify_paths([path])["e2e_changed"]] == []  # nosec B101
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/coverage-required.yml").read_text())
+    floor = next(
+        step for step in workflow["jobs"]["coverage-required"]["steps"] if step.get("name") == "AuthNZ coverage floor"
+    )
+    words = shlex.split(floor["run"].replace("\\\n", " "), comments=True)
+    assert {word.split("=", 1)[1] for word in words if word.startswith("--cov=")} >= AUTHNZ_FLOOR_TARGETS  # nosec B101
+    assert "--cov-fail-under=35" in words  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "guard",
+    [
+        "tldw_Server_API/tests/lint/test_authnz_alias_imports.py",
+        "tldw_Server_API/tests/AuthNZ/unit/test_backend_detection_guardrail.py",
+        "tldw_Server_API/tests/AuthNZ/unit/test_guardrail_sql_audit.py",
+        "tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py",
+    ],
+)
+def test_backend_required_enforces_provider_credential_guards(guard: str) -> None:
+    """TASK-13950.17: the alias gate, the widened AuthNZ guardrails and the CI-posture pins run in a required step."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    gate = next(
+        step
+        for step in workflow["jobs"]["backend-required"]["steps"]
+        if step.get("name") == "Enforce CI contracts and code ratchets"
+    )
+    assert not gate.get("continue-on-error", False)  # nosec B101
+    assert guard in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
 
 
 def test_frontend_critical_always_reports_so_it_can_be_a_required_check() -> None:

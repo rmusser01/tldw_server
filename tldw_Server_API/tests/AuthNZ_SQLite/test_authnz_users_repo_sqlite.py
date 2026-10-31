@@ -2,8 +2,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_authnz_users_repo_fetch_by_id_sqlite(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_authnz_users_repo_fetch_by_id_sqlite(tmp_path, monkeypatch, fresh_services):
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
@@ -13,7 +13,6 @@ async def test_authnz_users_repo_fetch_by_id_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
 
@@ -43,13 +42,9 @@ async def test_authnz_users_repo_fetch_by_id_sqlite(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_authnz_users_repo_create_does_not_inspect_or_mutate_schema(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ):
-    from tldw_Server_API.app.core.AuthNZ.database import (
-        _GuardedSQLiteConnection,
-        get_db_pool,
-        reset_db_pool,
-    )
+    from tldw_Server_API.app.core.AuthNZ.database import _GuardedSQLiteConnection, get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -58,7 +53,6 @@ async def test_authnz_users_repo_create_does_not_inspect_or_mutate_schema(
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     original_execute = _GuardedSQLiteConnection.execute
     schema_queries: list[str] = []
@@ -86,12 +80,12 @@ async def test_authnz_users_repo_create_does_not_inspect_or_mutate_schema(
 @pytest.mark.asyncio
 async def test_semantic_health_user_keyset_ignores_mutable_timestamps(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ):
     import sqlite3
     from datetime import datetime, timezone
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
@@ -100,7 +94,6 @@ async def test_semantic_health_user_keyset_ignores_mutable_timestamps(
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     users_db = UsersDB(pool)
     await users_db.initialize()

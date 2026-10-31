@@ -36,7 +36,7 @@ def _utc_iso(delta_days: int = 0) -> str:
 
 async def _make_authnz_pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Provision a real SQLite AuthNZ database and return its DatabasePool."""
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -45,7 +45,6 @@ async def _make_authnz_pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'admin_llm_usage_reads.db'}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
     return pool
@@ -122,100 +121,85 @@ def _assert_sqlite_uses_ts_index(db_path: Path, sql: str, params: tuple[Any, ...
 
 
 @pytest.mark.asyncio
-async def test_tokens_today_reads_llm_usage_log(tmp_path, monkeypatch) -> None:
+async def test_tokens_today_reads_llm_usage_log(tmp_path, monkeypatch, fresh_services) -> None:
     """tokens_today must sum only rows stamped today from llm_usage_log."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
-    try:
-        with sqlite3.connect(Path(pool.db_path)) as conn:
-            _seed_users(conn, range(1, 2))
-            conn.execute(_INSERT_USAGE, (_utc_iso(), 1, 100, 50, 150))
-            conn.execute(_INSERT_USAGE, (_utc_iso(-3), 1, 999, 998, 1997))
-        async with pool.acquire() as db:
-            stats = await get_system_stats(db)
-        assert stats.tokens_today is not None
-        assert stats.tokens_today.model_dump() == {"prompt": 100, "completion": 50, "total": 150}
-    finally:
-        await reset_db_pool()
+    with sqlite3.connect(Path(pool.db_path)) as conn:
+        _seed_users(conn, range(1, 2))
+        conn.execute(_INSERT_USAGE, (_utc_iso(), 1, 100, 50, 150))
+        conn.execute(_INSERT_USAGE, (_utc_iso(-3), 1, 999, 998, 1997))
+    async with pool.acquire() as db:
+        stats = await get_system_stats(db)
+    assert stats.tokens_today is not None
+    assert stats.tokens_today.model_dump() == {"prompt": 100, "completion": 50, "total": 150}
 
 
 @pytest.mark.asyncio
-async def test_tokens_today_query_is_sargable(tmp_path, monkeypatch) -> None:
+async def test_tokens_today_query_is_sargable(tmp_path, monkeypatch, fresh_services) -> None:
     """The tokens-today WHERE clause must not wrap ts in date()/datetime()."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
-    try:
-        with sqlite3.connect(Path(pool.db_path)) as conn:
-            _seed_users(conn, range(1, 2))
-            conn.execute(_INSERT_USAGE, (_utc_iso(), 1, 10, 5, 15))
-        async with pool.acquire() as inner:
-            recorder = _RecordingSqliteDb(inner)
-            await get_system_stats(recorder)
-        tokens_sql = _find_query(recorder.queries, ("SUM(prompt_tokens)",))
-        assert "FROM llm_usage_log" in tokens_sql
-        assert "llm_usage_v2" not in tokens_sql
-        # The column side must stay bare; transforming only the literal keeps it sargable.
-        where_clause = tokens_sql.split("WHERE", 1)[1] if "WHERE" in tokens_sql else ""
-        compact = where_clause.replace(" ", "").lower()
-        assert compact.startswith("ts>="), f"expected bare ts range filter, got: {where_clause!r}"
-        assert "date(ts)" not in compact and "datetime(ts)" not in compact
-        plan_detail = _assert_sqlite_uses_ts_index(Path(pool.db_path), tokens_sql, ())
-        assert "idx_llm_usage_log_ts" in plan_detail
-    finally:
-        await reset_db_pool()
+    with sqlite3.connect(Path(pool.db_path)) as conn:
+        _seed_users(conn, range(1, 2))
+        conn.execute(_INSERT_USAGE, (_utc_iso(), 1, 10, 5, 15))
+    async with pool.acquire() as inner:
+        recorder = _RecordingSqliteDb(inner)
+        await get_system_stats(recorder)
+    tokens_sql = _find_query(recorder.queries, ("SUM(prompt_tokens)",))
+    assert "FROM llm_usage_log" in tokens_sql
+    assert "llm_usage_v2" not in tokens_sql
+    # The column side must stay bare; transforming only the literal keeps it sargable.
+    where_clause = tokens_sql.split("WHERE", 1)[1] if "WHERE" in tokens_sql else ""
+    compact = where_clause.replace(" ", "").lower()
+    assert compact.startswith("ts>="), f"expected bare ts range filter, got: {where_clause!r}"
+    assert "date(ts)" not in compact and "datetime(ts)" not in compact
+    plan_detail = _assert_sqlite_uses_ts_index(Path(pool.db_path), tokens_sql, ())
+    assert "idx_llm_usage_log_ts" in plan_detail
 
 
 @pytest.mark.asyncio
-async def test_cost_attribution_groups_by_user(tmp_path, monkeypatch) -> None:
+async def test_cost_attribution_groups_by_user(tmp_path, monkeypatch, fresh_services) -> None:
     """group_by=user aggregates per-user sums from llm_usage_log, ordered, limited."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     now = _utc_iso()
-    try:
-        with sqlite3.connect(Path(pool.db_path)) as conn:
-            _seed_users(conn, range(1, 61))
-            rows = [
-                (now, 1, 100, 50, 150),
-                (now, 1, 10, 5, 15),
-                (now, 2, 300, 200, 500),
-                (_utc_iso(-10), 2, 999, 999, 1998),
-                (now, 3, 30, 20, 50),
-            ]
-            # 57 filler users (one small row each) so the hardcoded LIMIT 50 is exercised.
-            rows.extend((now, filler, 1, 0, 1) for filler in range(4, 61))
-            conn.executemany(_INSERT_USAGE, rows)
+    with sqlite3.connect(Path(pool.db_path)) as conn:
+        _seed_users(conn, range(1, 61))
+        rows = [
+            (now, 1, 100, 50, 150),
+            (now, 1, 10, 5, 15),
+            (now, 2, 300, 200, 500),
+            (_utc_iso(-10), 2, 999, 999, 1998),
+            (now, 3, 30, 20, 50),
+        ]
+        # 57 filler users (one small row each) so the hardcoded LIMIT 50 is exercised.
+        rows.extend((now, filler, 1, 0, 1) for filler in range(4, 61))
+        conn.executemany(_INSERT_USAGE, rows)
 
-        async def _superadmin_org_ids(_principal: AuthPrincipal) -> list[int] | None:
-            return None
+    async def _superadmin_org_ids(_principal: AuthPrincipal) -> list[int] | None:
+        return None
 
-        monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _superadmin_org_ids)
+    monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _superadmin_org_ids)
 
-        async with pool.acquire() as db:
-            result = await get_cost_attribution(
-                principal=_admin_principal(), db=db, group_by="user", range_days=7
-            )
-        items = result["items"]
-        assert len(items) == 50, "hardcoded LIMIT 50 must cap grouped results"
-        assert [int(item["entity_id"]) for item in items[:3]] == [2, 1, 3]
-        assert items[0]["request_count"] == 1
-        assert items[0]["prompt_tokens"] == 300
-        assert items[0]["completion_tokens"] == 200
-        assert items[0]["total_tokens"] == 500
-        assert items[0]["estimated_cost_usd"] == 0.0015
-        assert items[1]["request_count"] == 2
-        assert items[1]["prompt_tokens"] == 110
-        assert items[1]["completion_tokens"] == 55
-        assert items[1]["total_tokens"] == 165
-        assert items[2]["total_tokens"] == 50
-    finally:
-        await reset_db_pool()
+    async with pool.acquire() as db:
+        result = await get_cost_attribution(
+            principal=_admin_principal(), db=db, group_by="user", range_days=7
+        )
+    items = result["items"]
+    assert len(items) == 50, "hardcoded LIMIT 50 must cap grouped results"
+    assert [int(item["entity_id"]) for item in items[:3]] == [2, 1, 3]
+    assert items[0]["request_count"] == 1
+    assert items[0]["prompt_tokens"] == 300
+    assert items[0]["completion_tokens"] == 200
+    assert items[0]["total_tokens"] == 500
+    assert items[0]["estimated_cost_usd"] == 0.0015
+    assert items[1]["request_count"] == 2
+    assert items[1]["prompt_tokens"] == 110
+    assert items[1]["completion_tokens"] == 55
+    assert items[1]["total_tokens"] == 165
+    assert items[2]["total_tokens"] == 50
 
 
 @pytest.mark.asyncio
-async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch) -> None:
+async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch, fresh_services) -> None:
     """Org scoping filters to org members via a semi-join (SQLite).
 
     group_by=user must not plain-JOIN org_members: that emits one row per
@@ -223,64 +207,59 @@ async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch)
     the semi-join as an IN-subquery because the planner keeps an indexed
     (user_id, ts) search for it, unlike an EXISTS (full index scan).
     """
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     now = _utc_iso()
-    try:
-        with sqlite3.connect(Path(pool.db_path)) as conn:
-            _seed_users(conn, range(1, 4))
-            conn.executemany(
-                "INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)",
-                [(10, "Org Ten", "org-ten"), (20, "Org Twenty", "org-twenty")],
-            )
-            conn.executemany(
-                "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
-                [(10, 1), (10, 2), (20, 3)],
-            )
-            conn.executemany(
-                _INSERT_USAGE,
-                [
-                    (now, 1, 100, 50, 150),
-                    (now, 2, 30, 20, 50),
-                    (now, 3, 999, 999, 1998),
-                ],
-            )
-
-        async def _org_ten_ids(_principal: AuthPrincipal) -> list[int]:
-            return [10]
-
-        monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _org_ten_ids)
-
-        async with pool.acquire() as inner:
-            recorder = _RecordingSqliteDb(inner)
-            result = await get_cost_attribution(
-                principal=_admin_principal(), db=recorder, group_by="user", range_days=7
-            )
-
-        entity_ids = sorted(int(item["entity_id"]) for item in result["items"])
-        assert entity_ids == [1, 2], "only org-10 members' usage must be returned"
-        sql, params = _find_query_with_params(recorder.queries, ("FROM llm_usage_log", "GROUP BY"))
-        assert "JOIN org_members om ON om.user_id = llm_usage_log.user_id" not in sql
-        assert (
-            "llm_usage_log.user_id IN (SELECT om2.user_id FROM org_members om2"
-            " WHERE om2.org_id IN (?))" in sql
+    with sqlite3.connect(Path(pool.db_path)) as conn:
+        _seed_users(conn, range(1, 4))
+        conn.executemany(
+            "INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)",
+            [(10, "Org Ten", "org-ten"), (20, "Org Twenty", "org-twenty")],
         )
-        assert params == ("-7 days", 10)
-        plan_detail = _assert_sqlite_uses_ts_index(Path(pool.db_path), sql, params)
-        # Stage 3 (admin perf A) delivered idx_org_members_org_user; the
-        # semi-join's org_members side must be an index search, not a table scan.
-        assert "idx_org_members_org_user" in plan_detail, (
-            f"org_members lookup not served by idx_org_members_org_user, plan: {plan_detail}"
+        conn.executemany(
+            "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
+            [(10, 1), (10, 2), (20, 3)],
         )
-        assert "SCAN om" not in plan_detail
-    finally:
-        await reset_db_pool()
+        conn.executemany(
+            _INSERT_USAGE,
+            [
+                (now, 1, 100, 50, 150),
+                (now, 2, 30, 20, 50),
+                (now, 3, 999, 999, 1998),
+            ],
+        )
+
+    async def _org_ten_ids(_principal: AuthPrincipal) -> list[int]:
+        return [10]
+
+    monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _org_ten_ids)
+
+    async with pool.acquire() as inner:
+        recorder = _RecordingSqliteDb(inner)
+        result = await get_cost_attribution(
+            principal=_admin_principal(), db=recorder, group_by="user", range_days=7
+        )
+
+    entity_ids = sorted(int(item["entity_id"]) for item in result["items"])
+    assert entity_ids == [1, 2], "only org-10 members' usage must be returned"
+    sql, params = _find_query_with_params(recorder.queries, ("FROM llm_usage_log", "GROUP BY"))
+    assert "JOIN org_members om ON om.user_id = llm_usage_log.user_id" not in sql
+    assert (
+        "llm_usage_log.user_id IN (SELECT om2.user_id FROM org_members om2"
+        " WHERE om2.org_id IN (?))" in sql
+    )
+    assert params == ("-7 days", 10)
+    plan_detail = _assert_sqlite_uses_ts_index(Path(pool.db_path), sql, params)
+    # Stage 3 (admin perf A) delivered idx_org_members_org_user; the
+    # semi-join's org_members side must be an index search, not a table scan.
+    assert "idx_org_members_org_user" in plan_detail, (
+        f"org_members lookup not served by idx_org_members_org_user, plan: {plan_detail}"
+    )
+    assert "SCAN om" not in plan_detail
 
 
 @pytest.mark.asyncio
 async def test_cost_attribution_org_scoped_multi_org_user_not_double_counted(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, fresh_services
 ) -> None:
     """group_by=user must count each usage row once for multi-org members.
 
@@ -288,60 +267,55 @@ async def test_cost_attribution_org_scoped_multi_org_user_not_double_counted(
     twice per row under the previous INNER JOIN (one row per membership).
     group_by=org must keep the row-per-org attribution instead (TASK-13647).
     """
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     now = _utc_iso()
-    try:
-        with sqlite3.connect(Path(pool.db_path)) as conn:
-            _seed_users(conn, range(1, 3))
-            conn.executemany(
-                "INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)",
-                [(10, "Org Ten", "org-ten"), (20, "Org Twenty", "org-twenty")],
-            )
-            conn.executemany(
-                "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
-                # User 1 is a member of BOTH scoped orgs; user 2 only org 10.
-                [(10, 1), (20, 1), (10, 2)],
-            )
-            conn.executemany(
-                _INSERT_USAGE,
-                [
-                    (now, 1, 100, 50, 150),
-                    (now, 1, 10, 5, 15),
-                    (now, 1, 30, 20, 50),
-                    (now, 2, 40, 10, 50),
-                ],
-            )
+    with sqlite3.connect(Path(pool.db_path)) as conn:
+        _seed_users(conn, range(1, 3))
+        conn.executemany(
+            "INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)",
+            [(10, "Org Ten", "org-ten"), (20, "Org Twenty", "org-twenty")],
+        )
+        conn.executemany(
+            "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
+            # User 1 is a member of BOTH scoped orgs; user 2 only org 10.
+            [(10, 1), (20, 1), (10, 2)],
+        )
+        conn.executemany(
+            _INSERT_USAGE,
+            [
+                (now, 1, 100, 50, 150),
+                (now, 1, 10, 5, 15),
+                (now, 1, 30, 20, 50),
+                (now, 2, 40, 10, 50),
+            ],
+        )
 
-        async def _two_org_ids(_principal: AuthPrincipal) -> list[int]:
-            return [10, 20]
+    async def _two_org_ids(_principal: AuthPrincipal) -> list[int]:
+        return [10, 20]
 
-        monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _two_org_ids)
+    monkeypatch.setattr(admin_scope_service, "get_admin_org_ids", _two_org_ids)
 
-        async with pool.acquire() as db:
-            by_user = await get_cost_attribution(
-                principal=_admin_principal(), db=db, group_by="user", range_days=7
-            )
-        user_items = {int(item["entity_id"]): item for item in by_user["items"]}
-        assert set(user_items) == {1, 2}
-        assert user_items[1]["request_count"] == 3, "each usage row counted exactly once"
-        assert user_items[1]["total_tokens"] == 215
-        assert user_items[2]["request_count"] == 1
-        assert user_items[2]["total_tokens"] == 50
+    async with pool.acquire() as db:
+        by_user = await get_cost_attribution(
+            principal=_admin_principal(), db=db, group_by="user", range_days=7
+        )
+    user_items = {int(item["entity_id"]): item for item in by_user["items"]}
+    assert set(user_items) == {1, 2}
+    assert user_items[1]["request_count"] == 3, "each usage row counted exactly once"
+    assert user_items[1]["total_tokens"] == 215
+    assert user_items[2]["request_count"] == 1
+    assert user_items[2]["total_tokens"] == 50
 
-        async with pool.acquire() as db:
-            by_org = await get_cost_attribution(
-                principal=_admin_principal(), db=db, group_by="org", range_days=7
-            )
-        org_items = {int(item["entity_id"]): item for item in by_org["items"]}
-        assert set(org_items) == {10, 20}, "group_by=org must keep row-per-org attribution"
-        assert org_items[10]["request_count"] == 4
-        assert org_items[10]["total_tokens"] == 265
-        assert org_items[20]["request_count"] == 3
-        assert org_items[20]["total_tokens"] == 215
-    finally:
-        await reset_db_pool()
+    async with pool.acquire() as db:
+        by_org = await get_cost_attribution(
+            principal=_admin_principal(), db=db, group_by="org", range_days=7
+        )
+    org_items = {int(item["entity_id"]): item for item in by_org["items"]}
+    assert set(org_items) == {10, 20}, "group_by=org must keep row-per-org attribution"
+    assert org_items[10]["request_count"] == 4
+    assert org_items[10]["total_tokens"] == 265
+    assert org_items[20]["request_count"] == 3
+    assert org_items[20]["total_tokens"] == 215
 
 
 class _PgTokensDb:

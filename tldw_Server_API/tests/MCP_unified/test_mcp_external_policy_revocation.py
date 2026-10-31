@@ -14,7 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import mcp_hub_management as routes
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
@@ -86,13 +86,13 @@ class CallAdapter(ExternalMCPTransportAdapter):
 
 
 @pytest.fixture
-async def runtime(tmp_path, monkeypatch):
+async def runtime(tmp_path, monkeypatch, fresh_services):
+    # Fixture setup and test overrides share one undo stack through runtime shutdown.
     with monkeypatch.context() as patch:
         path = tmp_path / "users.db"
         patch.setenv("AUTH_MODE", "multi_user")
         patch.setenv("DATABASE_URL", f"sqlite:///{path}")
         reset_settings()
-        await reset_db_pool()
         pool = await get_db_pool()
         ensure_authnz_tables(path)
         repo = McpHubRepo(pool)
@@ -127,12 +127,11 @@ async def runtime(tmp_path, monkeypatch):
             async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
                 yield SimpleNamespace(repo=repo, service=service, registry=registry, module=module,
                                       manager=module._manager, adapters=adapters, client=client, app=app,
-                                      original_factory=original_factory)
+                                      original_factory=original_factory, patch=patch)
         finally:
             for adapter in adapters:
                 adapter.release.set()
             await registry.shutdown_all()
-            await reset_db_pool()
     reset_settings()
 
 
@@ -197,10 +196,10 @@ async def test_malformed_current_row_refuses_but_unrelated_partial_error_is_isol
     assert len(runtime.adapters[0].calls) == 1  # nosec B101 - pytest authority/effect oracle.
 
 
-async def test_unavailable_loader_refuses_with_safe_error(runtime, monkeypatch):
+async def test_unavailable_loader_refuses_with_safe_error(runtime):
     async def failed_storage(*_args, **_kwargs):
         raise RuntimeError("private credential/storage detail")
-    monkeypatch.setattr(runtime.repo, "list_external_servers", failed_storage)
+    runtime.patch.setattr(runtime.repo, "list_external_servers", failed_storage)
     with pytest.raises(PermissionError) as failure:
         await runtime.module.execute_tool(READ, {})
     assert "private credential" not in str(failure.value)  # nosec B101 - pytest authority/effect oracle.
@@ -208,19 +207,19 @@ async def test_unavailable_loader_refuses_with_safe_error(runtime, monkeypatch):
 
 
 @pytest.mark.parametrize("failure", ["construction", "discovery"])
-async def test_failed_changed_transport_reconcile_does_not_authorize_old_adapter(runtime, monkeypatch, failure):
+async def test_failed_changed_transport_reconcile_does_not_authorize_old_adapter(runtime, failure):
     await runtime.service.update_external_server(SERVER, config=config(args=["-u", str(SMOKE), "changed"]), actor_id=1)
     if failure == "construction":
         def broken_factory(_server):
             raise RuntimeError("private build detail")
-        monkeypatch.setattr(manager_mod, "build_transport_adapter", broken_factory)
+        runtime.patch.setattr(manager_mod, "build_transport_adapter", broken_factory)
     else:
         def broken_factory(server):
             adapter = CallAdapter(server.id)
             adapter.fail_discovery = True
             runtime.adapters.append(adapter)
             return adapter
-        monkeypatch.setattr(manager_mod, "build_transport_adapter", broken_factory)
+        runtime.patch.setattr(manager_mod, "build_transport_adapter", broken_factory)
     refresh = await runtime.manager.reconcile_servers(SERVER)
     assert refresh["errors"] == {SERVER: "external_server_discovery_failed"}  # nosec B101 - pytest authority/effect oracle.
     assert any(tool.virtual_name == READ for tool in runtime.manager.list_virtual_tools())  # nosec B101 - last-good inventory retained.
@@ -279,8 +278,8 @@ async def test_supported_standalone_file_loader_uses_current_policy(tmp_path, mo
         await manager.shutdown()
 
 
-async def test_real_installed_stdio_fixture_still_executes_after_reconcile(runtime, monkeypatch):
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", runtime.original_factory)
+async def test_real_installed_stdio_fixture_still_executes_after_reconcile(runtime):
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", runtime.original_factory)
     await runtime.service.update_external_server(SERVER, config=config({"allow_tool_patterns": ["echo.search"]}), actor_id=1)
     assert (await runtime.manager.reconcile_servers(SERVER))["errors"] == {}  # nosec B101 - pytest authority/effect oracle.
     result = await runtime.module.execute_tool(f"ext.{SERVER}.echo.search", {"query": "current authority"})

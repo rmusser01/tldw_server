@@ -8,6 +8,11 @@ from fastapi import HTTPException, status
 from tldw_Server_API.app import main as app_main
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoints
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.AuthNZ.api_key_crypto import (
+    format_api_key,
+    generate_api_key_id,
+    generate_api_key_secret,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -52,11 +57,14 @@ def test_cors_policy_not_wildcard_in_production() -> None:
     prior_disable_cors = os.getenv("DISABLE_CORS")
     prior_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS")
     prior_allowed_origins = os.getenv("ALLOWED_ORIGINS")
+    prior_api_key = os.getenv("SINGLE_USER_API_KEY")
     try:
         os.environ["ENV"] = "production"
         os.environ["DISABLE_CORS"] = "false"
         os.environ["CORS_ALLOW_CREDENTIALS"] = "false"
         os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000"
+        # Production rejects the suite's legacy test key before CORS is reached.
+        os.environ["SINGLE_USER_API_KEY"] = format_api_key(generate_api_key_id(), generate_api_key_secret())
         app = build_app_for_test()
         assert "*" not in get_cors_allow_origins(app)  # nosec B101
     finally:
@@ -64,6 +72,7 @@ def test_cors_policy_not_wildcard_in_production() -> None:
         _restore_env("DISABLE_CORS", prior_disable_cors)
         _restore_env("CORS_ALLOW_CREDENTIALS", prior_allow_credentials)
         _restore_env("ALLOWED_ORIGINS", prior_allowed_origins)
+        _restore_env("SINGLE_USER_API_KEY", prior_api_key)
         importlib.reload(config_mod)
         importlib.reload(app_main)
 

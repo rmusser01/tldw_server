@@ -6,10 +6,8 @@ import pytest
 from cryptography.fernet import Fernet
 
 from tldw_Server_API.app.core.AuthNZ import session_manager as session_manager_module
-from tldw_Server_API.app.core.AuthNZ.session_manager import (
-    SessionManager,
-    reset_session_manager,
-)
+from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+from tldw_Server_API.tests._plugins.app_services_fixtures import discard_app_services
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 from tldw_Server_API.app.core.config import settings as core_settings
 
@@ -51,7 +49,7 @@ async def test_session_manager_default_storage_avoids_project_root_config_dir(mo
         assert api_key_path.exists(), "Session key should be persisted to API storage by default"
         assert not (project_root / "Config_Files").exists(), "Project-root Config_Files should not be created by default"
     finally:
-        await reset_session_manager()
+        await discard_app_services()
         for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "SESSION_KEY_STORAGE"):
             monkeypatch.delenv(env_key, raising=False)
         reset_settings()
@@ -74,7 +72,7 @@ async def test_session_manager_accepts_configured_fernet_key(monkeypatch):
         encrypted = manager.encrypt_token(sample)
         assert manager.decrypt_token(encrypted) == sample
     finally:
-        await reset_session_manager()
+        await discard_app_services()
         for env_key in (
             "AUTH_MODE",
             "SINGLE_USER_API_KEY",
@@ -105,13 +103,13 @@ async def test_session_manager_persists_generated_key(monkeypatch, tmp_path):
     assert api_key_path is not None and api_key_path.exists(), "API session_encryption.key should exist"
     assert manager.decrypt_token(encrypted) == sample
 
-    await reset_session_manager()
+    await discard_app_services()
     reset_settings()
 
     manager_again = SessionManager()
     assert manager_again.decrypt_token(encrypted) == sample
 
-    await reset_session_manager()
+    await discard_app_services()
     for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "SESSION_KEY_STORAGE"):
         monkeypatch.delenv(env_key, raising=False)
     reset_settings()
@@ -150,7 +148,7 @@ async def test_session_manager_uses_secondary_secret_on_rotation(monkeypatch, tm
     payload = "rotation-token"
     encrypted = manager.encrypt_token(payload)
 
-    await reset_session_manager()
+    await discard_app_services()
 
     monkeypatch.setenv("JWT_SECRET_KEY", new_secret)
     monkeypatch.setenv("JWT_SECONDARY_SECRET", old_secret)
@@ -159,7 +157,7 @@ async def test_session_manager_uses_secondary_secret_on_rotation(monkeypatch, tm
     manager_after_rotation = SessionManager()
     assert manager_after_rotation.decrypt_token(encrypted) == payload
 
-    await reset_session_manager()
+    await discard_app_services()
     for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "JWT_SECONDARY_SECRET"):
         monkeypatch.delenv(env_key, raising=False)
     reset_settings()
@@ -204,7 +202,7 @@ async def test_session_manager_uses_secondary_private_key_on_rotation(monkeypatc
     payload = "rotation-token-private-key"
     encrypted = manager.encrypt_token(payload)
 
-    await reset_session_manager()
+    await discard_app_services()
 
     monkeypatch.setenv("JWT_PRIVATE_KEY", new_private_key)
     monkeypatch.setenv("JWT_SECONDARY_PRIVATE_KEY", old_private_key)
@@ -213,7 +211,7 @@ async def test_session_manager_uses_secondary_private_key_on_rotation(monkeypatc
     manager_after_rotation = SessionManager()
     assert manager_after_rotation.decrypt_token(encrypted) == payload
 
-    await reset_session_manager()
+    await discard_app_services()
     for env_key in (
         "AUTH_MODE",
         "DATABASE_URL",
@@ -247,7 +245,7 @@ async def test_session_manager_rejects_symlink_persistence(monkeypatch, tmp_path
         assert target.read_text(encoding="utf-8") == "stealme"
         assert key_path.is_symlink()
     finally:
-        await reset_session_manager()
+        await discard_app_services()
         for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "SESSION_KEY_STORAGE"):
             monkeypatch.delenv(env_key, raising=False)
         reset_settings()
@@ -281,7 +279,7 @@ async def test_session_manager_rejects_insecure_key_permissions(monkeypatch, tmp
         mode = stat.S_IMODE(os.stat(key_path, follow_symlinks=False).st_mode)
         assert mode & (stat.S_IRWXG | stat.S_IRWXO) == 0
     finally:
-        await reset_session_manager()
+        await discard_app_services()
         for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "SESSION_KEY_STORAGE"):
             monkeypatch.delenv(env_key, raising=False)
         reset_settings()

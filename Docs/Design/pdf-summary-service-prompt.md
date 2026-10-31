@@ -78,5 +78,5 @@ removing only the two PDF provider properties reproduces the new `dev`
 fingerprint. Fresh verification: 108 focused backend tests and the OpenAPI
 drift check pass; frontend API types regenerated successfully. The new base
 also contains an unrelated task with the same numeric ID; this work's record
-is specifically `task-13161 - Expose-synchronous-PDF-summarization-in-Service-Prompts.md`.
+is specifically `task-15142 - Expose-synchronous-PDF-summarization-in-Service-Prompts.md`.
 Do not edit the unrelated Personal Context task through ambiguous ID lookup.

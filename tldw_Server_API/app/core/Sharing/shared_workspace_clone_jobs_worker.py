@@ -1419,9 +1419,6 @@ async def _build_default_runtime(
     jobs: Any,
     stop_event: asyncio.Event | None = None,
 ) -> SharedWorkspaceCloneRuntime:
-    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-        get_chacha_db_for_owner,
-    )
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
         managed_media_db_for_owner,
     )
@@ -1430,6 +1427,9 @@ async def _build_default_runtime(
         SharedWorkspaceRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
+        get_chacha_db_for_owner,
+    )
 
     pool = await get_db_pool()
     share_repo = SharedWorkspaceRepo(db_pool=pool)

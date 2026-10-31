@@ -14,7 +14,7 @@ import ipaddress
 import os
 import secrets
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, Security, WebSocket, status
@@ -31,6 +31,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_db_transaction,
     verify_jwt_and_fetch_user,
 )
+from tldw_Server_API.app.api.v1.API_Deps.mcp_deps import get_mcp_server_dep
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -52,9 +53,10 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     resolve_single_user_cookie_websocket,
 )
 from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
-from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
+from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, MCPServer, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get_jwt_manager
+from tldw_Server_API.app.core.MCP_unified.auth_scope import project_authenticated_execution_scope
 from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
     invalid_request_response,
     mcp_response_to_json,
@@ -66,6 +68,7 @@ from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
 )
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
 from tldw_Server_API.app.core.MCP_unified.protocol import _trusted_compat_claims_metadata
+from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
 from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
@@ -77,7 +80,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
     get_app_standalone_html_validation_pool,
 )
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_production_like_env, is_test_mode
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
 
 _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS = (
@@ -282,46 +285,6 @@ def _should_use_single_user_api_key_compat() -> bool:
         return False
 
 
-def _single_user_test_key_compat_allowed() -> bool:
-    """Return True when SINGLE_USER_TEST_API_KEY may be used by mounted HTTP auth."""
-    if not is_test_mode():
-        return False
-    try:
-        cfg = get_config()
-    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        cfg = None
-    env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
-    prod_flag = is_production_like_env()
-    is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
-    if os.getenv("PYTEST_CURRENT_TEST") is not None:
-        is_dev_ctx = True
-    try:
-        import sys as _sys
-
-        if "pytest" in _sys.modules:
-            is_dev_ctx = True
-    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug(
-            "MCP unified test key compatibility pytest detection failed",
-            exc_info=True,
-        )
-    if env in {"dev", "development", "test", "ci"}:
-        is_dev_ctx = True
-    if prod_flag:
-        is_dev_ctx = False
-    if not is_dev_ctx:
-        logger.error(
-            "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
-            extra={
-                "audit": True,
-                "env": env,
-                "debug_mode": bool(cfg and getattr(cfg, "debug_mode", False)),
-            },
-        )
-        return False
-    return True
-
-
 def _require_demo_auth_enabled(request: Request) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     """Require the direct MCP demo-auth surface to be explicitly enabled."""
     if not env_flag_enabled("MCP_ENABLE_DEMO_AUTH"):
@@ -371,6 +334,26 @@ def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     return None
 
 
+def _authenticated_execution_scope(
+    *,
+    principal: AuthPrincipal | None,
+    user: TokenData | None,
+    api_key_info: dict[str, Any] | None,
+) -> AuthenticatedExecutionScope | None:
+    """Resolve active scope only from server-authenticated credential data."""
+
+    try:
+        return project_authenticated_execution_scope(
+            authenticated_user_id=getattr(user, "sub", None),
+            principal_user_id=getattr(principal, "user_id", None),
+            principal_active_org_id=getattr(principal, "active_org_id", None),
+            principal_active_team_id=getattr(principal, "active_team_id", None),
+            api_key_info=api_key_info,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid authenticated scope") from exc
+
+
 @dataclass
 class McpAuthContext:
     """Resolved authentication context for MCP HTTP endpoints."""
@@ -379,6 +362,18 @@ class McpAuthContext:
     principal: Optional[AuthPrincipal]
     api_key_info: Optional[dict[str, Any]]
     raw_api_key: Optional[str]
+    execution_scope: AuthenticatedExecutionScope | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.api_key_info is not None:
+            if not isinstance(self.api_key_info, dict):
+                raise HTTPException(status_code=403, detail="Invalid authenticated scope")
+            self.api_key_info = dict(self.api_key_info)
+        self.execution_scope = _authenticated_execution_scope(
+            principal=self.principal,
+            user=self.user,
+            api_key_info=self.api_key_info,
+        )
 
 
 def _principal_to_token_data(principal: AuthPrincipal) -> Optional[TokenData]:
@@ -415,8 +410,7 @@ async def _resolve_token_data_compat(
     1) AuthNZ access JWT (multi-user).
     2) MCP JWT (for tools integrations).
     3) API key:
-       - Single-user mode: treat SINGLE_USER_API_KEY (and, in TEST_MODE,
-         SINGLE_USER_TEST_API_KEY) as an admin-style principal.
+       - Single-user mode: treat SINGLE_USER_API_KEY as an admin-style principal.
        - Multi-user: validate via APIKeyManager and map to a user id.
 
     When the multi-user API key path succeeds, this helper also attaches the
@@ -505,29 +499,21 @@ async def _resolve_token_data_compat(
             try:
                 if _should_use_single_user_api_key_compat():
                     settings = get_settings()
-                    test_mode = _single_user_test_key_compat_allowed()
                     allowed: set[str] = set()
                     if settings.SINGLE_USER_API_KEY:
                         allowed.add(settings.SINGLE_USER_API_KEY)
-                    if test_mode:
-                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                        if test_key:
-                            allowed.add(test_key)
                     if x_api_key in {a for a in allowed if a}:
                         client_ip = _get_client_ip(request)
                         if not is_single_user_ip_allowed(client_ip, settings):
                             return None
                         auth_via = "single_user_api_key"
-                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY") if test_mode else None
-                        if test_key and secrets.compare_digest(x_api_key, test_key):
-                            auth_via = "single_user_test_api_key"
                         if request is not None:
                             request.state.mcp_compat_auth_metadata = _trusted_compat_claims_metadata(
                                 auth_via=auth_via,
                                 compat_claims_source="mounted_http",
                             )
                         roles = [UserRole.ADMIN.value]
-                        perms = ["*"] if test_mode else []
+                        perms = []
                         return TokenData(
                             sub=str(settings.SINGLE_USER_FIXED_ID),
                             username="single_user",
@@ -687,6 +673,17 @@ async def _attach_api_key_metadata(
                     exc_info=True,
                 )
             api_key_info = None
+
+    if api_key_info is not None and auth.api_key_info is None:
+        if not isinstance(api_key_info, dict):
+            raise HTTPException(status_code=403, detail="Invalid authenticated scope")
+        api_key_info = dict(api_key_info)
+        auth.execution_scope = _authenticated_execution_scope(
+            principal=auth.principal,
+            user=auth.user,
+            api_key_info=api_key_info,
+        )
+        auth.api_key_info = api_key_info
 
     if api_key_info:
         if api_key_info.get("org_id") is not None:
@@ -973,6 +970,7 @@ async def mcp_request(
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Process an MCP request via HTTP.
@@ -990,8 +988,6 @@ async def mcp_request(
         return _jsonrpc_error_response(
             request_plan.error or invalid_request_response("Invalid request", request_id=None)
         )
-
-    server = get_mcp_server()
 
     # Ensure server is initialized
     if not server.initialized:
@@ -1032,7 +1028,11 @@ async def mcp_request(
         metadata["safe_config"] = safe_config
 
     resp_obj = await server.handle_http_request(
-        request_plan.request, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+        request_plan.request,
+        client_id=client_id,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
     )
     if request_plan.is_notification:
         return Response(status_code=204)
@@ -1071,6 +1071,7 @@ async def mcp_request_batch(
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Process a batch of MCP requests via HTTP.
@@ -1088,7 +1089,6 @@ async def mcp_request_batch(
 
     batch_plan = prepare_jsonrpc_batch(payload)
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1135,7 +1135,11 @@ async def mcp_request_batch(
     server_responses: list[MCPResponse] = []
     if batch_plan.requests:
         handled_responses = await server.handle_http_batch(
-            batch_plan.requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+            batch_plan.requests,
+            client_id=client_id,
+            user_id=derived_user_id,
+            metadata=metadata or None,
+            server_auth_scope=auth.execution_scope,
         )
         if handled_responses:
             server_responses.extend(item for item in handled_responses if item.id is not None)
@@ -1163,6 +1167,7 @@ async def mcp_request_batch(
 async def get_server_status(
     _guard: None = Depends(enforce_http_security),
     _auth: McpAuthContext = Depends(get_mcp_auth_context),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Get MCP server status.
@@ -1173,7 +1178,6 @@ async def get_server_status(
     - Connection statistics
     - Module health summary
     """
-    server = get_mcp_server()
 
     # Ensure server is initialized
     if not server.initialized:
@@ -1187,6 +1191,7 @@ async def get_server_status(
 async def get_server_metrics(
     _principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Get detailed server metrics (requires `system.logs` permission or admin).
@@ -1197,7 +1202,6 @@ async def get_server_metrics(
     - Error rates
     - Latency statistics
     """
-    server = get_mcp_server()
 
     if not server.initialized:
         await server.initialize()
@@ -1265,6 +1269,7 @@ async def list_tools(
     catalog_fail_open: Optional[bool] = Query(None, description="Fail open unless catalog_strict=true"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     List available MCP tools.
@@ -1294,7 +1299,6 @@ async def list_tools(
         params["catalog_fail_open"] = catalog_fail_open
     request = MCPRequest(method="tools/list", params=params, id="http-tools-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1309,7 +1313,12 @@ async def list_tools(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1436,6 +1445,7 @@ async def execute_tool(
     http_request: Request,
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Execute a specific tool (requires authentication).
@@ -1452,7 +1462,6 @@ async def execute_tool(
         id=f"http-tools-execute:{request.tool_name}",
     )
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1478,7 +1487,12 @@ async def execute_tool(
 
     derived_user_id = _get_derived_user_id(user)
 
-    response = await server.handle_http_request(mcp_request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        mcp_request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response is None:
         logger.error("MCP server returned no response for tools/call", tool=request.tool_name)
@@ -1553,6 +1567,7 @@ async def list_modules(
     http_request: Request,
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     List registered MCP modules.
@@ -1561,7 +1576,6 @@ async def list_modules(
     """
     request = MCPRequest(method="modules/list", id="http-modules-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1576,7 +1590,12 @@ async def list_modules(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1605,6 +1624,7 @@ async def get_modules_health(
     http_request: Request,
     principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Get detailed health status of all modules; requires `system.logs` permission (or admin).
@@ -1613,7 +1633,6 @@ async def get_modules_health(
     """
     request = MCPRequest(method="modules/health", id="http-modules-health")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1624,7 +1643,16 @@ async def get_modules_health(
         meta["permissions"] = principal.permissions
     _attach_rg_ingress_metadata(meta, http_request)
 
-    response = await server.handle_http_request(request, user_id=principal.principal_id, metadata=meta)
+    response = await server.handle_http_request(
+        request,
+        user_id=principal.principal_id,
+        metadata=meta,
+        server_auth_scope=_authenticated_execution_scope(
+            principal=principal,
+            user=None,
+            api_key_info=None,
+        ),
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1653,6 +1681,7 @@ async def list_resources(
     http_request: Request,
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     List available MCP resources.
@@ -1661,7 +1690,6 @@ async def list_resources(
     """
     request = MCPRequest(method="resources/list", id="http-resources-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1676,7 +1704,12 @@ async def list_resources(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1698,6 +1731,7 @@ async def list_prompts(
     cursor: str | None = Query(None, description="Opaque MCP prompt list cursor"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ) -> dict[str, Any]:
     """
     List available MCP prompts.
@@ -1707,7 +1741,6 @@ async def list_prompts(
     params = {"cursor": cursor} if cursor is not None else None
     request = MCPRequest(method="prompts/list", params=params, id="http-prompts-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1722,7 +1755,12 @@ async def list_prompts(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1849,13 +1887,13 @@ async def refresh_token(
 @router.get("/health")
 async def health_check(
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Health check endpoint for load balancers.
 
     Returns 200 if server is healthy, 503 if not.
     """
-    server = get_mcp_server()
 
     if not server.initialized:
         raise HTTPException(

@@ -22,7 +22,12 @@ pytestmark = pytest.mark.unit
 def _allow_synthetic_public_observability_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep the public test host reachable under CI's hostile egress allowlist."""
+    """Declare mocked host/port access independently of collection order."""
+    ports = os.getenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")
+    allowed_ports = [port.strip() for port in ports.split(",") if port.strip()]
+    if "*" not in allowed_ports and "8443" not in allowed_ports:
+        allowed_ports.append("8443")
+        monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", ",".join(allowed_ports))
     configured = os.getenv("WORKFLOWS_EGRESS_ALLOWLIST", "")
     if not configured.strip():
         return
@@ -532,10 +537,6 @@ def test_sensitive_egress_dns_failure_redacts_full_loguru_record_and_resets_cont
 
     def fail_dns(*_args: object, **_kwargs: object) -> list[object]:
         raise OSError("deterministic resolver failure")
-
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setattr(egress.socket, "getaddrinfo", fail_dns)
     sink_id = logger.add(
@@ -1015,10 +1016,6 @@ async def test_sensitive_async_egress_failure_redacts_and_resets_context(
 
     def fail_dns(*_args: object, **_kwargs: object) -> list[object]:
         raise OSError("deterministic resolver failure")
-
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setattr(egress.socket, "getaddrinfo", fail_dns)
     sink_id = logger.add(

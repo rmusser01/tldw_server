@@ -558,41 +558,6 @@ def test_blocklist_update_preserves_pii_rules(monkeypatch):
 
 
 @pytest.mark.unit
-def test_compile_user_rule_rejects_dangerous_regex():
-    svc = ModerationService()
-    compiled = svc._compile_user_rule(
-        {
-            "id": "danger",
-            "pattern": "(a+)+$",
-            "is_regex": True,
-            "action": "block",
-            "phase": "both",
-        }
-    )
-    assert compiled is None
-
-
-@pytest.mark.unit
-def test_compile_user_rule_sets_phase_and_action():
-    svc = ModerationService()
-    compiled = svc._compile_user_rule(
-        {
-            "id": "warn-1",
-            "pattern": "heads up",
-            "is_regex": False,
-            "action": "warn",
-            "phase": "input",
-        }
-    )
-    assert isinstance(compiled, PatternRule)
-    assert compiled is not None
-    assert compiled.action == "warn"
-    assert compiled.phase == "input"
-    assert compiled.categories == {"*"}
-    assert compiled.regex.search("please heads up now")
-
-
-@pytest.mark.unit
 def test_uncategorized_category_allows_untagged_rules():
     svc = ModerationService()
     lines = [

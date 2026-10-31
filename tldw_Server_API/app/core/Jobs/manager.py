@@ -14,16 +14,23 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from datetime import timezone as _tz
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import (
     retry_failed_job_admission as _retry_failed_job_admission,
 )
+from tldw_Server_API.app.core.DB_Management.jobs_lifecycle_persistence import (
+    _insert_lifecycle_event,
+    _reconcile_lifecycle_counter_row,
+)
 from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
     fetch_slides_archive_collision_rows,
     job_event_filter_fragment,
+)
+from tldw_Server_API.app.core.DB_Management.jobs_transaction_helpers import (
+    _commit_postgres_transaction,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
@@ -41,6 +48,7 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Utils.jobs_errors import JobPayloadDecryptionError
 
 from .audit_bridge import submit_job_audit_event
 from .event_stream import emit_job_event, observe_job_event
@@ -157,31 +165,25 @@ from .pg_migrations import (
 )
 from .tracing import job_span
 
-try:
-    import psycopg  # type: ignore
+if TYPE_CHECKING:
+    from .operations.workflow_contracts import (
+        WorkflowAdmissionCommand,
+        WorkflowAdmissionInputs,
+        WorkflowEffect,
+        WorkflowPolicy,
+        WorkflowReceipt,
+    )
+    from .workflow_capability import PreparedWorkflowCapability
 
-    _PG_ERRORS: tuple[type[BaseException], ...] = (psycopg.Error,)
-except ImportError:
-    _PG_ERRORS = ()
-
-_JOB_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    AttributeError,
-    BadRequestError,
-    ConnectionError,
-    ImportError,
-    IndexError,
-    KeyError,
-    LookupError,
-    OSError,
-    RuntimeError,
-    TimeoutError,
-    TypeError,
-    UnicodeDecodeError,
-    ValueError,
-    json.JSONDecodeError,
-    sqlite3.Error,
-    *_PG_ERRORS,
+# Keep optional-driver initialization after the existing Jobs imports.
+# isort: split
+from tldw_Server_API.app.core.DB_Management.jobs_exception_policy import (
+    _JOB_NONCRITICAL_EXCEPTIONS,
+    _PG_ERRORS,
 )
+
+if _PG_ERRORS:
+    from tldw_Server_API.app.core.DB_Management.jobs_exception_policy import psycopg as psycopg
 
 _LEASE_EXPIRED_ERROR_CODE = "lease_expired"
 _LEASE_EXPIRED_ERROR_MESSAGE = "Job lease expired; retry budget exhausted"
@@ -214,14 +216,6 @@ class OwnerScopeAdmissionPolicy:
             or self.created_after.utcoffset() is None
         ):
             raise ValueError("owner scope admission policy is invalid")
-
-
-class JobPayloadDecryptionError(RuntimeError):
-    """Raised when an encrypted Jobs value cannot be safely decoded."""
-
-    def __init__(self, field_name: str) -> None:
-        super().__init__(f"Encrypted job {field_name} could not be decrypted")
-        self.field_name = field_name
 
 
 _SLIDES_GENERATION_DOMAIN = "slides"
@@ -326,19 +320,6 @@ def _close_connection_nonfatal(conn: Any, *, operation: str) -> None:
         )
 
 
-def _commit_postgres_transaction(conn: Any, *, operation: str) -> None:
-    """Commit a PostgreSQL mutation, rejecting already-aborted transactions."""
-
-    from psycopg.pq import TransactionStatus
-
-    if conn.info.transaction_status == TransactionStatus.INERROR:
-        conn.rollback()
-        raise RuntimeError(
-            f"Cannot commit PostgreSQL {operation}: transaction is aborted"
-        )
-    conn.commit()
-
-
 def _run_post_commit_side_effects(
     side_effects: list[tuple[Any, tuple[Any, ...], dict[str, Any]]],
 ) -> None:
@@ -360,47 +341,6 @@ def _record_job_span(
         pass
 
 
-def _insert_lifecycle_event(
-    executor: Any,
-    *,
-    backend: str,
-    event_type: str,
-    job: dict[str, Any],
-    attrs: dict[str, Any] | None = None,
-) -> None:
-    """Append a durable lifecycle event inside the caller's transaction."""
-
-    values = (
-        int(job["id"]),
-        job.get("domain"),
-        job.get("queue"),
-        job.get("job_type"),
-        event_type,
-        json.dumps(attrs or {}),
-        job.get("owner_user_id"),
-        job.get("request_id"),
-        job.get("trace_id"),
-    )
-    if backend == "postgres":
-        executor.execute(
-            (
-                "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, "
-                "attrs_json, owner_user_id, request_id, trace_id, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())"
-            ),
-            values,
-        )
-        return
-    executor.execute(
-        (
-            "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, "
-            "attrs_json, owner_user_id, request_id, trace_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))"
-        ),
-        values,
-    )
-
-
 def _queue_lifecycle_event_observer(
     side_effects: list[tuple[Any, tuple[Any, ...], dict[str, Any]]],
     *,
@@ -412,78 +352,6 @@ def _queue_lifecycle_event_observer(
 
     side_effects.append(
         (observe_job_event, (event_type,), {"job": job, "attrs": attrs})
-    )
-
-
-def _reconcile_lifecycle_counter_row(
-    executor: Any,
-    *,
-    backend: str,
-    domain: Any,
-    queue: Any,
-    job_type: Any,
-) -> None:
-    """Rebuild one missing counter row from transaction-local job state."""
-
-    params = (domain, queue, job_type)
-    if backend == "postgres":
-        executor.execute(
-            (
-                "SELECT "
-                "COUNT(*) FILTER (WHERE status='queued' AND available_at IS NULL) AS ready_count, "
-                "COUNT(*) FILTER (WHERE status='queued' AND available_at IS NOT NULL) AS scheduled_count, "
-                "COUNT(*) FILTER (WHERE status='processing') AS processing_count, "
-                "COUNT(*) FILTER (WHERE status='quarantined') AS quarantined_count "
-                "FROM jobs WHERE domain=%s AND queue=%s AND job_type=%s"
-            ),
-            params,
-        )
-        row = executor.fetchone()
-        if isinstance(row, dict):
-            counts = tuple(
-                int(row.get(name) or 0)
-                for name in (
-                    "ready_count",
-                    "scheduled_count",
-                    "processing_count",
-                    "quarantined_count",
-                )
-            )
-        else:
-            counts = tuple(int(value or 0) for value in (row or (0, 0, 0, 0)))
-        executor.execute(
-            (
-                "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) "
-                "VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (domain,queue,job_type) DO UPDATE SET "
-                "ready_count=EXCLUDED.ready_count, scheduled_count=EXCLUDED.scheduled_count, "
-                "processing_count=EXCLUDED.processing_count, quarantined_count=EXCLUDED.quarantined_count, "
-                "updated_at=NOW()"
-            ),
-            (*params, *counts),
-        )
-        return
-
-    row = executor.execute(
-        (
-            "SELECT "
-            "COALESCE(SUM(CASE WHEN status='queued' AND available_at IS NULL THEN 1 ELSE 0 END),0), "
-            "COALESCE(SUM(CASE WHEN status='queued' AND available_at IS NOT NULL THEN 1 ELSE 0 END),0), "
-            "COALESCE(SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END),0), "
-            "COALESCE(SUM(CASE WHEN status='quarantined' THEN 1 ELSE 0 END),0) "
-            "FROM jobs WHERE domain=? AND queue=? AND job_type=?"
-        ),
-        params,
-    ).fetchone()
-    counts = tuple(int(value or 0) for value in (row or (0, 0, 0, 0)))
-    executor.execute(
-        (
-            "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) "
-            "VALUES(?,?,?,?,?,?,?) ON CONFLICT(domain,queue,job_type) DO UPDATE SET "
-            "ready_count=excluded.ready_count, scheduled_count=excluded.scheduled_count, "
-            "processing_count=excluded.processing_count, quarantined_count=excluded.quarantined_count, "
-            "updated_at=DATETIME('now')"
-        ),
-        (*params, *counts),
     )
 
 
@@ -589,6 +457,7 @@ class JobManager:
     _RLS_IS_ADMIN: ContextVar[bool] = ContextVar("jobs_rls_is_admin", default=False)
     _RLS_DOMAIN_ALLOWLIST: ContextVar[str | None] = ContextVar("jobs_rls_domain_allowlist", default=None)
     _RLS_OWNER_USER_ID: ContextVar[str | None] = ContextVar("jobs_rls_owner_user_id", default=None)
+    _WORKFLOW_TRANSACTION: ContextVar[Any | None] = ContextVar("jobs_workflow_transaction", default=None)
 
     # Test-mode only: remember last acquired job per (domain,queue) to stabilize duplicate acquires
     _LAST_ACQUIRED_TEST: dict[tuple[str, str], dict[str, Any]] = {}
@@ -3591,6 +3460,83 @@ class JobManager:
             self._assert_invariants(result.job)
         return result
 
+    def workflow_capability(self, policy: WorkflowPolicy) -> PreparedWorkflowCapability:
+        """Construct an inert trusted-policy facade without opening a database."""
+        from .workflow_capability import PreparedWorkflowCapability
+
+        return PreparedWorkflowCapability(self, policy)
+
+    def _prepare_workflow_admission(
+        self, command: WorkflowAdmissionCommand, policy: WorkflowPolicy
+    ) -> WorkflowAdmissionInputs:
+        """Reuse admission policy leaves without inserting or committing work."""
+        from .operations.workflow_contracts import WorkflowAdmissionInputs
+
+        scope = policy.scope
+        expected = {policy.payload_field: command.reference_id}
+        # Validate both logical sides of secret/encryption policy. A reference
+        # root cannot adopt truncation or a policy-rewritten reference.
+        payload = dict(expected)
+        if scope.queue not in self._get_allowed_queues(scope.domain):
+            raise ValueError("workflow queue is not allowed")
+        priority = 5
+        if _fair_share_enabled():
+            scheduler = _get_fair_share()
+            transaction = self._WORKFLOW_TRANSACTION.get()
+            active_count = (
+                transaction.count_active_jobs()
+                if transaction is not None and transaction.manager is self
+                else self._count_active_jobs_for_user(command.owner_user_id)
+            )
+            if not scheduler.can_submit(command.owner_user_id, active_count):
+                raise ValueError("workflow fair-share limit exceeded")
+            priority = min(
+                priority,
+                self._map_fair_share_score_to_priority(
+                    scheduler.calculate_priority(command.owner_user_id, active_count)
+                ),
+            )
+        cleaned, found, _where = self._scan_and_redact_secrets(payload)
+        if found and self._is_truthy(os.getenv("JOBS_SECRET_REJECT", "")):
+            raise ValueError("workflow secret policy rejected payload")
+        payload = cleaned if found else payload
+        if payload != expected:
+            raise ValueError("workflow logical payload changed")
+        payload = self._maybe_encrypt_json(payload, scope.domain)
+        if self._maybe_decrypt_json(payload, fail_on_error=True) != expected:
+            raise ValueError("workflow logical payload changed")
+        if len(json.dumps(payload).encode("utf-8")) > int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576"):
+            raise ValueError("workflow payload exceeds size limit")
+        allowed_types = []
+        for name in ("JOBS_ALLOWED_JOB_TYPES", f"JOBS_ALLOWED_JOB_TYPES_{scope.domain.upper()}"):
+            allowed_types.extend(value.strip() for value in os.getenv(name, "").split(",") if value.strip())
+        if allowed_types and scope.job_type not in allowed_types:
+            raise ValueError("workflow job type is not allowed")
+        job = self._build_create_job_command(
+            domain=scope.domain,
+            queue=scope.queue,
+            job_type=scope.job_type,
+            payload=payload,
+            owner_user_id=command.owner_user_id,
+            project_id=None,
+            batch_group=None,
+            available_at=None,
+            request_id=None,
+            trace_id=str(_uuid.uuid4()),
+            idempotency_key=command.idempotency_key,
+            priority=priority,
+            max_retries=command.controls.max_retries,
+            expired_lease_policy=command.controls.expired_lease_policy,
+            quarantine_threshold=command.controls.quarantine_threshold,
+        )
+        return WorkflowAdmissionInputs(
+            job,
+            self._quota_get("JOBS_QUOTA_MAX_QUEUED", scope.domain, command.owner_user_id),
+            self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", scope.domain, command.owner_user_id),
+            self._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
+            self._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")),
+        )
+
     def admit_job(
         self,
         *,
@@ -4233,6 +4179,41 @@ class JobManager:
             return _sqlite_ensure_lease_horizon(conn, command=capped_command)
         finally:
             conn.close()
+
+    def _emit_workflow_effect_side_effects(
+        self,
+        effect: WorkflowEffect,
+        receipt: WorkflowReceipt,
+        job_facts: tuple[tuple[str, Any], ...],
+        outbox_enabled: bool,
+    ) -> None:
+        """Best-effort postcommit observers from immutable UUID-bound facts."""
+        from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import effect_event_type
+
+        from .operations.workflow_contracts import WorkflowAction
+
+        job = dict(job_facts)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            if effect.action is WorkflowAction.COMPLETE:
+                increment_completed(job)
+            elif receipt.resulting_status in {"failed", "quarantined"}:
+                increment_failures(job, reason="terminal")
+            elif effect.action is WorkflowAction.RETRY:
+                increment_retries(job)
+            elif effect.action is WorkflowAction.CANCEL:
+                increment_cancelled(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._assert_invariants(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._update_gauges(domain=job["domain"], queue=job["queue"], job_type=job["job_type"])
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            attrs = {"kind": effect.action.value, "origin": "workflow"}
+            if effect.reason_code is not None:
+                attrs["reason_code"] = effect.reason_code
+            if outbox_enabled:
+                submit_job_audit_event(effect_event_type(receipt), job=job, attrs=attrs)
+            else:
+                emit_job_event(effect_event_type(receipt), job=job, attrs=attrs)
 
     def apply_prepared_disposition(
         self,
@@ -6034,6 +6015,81 @@ class JobManager:
         finally:
             conn.close()
 
+    @staticmethod
+    def _transition_expired_legacy_job_postgres(
+        cur: Any, row: dict[str, Any]
+    ) -> tuple[str, dict[str, Any], bool]:
+        """Apply one guarded legacy transition in the caller's recovery transaction."""
+
+        retry_count = int(row["effective_retry_count"])
+        max_retries = int(row["effective_max_retries"])
+        no_attempt = (
+            row["effective_expired_lease_policy"] == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+        )
+        requeue = no_attempt or retry_count < max_retries
+        if no_attempt:
+            cur.execute(
+                (
+                    "UPDATE jobs SET status='queued', available_at=NULL, "
+                    "no_attempt_recovery_fingerprint="
+                    "prepared_disposition_fingerprint, "
+                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
+                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
+                    "WHERE id=%s AND status='processing' "
+                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                    "AND expired_lease_policy='requeue_no_attempt'"
+                ),
+                (int(row["id"]),),
+            )
+            event_type = "job.deferred"
+            attrs = {
+                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                "origin": "recovery",
+            }
+        elif requeue:
+            cur.execute(
+                (
+                    "UPDATE jobs SET status='queued', "
+                    "retry_count=COALESCE(retry_count, 0) + 1, "
+                    "max_retries=COALESCE(max_retries, %s), available_at=NULL, "
+                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=NULL "
+                    "WHERE id=%s AND status='processing' "
+                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                    "AND COALESCE(retry_count, 0) < COALESCE(max_retries, %s)"
+                ),
+                (_DEFAULT_MAX_RETRIES, int(row["id"]), _DEFAULT_MAX_RETRIES),
+            )
+            event_type = "job.retry_scheduled"
+            attrs = {
+                "backoff_seconds": 0,
+                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                "retry_count": retry_count + 1,
+            }
+        else:
+            cur.execute(
+                (
+                    "UPDATE jobs SET status='failed', "
+                    "retry_count=COALESCE(retry_count, 0), "
+                    "max_retries=COALESCE(max_retries, %s), "
+                    "last_error=%s, error_message=%s, error_code=%s, completed_at=NOW(), "
+                    "leased_until=NULL, worker_id=NULL, lease_id=NULL "
+                    "WHERE id=%s AND status='processing' "
+                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                    "AND COALESCE(retry_count, 0) >= COALESCE(max_retries, %s)"
+                ),
+                (
+                    _DEFAULT_MAX_RETRIES,
+                    _LEASE_EXPIRED_ERROR_CODE,
+                    _LEASE_EXPIRED_ERROR_MESSAGE,
+                    _LEASE_EXPIRED_ERROR_CODE,
+                    int(row["id"]),
+                    _DEFAULT_MAX_RETRIES,
+                ),
+            )
+            event_type = "job.failed"
+            attrs = {"error_code": _LEASE_EXPIRED_ERROR_CODE}
+        return event_type, attrs, requeue
+
     def _recover_expired_processing_jobs(
         self,
         *,
@@ -6074,10 +6130,22 @@ class JobManager:
                     where.append("job_type = ANY(%s)")
                     params.append(list(job_types))
                 with conn, self._pg_cursor(conn) as cur:
+                    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+                        effect_event_type,
+                        recover_workflow_expiry_in_transaction,
+                        workflow_enrollment_projection,
+                    )
+
+                    enrollment = workflow_enrollment_projection(conn, backend=self.backend)
+                    if enrollment == "workflow_capability_version":
+                        where[1] = (
+                            "(leased_until IS NULL OR leased_until <= CASE WHEN workflow_capability_version=1 THEN clock_timestamp() ELSE NOW() END)"
+                        )
                     counter_deltas: dict[tuple[str, str, str], tuple[int, int]] = {}
                     cur.execute(
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
+                            f"{enrollment}, "  # nosec B608
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
                             "COALESCE(max_retries, %s) AS effective_max_retries, "
                             "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
@@ -6090,74 +6158,23 @@ class JobManager:
                     rows = cur.fetchall() or []
                     for raw_row in rows:
                         row = dict(raw_row)
-                        retry_count = int(row["effective_retry_count"])
-                        max_retries = int(row["effective_max_retries"])
-                        no_attempt = (
-                            row["effective_expired_lease_policy"]
-                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
-                        )
-                        requeue = no_attempt or retry_count < max_retries
-                        if no_attempt:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status='queued', available_at=NULL, "
-                                    "no_attempt_recovery_fingerprint="
-                                    "prepared_disposition_fingerprint, "
-                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
-                                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
-                                    "WHERE id=%s AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
-                                    "AND expired_lease_policy='requeue_no_attempt'"
-                                ),
-                                (int(row["id"]),),
+                        if row.get("workflow_capability_version") is not None:
+                            from .operations.workflow_bindings import workflow_backend_hooks
+
+                            result = recover_workflow_expiry_in_transaction(
+                                conn,
+                                backend=self.backend,
+                                locked_root=row,
+                                decode_payload=self._maybe_decrypt_json,
+                                hooks=workflow_backend_hooks(self.backend),
                             )
-                            event_type = "job.deferred"
-                            attrs = {
-                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
-                                "origin": "recovery",
-                            }
-                        elif requeue:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status='queued', "
-                                    "retry_count=COALESCE(retry_count, 0) + 1, "
-                                    "max_retries=COALESCE(max_retries, %s), available_at=NULL, "
-                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=NULL "
-                                    "WHERE id=%s AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
-                                    "AND COALESCE(retry_count, 0) < COALESCE(max_retries, %s)"
-                                ),
-                                (_DEFAULT_MAX_RETRIES, int(row["id"]), _DEFAULT_MAX_RETRIES),
-                            )
-                            event_type = "job.retry_scheduled"
-                            attrs = {
-                                "backoff_seconds": 0,
-                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
-                                "retry_count": retry_count + 1,
-                            }
-                        else:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status='failed', "
-                                    "retry_count=COALESCE(retry_count, 0), "
-                                    "max_retries=COALESCE(max_retries, %s), "
-                                    "last_error=%s, error_message=%s, error_code=%s, completed_at=NOW(), "
-                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL "
-                                    "WHERE id=%s AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
-                                    "AND COALESCE(retry_count, 0) >= COALESCE(max_retries, %s)"
-                                ),
-                                (
-                                    _DEFAULT_MAX_RETRIES,
-                                    _LEASE_EXPIRED_ERROR_CODE,
-                                    _LEASE_EXPIRED_ERROR_MESSAGE,
-                                    _LEASE_EXPIRED_ERROR_CODE,
-                                    int(row["id"]),
-                                    _DEFAULT_MAX_RETRIES,
-                                ),
-                            )
-                            event_type = "job.failed"
-                            attrs = {"error_code": _LEASE_EXPIRED_ERROR_CODE}
+                            if result.receipt is not None:
+                                attrs = {"origin": "recovery"}
+                                if result.receipt.resulting_status == "failed":
+                                    attrs["error_code"] = "no_progress_exhausted"
+                                recovered.append((effect_event_type(result.receipt), row, attrs))
+                            continue
+                        event_type, attrs, requeue = self._transition_expired_legacy_job_postgres(cur, row)
                         if cur.rowcount != 1:
                             continue
 
@@ -6228,6 +6245,18 @@ class JobManager:
                     where.append(f"job_type IN ({', '.join('?' for _ in job_types)})")
                     params.extend(job_types)
                 scoped_where = " AND ".join(where)
+                from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+                    effect_event_type,
+                    recover_workflow_expiry_in_transaction,
+                    workflow_enrollment_projection,
+                )
+
+                enrollment = workflow_enrollment_projection(conn, backend=self.backend)
+                if enrollment == "workflow_capability_version":
+                    where[1] = (
+                        "(leased_until IS NULL OR (workflow_capability_version=1 AND JULIANDAY(leased_until)<=JULIANDAY('now')) OR (workflow_capability_version IS NULL AND leased_until<=STRFTIME('%Y-%m-%d %H:%M:%f','now')))"
+                    )
+                    scoped_where = " AND ".join(where)
                 # Healthy acquisitions pay only a scoped read; take the write
                 # lock only when an expired row may need recovery.
                 precheck = conn.execute(
@@ -6241,6 +6270,7 @@ class JobManager:
                     rows = conn.execute(
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
+                            f"{enrollment}, "  # nosec B608
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
                             "COALESCE(max_retries, ?) AS effective_max_retries, "
                             "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
@@ -6251,11 +6281,26 @@ class JobManager:
                     ).fetchall()
                     for raw_row in rows:
                         row = dict(raw_row)
+                        if row.get("workflow_capability_version") is not None:
+                            from .operations.workflow_bindings import workflow_backend_hooks
+
+                            result = recover_workflow_expiry_in_transaction(
+                                conn,
+                                backend=self.backend,
+                                locked_root=row,
+                                decode_payload=self._maybe_decrypt_json,
+                                hooks=workflow_backend_hooks(self.backend),
+                            )
+                            if result.receipt is not None:
+                                attrs = {"origin": "recovery"}
+                                if result.receipt.resulting_status == "failed":
+                                    attrs["error_code"] = "no_progress_exhausted"
+                                recovered.append((effect_event_type(result.receipt), row, attrs))
+                            continue
                         retry_count = int(row["effective_retry_count"])
                         max_retries = int(row["effective_max_retries"])
                         no_attempt = (
-                            row["effective_expired_lease_policy"]
-                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+                            row["effective_expired_lease_policy"] == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
                         )
                         requeue = no_attempt or retry_count < max_retries
                         if no_attempt:
@@ -6522,6 +6567,7 @@ class JobManager:
                     ),
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                     now=self._clock.now_utc(),
+                    decode_payload=self._maybe_decrypt_json,
                 )
                 if result.outcome is not OperationOutcome.APPLIED or result.row is None:
                     return None
@@ -6547,6 +6593,7 @@ class JobManager:
                     ),
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                     now=self._clock.now_utc(),
+                    decode_payload=self._maybe_decrypt_json,
                 )
                 if result.outcome is not OperationOutcome.APPLIED or result.row is None:
                     return None

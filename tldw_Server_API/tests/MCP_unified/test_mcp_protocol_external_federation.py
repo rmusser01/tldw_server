@@ -211,9 +211,9 @@ async def test_managed_external_registry_service_reports_partial_invalid_rows_wi
 @pytest.mark.asyncio
 async def test_managed_external_registry_service_keeps_runtime_config_auth_neutral_and_skips_legacy(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
@@ -231,7 +231,6 @@ async def test_managed_external_registry_service_keeps_runtime_config_auth_neutr
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -293,8 +292,8 @@ async def test_managed_external_registry_service_keeps_runtime_config_auth_neutr
 
 
 @pytest.mark.asyncio
-async def test_external_federation_module_ignores_legacy_file_config_for_runtime(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_external_federation_module_ignores_legacy_file_config_for_runtime(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -321,7 +320,6 @@ async def test_external_federation_module_ignores_legacy_file_config_for_runtime
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -353,9 +351,9 @@ async def test_external_federation_module_ignores_legacy_file_config_for_runtime
 @pytest.mark.asyncio
 async def test_managed_external_registry_service_keeps_named_slot_template_auth_neutral(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
@@ -373,7 +371,6 @@ async def test_managed_external_registry_service_keeps_named_slot_template_auth_
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -436,9 +433,9 @@ async def test_managed_external_registry_service_keeps_named_slot_template_auth_
 @pytest.mark.asyncio
 async def test_managed_external_registry_service_keeps_stdio_template_auth_neutral(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
@@ -456,7 +453,6 @@ async def test_managed_external_registry_service_keeps_stdio_template_auth_neutr
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -521,9 +517,9 @@ async def test_managed_external_registry_service_keeps_stdio_template_auth_neutr
 @pytest.mark.asyncio
 async def test_external_federation_module_brokers_managed_secret_ref_at_call_time(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.secret_backends.local_encrypted import (
         LocalEncryptedSecretBackend,
@@ -537,7 +533,6 @@ async def test_external_federation_module_brokers_managed_secret_ref_at_call_tim
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 

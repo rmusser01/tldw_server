@@ -83,17 +83,13 @@ async def _prepare_tables_and_seed_bytes_in():
 
 
 @pytest.mark.asyncio
-async def test_usage_bytes_in_aggregation_and_exports(monkeypatch, tmp_path):
+async def test_usage_bytes_in_aggregation_and_exports(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
 
     # Reset singletons for env take effect
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
     with TestClient(app, headers=headers) as client:

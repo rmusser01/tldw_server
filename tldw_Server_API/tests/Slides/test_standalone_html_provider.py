@@ -77,7 +77,7 @@ EXPECTED_CLOSED_ADAPTER_MANIFEST = (
 
 
 @pytest.fixture
-def provider_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+def provider_module(monkeypatch: pytest.MonkeyPatch, standalone_provider_egress: None) -> ModuleType:
     try:
         module = importlib.import_module("tldw_Server_API.app.core.Slides.standalone_html_provider")
     except ModuleNotFoundError:
@@ -1674,18 +1674,15 @@ async def test_document_limit_is_utf8_bytes_and_clamped_to_fixed_one_mib(
 
 
 # --- Production egress policy (TASK-13950.11 group D) -------------------------------------------
-# The fixtures above run under http_client's test-mode shortcut (no DNS check for hostnames). These
-# switch it off and answer DNS from a table, so the egress policy decides as it does in production.
+# These answer DNS from a table, so the egress policy decides on resolved addresses.
 
 
 @pytest.fixture
 def production_egress(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
-    from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Security import egress
 
     answers: dict[str, list[str]] = {}
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
     for name in ("TESTING", "TEST_MODE", "TLDW_TEST_MODE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(

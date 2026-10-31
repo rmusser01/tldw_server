@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import database
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 @pytest.mark.asyncio
@@ -102,7 +103,7 @@ async def test_pool_reconfiguration_log_never_contains_database_urls(
         AUTH_MODE="multi_user",
         DATABASE_URL=current_url,
     )
-    monkeypatch.setattr(database, "_db_pool", _ExistingPool())
+    monkeypatch.setattr(app_services(), "db_pool", _ExistingPool())
     monkeypatch.setattr(database, "get_settings", lambda: current_settings)
     monkeypatch.setattr(database, "DatabasePool", _ReplacementPool)
     output = io.StringIO()

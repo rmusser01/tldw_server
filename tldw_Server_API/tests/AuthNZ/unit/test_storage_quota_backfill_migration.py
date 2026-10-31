@@ -11,7 +11,11 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
 from tldw_Server_API.app.core.AuthNZ import storage_quota_backfill
-from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations, get_authnz_migrations
+from tldw_Server_API.app.core.AuthNZ.migrations import (
+    apply_authnz_migrations,
+    get_authnz_migrations,
+    migration_015_create_llm_usage_tables,
+)
 
 pytestmark = pytest.mark.unit
 KEY = "limits.storage_quota_mb"
@@ -78,6 +82,7 @@ def test_skips_when_users_table_absent(tmp_path: Path) -> None:
             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)"
         )
         conn.execute("INSERT INTO schema_migrations VALUES (99, 'synthetic', CURRENT_TIMESTAMP)")
+        migration_015_create_llm_usage_tables(conn)
     apply_authnz_migrations(db_path, target_version=100)
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
@@ -100,6 +105,7 @@ def test_skips_when_users_table_has_no_quota_column(tmp_path: Path) -> None:
             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)"
         )
         conn.execute("INSERT INTO schema_migrations VALUES (99, 'synthetic', CURRENT_TIMESTAMP)")
+        migration_015_create_llm_usage_tables(conn)
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)")
         conn.execute("INSERT INTO users (username) VALUES ('nocol')")
     apply_authnz_migrations(db_path, target_version=100)

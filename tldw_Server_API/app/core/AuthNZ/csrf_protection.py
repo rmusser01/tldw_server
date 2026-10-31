@@ -29,7 +29,7 @@ from tldw_Server_API.app.core.config import settings as global_settings
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import is_truthy
 
 _CSRF_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -61,8 +61,6 @@ def resolve_effective_csrf_enabled() -> bool:
         configured = bool(is_truthy(raw.strip().lower()))
     if configured is not None:
         return bool(configured)
-    if is_test_mode():
-        return False
     return get_settings().AUTH_MODE in {"single_user", "multi_user"}
 
 #######################################################################################################################

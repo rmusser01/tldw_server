@@ -37,7 +37,7 @@ def _stub_llm(monkeypatch, payload):
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
 
 

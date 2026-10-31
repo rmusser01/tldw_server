@@ -71,14 +71,12 @@ async def test_initialize_auth_runtime_services_runs_post_auth_steps_in_order(
         lambda: dispatcher,
     )
 
-    handles = await auth_runtime.initialize_auth_runtime_services(
+    await auth_runtime.initialize_auth_runtime_services(
         app=app,
         logger=logger,
         startup_guard_exceptions=(RuntimeError,),
     )
 
-    assert handles.db_pool is db_pool
-    assert handles.session_manager is session_manager
     assert observed == [
         ("init_auth_services", None),
         ("init_resource_governor", app),
@@ -115,14 +113,12 @@ async def test_initialize_auth_runtime_services_logs_and_preserves_partial_handl
         _raise_resource_governor_error,
     )
 
-    handles = await auth_runtime.initialize_auth_runtime_services(
+    await auth_runtime.initialize_auth_runtime_services(
         app=object(),
         logger=logger,
         startup_guard_exceptions=(RuntimeError,),
     )
 
-    assert handles.db_pool is db_pool
-    assert handles.session_manager is None
     assert logger.info_messages == []
     assert logger.exception_messages == [
         "App Startup: Security alert validation / auth services init failed: rg boom"

@@ -47,6 +47,12 @@ responses in TASK-13013.2.
 
 See [Container Image Lifecycle](Container_Image_Lifecycle.md) for the full build and publish pipeline.
 
+### security-required: TEST_MODE-unset suites
+
+The "Security suites with TEST_MODE unset" step runs `tests/http_client`, `tests/AuthNZ/unit`, `tests/AuthNZ_Unit`, `tests/Security` and the sentinel `tests/CI/test_unset_test_flags_run.py` with `TLDW_UNSET_TEST_FLAGS=1`, which makes `tests/conftest.py` drop `TEST_MODE`, `TESTING` and `TLDW_TEST_MODE`; the same variable un-skips the sentinel, and `test_license_first_workflow_contracts.py` pins it. AuthNZ means the unit-level suites only, because the integration suites take about 90 shard-minutes. The run is not production parity: `PYTEST_CURRENT_TEST`-keyed branches stay live, and the root conftests' other test settings still apply (`WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`, `WORKFLOWS_EGRESS_ALLOWED_PORTS=*`, `WORKFLOWS_WEBHOOK_ALLOWLIST=*`, `MINIMAL_TEST_APP=1`, the single-user test key). Postgres cases skip (`TLDW_TEST_NO_DOCKER=1`) and run in ci.yml's Postgres shard. A test that fails only here means production code still branches on `TEST_MODE`, `TESTING` or `TLDW_TEST_MODE`.
+
+Reproduce a failure locally: `env -u TEST_MODE -u TESTING -u TLDW_TEST_MODE TLDW_UNSET_TEST_FLAGS=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 TLDW_TEST_NO_DOCKER=1 PYTHONPATH=. python -m pytest -p pytest_asyncio.plugin -p pytest_timeout <file>`
+
 ## Conditional Execution and No-op Behavior
 
 Each required gate is designed to always report a status, so branch protection behaves
@@ -60,6 +66,10 @@ and check current behaviour rather than assuming.
   its workflow has no `paths:` filter, so the check always reports.
 - If the change-detection job itself fails, the gate reports failure. Before TASK-13462 the gate job was skipped in
   that case, and GitHub counts a skipped required job as satisfied.
+- `backend-required`'s change-detection job also fails when two backlog task files share an id
+  (`Helper_Scripts/ci/check_backlog_task_ids.py`, TASK-13960). That job runs on every PR, backlog-only ones
+  included, so a duplicate id turns `backend-required` red even when no backend path changed. Its log names
+  each file; renumber the newer one with `task renumber` (AGENTS.md, Backlog.md Task Tracking).
 - If the gate's own license wait (`await_license`) is cancelled, fails, or reports a negative verdict, the gate reports
   failure. Each required workflow has its own `await_license` job, so a runner that never picks one up affects only
   that workflow. Before TASK-13502 only `backend-required` reported this; the other five were skipped and read as

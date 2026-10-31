@@ -32,7 +32,7 @@ async def warm_chacha_notes_on_startup(
 
 
 def _reset_chacha_shutdown_state() -> None:
-    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+    from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
         reset_chacha_shutdown_state,
     )
 
@@ -62,7 +62,7 @@ def _schedule_warm_chacha_task(user_id: int, client_id: str) -> asyncio.Task[Any
 
 
 async def _warm_chacha_db_for_user(user_id: int, client_id: str) -> None:
-    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+    from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
         warm_chacha_db_for_user,
     )
 

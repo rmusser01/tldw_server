@@ -21,17 +21,14 @@ async def _fresh_pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.sqlite'}")
     monkeypatch.setenv("LLM_USAGE_ENABLED", "1")
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
     return await get_db_pool()
 
 
-async def test_the_quota_counters_leave_out_calls_paid_by_the_users_own_key(monkeypatch, tmp_path) -> None:
+async def test_the_quota_counters_leave_out_calls_paid_by_the_users_own_key(monkeypatch, tmp_path, fresh_services) -> None:
     """Team, org, server, operator-endpoint and unknown-source rows count; the user's own key's row does not."""
     pool = await _fresh_pool(monkeypatch, tmp_path)
     rows = (
@@ -51,7 +48,7 @@ async def test_the_quota_counters_leave_out_calls_paid_by_the_users_own_key(monk
     assert await repo.sum_user_llm_cost_since(user_id=1, since=since) == pytest.approx(1.05)
 
 
-async def test_a_call_on_the_users_own_key_is_recorded_with_its_real_tokens_and_cost(monkeypatch, tmp_path) -> None:
+async def test_a_call_on_the_users_own_key_is_recorded_with_its_real_tokens_and_cost(monkeypatch, tmp_path, fresh_services) -> None:
     """The row keeps its tokens and its catalog cost, and says whose key paid."""
     pool = await _fresh_pool(monkeypatch, tmp_path)
     await log_llm_usage(
@@ -67,7 +64,7 @@ async def test_a_call_on_the_users_own_key_is_recorded_with_its_real_tokens_and_
     assert row["total_cost_usd"] > 0
 
 
-async def test_a_table_without_the_column_still_records_counts_and_refuses(monkeypatch, tmp_path) -> None:
+async def test_a_table_without_the_column_still_records_counts_and_refuses(monkeypatch, tmp_path, fresh_services) -> None:
     """A schema from before the column keeps the row without its source, counts every row, and still refuses."""
     from tldw_Server_API.app.core.Usage import quota_checks
 
@@ -97,14 +94,22 @@ async def test_a_table_without_the_column_still_records_counts_and_refuses(monke
 
 async def test_a_failed_postgres_usage_column_is_logged_as_a_warning() -> None:
     """A usage-table statement that times out on PostgreSQL is a warning, so a missing column is visible."""
+    from contextlib import asynccontextmanager
+
     from loguru import logger
 
+    from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_usage_tables_pg
 
     class _Pool:
         """A PostgreSQL pool whose ALTER of llm_usage_log outlives the pool's command_timeout (a lock wait)."""
 
         pool = object()
+
+        @asynccontextmanager
+        async def transaction(self):
+            """Expose the atomic usage-DDL boundary used by the canonical pool."""
+            yield self
 
         async def execute(self, sql: str, *_params: object) -> None:
             """Time out every ALTER of llm_usage_log, as asyncpg does."""
@@ -114,7 +119,8 @@ async def test_a_failed_postgres_usage_column_is_logged_as_a_warning() -> None:
     warnings: list[str] = []
     sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
     try:
-        assert await ensure_usage_tables_pg(_Pool())
+        with pytest.raises(TransactionError):
+            await ensure_usage_tables_pg(_Pool())
     finally:
         logger.remove(sink)
     assert any("PG ensure usage tables DDL failed" in line for line in warnings)
@@ -134,7 +140,10 @@ def test_sqlite_migrations_add_the_column_to_new_and_upgraded_databases(tmp_path
 
     legacy = tmp_path / "legacy.db"
     with sqlite3.connect(legacy) as conn:
-        conn.execute("CREATE TABLE llm_usage_log (id INTEGER PRIMARY KEY, ts TIMESTAMP, user_id INTEGER)")
+        conn.execute(
+            "CREATE TABLE llm_usage_log "
+            "(id INTEGER PRIMARY KEY, ts TIMESTAMP, user_id INTEGER, request_id TEXT, operation TEXT)"
+        )
         conn.execute(
             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)"
         )

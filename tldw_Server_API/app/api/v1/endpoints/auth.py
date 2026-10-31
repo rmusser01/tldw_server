@@ -72,9 +72,6 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
-    global_settings as _csrf_globals,
-)
-from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
@@ -109,6 +106,7 @@ from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
@@ -166,7 +164,6 @@ from tldw_Server_API.app.services.auth_service import (
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
 from tldw_Server_API.app.services.storage_quota_service import resolved_storage_quota_mb
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -676,7 +673,9 @@ async def federation_callback(
         mapped_claims=mapped_claims,
     )
     db_pool = await get_db_pool()
-    async with db_pool.transaction() as db:
+    # Autocommit, like get_login_db_connection: the session manager writes on
+    # its own connection, which a SQLite BEGIN IMMEDIATE here would block.
+    async with db_pool.acquire_statement_autocommit() as db:
         return await _issue_multi_user_tokens(
             request=request,
             db=db,
@@ -956,27 +955,38 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
 
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-        from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
+        from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+            TrustedMembershipReason,
+            TrustedMembershipWriteContext,
+        )
         from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
+        pool = await get_db_pool()
+        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+        context = TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        )
         org = None
         for attempt in range(3):
             name = base_name if attempt == 0 else f"{base_name}-{secrets.token_hex(2)}"
             try:
-                org = await create_organization(name=name, owner_user_id=int(user_id))
+                org = await repo.create_organization_with_owner_membership(
+                    name=name,
+                    owner_user_id=int(user_id),
+                    context=context,
+                )
                 break
             except DuplicateOrganizationError:
                 continue
 
         if not org:
             return
-
-        pool = await get_db_pool()
-        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-        await repo.add_org_member(org_id=org["id"], user_id=int(user_id), role="owner")
     except Exception as exc:
         # Best-effort bootstrap: org creation failures must not block login flows.
-        logger.warning("Org bootstrap failed for user {}: {}", user_id, exc)
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Org bootstrap failed for user_id={}",
+            user_id,
+        )
 
 def _is_pytest_context() -> bool:
     """Return True when running under pytest or explicit test-mode flags."""
@@ -1409,9 +1419,8 @@ async def _register_runtime_diag(request: Request, response: Response):
         db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
         response.headers["X-TLDW-DB"] = db_backend
 
-        # Reflect runtime CSRF state exposed via global settings
-        csrf_enabled = _csrf_globals.get("CSRF_ENABLED", None)
-        response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(csrf_enabled) else "false"
+        # Reflect the effective CSRF state
+        response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
     finally:
         # Use a background callback via request.state to add duration later
         request.state._register_diag_start = start_ts
@@ -1443,8 +1452,7 @@ async def _login_runtime_diag(request: Request, response: Response):
         pool = await get_db_pool()
         db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
         response.headers["X-TLDW-DB"] = db_backend
-        csrf_enabled = _csrf_globals.get("CSRF_ENABLED", None)
-        response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(csrf_enabled) else "false"
+        response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
     finally:
         request.state._login_diag_start = _t.perf_counter()
 
@@ -2336,9 +2344,8 @@ async def refresh_token(
                 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_pool
                 pool = await _get_pool()
                 db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
-                from tldw_Server_API.app.core.AuthNZ.csrf_protection import global_settings as _csrf_globals
                 response.headers["X-TLDW-DB"] = db_backend
-                response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(_csrf_globals.get("CSRF_ENABLED", None)) else "false"
+                response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 pass
 
@@ -3498,7 +3505,7 @@ async def mfa_login(
     data: MFALoginRequest,
     request: Request,
     response: Response,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
@@ -3879,6 +3886,17 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid registration code."
         ) from e
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as e:
+        logger.warning("Registration deferred because the authentication database is busy")
+        log_counter("auth_register_database_busy")
+        log_histogram("auth_register_duration", time.perf_counter() - start_time)
+        _finalize_register_diag(http_request, response)
+        raise _authnz_busy_http_exception() from e
     except RegistrationError as e:
         logger.error(f"Registration error: {e}")
         log_counter("auth_register_error")
@@ -3917,7 +3935,7 @@ async def register(
                 content={"detail": "An error occurred during registration"},
                 headers={
                     "X-TLDW-DB": db_backend,
-                    "X-TLDW-CSRF-Enabled": "true" if bool(_csrf_globals.get("CSRF_ENABLED", None)) else "false",
+                    "X-TLDW-CSRF-Enabled": "true" if resolve_effective_csrf_enabled() else "false",
                     "X-TLDW-Register-Error": "internal-error",
                     "X-TLDW-Register-Duration-ms": str(int(duration * 1000)),
                 },

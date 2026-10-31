@@ -38,7 +38,7 @@ def _override_chat_deps(app, monkeypatch, chacha_db_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_llm_budget_middleware_returns_402_on_overage(tmp_path):
+async def test_llm_budget_middleware_returns_402_on_overage(tmp_path, fresh_services):
     # Configure SQLite for AuthNZ
     os.environ['AUTH_MODE'] = 'multi_user'
     os.environ['JWT_SECRET_KEY'] = 'test-secret-key-for-budget-402-12345678901234567890'
@@ -47,10 +47,9 @@ async def test_llm_budget_middleware_returns_402_on_overage(tmp_path):
 
     # Reset singletons and ensure schema
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -110,7 +109,7 @@ async def test_llm_budget_middleware_returns_402_on_overage(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_llm_budget_allows_under_budget_chat_sqlite(tmp_path, monkeypatch):
+async def test_llm_budget_allows_under_budget_chat_sqlite(tmp_path, monkeypatch, fresh_services):
     os.environ["AUTH_MODE"] = "multi_user"
     os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-budget-200-12345678901234567890"
     os.environ["DATABASE_URL"] = f"sqlite:///{tmp_path / 'users_under_budget.db'}"
@@ -119,10 +118,9 @@ async def test_llm_budget_allows_under_budget_chat_sqlite(tmp_path, monkeypatch)
     os.environ["OPENAI_API_KEY"] = "test"
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -163,17 +161,16 @@ async def test_llm_budget_allows_under_budget_chat_sqlite(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_llm_budget_middleware_blocks_disallowed_endpoint_sqlite(tmp_path):
+async def test_llm_budget_middleware_blocks_disallowed_endpoint_sqlite(tmp_path, fresh_services):
     os.environ['AUTH_MODE'] = 'multi_user'
     os.environ['JWT_SECRET_KEY'] = 'test-secret-key-for-endpoint-403-12345678901234567890'
     db_path = tmp_path / 'users_endpoint.db'
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -208,17 +205,16 @@ async def test_llm_budget_middleware_blocks_disallowed_endpoint_sqlite(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_llm_budget_middleware_enforces_usd_budgets_sqlite(tmp_path):
+async def test_llm_budget_middleware_enforces_usd_budgets_sqlite(tmp_path, fresh_services):
     os.environ['AUTH_MODE'] = 'multi_user'
     os.environ['JWT_SECRET_KEY'] = 'test-secret-key-for-usd-402-12345678901234567890'
     db_path = tmp_path / 'users_usd.db'
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -309,17 +305,16 @@ async def test_llm_budget_middleware_enforces_usd_budgets_sqlite(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_llm_budget_middleware_enforces_month_tokens_sqlite(tmp_path):
+async def test_llm_budget_middleware_enforces_month_tokens_sqlite(tmp_path, fresh_services):
     os.environ["AUTH_MODE"] = "multi_user"
     os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-month-tokens-12345678901234567890"
     db_path = tmp_path / "users_month_tokens.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -372,17 +367,16 @@ async def test_llm_budget_middleware_enforces_month_tokens_sqlite(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_llm_budget_middleware_returns_402_on_embeddings_overage(tmp_path):
+async def test_llm_budget_middleware_returns_402_on_embeddings_overage(tmp_path, fresh_services):
     os.environ['AUTH_MODE'] = 'multi_user'
     os.environ['JWT_SECRET_KEY'] = 'test-secret-key-for-embeddings-402-12345678901234567890'
     db_path = tmp_path / 'users_embeddings.db'
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

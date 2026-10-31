@@ -6,10 +6,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    ALL_SUPPORTED_PROVIDER_NAMES_LIST,
-    ChatCompletionRequest,
-)
+from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+from tldw_Server_API.app.core.config_llm_providers import ALL_SUPPORTED_PROVIDER_NAMES_LIST
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.main import app
 

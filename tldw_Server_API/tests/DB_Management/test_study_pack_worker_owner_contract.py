@@ -7,15 +7,15 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from cachetools import LRUCache
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as db_module
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
-from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager, get_chacha_runtime
 from tldw_Server_API.app.core.StudyPacks import generation_service
 from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.services import study_pack_jobs_worker as worker
 
 EVIDENCE = "The citrine calibration is twenty-seven."
@@ -84,16 +84,11 @@ def test_worker_preserves_canonical_owner(request, tmp_path, monkeypatch, kind, 
     monkeypatch.setattr(
         deps.DatabasePaths, "get_user_visual_identities_dir", staticmethod(lambda user: tmp_path / str(user) / "visual")
     )
-    cache = LRUCache(maxsize=4)
-    monkeypatch.setattr(deps, "_chacha_db_instances", cache)
-    monkeypatch.setattr(deps, "_chacha_db_init_events", {})
-    monkeypatch.setattr(deps, "_chacha_db_init_errors", {})
-    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", ChaChaRuntimeManager())
-    monkeypatch.setattr(deps, "_CHACHA_SHUTTING_DOWN", False)
-    monkeypatch.setattr(deps, "_chacha_default_char_tasks", set())
-    monkeypatch.setattr(deps, "_chacha_default_char_futures", set())
+    runtime = ChaChaRuntimeManager(max_cached=4)
+    cache = runtime._instances
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
     executor = ThreadPoolExecutor(max_workers=2)
-    monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+    monkeypatch.setattr(runtime, "executor", lambda: executor)
     monkeypatch.setattr(worker, "get_media_db_for_owner", lambda _: SimpleNamespace())
     monkeypatch.setattr(
         generation_service, "_resolve_generation_provider_and_model", lambda *_: ("fixture", "fixture", {})
@@ -127,8 +122,8 @@ def test_worker_preserves_canonical_owner(request, tmp_path, monkeypatch, kind, 
 
     async def drain():
         await asyncio.sleep(0)
-        while deps._chacha_default_char_tasks:
-            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+        while get_chacha_runtime()._tasks:
+            await asyncio.gather(*tuple(get_chacha_runtime()._tasks))
             # Awaiting a gather of already-done tasks never yields, so without this
             # their pending discard callbacks never run and the loop spins forever.
             await asyncio.sleep(0)

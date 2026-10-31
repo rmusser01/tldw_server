@@ -45,8 +45,8 @@ def _isolate_app_state_per_test(monkeypatch, request):
 
     # Reset JWT singleton so a fresh key/config is used each test
     try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service as _reset_jwt
-        _reset_jwt()
+        from tldw_Server_API.app.core.Utils.app_services import app_services
+        app_services().jwt_service = None
     except Exception:
         _ = None
 

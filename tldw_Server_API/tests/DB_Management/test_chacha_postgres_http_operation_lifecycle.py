@@ -14,20 +14,22 @@ from unittest.mock import AsyncMock
 import anyio
 import httpx
 import pytest
-from cachetools import LRUCache
 from fastapi import Depends, FastAPI
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import buddies, flashcards, notes
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import runtime as runtime_module
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
     ChaChaOperationMiddleware,
     current_connection_state,
 )
-from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager, get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
@@ -71,14 +73,12 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
     # checking, runtime admission, default maintenance and the HTTP dependency.
     owner_dir = tmp_path / "owner"
     monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda _user_id: owner_dir))
-    cache = LRUCache(maxsize=4)
+    runtime = ChaChaRuntimeManager(max_cached=4)
+    cache = runtime._instances
     cache[str(owner_dir)] = db
-    monkeypatch.setattr(deps, "_chacha_db_instances", cache)
-    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", ChaChaRuntimeManager())
-    monkeypatch.setattr(deps, "_CHACHA_SHUTTING_DOWN", False)
-    monkeypatch.setattr(deps, "_chacha_default_char_tasks", set())
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
     executor = ThreadPoolExecutor(max_workers=1)
-    monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+    monkeypatch.setattr(runtime, "executor", lambda: executor)
 
     observations = []
     checkouts = []
@@ -138,7 +138,7 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
 
     monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
     observe_database(db)
-    real_create_and_prepare = deps._create_and_prepare_db
+    real_create_and_prepare = chacha_db_provider.create_and_prepare_chacha_db
 
     def create_and_observe(user_id, client_id):
         """Retain real initialization and observe every rebuilt HTTP handle."""
@@ -146,7 +146,7 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
         observe_database(database)
         return database
 
-    monkeypatch.setattr(deps, "_create_and_prepare_db", create_and_observe)
+    monkeypatch.setattr(chacha_db_provider, "create_and_prepare_chacha_db", create_and_observe)
     app = FastAPI()
     app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router, prefix="/api/v1")
@@ -248,8 +248,8 @@ async def _run(f, operation):
             transport=httpx.ASGITransport(app=f.app, raise_app_exceptions=False), base_url="http://test"
         ) as client:
             await operation(client)
-        if deps._chacha_default_char_tasks:
-            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+        if get_chacha_runtime()._tasks:
+            await asyncio.gather(*tuple(get_chacha_runtime()._tasks))
     finally:
         limiter.total_tokens = previous
 
@@ -336,7 +336,7 @@ def _replacement(f):
 def test_real_dependency_cache_rebuild_retains_official_postgres(pg_http, monkeypatch):
     """Health eviction must reopen the fixture database, preserving real HTTP cleanup."""
     f = pg_http
-    real_probe = deps.probe_chacha_connection
+    real_probe = runtime_module.probe_chacha_connection
     probed = []
     rebuilt = None
 
@@ -346,7 +346,7 @@ def test_real_dependency_cache_rebuild_retains_official_postgres(pg_http, monkey
             raise RuntimeError("Force the real dependency's cache-rebuild path")
         return real_probe(database)
 
-    monkeypatch.setattr(deps, "probe_chacha_connection", reject_first_probe)
+    monkeypatch.setattr(runtime_module, "probe_chacha_connection", reject_first_probe)
 
     async def operation(client):
         nonlocal rebuilt
@@ -466,7 +466,7 @@ def test_http_cleanup_survives_default_worker_reusing_endpoint_pid(pg_http, monk
     release = threading.Event()
     worker = {}
     endpoint = []
-    owned = deps._ensure_default_character_owned
+    owned = chacha_db_provider._ensure_default_character_owned
     original_execute = BackendCursorWrapper.execute
 
     def hold_worker(db):
@@ -484,7 +484,7 @@ def test_http_cleanup_survives_default_worker_reusing_endpoint_pid(pg_http, monk
             assert release.wait(5), "The cleanup assertion did not release maintenance"
         return result
 
-    monkeypatch.setattr(deps, "_ensure_default_character_owned", hold_worker)
+    monkeypatch.setattr(chacha_db_provider, "_ensure_default_character_owned", hold_worker)
     monkeypatch.setattr(BackendCursorWrapper, "execute", hold_read)
 
     @f.app.get("/probe/reuse")
@@ -574,7 +574,7 @@ def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(
     the caller's pending write (TASK-13412).
     """
     f = pg_http
-    real_probe = deps.probe_chacha_connection
+    real_probe = runtime_module.probe_chacha_connection
     probed: list[CharactersRAGDB] = []
 
     def fail_after_first_probe(database: CharactersRAGDB) -> None:
@@ -584,7 +584,7 @@ def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(
             raise RuntimeError("Emulate an expired mid-request health probe")
         return real_probe(database)
 
-    monkeypatch.setattr(deps, "probe_chacha_connection", fail_after_first_probe)
+    monkeypatch.setattr(runtime_module, "probe_chacha_connection", fail_after_first_probe)
 
     @f.app.post("/probe/nested-reprobe")
     async def nested_reprobe(
@@ -796,7 +796,7 @@ def test_two_account_databases_have_separate_checkouts_and_visible_notes(pg_http
     monkeypatch.setattr(
         deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda user_id: owner_dirs[int(user_id)])
     )
-    deps._chacha_db_instances[str(owner_dirs[2])] = other
+    get_chacha_runtime()._instances[str(owner_dirs[2])] = other
     raw_by_user = {}
 
     async def identity(request: Request):
@@ -880,15 +880,15 @@ def test_real_initializer_and_default_worker_finish_independent_scopes(pg_http, 
         created.append(db)
         return db
 
-    monkeypatch.setattr(deps, "CharactersRAGDB", construct)
-    monkeypatch.setattr(deps, "_get_chacha_db_path_for_user", lambda _: f.tmp_path / "published.db")
-    published = deps._create_and_prepare_db(3, "3")
+    monkeypatch.setattr(chacha_db_provider, "CharactersRAGDB", construct)
+    monkeypatch.setattr(chacha_db_provider, "_get_chacha_db_path_for_user", lambda _: f.tmp_path / "published.db")
+    published = chacha_db_provider.create_and_prepare_chacha_db(3, "3")
     assert published is created[0]
     assert initialization_states[0] is not None
     assert initialization_states[0].conn is None
     # PostgreSQL intentionally skips the SQLite-only bundled visual seed.
     # Exercise the real default-character worker, which does use a checkout.
-    asyncio.run(deps._ensure_default_character_async(published, 3))
+    asyncio.run(chacha_db_provider._ensure_default_character_async(published, 3))
     _assert_finished(f, "default-worker")
     assert published._get_pinned_backend() is None
 
@@ -1146,8 +1146,8 @@ def test_retained_connection_cannot_rebind_a_new_cursor_after_return(pg_http, mo
         assert (await client.get("/probe/cursor-source")).status_code == 200
         if later_request:
             await asyncio.sleep(0)
-            if deps._chacha_default_char_tasks:
-                await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+            if get_chacha_runtime()._tasks:
+                await asyncio.gather(*tuple(get_chacha_runtime()._tasks))
             _prefer_returned_checkout(f, retained[0]._connection, monkeypatch)
             assert (await client.get("/probe/new-cursor")).json() == {"rejected": True}
         else:

@@ -187,8 +187,9 @@ def _submit_record(
     completion_tokens: int,
     started: float,
     estimate_source: str | None,
+    estimated: bool | None = None,
 ) -> None:
-    """Schedule one usage row; never raises."""
+    """Schedule one usage row; never raises. ``estimated`` marks a row whose block counts only one side."""
     try:
         provider_name = str(getattr(provider, "name", "") or "provider")
         model = str(request.get("model") or "") if isinstance(request, dict) else ""
@@ -210,7 +211,7 @@ def _submit_record(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 usage_metadata=usage,
-                estimated=True if usage is None else None,
+                estimated=True if usage is None or estimated else None,
                 estimate_source=estimate_source,
                 credential_source=plan.credential_source,
             )
@@ -227,9 +228,12 @@ def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any
         if isinstance(usage, dict) and usage:
             prompt_tokens, completion_tokens = _usage_tokens(usage)
             if (prompt_tokens, completion_tokens) != (0, 0):
+                # A side the block does not count (a prompt-only block, say) comes from the estimate (TASK-13953).
+                counted = (prompt_tokens, completion_tokens)
+                filled = (prompt_tokens or _prompt_estimate(request), completion_tokens or _approx_tokens(_response_chars(response)))
                 _submit_record(
-                    provider, plan, request, usage=usage, prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens, started=started, estimate_source=None,
+                    provider, plan, request, usage=usage, prompt_tokens=filled[0], completion_tokens=filled[1],
+                    started=started, estimate_source=None, estimated=filled != counted,
                 )
                 return
         _submit_record(
@@ -241,15 +245,20 @@ def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any
         logger.bind(exception_type=type(error).__name__).debug("LLM usage accounting record failed")
 
 
-def _record_stream(provider: Any, plan: _CallPlan, request: Any, seen: _StreamUsage, started: float) -> None:
-    """Record a stream from its usage chunk, or an estimate of what was received; never raises."""
+def _record_stream(provider: Any, plan: _CallPlan | None, request: Any, seen: _StreamUsage, started: float) -> None:
+    """Record a stream from its usage chunk, or an estimate of what was received; nothing with no plan; never raises."""
+    if plan is None:
+        return
     try:
         if seen.usage is not None:
             prompt_tokens, completion_tokens = _usage_tokens(seen.usage)
             if (prompt_tokens, completion_tokens) != (0, 0):
+                # A side the chunk does not count comes from the estimate, as on /chat/completions (TASK-13953).
+                counted = (prompt_tokens, completion_tokens)
+                filled = (prompt_tokens or _prompt_estimate(request), completion_tokens or _approx_tokens(seen.chars))
                 _submit_record(
-                    provider, plan, request, usage=seen.usage, prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens, started=started, estimate_source=None,
+                    provider, plan, request, usage=seen.usage, prompt_tokens=filled[0], completion_tokens=filled[1],
+                    started=started, estimate_source=None, estimated=filled != counted,
                 )
                 return
         _submit_record(
@@ -260,8 +269,10 @@ def _record_stream(provider: Any, plan: _CallPlan, request: Any, seen: _StreamUs
         logger.bind(exception_type=type(error).__name__).debug("LLM usage accounting record failed")
 
 
-def _accounted_sync_stream(provider: Any, plan: _CallPlan, request: Any, inner: Any, started: float) -> Iterator[Any]:
-    """Yield ``inner``'s items and record once when the stream ends, however it ends."""
+def _accounted_sync_stream(
+    provider: Any, plan: _CallPlan | None, request: Any, inner: Any, started: float
+) -> Iterator[Any]:
+    """Yield ``inner``'s items, each read as an accounted call; record once when the stream ends, however it ends."""
     seen = _StreamUsage()
     iterator = iter(inner)
     try:
@@ -271,7 +282,8 @@ def _accounted_sync_stream(provider: Any, plan: _CallPlan, request: Any, inner: 
                     item = next(iterator)
                 except StopIteration:
                     return
-            seen.feed(item)
+            if plan is not None:
+                seen.feed(item)
             yield item
     finally:
         close = getattr(inner, "close", None)
@@ -324,7 +336,7 @@ async def _async_checked_at_first_item(user_id: int, outer: Any, inner: Any) -> 
 
 
 async def _accounted_async_stream(
-    provider: Any, plan: _CallPlan, request: Any, inner: Any, started: float
+    provider: Any, plan: _CallPlan | None, request: Any, inner: Any, started: float
 ) -> AsyncIterator[Any]:
     """Async form of ``_accounted_sync_stream``."""
     seen = _StreamUsage()
@@ -336,7 +348,8 @@ async def _accounted_async_stream(
                     item = await iterator.__anext__()
                 except StopAsyncIteration:
                     return
-            seen.feed(item)
+            if plan is not None:
+                seen.feed(item)
             yield item
     finally:
         aclose = getattr(inner, "aclose", None)
@@ -407,14 +420,14 @@ def _wrap_stream(fn: Callable[..., Any]) -> Callable[..., Any]:
         user_id = user_to_check(source)
         unchecked = user_id is not None and not check_user_sync(user_id)
         plan = _plan_call(source)
-        if plan is None and not unchecked:
+        if plan is None and user_id is None and source != USER_KEY_SOURCE:
             return fn(self, request, *args, **kwargs)
         started = time.monotonic()
-        with accounted_call():
+        with accounted_call():  # checked here or on the user's own key: a nested method is not checked again
             inner = fn(self, request, *args, **kwargs)
         if not hasattr(inner, "__iter__"):
             return inner  # a broken provider's result reaches the caller's own check unchanged
-        outer = inner if plan is None else _accounted_sync_stream(self, plan, request, inner, started)
+        outer = _accounted_sync_stream(self, plan, request, inner, started)
         return _checked_at_first_item(user_id, outer, inner) if unchecked else outer
 
     return stream
@@ -431,10 +444,10 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
         source = call_credential_source(request)
         user_id = user_to_check(source)
         plan = _plan_call(source)
-        if plan is None and user_id is None:
+        if plan is None and user_id is None and source != USER_KEY_SOURCE:
             return fn(self, request, *args, **kwargs)
         started = time.monotonic()
-        with accounted_call():
+        with accounted_call():  # checked here or on the user's own key: a nested method is not checked again
             inner = fn(self, request, *args, **kwargs)
         if inspect.isawaitable(inner):
 
@@ -448,14 +461,14 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
                         raise
                 with accounted_call():
                     resolved = await inner
-                if plan is None or not hasattr(resolved, "__aiter__"):
+                if not hasattr(resolved, "__aiter__"):
                     return resolved
                 return _accounted_async_stream(self, plan, request, resolved, started)
 
             return _resolve()
         if not hasattr(inner, "__aiter__"):
             return inner  # a broken provider's result reaches the caller's own check unchanged
-        outer = inner if plan is None else _accounted_async_stream(self, plan, request, inner, started)
+        outer = _accounted_async_stream(self, plan, request, inner, started)
         return outer if user_id is None else _async_checked_at_first_item(user_id, outer, inner)
 
     if inspect.iscoroutinefunction(fn):

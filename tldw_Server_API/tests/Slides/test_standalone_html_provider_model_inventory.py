@@ -34,7 +34,7 @@ Boundary = tuple[list[httpx.Request], list[tuple[str, str, dict[str, Any], int]]
 
 
 @pytest.fixture
-def boundary(monkeypatch: pytest.MonkeyPatch) -> Boundary:
+def boundary(monkeypatch: pytest.MonkeyPatch, standalone_provider_egress: None) -> Boundary:
     """Fake current inventory and all generation/detail traffic at the boundary."""
     posts = []
     discoveries = []
@@ -201,7 +201,9 @@ async def test_discovery_failure_is_sanitized_without_post(boundary: Boundary, m
 
 
 @pytest.fixture
-def alias_boundary(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> dict[str, Any]:
+def alias_boundary(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, standalone_provider_egress: None,
+) -> dict[str, Any]:
     """Fake real catalog/detail HTTP separately from the exact-ID fixture."""
     state = {
         "key": "fake-" + request.node.name,

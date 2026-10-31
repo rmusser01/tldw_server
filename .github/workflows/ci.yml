@@ -652,6 +652,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -995,6 +996,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -1456,6 +1458,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -2342,6 +2345,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -2686,6 +2690,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -3149,6 +3154,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -3871,6 +3877,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -4215,6 +4222,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -4678,6 +4686,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -5310,6 +5319,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -5654,6 +5664,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -6117,6 +6128,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -6740,6 +6752,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -7084,6 +7097,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -7547,6 +7561,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py

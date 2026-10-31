@@ -8,7 +8,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 
 @pytest.mark.asyncio
-async def test_provider_model_allowlists_sqlite(tmp_path):
+async def test_provider_model_allowlists_sqlite(tmp_path, fresh_services):
     # Configure SQLite for AuthNZ
     os.environ['AUTH_MODE'] = 'multi_user'
     os.environ['JWT_SECRET_KEY'] = 'test-secret-key-for-allowlists-12345678901234567890'
@@ -17,10 +17,9 @@ async def test_provider_model_allowlists_sqlite(tmp_path):
 
     # Reset singletons
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -70,7 +69,7 @@ async def test_provider_model_allowlists_sqlite(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_missing_provider_header_allows_when_allowlist_present_sqlite(tmp_path):
+async def test_missing_provider_header_allows_when_allowlist_present_sqlite(tmp_path, fresh_services):
     # Configure SQLite for AuthNZ
     import os
     os.environ['AUTH_MODE'] = 'multi_user'
@@ -80,10 +79,9 @@ async def test_missing_provider_header_allows_when_allowlist_present_sqlite(tmp_
 
     # Reset singletons and ensure schema
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
@@ -121,7 +119,7 @@ async def test_missing_provider_header_allows_when_allowlist_present_sqlite(tmp_
 
 
 @pytest.mark.asyncio
-async def test_non_json_body_skips_model_enforcement_sqlite(tmp_path):
+async def test_non_json_body_skips_model_enforcement_sqlite(tmp_path, fresh_services):
     # Configure SQLite for AuthNZ
     import os
     os.environ['AUTH_MODE'] = 'multi_user'
@@ -130,10 +128,9 @@ async def test_non_json_body_skips_model_enforcement_sqlite(tmp_path):
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
@@ -173,7 +170,7 @@ async def test_non_json_body_skips_model_enforcement_sqlite(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_invalid_json_body_skips_model_enforcement_sqlite(tmp_path):
+async def test_invalid_json_body_skips_model_enforcement_sqlite(tmp_path, fresh_services):
     # Configure SQLite for AuthNZ
     import os
     os.environ['AUTH_MODE'] = 'multi_user'
@@ -182,10 +179,9 @@ async def test_invalid_json_body_skips_model_enforcement_sqlite(tmp_path):
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 

@@ -109,6 +109,7 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "notes_semantic_maintenance_task",
     "privilege_snapshot_task",
     "audio_jobs_task",
+    "audio_studio_jobs_task",
     "tts_jobs_task",
     "audiobook_jobs_task",
     "chat_macros_jobs_task",
@@ -127,8 +128,6 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "workspace_file_inventory_jobs_task",
     "writing_annotation_review_jobs_task",
     "shared_workspace_clone_jobs_task",
-    "notes_graph_suggestions_jobs_task",
-    "notes_graph_suggestions_maintenance_task",
 }
 
 TASK6_BACKGROUND_SPEC_NAMES = {

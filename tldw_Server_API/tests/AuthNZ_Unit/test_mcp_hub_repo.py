@@ -9,8 +9,8 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio
-async def test_repo_can_crud_acp_profile(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_can_crud_acp_profile(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -20,7 +20,6 @@ async def test_repo_can_crud_acp_profile(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -65,8 +64,8 @@ async def test_repo_can_crud_acp_profile(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_repo_external_server_secret_is_stored_separately(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_external_server_secret_is_stored_separately(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -76,7 +75,6 @@ async def test_repo_external_server_secret_is_stored_separately(tmp_path, monkey
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -114,11 +112,11 @@ async def test_repo_external_server_secret_is_stored_separately(tmp_path, monkey
 
 
 @pytest.mark.asyncio
-async def test_repo_ensure_tables_requires_governance_pack_distribution_tables(tmp_path, monkeypatch) -> None:
+async def test_repo_ensure_tables_requires_governance_pack_distribution_tables(tmp_path, monkeypatch, fresh_services) -> None:
     import sqlite3
     from contextlib import closing
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -128,7 +126,6 @@ async def test_repo_ensure_tables_requires_governance_pack_distribution_tables(t
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -147,8 +144,8 @@ async def test_repo_ensure_tables_requires_governance_pack_distribution_tables(t
 
 
 @pytest.mark.asyncio
-async def test_repo_can_crud_permission_profile_and_policy_assignment(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_can_crud_permission_profile_and_policy_assignment(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -158,7 +155,6 @@ async def test_repo_can_crud_permission_profile_and_policy_assignment(tmp_path, 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -225,8 +221,8 @@ async def test_repo_can_crud_permission_profile_and_policy_assignment(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_repo_update_policy_assignment_can_clear_nullable_fields(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_update_policy_assignment_can_clear_nullable_fields(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -236,7 +232,6 @@ async def test_repo_update_policy_assignment_can_clear_nullable_fields(tmp_path,
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -277,8 +272,8 @@ async def test_repo_update_policy_assignment_can_clear_nullable_fields(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_repo_can_crud_workspace_set_objects_and_named_assignment_source(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_can_crud_workspace_set_objects_and_named_assignment_source(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -288,7 +283,6 @@ async def test_repo_can_crud_workspace_set_objects_and_named_assignment_source(t
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -356,8 +350,8 @@ async def test_repo_can_crud_workspace_set_objects_and_named_assignment_source(t
 
 
 @pytest.mark.asyncio
-async def test_repo_can_crud_shared_workspaces(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_can_crud_shared_workspaces(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -367,7 +361,6 @@ async def test_repo_can_crud_shared_workspaces(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -409,8 +402,8 @@ async def test_repo_can_crud_shared_workspaces(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_repo_can_crud_approval_policy_and_match_active_decision(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_can_crud_approval_policy_and_match_active_decision(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -420,7 +413,6 @@ async def test_repo_can_crud_approval_policy_and_match_active_decision(tmp_path,
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -565,8 +557,8 @@ async def test_repo_can_crud_approval_policy_and_match_active_decision(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_repo_credential_binding_is_unique_per_target_and_server(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_credential_binding_is_unique_per_target_and_server(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -576,7 +568,6 @@ async def test_repo_credential_binding_is_unique_per_target_and_server(tmp_path,
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -619,8 +610,8 @@ async def test_repo_credential_binding_is_unique_per_target_and_server(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_repo_rejects_disable_binding_for_profile_target(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_rejects_disable_binding_for_profile_target(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -630,7 +621,6 @@ async def test_repo_rejects_disable_binding_for_profile_target(tmp_path, monkeyp
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -662,8 +652,8 @@ async def test_repo_rejects_disable_binding_for_profile_target(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -673,7 +663,6 @@ async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(t
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -705,8 +694,8 @@ async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(t
 
 
 @pytest.mark.asyncio
-async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -716,7 +705,6 @@ async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(t
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -748,8 +736,8 @@ async def test_repo_rejects_explicit_server_credential_ref_for_disable_binding(t
 
 
 @pytest.mark.asyncio
-async def test_repo_credential_slot_name_is_unique_per_server(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_credential_slot_name_is_unique_per_server(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -759,7 +747,6 @@ async def test_repo_credential_slot_name_is_unique_per_server(tmp_path, monkeypa
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -802,8 +789,8 @@ async def test_repo_credential_slot_name_is_unique_per_server(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_repo_credential_binding_is_unique_per_target_server_and_slot(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_credential_binding_is_unique_per_target_server_and_slot(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -813,7 +800,6 @@ async def test_repo_credential_binding_is_unique_per_target_server_and_slot(tmp_
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -867,8 +853,8 @@ async def test_repo_credential_binding_is_unique_per_target_server_and_slot(tmp_
 
 
 @pytest.mark.asyncio
-async def test_repo_rejects_slot_binding_for_unknown_slot(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_rejects_slot_binding_for_unknown_slot(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -878,7 +864,6 @@ async def test_repo_rejects_slot_binding_for_unknown_slot(tmp_path, monkeypatch)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -911,8 +896,8 @@ async def test_repo_rejects_slot_binding_for_unknown_slot(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_repo_rejects_explicit_slot_credential_ref_for_disable_binding(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_rejects_explicit_slot_credential_ref_for_disable_binding(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -922,7 +907,6 @@ async def test_repo_rejects_explicit_slot_credential_ref_for_disable_binding(tmp
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -964,8 +948,8 @@ async def test_repo_rejects_explicit_slot_credential_ref_for_disable_binding(tmp
 
 
 @pytest.mark.asyncio
-async def test_repo_rejects_explicit_slot_credential_ref_for_disable_binding(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_repo_rejects_explicit_slot_credential_ref_for_disable_binding(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -975,7 +959,6 @@ async def test_repo_rejects_explicit_slot_credential_ref_for_disable_binding(tmp
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))

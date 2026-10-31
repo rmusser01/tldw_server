@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.mfa_service import get_mfa_service
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
 from tldw_Server_API.app.core.UserProfiles.limits_precedence import LIMITS_PREFIX, most_generous_values
@@ -784,6 +784,26 @@ class UserProfileService:
                 lock_user=lock_user,
             )
         return await self._profile_version_gateway.read(user_id)
+
+    async def lock_profile_users(
+        self,
+        *,
+        user_ids: tuple[int, ...],
+        db_conn: Any,
+    ) -> dict[int, datetime]:
+        """Lock profile user rows once in caller-supplied canonical order."""
+        if user_ids != tuple(sorted(set(user_ids))) or any(
+            type(user_id) is not int or user_id <= 0 for user_id in user_ids
+        ):
+            raise ValueError("Profile user locks require sorted unique positive IDs")
+        return {
+            user_id: await self._profile_version_gateway.read_in_transaction(
+                db_conn,
+                user_id,
+                lock_user=True,
+            )
+            for user_id in user_ids
+        }
 
     async def _get_byok_repo(self) -> AuthnzUserProviderSecretsRepo:
         repo = AuthnzUserProviderSecretsRepo(self._db_pool)

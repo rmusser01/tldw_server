@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,13 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+
+class _RecoveryMetadataCursor:
+    """Iterable catalog result for a legacy jobs table without enrollment."""
+
+    def __iter__(self) -> Iterator[tuple[str, str, bool, None]]:
+        return iter([("id", "bigint", True, None)])
 
 
 class _RecoveryConnection:
@@ -28,6 +36,16 @@ class _RecoveryConnection:
     def close(self) -> None:
         return None
 
+    def execute(self, sql: Any, params: Any = None) -> _RecoveryMetadataCursor:
+        normalized = " ".join(str(sql).split())
+        if (
+            normalized.startswith("SELECT a.attname,format_type(")
+            and "FROM pg_attribute a " in normalized
+            and params == ("jobs",)
+        ):
+            return _RecoveryMetadataCursor()
+        raise AssertionError(f"unexpected recovery connection SQL: {normalized}")
+
 
 class _RecoveryCursor:
     """Capture counter mutations while returning lease-ordered job rows."""
@@ -36,12 +54,14 @@ class _RecoveryCursor:
         self.rowcount = 0
         self._rows: list[dict[str, Any]] = []
         self.counter_updates: list[tuple[Any, ...]] = []
+        self.recovery_select = ""
 
     def execute(self, sql: Any, params: Any = None) -> None:
         normalized = " ".join(str(sql).split())
         self.rowcount = 0
         self._rows = []
         if normalized.startswith("SELECT id, uuid, domain, queue, job_type"):
+            self.recovery_select = normalized
             self._rows = [
                 {
                     "id": 1,
@@ -52,6 +72,7 @@ class _RecoveryCursor:
                     "owner_user_id": "owner",
                     "request_id": None,
                     "trace_id": None,
+                    "workflow_capability_version": None,
                     "effective_retry_count": 0,
                     "effective_max_retries": 3,
                     "effective_expired_lease_policy": "consume_retry",
@@ -65,6 +86,7 @@ class _RecoveryCursor:
                     "owner_user_id": "owner",
                     "request_id": None,
                     "trace_id": None,
+                    "workflow_capability_version": None,
                     "effective_retry_count": 0,
                     "effective_max_retries": 3,
                     "effective_expired_lease_policy": "consume_retry",
@@ -78,6 +100,7 @@ class _RecoveryCursor:
                     "owner_user_id": "owner",
                     "request_id": None,
                     "trace_id": None,
+                    "workflow_capability_version": None,
                     "effective_retry_count": 0,
                     "effective_max_retries": 3,
                     "effective_expired_lease_policy": "consume_retry",
@@ -124,6 +147,7 @@ def test_postgres_expired_recovery_aggregates_and_sorts_counter_updates(
     monkeypatch.setattr(jobs_manager_module, "increment_retries", lambda *_args, **_kwargs: None)
 
     assert manager._recover_expired_processing_jobs() == 3
+    assert "NULL AS workflow_capability_version" in cursor.recovery_select
     assert cursor.counter_updates == [
         ("recovery", "default", "alpha", 1, 1),
         ("recovery", "default", "zeta", 2, 2),

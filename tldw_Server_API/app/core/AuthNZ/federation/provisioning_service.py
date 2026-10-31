@@ -9,6 +9,11 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.federated_identity_repo import FederatedIdentityRepo
 from tldw_Server_API.app.core.AuthNZ.repos.federated_managed_grant_repo import FederatedManagedGrantRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
@@ -16,6 +21,13 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
     AuthnzOrgsTeamsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
+
+_FEDERATION_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def _claims_hash(claims: dict[str, Any]) -> str:
@@ -416,103 +428,17 @@ class FederationProvisioningService:
             "warnings": warnings,
         }
 
-    async def apply_mapped_grants(
+    async def _apply_role_grants(
         self,
         *,
-        provider: dict[str, Any],
+        users_repo: AuthnzUsersRepo,
+        managed_repo: FederatedManagedGrantRepo,
+        provider_id: int,
         user_id: int,
-        mapped_claims: dict[str, Any],
-    ) -> dict[str, Any]:
-        policy = provider.get("provisioning_policy") or {}
-        mode = str(policy.get("mode") or "").strip().lower()
-        if mode not in _FEDERATED_GRANT_MODES:
-            return {
-                "mode": mode,
-                "applied": False,
-                "org_ids": [],
-                "team_ids": [],
-                "roles": [],
-                "revoked_org_ids": [],
-                "revoked_team_ids": [],
-                "revoked_roles": [],
-            }
-
-        orgs_repo = AuthnzOrgsTeamsRepo(db_pool=self.db_pool)
-        users_repo = AuthnzUsersRepo(db_pool=self.db_pool)
-        managed_repo = FederatedManagedGrantRepo(db_pool=self.db_pool)
-        await managed_repo.ensure_tables()
-
-        provider_id = int(provider["id"])
-        desired_org_ids, desired_team_ids, desired_role_names, _ = await self._resolve_desired_grants(
-            provider_id=provider_id,
-            user_id=user_id,
-            mapped_claims=mapped_claims,
-        )
-        existing_managed = await managed_repo.list_for_provider_user(
-            identity_provider_id=provider_id,
-            user_id=int(user_id),
-        )
-        existing_managed_keys = {
-            _grant_key(row.get("grant_kind", ""), row.get("target_ref", ""))
-            for row in existing_managed
-        }
-
-        applied_org_ids: list[int] = []
-        for org_id in sorted(desired_org_ids):
-            grant_key = _grant_key("org", str(org_id))
-            try:
-                current = await orgs_repo.get_org_member(int(org_id), int(user_id))
-                if current is None or grant_key in existing_managed_keys:
-                    if current is None:
-                        await orgs_repo.add_org_member(
-                            org_id=int(org_id),
-                            user_id=int(user_id),
-                            role="member",
-                        )
-                    await managed_repo.upsert_grant(
-                        identity_provider_id=provider_id,
-                        user_id=int(user_id),
-                        grant_kind="org",
-                        target_ref=str(org_id),
-                    )
-                    applied_org_ids.append(int(org_id))
-            except Exception as exc:  # pragma: no cover - defensive runtime hardening
-                logger.warning(
-                    "Failed to apply federated org grant provider_id={} user_id={} org_id={}: {}",
-                    provider_id,
-                    user_id,
-                    org_id,
-                    exc,
-                )
-
-        applied_team_ids: list[int] = []
-        for team_id in sorted(desired_team_ids):
-            grant_key = _grant_key("team", str(team_id))
-            try:
-                current = await orgs_repo.get_team_member(int(team_id), int(user_id))
-                if current is None or grant_key in existing_managed_keys:
-                    if current is None:
-                        await orgs_repo.add_team_member(
-                            team_id=int(team_id),
-                            user_id=int(user_id),
-                            role="member",
-                        )
-                    await managed_repo.upsert_grant(
-                        identity_provider_id=provider_id,
-                        user_id=int(user_id),
-                        grant_kind="team",
-                        target_ref=str(team_id),
-                    )
-                    applied_team_ids.append(int(team_id))
-            except Exception as exc:  # pragma: no cover - defensive runtime hardening
-                logger.warning(
-                    "Failed to apply federated team grant provider_id={} user_id={} team_id={}: {}",
-                    provider_id,
-                    user_id,
-                    team_id,
-                    exc,
-                )
-
+        desired_role_names: set[str],
+        existing_managed_keys: set[tuple[str, str]],
+    ) -> list[str]:
+        """Apply role grants without claiming pre-existing unmanaged assignments."""
         applied_roles: list[str] = []
         for role_name in sorted(desired_role_names):
             grant_key = _grant_key("role", role_name)
@@ -541,13 +467,143 @@ class FederationProvisioningService:
                     )
                     applied_roles.append(role_name)
             except Exception as exc:  # pragma: no cover - defensive runtime hardening
-                logger.warning(
-                    "Failed to apply federated role grant provider_id={} user_id={} role={}: {}",
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Failed to apply federated role grant provider_id={} user_id={} role={}",
                     provider_id,
                     user_id,
                     role_name,
-                    exc,
                 )
+        return applied_roles
+
+    async def apply_mapped_grants(
+        self,
+        *,
+        provider: dict[str, Any],
+        user_id: int,
+        mapped_claims: dict[str, Any],
+    ) -> dict[str, Any]:
+        policy = provider.get("provisioning_policy") or {}
+        mode = str(policy.get("mode") or "").strip().lower()
+        if mode not in _FEDERATED_GRANT_MODES:
+            return {
+                "mode": mode,
+                "applied": False,
+                "org_ids": [],
+                "team_ids": [],
+                "roles": [],
+                "revoked_org_ids": [],
+                "revoked_team_ids": [],
+                "revoked_roles": [],
+            }
+
+        orgs_repo = AuthnzOrgsTeamsRepo(db_pool=self.db_pool)
+        users_repo = AuthnzUsersRepo(db_pool=self.db_pool)
+        managed_repo = FederatedManagedGrantRepo(db_pool=self.db_pool)
+        await managed_repo.ensure_tables()
+        acquire_timeout_seconds = (
+            get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+        )
+
+        provider_id = int(provider["id"])
+        desired_org_ids, desired_team_ids, desired_role_names, _ = await self._resolve_desired_grants(
+            provider_id=provider_id,
+            user_id=user_id,
+            mapped_claims=mapped_claims,
+        )
+        existing_managed = await managed_repo.list_for_provider_user(
+            identity_provider_id=provider_id,
+            user_id=int(user_id),
+        )
+        existing_managed_keys = {
+            _grant_key(row.get("grant_kind", ""), row.get("target_ref", ""))
+            for row in existing_managed
+        }
+
+        applied_org_ids: list[int] = []
+        for org_id in sorted(desired_org_ids):
+            grant_key = _grant_key("org", str(org_id))
+            try:
+                current = await orgs_repo.get_org_member(int(org_id), int(user_id))
+                if current is None or grant_key in existing_managed_keys:
+                    if current is None:
+                        operation_time = datetime.now(timezone.utc)
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
+                            await orgs_repo.provision_org_membership_on_connection(
+                                conn=conn,
+                                org_id=int(org_id),
+                                user_id=int(user_id),
+                                org_role="member",
+                                team_id=None,
+                                team_role=None,
+                                team_failure_is_best_effort=False,
+                                context=_FEDERATION_MEMBERSHIP_CONTEXT,
+                                anchor_ownership=(
+                                    AnchorOwnership.WRITER_OWNS_ANCHOR
+                                ),
+                                operation_time=operation_time,
+                            )
+                    await managed_repo.upsert_grant(
+                        identity_provider_id=provider_id,
+                        user_id=int(user_id),
+                        grant_kind="org",
+                        target_ref=str(org_id),
+                    )
+                    applied_org_ids.append(int(org_id))
+            except Exception as exc:  # pragma: no cover - defensive runtime hardening
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Failed to apply federated org grant provider_id={} user_id={} org_id={}",
+                    provider_id,
+                    user_id,
+                    org_id,
+                )
+
+        applied_team_ids: list[int] = []
+        for team_id in sorted(desired_team_ids):
+            grant_key = _grant_key("team", str(team_id))
+            try:
+                current = await orgs_repo.get_team_member(int(team_id), int(user_id))
+                if current is None or grant_key in existing_managed_keys:
+                    if current is None:
+                        operation_time = datetime.now(timezone.utc)
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
+                            await orgs_repo.add_team_member_on_connection(
+                                conn=conn,
+                                team_id=int(team_id),
+                                user_id=int(user_id),
+                                role="member",
+                                context=_FEDERATION_MEMBERSHIP_CONTEXT,
+                                anchor_ownership=(
+                                    AnchorOwnership.WRITER_OWNS_ANCHOR
+                                ),
+                                operation_time=operation_time,
+                            )
+                    await managed_repo.upsert_grant(
+                        identity_provider_id=provider_id,
+                        user_id=int(user_id),
+                        grant_kind="team",
+                        target_ref=str(team_id),
+                    )
+                    applied_team_ids.append(int(team_id))
+            except Exception as exc:  # pragma: no cover - defensive runtime hardening
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Failed to apply federated team grant provider_id={} user_id={} team_id={}",
+                    provider_id,
+                    user_id,
+                    team_id,
+                )
+
+        applied_roles = await self._apply_role_grants(
+            users_repo=users_repo,
+            managed_repo=managed_repo,
+            provider_id=provider_id,
+            user_id=user_id,
+            desired_role_names=desired_role_names,
+            existing_managed_keys=existing_managed_keys,
+        )
 
         revoked_org_ids: list[int] = []
         revoked_team_ids: list[int] = []
@@ -592,7 +648,22 @@ class FederationProvisioningService:
                                 target_ref=target_ref,
                             )
                             continue
-                        removal = await orgs_repo.remove_team_member(team_id=team_id, user_id=int(user_id))
+                        operation_time = datetime.now(timezone.utc)
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
+                            removal = (
+                                await orgs_repo.remove_team_member_on_connection(
+                                    conn=conn,
+                                    team_id=team_id,
+                                    user_id=int(user_id),
+                                    context=_FEDERATION_MEMBERSHIP_CONTEXT,
+                                    anchor_ownership=(
+                                        AnchorOwnership.WRITER_OWNS_ANCHOR
+                                    ),
+                                    operation_time=operation_time,
+                                )
+                            )
                         await managed_repo.delete_grant(
                             identity_provider_id=provider_id,
                             user_id=int(user_id),
@@ -655,7 +726,23 @@ class FederationProvisioningService:
                                 target_ref=target_ref,
                             )
                             continue
-                        removal = await orgs_repo.remove_org_member(org_id=org_id, user_id=int(user_id))
+                        operation_time = datetime.now(timezone.utc)
+                        async with self.db_pool.transaction(
+                            acquire_timeout_seconds=acquire_timeout_seconds,
+                        ) as conn:
+                            removal = (
+                                await orgs_repo.remove_org_member_on_connection(
+                                    conn=conn,
+                                    org_id=org_id,
+                                    user_id=int(user_id),
+                                    context=_FEDERATION_MEMBERSHIP_CONTEXT,
+                                    anchor_ownership=(
+                                        AnchorOwnership.WRITER_OWNS_ANCHOR
+                                    ),
+                                    operation_time=operation_time,
+                                    preserve_non_default_teams=True,
+                                )
+                            )
                         await managed_repo.delete_grant(
                             identity_provider_id=provider_id,
                             user_id=int(user_id),
@@ -665,13 +752,12 @@ class FederationProvisioningService:
                         if removal.get("removed"):
                             revoked_org_ids.append(org_id)
                 except Exception as exc:  # pragma: no cover - defensive runtime hardening
-                    logger.warning(
-                        "Failed to reconcile stale federated grant provider_id={} user_id={} grant_kind={} target_ref={}: {}",
+                    logger.bind(error_type=type(exc).__name__).warning(
+                        "Failed to reconcile stale federated grant provider_id={} user_id={} grant_kind={} target_ref={}",
                         provider_id,
                         user_id,
                         grant_kind,
                         target_ref,
-                        exc,
                     )
 
         return {

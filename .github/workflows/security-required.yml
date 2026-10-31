@@ -149,7 +149,7 @@ jobs:
           needs.await_license.outputs.license_passed != 'true'
         )
       )
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       # Stays first: no later step uses a status function, so none runs once
       # this has failed.
@@ -263,6 +263,48 @@ jobs:
 
           print("No unallowlisted HIGH/CRITICAL findings detected.")
           PY
+
+      # TASK-13950.19: the AuthNZ (unit-level), http_client and Security suites with TEST_MODE,
+      # TESTING and TLDW_TEST_MODE unset; tests/conftest.py drops them when TLDW_UNSET_TEST_FLAGS=1.
+      # Not production parity: PYTEST_CURRENT_TEST and the root conftests' other test settings
+      # still apply. Postgres cases skip here and run in ci.yml's Postgres shard.
+      - name: Install PortAudio for the TEST_MODE-unset suites
+        if: needs.changes.outputs.backend_changed == 'true'
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+
+      - name: Setup Python dependencies for the TEST_MODE-unset suites
+        if: needs.changes.outputs.backend_changed == 'true'
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: "3.12"
+          use-uv: "true"
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Security suites with TEST_MODE unset
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+          # Without this, the explicit -p flags below fail with "Plugin already registered".
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          # Also un-skips tldw_Server_API/tests/CI/test_unset_test_flags_run.py.
+          TLDW_UNSET_TEST_FLAGS: "1"
+          TLDW_TEST_NO_DOCKER: "1"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          python -m pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout --timeout=300 -o timeout_method=signal \
+            tldw_Server_API/tests/http_client \
+            tldw_Server_API/tests/AuthNZ/unit \
+            tldw_Server_API/tests/AuthNZ_Unit \
+            tldw_Server_API/tests/Security \
+            tldw_Server_API/tests/CI/test_unset_test_flags_run.py
 
   # Wakes the merge queue when the gate above fails (spec 4.6 of
   # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes

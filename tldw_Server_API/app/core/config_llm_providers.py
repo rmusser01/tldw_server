@@ -1,7 +1,8 @@
 """Provider names and API keys from env and config, read at call time (TASK-13950.13; TASK-13950.14 adds the default provider)."""
 
 import os
-from typing import Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.custom_openai_providers import (
@@ -10,6 +11,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
     iter_custom_openai_provider_names,
 )
+from tldw_Server_API.app.core.testing import is_test_mode
 
 _BASE_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
     "bedrock",
@@ -109,3 +111,40 @@ def get_api_keys() -> dict[str, Optional[str]]:
         name: _get_dynamic_setting(_provider_env_keys(name), "api_keys", name)
         for name in ALL_SUPPORTED_PROVIDER_NAMES_LIST
     }
+
+
+def config_default_llm_provider(
+    config_data: dict[str, Any] | None = None,
+) -> str | None:
+    """Return the configured default provider without applying fallbacks."""
+
+    cfg = load_and_log_configs() if config_data is None else config_data
+    if not isinstance(cfg, dict):
+        return None
+    for section in ("llm_api_settings", "API"):
+        section_data = cfg.get(section)
+        if not isinstance(section_data, dict):
+            continue
+        value = section_data.get("default_api")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def get_default_provider(
+    *,
+    config_resolver: Callable[[], str | None] = config_default_llm_provider,
+    test_mode_resolver: Callable[[], bool] = is_test_mode,
+    fallback_provider: str = "openai",
+) -> str:
+    """Resolve the server default provider using the ordinary chat precedence."""
+
+    configured = config_resolver()
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    environment = os.getenv("DEFAULT_LLM_PROVIDER")
+    if isinstance(environment, str) and environment.strip():
+        return environment.strip()
+    if test_mode_resolver():
+        return "local-llm"
+    return str(fallback_provider or "").strip()

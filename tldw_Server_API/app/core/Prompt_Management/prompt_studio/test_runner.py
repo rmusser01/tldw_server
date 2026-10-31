@@ -8,11 +8,6 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from ....core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    is_runtime_issued_provider_call_credentials,
-)
 from ....core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_sync_call,
@@ -32,6 +27,11 @@ from ....core.LLM_Calls.adapter_utils import (
     resolve_provider_api_key_from_config,
     resolve_provider_model,
     split_system_message,
+)
+from ....core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
 )
 from ..structured_prompts import StructuredPromptAssemblyError
 from .program_evaluator import ProgramEvaluator

@@ -36,7 +36,6 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Protocol, Ty
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_sync_call,
@@ -60,14 +59,11 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.RAG.exceptions import RAGConfigurationError
 from tldw_Server_API.app.core.testing import (
     is_production_like_env as _shared_is_production_like_env,
-)
-from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
-)
-from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
@@ -515,8 +511,6 @@ try:
     # OpenTelemetry telemetry manager (metrics + tracing)
     from tldw_Server_API.app.core.Metrics.telemetry import (
         OTEL_AVAILABLE as _OTEL_AVAILABLE,
-    )
-    from tldw_Server_API.app.core.Metrics.telemetry import (
         get_telemetry_manager as _get_telemetry_manager,
     )
 except ImportError:  # pragma: no cover - optional dependency
@@ -567,11 +561,7 @@ from .types import DataSource, Document
 if TYPE_CHECKING:
     from .database_retrievers import (
         ChatHistoryRetriever as ChatHistoryRetrieverType,
-    )
-    from .database_retrievers import (
         MediaDBRetriever as MediaDBRetrieverType,
-    )
-    from .database_retrievers import (
         NotesDBRetriever as NotesDBRetrieverType,
     )
 
@@ -640,11 +630,7 @@ normalize_sources_internal = _normalize_sources_internal
 try:
     from .quick_wins import (
         highlight_results as _highlight_results,
-    )
-    from .quick_wins import (
         spell_check_query as _spell_check_query,
-    )
-    from .quick_wins import (
         track_llm_cost as _track_llm_cost,
     )
 except ImportError:
@@ -660,14 +646,8 @@ track_llm_cost = _track_llm_cost
 try:
     from .query_features import (
         QueryAnalyzer as _QueryAnalyzer,
-    )
-    from .query_features import (
         QueryIntent as _QueryIntent,
-    )
-    from .query_features import (
         QueryRewriter as _QueryRewriter,
-    )
-    from .query_features import (
         QueryRouter as _QueryRouter,
     )
 except ImportError:
@@ -691,14 +671,10 @@ _assess_query_for_clarification: Any = None
 try:
     from .query_classifier import (
         QueryClassification as _QueryClassification,
-    )
-    from .query_classifier import (
         classify_and_reformulate as _classify_and_reformulate,
     )
     from .research_agent import (
         create_default_registry as _create_default_registry,
-    )
-    from .research_agent import (
         research_loop as _research_loop,
     )
 except ImportError:
@@ -710,8 +686,6 @@ except ImportError:
 try:
     from .clarification_gate import (
         ClarificationDecision as _ClarificationDecision,
-    )
-    from .clarification_gate import (
         assess_query_for_clarification as _assess_query_for_clarification,
     )
 except ImportError:
@@ -741,14 +715,8 @@ _get_writer_depth_policy: Any = None
 try:
     from .response_writer import (
         build_writer_system_prompt as _build_writer_system_prompt,
-    )
-    from .response_writer import (
         build_writer_user_prompt as _build_writer_user_prompt,
-    )
-    from .response_writer import (
         format_context_xml as _format_context_xml,
-    )
-    from .response_writer import (
         get_writer_depth_policy as _get_writer_depth_policy,
     )
 except ImportError:
@@ -765,11 +733,7 @@ get_writer_depth_policy = _get_writer_depth_policy
 try:
     from .hyde import (
         embed_text as _hyde_embed_text,
-    )
-    from .hyde import (
         generate_hypothetical_answer as _generate_hypothetical_answer,
-    )
-    from .hyde import (
         generate_hypothetical_answer_async as _generate_hypothetical_answer_async,
     )
 except ImportError:
@@ -784,17 +748,9 @@ hyde_embed_text = _hyde_embed_text
 try:
     from .query_expansion import (
         domain_specific_expansion as _domain_specific_expansion,
-    )
-    from .query_expansion import (
         entity_recognition_expansion as _entity_recognition_expansion,
-    )
-    from .query_expansion import (
         expand_acronyms as _expand_acronyms,
-    )
-    from .query_expansion import (
         expand_synonyms as _expand_synonyms,
-    )
-    from .query_expansion import (
         multi_strategy_expansion as _multi_strategy_expansion,
     )
 except ImportError:
@@ -814,14 +770,8 @@ _sanitize_cache_payload: Callable[[Any], Any | None] | None
 try:
     from .semantic_cache import (
         AdaptiveCache as _AdaptiveCache,
-    )
-    from .semantic_cache import (
         SemanticCache as _SemanticCache,
-    )
-    from .semantic_cache import (
         _sanitize_retrieval_payload as _imported_sanitize_cache_payload,
-    )
-    from .semantic_cache import (
         get_shared_cache as _get_shared_cache,
     )
 except ImportError:
@@ -842,23 +792,11 @@ _NotesDBRetriever: type["NotesDBRetrieverType"] | None
 try:
     from .database_retrievers import (
         ChatHistoryRetriever as _ImportedChatHistoryRetriever,
-    )
-    from .database_retrievers import (
         MediaDBRetriever as _MediaDBRetriever,
-    )
-    from .database_retrievers import (
         MultiDatabaseRetriever as _MultiDatabaseRetriever,
-    )
-    from .database_retrievers import (
         NotesDBRetriever as _ImportedNotesDBRetriever,
-    )
-    from .database_retrievers import (
         RetrievalConfig as _RetrievalConfig,
-    )
-    from .database_retrievers import (
         SQLRetriever as _SQLRetriever,
-    )
-    from .database_retrievers import (
         _allocate_slides_source_projection_caps as _imported_slides_source_projection_caps,
     )
 except ImportError:
@@ -883,8 +821,7 @@ SQLRetriever = _SQLRetriever
 allocate_slides_source_projection_caps = _allocate_slides_source_projection_caps_impl
 
 try:
-    from .security_filters import SecurityFilters as _SecurityFilters
-    from .security_filters import SensitivityLevel as _SensitivityLevel
+    from .security_filters import SecurityFilters as _SecurityFilters, SensitivityLevel as _SensitivityLevel
 except ImportError:
     _SecurityFilters = None
     _SensitivityLevel = None
@@ -902,14 +839,8 @@ TableProcessor = _TableProcessor
 try:
     from .enhanced_chunking_integration import (
         enhanced_chunk_documents as _enhanced_chunk_documents,
-    )
-    from .enhanced_chunking_integration import (
         expand_with_parent_context as _expand_with_parent_context,
-    )
-    from .enhanced_chunking_integration import (
         filter_chunks_by_type as _filter_chunks_by_type,
-    )
-    from .enhanced_chunking_integration import (
         prioritize_by_chunk_type as _prioritize_by_chunk_type,
     )
 except ImportError:
@@ -926,14 +857,8 @@ prioritize_by_chunk_type = _prioritize_by_chunk_type
 try:
     from .advanced_reranking import (
         RerankingConfig as _RerankingConfig,
-    )
-    from .advanced_reranking import (
         RerankingStrategy as _RerankingStrategy,
-    )
-    from .advanced_reranking import (
         create_preinstalled_local_reranker as _create_preinstalled_local_reranker,
-    )
-    from .advanced_reranking import (
         create_reranker as _create_reranker,
     )
 except ImportError:
@@ -951,8 +876,6 @@ RerankingConfig = _RerankingConfig
 try:
     from .advanced_retrieval import (
         MultiVectorConfig as _MultiVectorConfig,
-    )
-    from .advanced_retrieval import (
         apply_multi_vector_passages as _apply_multi_vector_passages,
     )
 except ImportError:
@@ -964,8 +887,7 @@ MultiVectorConfig = _MultiVectorConfig
 
 # Pseudo-relevance feedback (PRF)
 try:
-    from .prf import PRFConfig as _PRFConfig
-    from .prf import apply_prf as _apply_prf
+    from .prf import PRFConfig as _PRFConfig, apply_prf as _apply_prf
 except ImportError:
     _PRFConfig = None
     _apply_prf = None
@@ -977,8 +899,6 @@ apply_prf = _apply_prf
 try:
     from .precomputed_spans import (
         PrecomputedSpanConfig as _PrecomputedSpanConfig,
-    )
-    from .precomputed_spans import (
         apply_precomputed_spans as _apply_precomputed_spans,
     )
 except ImportError:
@@ -1009,8 +929,7 @@ def load_prompt(*args, **kwargs):
 
 # Chunking support
 try:
-    from tldw_Server_API.app.core.Chunking import Chunker as _Chunker
-    from tldw_Server_API.app.core.Chunking import ChunkerConfig as _ChunkerConfig
+    from tldw_Server_API.app.core.Chunking import Chunker as _Chunker, ChunkerConfig as _ChunkerConfig
 except ImportError:
     _Chunker = None
     _ChunkerConfig = None
@@ -1018,8 +937,7 @@ except ImportError:
 Chunker = _Chunker
 ChunkerConfig = _ChunkerConfig
 try:
-    from .citations import CitationGenerator as _CitationGenerator
-    from .citations import CitationStyle as _CitationStyle
+    from .citations import CitationGenerator as _CitationGenerator, CitationStyle as _CitationStyle
 except ImportError:
     _CitationGenerator = None
     _CitationStyle = None
@@ -1031,15 +949,10 @@ CitationStyle = _CitationStyle
 try:
     from .granularity_router import (
         GranularityDecision as _GranularityDecision,
-    )
-    from .granularity_router import (
         GranularityRouter as _GranularityRouter,
-    )
-    from .granularity_router import (
         route_query_granularity as _route_query_granularity,
     )
-    from .types import Granularity as _Granularity
-    from .types import QueryType as _QueryType
+    from .types import Granularity as _Granularity, QueryType as _QueryType
 except ImportError:
     _GranularityRouter = None
     _GranularityDecision = None
@@ -1057,11 +970,7 @@ Granularity = _Granularity
 try:
     from .evidence_accumulator import (
         AccumulationResult as _AccumulationResult,
-    )
-    from .evidence_accumulator import (
         EvidenceAccumulator as _EvidenceAccumulator,
-    )
-    from .evidence_accumulator import (
         accumulate_evidence as _accumulate_evidence,
     )
 except ImportError:
@@ -1077,11 +986,7 @@ accumulate_evidence = _accumulate_evidence
 try:
     from .evidence_chains import (
         ChainBuildResult as _ChainBuildResult,
-    )
-    from .evidence_chains import (
         EvidenceChainBuilder as _EvidenceChainBuilder,
-    )
-    from .evidence_chains import (
         build_evidence_chains as _build_evidence_chains,
     )
 except ImportError:
@@ -1097,11 +1002,7 @@ build_evidence_chains = _build_evidence_chains
 try:
     from .document_grader import (
         DocumentGrader as _DocumentGrader,
-    )
-    from .document_grader import (
         GradingConfig as _GradingConfig,
-    )
-    from .document_grader import (
         grade_and_filter_documents as _grade_and_filter_documents,
     )
 except ImportError:
@@ -1117,14 +1018,8 @@ grade_and_filter_documents = _grade_and_filter_documents
 try:
     from .web_fallback import (
         WebFallbackConfig as _WebFallbackConfig,
-    )
-    from .web_fallback import (
         fallback_to_web_search as _fallback_to_web_search,
-    )
-    from .web_fallback import (
         merge_web_results as _merge_web_results,
-    )
-    from .web_fallback import (
         web_search_fallback as _web_search_fallback,
     )
 except ImportError:
@@ -1142,11 +1037,7 @@ fallback_to_web_search = _fallback_to_web_search
 try:
     from .knowledge_strips import (
         KnowledgeStripsProcessor as _KnowledgeStripsProcessor,
-    )
-    from .knowledge_strips import (
         KnowledgeStripsResult as _KnowledgeStripsResult,
-    )
-    from .knowledge_strips import (
         process_knowledge_strips as _process_knowledge_strips,
     )
 except ImportError:
@@ -1162,20 +1053,10 @@ process_knowledge_strips = _process_knowledge_strips
 try:
     from .quality_graders import (
         FastGroundednessGrader as _FastGroundednessGrader,
-    )
-    from .quality_graders import (
         FastGroundednessResult as _FastGroundednessResult,
-    )
-    from .quality_graders import (
         UtilityGrader as _UtilityGrader,
-    )
-    from .quality_graders import (
         UtilityResult as _UtilityResult,
-    )
-    from .quality_graders import (
         check_fast_groundedness as _check_fast_groundedness,
-    )
-    from .quality_graders import (
         grade_utility as _grade_utility,
     )
 except ImportError:
@@ -1211,8 +1092,6 @@ PostGenerationVerifier = _PostGenerationVerifier
 try:
     from tldw_Server_API.app.core.config import (
         rag_low_confidence_behavior as _rag_low_conf,
-    )
-    from tldw_Server_API.app.core.config import (
         rag_require_hard_citations as _rag_req_hc,
     )
 except ImportError:
@@ -1223,26 +1102,12 @@ try:
     # Guardrails utilities: injection filtering, numeric fidelity, hard citations
     from .guardrails import (
         apply_content_policy as _apply_content_policy,
-    )
-    from .guardrails import (
         build_hard_citations as _build_hard_citations,
-    )
-    from .guardrails import (
         build_quote_citations as _build_quote_citations,
-    )
-    from .guardrails import (
         check_numeric_fidelity as _check_numeric_fidelity,
-    )
-    from .guardrails import (
         detect_injection_score as _detect_injection_score,
-    )
-    from .guardrails import (
         downweight_injection_docs as _downweight_injection_docs,
-    )
-    from .guardrails import (
         gate_docs_by_ocr_confidence as _gate_docs_by_ocr_confidence,
-    )
-    from .guardrails import (
         sanitize_html_allowlist as _sanitize_html_allowlist,
     )
 except ImportError:
@@ -1348,14 +1213,8 @@ Tracer = _Tracer
 try:
     from .resilience import (
         CircuitBreakerConfig as _CircuitBreakerConfig,
-    )
-    from .resilience import (
         RetryConfig as _RetryConfig,
-    )
-    from .resilience import (
         RetryPolicy as _RetryPolicy,
-    )
-    from .resilience import (
         get_coordinator as _get_coordinator,
     )
 except ImportError:
@@ -1380,8 +1239,6 @@ PerformanceMonitor = _PerformanceMonitor
 try:
     from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
         ClaimsJobContext as _ClaimsJobContext,
-    )
-    from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
         resolve_claims_job_budget as _resolve_claims_job_budget,
     )
 except ImportError:
@@ -3673,8 +3530,7 @@ async def unified_rag_pipeline(
                 )
 
                 # Convert research results to Document objects
-                from .types import DataSource as _DS
-                from .types import Document as _Doc
+                from .types import DataSource as _DS, Document as _Doc
 
                 _research_docs = []
                 for r_item in _research_output.all_results:
@@ -4484,8 +4340,7 @@ async def unified_rag_pipeline(
                         and retrieval_search_mode in ("fts", "hybrid")
                     ):
                         try:
-                            from .database_retrievers import MediaDBRetriever as _MDBR
-                            from .database_retrievers import RetrievalConfig as _RCfg
+                            from .database_retrievers import MediaDBRetriever as _MDBR, RetrievalConfig as _RCfg
 
                             fb_cfg = _RCfg(
                                 max_results=retrieval_top_k,
@@ -4704,8 +4559,10 @@ async def unified_rag_pipeline(
                             multi_intents = {"comparative", "causal", "analytical", "temporal"}
                             if intent_val in multi_intents and comp_val == "complex":
                                 try:
-                                    from .agentic_chunker import AgenticConfig as _ACfg
-                                    from .agentic_chunker import _decompose_query as _agentic_decompose
+                                    from .agentic_chunker import (
+                                        AgenticConfig as _ACfg,
+                                        _decompose_query as _agentic_decompose,
+                                    )
 
                                     subgoal_max = max_subqueries if max_subqueries is not None else 3
                                     acfg = _ACfg(enable_query_decomposition=True, subgoal_max=int(subgoal_max))
@@ -4978,8 +4835,7 @@ async def unified_rag_pipeline(
                     and retrieval_search_mode in ("fts", "hybrid")
                 ):
                     try:
-                        from .database_retrievers import MediaDBRetriever as _MDBR
-                        from .database_retrievers import RetrievalConfig as _RCfg
+                        from .database_retrievers import MediaDBRetriever as _MDBR, RetrievalConfig as _RCfg
 
                         fb_cfg = _RCfg(
                             max_results=top_k,

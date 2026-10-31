@@ -36,6 +36,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import sys
 import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -46,6 +47,7 @@ from types import SimpleNamespace
 
 import anyio
 import pytest
+from anyio.from_thread import start_blocking_portal
 from fastapi import FastAPI, WebSocket
 from fastapi.routing import APIWebSocketRoute
 from fastapi.testclient import TestClient
@@ -55,6 +57,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
 from tldw_Server_API.app.core import config
+from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig
+from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.helpers.app_main_state import reload_app_main, restore_app_main, snapshot_app_main
@@ -185,11 +189,11 @@ def _seed_watchlists_runs(user_id: int) -> None:
 
 
 def _reset_auth_singletons() -> None:
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.Utils.app_services import app_services
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
 
 @pytest.fixture(scope="module")
@@ -244,8 +248,35 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
         _reset_auth_singletons()
 
 
+@pytest.fixture(scope="module")
+def acp_runner(full_app: SimpleNamespace) -> Iterator[ACPRunnerClient]:
+    """Own a real stub-agent transport independently of each WebSocket's event loop."""
+    runner = ACPRunnerClient(
+        ACPRunnerConfig(
+            command=sys.executable,
+            args=[str(Path(__file__).resolve().parents[3] / "Helper_Scripts" / "acp_stub_agent.py")],
+        )
+    )
+    with start_blocking_portal() as portal:
+        try:
+            portal.call(runner.start)
+            yield runner
+        finally:
+            portal.call(runner.shutdown)
+
+
 @pytest.fixture()
-def env(full_app: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def env(
+    full_app: SimpleNamespace, acp_runner: ACPRunnerClient, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    from tldw_Server_API.app.api.v1.endpoints import acp_multiplex
+
+    async def _get_matrix_runner() -> ACPRunnerClient:
+        if not acp_runner.is_running:
+            raise RuntimeError("WebSocket auth matrix ACP runner stopped")
+        return acp_runner
+
+    monkeypatch.setattr(acp_multiplex, "get_runner_client", _get_matrix_runner)
     for key, value in full_app.environ.items():
         monkeypatch.setenv(key, value)
     _reset_auth_singletons()
@@ -845,7 +876,39 @@ def test_realtime_speech_echoes_the_bearer_subprotocol(env: SimpleNamespace, rou
 
 
 def _voice_auth(client: TestClient, url: str = ROUTES[VOICE][0], **frame: object) -> str:
-    return _outcome(client, url, frame={"type": "auth", **frame}, timeout=ADMITTED_AFTER_S)
+    """Voice acknowledges auth after session/DB setup; silence is not its success signal."""
+    return _outcome(client, url, frame={"type": "auth", **frame}, timeout=FRAME_TIMEOUT_S)
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [("/auth-ok", "answered auth_ok"), ("/refuses", "closed 4401"), ("/waits", "silent")],
+)
+def test_voice_auth_waits_for_a_bounded_frame_reply(path: str, expected: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit voice reply uses the frame budget, not the silent-admission probe."""
+    app = _scratch_app()
+
+    @app.websocket("/auth-ok")
+    async def acknowledge(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.receive_json()
+        await websocket.send_json({"type": "auth_ok"})
+
+    monkeypatch.setitem(globals(), "FRAME_TIMEOUT_S", 0.2)
+    monkeypatch.setitem(globals(), "ADMITTED_AFTER_S", 0.01)
+    receive = _receive
+    reply_budgets: list[float] = []
+
+    def observed_receive(ws: object, timeout: float) -> dict[str, object] | None:
+        reply_budgets.append(timeout)
+        return receive(ws, timeout)
+
+    monkeypatch.setitem(globals(), "_receive", observed_receive)
+    with TestClient(app) as client:
+        outcome = _voice_auth(client, path)
+
+    assert outcome == expected
+    assert reply_budgets == [FRAME_TIMEOUT_S]
 
 
 def test_voice_reads_a_deprecated_query_token_only_without_a_frame_token(env: SimpleNamespace) -> None:

@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     build_secret_payload,
     decrypt_byok_payload,
     dumps_envelope,

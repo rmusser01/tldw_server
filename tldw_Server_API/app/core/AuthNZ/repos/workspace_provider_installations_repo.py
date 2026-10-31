@@ -9,7 +9,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import normalize_provider_name
 
 
 def _normalize_external_id(external_id: str) -> str:
