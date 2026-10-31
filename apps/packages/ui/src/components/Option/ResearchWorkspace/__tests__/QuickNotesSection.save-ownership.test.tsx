@@ -1278,19 +1278,15 @@ it("allows a genuinely unbound new Quick Note in a migrated server Workspace", a
   );
   render(<QuickNotesSection />);
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() =>
-    expect(
-      mocks.error.mock.calls.length + mocks.success.mock.calls.length,
-    ).toBeGreaterThan(0),
-  );
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled());
   expect(writes()).toHaveLength(1);
-  expect(mocks.error).toHaveBeenCalled();
+  expect(mocks.error).not.toHaveBeenCalled();
   expect(
     Object.values(
       await readSurfaceOfflineDraftQueue(
         createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId),
       ),
-    )[0].pendingWrite?.body.id,
+    )[0].noteId,
   ).toBe(writes()[0][0].body.id);
 });
 
@@ -1617,11 +1613,11 @@ it.each(["422", "409", "policy", "uncertain"])(
       if (boundary === "422") {
         deliberate = true;
         fireEvent.click(screen.getByRole("button", { name: "Save" }));
-        await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(3));
-        expect(
-          Object.values(await readSurfaceOfflineDraftQueue(owner))[0].pendingWrite
-            ?.body.id,
-        ).toBe(writes()[2][0].body.id);
+        await waitFor(() => expect(mocks.success).toHaveBeenCalled());
+        expect(mocks.error).toHaveBeenCalledTimes(2);
+        const accepted = Object.values(await readSurfaceOfflineDraftQueue(owner))[0];
+        expect(accepted.noteId).toBe(writes()[2][0].body.id);
+        expect(accepted.pendingWrite).toBeUndefined();
         expect(writes()).toHaveLength(3);
         expect(writes()[2][0].body.content).toBe(
           "An unrelated deliberate new draft",
@@ -1877,6 +1873,14 @@ it("keeps a migrated acknowledged new create recoverable until explicit previous
     serverNotes.set(id, request.body);
     return { ...request.body, id, version: 1 };
   });
+  let failCheckpoint = true;
+  const set = PlasmoStorage.prototype.set;
+  vi.spyOn(PlasmoStorage.prototype, "set").mockImplementation(async function (key, value) {
+    const retained = value as { value?: { metadata?: Record<string, unknown> } };
+    if (failCheckpoint && retained?.value?.metadata?.quickNotesAcceptedKey)
+      throw new Error("Accepted checkpoint unavailable");
+    return set.call(this, key, value);
+  });
   render(<CollapsibleQuickNotes />);
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(mocks.error).toHaveBeenCalled());
@@ -1899,6 +1903,7 @@ it("keeps a migrated acknowledged new create recoverable until explicit previous
   fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }));
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(mocks.open).toHaveBeenCalled());
+  failCheckpoint = false;
   const recovery = render(mocks.open.mock.calls.at(-1)![0].content);
   fireEvent.click(screen.getByRole("button", { name: "Retry previous save" }));
   await waitFor(async () => {
@@ -1944,6 +1949,14 @@ it("keeps the durable create operation through migrated in-memory UUID edits and
     const id = String(request.body.id);
     serverNotes.set(id, request.body);
     return { ...request.body, id, version: 1 };
+  });
+  let failCheckpoint = true;
+  const set = PlasmoStorage.prototype.set;
+  vi.spyOn(PlasmoStorage.prototype, "set").mockImplementation(async function (key, value) {
+    const retained = value as { value?: { metadata?: Record<string, unknown> } };
+    if (failCheckpoint && retained?.value?.metadata?.quickNotesAcceptedKey)
+      throw new Error("Accepted checkpoint unavailable");
+    return set.call(this, key, value);
   });
   render(<CollapsibleQuickNotes />);
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -3371,3 +3384,165 @@ describe("Quick Notes native provenance typing", () => {
     expect(useWorkspaceStore.getState().currentNote.knowledge_provenance).toEqual(history)
   })
 })
+
+it.each(["single-user", "multi-user"] as const)(
+  "confirms a cited create in a migrated %s Workspace without reviving legacy snapshots",
+  async (mode) => {
+    mocks.authMode = mode;
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+        deletedAt: "2026-10-08T00:00:00Z",
+      }),
+    );
+    useWorkspaceStore.setState({
+      currentNote: { title: "", content: "", keywords: [], isDirty: false },
+    });
+    act(() => {
+      useWorkspaceStore.getState().captureToCurrentNote({
+        title: "Migrated cited capture",
+        content: "The telescope is Selene [0].",
+        provenance: {
+          origin: "knowledge_qa",
+          sources: [
+            {
+              originalId: 1,
+              mediaId: 1,
+              title: "Rowan Observatory",
+              excerpt: "The telescope is named Selene.",
+              type: "document",
+              sourceType: "document",
+            },
+          ],
+        },
+      });
+    });
+    mocks.request.mockImplementation(async (request: BgRequestInit) =>
+      request.path.includes("/search/")
+        ? []
+        : {
+            ...request.body,
+            id: request.body.id,
+            version: 1,
+            knowledge_provenance_state: "active",
+            knowledge_provenance_version: 1,
+            knowledge_provenance: request.body.knowledge_provenance,
+          },
+    );
+    render(<QuickNotesSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalled());
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(screen.getByTestId("quick-notes-saved-indicator")).toBeVisible();
+    const current = useWorkspaceStore.getState().currentNote;
+    expect(current.isDirty).toBe(false);
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][0].body.keywords).toContain("workspace:workspace-a");
+    const queue = Object.values(
+      await readSurfaceOfflineDraftQueue(
+        createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId),
+      ),
+    );
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({
+      noteId: current.id,
+      baseVersion: 1,
+      metadata: { quickNotesDirty: false },
+    });
+    expect(queue[0].pendingWrite).toBeUndefined();
+    await flushWorkspacePersistence();
+    const persisted = await useWorkspaceStore.persist
+      .getOptions()
+      .storage!.getItem(useWorkspaceStore.persist.getOptions().name);
+    expect(
+      persisted?.state?.workspaceSnapshots?.["workspace-a"],
+    ).toBeUndefined();
+  },
+);
+
+it.each([
+  "checkpoint",
+  "checkpoint-missing",
+  "later-edits",
+  "account",
+  "workspace",
+] as const)(
+  "retains migrated create safety through %s at acknowledgement",
+  async (boundary) => {
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+        deletedAt: "2026-10-08T00:00:00Z",
+      }),
+    );
+    const { gate } = await beginSave("POST");
+    let restoreCheckpointRead: (() => void) | undefined;
+    if (boundary === "checkpoint-missing") {
+      const get = PlasmoStorage.prototype.get;
+      const reading = vi
+        .spyOn(PlasmoStorage.prototype, "get")
+        .mockImplementation(async function (key: string) {
+          if (key.startsWith("tldw:notesOfflineDraftQueue:v1:"))
+            return undefined;
+          return get.call(this, key);
+        });
+      restoreCheckpointRead = () => reading.mockRestore();
+    } else if (boundary === "checkpoint") {
+      const set = PlasmoStorage.prototype.set;
+      vi.spyOn(PlasmoStorage.prototype, "set").mockImplementation(
+        async function (key, value) {
+          const retained = value as {
+            value?: { metadata?: Record<string, unknown> };
+          };
+          if (retained?.value?.metadata?.quickNotesAcceptedKey)
+            throw new Error("Accepted checkpoint unavailable");
+          return set.call(this, key, value);
+        },
+      );
+    } else {
+      act(() =>
+        changeContext(boundary === "later-edits" ? "newer-edits" : boundary),
+      );
+    }
+    const beforeAck = useWorkspaceStore.getState().currentNote;
+    await finishSave(gate);
+    restoreCheckpointRead?.();
+    const queue = Object.values(
+      await readSurfaceOfflineDraftQueue(
+        createNotesGraphAuthorityScope("https://research-a.example", "alice"),
+      ),
+    );
+    expect(writes()).toHaveLength(1);
+    expect(queue).toHaveLength(1);
+    if (boundary === "later-edits") {
+      expect(mocks.success).toHaveBeenCalled();
+      expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+        content: "Newer human body",
+        isDirty: true,
+      });
+      expect(screen.queryByTestId("quick-notes-saved-indicator")).toBeNull();
+      expect(queue[0]).toMatchObject({
+        noteId,
+        baseVersion: 4,
+        content: "Newer human body",
+        metadata: { quickNotesDirty: true },
+      });
+      expect(queue[0].pendingWrite).toBeUndefined();
+    } else {
+      expect(mocks.success).not.toHaveBeenCalled();
+      expect(queue[0].pendingWrite?.body.id).toBe(noteId);
+      expect(screen.queryByTestId("quick-notes-saved-indicator")).toBeNull();
+      if (boundary.startsWith("checkpoint"))
+        expect(mocks.error).toHaveBeenCalled();
+      else expect(useWorkspaceStore.getState().currentNote).toBe(beforeAck);
+    }
+  },
+);
