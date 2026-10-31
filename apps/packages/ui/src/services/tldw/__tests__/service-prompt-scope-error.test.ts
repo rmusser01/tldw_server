@@ -507,13 +507,13 @@ describe("owned Persona transport: bounded setup scope", () => {
   })
 })
 
-// B05 captures a transcript upload's account, without broadening other audio operations.
+// Transcript uploads and Studio speech use scoped writes; other audio operations stay excluded.
 it.each([
   ["/api/v1/audio/transcriptions", "POST", true],
   ["/api/v1/audio/transcriptions", "GET", false],
   ["/api/v1/audio/transcriptions/extra", "POST", false],
   ["/api/v1/audio/translations", "POST", false],
-  ["/api/v1/audio/speech", "POST", false],
+  ["/api/v1/audio/speech", "POST", true], // Studio TTS uses the captured scope.
   ["/api/v1/audio/../transcriptions", "POST", false],
 ])("B05 scoped transcription path %s %s", (path, method, allowed) => {
   expect(isServicePromptRequestPath(path, method)).toBe(allowed);
@@ -536,3 +536,19 @@ describe('S03 captured Data Tables generation routes', () => {
     ['/api/v1/data-tables/../regenerate', 'POST', false],
   ])('bounds %s %s', (path, method, allowed) => expect(isServicePromptRequestPath(path, method)).toBe(allowed));
 });
+
+describe("ACP history scoped reads", () => {
+  it.each([
+    ["/api/v1/agent-orchestration/projects?canonical_workspace_id=owned", "GET", true],
+    ["/api/v1/agent-orchestration/projects/12/tasks", "GET", true],
+    ["/api/v1/agent-orchestration/tasks/12", "GET", true],
+    ["/api/v1/acp/sessions?workspace_id=owned", "GET", true],
+    ["/api/v1/acp/sessions", "POST", false],
+    ["/api/v1/agent-orchestration/tasks/12", "POST", false],
+    ["/api/v1/agent-orchestration/tasks/12/run", "GET", false],
+    ["/api/v1/agent-orchestration/projects/a/tasks", "GET", false],
+    ["/api/v1/agent-orchestration/projects/0/tasks", "GET", false],
+    ["/api/v1/agent-orchestration/tasks/12%2fother", "GET", false]
+  ])("bounds %s %s", (path, method, allowed) =>
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed))
+})

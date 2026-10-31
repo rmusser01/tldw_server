@@ -37,3 +37,11 @@ Worker-created media artifacts keep canonical identity/version separate from dis
 Flashcard and quiz editors wait for acknowledgement before publishing changes or closing. Failures/conflicts retain the edit. Pending controls are disabled, and only that editor's removal Undo actions are finalized before Save or retirement; unrelated workspace Undo remains available.
 
 ACP enrollment and live native qualification remain open. Transient audio blob URLs are not durable resources; this draft unit preserves the script, existing metadata and durable references and makes no binary-audio restoration claim. ADR-008 remains governing; no new durable architecture rule or dependency.
+
+## ACP history saves
+
+Capture verified history authority before reading projects, tasks or sessions through the existing scoped transport. Keep one fifteen-second load budget and retire old results, errors and actions on account/server/workspace changes. Only the exact projects collection's structured 404 Not Found means unsupported orchestration; ordinary missing records retain their error.
+
+Plan ACP versions from the owned canonical artifact inventory, never cached cards. Keep the existing custom ACP version identity and use it as the workspace-relative canonical ID so competing allocations conflict visibly. A bounded save publishes only after canonical acknowledgement. The same pending result keeps its ID through save-only retry and late receipt reconciliation, including history close/reopen. Changed visible run content requires a new explicit Save intent; known conflicts also require another explicit Save after a fresh inventory. Retain durable run provenance/timestamps in existing ACP data; do not serialize request authority.
+
+Restore acknowledged artifacts through the existing ID-preserving store action. Keep the complete Header workspace/pending-entry fence inside the shared adapter. This source unit adds no database/dependency/storage namespace; ADR-008 and the existing canonical resource contract remain governing. Combined build/private native and binary-audio acceptance remain open.

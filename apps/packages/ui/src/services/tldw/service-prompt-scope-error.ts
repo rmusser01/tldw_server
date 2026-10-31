@@ -104,6 +104,12 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (requestMethod === "GET" && (
+    pathname === "/api/v1/agent-orchestration/projects" ||
+    /^\/api\/v1\/agent-orchestration\/projects\/[1-9][0-9]*\/tasks$/.test(pathname) ||
+    /^\/api\/v1\/agent-orchestration\/tasks\/[1-9][0-9]*$/.test(pathname) ||
+    pathname === "/api/v1/acp/sessions"
+  )) return true
   if (requestMethod === "POST" && [
     "/api/v1/research-workspace/artifacts/generate", "/api/v1/quizzes/generate",
     "/api/v1/slides/generate/from-media", "/api/v1/audio/speech",
