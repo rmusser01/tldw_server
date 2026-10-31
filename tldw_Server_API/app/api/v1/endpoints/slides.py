@@ -30,7 +30,6 @@ from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collecti
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import get_slides_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     ExportFormat,
     GenerateFromChatRequest,
@@ -71,6 +70,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -1180,7 +1180,7 @@ def _parse_sort(sort: str | None) -> tuple[str, str]:
 
 
 def _resolve_provider(request_provider: str | None) -> str:
-    provider = (request_provider or DEFAULT_LLM_PROVIDER or "openai").strip()
+    provider = (request_provider or get_default_provider() or "openai").strip()
     return provider.lower() if provider else "openai"
 
 

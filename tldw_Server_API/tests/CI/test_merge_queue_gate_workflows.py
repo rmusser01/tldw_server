@@ -28,6 +28,8 @@ GATES = {
     "coverage-required.yml": "coverage-required",
     "e2e-required.yml": "e2e-required",
     "container-build-check.yml": "container-build-check",
+    # Path-scoped by its `if:` rather than by no-op steps: see test_e2e_critical_skips_only_an_irrelevant_change.
+    "frontend-e2e-tiers.yml": "critical",
 }
 # The gates with a `changes` job. container-build-check builds every image on every run.
 CHANGE_GATED = tuple(name for name in GATES if name != "container-build-check.yml")
@@ -128,6 +130,10 @@ def _evaluate(expression: str, values: dict[str, str], cancelled: bool = False) 
 def test_gate_declares_an_optional_base_sha_dispatch_input(name):
     """Without the input a dispatch compares against HEAD^ and can no-op with nothing tested."""
     inputs = _triggers(name)["workflow_dispatch"]["inputs"]
+    if name == "frontend-e2e-tiers.yml":
+        # A dispatch runs its chosen tier whatever changed, so there is no base to compare against.
+        assert set(inputs) == {"tier"}
+        return
     assert set(inputs) == ({"base_sha", "queue_kick", "wait_run"} if name == "security-required.yml" else {"base_sha"})
     assert inputs["base_sha"]["type"] == "string"
     assert inputs["base_sha"]["required"] is False
@@ -225,6 +231,7 @@ class Row(NamedTuple):
     license_passed: str
     changes: str
     cancelled: bool
+    relevant: bool = True  # what `changes` found, read only by E2E Critical's path scope
 
     @property
     def admitted(self) -> bool:
@@ -248,7 +255,18 @@ class Row(NamedTuple):
             "needs.changes.result": self.changes,
             "github.event.inputs.queue_kick": "",
             "github.ref": "refs/pull/1/merge",
+            **_e2e_scope(self.relevant),
         }
+
+
+def _e2e_scope(relevant: bool) -> dict[str, str]:
+    """The extra names E2E Critical's `if:` reads: the dispatched tier and the two path flags."""
+    flag = "true" if relevant else "false"
+    return {
+        "github.event.inputs.tier": "critical",
+        "needs.changes.outputs.backend_changed": flag,
+        "needs.changes.outputs.e2e_changed": flag,
+    }
 
 
 def _rows(reachable_only: bool = True) -> list[Row]:
@@ -310,6 +328,23 @@ def test_gate_is_red_when_change_detection_did_not_succeed(name):
     assert newly_red, "no row exercised a failed change detection"
 
 
+def test_e2e_critical_skips_only_an_irrelevant_change():
+    """E2E Critical has no `paths:` filter, so it always reports; a PR that changes nothing
+    E2E-relevant skips it, which GitHub counts as passing. Every other row keeps the shared gate
+    outcome: a license wait that did not pass, or change detection that did not succeed, is red
+    whatever the PR changed, and a dispatch runs its tier."""
+    gate = _gate("frontend-e2e-tiers.yml")
+    skipped = 0
+    for row in _rows():
+        row = row._replace(relevant=False)
+        expected = _expected_outcome("frontend-e2e-tiers.yml", row)
+        if expected == "proceeds" and row.event != "workflow_dispatch":
+            expected = "skipped"
+            skipped += 1
+        assert _outcome(gate, row) == expected, row
+    assert skipped, "no row exercised an irrelevant change"
+
+
 @pytest.mark.parametrize("name", CHANGE_GATED)
 def test_gate_that_sees_admission_is_red_if_changes_was_skipped_when_it_should_have_run(name):
     """Every gate needs admission and await_license itself, so it can tell "skipped by design" from
@@ -342,10 +377,13 @@ def test_change_detection_guard_fails_before_any_other_work(name):
     assert result.returncode == 1
     assert result.stdout.startswith("::error::") and "'failure'" in result.stdout
 
-    # Nothing can turn that failure back into a pass, and nothing after it runs.
+    # Nothing can turn that failure back into a pass, and nothing after it runs. An evidence upload
+    # may use always() only together with a successful `changes`, so it cannot run after the guard.
     assert "continue-on-error" not in guard and "continue-on-error" not in gate
     for step in steps[index + 1:]:
         condition = str(step.get("if", ""))
+        if " ".join(condition.split()) == "always() && needs.changes.result == 'success'":
+            continue
         assert not re.search(r"\b(always|failure|cancelled)\(\)", condition), step.get("name")
 
 
@@ -376,6 +414,7 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
             "needs.changes.result": "skipped",
             "github.event.inputs.queue_kick": "",
             "github.ref": "refs/pull/1/merge",
+            **_e2e_scope(False),
         }
         assert _evaluate(gate["if"], values), (awaited, passed)
         assert _evaluate(refusal["if"], values), (awaited, passed)
@@ -388,6 +427,7 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
         "needs.changes.result": "success",
         "github.event.inputs.queue_kick": "",
         "github.ref": "refs/pull/1/merge",
+        **_e2e_scope(True),
     }
     assert not _evaluate(refusal["if"], passing)
 
@@ -401,7 +441,7 @@ KICK_RUN = (
 )
 
 
-# All six gate workflows. GATES above leaves out frontend-required.yml, which its own test file covers.
+# All seven gate workflows. GATES above leaves out frontend-required.yml, which its own test file covers.
 TICK_GATES = {**GATES, "frontend-required.yml": "frontend-required"}
 
 
@@ -472,7 +512,7 @@ def test_the_kick_job_is_the_queue_job_reading_wait_run():
     steps[1] = dict(steps[1], env={**steps[1]["env"], "WAIT_RUN": "${{ github.event.inputs.wait_run }}"})
     assert job == {"name": "Merge queue kick", "runs-on": "ubuntu-latest", "timeout-minutes": queue["timeout-minutes"],
                    "permissions": queue["permissions"], "steps": steps}
-    assert queue["timeout-minutes"] == 15, "a kick may wait 3 minutes and then re-run up to six gates"
+    assert queue["timeout-minutes"] == 15, "a kick may wait 3 minutes and then re-run up to seven gates"
 
 
 def test_security_required_kick_skips_every_gate_job_only_on_dev():

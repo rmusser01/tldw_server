@@ -449,21 +449,21 @@ class TestResolveProviderKey:
     def test_returns_none_when_no_key(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         # Patch the function at the module where it's imported from
-        _target = "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys"
+        _target = "tldw_Server_API.app.core.config_llm_providers.get_api_keys"
         with patch(_target, return_value={"openai": ""}):
             result = _resolve_provider_key("openai")
             assert result is None
 
     def test_ignores_whitespace_only_env_var(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "   ")
-        _target = "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys"
+        _target = "tldw_Server_API.app.core.config_llm_providers.get_api_keys"
         with patch(_target, return_value={"openai": ""}):
             result = _resolve_provider_key("openai")
             assert result is None
 
     def test_falls_back_to_get_api_keys(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        _target = "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys"
+        _target = "tldw_Server_API.app.core.config_llm_providers.get_api_keys"
         with patch(_target, return_value={"anthropic": "ant-key-from-config"}):
             result = _resolve_provider_key("anthropic")
             assert result == "ant-key-from-config"
@@ -476,7 +476,7 @@ class TestResolveProviderKey:
             raise RuntimeError("provider key loader exploded at /private/config.txt")
 
         monkeypatch.setattr(config_info_mod, "logger", logger_stub)
-        _target = "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys"
+        _target = "tldw_Server_API.app.core.config_llm_providers.get_api_keys"
         with patch(_target, side_effect=_fail_get_api_keys):
             result = _resolve_provider_key("openai")
 
@@ -569,7 +569,7 @@ class TestListConfiguredProviders:
             monkeypatch.delenv(env_var, raising=False)
 
         with patch(
-            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
             response = await list_configured_providers()
@@ -589,7 +589,7 @@ class TestListConfiguredProviders:
     async def test_detects_configured_provider(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-12345678")
         with patch(
-            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={"openai": "sk-test-12345678"},
         ):
             response = await list_configured_providers()
@@ -605,7 +605,7 @@ class TestListConfiguredProviders:
     async def test_local_providers_always_configured(self):
         # Local providers don't require API keys
         with patch(
-            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
             response = await list_configured_providers()
@@ -622,7 +622,7 @@ class TestListConfiguredProviders:
         monkeypatch.delenv("CUSTOM_OPENAI_API_KEY_99", raising=False)
 
         with patch(
-            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
             response = await list_configured_providers()
@@ -647,7 +647,7 @@ class TestListConfiguredProviders:
             monkeypatch.delenv(env_var, raising=False)
 
         with patch(
-            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={},
         ):
             response = await list_configured_providers()
@@ -660,7 +660,7 @@ class TestListConfiguredProviders:
         monkeypatch.setenv("OPENAI_API_KEY", full_key)
 
         with patch(
-            "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+            "tldw_Server_API.app.core.config_llm_providers.get_api_keys",
             return_value={"openai": full_key},
         ):
             response = await list_configured_providers()
