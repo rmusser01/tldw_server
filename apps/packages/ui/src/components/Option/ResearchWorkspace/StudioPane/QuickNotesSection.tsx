@@ -1518,6 +1518,8 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       // operation remains recoverable only through the explicit previous-save action.
       if (!canonicalUpdateBound && !migrationSuppressed) {
         const persistence = useWorkspaceStore.persist.getOptions();
+        await flushWorkspacePersistence();
+        if (!isCurrent()) return;
         const persistedWorkspace = await persistence.storage?.getItem(
           persistence.name,
         );
