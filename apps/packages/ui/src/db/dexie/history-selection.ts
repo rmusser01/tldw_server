@@ -1194,6 +1194,7 @@ const projectHistoryTurnRecovery = async (
     ...(turn.model_id ? { model_id: turn.model_id } : {}),
     ...(typeof turn.failure_reason === "string" && turn.failure_reason ? { failure_reason: turn.failure_reason } : {}),
     ...(turn.failure_action === "open-model-selector" ? { failure_action: turn.failure_action } : {}),
+    ...(turn.stopped_before_reply === true ? { stopped_before_reply: true as const } : {}),
     ...(turn.existing_selection ? {existing_selection: structuredClone(turn.existing_selection)} : {}),
     ...(turn.settlement_payload ? {settlement_payload: structuredClone({
       id: turn.settlement_payload.id, history_id: turn.settlement_payload.history_id,

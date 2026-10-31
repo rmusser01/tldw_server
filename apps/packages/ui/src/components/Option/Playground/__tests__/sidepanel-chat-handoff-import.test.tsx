@@ -78,11 +78,14 @@ vi.mock("../usage-metrics", () => ({
   })),
 }))
 
-vi.mock("@/hooks/chat/chat-action-utils", () => ({
+vi.mock("@/hooks/chat/chat-action-utils", async importOriginal => ({
   isChatSubmitSuccess: vi.fn((result: { status?: string }) =>
     result?.status === "submitted",
   ),
   normalizeChatSubmitResult: vi.fn((result) => result ?? { status: "submitted" }),
+  shouldRestoreDraftAfterSubmit: (
+    await importOriginal<typeof import("@/hooks/chat/chat-action-utils")>()
+  ).shouldRestoreDraftAfterSubmit,
   throwIfChatSubmitUnsuccessful: vi.fn(),
 }))
 

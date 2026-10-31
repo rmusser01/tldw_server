@@ -1270,7 +1270,8 @@ const captureNormalHistoryTurn = async (
     state: HistoryTurnRecovery["state"],
     extra: Pick<
       Partial<HistoryTurnRecovery>,
-      "outcome" | "interruption_reason" | "failure_reason" | "failure_action" | "settled_message_id"
+      | "outcome" | "interruption_reason" | "failure_reason" | "failure_action"
+      | "stopped_before_reply" | "settled_message_id"
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
@@ -1452,7 +1453,7 @@ const captureNormalHistoryTurn = async (
       }
       // A reply the server never received leaves the server copy incomplete.
       endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
-      const failure = !data.outcome && error != null
+      const failure = !data.outcome && !data.stoppedBeforeReply && error != null
         ? decodeChatErrorPayload(
             buildFriendlyErrorMessage(error, { modelLabel: turn.replyModel?.label })
           )
@@ -1476,13 +1477,21 @@ const captureNormalHistoryTurn = async (
             ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {}),
             ...(failure?.recoveryAction === "open-model-selector"
               ? { failure_action: failure.recoveryAction }
-              : {})
+              : {}),
+            ...(data.stoppedBeforeReply ? { stopped_before_reply: true as const } : {})
           }
         )
       )
       // Keep the admitted question selected so a deliberate no-output retry can reuse it.
-      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection)
-        await controller.followResult(view, turn.admission.input_message_id)
+      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection) {
+        const following = controller.followResult(view, turn.admission.input_message_id)
+        // A Stop ends at once; following the question may wait on a slow read (CM-02).
+        if (data.stoppedBeforeReply)
+          void Promise.resolve(following).catch(() =>
+            console.warn("Could not follow a question stopped before its reply.")
+          )
+        else await following
+      }
       await controller.refreshRecovery?.()
     },
     cancelPreparation: async () => {

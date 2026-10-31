@@ -1419,6 +1419,7 @@
     "branchPending": "Your next message will branch from this point. The existing conversation is kept.",
     "recoveryTitle": "No reply to this message",
     "recoveryUnsavedReplyTitle": "Reply not saved",
+    "stoppedBeforeReplyTitle": "Stopped before a reply",
     "recoveryUnconfirmedTitle": "Reply not confirmed",
     "switchModel": "Switch model",
     "recoveryMessage": "Your message is kept. Nothing is sent again unless you choose to retry.",

@@ -3,7 +3,8 @@ import path from "node:path"
 import ts from "typescript"
 import {
   isChatSubmitSuccess,
-  normalizeChatSubmitResult
+  normalizeChatSubmitResult,
+  shouldRestoreDraftAfterSubmit
 } from "@/hooks/chat/chat-action-utils"
 import React from "react"
 import { act, cleanup, renderHook } from "@testing-library/react"
@@ -76,6 +77,7 @@ const deployedAfterSend = (
     "restorePromptAssistAttempt",
     "isChatSubmitSuccess",
     "normalizeChatSubmitResult",
+    "shouldRestoreDraftAfterSubmit",
     "clearSubmittedDocuments",
     "selectedDocuments",
     "contextFiles",
@@ -92,6 +94,7 @@ const deployedAfterSend = (
     composer.restorePromptAssistAttempt,
     isChatSubmitSuccess,
     normalizeChatSubmitResult,
+    shouldRestoreDraftAfterSubmit,
     vi.fn(),
     [],
     [],
@@ -147,6 +150,7 @@ const deployedWebAfterSend = (
     "restorePromptAssistAttempt",
     "isChatSubmitSuccess",
     "normalizeChatSubmitResult",
+    "shouldRestoreDraftAfterSubmit",
     "messageForModel",
     "clearImportedSidepanelContext",
     "draftOwnership",
@@ -159,6 +163,7 @@ const deployedWebAfterSend = (
     composer.restorePromptAssistAttempt,
     isChatSubmitSuccess,
     normalizeChatSubmitResult,
+    shouldRestoreDraftAfterSubmit,
     undefined,
     vi.fn(),
     composer.captureDraftOwnership(),

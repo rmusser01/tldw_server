@@ -448,8 +448,20 @@ export const createFakeTldwServer = ({
     }
     const text = new Map(chat.messages.map((message) => [message.id, message.content]))
     const extra = new Map(chat.messages.map((message) => [message.id, message.metadata_extra]))
+    // Like the real server (validate_history_admission): a capture that names
+    // an accepted input returns proof when that input was admitted as the
+    // selected question, so a saved question can be retried without resending it.
+    const accepted = request.accepted_input_admission as HistoryAdmissionV1 | undefined
+    const question = resolved.rows.at(-1) as { id: string; revision: string; role: string } | undefined
+    const recorded = question ? inputAdmissions.get(question.id) : undefined
+    const validatedAdmission =
+      accepted && question?.role === "user" && recorded &&
+      recorded.input_message_id === accepted.input_message_id
+        ? { validated_admission: { admission: accepted, input_revision: question.revision } }
+        : {}
     return {
       status: "captured",
+      ...validatedAdmission,
       ...(advertiseNativeCompletion && request.purpose === "send"
         ? { native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage" } }
         : {}),
