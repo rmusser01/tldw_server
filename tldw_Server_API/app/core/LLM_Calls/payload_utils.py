@@ -141,7 +141,7 @@ def resolve_runtime_embedding_base_url(
     from tldw_Server_API.app.core.AuthNZ.byok_config import (
         is_runtime_base_url_override,
     )
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
     base_url = request.get("base_url")
     provenance = request.get("_runtime_base_url_override")

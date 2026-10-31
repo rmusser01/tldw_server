@@ -144,7 +144,7 @@ def _resolve_config_templates(cfg: Any, context: dict[str, Any]) -> Any:
                 return obj
         # Fallback: render as Jinja2 template string
         try:
-            from tldw_Server_API.app.core.Chat.prompt_template_manager import (
+            from tldw_Server_API.app.core.Utils.template_render import (
                 apply_template_to_string,
             )
             rendered = apply_template_to_string(cfg, context)
@@ -1781,7 +1781,7 @@ class WorkflowEngine:
                 return str(raw)
         if isinstance(raw, str):
             try:
-                from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+                from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
                 rendered = apply_template_to_string(raw, context) or raw
             except _WF_NONCRITICAL_EXCEPTIONS:
                 rendered = raw

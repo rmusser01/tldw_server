@@ -21,7 +21,7 @@ BASELINE = {
     # The helpers themselves.
     "core/LLM_Calls/sse.py": 2,
     # Anthropic wire format: event frame with explicit ensure_ascii.
-    "core/LLM_Calls/anthropic_messages.py": 1,
+    "core/Chat/anthropic_messages.py": 1,
     # Unterminated line handed to SSEStream.send_raw_sse_line.
     "api/v1/endpoints/character_chat_sessions.py": 1,
     # Compact separators=(",", ":") replay frames.

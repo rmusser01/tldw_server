@@ -2,13 +2,48 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from typing import Any
+from urllib.parse import urlsplit
 
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
+
+# The credential source of a call made with the user's own key on a provider that bills that key.
+# The operator pays nothing for it, so the LLM quotas neither check nor count it (TASK-13955).
+USER_KEY_SOURCE = "user"
+# A user key on an endpoint the operator runs (a custom OpenAI-compatible slot, a local server, a
+# billed provider pointed at a model server or gateway). It answers whatever key is sent, so the call
+# counts like a server-key call.
+USER_KEY_UNMETERED_SOURCE = "user_unmetered"
+# Each provider that bills per key, and the host(s) its adapter calls by default (fnmatch patterns).
+# A user key is the user's own spend only there (TASK-13955).
+VENDOR_HOSTS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("api.anthropic.com",),
+    "bedrock": ("bedrock-runtime.*.amazonaws.com",),
+    "cohere": ("api.cohere.ai",),
+    "deepseek": ("api.deepseek.com",),
+    "google": ("generativelanguage.googleapis.com",),
+    "groq": ("api.groq.com",),
+    "huggingface": ("api-inference.huggingface.co", "router.huggingface.co"),
+    "mistral": ("api.mistral.ai",),
+    "moonshot": ("api.moonshot.cn",),
+    "novita": ("api.novita.ai",),
+    "openai": ("api.openai.com",),
+    "openrouter": ("openrouter.ai",),
+    "poe": ("api.poe.com",),
+    "qwen": ("dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "dashscope.aliyuncs.com"),
+    "together": ("api.together.xyz",),
+    "zai": ("api.z.ai",),
+}
+# Every provider-section key an adapter takes its base URL from.
+_BASE_URL_KEYS = (
+    "base_url", "api_base_url", "api_base", "api_url", "api_ip", "endpoint", "runtime_endpoint",
+    "router_base_url", "huggingface_router_base_url",
+)
 
 
 @dataclass(frozen=True)
@@ -21,6 +56,7 @@ class LLMCallContext:
     exempt: bool = False
     records_itself: bool = False
     prechecked: bool = False
+    credential_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +75,63 @@ _IN_ACCOUNTED_CALL: ContextVar[bool] = ContextVar("llm_in_accounted_call", defau
 def current_llm_call_context() -> LLMCallContext:
     """The call context in effect."""
     return _CTX.get()
+
+
+def call_credential_source(request: Any = None) -> str | None:
+    """Whose key a call uses: its request's runtime credential handle, else the call context's.
+
+    A request that carries a runtime-issued handle is decided by the handle alone.
+    Never raises: a request that cannot be read is an unknown source, so its call is checked and counted.
+    """
+    try:
+        from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+            PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+            is_runtime_issued_provider_call_credentials,
+        )
+
+        handle = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY) if isinstance(request, Mapping) else None
+        if is_runtime_issued_provider_call_credentials(handle):
+            return handle.credential_source
+        return _CTX.get().credential_source
+    except Exception:  # noqa: BLE001 - accounting must never break an LLM call
+        return None
+
+
+def billed_credential_source(provider: str | None, source: str | None, *configs: Any) -> str | None:
+    """``source`` as the LLM quotas read it: a user key is the user's own spend only on its vendor's host.
+
+    ``user`` stays ``user`` only for a provider in ``VENDOR_HOSTS`` whose base
+    URLs in ``configs`` (a resolved ``app_config``, a server config snapshot) are
+    all on the vendor's host. Otherwise it becomes ``user_unmetered``, which
+    counts: a custom OpenAI-compatible slot, a local server, an unknown provider,
+    or a billed provider pointed at a model server or gateway. Every other source
+    is returned unchanged, so nothing else ever becomes ``user``.
+    """
+    if source != USER_KEY_SOURCE:
+        return source
+    from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+
+    name = canonical_provider_name(provider) if provider else ""
+    hosts = VENDOR_HOSTS.get(name)
+    if hosts is None:
+        return USER_KEY_UNMETERED_SOURCE
+    for config in configs:
+        section = config.get(PROVIDER_APP_CONFIG_KEYS[name]) if isinstance(config, Mapping) else None
+        for key in _BASE_URL_KEYS if isinstance(section, Mapping) else ():
+            url = section.get(key)
+            if isinstance(url, str) and url.strip() and not _on_vendor_host(url, hosts):
+                return USER_KEY_UNMETERED_SOURCE
+    return source
+
+
+def _on_vendor_host(url: str, hosts: tuple[str, ...]) -> bool:
+    """Whether ``url``'s host matches one of the vendor's host patterns."""
+    try:
+        host = urlsplit(url.strip()).hostname or ""
+    except ValueError:  # a malformed URL is not the vendor's
+        return False
+    return any(fnmatchcase(host, pattern) for pattern in hosts)
 
 
 def current_llm_user_id() -> int | None:

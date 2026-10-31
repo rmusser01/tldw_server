@@ -659,7 +659,7 @@ async def test_document_sync_stream_uses_bounded_next_and_reserved_close_when_ex
 ):
     """Disconnect drains direct next/close workers without the loop executor."""
     from tldw_Server_API.app.api.v1.endpoints import chat_documents as chat_docs
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 
     lifecycle = []
     default_entered = threading.Event()

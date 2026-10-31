@@ -7,14 +7,16 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.main import app
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.Chat.chat_metrics import ChatMetricsCollector
 from tldw_Server_API.app.core.Chat.prompt_template_manager import DEFAULT_RAW_PASSTHROUGH_TEMPLATE
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 pytestmark = pytest.mark.integration
 
 
-@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test_key"})
+@patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_chat_endpoint_records_run_first_rollout_labels(

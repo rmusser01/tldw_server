@@ -22,7 +22,7 @@
   - Send test notification: tldw_Server_API/app/api/v1/endpoints/monitoring.py:118
   - Tail recent notifications: tldw_Server_API/app/api/v1/endpoints/monitoring.py:141
 - Related Schemas/DB
-  - Schemas: tldw_Server_API/app/api/v1/schemas/monitoring_schemas.py:1
+  - Schemas: tldw_Server_API/app/api/v1/schemas/monitoring_schemas.py:1 (`Watchlist` and `WatchlistRule` are defined in tldw_Server_API/app/core/Monitoring/monitoring_schemas.py:1 and re-exported)
   - DB layer: tldw_Server_API/app/core/DB_Management/TopicMonitoring_DB.py:1
 
 ## 2. Technical Details of Features

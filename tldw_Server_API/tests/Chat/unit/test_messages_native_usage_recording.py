@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import messages as messages_endpoint
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import AnthropicMessagesRequest
@@ -384,3 +385,93 @@ async def test_a_streamed_batch_reply_is_costed_at_half_price(costed_rows, monke
     (row,) = costed_rows
     assert row["prompt_cost_usd"] == pytest.approx((3 * 0.005 + 60000 * 0.0005 + 2000 * 0.00625) / 1000 * 0.5)
     assert row["completion_cost_usd"] == pytest.approx(100 * 0.025 / 1000 * 0.5)
+
+
+class _UserKeyRuntime(_Runtime):
+    """Resolves the user's own key."""
+
+    async def resolve(self, provider: str, *, model: str | None = None) -> Any:
+        """Credentials whose source is the user's own key."""
+        del model
+        return SimpleNamespace(
+            provider=provider, api_key="k", app_config={}, credentials_resolved=True, credential_source="user"
+        )
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_a_native_call_on_the_users_own_key_is_recorded_as_such(rows, monkeypatch, stream) -> None:
+    """The row says the user's own key paid, so the LLM quota counters leave it out (TASK-13955)."""
+    monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _UserKeyRuntime)
+    if stream:
+        row = await _stream_row(monkeypatch, rows, STREAM_FRAMES)
+    else:
+        monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_reply(NATIVE_RESPONSE["usage"]))
+        with scoped_context(user_id=5):
+            assert (await _call("anthropic/claude-3-5-haiku-latest", stream=False)).status_code == 200
+        await llm_accounting.drain_accounting()
+        (row,) = rows
+    assert row["credential_source"] == "user"
+
+
+async def test_a_native_call_let_through_at_the_boundary_is_still_checked_when_not_on_the_users_key(
+    monkeypatch,
+) -> None:
+    """The boundary admits an over-limit user on their own key; a native call on another key is refused (TASK-13955)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+
+    calls: list[str] = []
+
+    async def _own_key(_uid: Any, _provider: str) -> bool:
+        """The boundary believes the provider runs on the user's own key."""
+        return True
+
+    async def _post(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        """The provider call, which must not happen."""
+        calls.append("native")
+        return NATIVE_RESPONSE
+
+    _stub_endpoint(monkeypatch)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _post)
+    refuse_llm_calls(monkeypatch)
+    with scoped_context(user_id=5), pytest.raises(LLMQuotaExceededError) as refused:
+        await messages_endpoint._handle_messages(
+            AnthropicMessagesRequest(model="anthropic/claude-3-5-haiku-latest", messages=[{"role": "user", "content": "hi"}]),
+            current_user=SimpleNamespace(id=5, id_int=5),
+            request=SimpleNamespace(),
+            anthropic_version=None,
+            anthropic_beta=None,
+        )
+    assert refused.value.detail["category"] == "llm_tokens_month"
+    assert calls == []
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "stream"])
+async def test_an_adapter_call_refused_at_the_call_after_an_own_key_admission_answers_402(
+    monkeypatch, stream: bool
+) -> None:
+    """The real adapter dispatch refuses a server-key call the boundary let through; the client sees 402, not 502 (TASK-13955)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+
+    async def _own_key(_uid: Any, _provider: str) -> bool:
+        """The boundary believes the provider runs on the user's own key."""
+        return True
+
+    _stub_endpoint(monkeypatch)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_calls(monkeypatch)
+    with scoped_context(user_id=5), pytest.raises(HTTPException) as refused:
+        await messages_endpoint._handle_messages(
+            AnthropicMessagesRequest(
+                model="openai/gpt-4", messages=[{"role": "user", "content": "hi"}], max_tokens=10, stream=stream
+            ),
+            current_user=SimpleNamespace(id=5, id_int=5),
+            request=SimpleNamespace(),
+            anthropic_version=None,
+            anthropic_beta=None,
+        )
+    assert refused.value.status_code == 402
+    assert refused.value.detail["category"] == "llm_tokens_month"

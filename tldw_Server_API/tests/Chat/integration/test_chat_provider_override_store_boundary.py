@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides_module
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
@@ -112,12 +112,10 @@ def test_legacy_chat_key_resolver_cannot_bypass_unhealthy_override_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Legacy adapters share the same fail-closed credential boundary."""
-    # This regression exercises the dynamic/config fallback used in production,
-    # not the explicit module-key seam installed by the Chat test harness.
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {})
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {})
+    # This regression exercises the dynamic/config fallback used in production.
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+        config_llm_providers,
+        "get_api_keys",
         lambda: {"openai": "configured-static-key"},
     )
     overrides_module.set_llm_provider_overrides_cache_for_tests(
@@ -350,7 +348,6 @@ def test_chat_static_fallback_freezes_one_config_generation_at_adapter_boundary(
     expected_base_url: str | None,
 ) -> None:
     """Chat cannot combine an earlier static decision with a later config load."""
-    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
     from tldw_Server_API.app.core.AuthNZ import byok_helpers, provider_credential_runtime
 
     rotated_config = {
@@ -408,9 +405,7 @@ def test_chat_static_fallback_freezes_one_config_generation_at_adapter_boundary(
         load_static_snapshot,
     )
     monkeypatch.setattr(byok_runtime, "loaded_config_data", initial_config)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", legacy_dynamic_keys)
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {})
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {})
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", legacy_dynamic_keys)
     monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", adapter_boundary)
     monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: None)
     monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: None)

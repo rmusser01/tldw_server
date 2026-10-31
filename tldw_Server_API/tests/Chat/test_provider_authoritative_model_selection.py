@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatConfigurationError,
 )
-from tldw_Server_API.app.core.LLM_Calls import adapter_utils, provider_model_inventory
+from tldw_Server_API.app.core.LLM_Calls import adapter_utils, gateway, provider_model_inventory
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import AuditedCallPolicyTransport
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
@@ -80,7 +80,7 @@ def boundary(monkeypatch):
             enforces_maximum_timeout=True,
         ),
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     calls = []
     result = SimpleNamespace(status="ready", models=("current-model",))
 
@@ -92,7 +92,9 @@ def boundary(monkeypatch):
         return result
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: ["retired-model"])
+    monkeypatch.setattr(gateway, "list_provider_models", chat_service.list_provider_models)
     monkeypatch.setattr(chat_service, "_configured_models_for_provider", lambda _provider: ("retired-model",))
     return SimpleNamespace(adapter=adapter, discovery=calls, result=result)
 
@@ -180,6 +182,7 @@ def test_openrouter_malformed_fallbacks_never_reach_generation(boundary, async_c
 def test_openrouter_current_fallbacks_match_actual_adapter_payload(boundary, monkeypatch, async_call):
     inventory_calls = []
     monkeypatch.setattr(chat_service, "discover_provider_models", provider_model_inventory.discover_provider_models)
+    monkeypatch.setattr(gateway, "discover_provider_models", provider_model_inventory.discover_provider_models)
 
     def fetch_inventory(**kwargs):
         inventory_calls.append(kwargs)
@@ -192,7 +195,7 @@ def test_openrouter_current_fallbacks_match_actual_adapter_payload(boundary, mon
     monkeypatch.setattr(provider_model_inventory, "_http_fetch", fetch_inventory)
     adapter = openrouter_adapter.OpenRouterAdapter()
     monkeypatch.setattr(
-        chat_service, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: adapter)
+        gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: adapter)
     )
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENROUTER", "1")
     posts = []
@@ -239,6 +242,7 @@ def test_openrouter_dispatch_snapshots_validated_fallback_candidates(boundary, m
         return boundary.result
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     chat_service.perform_chat_api_call(
         **args(
             api_provider="openrouter",
@@ -261,7 +265,7 @@ def test_real_adapter_preserves_primary_model_and_bound_auth_with_shadowed_extra
     adapter = adapter_type()
     provider = adapter.name
     monkeypatch.setattr(
-        chat_service, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: adapter)
+        gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: adapter)
     )
     monkeypatch.setenv(f"LLM_ADAPTERS_NATIVE_HTTP_{provider.upper()}", "1")
     posts = []
@@ -411,6 +415,7 @@ async def test_byok_discovery_uses_runtime_key_and_endpoint_not_server_defaults(
 @pytest.mark.parametrize("async_call", [False, True])
 def test_audited_scope_mismatch_blocks_discovery(boundary, monkeypatch, async_call):
     monkeypatch.setattr(chat_service, "discover_provider_models", provider_model_inventory.discover_provider_models)
+    monkeypatch.setattr(gateway, "discover_provider_models", provider_model_inventory.discover_provider_models)
     http_calls = []
 
     def reject_http(**_kwargs):
@@ -436,6 +441,7 @@ def test_audited_scope_mismatch_blocks_discovery(boundary, monkeypatch, async_ca
 @pytest.mark.parametrize("async_call", [False, True])
 def test_audited_current_model_uses_checked_discovery_transport(boundary, monkeypatch, async_call):
     monkeypatch.setattr(chat_service, "discover_provider_models", provider_model_inventory.discover_provider_models)
+    monkeypatch.setattr(gateway, "discover_provider_models", provider_model_inventory.discover_provider_models)
     http_calls = []
     closed = []
     policy = ProviderCallPolicy(
@@ -482,6 +488,7 @@ def test_audited_current_model_uses_checked_discovery_transport(boundary, monkey
 def test_audited_discovery_receives_policy_and_generation_shares_deadline(boundary, monkeypatch, async_call):
     clock = [100.0]
     monkeypatch.setattr(chat_service, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(gateway, "time", chat_service.time)
     policy = ProviderCallPolicy(
         max_transport_attempts=1,
         maximum_timeout_seconds=10,
@@ -490,12 +497,13 @@ def test_audited_discovery_receives_policy_and_generation_shares_deadline(bounda
     )
     policies = []
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         policies.append(call_policy)
         clock[0] += 2
         return boundary.result
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     if async_call:
         asyncio.run(chat_service.perform_chat_api_call_async(**args(model="current-model", call_policy=policy)))
     else:
@@ -508,17 +516,19 @@ def test_audited_discovery_receives_policy_and_generation_shares_deadline(bounda
 def test_audited_discovery_over_deadline_never_generates(boundary, monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(chat_service, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(gateway, "time", chat_service.time)
     policy = ProviderCallPolicy(
         max_transport_attempts=1,
         maximum_timeout_seconds=0.5,
         required_endpoint_scope=ConfiguredEndpointScope.from_url("https://api.openai.com/v1"),
     )
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         clock[0] += 1
         return boundary.result
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     with pytest.raises(ChatConfigurationError):
         chat_service.perform_chat_api_call(**args(model="current-model", call_policy=policy))
     assert boundary.adapter.calls == []
@@ -536,6 +546,7 @@ async def test_async_audited_deadline_includes_discovery_dispatch_elapsed(
 ):
     clock = [100.0]
     monkeypatch.setattr(chat_service, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(gateway, "time", chat_service.time)
     policy = ProviderCallPolicy(
         max_transport_attempts=1,
         maximum_timeout_seconds=10,
@@ -549,13 +560,15 @@ async def test_async_audited_deadline_includes_discovery_dispatch_elapsed(
         clock[0] += queued_elapsed
         return await dispatch(call, **kwargs)
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         discovery_threads.append(threading.get_ident())
         clock[0] += 1
         return boundary.result
 
     monkeypatch.setattr(chat_service, "await_bounded_sync_call", queued_dispatch)
+    monkeypatch.setattr(gateway, "await_bounded_sync_call", queued_dispatch)
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     fields = args(model="current-model", stream=stream, call_policy=policy)
     if remaining is None:
         with pytest.raises(ChatConfigurationError):
@@ -575,11 +588,12 @@ def test_attempt_only_policy_allows_current_model_generation(boundary, monkeypat
     policies = []
     policy = ProviderCallPolicy(max_transport_attempts=1)
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         policies.append(call_policy)
         return boundary.result
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     if async_call:
         asyncio.run(chat_service.perform_chat_api_call_async(**args(model="current-model", call_policy=policy)))
     else:
@@ -636,8 +650,8 @@ def test_resolved_missing_key_never_falls_back_to_server_inventory(boundary, mon
 
 
 def test_commercial_normalization_does_not_infer_aliases_from_pricing(boundary, monkeypatch):
-    monkeypatch.setattr(chat_service, "_load_alias_overrides_cached", lambda: {})
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda _provider: ("CURRENT-MODEL",))
+    monkeypatch.setattr(gateway, "_load_alias_overrides_cached", lambda: {})
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda _provider: ("CURRENT-MODEL",))
     request = SimpleNamespace(api_provider="openai", model="current-model")
     assert chat_service.normalize_request_provider_and_model(request, "openai") == "openai"
     assert request.model == "current-model"
@@ -653,7 +667,7 @@ def test_explicit_cloud_user_alias_destination_requires_exact_inventory(
     available,
 ):
     monkeypatch.setenv("CHAT_MODEL_ALIAS_OVERRIDES", json.dumps({provider: {"friendly": destination}}))
-    chat_service._load_alias_overrides_cached.cache_clear()
+    gateway._load_alias_overrides_cached.cache_clear()
     try:
         request = SimpleNamespace(api_provider=provider, model="friendly")
         assert chat_service.normalize_request_provider_and_model(request, provider) == provider
@@ -668,7 +682,7 @@ def test_explicit_cloud_user_alias_destination_requires_exact_inventory(
                 chat_service.perform_chat_api_call(**fields)
             assert boundary.adapter.calls == []
     finally:
-        chat_service._load_alias_overrides_cached.cache_clear()
+        gateway._load_alias_overrides_cached.cache_clear()
 
 
 def test_inventory_endpoint_remains_generation_endpoint_after_env_changes(boundary, monkeypatch):
@@ -680,6 +694,7 @@ def test_inventory_endpoint_remains_generation_endpoint_after_env_changes(bounda
         return boundary.result
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     chat_service.perform_chat_api_call(**args(model="current-model"))
     request = boundary.adapter.calls[0][1]
     assert boundary.adapter._resolve_base_url(request) == "https://before.invalid/v1"
@@ -687,7 +702,7 @@ def test_inventory_endpoint_remains_generation_endpoint_after_env_changes(bounda
 
 @pytest.mark.parametrize("prevalidator", [False, True])
 def test_unresolved_inventory_endpoint_never_falls_back(boundary, monkeypatch, prevalidator):
-    monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gateway, "resolve_provider_models_base_url", lambda *_args, **_kwargs: None)
     with pytest.raises(ChatConfigurationError):
         if prevalidator:
             chat_service.is_model_known_for_provider(
@@ -705,7 +720,7 @@ def test_unresolved_inventory_endpoint_never_falls_back(boundary, monkeypatch, p
 
 def test_invalid_explicit_inventory_endpoint_is_rejected_before_discovery(boundary):
     with pytest.raises(ChatConfigurationError):
-        chat_service._validate_provider_model_selection(
+        gateway._validate_provider_model_selection(
             "openai",
             {
                 "api_key": "fake-request-key",
@@ -762,12 +777,13 @@ def test_inventory_failures_map_to_the_errors_the_endpoints_handle(
 ):
     """A model-list 401 is an authentication failure a refreshable OAuth token may retry (review I3, M1)."""
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_a, **_k: ModelDiscoveryResult(status))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     request = {
         "model": "current-model", "api_key": "synthetic-key", "base_url": "https://provider.example.invalid/v1",
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: SimpleNamespace(auth_source=auth_source),
     }
     with pytest.raises(expected) as error:
-        chat_service._validate_provider_model_selection("openai", request)
+        gateway._validate_provider_model_selection("openai", request)
     if expected is ChatAuthenticationError:
         assert error.value.status_code == 401
     else:
@@ -778,8 +794,9 @@ def test_inventory_failures_map_to_the_errors_the_endpoints_handle(
 
 def test_unlisted_model_names_the_model_provider_and_fix(monkeypatch):
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_a, **_k: ModelDiscoveryResult("ready", ("other",)))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     with pytest.raises(ChatBadRequestError) as error:
-        chat_service._validate_provider_model_selection(
+        gateway._validate_provider_model_selection(
             "openai", {"model": "gpt-gone", "api_key": "synthetic-key", "base_url": "https://provider.example.invalid/v1"},
         )
     message = str(error.value)

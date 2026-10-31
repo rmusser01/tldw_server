@@ -15,7 +15,7 @@ configuration.
 - Audio setup packs: `audio_bundle_catalog.py`, `audio_profile_service.py`,
   `audio_pack_service.py`, and `audio_readiness_store.py`.
 - API endpoint and schemas: `app/api/v1/endpoints/setup.py` and
-  `app/api/v1/schemas/setup_schemas.py`.
+  `app/api/v1/schemas/setup_schemas.py`, which re-exports the models defined in this package's `setup_schemas.py`.
 - Tests: `tests/Setup/`.
 
 ## Responsibilities

@@ -14,7 +14,7 @@ from loguru import logger
 from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tiktoken_encoding_or_default,
 )
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.testing import is_test_mode

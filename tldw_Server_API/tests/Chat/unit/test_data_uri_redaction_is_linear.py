@@ -5,7 +5,7 @@ An unbounded ``(data:image[^,]*,)`` rescans to the end of the text for every
 seconds to redact. Each chat call site must handle it in well under two seconds.
 The call sites now share one pattern, so the endpoint's estimate also redacts a
 payload outside a "url" key and the size validator an uppercase data URI.
-Since TASK-13843 the chat path has one redactor (prompt_cost_envelope._sanitize_data_uris)
+Since TASK-13843 the chat path has one redactor (core.Utils.tokenizer.redact_data_uris)
 and one estimate (estimate_segment_tokens) behind every prompt-size estimate.
 """
 

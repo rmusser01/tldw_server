@@ -13,14 +13,6 @@ from typing import Any
 import aiofiles
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import (
-    FileArtifact,
-    FileCreateOptions,
-    FileCreateRequest,
-    FileExportInfo,
-    FileExportRequest,
-    FileValidationResult,
-)
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
 from tldw_Server_API.app.core.config import get_config_value
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
@@ -31,6 +23,14 @@ from tldw_Server_API.app.core.File_Artifacts.adapters.base import ExportResult, 
 from tldw_Server_API.app.core.File_Artifacts.adapters.image_adapter import (
     reset_image_adapter_request_context,
     set_image_adapter_request_context,
+)
+from tldw_Server_API.app.core.File_Artifacts.file_artifacts_schemas import (
+    FileArtifact,
+    FileCreateOptions,
+    FileCreateRequest,
+    FileExportInfo,
+    FileExportRequest,
+    FileValidationResult,
 )
 from tldw_Server_API.app.core.File_Artifacts.metrics import register_file_artifacts_metrics
 from tldw_Server_API.app.core.Jobs.manager import JobManager

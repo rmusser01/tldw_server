@@ -42,7 +42,7 @@ def _optional_config_text(value: Any) -> str | None:
 
 def _configuration_error() -> Exception:
     """Build one bounded configuration error without reflecting endpoint data."""
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
     return ChatConfigurationError(
         provider="huggingface",
@@ -178,7 +178,7 @@ class HuggingFaceAdapter(ChatProvider):
             try:
                 model_path = encode_huggingface_model_path(model)
             except ValueError:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+                from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 
                 raise ChatBadRequestError(
                     provider=self.name,

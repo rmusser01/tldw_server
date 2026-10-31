@@ -29,6 +29,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionUserMessageParam,
 )
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
@@ -38,7 +39,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import (
     chat_service,
     chat_target_resolution,
@@ -53,8 +53,10 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import ProviderCredentialTerminalError
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
 from tldw_Server_API.app.main import app
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     issue_provider_call_credentials_async,
 )
@@ -212,13 +214,13 @@ def _real_router_inputs(scope: str) -> tuple[
 
 @pytest.fixture(autouse=True)
 def _freeze_legacy_test_api_keys_for_runtime(monkeypatch):
-    """Expose legacy module test keys through the runtime's frozen config seam."""
+    """Expose the test keys set on config_llm_providers.get_api_keys through the runtime's frozen config seam."""
     from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
     from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
 
     def load_snapshot():
         snapshot = {}
-        for provider, api_key in dict(chat_endpoint.API_KEYS).items():
+        for provider, api_key in config_llm_providers.get_api_keys().items():
             section = PROVIDER_APP_CONFIG_KEYS.get(provider)
             if (
                 section is not None
@@ -709,7 +711,7 @@ def test_chat_completion_basic(authenticated_client, mock_chacha_db, setup_depen
     # Mock the LLM call and API keys
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -784,7 +786,7 @@ def test_chat_completion_streaming(authenticated_client, mock_chacha_db):
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = mock_stream()
 
@@ -817,7 +819,7 @@ def test_chat_completion_with_character(authenticated_client, mock_chacha_db, se
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -867,7 +869,7 @@ def test_chat_completion_invalid_model(authenticated_client, mock_chacha_db, set
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         # Simulate an error for invalid model
         mock_llm.side_effect = Exception("Invalid model: invalid-model-xyz")
@@ -892,7 +894,7 @@ def test_chat_completion_explicit_model_unavailable_returns_400(
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
             return_value=False,
@@ -938,7 +940,7 @@ def test_chat_completion_disables_provider_fallback_for_explicit_model(
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
             return_value=True,
@@ -974,19 +976,21 @@ def test_chat_completion_strict_selection_accepts_a_saved_dotted_anthropic_name(
     provider_manager.circuit_breakers = {}
     # Strict selection asks Anthropic's live list (TASK-13460), which holds only the dashed ID.
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setattr(
-        chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.anthropic.com/v1",
+        gateway, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.anthropic.com/v1",
     )
     monkeypatch.setattr(
         chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("claude-sonnet-4-5",)),
     )
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"anthropic": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"anthropic": "test-key"})),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
 
@@ -1008,7 +1012,7 @@ def test_chat_completion_revalidates_default_model(authenticated_client, mock_ch
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.get_override_default_model", return_value="bad-model"),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.validate_provider_override", side_effect=_fake_validate),
     ):
@@ -1047,7 +1051,7 @@ def test_chat_completion_default_model_tracks_model(authenticated_client, mock_c
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.get_override_default_model", return_value="default-model"),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.validate_provider_override", return_value=None),
     ):
@@ -1269,7 +1273,7 @@ def test_chat_completion_downgrades_structured_response_format_before_provider_c
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -1338,7 +1342,7 @@ def test_chat_completion_uses_one_runtime_and_marks_success_once(
             "execute_streaming_call",
             side_effect=fake_execute_streaming_call,
         ),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -1389,9 +1393,9 @@ def test_chat_completion_resolves_health_fallback_with_same_runtime(
             side_effect=fake_execute_non_stream_call,
         ),
         patch.object(
-            chat_endpoint,
-            "API_KEYS",
-            {"openai": "legacy-openai", "anthropic": "legacy-anthropic"},
+            config_llm_providers,
+            "get_api_keys",
+            api_keys_source({"openai": "legacy-openai", "anthropic": "legacy-anthropic"}),
         ),
     ):
         response = authenticated_client.post(
@@ -2836,7 +2840,7 @@ def test_chat_credential_resolution_errors_are_terminal_503(
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
         patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
         patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
@@ -2867,7 +2871,7 @@ def test_chat_missing_runtime_credentials_are_terminal_503(
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
         patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
         patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
@@ -2992,7 +2996,7 @@ def test_chat_provider_auth_and_config_errors_are_sanitized_and_terminal(
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
         patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
         patch.object(
             chat_endpoint,
             "execute_non_stream_call",
@@ -3280,7 +3284,9 @@ def test_chat_closes_runtime_for_every_setup_failure_after_construction(
 
     with ExitStack() as stack:
         stack.enter_context(patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type))
-        stack.enter_context(patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}))
+        stack.enter_context(
+            patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"}))
+        )
         if failure_point == "auto_router":
             stack.enter_context(
                 patch.object(
@@ -4057,8 +4063,8 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
 ):
     import httpx
 
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
 
     sentinel = "real-openai-401-secret-/srv/provider"
@@ -5259,7 +5265,7 @@ def test_chat_completion_with_conversation_history(authenticated_client, mock_ch
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -5298,7 +5304,7 @@ def test_chat_completion_rate_limiting(authenticated_client, mock_chacha_db, set
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -5365,9 +5371,10 @@ def test_chat_completion_rg_primary_deny(
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openai": "test-key"},
+        patch.object(
+            config_llm_providers,
+            "get_api_keys",
+            api_keys_source({"openai": "test-key"}),
         ),
     ):
         mock_llm.return_value = {
@@ -5444,9 +5451,10 @@ def test_chat_completion_rg_shadow_vs_primary_behaviour(
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openai": "test-key"},
+        patch.object(
+            config_llm_providers,
+            "get_api_keys",
+            api_keys_source({"openai": "test-key"}),
         ),
     ):
         mock_llm.return_value = {
@@ -6813,6 +6821,7 @@ def test_real_openai_nonstream_auth_status_controls_oauth_refresh(
 def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_source: str | None = "oauth"):
     """POST one OpenAI chat through the real adapter; only the model list and generation transport are faked."""
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
 
     generation_keys: list[str] = []
@@ -6853,8 +6862,9 @@ def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
-        patch.object(chat_service, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
+        patch.object(gateway, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
         patch.object(chat_service, "discover_provider_models", discover),
+        patch.object(gateway, "discover_provider_models", discover),
         patch.object(openai_adapter, "http_client_factory", lambda **_kwargs: Client()),
     ):
         response = client.post("/api/v1/chat/completions", json=request_data.model_dump())

@@ -10,6 +10,7 @@ from unittest.mock import patch, MagicMock
 from dotenv import load_dotenv
 from pathlib import Path
 
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 
 # Load environment variables from the canonical Config_Files/.env
@@ -45,6 +46,7 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
     list_provider_models,
     get_pricing_catalog,
 )
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 # --- Fixtures defined locally in this file ---
@@ -826,7 +828,7 @@ def test_local_provider_non_streaming_no_template(
 
 
 # --- Invalid Key Test (for a commercial provider that needs a key) ---
-@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "invalid_key"})
+@patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "invalid_key"}))
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")  # Mock the shim
 def test_chat_integration_invalid_key_for_commercial_provider_standalone(
     mock_chat_api_call_shim, client, valid_auth_token, mock_db_dependencies_for_integration
@@ -876,7 +878,7 @@ def test_chat_integration_bad_request_missing_messages_standalone(
 
 
 @pytest.mark.integration
-@patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-test"}, clear=False)
+@patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "sk-test"}))
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
 def test_chat_completions_response_shape_unchanged(
     mock_chat_api_call_shim, client, valid_auth_token, mock_db_dependencies_for_integration

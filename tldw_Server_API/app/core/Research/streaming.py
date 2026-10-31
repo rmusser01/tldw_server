@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.research_runs_schemas import ResearchRunSnapshotResponse
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchRunEventRow
+from tldw_Server_API.app.core.Research.research_runs_schemas import ResearchRunSnapshotResponse
 
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 

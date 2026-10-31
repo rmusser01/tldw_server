@@ -17,12 +17,22 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import validate_base_url_override
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.LLM_Calls import chat_calls
+from tldw_Server_API.app.core.LLM_Calls import gateway as llm_gateway
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.Security import egress
 
 pytestmark = [pytest.mark.unit, pytest.mark.provider_inventory]
+
+# What character-chat roleplay resume sends: capability limits only, no endpoint scope or deadline.
+CAPABILITY_ONLY_POLICY = ProviderCallPolicy(
+    allow_streaming=False,
+    allow_tools=False,
+    allow_response_format=False,
+    allow_sampling_modifiers=False,
+    candidate_count=1,
+)
 
 
 @pytest.fixture
@@ -40,7 +50,19 @@ def gateway(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 - http.server API
             hits.append(self.path)
-            body = json.dumps({"data": [{"id": "gateway-model"}]}).encode()
+            self._reply({"data": [{"id": "gateway-model"}]})
+
+        def do_POST(self) -> None:  # noqa: N802 - http.server API
+            hits.append(self.path)
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            message = {"role": "assistant", "content": "gateway reply"}
+            self._reply({
+                "id": "gateway-completion", "object": "chat.completion", "created": 0, "model": "gateway-model",
+                "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+            })
+
+        def _reply(self, payload: Any) -> None:
+            body = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -72,14 +94,42 @@ def test_operator_configured_localhost_gateway_is_discovered_through_real_fetch(
         "api_key": "synthetic-key",
         "app_config": gateway.server_config,
     }
-    chat_service._validate_provider_model_selection("openai", request)
+    llm_gateway._validate_provider_model_selection("openai", request)
     assert gateway.hits == ["/v1/models"]
     assert request["base_url"] == gateway.base
 
 
+def test_capability_only_call_policy_reaches_the_env_configured_gateway(
+    gateway: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Character-chat roleplay resume (#3191 E2E regression): a policy without an endpoint scope
+    must not drop the operator's scope, or discovery refuses the loopback base generation calls.
+
+    The base comes from ``OPENAI_API_BASE_URL``, as in the E2E workflow.
+    """
+    monkeypatch.setattr(chat_calls, "load_and_log_configs", lambda: {"openai_api": {}})
+    monkeypatch.setenv("OPENAI_API_BASE_URL", gateway.base)
+
+    response = llm_gateway.perform_chat_api_call(
+        api_endpoint="openai",
+        messages_payload=[{"role": "user", "content": "hello"}],
+        api_key="sk-synthetic-key",
+        model="gateway-model",
+        streaming=False,
+        app_config={"openai_api": {"api_base_url": gateway.base}},
+        call_policy=CAPABILITY_ONLY_POLICY,
+    )
+
+    assert gateway.hits[0] == "/v1/models"
+    assert "/v1/chat/completions" in gateway.hits
+    assert response["choices"][0]["message"]["content"] == "gateway reply"
+
+
+@pytest.mark.parametrize("call_policy", [None, CAPABILITY_ONLY_POLICY], ids=["no-policy", "capability-policy"])
 @pytest.mark.parametrize("block_private", [True, False])
 def test_byok_private_gateway_is_refused_exactly_when_generation_refuses(
     gateway: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, block_private: bool,
+    call_policy: ProviderCallPolicy | None,
 ) -> None:
     """A BYOK base keeps the default policy its stored base_url was admitted with, never a wider scope.
 
@@ -101,8 +151,10 @@ def test_byok_private_gateway_is_refused_exactly_when_generation_refuses(
         "credentials_resolved": True,
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: SimpleNamespace(endpoint_provenance="byok", auth_source=None),
     }
+    if call_policy is not None:
+        request["call_policy"] = call_policy
     try:
-        chat_service._validate_provider_model_selection("openai", request)
+        llm_gateway._validate_provider_model_selection("openai", request)
         discovery_refuses = False
     except ChatConfigurationError:
         discovery_refuses = True

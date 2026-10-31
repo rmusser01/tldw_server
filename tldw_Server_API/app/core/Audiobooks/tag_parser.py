@@ -6,7 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from tldw_Server_API.app.api.v1.schemas.audiobook_schemas import ChapterPreview
+from tldw_Server_API.app.core.Audiobooks.audiobook_schemas import ChapterPreview
 
 _TAG_LINE_RE = re.compile(r"^\[\[(.+)\]\]$")
 _CHAPTER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")

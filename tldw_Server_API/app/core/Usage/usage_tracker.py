@@ -362,11 +362,15 @@ async def log_llm_usage(
     prompt_fingerprint: str | None = None,
     prompt_fingerprint_version: str | None = None,
     world_book_fingerprint: str | None = None,
+    credential_source: str | None = None,
 ) -> None:
     """
     Insert a single llm_usage_log row. Computes costs if needed.
 
-    This function is best-effort and should never raise; errors are logged.
+    ``credential_source`` is whose provider key the call used (``user``,
+    ``team``, ``org``, ``server_default``), or None when unknown; the LLM quota
+    counters leave ``user`` rows out. This function is best-effort and should
+    never raise; errors are logged.
     """
     if not _enabled():
         return
@@ -530,6 +534,7 @@ async def log_llm_usage(
             prompt_fingerprint_version=prompt_fingerprint_version,
             world_book_fingerprint=world_book_fingerprint,
             raw_usage_metadata_json=raw_usage_metadata_json,
+            credential_source=credential_source,
         )
 
         # Shadow-write daily token usage into the shared ResourceDailyLedger so

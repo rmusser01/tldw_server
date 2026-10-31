@@ -20,7 +20,7 @@ from typing import Any, NoReturn
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import ChatAPIError
 
 
 def raise_if_in_band_provider_error(
@@ -31,13 +31,13 @@ def raise_if_in_band_provider_error(
 ) -> None:
     """Reject structured HTTP-200 and SSE error envelopes safely."""
 
-    from tldw_Server_API.app.core.Chat.streaming_utils import (
-        normalize_provider_stream_error,
-    )
     from tldw_Server_API.app.core.exceptions import raise_detached_error
     from tldw_Server_API.app.core.LLM_Calls.error_utils import (
         build_sanitized_chat_error,
         log_provider_failure,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+        normalize_provider_stream_error,
     )
 
     normalized = normalize_provider_stream_error(value)
@@ -94,7 +94,7 @@ class ChatProvider(ABC):
 
     def _validate_model_inventory(self, request: dict[str, Any], refreshable_oauth: bool = False) -> None:
         """Cover direct adapter callers as well as the ordinary Chat dispatcher."""
-        from tldw_Server_API.app.core.Chat.chat_service import (
+        from tldw_Server_API.app.core.LLM_Calls.gateway import (
             _call_policy_after_model_discovery,
             _validate_provider_model_selection,
         )

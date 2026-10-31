@@ -169,6 +169,7 @@ def _stub_openai_model_inventory(monkeypatch, *, api_key: str | None = None):
     discovery used the same credential as generation.
     """
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     def discover(_provider, key, **_kwargs):
@@ -176,8 +177,9 @@ def _stub_openai_model_inventory(monkeypatch, *, api_key: str | None = None):
             return ModelDiscoveryResult("auth_failed")
         return ModelDiscoveryResult("ready", ("gpt-test",))
 
-    monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1")
+    monkeypatch.setattr(gateway, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1")
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
 
 
 async def _insert_raw_user_payload(pool, *, user_id: int, provider: str, payload: dict) -> None:

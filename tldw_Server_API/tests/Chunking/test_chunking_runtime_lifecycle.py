@@ -22,12 +22,12 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     dumps_envelope,
     encrypt_byok_payload,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon
 from tldw_Server_API.app.core.Chunking.strategies.rolling_summarize import (
     LLM_USAGE_SUCCEEDED_KEY,
     LLM_USAGE_TRACKER_KEY,
 )
 from tldw_Server_API.app.core.Chunking.templates import TemplateProcessor
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
 
 pytestmark = pytest.mark.unit
 

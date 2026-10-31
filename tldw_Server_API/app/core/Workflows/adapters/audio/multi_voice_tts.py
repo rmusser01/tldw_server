@@ -79,7 +79,7 @@ async def _synthesize_section(
     provider: str | None = None,
 ) -> int:
     """Synthesize a single text section, returning size in bytes."""
-    from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+    from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
     from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 
     req = OpenAISpeechRequest(

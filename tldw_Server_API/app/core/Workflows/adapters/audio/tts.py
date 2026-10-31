@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 try:
-    from tldw_Server_API.app.api.v1.schemas.audio_schemas import (  # type: ignore
+    from tldw_Server_API.app.core.TTS.speech_schemas import (  # type: ignore
         NormalizationOptions,
         OpenAISpeechRequest,
     )
@@ -80,7 +80,7 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
         return {"error": "tts_unavailable"}
 
     # Resolve input text
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     text_t = str(config.get("input") or "").strip()
     if text_t:

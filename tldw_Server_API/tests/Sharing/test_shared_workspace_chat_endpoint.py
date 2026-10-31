@@ -679,21 +679,21 @@ async def test_receipt_lease_uses_unique_catalog_provider_for_unqualified_model(
     monkeypatch,
 ) -> None:
     from tldw_Server_API.app.core.Chat import (
-        chat_service,
         chat_target_resolution,
     )
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     # Catalog inference only switches between local providers; a commercial model
     # needs a credentialed provider inventory (TASK-13460), so it never infers one.
     monkeypatch.setattr(chat_target_resolution, "get_default_provider", lambda: "llama.cpp")
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda provider: [])
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda provider: [])
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_provider_has_model_cached",
         lambda provider, model: False,
     )
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda model: ("ollama",),
     )

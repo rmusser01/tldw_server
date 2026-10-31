@@ -165,7 +165,7 @@ def _install_explicit_chat_capture(
 ) -> dict[str, Any]:
     """Capture a real chat-service boundary while forbidding server fallback."""
     from tldw_Server_API.app.core.Chat import chat_service
-    from tldw_Server_API.app.core.LLM_Calls import adapter_utils
+    from tldw_Server_API.app.core.LLM_Calls import adapter_utils, gateway
 
     def fail_server_fallback(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("server credential fallback must not run")
@@ -179,7 +179,7 @@ def _install_explicit_chat_capture(
     )
 
     async def fake_chat_call(**kwargs: Any) -> Any:
-        provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+        provider, request, _internal = gateway._build_adapter_request_from_chat_args(
             kwargs
         )
         captured["provider"] = provider
@@ -197,7 +197,7 @@ def _install_blocking_sync_chat_adapter(
 ) -> tuple[threading.Event, threading.Event]:
     """Install a real sync-only adapter whose completion is event-gated."""
 
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     entered = threading.Event()
     release = threading.Event()
@@ -212,7 +212,7 @@ def _install_blocking_sync_chat_adapter(
             return response
 
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: BlockingSyncAdapter()),
     )

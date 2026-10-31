@@ -7,7 +7,11 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import roleplay_resume_fence
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import prepare_roleplay_resume
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.tests.LLM_Calls.test_provider_inventory_egress_scope import (  # noqa: F401 - fixture, renamed so it cannot shadow the gateway module
+    gateway as loopback_gateway,
+)
 
 
 @pytest.fixture
@@ -386,7 +390,7 @@ def test_saved_kobold_sampling_reaches_actual_http_payload(resume_api, monkeypat
     import httpx
 
     from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     client, db, _, headers = resume_api
     card = db.add_character_card(
@@ -429,9 +433,9 @@ def test_saved_kobold_sampling_reaches_actual_http_payload(resume_api, monkeypat
             request=httpx.Request("POST", kwargs["url"]),
         )
 
-    adapter = chat_service._get_llm_registry().get_adapter("kobold")
+    adapter = gateway._get_llm_registry().get_adapter("kobold")
     monkeypatch.setattr(adapter, "http_fetcher", fetch)
-    frozen = db.prepare_roleplay_resume_generation(cid, body["tldw_roleplay_resume_v1"], owner_client_id="1")
+    frozen = prepare_roleplay_resume(db, cid, body["tldw_roleplay_resume_v1"], owner_client_id="1")
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert response.json()["saved"] is True
@@ -563,7 +567,7 @@ def test_resume_suppresses_current_local_tool_and_candidate_defaults_at_http_bou
     import httpx
 
     from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     client, db, cid, headers = resume_api
     body = generation_request(client, db, cid, headers)
@@ -594,7 +598,7 @@ def test_resume_suppresses_current_local_tool_and_candidate_defaults_at_http_bou
             request=httpx.Request("POST", kwargs["url"]),
         )
 
-    monkeypatch.setattr(chat_service._get_llm_registry().get_adapter("local-llm"), "http_fetcher", fetch)
+    monkeypatch.setattr(gateway._get_llm_registry().get_adapter("local-llm"), "http_fetcher", fetch)
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert response.json()["saved"] is True
@@ -682,6 +686,30 @@ def test_resume_suppresses_unsaved_sampling_modifiers_at_vendor_http_boundary(re
     assert response.json()["saved"] is True
     assert not {"seed", "presence_penalty", "frequency_penalty", "logit_bias"} & sent[0].keys()
     assert sent[0]["model"] == model
+
+
+@pytest.mark.provider_inventory
+def test_resume_reaches_the_env_configured_loopback_gateway(resume_api, loopback_gateway, monkeypatch):  # noqa: F811 - pytest fixture
+    """#3191 E2E regression: Resume's capability-only call policy keeps the operator's loopback scope.
+
+    Real model discovery, egress policy and generation against ``OPENAI_API_BASE_URL``, as in the E2E workflow.
+    """
+    client, db, _, headers = resume_api
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-roleplay-test-only-key")
+    monkeypatch.setenv("OPENAI_API_BASE_URL", loopback_gateway.base)
+    card = db.add_character_card({"name": "Gateway Ava"})
+    cid = create_character_conversation(
+        db,
+        conversation_data={"character_id": card, "title": "Gateway Resume", "client_id": "1"},
+        provider="openai",
+        model="gateway-model",
+    )
+    body = generation_request(client, db, cid, headers)
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["assistant_content"] == "gateway reply"
+    assert loopback_gateway.hits[0] == "/v1/models"
+    assert "/v1/chat/completions" in loopback_gateway.hits
 
 
 _RESUME_FEATURES = {
