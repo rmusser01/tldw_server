@@ -4062,7 +4062,7 @@
         },
         {
           "id": "llm_budget_guard.enforce_llm_budget",
-          "module": "tldw_Server_API.app.core.AuthNZ.llm_budget_guard",
+          "module": "tldw_Server_API.app.core.Usage.llm_budget_guard",
           "type": "dependency"
         },
         {
@@ -6553,7 +6553,7 @@
         },
         {
           "id": "llm_budget_guard.enforce_llm_budget",
-          "module": "tldw_Server_API.app.core.AuthNZ.llm_budget_guard",
+          "module": "tldw_Server_API.app.core.Usage.llm_budget_guard",
           "type": "dependency"
         },
         {

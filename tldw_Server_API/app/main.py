@@ -2476,7 +2476,7 @@ from tldw_Server_API.app.core.config import (
 
 # Starlette wraps later middleware around earlier middleware. Register LLM
 # budget first so receive-time admission runs before its JSON body parsing.
-from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+from tldw_Server_API.app.core.Usage.llm_budget_middleware import LLMBudgetMiddleware
 
 try:
     app.add_middleware(LLMBudgetMiddleware)

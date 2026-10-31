@@ -51,6 +51,7 @@ MOVED: dict[str, str] = {
             "byok_validation_runs_repo",
         )
     },
+    **{f"AuthNZ.{name}": f"Usage.{name}" for name in ("llm_budget_guard", "llm_budget_middleware")},
 }
 
 # Scanned root -> the dotted package name of that root (for resolving relative imports).

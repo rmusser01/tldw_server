@@ -1734,8 +1734,15 @@ def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() ->
 MOVED_E2E_PATHS = [
     "tldw_Server_API/app/core/Provider_Credentials/byok_runtime.py",
     "tldw_Server_API/app/core/Provider_Credentials/repos/user_provider_secrets_repo.py",
+    "tldw_Server_API/app/core/Usage/llm_budget_guard.py",
+    "tldw_Server_API/app/core/Usage/llm_budget_middleware.py",
 ]
-AUTHNZ_FLOOR_TARGETS = {"tldw_Server_API/app/core/AuthNZ", "tldw_Server_API/app/core/Provider_Credentials"}
+AUTHNZ_FLOOR_TARGETS = {
+    "tldw_Server_API/app/core/AuthNZ",
+    "tldw_Server_API/app/core/Provider_Credentials",
+    "tldw_Server_API.app.core.Usage.llm_budget_guard",
+    "tldw_Server_API.app.core.Usage.llm_budget_middleware",
+}
 
 
 @pytest.mark.unit

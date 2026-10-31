@@ -22,7 +22,9 @@ def test_authnz_core_avoids_connection_capability_backend_probing():
     for root in roots:
         assert root.exists(), f"Expected core path not found: {root}"
     files = [path for root in roots for path in root.rglob("*.py")]
+    files += [project_root / "app" / "core" / "Usage" / f"llm_budget_{name}.py" for name in ("guard", "middleware")]
     assert project_root / "app" / "core" / "Provider_Credentials" / "byok_runtime.py" in files
+    assert project_root / "app" / "core" / "Usage" / "llm_budget_guard.py" in files
 
     forbidden_patterns = (
         re.compile(r"hasattr\(\s*conn\s*,\s*['\"]fetch['\"]\s*\)"),
