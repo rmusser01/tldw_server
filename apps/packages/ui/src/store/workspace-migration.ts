@@ -1,5 +1,6 @@
 import {
   classifyResearchWorkspaceLegacyStorageSurface,
+  RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX,
   RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX,
   RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX,
   evaluateResearchWorkspaceLegacyDeletionEligibility,
@@ -113,7 +114,7 @@ export const readResearchWorkspaceChatReference = (
 }
 
 const chatReferenceKey = (workspaceId: string, scopeKey: string): string =>
-  `tldw:research-workspace:chat-reference:${encodeURIComponent(scopeKey)}:${encodeURIComponent(workspaceId)}`
+  `${RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX}:${encodeURIComponent(scopeKey)}:${encodeURIComponent(workspaceId)}`
 
 export const readSavedResearchWorkspaceChatReference = (
   storage: Storage,
