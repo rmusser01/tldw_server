@@ -897,6 +897,47 @@ it.each(["base-path", "org", "auth-source"])(
   },
 );
 
+it("flushes the real coalesced recovery pointer before a fresh Note is dispatched", async () => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } })
+  await act(async () => {
+    await flushWorkspacePersistence()
+  })
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    if (request.method === "POST") {
+      const persistence = useWorkspaceStore.persist.getOptions()
+      const stored = await persistence.storage!.getItem(persistence.name)
+      expect(
+        stored?.state.workspaceSnapshots?.["workspace-a"]?.currentNote
+          .pendingNoteWriteKey
+      ).toBe(useWorkspaceStore.getState().currentNote.pendingNoteWriteKey)
+      expect(
+        useWorkspaceStore.getState().currentNote.pendingNoteWriteKey
+      ).toMatch(/^surface:quick-notes:/)
+    }
+    return { ...request.body, id: request.body.id, version: 1 }
+  })
+  vi.useFakeTimers()
+  // Chrome can defer idle delivery; keep the real coalescer buffered until its explicit drain.
+  vi.stubGlobal("requestIdleCallback", () => 0)
+  vi.stubGlobal("cancelIdleCallback", vi.fn())
+  const view = render(<QuickNotesSection />)
+  try {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    })
+    expect(writes()).toHaveLength(1)
+    expect(mocks.error).not.toHaveBeenCalled()
+    expect(writes()[0][0].body.content).toBe("Original draft body")
+    expect(writes()[0][0].servicePromptConfig.expectedUserId).toBe("alice")
+  } finally {
+    view.unmount()
+    await flushWorkspacePersistence()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  }
+})
+
 it("refuses dispatch if the operation record succeeds but the real Workspace pointer persistence fails", async () => {
   useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } });
   // The coalescing persist writer defers the setup write above; drain it so
