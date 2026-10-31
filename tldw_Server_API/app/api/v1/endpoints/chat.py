@@ -412,6 +412,16 @@ def _derive_endpoint_provenance(
     return credentials.endpoint_provenance
 
 
+async def _own_key_before_the_hosted_plan(current_user: Any, provider: str, billing_org_id: Any) -> bool | None:
+    """Whether the user's own key serves ``provider``; None when the hosted plan does not check this request.
+
+    Asked once per request: ``enforce_llm_quota`` reuses the answer (ADR-083).
+    """
+    if not enforcement_enabled() or billing_org_id is None:
+        return None
+    return await users_own_key_serves(getattr(current_user, "id", None), provider)
+
+
 def _request_has_endpoint_override(request_data: Any) -> bool:
     """Return whether parsed request data contains an explicit endpoint override."""
     return any(
@@ -4396,12 +4406,8 @@ async def create_chat_completion(
 
             # Billing: LLM token enforcement via context manager (tracks actual usage). A request whose
             # provider runs on the user's own key is neither checked nor counted as plan usage (ADR-083).
-            if (
-                enforcement_enabled()
-                and billing_org_id is not None
-                and not _billing_enforcer_entered
-                and not await users_own_key_serves(getattr(current_user, "id", None), selected_provider)
-            ):
+            own_key = await _own_key_before_the_hosted_plan(current_user, selected_provider, billing_org_id)
+            if own_key is False and not _billing_enforcer_entered:
                 try:
                     _billing_enforcer = LimitEnforcer(
                         billing_org_id,
@@ -4418,7 +4424,8 @@ async def create_chat_completion(
 
             # Usage quotas (LLM usage accounting spec §4a): monthly LLM tokens, and daily and monthly LLM spend.
             await enforce_llm_quota(
-                getattr(current_user, "id", None), max(1, _estimated_request_tokens), provider=selected_provider
+                getattr(current_user, "id", None), max(1, _estimated_request_tokens), provider=selected_provider,
+                own_key=own_key,
             )
 
             # Resolve one effective model before either durable macro creation or direct dispatch.

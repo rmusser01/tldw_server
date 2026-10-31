@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -19,20 +19,21 @@ USER_KEY_SOURCE = "user"
 # billed provider pointed at a model server or gateway). It answers whatever key is sent, so the call
 # counts like a server-key call.
 USER_KEY_UNMETERED_SOURCE = "user_unmetered"
-# Each provider that bills per key, and the host(s) its adapter calls by default (fnmatch patterns).
+# Each provider that bills per key, and the hosts its vendor documents (fnmatch patterns; ``*`` is one DNS label).
 # A user key is the user's own spend only there (TASK-13955).
 VENDOR_HOSTS: dict[str, tuple[str, ...]] = {
     "anthropic": ("api.anthropic.com",),
-    "bedrock": ("bedrock-runtime.*.amazonaws.com",),
-    "cohere": ("api.cohere.ai",),
+    "bedrock": ("bedrock-runtime.*.amazonaws.com", "bedrock-runtime-fips.*.amazonaws.com"),
+    "cohere": ("api.cohere.ai", "api.cohere.com"),
     "deepseek": ("api.deepseek.com",),
     "google": ("generativelanguage.googleapis.com",),
     "groq": ("api.groq.com",),
     "huggingface": ("api-inference.huggingface.co", "router.huggingface.co"),
     "mistral": ("api.mistral.ai",),
-    "moonshot": ("api.moonshot.cn",),
+    "moonshot": ("api.moonshot.cn", "api.moonshot.ai"),
     "novita": ("api.novita.ai",),
-    "openai": ("api.openai.com",),
+    # and its data-residency domains, <region>.api.openai.com (developers.openai.com/api/docs/guides/your-data)
+    "openai": ("api.openai.com", "*.api.openai.com"),
     "openrouter": ("openrouter.ai",),
     "poe": ("api.poe.com",),
     "qwen": ("dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "dashscope.aliyuncs.com"),
@@ -80,7 +81,8 @@ def current_llm_call_context() -> LLMCallContext:
 def call_credential_source(request: Any = None) -> str | None:
     """Whose key a call uses: its request's runtime credential handle, else the call context's.
 
-    A request that carries a runtime-issued handle is decided by the handle alone.
+    A request that carries a runtime-issued handle is decided by the handle and the request's own base URL
+    (``base_url``, ``api_base_url``).
     Never raises: a request that cannot be read is an unknown source, so its call is checked and counted.
     """
     try:
@@ -91,21 +93,27 @@ def call_credential_source(request: Any = None) -> str | None:
 
         handle = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY) if isinstance(request, Mapping) else None
         if is_runtime_issued_provider_call_credentials(handle):
-            return handle.credential_source
+            # A trusted caller's per-request base URL wins over app_config in every adapter, so it is read too.
+            urls = (request.get("base_url"), request.get("api_base_url"))
+            return billed_credential_source(handle.provider, handle.credential_source, base_urls=urls)
         return _CTX.get().credential_source
     except Exception:  # noqa: BLE001 - accounting must never break an LLM call
         return None
 
 
-def billed_credential_source(provider: str | None, source: str | None, *configs: Any) -> str | None:
+def billed_credential_source(
+    provider: str | None, source: str | None, *configs: Any, base_urls: Iterable[Any] = ()
+) -> str | None:
     """``source`` as the LLM quotas read it: a user key is the user's own spend only on its vendor's host.
 
     ``user`` stays ``user`` only for a provider in ``VENDOR_HOSTS`` whose base
-    URLs in ``configs`` (a resolved ``app_config``, a server config snapshot) are
-    all on the vendor's host. Otherwise it becomes ``user_unmetered``, which
-    counts: a custom OpenAI-compatible slot, a local server, an unknown provider,
-    or a billed provider pointed at a model server or gateway. Every other source
-    is returned unchanged, so nothing else ever becomes ``user``.
+    URLs in ``configs`` (a resolved ``app_config``, a server config snapshot) and
+    in ``base_urls`` (a trusted caller's per-request override) are all on the
+    vendor's host. Otherwise it becomes ``user_unmetered``, which counts: a custom
+    OpenAI-compatible slot, a local server, an unknown provider, a billed provider
+    with no config section, or a billed provider pointed at a model server or
+    gateway. Every other source is returned unchanged, so nothing else ever
+    becomes ``user``.
     """
     if source != USER_KEY_SOURCE:
         return source
@@ -114,24 +122,26 @@ def billed_credential_source(provider: str | None, source: str | None, *configs:
 
     name = canonical_provider_name(provider) if provider else ""
     hosts = VENDOR_HOSTS.get(name)
-    if hosts is None:
+    section_key = PROVIDER_APP_CONFIG_KEYS.get(name)
+    if hosts is None or section_key is None:
         return USER_KEY_UNMETERED_SOURCE
+    urls = list(base_urls)
     for config in configs:
-        section = config.get(PROVIDER_APP_CONFIG_KEYS[name]) if isinstance(config, Mapping) else None
-        for key in _BASE_URL_KEYS if isinstance(section, Mapping) else ():
-            url = section.get(key)
-            if isinstance(url, str) and url.strip() and not _on_vendor_host(url, hosts):
-                return USER_KEY_UNMETERED_SOURCE
+        section = config.get(section_key) if isinstance(config, Mapping) else None
+        if isinstance(section, Mapping):
+            urls.extend(section.get(key) for key in _BASE_URL_KEYS)
+    if any(isinstance(url, str) and url.strip() and not _on_vendor_host(url, hosts) for url in urls):
+        return USER_KEY_UNMETERED_SOURCE
     return source
 
 
 def _on_vendor_host(url: str, hosts: tuple[str, ...]) -> bool:
-    """Whether ``url``'s host matches one of the vendor's host patterns."""
+    """Whether ``url``'s host matches one of the vendor's host patterns, a ``*`` matching one DNS label."""
     try:
         host = urlsplit(url.strip()).hostname or ""
     except ValueError:  # a malformed URL is not the vendor's
         return False
-    return any(fnmatchcase(host, pattern) for pattern in hosts)
+    return any(fnmatchcase(host, pattern) and host.count(".") == pattern.count(".") for pattern in hosts)
 
 
 def current_llm_user_id() -> int | None:
