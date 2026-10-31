@@ -690,6 +690,7 @@ def generate_and_search(question: str, search_params: dict) -> dict:
     if not web_search_results_dict["warnings"]:
         web_search_results_dict.pop("warnings", None)
 
+    web_search_results_dict["result_count"] = len(web_search_results_dict["results"])
     return {
         "web_search_results_dict": web_search_results_dict,
         "sub_query_dict": sub_query_dict
@@ -1646,8 +1647,8 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
 
             # Call the search_web_google function with the prepared arguments
             web_search_results = search_web_google(**google_args)  # raw JSON
-            web_search_results_dict = process_web_search_results(web_search_results, "google")
-            return web_search_results_dict
+            # Keep Google's established normalized name at the shared result boundary.
+            search_engine = "google"
 
         elif search_engine.lower() == "kagi":
             # Limit uses result_count; content_country is not applicable
@@ -1723,6 +1724,11 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
 
         # Process the raw search results
         web_search_results_dict = process_web_search_results(web_search_results, search_engine)
+        results = web_search_results_dict.get("results")
+        if isinstance(results, list):
+            if type(result_count) is int and result_count > 0:
+                web_search_results_dict["results"] = results[:result_count]
+            web_search_results_dict["result_count"] = len(web_search_results_dict["results"])
         # FIXME
         #logging.debug("After process_web_search_results:")
         #logging.debug(json.dumps(web_search_results_dict, indent=2))
