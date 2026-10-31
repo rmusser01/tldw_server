@@ -21,7 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import get_api_keys
+from tldw_Server_API.app.core.config_llm_providers import get_api_keys
 from tldw_Server_API.app.core.Audio.streaming_service import (
     _audio_ws_authenticate,
     _stream_tts_to_websocket,

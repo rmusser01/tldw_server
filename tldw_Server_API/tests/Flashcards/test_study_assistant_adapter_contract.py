@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
 from tldw_Server_API.app.api.v1.endpoints import flashcards, quizzes
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat import chat_service
@@ -64,7 +65,7 @@ def provider_boundary(monkeypatch):
         lambda provider: TerminalAdapter(provider) if provider in {"llama.cpp", "openai"} else None,
     )
     monkeypatch.setattr(adapter_registry, "get_registry", lambda: registry)
-    monkeypatch.setattr(targets, "load_and_log_configs", lambda: state.config)
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: state.config)
     monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda _config=None: state.config)
 
     def override_snapshot(provider):

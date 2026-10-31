@@ -37,12 +37,12 @@ from typing import Any, Callable
 from cachetools import LRUCache
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
@@ -58,8 +58,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from tldw_Server_API.app.core.exceptions import DataTablesJobError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
-from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
+from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int, jobs_manager_from_env as _jobs_manager
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
@@ -1073,7 +1072,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id)
             return {"cancelled": True, "table_id": table_id}
 
-        provider = (DEFAULT_LLM_PROVIDER or "openai").strip().lower()
+        provider = (get_default_provider() or "openai").strip().lower()
         api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
         if provider_requires_api_key(provider) and not api_key:
             raise DataTablesJobError(f"missing_api_key:{provider}", retryable=False)

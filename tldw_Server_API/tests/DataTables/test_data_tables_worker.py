@@ -124,7 +124,7 @@ async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
 
     job = {
@@ -426,7 +426,7 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
     monkeypatch.setattr(jobs_worker, "_LLM_TIMEOUT_SECONDS", 0.01)
 
@@ -502,7 +502,7 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
     monkeypatch.setattr(jobs_worker, "_LLM_TIMEOUT_SECONDS", 12)
 
