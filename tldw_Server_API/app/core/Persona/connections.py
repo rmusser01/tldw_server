@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Persona.dialogue_tree_context import redact_sensitive_payload
 from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     build_secret_payload,
     decrypt_byok_payload,
@@ -14,9 +15,7 @@ from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import 
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.Persona.dialogue_tree_context import redact_sensitive_payload
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-
 
 PERSONA_CONNECTION_STATUS_FIELD = "secret_configured"
 

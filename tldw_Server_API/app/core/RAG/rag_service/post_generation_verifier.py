@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
@@ -39,6 +38,7 @@ from tldw_Server_API.app.core.Claims_Extraction.output_parser import (
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.testing import is_truthy
 
 if TYPE_CHECKING:

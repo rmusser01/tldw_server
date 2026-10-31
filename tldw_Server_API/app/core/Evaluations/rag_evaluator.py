@@ -20,9 +20,6 @@ import numpy as np
 from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
@@ -30,8 +27,11 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_bounded_sync_call,
     await_owned_worker,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_likert
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
+from tldw_Server_API.app.core.testing import is_test_mode
 
 _RAG_EVAL_NONCRITICAL_EXCEPTIONS = (
     AssertionError,

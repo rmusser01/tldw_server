@@ -5,9 +5,6 @@ import json
 from collections.abc import AsyncIterator, Iterable
 from typing import Any, Callable
 
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-)
 from tldw_Server_API.app.core.config import load_settings
 from tldw_Server_API.app.core.exceptions import (
     ChatAuthenticationError,
@@ -20,14 +17,8 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _HC_RetryPolicy,
-)
-from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
-)
-from tldw_Server_API.app.core.http_client import (
     fetch as _hc_fetch,
-)
-from tldw_Server_API.app.core.http_client import (
     stream_response as _hc_stream_response,
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
@@ -54,6 +45,9 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_done,
 )
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
 

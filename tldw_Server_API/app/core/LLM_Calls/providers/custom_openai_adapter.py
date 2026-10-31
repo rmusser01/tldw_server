@@ -5,18 +5,13 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_endpoint_env_keys,
     custom_openai_provider_name,
     custom_openai_section_name,
 )
 from tldw_Server_API.app.core.exceptions import ChatConfigurationError, EgressPolicyError, raise_detached_error
-from tldw_Server_API.app.core.http_client import fetch as _hc_fetch
-from tldw_Server_API.app.core.http_client import stream_response as _hc_stream_response
+from tldw_Server_API.app.core.http_client import fetch as _hc_fetch, stream_response as _hc_stream_response
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
@@ -31,6 +26,10 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
 from tldw_Server_API.app.core.LLM_Calls.streaming import (
     provider_stream_error_frame,
     wrap_sync_stream,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
 )
 from tldw_Server_API.app.core.testing import is_truthy
 

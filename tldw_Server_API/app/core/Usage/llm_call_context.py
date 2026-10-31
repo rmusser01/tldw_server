@@ -109,8 +109,8 @@ def billed_credential_source(provider: str | None, source: str | None, *configs:
     """
     if source != USER_KEY_SOURCE:
         return source
-    from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
     from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+    from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
 
     name = canonical_provider_name(provider) if provider else ""
     hosts = VENDOR_HOSTS.get(name)

@@ -29,7 +29,6 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
@@ -38,6 +37,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 
 from . import agentic_execution as _agentic_execution
 from .advanced_cache import AGENTIC_CACHE
@@ -359,8 +359,7 @@ async def agentic_rag_pipeline(
     # ensures quality-gate tests have at least one document when media exists.
     if (not docs) and media_db_path and effective_search_mode in ("fts", "hybrid"):
         try:
-            from .database_retrievers import MediaDBRetriever as _MDBR
-            from .database_retrievers import RetrievalConfig as _RCfg
+            from .database_retrievers import MediaDBRetriever as _MDBR, RetrievalConfig as _RCfg
             fb_cfg = _RCfg(
                 max_results=effective_top_k,
                 min_score=effective_min_score,

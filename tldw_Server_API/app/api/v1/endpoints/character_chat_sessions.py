@@ -110,21 +110,6 @@ from tldw_Server_API.app.api.v1.utils.chat_message_images import (
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-    apply_llm_provider_overrides_to_listing,
-    capture_provider_override_call_snapshot,
-    get_llm_provider_overrides_snapshot,
-    get_override_model_priority,
-)
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCredentialRuntime,
-)
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -167,32 +152,14 @@ from tldw_Server_API.app.core.Character_Chat.constants import (
 )
 from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _extract_character_default_author_note as _extract_character_default_author_note,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _extract_character_memory_note as _extract_character_memory_note,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _inject_author_note_from_settings as _inject_author_note_from_settings,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _insert_author_note_at_depth as _insert_author_note_at_depth,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _insert_author_note_message as _insert_author_note_message,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _normalize_memory_scope as _normalize_memory_scope,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _normalize_note_text as _normalize_note_text,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _resolve_author_note_position as _resolve_author_note_position,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     _resolve_author_note_text as _resolve_author_note_text,
-)
-from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     inject_character_memory_rows,
     insert_character_greeting,
 )
@@ -201,6 +168,21 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
     build_world_book_prompt_context,
 )
 from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    apply_llm_provider_overrides_to_listing,
+    capture_provider_override_call_snapshot,
+    get_llm_provider_overrides_snapshot,
+    get_override_model_priority,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
+)
 
 MAX_STREAM_PERSIST_USAGE_BYTES = 4_096
 from tldw_Server_API.app.core.Character_Chat.emote_directives import (
@@ -261,8 +243,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
 )
-from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.config import settings as app_settings
+from tldw_Server_API.app.core.config import load_and_log_configs, settings as app_settings
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError

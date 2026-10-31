@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Provider_Credentials.byok_config import is_runtime_base_url_override
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
@@ -23,6 +22,7 @@ from tldw_Server_API.app.core.LLM_Calls.streaming import (
     iter_sse_lines_raising,
     wrap_sync_stream,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import is_runtime_base_url_override
 
 from .base import ChatProvider
 

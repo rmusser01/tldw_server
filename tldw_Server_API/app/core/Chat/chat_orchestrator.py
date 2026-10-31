@@ -42,10 +42,6 @@ from tldw_Server_API.app.core.Chat.orchestrator.provider_resolution import (
 from tldw_Server_API.app.core.Chat.orchestrator.stream_execution import (
     execute_stream,
 )
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.exceptions import (
     NetworkError,
     RetryExhaustedError,
@@ -55,6 +51,10 @@ from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     get_http_status_from_exception as _llm_get_http_status_from_exception,
 )
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
 
 _CHAT_ORCHESTRATOR_COERCE_EXCEPTIONS = (
@@ -85,8 +85,7 @@ except ImportError:
     _REQUESTS_REQUEST_EXCEPTION = None
 
 try:
-    from httpx import HTTPError as _HTTPX_HTTP_ERROR
-    from httpx import RequestError as _HTTPX_REQUEST_ERROR
+    from httpx import HTTPError as _HTTPX_HTTP_ERROR, RequestError as _HTTPX_REQUEST_ERROR
 except ImportError:
     _HTTPX_HTTP_ERROR = None
     _HTTPX_REQUEST_ERROR = None

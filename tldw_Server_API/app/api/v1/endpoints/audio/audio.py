@@ -110,15 +110,13 @@ check_rate_limit = check_rate_limit
 from tldw_Server_API.app.core.Audio.tts_service import (
     _tts_fallback_resolver,
 )
+from tldw_Server_API.app.core.config import load_comprehensive_config as _load_comprehensive_config
+from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     ResolvedByokCredentials,
-)
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     resolve_byok_credentials as _default_resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.config import load_comprehensive_config as _load_comprehensive_config
-from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException
 
 # Re-export config loader for tests to monkeypatch
 load_comprehensive_config = _load_comprehensive_config
@@ -301,20 +299,10 @@ def SileroTurnDetector(*args, **kwargs):
 # Re-export quota helpers for tests/monkeypatching
 from tldw_Server_API.app.core.Usage.audio_quota import (
     add_daily_minutes as add_daily_minutes,
-)
-from tldw_Server_API.app.core.Usage.audio_quota import (
     bytes_to_seconds as bytes_to_seconds,
-)
-from tldw_Server_API.app.core.Usage.audio_quota import (
     can_start_stream as can_start_stream,
-)
-from tldw_Server_API.app.core.Usage.audio_quota import (
     check_daily_minutes_allow as check_daily_minutes_allow,
-)
-from tldw_Server_API.app.core.Usage.audio_quota import (
     consume_daily_minutes as consume_daily_minutes,
-)
-from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_stream as finish_stream,
 )
 
@@ -322,17 +310,9 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
 try:
     from tldw_Server_API.app.core.Usage.audio_quota import (
         get_daily_minutes_used as get_daily_minutes_used,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         get_job_heartbeat_interval_seconds as get_job_heartbeat_interval_seconds,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         get_user_tier as get_user_tier,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         heartbeat_jobs as heartbeat_jobs,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         heartbeat_stream as heartbeat_stream,
     )
 except ImportError:
@@ -342,14 +322,8 @@ except ImportError:
 try:
     from tldw_Server_API.app.core.Usage.audio_quota import (
         can_start_job as can_start_job,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         finish_job as finish_job,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         get_limits_for_user as get_limits_for_user,
-    )
-    from tldw_Server_API.app.core.Usage.audio_quota import (
         increment_jobs_started as increment_jobs_started,
     )
 except ImportError:

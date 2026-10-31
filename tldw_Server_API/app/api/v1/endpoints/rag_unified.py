@@ -56,6 +56,16 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     UnifiedRAGRequest,
     UnifiedRAGResponse,
 )
+from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.config import get_config_value
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     derive_trusted_credential_scope,
     is_trusted_base_url_principal,
@@ -66,20 +76,10 @@ from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     capture_provider_override_call_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCredentialRuntime,
     reject_provider_call_credentials,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.config import get_config_value
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
-from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
-from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
@@ -759,9 +759,9 @@ def _build_source_health_source_sets(
     )
 
 
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 router = APIRouter(prefix="/api/v1/rag", tags=["rag-unified"])
 

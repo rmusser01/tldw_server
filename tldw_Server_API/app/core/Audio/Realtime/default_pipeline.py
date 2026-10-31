@@ -317,17 +317,19 @@ def build_default_realtime_pipeline(
     from types import SimpleNamespace
 
     from tldw_Server_API.app.core.Audio.tts_service import tts_provider_credential_scope
-    from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
-    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
-    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-        ProviderCredentialRuntime,
-    )
     from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
         apply_transcript_text_policy,
         resolve_effective_stt_policy,
+    )
+    from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        capture_provider_override_call_snapshot,
+    )
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+        ProviderCredentialRuntime,
     )
     from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
     from tldw_Server_API.app.core.Usage.audio_quota import consume_daily_minutes

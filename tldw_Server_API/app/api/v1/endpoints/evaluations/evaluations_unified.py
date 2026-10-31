@@ -42,20 +42,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     ResponseQualityRequest,
     ResponseQualityResponse,
 )
-from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     DaemonCapacityError,
     await_owned_worker,
@@ -75,13 +62,13 @@ from tldw_Server_API.app.core.Evaluations.audit_adapter import (
     log_evaluation_exported,
 )
 
+# Import additional services
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
+
 # Import unified service
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )
-
-# Import additional services
-from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.Evaluations.user_rate_limiter import get_user_rate_limiter_for_user
 from tldw_Server_API.app.core.Evaluations.webhook_identity import webhook_user_id_from_user
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookEvent, WebhookManager
@@ -92,10 +79,21 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
-from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.testing import (
+    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
     is_test_mode as _is_test_mode,
 )
 

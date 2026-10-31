@@ -67,23 +67,9 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_models import (
     EmbeddingUsage,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventCategory, AuditEventType
-from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
-    PROVIDER_APP_CONFIG_KEYS,
-    runtime_base_url_override_provenance,
-)
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
-    ByokResolutionError,
-    ResolvedByokCredentials,
-    record_byok_missing_credentials,
-    resolve_byok_credentials,
-    resolve_static_server_fallback_from_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
-from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM_CONFIGURE
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -125,8 +111,6 @@ from tldw_Server_API.app.core.Embeddings.provider_resolution import (
 )
 from tldw_Server_API.app.core.Embeddings.request_batching import (
     EmbeddingsRateLimitError,
-)
-from tldw_Server_API.app.core.Embeddings.request_batching import (
     create_embeddings_batch_async as batching_create_embeddings_batch_async,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
@@ -159,18 +143,16 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _RetryPolicy,
-)
-from tldw_Server_API.app.core.http_client import (
     afetch as _http_afetch,
-)
-from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
 
 # Circuit Breaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerOpenError as CircuitBreakerError,
+    registry as circuit_breaker_registry,
+)
 from tldw_Server_API.app.core.Infrastructure.redis_factory import (
     create_async_redis_client,
     ensure_async_client_closed,
@@ -184,6 +166,21 @@ from tldw_Server_API.app.core.LLM_Calls.providers.base import (
     EmbeddingsAdapterUnavailableError,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
+    PROVIDER_APP_CONFIG_KEYS,
+    runtime_base_url_override_provenance,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    ResolvedByokCredentials,
+    record_byok_missing_credentials,
+    resolve_byok_credentials,
+    resolve_static_server_fallback_from_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
@@ -192,7 +189,6 @@ from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
 )
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 # Exception buckets to replace broad Exception catches while preserving behavior.
 try:
@@ -234,10 +230,8 @@ try:
         LocalAPICfg,
         ONNXModelCfg,
         OpenAIModelCfg,
-        resolve_model_storage_base_dir,
-    )
-    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
         create_embeddings_batch_async as create_explicit_embeddings_batch_async,
+        resolve_model_storage_base_dir,
     )
 
     EMBEDDINGS_AVAILABLE = True

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
-from datetime import datetime, timezone
 import inspect
 import json
 import os
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -20,16 +20,16 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
-from tldw_Server_API.app.core.exceptions import (
-    BadRequestError,
-    ResourceNotFoundError,
-)
 from tldw_Server_API.app.core.AuthNZ.repos.managed_secret_refs_repo import (
     ManagedSecretRefsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import (
     McpHubRepo,
     encode_managed_secret_credential_ref,
+)
+from tldw_Server_API.app.core.exceptions import (
+    BadRequestError,
+    ResourceNotFoundError,
 )
 from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     build_secret_payload,
@@ -38,14 +38,14 @@ from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import 
     key_hint_for_api_key,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
-from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
-    McpHubExternalLegacyInventoryService,
-)
 from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
     McpHubExternalAccessResolver,
 )
 from tldw_Server_API.app.services.mcp_hub_external_auth_service import (
     ManagedExternalAuthBridge,
+)
+from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
+    McpHubExternalLegacyInventoryService,
 )
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,

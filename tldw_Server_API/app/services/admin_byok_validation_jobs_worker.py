@@ -10,22 +10,7 @@ from typing import Any, Protocol, TypedDict
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
-    ByokResolutionError,
-    _extract_runtime_api_key,
-    _extract_runtime_auth_source,
-    merge_server_fallback_snapshot,
-    resolve_static_server_fallback_from_snapshot,
-)
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    configured_provider_model_from_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
-    decrypt_byok_payload,
-    loads_envelope,
-)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
     ChatBadRequestError,
@@ -38,6 +23,21 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    _extract_runtime_api_key,
+    _extract_runtime_auth_source,
+    merge_server_fallback_snapshot,
+    resolve_static_server_fallback_from_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    configured_provider_model_from_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
+    decrypt_byok_payload,
+    loads_envelope,
+)
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services import admin_byok_service, admin_orgs_service
 

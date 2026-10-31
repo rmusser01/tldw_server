@@ -25,6 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     BulkGenerateRequest,
     BulkGenerateResponse,
     DocumentListResponse,
+    DocumentType as DocType,
     GeneratedDocument,
     GenerateDocumentRequest,
     GenerateDocumentResponse,
@@ -33,24 +34,8 @@ from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     PromptConfigResponse,
     SavePromptConfigRequest,
 )
-from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
-    DocumentType as DocType,
-)
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
@@ -61,8 +46,6 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.document_generator import (
     DocumentGeneratorService,
     DocumentType,
-)
-from tldw_Server_API.app.core.Chat.document_generator import (
     GenerationStatus as GenStatus,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
@@ -75,6 +58,19 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 router = APIRouter()

@@ -26,6 +26,7 @@ import numpy as np
 from loguru import logger
 from prometheus_client import REGISTRY, Counter, Gauge  # Assuming these are defined elsewhere or used directly
 from pydantic import BaseModel, Field
+
 # Was a fourth copy with NO message-text branch and inverted attribute precedence
 # (exc.status_code before exc.response, never exc.status), so an aiohttp
 # ClientResponseError returned None here and the right status elsewhere.

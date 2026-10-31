@@ -26,13 +26,27 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     require_expected_user,
 )
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
     ROLEPLAY_RESUME_CONTRACT_VERSION,
     ROLEPLAY_RESUME_FEATURES,
 )
-from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
-from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    PROVIDER_STREAM_ERROR_MESSAGES,
+)
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_provider_number,
+    custom_openai_section_name,
+    iter_custom_openai_provider_names,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
+    canonical_builtin_llm_provider_name,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
+    provider_requires_api_key,
+)
 from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
     is_runtime_base_url_override,
@@ -51,22 +65,8 @@ from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
 )
-from tldw_Server_API.app.core.Chat.streaming_utils import (
-    PROVIDER_STREAM_ERROR_MESSAGES,
-)
-from tldw_Server_API.app.core.custom_openai_providers import (
-    custom_openai_api_key_env_keys,
-    custom_openai_provider_number,
-    custom_openai_section_name,
-    iter_custom_openai_provider_names,
-)
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
-    canonical_builtin_llm_provider_name,
-)
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
-    provider_requires_api_key,
-)
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
 
 router = APIRouter()

@@ -12,8 +12,6 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
 )
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
     ChatBadRequestError,
@@ -38,6 +36,8 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     PROMPT_IMPROVEMENT_LIMITS,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source, llm_call_context
 
 PROMPT_IMPROVEMENT_MAX_OUTPUT_TOKENS = 1024
