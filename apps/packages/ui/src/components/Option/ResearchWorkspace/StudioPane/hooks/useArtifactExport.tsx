@@ -65,11 +65,14 @@ const getMediaOutputDownloadRef = (artifact: GeneratedArtifact) => {
 
 export const downloadBlobFile = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  try {
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }
 
 export function getFileExtension(type: ArtifactType): string {
@@ -156,10 +159,15 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
   } = deps
 
   const mounted = React.useRef(true)
+  const audioDownloads = React.useRef(new Set<AbortController>())
   React.useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
+  React.useEffect(() => () => {
+    for (const controller of audioDownloads.current) controller.abort()
+    audioDownloads.current.clear()
+  }, [workspaceId])
 
   const persistRemoval = React.useCallback(async (
     artifact: GeneratedArtifact, removed: boolean, allowAbsent = false,
@@ -345,12 +353,48 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
 
   const handleDownloadArtifact = React.useCallback(
     async (artifact: GeneratedArtifact, format?: string) => {
-      // Handle audio download - use the audioUrl blob directly
-      if (artifact.type === "audio_overview" && artifact.audioUrl) {
-        const a = document.createElement("a")
-        a.href = artifact.audioUrl
-        a.download = `${artifact.title}.${artifact.audioFormat || "mp3"}`
-        a.click()
+      if (artifact.type === "audio_overview") {
+        if (artifact.audioFormat === "browser") {
+          downloadBlobFile(new Blob([artifact.content || ""], { type: "text/plain" }), artifact.title + ".txt")
+          messageApi.success("Downloaded the script. Browser speech does not provide an audio file.")
+          return
+        }
+        if (artifact.audioUrl && !artifact.exportRefs?.some(ref => ref.sourceType === "storage_file")) {
+          const a = document.createElement("a")
+          a.href = artifact.audioUrl
+          a.download = artifact.title + "." + (artifact.audioFormat || "mp3")
+          a.click()
+          return
+        }
+        const deadline = performance.now() + 15000
+        const controller = new AbortController()
+        let retired = false
+        const ownsArtifact = () => mounted.current && useWorkspaceStore.getState().workspaceId === workspaceId &&
+          useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) === artifact
+        const retire = () => { retired = true; controller.abort() }
+        const timeoutError = () => new DOMException("Saved audio download exceeded 15 seconds.", "TimeoutError")
+        audioDownloads.current.add(controller)
+        const stopAccount = watchChatAccountChanges(invalidated => { if (invalidated) retire() })
+        const timeout = setTimeout(() => controller.abort(timeoutError()), 15000)
+        const isCurrent = () => !retired && performance.now() < deadline && !controller.signal.aborted && ownsArtifact()
+        const stopStore = useWorkspaceStore.subscribe(() => { if (!ownsArtifact()) retire() })
+        try {
+          const { readStoredWorkspaceAudio } = await import("@/services/workspace-artifact-audio")
+          if (!workspaceId || !isCurrent()) throw controller.signal.reason ?? timeoutError()
+          const blob = await readStoredWorkspaceAudio(artifact, { workspaceId, isCurrent, signal: controller.signal })
+          if (!isCurrent()) throw controller.signal.reason ?? timeoutError()
+          downloadBlobFile(blob, artifact.title + "." + artifact.audioFormat)
+          messageApi.success(t("common:downloadSuccess", "Downloaded successfully"))
+        } catch {
+          const timedOut = performance.now() >= deadline || controller.signal.reason?.name === "TimeoutError"
+          if (!retired && ownsArtifact() && (!controller.signal.aborted || timedOut))
+            messageApi.error("Saved audio could not be downloaded. Retry, reopen the output or generate its audio again.")
+        } finally {
+          clearTimeout(timeout)
+          stopStore()
+          stopAccount()
+          audioDownloads.current.delete(controller)
+        }
         return
       }
 
@@ -487,7 +531,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
         URL.revokeObjectURL(url)
       }
     },
-    [messageApi, t]
+    [messageApi, t, workspaceId]
   )
 
   // Show slides export format selection modal

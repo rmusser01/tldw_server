@@ -84,6 +84,7 @@ export type TldwSpeechOptions = {
   backend?: string
   allowFallback?: boolean
   stream?: boolean
+  returnDownloadLink?: boolean
   requestScope?: ServicePromptRequestScope
   signal?: AbortSignal
   timeoutMs?: number
@@ -91,6 +92,7 @@ export type TldwSpeechOptions = {
 
 export type TldwSpeechDetailedResult = {
   buffer: ArrayBuffer
+  generatedFileId?: number
   actualBackend?: string
   fallbackUsed: boolean
 }
@@ -412,7 +414,7 @@ const createSpeechTransportError = (
   return error
 }
 
-const readResponseHeader = (headers: unknown, name: string): string | undefined => {
+export const readResponseHeader = (headers: unknown, name: string): string | undefined => {
   if (!headers) return undefined
   const getter = (headers as { get?: (key: string) => unknown }).get
   if (typeof getter === "function") {
@@ -1183,6 +1185,9 @@ export const modelsAudioMethods = {
     text: string,
     options?: TldwSpeechOptions
   ): Promise<TldwSpeechDetailedResult> {
+    if (options?.returnDownloadLink && options.stream === true) {
+      throw new Error("Stored speech requires non-streaming audio.")
+    }
     const config = options?.requestScope?.config ?? await this.ensureConfigForRequest(true)
     const body: Record<string, any> = { input: text, text }
     if (options?.voice) body.voice = options.voice
@@ -1195,6 +1200,10 @@ export const modelsAudioMethods = {
     }
     if (options?.extraParams) body.extra_params = options.extraParams
     if (options?.stream != null) body.stream = options.stream
+    if (options?.returnDownloadLink) {
+      body.return_download_link = true
+      body.stream = false
+    }
     const negotiatedScope =
       options?.backend && await supportsExplicitTtsBackend(this, config, options)
         ? getTtsCapabilityScope(config)
@@ -1315,10 +1324,23 @@ export const modelsAudioMethods = {
       responseRecord?.headers,
       "X-TLDW-TTS-Fallback-Used"
     )
+    let generatedFileId: number | undefined
+    if (options?.returnDownloadLink) {
+      const id = readResponseHeader(responseRecord?.headers, "X-Generated-File-Id")?.trim() || ""
+      generatedFileId = Number(id)
+      if (!/^[1-9][0-9]*$/.test(id) || !Number.isSafeInteger(generatedFileId)) {
+        throw new Error("Speech audio was not acknowledged as a saved file.")
+      }
+      const contentType = readResponseHeader(responseRecord?.headers, "Content-Type")?.trim().toLowerCase()
+      if (!normalized.byteLength || !contentType?.startsWith("audio/")) {
+        throw new Error("Stored speech did not return usable audio.")
+      }
+    }
     return {
       buffer: normalized,
       actualBackend,
-      fallbackUsed: fallbackHeader?.trim().toLowerCase() === "true"
+      fallbackUsed: fallbackHeader?.trim().toLowerCase() === "true",
+      ...(options?.returnDownloadLink ? { generatedFileId } : {})
     }
   },
 

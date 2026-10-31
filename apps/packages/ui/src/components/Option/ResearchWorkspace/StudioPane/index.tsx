@@ -128,6 +128,8 @@ export { estimateGenerationSeconds, estimateGenerationTokens, estimateGeneration
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Icon mapping for artifact types
+const StoredAudioArtifactViewer = React.lazy(() => import("./StoredAudioArtifactViewer"))
+
 const ARTIFACT_TYPE_ICONS: Record<ArtifactType, React.ElementType> = {
   audio_overview: Headphones,
   video_overview: Video,
@@ -797,6 +799,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const { t } = useTranslation(["playground", "common"])
   const isMobile = useMobile()
   const [messageApi, contextHolder] = message.useMessage()
+  const [artifactModal, artifactModalContextHolder] = Modal.useModal()
 
   // Store state
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
@@ -1528,12 +1531,44 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   // ── View artifact handler ──
 
+  const openArtifactViewer = (config: Parameters<typeof artifactModal.info>[0]) => {
+    const viewer = createEditorGuard()
+    try {
+      const modal = artifactModal.info({ ...config, afterClose: viewer.afterClose })
+      viewer.attach(modal)
+    } catch (error) {
+      viewer.afterClose()
+      throw error
+    }
+  }
+
   const handleViewArtifact = (artifact: GeneratedArtifact) => {
     const responsiveModalProps = (desktopWidth: number) =>
       getResponsiveArtifactModalProps(isMobile, desktopWidth)
 
+    if (artifact.type === "audio_overview" && artifact.audioFormat !== "browser" &&
+        (!artifact.audioUrl || artifact.exportRefs?.some(ref => ref.sourceType === "storage_file"))) {
+      const viewer = createEditorGuard()
+      try {
+        const modal = artifactModal.info({
+          title: artifact.title,
+          content: renderArtifactModalContent(
+            <StoredAudioArtifactViewer artifact={artifact} workspaceId={workspaceId ?? ""} isCurrent={viewer.isCurrent} />,
+            t("playground:studio.loadingOutputViewer", "Loading output viewer...")
+          ),
+          ...responsiveModalProps(560),
+          afterClose: viewer.afterClose,
+        })
+        viewer.attach(modal)
+      } catch (error) {
+        viewer.afterClose()
+        throw error
+      }
+      return
+    }
+
     if (artifact.type === "audio_overview" && artifact.audioUrl) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: (
           <div className="flex flex-col gap-4">
@@ -1566,7 +1601,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       artifact.audioFormat === "browser" &&
       artifact.content
     ) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: (
           <BrowserSpeechArtifactViewer
@@ -1580,7 +1615,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "mindmap" && artifact.content) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <MindMapArtifactViewer content={artifact.content} />,
@@ -1594,7 +1629,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "data_table" && artifact.content) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <DataTableArtifactViewer title={artifact.title} content={artifact.content} />,
@@ -1608,7 +1643,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "video_overview") {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <VideoOverviewArtifactViewer artifact={artifact} />,
@@ -1622,7 +1657,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "infographic") {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <InfographicArtifactViewer artifact={artifact} />,
@@ -1638,7 +1673,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     if (artifact.type === "flashcards") {
       const initialCards = getArtifactFlashcards(artifact)
       const editor = createEditorGuard()
-      const modal = Modal.info({
+      const modal = artifactModal.info({
         afterClose: editor.afterClose,
         title: artifact.title,
         content: renderArtifactModalContent(
@@ -1675,7 +1710,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     if (artifact.type === "quiz") {
       const initialQuestions = getArtifactQuizQuestions(artifact)
       const editor = createEditorGuard()
-      const modal = Modal.info({
+      const modal = artifactModal.info({
         afterClose: editor.afterClose,
         title: artifact.title,
         content: renderArtifactModalContent(
@@ -1712,7 +1747,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     const proposalVerificationArtifact =
       findProposalDeepResearchVerificationArtifact(artifact, generatedArtifacts)
     if (artifact.content && proposalVerificationArtifact) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <ProposalDeepResearchVerificationViewer
@@ -1731,7 +1766,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.content || hasTraceableArtifactMetadata(artifact)) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: (
           <div className="max-h-[70vh] space-y-4 overflow-y-auto">
@@ -1755,6 +1790,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       {contextHolder}
+      {artifactModalContextHolder}
 
       {/* Header */}
       <div className="flex items-start justify-between border-b border-border px-4 py-3">

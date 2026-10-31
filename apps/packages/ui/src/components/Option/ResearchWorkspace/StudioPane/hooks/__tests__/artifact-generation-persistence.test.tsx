@@ -12,7 +12,7 @@ import { useArtifactGeneration, type UseArtifactGenerationDeps } from '../useArt
 const io = vi.hoisted(() => ({
   migrated: true,
   state: { workspaceId: 'owned', generatedArtifacts: [] as GeneratedArtifact[] },
-  request: vi.fn(), snapshot: vi.fn(), complete: vi.fn(), media: vi.fn(), sources: vi.fn(), submit: vi.fn(), output: vi.fn(),
+  request: vi.fn(), snapshot: vi.fn(), verified: vi.fn(), speech: vi.fn(), complete: vi.fn(), media: vi.fn(), sources: vi.fn(), submit: vi.fn(), output: vi.fn(),
 }));
 vi.mock('@/store/workspace', () => ({
   useWorkspaceStore: { getState: () => io.state },
@@ -20,9 +20,11 @@ vi.mock('@/store/workspace', () => ({
 }));
 vi.mock('@/services/background-proxy', () => ({ bgRequest: io.request }));
 vi.mock('@/services/service-prompts', () => ({ loadServicePromptSnapshot: io.snapshot }));
+vi.mock('@/services/researchWorkspaceArtifacts', () => ({ generateResearchWorkspaceArtifact: io.verified }));
 vi.mock('@/services/tldw/TldwApiClient', () => ({
   tldwClient: {
     listVisualStyles: async () => [],
+    synthesizeSpeechDetailed: io.speech,
     getMediaDetails: io.media,
     getWorkspaceSources: io.sources,
     createChatCompletion: io.complete,
@@ -75,6 +77,9 @@ const deps = (): UseArtifactGenerationDeps => ({
 beforeEach(() => {
   vi.clearAllMocks(); io.request.mockReset(); io.complete.mockReset(); localStorage.clear();
   stored = []; controller = new AbortController();
+  io.speech.mockReset(); io.verified.mockReset();
+  io.speech.mockResolvedValue({ buffer: new ArrayBuffer(8), generatedFileId: 47, actualBackend: 'pocket_tts', fallbackUsed: false });
+  io.verified.mockResolvedValue({ content: 'Selene tours start Friday at 18:00.', data: {} });
   io.state = { workspaceId: 'owned', generatedArtifacts: [] };
   io.migrated = true;
   io.snapshot.mockImplementation(async () => ({
@@ -102,6 +107,76 @@ beforeEach(() => {
 });
 
 describe('migrated Studio result durability', () => {
+
+  it("persists a stored-audio reference that survives cold restoration", async () => {
+    const original = Object.getOwnPropertyDescriptor(URL, "createObjectURL")
+    const transient = vi.fn(() => "blob:transient-audio")
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: transient })
+    try {
+      const input = { ...deps(), audioSettings: { provider: "tldw" as const, model: "pocket", voice: "owned-voice", speed: 1, format: "wav" as const } }
+      const hook = renderHook(() => useArtifactGeneration(input))
+      await act(async () => { await hook.result.current.handleGenerateOutput("audio_overview") })
+      expect(stored).toHaveLength(1)
+      expect(io.speech.mock.calls[0][1]).toMatchObject({ returnDownloadLink: true, requestScope: { userId: "alice" } })
+      const restored = mapServerArtifactToLocal(stored[0])
+      expect(restored).toMatchObject({
+        id: "stable-draft", workspaceArtifactId: "stable-draft", audioFormat: "wav",
+        content: "Selene tours start Friday at 18:00.",
+        exportRefs: [{ sourceType: "storage_file", fileId: 47, format: "wav", status: "ready" }],
+      })
+      expect(restored.audioUrl).toBeUndefined()
+      expect(transient).not.toHaveBeenCalled()
+    } finally {
+      if (original) Object.defineProperty(URL, "createObjectURL", original)
+      else Reflect.deleteProperty(URL, "createObjectURL")
+    }
+  })
+
+  it("refuses canonical audio without a stored-file acknowledgement", async () => {
+    io.speech.mockResolvedValueOnce({ buffer: new ArrayBuffer(8), fallbackUsed: false })
+    const original = Object.getOwnPropertyDescriptor(URL, "createObjectURL")
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:transient-audio") })
+    try {
+      const hook = renderHook(() => useArtifactGeneration({ ...deps(), audioSettings: { provider: "tldw", model: "pocket", voice: "owned-voice", speed: 1, format: "wav" } }))
+      await act(async () => { await hook.result.current.handleGenerateOutput("audio_overview") })
+      expect(stored).toHaveLength(0)
+      expect(messages.success).not.toHaveBeenCalled()
+      expect(io.state.generatedArtifacts[0].status).toBe("failed")
+    } finally {
+      if (original) Object.defineProperty(URL, "createObjectURL", original)
+      else Reflect.deleteProperty(URL, "createObjectURL")
+    }
+  })
+
+  it("retains the stored-audio file for save-only Retry without another synthesis", async () => {
+    const original = Object.getOwnPropertyDescriptor(URL, "createObjectURL")
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:transient-audio") })
+    io.request.mockImplementationOnce(async () => []).mockRejectedValueOnce(new Error("Storage unavailable"))
+      .mockImplementationOnce(async () => [])
+    try {
+      const hook = renderHook(() => useArtifactGeneration({ ...deps(), audioSettings: { provider: "tldw", model: "pocket", voice: "owned-voice", speed: 1, format: "wav" } }))
+      await act(async () => { await hook.result.current.handleGenerateOutput("audio_overview") })
+      expect(hook.result.current.unsavedArtifact?.exportRefs).toEqual([{ sourceType: "storage_file", fileId: 47, format: "wav", status: "ready" }])
+      await act(async () => { await hook.result.current.handleRetryArtifactSave() })
+      expect(io.speech).toHaveBeenCalledTimes(1)
+      expect(stored).toHaveLength(1)
+      expect(mapServerArtifactToLocal(stored[0]).exportRefs?.[0].fileId).toBe(47)
+    } finally {
+      if (original) Object.defineProperty(URL, "createObjectURL", original)
+      else Reflect.deleteProperty(URL, "createObjectURL")
+    }
+  })
+
+  it("does not save canonical audio after a storage-quota refusal", async () => {
+    io.speech.mockRejectedValueOnce(Object.assign(new Error("Storage quota exceeded"), { status: 507 }))
+    const hook = renderHook(() => useArtifactGeneration({ ...deps(), audioSettings: { provider: "tldw", model: "pocket", voice: "owned-voice", speed: 1, format: "wav" } }))
+    await act(async () => { await hook.result.current.handleGenerateOutput("audio_overview") })
+    expect(stored).toHaveLength(0)
+    expect(messages.success).not.toHaveBeenCalled()
+    expect(io.state.generatedArtifacts[0].status).toBe("failed")
+  })
+
+
   it('saves a real generated result before success and cold-restores its stable identity and source lineage', async () => {
     const hook = renderHook(() => useArtifactGeneration(deps()));
     await act(async () => { await hook.result.current.handleGenerateOutput('summary'); });
