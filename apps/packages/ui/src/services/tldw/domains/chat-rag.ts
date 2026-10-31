@@ -1412,6 +1412,7 @@ export const chatRagMethods = {
               ? senderCandidate
               : undefined,
           content: String(m.content ?? ""),
+          parent_message_id: m.parent_message_id == null ? m.parent_message_id : String(m.parent_message_id),
           ...(Object.prototype.hasOwnProperty.call(m, "images") ? { images: readCompleteMessageImages(m.images) } : {}),
           created_at,
           version:

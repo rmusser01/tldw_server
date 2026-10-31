@@ -1,3 +1,5 @@
+import { formatToMessage } from "@/db/dexie/helpers";
+import { readWorkspaceServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
 import { canonicalHistoryJson } from "@/db/dexie/history-selection";
 import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
@@ -101,12 +103,26 @@ const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[]): 
   if (cached.length !== canonical.length || ids.some(id => !id) ||
       new Set(ids).size !== ids.length) return false;
   try {
+    const localIds = new Map<string, string>();
+    cached.forEach((message, index) => {
+      if (!message.id || localIds.has(message.id)) throw new Error("Ambiguous local message identity");
+      localIds.set(message.id, ids[index]!);
+    });
+    const parentId = (value: unknown) => {
+      if (value == null) return null;
+      if (typeof value !== "string") throw new Error("Unknown message parent");
+      const candidates = new Set([localIds.get(value), ids.includes(value) ? value : undefined].filter(Boolean));
+      if (candidates.size !== 1) throw new Error("Unverified message parent");
+      return [...candidates][0];
+    };
     return cached.every((message, index) => {
       const saved = canonical[index];
       if (ids[index] !== saved.serverMessageId || message.isBot !== saved.isBot) return false;
-      // Local rendering IDs are not the canonical message identity.
-      const fields = Object.keys(message).filter(key => key !== "id" && message[key as keyof Message] !== undefined);
-      return canonicalHistoryJson(Object.fromEntries(fields.map(key => [key, message[key as keyof Message]]))) ===
+      // Optimistic display labels and timing are retained, not canonical payload.
+      const display = ["id", "name", "createdAt", "modelId", "modelName", "modelImage", "reasoning_time_taken"];
+      const fields = Object.keys(message).filter(key => !display.includes(key) && message[key as keyof Message] !== undefined);
+      return canonicalHistoryJson(Object.fromEntries(fields.map(key => [key,
+        key === "parentMessageId" ? parentId(message.parentMessageId) : message[key as keyof Message]]))) ===
         canonicalHistoryJson(Object.fromEntries(fields.map(key => [key, saved[key as keyof Message]])));
     });
   } catch {
@@ -446,7 +462,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     const cachedSelection = options.getCachedChat?.();
     const cachedChat = cachedSelection?.session;
     const provisional = !savedChat.value && !markerReference && cachedChat?.messages.length &&
-      cachedChat.historyId === null && cachedChat.serverChatId
+      cachedChat.serverChatId
       ? readResearchWorkspaceChatReference({
           referenceId: cachedSelection!.referenceId, serverChatId: cachedChat.serverChatId,
         }) : undefined;
@@ -469,8 +485,14 @@ export const restoreMigratedResearchWorkspace = async (options: {
       }
     }
     let verifiedCachedChat: CachedWorkspaceChat | undefined;
+    const mirrorBinding = chatReference?.serverChatId && cachedChat?.historyId ? {
+      historyId: cachedChat.historyId, chatId: chatReference.serverChatId,
+      ownerKey: serverChatMirrorOwnerKey(scope), workspaceId,
+    } : undefined;
+    const mirror = mirrorBinding ? await readWorkspaceServerChatMirror(mirrorBinding) : undefined;
+    assertCurrent();
     if (chatReference?.serverChatId && cachedChat?.serverChatId === chatReference.serverChatId &&
-        cachedChat.historyId === null && cachedChat.messages.length) {
+        cachedChat.messages.length) {
       const signal = AbortSignal.any([scope.scopeSignal, AbortSignal.timeout(15000)]);
       const serverMessages = await fetchAllServerChatMessages(
         ({ limit, offset }) => tldwClient.listChatMessages(chatReference.serverChatId!, {
@@ -482,7 +504,10 @@ export const restoreMigratedResearchWorkspace = async (options: {
       );
       assertCurrent();
       const canonical = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
+      const mirrorMessages = mirror ? formatToMessage(mirror.rows) : undefined;
       if (cachedMessagesMatchCanonical(cachedChat.messages, canonical) &&
+          (!mirrorMessages || (mirror!.rows.length === mirrorMessages.length &&
+            cachedMessagesMatchCanonical(mirrorMessages, canonical))) &&
           (cachedChat.history.length === 0 ||
             canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical))))
         verifiedCachedChat = cachedSelection!;
@@ -490,6 +515,12 @@ export const restoreMigratedResearchWorkspace = async (options: {
     if (provisional && verifiedCachedChat) {
       snapshot.workspaceChatReferenceId = provisional.referenceId;
       chatSession = { messages: [], history: [], historyId: null, serverChatId: provisional.serverChatId };
+    }
+    if (mirror && verifiedCachedChat) {
+      if (canonicalHistoryJson(await readWorkspaceServerChatMirror(mirrorBinding!)) !== canonicalHistoryJson(mirror))
+        throw new Error("Workspace Chat mirror changed during restoration");
+      // Keep its exact local settings association and optimistic display data.
+      chatSession = cachedChat;
     }
     assertCurrent();
     const relevantReceipts = (rows: MigrationReceipt[]) => rows
