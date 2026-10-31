@@ -397,6 +397,34 @@ async def test_a_provider_method_nested_in_an_own_key_call_is_not_checked_again(
     assert len(response["chunks"]) == 1
 
 
+@pytest.mark.parametrize("layer", ["sync", "async"])
+async def test_a_provider_method_nested_in_an_own_key_stream_is_not_checked_again(refused, layer: str) -> None:
+    """The same for a stream: its body runs while it is read, after stream() returned, and is not refused mid-stream."""
+
+    def _without_handle(request: dict[str, Any]) -> dict[str, Any]:
+        """The request a delegate gets: no handle."""
+        return {key: value for key, value in request.items() if key != PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY}
+
+    class _Delegating(_Provider):
+        """stream() and astream() read their reply from chat() and achat()."""
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Delegate to chat() while the stream is read."""
+            yield self.chat(_without_handle(request))["choices"][0]["message"]["content"]
+
+        async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
+            """Delegate to achat() while the stream is read."""
+            yield (await self.achat(_without_handle(request)))["choices"][0]["message"]["content"]
+
+    request = {**REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user")}
+    with llm_call_context(user_id=7, records_itself=True):
+        if layer == "sync":
+            chunks = await asyncio.to_thread(lambda: list(_Delegating().stream(request)))
+        else:
+            chunks = [chunk async for chunk in _Delegating().astream(request)]
+    assert chunks == ["hi"]
+
+
 def _chat_request() -> SimpleNamespace:
     """A /chat/completions request for user 7."""
     return SimpleNamespace(
