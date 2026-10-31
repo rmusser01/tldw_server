@@ -1608,17 +1608,23 @@ def test_data_tables_imports_input_error_from_media_db_errors_and_not_media_db_v
 
 
 def test_sync_imports_db_errors_from_media_db_errors_and_not_media_db_v2(monkeypatch):
+    from tldw_Server_API.app.core.Sync import server_sync_processor
+
     monkeypatch.setattr(legacy_media_db, "ConflictError", object(), raising=False)
     monkeypatch.setattr(legacy_media_db, "DatabaseError", object(), raising=False)
     monkeypatch.setattr(legacy_media_db, "InputError", object(), raising=False)
     monkeypatch.setattr(legacy_media_db, "MediaDatabase", object(), raising=False)
 
+    processor = importlib.reload(server_sync_processor)
     module = importlib.reload(sync)
 
-    assert module.ConflictError is media_db_errors.ConflictError
-    assert module.DatabaseError is media_db_errors.DatabaseError
-    assert module.InputError is media_db_errors.InputError
+    assert module.ServerSyncProcessor is processor.ServerSyncProcessor
+    assert processor.ConflictError is media_db_errors.ConflictError
+    assert processor.DatabaseError is media_db_errors.DatabaseError
+    assert processor.InputError is media_db_errors.InputError
     assert "MediaDatabase" not in module.__dict__
+    assert "MediaDatabase" not in processor.__dict__
+    assert "Media_DB_v2" not in inspect.getsource(processor)
 
 
 def test_db_manager_does_not_bind_detail_helpers_from_media_db_v2(monkeypatch):
@@ -2227,6 +2233,8 @@ def test_claims_service_does_not_bind_media_database_from_shim(monkeypatch):
     module = importlib.reload(claims_service)
     assert module.managed_media_database is media_db_api.managed_media_database
     assert "MediaDatabase" not in module.__dict__
+    assert "from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase" in inspect.getsource(module)
+    assert "Media_DB_v2" not in inspect.getsource(module)
 
 
 def test_media_module_imports_create_media_database_from_media_db_api(monkeypatch):

@@ -367,12 +367,51 @@ async def test_flashcards_export_rejects_cross_workspace_card_in_apkg_path(monke
         context=ctx,
     )
 
-    assert captured["rows"] == []  # nosec B101
-    assert captured["include_reverse"] is False  # nosec B101
+    # The query is scoped to the requesting workspace, not the requested deck's. This is
+    # the isolation boundary itself; everything below is a consequence of it.
     assert fake_db.list_flashcards_calls[-1]["workspace_id"] == "ws-1"  # nosec B101
     assert fake_db.list_flashcards_calls[-1]["deck_id"] == foreign_deck_id  # nosec B101
-    apkg_bytes = base64.b64decode(apkg_export["content_base64"])
-    assert apkg_bytes == b"apkg"  # nosec B101
+
+    # It therefore matches nothing, and _export_cards_sync returns before building an
+    # archive at all. The exporter is never handed a foreign row -- a stronger property
+    # than this test used to assert.
+    #
+    # It previously asserted `captured["rows"] == []`, i.e. that the exporter WAS called
+    # with an empty list. That stopped being true when the empty short-circuit was added,
+    # so the test failed with KeyError: 'rows' before reaching any isolation assertion --
+    # leaving the property unverified in either direction. It went unnoticed because this
+    # tree runs in no CI job; see TASK-13291 and TASK-13358.
+    assert "rows" not in captured, (  # nosec B101
+        f"export_apkg_from_rows was called with {captured.get('rows')!r} for a deck in "
+        "another workspace; no foreign row should reach the exporter at all"
+    )
+    assert apkg_export["success"] is False  # nosec B101
+    assert apkg_export["error"] == "No flashcards to export"  # nosec B101
+    assert "content_base64" not in apkg_export  # nosec B101
+
+    # Control: the refusal must be about the workspace, not about apkg export being
+    # broken. The same call for a deck in the caller's own workspace reaches the exporter.
+    own_deck_id = fake_db.add_deck("Own Deck", workspace_id="ws-1")
+    fake_db.cards["card-own"] = {
+        "uuid": "card-own",
+        "deck_id": own_deck_id,
+        "workspace_id": "ws-1",
+        "front": "Own Front",
+        "back": "Own Back",
+        "version": 1,
+        "deleted": 0,
+    }
+
+    own_export = await mod.execute_tool(
+        "flashcards.export",
+        {"format": "apkg", "deck_id": own_deck_id},
+        context=ctx,
+    )
+
+    assert own_export["success"] is True  # nosec B101
+    assert base64.b64decode(own_export["content_base64"]) == b"apkg"  # nosec B101
+    assert [row["uuid"] for row in captured["rows"]] == ["card-own"]  # nosec B101
+    assert captured["include_reverse"] is False  # nosec B101
 
 
 @pytest.mark.asyncio

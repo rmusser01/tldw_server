@@ -22,6 +22,7 @@ import math
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
@@ -51,8 +52,11 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     validate_stt_loaded_runtime,
 )
 
-# Global model cache
+# Global model cache. Loads run under the lock so concurrent misses on one key
+# load the (1-3 GB) model once; cached hits skip the lock.
+# ponytail: one module lock serialises loads of different models too; per-key locks if that matters.
 _model_cache: dict[str, Any] = {}
+_model_cache_lock = threading.Lock()
 _RUNTIME_MODEL_PATH = "model_path"
 _RUNTIME_DEVICE = "device"
 _RUNTIME_DTYPE = "dtype"
@@ -411,26 +415,29 @@ def _load_controlled_nemo_model(
     )
     model = _model_cache.get(cache_key)
     if model is None:
-        try:
-            model = (
-                model_class.restore_from(str(local_path), map_location=device)
-                if local_path is not None
-                else model_class.from_pretrained(hub_model_id)
-            )
-            if configure_decoding:
-                model.change_decoding_strategy(None)
-            model = _move_nemo_model(
-                model,
-                device=device,
-                dtype_name=dtype_name,
-            )
-        except (STTExecutionPlanError, STTExecutionUnsupportedError):
-            raise
-        except Exception:
-            raise STTExecutionUnsupportedError(
-                f"Controlled local {provider} artifact could not be loaded"
-            ) from None
-        _model_cache[cache_key] = model
+        with _model_cache_lock:
+            model = _model_cache.get(cache_key)
+            if model is None:
+                try:
+                    model = (
+                        model_class.restore_from(str(local_path), map_location=device)
+                        if local_path is not None
+                        else model_class.from_pretrained(hub_model_id)
+                    )
+                    if configure_decoding:
+                        model.change_decoding_strategy(None)
+                    model = _move_nemo_model(
+                        model,
+                        device=device,
+                        dtype_name=dtype_name,
+                    )
+                except (STTExecutionPlanError, STTExecutionUnsupportedError):
+                    raise
+                except Exception:
+                    raise STTExecutionUnsupportedError(
+                        f"Controlled local {provider} artifact could not be loaded"
+                    ) from None
+                _model_cache[cache_key] = model
     if execution_route is None:
         return model
     return SttLoadedRuntime(
@@ -478,41 +485,45 @@ def load_canary_model(
         logging.debug("Using cached Canary model")
         return _model_cache[cache_key]
 
-    try:
-        import nemo.collections.asr as nemo_asr
-    except ImportError:
-        logging.exception("Nemo toolkit not installed. Install with: pip install nemo_toolkit[asr]")
-        return None
+    with _model_cache_lock:
+        if cache_key in _model_cache:
+            return _model_cache[cache_key]
 
-    try:
-        logging.info("Loading Canary-1b model from NVIDIA...")
-
-        # Set cache directory for Nemo
-        cache_dir = _get_cache_dir()
-        os.environ['NEMO_CACHE_DIR'] = str(cache_dir)
-
-        # Load the model
-        model = nemo_asr.models.EncDecMultiTaskModel.from_pretrained("nvidia/canary-1b-v2")
-
-        # Configure device
-        device = 'cuda' if _torch_cuda_available(allow_import=True) else 'cpu'
         try:
-            stt_cfg = get_stt_config()
-        except _NEMO_NONCRITICAL_EXCEPTIONS:
-            stt_cfg = {}
-        device = stt_cfg.get('nemo_device', device)
+            import nemo.collections.asr as nemo_asr
+        except ImportError:
+            logging.exception("Nemo toolkit not installed. Install with: pip install nemo_toolkit[asr]")
+            return None
 
-        model = model.cuda() if device == 'cuda' and _torch_cuda_available(allow_import=False) else model.cpu()
+        try:
+            logging.info("Loading Canary-1b model from NVIDIA...")
 
-        model.eval()
+            # Set cache directory for Nemo
+            cache_dir = _get_cache_dir()
+            os.environ['NEMO_CACHE_DIR'] = str(cache_dir)
 
-        _model_cache[cache_key] = model
-        logging.info(f"Successfully loaded Canary-1b model on {device}")
-        return model
+            # Load the model
+            model = nemo_asr.models.EncDecMultiTaskModel.from_pretrained("nvidia/canary-1b-v2")
 
-    except Exception as e:
-        logging.exception(f"Failed to load Canary model: {e}")
-        return None
+            # Configure device
+            device = 'cuda' if _torch_cuda_available(allow_import=True) else 'cpu'
+            try:
+                stt_cfg = get_stt_config()
+            except _NEMO_NONCRITICAL_EXCEPTIONS:
+                stt_cfg = {}
+            device = stt_cfg.get('nemo_device', device)
+
+            model = model.cuda() if device == 'cuda' and _torch_cuda_available(allow_import=False) else model.cpu()
+
+            model.eval()
+
+            _model_cache[cache_key] = model
+            logging.info(f"Successfully loaded Canary-1b model on {device}")
+            return model
+
+        except Exception as e:
+            logging.exception(f"Failed to load Canary model: {e}")
+            return None
 
 
 def load_parakeet_model(
@@ -566,23 +577,27 @@ def load_parakeet_model(
         logging.debug(f"Using cached Parakeet model (variant: {variant})")
         return _model_cache[cache_key]
 
-    device = 'cuda' if _torch_cuda_available(allow_import=True) else 'cpu'
-    try:
-        stt_cfg = get_stt_config()
-    except _NEMO_NONCRITICAL_EXCEPTIONS:
-        stt_cfg = {}
-    device = stt_cfg.get('nemo_device', device)
+    with _model_cache_lock:
+        if cache_key in _model_cache:
+            return _model_cache[cache_key]
 
-    try:
-        if variant == 'onnx':
-            return _load_parakeet_onnx(device)
-        elif variant == 'mlx':
-            return _load_parakeet_mlx()
-        else:  # standard
-            return _load_parakeet_standard(device)
-    except Exception as e:
-        logging.exception(f"Failed to load Parakeet model (variant: {variant}): {e}")
-        return None
+        device = 'cuda' if _torch_cuda_available(allow_import=True) else 'cpu'
+        try:
+            stt_cfg = get_stt_config()
+        except _NEMO_NONCRITICAL_EXCEPTIONS:
+            stt_cfg = {}
+        device = stt_cfg.get('nemo_device', device)
+
+        try:
+            if variant == 'onnx':
+                return _load_parakeet_onnx(device)
+            elif variant == 'mlx':
+                return _load_parakeet_mlx()
+            else:  # standard
+                return _load_parakeet_standard(device)
+        except Exception as e:
+            logging.exception(f"Failed to load Parakeet model (variant: {variant}): {e}")
+            return None
 
 
 def _load_parakeet_standard(device: str):

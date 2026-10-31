@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,94 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.asyncio
+async def test_partial_source_failure_is_reported_without_contaminating_other_request(monkeypatch):
+    """Keep successful evidence, but never label a failed source empty/searched."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+    class Source:
+        def __init__(self, source):
+            self.source = source
+
+        async def retrieve(self, query, **kwargs):
+            await asyncio.sleep(0)
+            if query == "failure" and self.source != DataSource.MEDIA_DB:
+                raise CharactersRAGDBError("private database details must not escape")
+            return [Document(id=self.source.value, content="Rowan evidence", metadata={}, source=self.source)]
+
+    retriever = MultiDatabaseRetriever({})
+    retriever.retrievers = {
+        source: Source(source)
+        for source in [DataSource.MEDIA_DB, DataSource.CHARACTER_CARDS, DataSource.CHAT_HISTORY]
+    }
+    monkeypatch.setattr(up, "MultiDatabaseRetriever", lambda *args, **kwargs: retriever)
+
+    async def query(text):
+        return await up.unified_rag_pipeline(
+            query=text, sources=["media_db", "characters", "chats"],
+            media_db_path=":memory:", enable_generation=False, enable_cache=False,
+            enable_reranking=False, enable_security_filter=False,
+        )
+
+    failed, healthy = await asyncio.gather(query("failure"), query("healthy"))
+    assert len(failed.documents) == 1
+    assert failed.metadata["source_status"] == {
+        "media_db": {"status": "searched", "count": 1},
+        "characters": {"status": "error", "count": 0, "reason": "retrieval_failed"},
+        "chats": {"status": "error", "count": 0, "reason": "retrieval_failed"},
+    }
+    assert all(value["status"] == "searched" for value in healthy.metadata["source_status"].values())
+    assert "private database details" not in str(failed.metadata)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_request", [False, True], ids=["deadline", "caller-cancel"])
+@pytest.mark.parametrize("variant_kind", ["expansion", "decomposition"])
+async def test_variant_deadline_reports_partial_search_and_preserves_cancellation(monkeypatch, cancel_request, variant_kind):
+    from unittest.mock import AsyncMock
+
+    started = asyncio.Event()
+    finished = asyncio.Event()
+
+    class Source:
+        async def retrieve(self, query, **kwargs):
+            if query == "slow variant":
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    finished.set()
+            return [Document(id="character-1", content="Rowan evidence", metadata={}, source=DataSource.CHARACTER_CARDS)]
+
+    retriever = MultiDatabaseRetriever({})
+    retriever.retrievers = {DataSource.CHARACTER_CARDS: Source()}
+    monkeypatch.setattr(up, "MultiDatabaseRetriever", lambda *args, **kwargs: retriever)
+    monkeypatch.setattr(up, "multi_strategy_expansion", AsyncMock(return_value=["slow variant"]))
+    monkeypatch.setattr(up, "QueryRewriter", None)
+    monkeypatch.setattr(up, "RewriteCache", None)
+    decomposition = variant_kind == "decomposition"
+    deadline = 0.05 if not cancel_request else None
+    task = asyncio.create_task(up.unified_rag_pipeline(
+        query="base and slow variant" if decomposition else "base",
+        sources=["characters"], character_db_path=":memory:",
+        expand_query=not decomposition, enable_query_decomposition=decomposition,
+        subquery_time_budget_sec=deadline if decomposition else None,
+        timeout_seconds=None if decomposition else deadline,
+        enable_generation=False, enable_cache=False, enable_reranking=False, enable_security_filter=False,
+    ))
+    if cancel_request:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        result = await task
+        assert result.metadata["source_status"]["characters"] == {
+            "status": "error", "count": 1, "reason": "retrieval_failed",
+        }
+    assert finished.is_set(), "Cancelled retrieval tasks must finish before returning"
 
 
 def _create_prompts_db(path: Path) -> None:
@@ -75,6 +164,7 @@ def _create_chacha_source_db(path: Path) -> None:
             CREATE TABLE conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 character_id INTEGER,
+                title TEXT,
                 source TEXT DEFAULT '',
                 deleted BOOLEAN DEFAULT 0
             )
@@ -156,7 +246,7 @@ def _create_chacha_source_db(path: Path) -> None:
                 "tester",
             ),
         )
-        conn.execute("INSERT INTO conversations (character_id) VALUES (1)")
+        conn.execute("INSERT INTO conversations (character_id, title) VALUES (?, ?)", (1, "Retrieval conversation"))
         conn.execute(
             "INSERT INTO messages (conversation_id, content, sender, timestamp) VALUES (?, ?, ?, ?)",
             (1, "The experiment showed better retrieval coverage.", "user", "2026-05-12T01:00:00Z"),

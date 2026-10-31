@@ -2,6 +2,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.main import app
 
@@ -159,8 +160,10 @@ def test_dlq_requeue_sanitizes_backend_failure(monkeypatch, admin_user):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("bulk", [False, True], ids=["single", "bulk"])
-def test_dlq_requeue_sanitizes_schema_warning(monkeypatch, admin_user, bulk):
-    """Invalid payload diagnostics must not leak input values into responses."""
+def test_dlq_requeue_sanitizes_schema_warning(
+    monkeypatch: pytest.MonkeyPatch, admin_user: None, bulk: bool,
+) -> None:
+    """Keep safe retry context without leaking invalid input into logs or responses."""
     import redis.asyncio as aioredis
 
     client = TestClient(app)
@@ -182,10 +185,15 @@ def test_dlq_requeue_sanitizes_schema_warning(monkeypatch, admin_user, bulk):
     monkeypatch.setattr(aioredis, "from_url", fake_from_url)
     request = {"stage": "embedding", "delete_from_dlq": True}
     request["entry_ids" if bulk else "entry_id"] = ["1-0"] if bulk else "1-0"
-    response = client.post(
-        "/api/v1/embeddings/dlq/requeue" + ("/bulk" if bulk else ""),
-        json=request,
-    )
+    messages = []
+    sink_id = logger.add(messages.append, format="{message} {extra}")
+    try:
+        response = client.post(
+            "/api/v1/embeddings/dlq/requeue" + ("/bulk" if bulk else ""),
+            json=request,
+        )
+    finally:
+        logger.remove(sink_id)
 
     assert response.status_code == 200
     result = response.json()["results"][0] if bulk else response.json()
@@ -194,3 +202,14 @@ def test_dlq_requeue_sanitizes_schema_warning(monkeypatch, admin_user, bulk):
     assert len(fake.streams["embeddings:embedding"]) == 1
     assert fake.streams["embeddings:embedding:dlq"] == []
     assert fake.closed
+    warnings = [
+        message for message in messages
+        if message.record["message"].startswith("DLQ payload schema validation failed:")
+    ]
+    assert len(warnings) == 1
+    context = warnings[0].record["extra"]
+    assert context["operation"] == ("dlq_requeue_bulk" if bulk else "dlq_requeue")
+    assert context["stage"] == "embedding"
+    assert context["stream"] == "embeddings:embedding:dlq"
+    assert context["entry_id"] == "1-0"
+    assert all("secret-token" not in message for message in messages)

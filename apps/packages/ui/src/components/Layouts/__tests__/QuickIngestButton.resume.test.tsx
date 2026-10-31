@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -145,7 +145,7 @@ describe("QuickIngestButton resume behavior", () => {
         advancedValues: { api_name: "openai" },
       },
     })
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "draft",
       visibility: "visible",
@@ -242,7 +242,7 @@ describe("QuickIngestButton resume behavior", () => {
         advancedValues: { api_name: "openai" },
       },
     })
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "draft",
       visibility: "visible",
@@ -281,7 +281,7 @@ describe("QuickIngestButton resume behavior", () => {
         advancedValues: { api_name: "openai" },
       },
     })
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       visibility: "hidden",
       presetConfig: {
@@ -316,7 +316,7 @@ describe("QuickIngestButton resume behavior", () => {
   })
 
   it("remounts and applies a first-source seed to an existing custom draft", () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       visibility: "hidden",
       selectedPreset: "custom",
@@ -356,7 +356,7 @@ describe("QuickIngestButton resume behavior", () => {
   })
 
   it("remounts a custom draft when a playlist seed changes its open detail", () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       visibility: "hidden",
       selectedPreset: "custom",
@@ -395,7 +395,7 @@ describe("QuickIngestButton resume behavior", () => {
   it.each(["processing", "completed"] as const)(
     "keeps a %s session snapshot when a seeded open arrives",
     (lifecycle) => {
-      useQuickIngestSessionStore.getState().upsertSession({
+      useQuickIngestSessionStore.getState().createDraftSession({
         ...createEmptyQuickIngestSession(),
         lifecycle,
         visibility: "hidden",
@@ -433,7 +433,7 @@ describe("QuickIngestButton resume behavior", () => {
   it("captures current settings when Ingest More creates a new draft", async () => {
     const user = userEvent.setup()
     const completed = createEmptyQuickIngestSession()
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...completed,
       lifecycle: "completed",
       visibility: "visible",
@@ -482,7 +482,7 @@ describe("QuickIngestButton resume behavior", () => {
         },
       })
       const existing = createEmptyQuickIngestSession()
-      useQuickIngestSessionStore.getState().upsertSession({
+      useQuickIngestSessionStore.getState().createDraftSession({
         ...existing,
         lifecycle,
         visibility: "visible",
@@ -511,7 +511,7 @@ describe("QuickIngestButton resume behavior", () => {
     const user = userEvent.setup()
     const session = createEmptyQuickIngestSession()
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       id: session.id,
       lifecycle: "processing",
       visibility: "hidden",
@@ -538,7 +538,7 @@ describe("QuickIngestButton resume behavior", () => {
   it("shows the secondary CTA only for draft sessions with queued items", async () => {
     const user = userEvent.setup()
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "draft",
       visibility: "hidden",
@@ -574,7 +574,7 @@ describe("QuickIngestButton resume behavior", () => {
   })
 
   it("keeps the modal host mounted while a resumable session exists", () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       visibility: "hidden",
@@ -647,3 +647,18 @@ describe("QuickIngestButton resume behavior", () => {
     expect(session?.presetConfig.typeDefaults.document?.ocr).toBe(false)
   })
 })
+
+vi.mock("@plasmohq/storage", async () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1 }) } }))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {}, promptForRag: vi.fn() }))
+import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+let releaseAuthority: (() => void) | undefined
+beforeEach(async () => {
+  localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://test.test", authMode: "single-user", apiKey: "synthetic" }))
+  useQuickIngestSessionStore.getState().setAuthority(null)
+  releaseAuthority = quickIngestAuthority.retain()
+  await waitFor(() => expect(useQuickIngestSessionStore.getState().authorityKey).toBeTruthy())
+})
+afterEach(() => releaseAuthority?.())
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { initialize: async () => {}, ensureConfigForRequest: async () => JSON.parse(localStorage.getItem("tldwConfig") || "null") } }))

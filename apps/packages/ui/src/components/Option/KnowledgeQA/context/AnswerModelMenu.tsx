@@ -100,8 +100,8 @@ export function AnswerModelMenu({
     [providerCatalog]
   )
 
-  const effectiveProviderKey =
-    generationProvider || providerCatalog?.default_provider || null
+  // The catalog default belongs to Chat; RAG has independently configured defaults.
+  const effectiveProviderKey = generationProvider || null
 
   const selectedProviderConfig = useMemo(
     () =>
@@ -154,10 +154,6 @@ export function AnswerModelMenu({
     : generationProvider
       ? `${providerLabel} default`
       : "Server default"
-  const resolvedDefaultDetail =
-    !generationProvider && !trimmedGenerationModel && effectiveProviderKey
-      ? ` (${providerLabel} default when available)`
-      : ""
 
   return (
     <div className={cn("relative", className)} ref={containerRef}>
@@ -168,7 +164,7 @@ export function AnswerModelMenu({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Choose answer model"
-        title={`Answer generation uses ${summary}${resolvedDefaultDetail}`}
+        title={`Answer generation uses ${summary}`}
       >
         <Sparkles className="h-3.5 w-3.5" />
         <span className="max-w-[11rem] truncate">AI: {summary}</span>
@@ -210,13 +206,14 @@ export function AnswerModelMenu({
             <select
               aria-label="Answer provider"
               value={generationProvider ?? SERVER_DEFAULT_PROVIDER_VALUE}
-              onChange={(event) =>
-                onGenerationProviderChange(
-                  event.target.value === SERVER_DEFAULT_PROVIDER_VALUE
-                    ? null
-                    : event.target.value
+              onChange={(event) => {
+                const provider = event.target.value === SERVER_DEFAULT_PROVIDER_VALUE
+                  ? null : event.target.value
+                onGenerationProviderChange(provider)
+                onGenerationModelChange(
+                  providerEntries.find((entry) => entry.name === provider)?.default_model?.trim() || null
                 )
-              }
+              }}
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface2 px-2 text-sm text-text outline-none focus:border-primary"
             >
               {providerOptions.map((option) => (
@@ -239,7 +236,7 @@ export function AnswerModelMenu({
               placeholder={
                 selectedProviderConfig?.default_model
                   ? `Default: ${selectedProviderConfig.default_model}`
-                  : "Use provider default"
+                  : generationProvider ? "Enter an answer model" : "Use RAG server default"
               }
               className="mt-1 h-9 w-full rounded-md border border-border bg-surface2 px-2 text-sm text-text outline-none placeholder:text-text-muted focus:border-primary"
             />

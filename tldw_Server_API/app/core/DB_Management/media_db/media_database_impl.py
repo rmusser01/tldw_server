@@ -6,9 +6,11 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager, nullcontext, suppress
-from datetime import timezone
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
@@ -532,6 +534,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_schema_versio
     get_db_version,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 
 
 class MediaDatabase:
@@ -1673,12 +1676,15 @@ class MediaDatabase:
         raw = str(value or "").strip()
         if not raw:
             return None
-        with suppress(MEDIA_NONCRITICAL_EXCEPTIONS):
-            dt = parsedate_to_datetime(raw)
-            if dt is not None:
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt.astimezone(timezone.utc).isoformat()
+        for parser in (datetime.fromisoformat, parsedate_to_datetime):
+            try:
+                dt = parser(raw)
+                if dt is not None:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.astimezone(timezone.utc).isoformat()
+            except (ValueError, TypeError, OverflowError):
+                continue
         return None
 
     @staticmethod
@@ -1909,8 +1915,8 @@ class MediaDatabase:
                 if outermost:
                     conn.commit()
                     logging.debug("Committed SQLite transaction.")
-            except MEDIA_NONCRITICAL_EXCEPTIONS:
-                logging.exception("SQLite transaction failed, rolling back")
+            except MEDIA_NONCRITICAL_EXCEPTIONS as exc:
+                logger.error("SQLite transaction rollback (error_type={})", exception_type_for_log(exc))
                 if outermost:
                     with suppress(sqlite3.Error):
                         conn.rollback()

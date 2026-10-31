@@ -27,6 +27,8 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import get_byok_credential_policy
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 DEFAULT_BYOK_ALLOWED_PROVIDERS: set[str] = {
     "anthropic",
@@ -52,8 +54,9 @@ DEFAULT_BYOK_ALLOWED_PROVIDERS: set[str] = {
     "zai",
 }
 DEFAULT_BYOK_ALLOWED_PROVIDERS.update(iter_custom_openai_provider_names(start=3))
-_PLATFORM_ADMIN_ROLES = frozenset({"admin", "owner", "super_admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+# Imported, not restated: see AuthNZ/platform_admin.py for why there is one copy.
+_PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _CREDENTIAL_HEADER_FIELDS = frozenset({"org_id", "project_id"})
 _MAX_CREDENTIAL_HEADER_VALUE_LENGTH = 512
 _RUNTIME_CONFIG_PLACEHOLDERS = frozenset(

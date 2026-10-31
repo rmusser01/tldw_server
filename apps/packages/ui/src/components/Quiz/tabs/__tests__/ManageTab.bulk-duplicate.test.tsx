@@ -52,7 +52,23 @@ vi.mock("../../hooks", () => ({
   useUpdateQuizMutation: vi.fn(),
   useCreateQuestionMutation: vi.fn(),
   useUpdateQuestionMutation: vi.fn(),
-  useDeleteQuestionMutation: vi.fn()
+  useDeleteQuestionMutation: vi.fn(),
+  useAllOsceStationsQuery: vi.fn(() => ({
+    data: [],
+    error: null,
+    isLoading: false,
+    refetch: vi.fn()
+  })),
+  useDeleteOsceStationMutation: vi.fn(() => ({
+    isPending: false,
+    mutateAsync: vi.fn()
+  })),
+  useOsceStationQuery: vi.fn(() => ({
+    data: undefined,
+    error: null,
+    isLoading: false,
+    refetch: vi.fn()
+  }))
 }))
 
 vi.mock("@/services/quizzes", () => ({
@@ -88,12 +104,17 @@ describe("ManageTab bulk and duplicate actions", () => {
     failed_quizzes: 0,
     imported_questions: 2,
     failed_questions: 0,
+    imported_stations: 0,
+    failed_stations: 0,
     items: [
       {
         source_index: 0,
         quiz_id: 901,
         imported_questions: 2,
-        failed_questions: 0
+        failed_questions: 0,
+        imported_stations: 0,
+        failed_stations: 0,
+        station_ids: []
       }
     ],
     errors: []

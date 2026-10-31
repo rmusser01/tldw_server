@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight import (
     ProbeUnavailable,
 )
 from tldw_Server_API.app.core.Web_Scraping.preflight.asyncio_compat import timeout as asyncio_timeout
+from tldw_Server_API.app.core.Web_Scraping.preflight.context import _CleanupEntry
 from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeBrowserContext,
@@ -1602,7 +1603,9 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     started_at = asyncio.get_running_loop().time()
     async with probe.open_page(BrowserProbeOptions()):
         pass
+    analyzer_started_at = asyncio.get_running_loop().time()
     await asyncio.sleep(analyzer_delay_s)
+    analyzer_elapsed_s = asyncio.get_running_loop().time() - analyzer_started_at
     async with probe.open_page(BrowserProbeOptions()):
         pass
     elapsed_s = asyncio.get_running_loop().time() - started_at
@@ -1613,7 +1616,7 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     assert [page.close_cancellations for page in pages] == [0, 0]
     assert [page.results.get("close_complete") for page in pages] == [True, True]
     assert [page.force_close_calls for page in pages] == [0, 0]
-    assert elapsed_s - analyzer_delay_s < grace_s
+    assert elapsed_s - analyzer_elapsed_s < grace_s
 
 
 @pytest.mark.asyncio
@@ -1858,3 +1861,116 @@ async def test_guard_and_cleanup_logs_never_include_urls_or_raw_errors() -> None
     assert "secret.example" not in rendered
     assert "token=raw" not in rendered
     assert "RuntimeError" not in rendered
+
+
+class _ControlledBrowserClose:
+    """Expose native close completion independently of its shielded waiter."""
+
+    def __init__(self, outcome: str, *, force_available: bool) -> None:
+        self.outcome = outcome
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.native_calls: list[str] = []
+        self.force_calls = 0
+        self.closed = False
+        if not force_available:
+            self.force_close = None
+
+    async def _native_close(self, method: str) -> None:
+        self.native_calls.append(method)
+        self.started.set()
+        await self.release.wait()
+        if self.outcome == "failed":
+            raise RuntimeError("controlled native close failure")
+        self.closed = True
+
+    async def close(self) -> None:
+        await self._native_close("close")
+
+    async def stop(self) -> None:
+        await self._native_close("stop")
+
+    async def force_close(self) -> None:
+        self.force_calls += 1
+        self.release.set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["page", "context", "browser", "playwright"])
+@pytest.mark.parametrize("outcome", ["succeeded", "failed", "cancelled", "pending", "absent"])
+@pytest.mark.parametrize("force_available", [True, False], ids=["force-method", "native-only"])
+async def test_browser_force_cleanup_checks_native_operation_before_forcing(
+    kind: str,
+    outcome: str,
+    force_available: bool,
+) -> None:
+    resource = _ControlledBrowserClose(outcome, force_available=force_available)
+    handle = _required("_cleanup_handle")(resource, kind=kind)
+    controls = _controls()
+    entry = _CleanupEntry(handle=handle)
+    operation: asyncio.Task[None] | None = None
+    graceful: asyncio.Task[None] | None = None
+    loop = asyncio.get_running_loop()
+    warnings: list[str] = []
+    sink = logger.add(warnings.append, level="WARNING", format="{message}")
+    try:
+        if outcome != "absent":
+            graceful = asyncio.create_task(controls._graceful_cleanup((entry,)))
+            await resource.started.wait()
+            operation = handle._operation_task
+            assert operation is not None
+            if outcome in {"succeeded", "failed"}:
+                # Queue native completion before cancellation, so the shield's
+                # continuation cannot mark the entry before the force sweep.
+                resource.release.set()
+            elif outcome == "cancelled":
+                operation.cancel()
+            loop.call_soon(graceful.cancel)
+            await asyncio.gather(graceful, return_exceptions=True)
+            assert graceful.cancelled()
+            if outcome == "succeeded":
+                assert operation.done() and not operation.cancelled()
+                assert operation.exception() is None
+                assert resource.closed
+            elif outcome == "failed":
+                assert isinstance(operation.exception(), RuntimeError)
+            elif outcome == "cancelled":
+                assert operation.cancelled()
+            else:
+                assert not operation.done()
+        assert not entry.graceful_complete
+
+        force_tasks = controls._start_force_cleanup((entry,))
+        if not force_available and outcome in {"pending", "absent"}:
+            loop.call_soon(resource.release.set)
+        force_results = await asyncio.gather(*force_tasks, return_exceptions=True)
+        if not force_available and outcome == "cancelled":
+            assert len(force_results) == 1
+            assert isinstance(force_results[0], asyncio.CancelledError)
+        else:
+            assert force_results == [None]
+        await handle.force_close()
+        await handle.close()
+        expected_warnings = ["Preflight cleanup failed for _BrowserCleanupHandle."] if (
+            not force_available and outcome == "failed"
+        ) else []
+        assert [message.strip() for message in warnings] == expected_warnings
+
+        expected_force_calls = int(force_available and outcome != "succeeded")
+        assert resource.force_calls == expected_force_calls
+        expected_native_calls = [] if force_available and outcome == "absent" else [
+            "stop" if kind == "playwright" else "close"
+        ]
+        assert resource.native_calls == expected_native_calls
+        assert controls._start_force_cleanup((entry,)) == set()
+        if operation is not None:
+            assert handle._operation_task is operation
+    finally:
+        logger.remove(sink)
+        resource.release.set()
+        if graceful is not None and not graceful.done():
+            graceful.cancel()
+            await asyncio.gather(graceful, return_exceptions=True)
+        native = handle._operation_task
+        if native is not None:
+            await asyncio.gather(native, return_exceptions=True)

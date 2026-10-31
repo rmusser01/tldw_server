@@ -32,7 +32,6 @@ _WF_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeDecodeError,
     ValueError,
     AdapterError,
-    asyncio.CancelledError,
 )
 
 # Telemetry/metrics (graceful fallbacks if missing)

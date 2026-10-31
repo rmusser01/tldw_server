@@ -1940,6 +1940,7 @@ def _build_source_status(
     retriever: Any,
     documents: list[Any],
     filtered_counts: dict[str, int],
+    source_failures: set[DataSource] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Build per-source availability and result-count diagnostics for UI recovery."""
     retriever_map = getattr(retriever, "retrievers", {}) or {}
@@ -1958,6 +1959,12 @@ def _build_source_status(
                 "status": "unavailable",
                 "count": 0,
                 "reason": "no_retriever_configured",
+            }
+        elif source_failures and data_source in source_failures:
+            entry = {
+                "status": "error",
+                "count": count,
+                "reason": "retrieval_failed",
             }
         elif count == 0:
             entry = {
@@ -3171,6 +3178,7 @@ async def unified_rag_pipeline(
             return db_paths
 
         source_status_retriever: Any = None
+        source_failures: set[DataSource] = set()
         cumulative_filtered_artifact_counts: dict[str, int] = {}
 
         def _apply_workspace_filtering_to_result() -> None:
@@ -3189,6 +3197,7 @@ async def unified_rag_pipeline(
                     retriever=source_status_retriever,
                     documents=filtered_documents,
                     filtered_counts=dict(cumulative_filtered_artifact_counts),
+                    source_failures=source_failures,
                 )
             if workspace_id is not None:
                 result.metadata["workspace_id"] = workspace_id
@@ -4354,10 +4363,16 @@ async def unified_rag_pipeline(
                                 ),
                                 retriever=retriever,
                                 retrieval_config=retrieval_cfg or config,
+                                source_failures=source_failures,
                                 allowed_media_ids=include_media_ids,
                                 allowed_note_ids=include_note_ids,
                                 bypass_provider_failures=credential_runtime is not None,
                             )
+                        except asyncio.TimeoutError:
+                            # This retrieval attempt did not finish. Keep base
+                            # evidence, but disclose incomplete source coverage.
+                            source_failures.update(resolved_data_sources)
+                            raise
                         except _RAG_PROVIDER_FAILURES as exc:
                             if credential_runtime is None:
                                 raise
@@ -4375,6 +4390,7 @@ async def unified_rag_pipeline(
                         retrieval_plan=effective_retrieval_plan,
                         retriever=retriever,
                         retrieval_config=config,
+                        source_failures=source_failures,
                         allowed_media_ids=include_media_ids,
                         allowed_note_ids=include_note_ids,
                         bypass_provider_failures=credential_runtime is not None,
@@ -4716,13 +4732,19 @@ async def unified_rag_pipeline(
 
                                 tasks = [asyncio.create_task(_run_subquery(sq)) for sq in subqueries_to_run]
                                 if tasks:
-                                    if time_budget is not None:
-                                        remaining = max(0.0, time_budget - (time.time() - decomp_start))
-                                        done, pending = await asyncio.wait(tasks, timeout=remaining)
-                                        for p in pending:
-                                            p.cancel()
-                                    else:
-                                        done, _ = await asyncio.wait(tasks)
+                                    try:
+                                        if time_budget is not None:
+                                            remaining = max(0.0, time_budget - (time.time() - decomp_start))
+                                            done, pending = await asyncio.wait(tasks, timeout=remaining)
+                                            if pending:
+                                                source_failures.update(resolved_data_sources)
+                                        else:
+                                            done, _ = await asyncio.wait(tasks)
+                                    finally:
+                                        for task in tasks:
+                                            if not task.done():
+                                                task.cancel()
+                                        await asyncio.gather(*tasks, return_exceptions=True)
                                     for task in done:
                                         try:
                                             task.result()
@@ -5089,8 +5111,9 @@ async def unified_rag_pipeline(
                         from tldw_Server_API.app.core.config import load_and_log_configs
 
                         _cfg = load_and_log_configs() or {}
-                        _prov = (_cfg.get("RAG_DEFAULT_LLM_PROVIDER") or "openai").strip()
-                        _model = (_cfg.get("RAG_DEFAULT_LLM_MODEL") or "gpt-4o-mini").strip()
+                        from .generation_defaults import resolve_generation_defaults
+
+                        _prov, _model = resolve_generation_defaults(_cfg)
                     except (ImportError, AttributeError, OSError, TypeError, ValueError):
                         _prov, _model = "openai", "gpt-4o-mini"
                     prompt = (
@@ -5307,7 +5330,11 @@ async def unified_rag_pipeline(
                 before_count = len(result.documents)
                 filtered_docs = []
                 for d in result.documents:
-                    doc_type = _normalize_chunk_type_value((d.metadata or {}).get("chunk_type"))
+                    # Whole text records (notes, chats, cards) have no chunk
+                    # annotation. They remain text, including in the UI default
+                    # filter; an explicitly typed chunk still keeps its type.
+                    raw_type = (d.metadata or {}).get("chunk_type")
+                    doc_type = _normalize_chunk_type_value(raw_type if raw_type is not None else "text")
                     if doc_type and doc_type in allowed:
                         filtered_docs.append(d)
                 result.documents = filtered_docs
@@ -5493,6 +5520,11 @@ async def unified_rag_pipeline(
                                 filtered_docs.append(doc_ref)
 
                     if filtered_docs is not None:
+                        # Expose only aggregate outcomes, never excluded evidence.
+                        result.metadata["security_filter"] = {
+                            "excluded_count": max(0, len(result.documents) - len(filtered_docs)),
+                            "retained_count": len(filtered_docs),
+                        }
                         result.documents = filtered_docs
                     result.timings["security_filter"] = time.time() - security_start
 
@@ -5737,6 +5769,7 @@ async def unified_rag_pipeline(
                             query=gap_query,
                             sources=data_sources,
                             config=config,
+                            source_failures=source_failures,
                             index_namespace=retrieval_index_namespace,
                             retrieval_plan=_retrieval_plan_for(gap_query),
                             allowed_media_ids=include_media_ids,
@@ -5979,6 +6012,7 @@ async def unified_rag_pipeline(
                                 query=rewritten_query,
                                 sources=data_sources,
                                 config=retrieval_config,
+                                source_failures=source_failures,
                                 index_namespace=retrieval_index_namespace,
                                 retrieval_plan=_retrieval_plan_for(rewritten_query),
                             )
@@ -8879,13 +8913,9 @@ async def unified_rag_pipeline(
                             )
 
                             _f_cfg = _load_cfg() or {}
-                            _f_prov = (
-                                generation_provider
-                                or _f_cfg.get("RAG_DEFAULT_LLM_PROVIDER")
-                                or _f_cfg.get("default_api")
-                                or "openai"
-                            ).strip()
-                            _f_model = generation_model or _f_cfg.get("RAG_DEFAULT_LLM_MODEL")
+                            from .generation_defaults import resolve_generation_defaults
+
+                            _f_prov, _f_model = resolve_generation_defaults(_f_cfg, generation_provider, generation_model)
                             _f_handle = None
                             if credential_runtime is not None:
                                 _f_handle = await credential_runtime.resolve(

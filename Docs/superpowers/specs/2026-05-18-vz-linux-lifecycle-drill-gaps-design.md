@@ -282,3 +282,124 @@ touch:
   first implementation drill lands?
 - What minimum prepared-host evidence is required before any of these drills can
   be promoted from manual local run to manual host-gated workflow input?
+
+## 2026-09-13 Reproducible Guest-Fault Workflow
+
+TASK-13243.5 packages the two already accepted real guest drills (missing `exec`
+capability and acknowledged-handshake readiness withholding) into one explicit
+operator workflow, `tools/macos-vz-helper/scripts/vz-failure-drill.py`. This is
+preparation and repeatability work, not a new runtime or a general fault engine.
+The existing individual pytest entrypoints remain available.
+
+- Require explicit fault-injection consent, a known-good Debian arm64 ext4
+  bundle, a signed helper path, and a new private evidence directory.
+- Keep fault behavior in checked-in test fixtures applied through Go build
+  overlays. Refuse ambiguous/missing source anchors rather than silently
+  producing a healthy guest. No production flags or source edits.
+- Use the existing image-store materializer for all clones. Install each test
+  binary into an offline clone through a separate healthy disposable preparer
+  VM; compare installed bytes and run filesystem checks. Never boot source
+  bundles, and independently verify their hashes even after a failed drill.
+- Use the existing managed direct-helper lifecycle at a fresh private socket,
+  with signing/entitlement preflight and PID ownership checks. Do not attach to
+  another helper, install launchd services, or change default smoke/CI triggers.
+- Run both positive tests and negative controls on fresh clones. Negative
+  acceptance requires the intended assertion failure **and** recorded completed
+  execution, exit zero, exact stdout, and dispatch to the fault VM. Cancelled
+  runs, unrelated failures, missing reports, and skips are not acceptance.
+- Retain receipts, input/binary/source hashes, overlays, logs, and image-store
+  clones. Independently attempt VM cleanup, disk-handle checks, helper stop, and
+  socket/PID absence verification. Any cleanup uncertainty makes the command
+  fail. Only the empty short runtime directory is automatically removed.
+
+Host reboot, kernel boot hangs, missing-agent, protocol-version mismatch,
+workspace mismatch, arbitrary crash classes, and scheduled fault injection
+remain outside this slice. See the helper README for the operator command and
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` for the actual host results.
+
+## 2026-09-14 Guest Protocol Mismatch Extension
+
+TASK-13243.6 adds the next bounded guest-compatibility drill to the existing
+workflow. A test-only Go overlay sends initial guest handshake version `999`;
+the normal helper rejects it with `guest_protocol_mismatch` rather than the
+generic `helper_internal_error`. Unrelated malformed messages retain their
+existing classification. This is the guest VSock protocol, not the separate
+host-helper protocol or the already tested missing-exec capability gate.
+
+The dedicated diagnostic also covers version mismatches in later exec replies.
+Swift server/bridge regression tests cover that path and preserve request-ID and
+malformed-response classifications; the live drill injects only the handshake.
+
+The existing disposable image-store/offline-preparer/isolated-helper lifecycle
+remains authoritative. A fresh workspace nonce correlates a guest-written proof
+with the attempted VM and wire version. Proof alone cannot pass the test:
+acceptance requires the specific rejection, no exec dispatch, no surviving
+reusable VM state, then real healthy execution and same-session VM reuse.
+The negative control changes only the fixture's version to the supported value;
+helper validation stays enabled, and real successful execution plus the intended
+assertion failure are both required. The command now requires all six cases.
+
+Keep canonical/source hashes and cleanup verification, retain the evidence,
+and do not introduce production fault flags, automatic injection or reboot.
+Host reboot, missing-agent, early kernel boot hangs and other deferred fault
+classes remain separate. Record actual host results in the prepared-host evidence
+document; this design extension is not itself proof of real VM acceptance.
+
+## 2026-09-15 Advertised Workspace Mismatch Extension
+
+TASK-13243.7 isolates the existing runner workspace-metadata admission guard.
+Reuse the same disposable image-store, offline installer, isolated helper and
+evidence workflow, now with four profiles and eight required positive/negative
+cases. No production admission or VM lifecycle change is intended.
+
+The test-only Go overlay alters only the initial handshake's advertised root to
+`/workspace-mismatch/<fresh nonce>`. The actual `/workspace` mount, guest protocol
+and `exec`/`output_cap_v1` capabilities remain unchanged. The host must observe
+that exact root from the real helper create reply for the attempted VM, then
+require only `vz_linux_guest_agent_workspace_mismatch`, no exec dispatch, no
+reusable VM state, and healthy replacement execution plus same-session reuse.
+Public reconciliation, session APIs and helper inventory establish cleanup;
+do not reach into private orchestrator state or bypass admission.
+
+The negative control changes only the challenge to advertise the supported root.
+Acceptance requires supported metadata and actual completed, exit-zero,
+exact-output execution before the intended rejection assertion fails. A skip,
+readiness failure, capability fault, foreign VM, or uncertain cleanup is not
+acceptance. Existing source-hash and helper/disk cleanup gates remain mandatory.
+
+This proves advertised metadata admission, not mount isolation or path-escape
+resistance. Missing-agent, early boot-hang and host-reboot live evidence remain
+separate; no reboot, source-bundle mutation or scheduled fault injection is added.
+
+## 2026-09-26 Initramfs Boot-Stall Extension
+
+TASK-13243.10 extends the existing manual failure workflow to six profiles and
+twelve mandatory positive/negative cases. Unlike the missing-agent launcher,
+this test-only wrapper runs as initramfs PID1 before Debian's original `/init`,
+rootfs mounting, systemd, or guest-agent startup. It prints a fresh nonce,
+requested VM ID, mode, and `initramfs` stage through the helper's per-VM serial
+log, then stalls. A transport timeout without matching serial proof is a failed
+drill, not acceptance.
+
+The existing disposable healthy preparer extracts the original `/init` from an
+offline fault-source clone. Append an aligned native `newc` archive containing
+the wrapper, preserved original init, and fixture settings to that clone's
+manifest-selected initrd. Do not modify the source bundle, kernel, rootfs, or
+production agent. Each case clones that prepared image through the existing
+image store and appends only its fresh nonce/mode settings. The continue-mode
+negative control executes the preserved original init through the same wrapper;
+acceptance requires completed real fault-VM execution plus the intended failed
+assertion. Normal host validation remains enabled.
+
+Positive acceptance requires a bounded guest-transport timeout, zero exec,
+no reusable session VM state, healthy replacement execution and same-session
+reuse. Existing VM enumeration, disk-handle, helper shutdown, source-hash and
+evidence-retention gates remain mandatory. Record preparation initrd hashes and
+original-init hash as well as input hashes and live serial proof. This extends
+test fixtures only: no production fault flag, Docker dependency, default-helper
+takeover, launchd change, reboot, or default CI trigger.
+
+This is explicitly early-userspace-stall evidence, not closure of arbitrary
+kernel hangs, a stalled Virtualization.framework start callback, mount isolation,
+or host reboot recovery. Portable success does not establish live acceptance;
+the prepared-host evidence tracker must record an actual twelve-case receipt.

@@ -346,13 +346,41 @@ def test_analyzer_and_public_entry_point_signatures_match_current_inventory() ->
         "enhanced_scrape_article": EnhancedWebScraper.scrape_article,
     }
     assert {  # nosec B101
-        name: str(inspect.signature(entry_point)) for name, entry_point in public_entry_points.items()
+        name: str(inspect.signature(runner_entry_point))
+        for name, runner_entry_point in (
+            ("gather_analysis", runner.gather_analysis),
+            ("run_analysis", runner.run_analysis),
+        )
     } == {
         "gather_analysis": "(url: 'str', *, find_all: 'bool' = False, impersonate: 'bool' = False, scan_depth: 'ScanDepth | None' = None) -> 'AnalysisOutput'",
         "run_analysis": "(url: 'str', *, find_all: 'bool' = False, impersonate: 'bool' = False, scan_depth: 'ScanDepth | None' = None) -> 'AnalysisOutput'",
-        "article_scrape_article": "(url: str, custom_cookies: list[dict[str, Any]] | None = None, *, allow_llm_extraction: bool = True) -> dict[str, typing.Any]",
-        "enhanced_scrape_article": "(self, url: str, method: str = 'auto', custom_cookies: list[dict[str, Any]] | None = None, user_agent: str | None = None, custom_headers: dict[str, str] | None = None, allow_llm_extraction: bool = True) -> dict[str, typing.Any]",
     }
+
+    # The scrape_article entry points use evaluated annotations, whose str()
+    # differs across Python versions (3.12 renders Optional[...]/typing.Any,
+    # 3.14 renders X | None). Compare Signature objects instead: Optional[X]
+    # and X | None are equal, so this pins names, kinds, defaults and types.
+    def article_scrape_article(
+        url: str,
+        custom_cookies: list[dict[str, Any]] | None = None,
+        *,
+        allow_llm_extraction: bool = True,
+    ) -> dict[str, Any]: ...
+
+    def enhanced_scrape_article(
+        self,
+        url: str,
+        method: str = "auto",
+        custom_cookies: list[dict[str, Any]] | None = None,
+        user_agent: str | None = None,
+        custom_headers: dict[str, str] | None = None,
+        allow_llm_extraction: bool = True,
+    ) -> dict[str, Any]: ...
+
+    for expected in (article_scrape_article, enhanced_scrape_article):
+        assert inspect.signature(public_entry_points[expected.__name__]) == inspect.signature(  # nosec B101
+            expected, eval_str=True
+        )
     assert {  # nosec B101
         name: inspect.iscoroutinefunction(entry_point) for name, entry_point in public_entry_points.items()
     } == {

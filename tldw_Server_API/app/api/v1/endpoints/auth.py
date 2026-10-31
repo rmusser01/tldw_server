@@ -28,6 +28,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
+    _authnz_busy_http_exception,
     check_auth_rate_limit,
     get_auth_principal,
     get_db_transaction,
@@ -77,10 +78,14 @@ from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseError,
+    DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateUserError,
     InvalidRegistrationCodeError,
+    InvalidSessionError,
     InvalidTokenError,
     RegistrationError,
     SessionError,
@@ -114,6 +119,7 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     validate_single_user_session,
 )
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
@@ -158,9 +164,9 @@ from tldw_Server_API.app.services.auth_service import (
     verify_user_email_once as _svc_verify_user_email_once,
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -710,7 +716,7 @@ def _current_user_id(user: Any) -> Optional[int]:
 
 
 _PLATFORM_ADMIN_ROLES = frozenset({"admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _normalized_claim_values(values: Any) -> set[str]:
@@ -820,8 +826,17 @@ async def _fetch_user_by_email_for_verification(db: Any, email: str) -> dict[str
     return await _svc_fetch_user_by_email_for_verification(db, email)
 
 
-async def _mark_user_verified(db: Any, user_id: int, now_utc: datetime) -> None:
-    await _svc_mark_user_verified(db, user_id, now_utc)
+async def _mark_user_verified(user_id: int, now_utc: datetime) -> None:
+    """Mark the user verified in its own short, committed transaction.
+
+    The versioned users gateway locks the user row ``FOR UPDATE``. Doing that
+    inside the request-scoped transaction and then creating the session / org
+    membership on other pool connections (whose FKs need ``KEY SHARE`` on the
+    same row) self-deadlocks on PostgreSQL until the pool times out.
+    """
+    pool = await get_db_pool()
+    async with pool.transaction() as conn:
+        await _svc_mark_user_verified(conn, user_id, now_utc)
 
 
 def _current_user_username(user: Any) -> str:
@@ -1058,6 +1073,11 @@ def _auth_rg_policy_defined(request: Request, policy_id: str, governor: Any) -> 
 
 
 async def _get_auth_endpoint_rg_governor(request: Request) -> Optional[Any]:
+    from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+    if not bool(_rg_enabled_flag(True)):
+        return None
+
     try:
         app = request.app
         state = getattr(app, "state", None)
@@ -1108,6 +1128,20 @@ async def _reserve_auth_rg_requests(
     _ = fail_open  # Compatibility parameter; legacy fallback limiter is retired.
 
     rg_entity = entity or f"ip:{_auth_request_client_ip(request)}"
+
+    # Skip only when ingress already charged this exact entity to this policy.
+    # rg_ingress_entity is set only after an allowed ingress reservation, so a fail-open
+    # ingress never skips. Any other ingress entity must not stand in for this one: a
+    # user:/api_key: bucket is per account, so a caller rotating several valid accounts
+    # would get a fresh bucket each time and evade the per-IP limit on entity-scoped
+    # sensitive policies; a tenant: entity comes from an unvalidated header. When AuthNZ
+    # and RG derive different IPs (TASK-13144) the request is charged twice, never zero.
+    # Reservations keyed on some other entity (a per-email throttle, or the per-user MFA
+    # limit when ingress charged the IP) still apply.
+    state = getattr(request, "state", None)
+    ingress_entity = getattr(state, "rg_ingress_entity", None)
+    if getattr(state, "rg_policy_id", None) == policy_id and ingress_entity and rg_entity == ingress_entity:
+        return True, None
 
     governor = await _get_auth_endpoint_rg_governor(request)
     if governor is None:
@@ -1347,6 +1381,8 @@ async def delete_single_user_cookie_session(
 async def _build_scope_claims(user_id: int) -> dict[str, Any]:
     try:
         memberships = await list_memberships_for_user(int(user_id))
+    except asyncio.CancelledError:
+        raise
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         return {}
 
@@ -2287,7 +2323,7 @@ async def refresh_token(
     http_request: Request,
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     settings: Settings = Depends(get_settings)
 ) -> TokenResponse:
     """
@@ -2353,7 +2389,9 @@ async def refresh_token(
                 raise
 
             # Check if token is blacklisted
-            if await session_manager.is_token_blacklisted(payload.refresh_token, token_payload.get("jti")):
+            if await session_manager.is_token_blacklisted(
+                payload.refresh_token, token_payload.get("jti"), strict=True
+            ):
                 if _is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "blacklist"
@@ -2453,7 +2491,7 @@ async def refresh_token(
                     new_access_token=new_access_token,
                     new_refresh_token=(new_refresh_token if new_refresh_token != payload.refresh_token else None)
                 )
-            except _AUTH_NONCRITICAL_EXCEPTIONS as _sess_e:
+            except (InvalidSessionError, SessionRevokedException) as _sess_e:
                 # Treat missing/invalid session mapping as invalid token usage
                 if _is_test_mode():
                     try:
@@ -2483,6 +2521,8 @@ async def refresh_token(
                         revoked_by=None,
                         ip_address=(_auth_request_client_ip(http_request) if http_request else None),
                     )
+            except asyncio.CancelledError:
+                raise
             except _AUTH_NONCRITICAL_EXCEPTIONS as _bl_e:
                 with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
                     logger.debug(f"Refresh: blacklist prior token best-effort failed: {_bl_e}")
@@ -2505,6 +2545,14 @@ async def refresh_token(
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
 
+    except asyncio.CancelledError:
+        raise
+    except (DatabaseLockError, ConnectionPoolExhaustedError, DatabaseConcurrencyConflict) as e:
+        log_counter("auth_refresh_database_busy")
+        log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
+        raise _authnz_busy_http_exception(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ) from e
     except (TokenExpiredError, InvalidTokenError) as e:
         logger.warning(f"Token refresh failed: {e}")
         log_counter("auth_refresh_token_error", labels={"type": type(e).__name__})
@@ -3014,7 +3062,7 @@ async def request_admin_reauth(
 async def verify_magic_link(
     data: MagicLinkVerifyRequest,
     request: Request,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     registration_service: RegistrationService = Depends(get_registration_service_dep),
@@ -3111,7 +3159,7 @@ async def verify_magic_link(
         if not user and user_info:
             user_id = int(user_info["user_id"])
             # Mark user verified (magic link serves as email verification)
-            await _mark_user_verified(db, user_id, datetime.utcnow())
+            await _mark_user_verified(user_id, datetime.utcnow())
             user = await fetch_active_user_by_id(db, user_id)
 
     if not user:
@@ -3128,7 +3176,7 @@ async def verify_magic_link(
     # If an existing account wasn't verified, magic link serves as verification
     try:
         if user.get("is_verified") is False:
-            await _mark_user_verified(db, int(user["id"]), datetime.utcnow())
+            await _mark_user_verified(int(user["id"]), datetime.utcnow())
             user["is_verified"] = True
     except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Magic link verification: failed to mark user verified: {}", exc)

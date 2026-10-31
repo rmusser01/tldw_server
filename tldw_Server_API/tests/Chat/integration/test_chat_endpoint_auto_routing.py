@@ -1,18 +1,71 @@
+"""Ordinary chat routing preserves admission before credentials and generation."""
+
 from unittest.mock import patch
 
 import pytest
 from fastapi import status
 
+from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionUserMessageParam,
 )
+from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.LLM_Calls.routing.decision_store import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+from tldw_Server_API.tests.Chat.integration.test_persona_backed_chat_conversations import (
+    _create_persona_conversation,
+)
+from tldw_Server_API.tests.Chat.integration.test_persona_backed_chat_conversations import (
+    persona_chat_client as persona_chat_client,
+)
+from tldw_Server_API.tests.Chat.integration.test_persona_backed_chat_conversations import (
+    persona_chat_db as persona_chat_db,
+)
 
 pytest_plugins = (
     "tldw_Server_API.tests.Chat.credential_runtime_fixtures",
 )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("model", ["gpt-4", "auto"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("failure", ["inactive", "deleted", "missing", "wrong_owner", "disabled", "malformed"])
+def test_persona_rejection_precedes_router_credentials_and_message_effects(
+    persona_chat_client, persona_chat_db, monkeypatch, model, stream, failure,
+):
+    """Fixed/auto and streaming requests cannot route or write with an unusable Persona."""
+    client, headers, provider_call = persona_chat_client
+    monkeypatch.setattr(feature_flags, "is_persona_enabled", lambda: failure != "disabled")
+    cid, _ = _create_persona_conversation(persona_chat_db, persona_id="admission-persona")
+    expected = {"inactive": (409, "persona_unavailable"), "deleted": (404, "persona_not_found"),
+                "missing": (404, "persona_not_found"), "wrong_owner": (404, "persona_not_found"),
+                "disabled": (503, "persona_feature_disabled"), "malformed": (409, "persona_binding_invalid")}[failure]
+    with persona_chat_db.transaction() as conn:
+        if failure == "inactive":
+            conn.execute("UPDATE persona_profiles SET is_active = ? WHERE id = ?", (False, "admission-persona"))
+        elif failure == "deleted":
+            conn.execute("UPDATE persona_profiles SET deleted = ? WHERE id = ?", (True, "admission-persona"))
+        elif failure == "wrong_owner":
+            conn.execute("UPDATE persona_profiles SET user_id = ? WHERE id = ?", ("other", "admission-persona"))
+        elif failure in {"missing", "malformed"}:
+            conn.execute("UPDATE conversations SET assistant_id = ? WHERE id = ?",
+                         (None if failure == "malformed" else "private-missing", cid))
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", wraps=chat_endpoint.ProviderCredentialRuntime) as credentials,
+        patch.object(chat_endpoint, "_resolve_auto_chat_routing_decision", wraps=chat_endpoint._resolve_auto_chat_routing_decision) as router,
+        patch.object(persona_chat_db, "add_message", wraps=persona_chat_db.add_message) as message,
+    ):
+        response = client.post("/api/v1/chat/completions", headers=headers, json={
+            "model": model, "api_provider": "openai", "conversation_id": cid,
+            "stream": stream, "save_to_db": True,
+            "messages": [{"role": "user", "content": "Private turn"}],
+        })
+    assert response.status_code == expected[0], response.text
+    assert response.json()["detail"]["code"] == expected[1]
+    assert credentials.call_count == router.call_count == message.call_count == provider_call.call_count == 0
+    assert persona_chat_db.get_messages_for_conversation(cid) == []
 
 
 @pytest.mark.integration
@@ -155,11 +208,13 @@ def test_chat_endpoint_returns_400_when_auto_router_has_no_candidates(
 
 @pytest.mark.integration
 def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_mode(
-    authenticated_client,
-    mock_chacha_db,
-    setup_dependencies,
+    persona_chat_client,
+    persona_chat_db,
     execution_scoped_provider_credentials,
 ):
+    """Sticky routing uses a real accessible conversation before credential resolution."""
+    authenticated_client, headers, _ = persona_chat_client
+    persona_chat_db.add_conversation({"id": "conv-router", "client_id": "1", "title": "Sticky routing"})
     injected_store = InMemoryRoutingDecisionStore()
     authenticated_client.app.state.routing_decision_store = injected_store
     request_data = ChatCompletionRequest(
@@ -268,7 +323,7 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
             side_effect=fake_execute_non_stream_call,
         ),
     ):
-        response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+        response = authenticated_client.post("/api/v1/chat/completions", headers=headers, json=request_data.model_dump())
 
     assert response.status_code == status.HTTP_200_OK
     assert captured["selected_provider"] == "openrouter"
@@ -280,6 +335,109 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     }
     assert captured["router_call"]["model"] == "anthropic/claude-4.5-sonnet"
     assert captured["router_usage"][0]["provider"] == "openrouter"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("query,parent_state,allowed", [
+    ({"scope_type": "workspace", "workspace_id": "ws"}, "active", True),
+    ({}, "active", True),
+    ({"scope_type": "workspace", "workspace_id": "other"}, "active", False),
+    ({"scope_type": "global"}, "active", False),
+    *[(query, state, state == "archived")
+      for state in ("deleted", "closing", "transferred", "archived")
+      for query in ({}, {"scope_type": "workspace", "workspace_id": "ws"})],
+])
+def test_workspace_persona_generation_requires_current_scope_access(
+    persona_chat_client, persona_chat_db, monkeypatch, query, parent_state, allowed,
+):
+    """Ordinary generation supports Workspace Persona only with current parent access."""
+    client, headers, provider_call = persona_chat_client
+    monkeypatch.setattr(feature_flags, "is_persona_enabled", lambda: True)
+    cid, _ = _create_persona_conversation(persona_chat_db, persona_id="workspace-persona")
+    persona_chat_db.upsert_workspace("ws", name="Private Workspace")
+    with persona_chat_db.transaction() as conn:
+        conn.execute("UPDATE conversations SET scope_type = ?, workspace_id = ? WHERE id = ?", ("workspace", "ws", cid))
+        if parent_state == "deleted":
+            conn.execute("UPDATE workspaces SET deleted = ? WHERE id = ?", (True, "ws"))
+        elif parent_state == "closing":
+            conn.execute("UPDATE workspaces SET system_operation_state = ? WHERE id = ?", ("staged", "ws"))
+        elif parent_state == "transferred":
+            conn.execute("UPDATE workspaces SET client_id = ? WHERE id = ?", ("other", "ws"))
+        elif parent_state == "archived":
+            conn.execute("UPDATE workspaces SET archived = ? WHERE id = ?", (True, "ws"))
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", wraps=chat_endpoint.ProviderCredentialRuntime) as credentials,
+        patch.object(chat_endpoint, "_resolve_auto_chat_routing_decision", wraps=chat_endpoint._resolve_auto_chat_routing_decision) as router,
+        patch.object(persona_chat_db, "add_message", wraps=persona_chat_db.add_message) as message,
+    ):
+        response = client.post("/api/v1/chat/completions", headers=headers, params=query, json={
+            "model": "gpt-4", "api_provider": "openai", "conversation_id": cid, "save_to_db": True,
+            "messages": [{"role": "user", "content": "Private Workspace turn"}],
+        })
+    if allowed:
+        assert response.status_code == 200, response.text
+        assert provider_call.call_count == 1
+        assert provider_call.call_args.kwargs["system_message"] == "You are Garden Helper."
+    else:
+        assert response.status_code == 404, response.text
+        assert credentials.call_count == router.call_count == message.call_count == provider_call.call_count == 0
+        assert persona_chat_db.get_messages_for_conversation(cid) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("target", ["missing", "deleted"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_supplied_missing_or_deleted_target_rejects_before_generation(
+    persona_chat_client, persona_chat_db, target, stream,
+) -> None:
+    """An explicit stale id cannot silently create a replacement or bypass admission."""
+    client, headers, provider_call = persona_chat_client
+    cid = "unknown-conversation"
+    if target == "deleted":
+        cid = persona_chat_db.add_conversation({"client_id": "1", "title": "Deleted target"})
+        persona_chat_db.soft_delete_conversation(cid, expected_version=persona_chat_db.get_conversation_by_id(cid)["version"])
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", wraps=chat_endpoint.ProviderCredentialRuntime) as credentials,
+        patch.object(chat_endpoint, "_resolve_auto_chat_routing_decision", wraps=chat_endpoint._resolve_auto_chat_routing_decision) as router,
+        patch.object(persona_chat_db, "add_conversation", wraps=persona_chat_db.add_conversation) as create,
+        patch.object(persona_chat_db, "add_message", wraps=persona_chat_db.add_message) as message,
+    ):
+        response = client.post("/api/v1/chat/completions", headers=headers, json={
+            "model": "auto", "api_provider": "openai", "conversation_id": cid,
+            "stream": stream, "save_to_db": True,
+            "messages": [{"role": "user", "content": "Do not create a replacement"}],
+        })
+    assert response.status_code == 404, response.text
+    assert credentials.call_count == router.call_count == create.call_count == message.call_count == provider_call.call_count == 0
+
+
+@pytest.mark.integration
+def test_service_rechecks_persona_revoked_after_endpoint_admission(
+    persona_chat_client, persona_chat_db, monkeypatch,
+):
+    """Endpoint approval is not cached across later ordinary context assembly."""
+    client, headers, provider_call = persona_chat_client
+    monkeypatch.setattr(feature_flags, "is_persona_enabled", lambda: True)
+    cid, _ = _create_persona_conversation(persona_chat_db, persona_id="revoked-persona")
+    original = chat_endpoint.require_current_persona
+
+    def admit_then_revoke(*args, **kwargs):
+        """Revoke the real profile after the point-in-time endpoint check."""
+        profile = original(*args, **kwargs)
+        with persona_chat_db.transaction() as conn:
+            conn.execute("UPDATE persona_profiles SET is_active = ? WHERE id = ?", (False, "revoked-persona"))
+        return profile
+
+    monkeypatch.setattr(chat_endpoint, "require_current_persona", admit_then_revoke)
+    with patch.object(persona_chat_db, "add_message", wraps=persona_chat_db.add_message) as message:
+        response = client.post("/api/v1/chat/completions", headers=headers, json={
+            "model": "gpt-4", "api_provider": "openai", "conversation_id": cid, "save_to_db": True,
+            "messages": [{"role": "user", "content": "Private revoked turn"}],
+        })
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "persona_unavailable"
+    assert message.call_count == provider_call.call_count == 0
+    assert persona_chat_db.get_messages_for_conversation(cid) == []
 
 
 @pytest.mark.integration

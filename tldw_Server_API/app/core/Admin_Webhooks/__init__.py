@@ -1,5 +1,7 @@
 """Canonical admin outgoing webhook contracts."""
 
+from tldw_Server_API.app.core.exceptions import WebhookKeyError
+
 from .catalog import (
     EVENT_API_VERSION,
     EVENT_CATALOG,
@@ -19,7 +21,6 @@ from .crypto import (
     MIGRATION_DOMAIN_SYSTEM_OPS_RECORD,
     MIGRATION_DOMAIN_SYSTEM_OPS_SUBTREE,
     ProtectedValue,
-    WebhookKeyError,
     WebhookKeyErrorCode,
     WebhookKeyLoadCode,
     WebhookKeyRing,

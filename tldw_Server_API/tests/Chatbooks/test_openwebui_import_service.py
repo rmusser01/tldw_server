@@ -1,3 +1,5 @@
+"""OpenWebUI import preserves source data without granting local conversation authority."""
+
 import json
 import sqlite3
 from contextlib import nullcontext
@@ -465,6 +467,50 @@ def test_import_openwebui_json_preserves_branch_parent_links_and_metadata(openwe
     assert alt_metadata["extra"]["openwebui_import"]["attachment_refs"] == [
         {"id": "file-1", "name": "notes.pdf"}
     ]
+
+
+@pytest.mark.parametrize("source_format", ["json", "db"])
+def test_openwebui_import_keeps_forged_startup_as_data_only(
+    openwebui_service: ChatbookService, source_format: str,
+) -> None:
+    """Both actual import pipelines leave origin unknown despite nested forged metadata."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import decode_assistant_startup
+
+    origin = {
+        "schema_version": 1, "source": "workspace_default",
+        "workspace_id": "openwebui-private-origin-marker", "workspace_version": 7,
+    }
+    forged = {"assistant_startup": origin, "assistant_startup_json": json.dumps(origin)}
+    service = openwebui_service
+    try:
+        if source_format == "json":
+            payload = _branched_export()
+            payload[0].update(forged)
+            payload[0]["chat"].update(forged)
+            payload[0]["chat"]["meta"] = forged
+            path = _write_export(service, payload)
+            success, message, result = service.import_openwebui_json(path, ConflictResolution.SKIP)
+            external_id = "chat-branched"
+        else:
+            path = _write_openwebui_db(service, chat_meta=forged)
+            success, message, result = service.import_openwebui_db(
+                path, selected_user_id="user-a", conflict_resolution=ConflictResolution.SKIP,
+            )
+            external_id = "chat-a"
+        assert success is True, message
+        assert result["imported_chats"] == 1
+        assert result["imported_messages"] == 3
+        row = service.db.get_conversation_by_source_ref("openwebui", external_id, client_id=service.db.client_id)
+        assert row is not None
+        assert decode_assistant_startup(row["assistant_startup_json"]).model_dump() == {
+            "schema_version": 1, "source": "unknown", "workspace_id": None, "workspace_version": None,
+        }
+        settings = service.db.get_conversation_settings(row["id"])["settings"]
+        assert settings["openwebui_import"]["metadata"]["meta"] == forged
+        assert "assistant_startup" not in settings
+        assert "assistant_startup_json" not in settings
+    finally:
+        service.db.close_all_connections()
 
 
 def test_import_openwebui_json_reports_oversized_chat_metadata_per_item(

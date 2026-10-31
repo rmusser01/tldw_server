@@ -53,3 +53,5 @@ This ADR does not decide TTS/STT preset storage ownership. That remains inventor
 - Use this ADR as the covering record for `INV-021`.
 - Create a separate ADR before changing Audio API auth ownership, TTS routing priority semantics, default streaming error behavior, or `return_download_link` streaming restrictions.
 - Keep `INV-022` unresolved until preset storage ownership is reviewed.
+
+**Subsequent resolution (2026-09-25):** The owner-reviewed preset storage decision was implemented and backfilled as [ADR-047](047-per-user-audio-preset-ownership.md). The preceding `INV-022` follow-up records the state when this ADR was accepted; it is no longer an open instruction.

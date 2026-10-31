@@ -3,6 +3,7 @@ import {
   useDraftPersistence
 } from "@/hooks/useDraftPersistence"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import React from "react"
 
 /**
@@ -27,6 +28,8 @@ import React from "react"
 export interface UseComposerTextOptions {
   /** Persistence key for draft messages. Each surface uses its own key. */
   draftKey: string
+  /** Keep active browser tabs from replacing each other's unsent text. */
+  tabScopedDraft?: boolean
   /** Textarea ref owned by the caller (usually the composer component). */
   textareaRef: React.RefObject<HTMLTextAreaElement>
   /** Pro mode gets a taller textarea (160px) vs casual (120px). */
@@ -74,6 +77,8 @@ export interface UseComposerTextResult {
   textAreaFocus: () => void
   /** Whether the draft was recently persisted — for the "Draft saved" indicator. */
   draftSaved: boolean
+  /** Whether this owner's saved draft has finished restoring. */
+  draftReady: boolean
   /** Imperative draft clear (call after a successful send). */
   clearDraft: () => void
   /** Computed max height actually applied to the textarea. Surfaced for tests. */
@@ -88,6 +93,7 @@ export function useComposerText(
 ): UseComposerTextResult {
   const {
     draftKey,
+    tabScopedDraft = false,
     textareaRef,
     isProMode = false,
     maxHeight: explicitMaxHeight,
@@ -162,13 +168,23 @@ export function useComposerText(
     [form, restoreWithMetadata]
   )
 
-  const { draftSaved, clearDraft } = useDraftPersistence({
-    storageKey: draftKey,
+  const { ownerKey, isCurrent } = useChatDraftOwner(() => {
+    pendingPromptAssistResetRef.current = null
+    setPromptAssistSavedAttemptId(null)
+    form.reset()
+    restoreWithMetadata?.("", undefined)
+  })
+
+  const { draftSaved, draftReady, clearDraft } = useDraftPersistence({
+    storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
+    tabScoped: tabScopedDraft,
+    legacyStorageKey: draftKey,
+    isCurrent,
     getValue: () => form.values.message,
     getMetadata: getDraftMetadata,
     setValue: (value) => setMessageValue(value),
     setValueWithMetadata: restoreMessage,
-    enabled: draftEnabled
+    enabled: draftEnabled && ownerKey !== null
   })
 
   const textareaMaxHeight =
@@ -202,6 +218,7 @@ export function useComposerText(
     setMessageValue,
     textAreaFocus,
     draftSaved,
+    draftReady,
     clearDraft,
     textareaMaxHeight
   }

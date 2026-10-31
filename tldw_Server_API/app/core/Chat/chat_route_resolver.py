@@ -36,7 +36,6 @@ from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
 )
 
 _NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

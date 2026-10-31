@@ -7,6 +7,7 @@ import aiosqlite
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.External_Sources import connectors_service as svc
 from tldw_Server_API.app.core.External_Sources.sync_adapter import FileSyncWebhookSubscription
 
@@ -23,7 +24,7 @@ def connectors_client() -> Tuple[TestClient, dict]:
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.endpoints import connectors as connectors_router
 
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_served_routes(app.routes)}
     if "/api/v1/connectors/sources" not in paths:
         app.include_router(connectors_router.router, prefix="/api/v1", tags=["connectors"])
 

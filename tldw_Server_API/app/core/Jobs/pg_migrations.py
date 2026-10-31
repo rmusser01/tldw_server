@@ -147,6 +147,11 @@ def _pg_archive_index_matches(
                  FROM generate_series(1, index_state.indnkeyatts) AS positions(position)
                  ORDER BY position
                ) AS key_columns,
+               ARRAY(
+                 SELECT index_state.indoption[position - 1]::integer
+                 FROM generate_series(1, index_state.indnkeyatts) AS positions(position)
+                 ORDER BY position
+               ) AS key_options,
                pg_get_expr(index_state.indpred, index_state.indrelid, TRUE) AS predicate
         FROM pg_class AS index_class
         JOIN pg_index AS index_state ON index_state.indexrelid=index_class.oid
@@ -167,15 +172,20 @@ def _pg_archive_index_matches(
         is_unique = row["is_unique"]
         total_attributes = row["total_attributes"]
         actual_columns = row["key_columns"]
+        actual_options = row["key_options"]
         actual_predicate = row["predicate"]
     else:
-        is_valid, is_ready, is_unique, total_attributes, actual_columns, actual_predicate = row
+        is_valid, is_ready, is_unique, total_attributes, actual_columns, actual_options, actual_predicate = row
+    expected_names = tuple(column.removesuffix(" desc") for column in columns)
+    # Canonical DESC combines PostgreSQL's DESC (1) and NULLS FIRST (2) bits.
+    expected_options = tuple(3 if column.endswith(" desc") else 0 for column in columns)
     return (
         bool(is_valid)
         and bool(is_ready)
         and bool(is_unique) is unique
         and int(total_attributes) == len(columns)
-        and tuple(_normalize_pg_index_expression(item) for item in (actual_columns or ())) == columns
+        and tuple(_normalize_pg_index_expression(item) for item in (actual_columns or ())) == expected_names
+        and tuple(int(option) for option in (actual_options or ())) == expected_options
         and _normalize_pg_index_expression(actual_predicate) == predicate
     )
 
@@ -1400,7 +1410,7 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         """
         UPDATE slides_standalone_reconciliation
         SET diagnostic_code=%s, diagnostic_count=%s,
-            diagnostic_at=CASE WHEN %s IS NULL THEN NULL ELSE NOW() END
+            diagnostic_at=CASE WHEN CAST(%s AS TEXT) IS NULL THEN NULL ELSE NOW() END
         WHERE singleton_id=1
         """,
         (diagnostic_code, diagnostic_count, diagnostic_code),
@@ -1712,26 +1722,34 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
 
             if _is_truthy(_os.getenv("JOBS_PG_RLS_ENABLE", "")):
                 with psycopg.connect(_dsn, autocommit=True) as _c_rls, _c_rls.cursor() as _p:
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_events ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_counters ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_queue_controls ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_attachments ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_sla_policies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute(
-                            "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY"
-                        )
+                    # ENABLE alone exempts the table owner, and the app usually
+                    # connects as the owner, so FORCE has to accompany it or the
+                    # policies below never run for the process that matters.
+                    # Written out rather than looped over table names so the
+                    # RLS coverage ratchet can see them: it scans source text,
+                    # and DDL assembled from a loop variable is invisible to it.
+                    for _rls_ddl in (
+                        "ALTER TABLE jobs ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_events ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_events FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_counters ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_counters FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_queue_controls ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_queue_controls FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_attachments ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_attachments FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_sla_policies ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_sla_policies FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_dependencies FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs_archive FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_idempotency_receipts FORCE ROW LEVEL SECURITY",
+                    ):
+                        with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+                            _p.execute(_rls_ddl)
         except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
             # Ignore in environments without permissions or when tables don't exist yet
             pass
@@ -1802,6 +1820,29 @@ def ensure_job_events_pg(db_url: str) -> None:
                 pass
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
+
+
+def build_jobs_rls_predicates() -> tuple[str, str, str]:
+    """Return the (admin, domain, owner) SQL predicates used by the Jobs policies.
+
+    Owner is the tenant boundary and is deliberately fail-CLOSED: when
+    ``app.owner_user_id`` is unset, ``NULLIF`` yields NULL, the comparison
+    yields NULL, and the row is filtered out. Missing context must mean "no
+    rows", never "all rows".
+
+    Domain is a worker capability filter rather than a tenant boundary, so it
+    stays permissive when unset -- a worker that has not narrowed its domains
+    legitimately polls all of them. Crossing the tenant line still requires
+    either owning the row or holding the admin claim.
+    """
+    admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
+    domain_expr = "NULLIF(current_setting('app.domain_allowlist', true), '')"
+    owner_expr = "NULLIF(current_setting('app.owner_user_id', true), '')"
+    domain_filter = (
+        f"({domain_expr} IS NULL OR domain = ANY(string_to_array({domain_expr}, ',')))"
+    )
+    owner_filter = f"(owner_user_id = {owner_expr})"
+    return admin_expr, domain_filter, owner_filter
 
 
 def ensure_jobs_rls_policies_pg(db_url: str) -> None:
@@ -1931,11 +1972,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_idempotency_receipts",
             ):
                 _enable_rls(_table)
-            admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
-            domain_expr = "NULLIF(current_setting('app.domain_allowlist', true), '')"
-            owner_expr = "NULLIF(current_setting('app.owner_user_id', true), '')"
-            domain_filter = f"({domain_expr} IS NULL OR domain = ANY(string_to_array({domain_expr}, ',')))"
-            owner_filter = f"({owner_expr} IS NULL OR owner_user_id = {owner_expr})"
+            admin_expr, domain_filter, owner_filter = build_jobs_rls_predicates()
 
             cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
             cur.execute(

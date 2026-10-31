@@ -1,5 +1,6 @@
 import { bgRequest } from "@/services/background-proxy"
-import { tldwClient, type ServerChatSummary } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type ScopedRequestOptions, type ServerChatSummary } from "@/services/tldw/TldwApiClient"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 
 export type FeedbackType = "helpful" | "relevance" | "report"
 
@@ -57,13 +58,17 @@ export const getFeedbackSessionId = (): string => {
 }
 
 export async function submitExplicitFeedback(
-  payload: ExplicitFeedbackRequest
+  payload: ExplicitFeedbackRequest,
+  options?: ScopedRequestOptions
 ): Promise<ExplicitFeedbackResponse> {
   await tldwClient.initialize().catch(() => null)
+  const scopeFields = requestScopeFields(options?.requestScope)
   return await bgRequest<ExplicitFeedbackResponse>({
+    ...scopeFields,
+    ...(options?.signal ? { abortSignal: options.signal } : {}),
     path: "/api/v1/feedback/explicit",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...scopeFields.headers },
     body: payload,
     timeoutMs: FEEDBACK_EXPLICIT_TIMEOUT_MS
   })
@@ -78,7 +83,8 @@ export async function submitImplicitFeedback(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: payload,
-    timeoutMs: FEEDBACK_IMPLICIT_TIMEOUT_MS
+    timeoutMs: FEEDBACK_IMPLICIT_TIMEOUT_MS,
+    suppressBackendUnavailableEvent: true
   })
 }
 

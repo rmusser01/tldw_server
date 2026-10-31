@@ -1,7 +1,12 @@
+from unittest.mock import Mock
+
 import pytest
 
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager import EvaluationManager
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import TestRunner
+
+pytestmark = pytest.mark.integration
 
 
 def _make_prompt_definition_payload() -> dict:
@@ -39,6 +44,34 @@ def _make_prompt_definition_payload() -> dict:
         "assembly_config": {
             "legacy_system_roles": ["system", "developer"],
             "legacy_user_roles": ["user"],
+            "block_separator": "\n\n",
+        },
+    }
+
+
+def _make_recipe_definition_payload() -> dict:
+    return {
+        "schema_version": 2,
+        "format": "structured",
+        "definition_kind": "single_text_recipe",
+        "variables": [],
+        "blocks": [
+            {
+                "id": "objective",
+                "name": "Objective",
+                "section_key": "objective",
+                "role": "user",
+                "kind": "objective",
+                "content": "Explain the task.",
+                "enabled": True,
+                "order": 10,
+                "is_template": False,
+            }
+        ],
+        "assembly_config": {
+            "assembly_mode": "single_text",
+            "target_role": "user",
+            "render_format": "freeform",
             "block_separator": "\n\n",
         },
     }
@@ -160,3 +193,32 @@ def test_evaluation_manager_uses_structured_assembly_for_evaluations(isolated_db
     ]
     assert result["status"] == "completed"
     assert result["metrics"]["average_score"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_prompt_studio_multimessage_executor_rejects_single_text_recipe(isolated_db, monkeypatch):
+    project = isolated_db.create_project(name="Recipe Execution Project", user_id="test-user")
+    prompt = isolated_db.create_prompt(
+        project_id=project["id"],
+        name="Recipe Execution Prompt",
+        prompt_format="structured",
+        prompt_schema_version=2,
+        prompt_definition=_make_recipe_definition_payload(),
+    )
+    provider_registry = Mock(side_effect=AssertionError("Recipe must fail before provider dispatch"))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor.get_registry",
+        provider_registry,
+    )
+    executor = PromptExecutor(isolated_db)
+
+    result = await executor.execute_prompt(
+        prompt_id=prompt["id"],
+        test_inputs={},
+        model_config={"provider": "openai", "model": "gpt-4", "parameters": {}},
+    )
+
+    assert result["success"] is False
+    assert result["prompt_id"] == prompt["id"]
+    assert result["error"] == "Single-text recipe must be rendered/applied first."
+    provider_registry.assert_not_called()

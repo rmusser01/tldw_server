@@ -60,8 +60,17 @@ def test_postgres_task_operations_do_not_leak_dataset_scope_to_the_session(
 
 
 def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
-    """Replace the fresh v61 graph with the exact reviewed empty v59 source."""
+    """Replace the current graph with the exact reviewed empty v59 source."""
     with db.transaction() as conn:
+        # Remove newer graph references before reconstructing the v59 index.
+        for table in (
+            "note_graph_suggestion_evidence",
+            "note_graph_suggestions",
+            "note_graph_suggestion_rejection_sets",
+            "note_graph_suggestion_runs",
+            "note_graph_suggestion_operation_receipts",
+        ):
+            db.backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608 -- Fixed fixture tables.
         for table, constraint in (
             ("moodboard_notes", "moodboard_notes_v61_note_fk"),
             ("note_studio_documents", "note_studio_documents_v61_note_fk"),
@@ -427,7 +436,7 @@ def test_postgres_bind_caught_hash_failure_rolls_back_rekey_and_restores_force(
         backend.get_pool().close_all()
 
 
-def test_postgres_note_task_schema_remains_authoritative_at_v63(
+def test_postgres_note_task_schema_remains_authoritative_at_current_version(
     pg_database_config: DatabaseConfig,
 ) -> None:
     owner = "950001"
@@ -446,7 +455,7 @@ def test_postgres_note_task_schema_remains_authoritative_at_v63(
                 "ORDER BY tablename, policyname",
                 (list(CharactersRAGDB._NOTE_TASK_V60_RELATIONS),),
             ).fetchall()
-        assert version == 63
+        assert version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         assert [(row["tablename"], row["policyname"]) for row in policy_rows] == [
             (table, f"{table}_tenant_isolation")
             for table in sorted(CharactersRAGDB._NOTE_TASK_V60_RELATIONS)
@@ -1196,6 +1205,9 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
     pg_database_config: DatabaseConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Pin the historical target; current-schema concurrency is covered separately
+    # by the Notes bootstrap lifecycle suite, including independent backends.
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 64)
     owner = "950032"
     setup_backend = DatabaseBackendFactory.create_backend(pg_database_config)
     setup_db = CharactersRAGDB(":memory:", client_id=owner, backend=setup_backend)
@@ -1247,7 +1259,7 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
         futures = [executor.submit(initialize) for _index in range(2)]
         versions = [future.result(timeout=120) for future in futures]
 
-        assert versions == [63, 63]
+        assert versions == [64, 64]
     assert checkpoints == ["validate", "create", "copy", "index", "verify"]
     assert len(verify_threads) == 2
     assert len(set(verify_threads)) == 2
@@ -1266,7 +1278,7 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
                 ("%_v60",),
                 connection=conn,
             ).rows
-        assert version == 63
+        assert version == 64
         assert remnants == []
     finally:
         check_backend.get_pool().close_all()

@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
 import { useMessage } from "~/hooks/useMessage"
@@ -32,6 +33,7 @@ export const SidePanelBody = ({
   timelineAction,
   onTimelineActionHandled
 }: Props) => {
+  const historySelection = useHistorySelectionContext()
   const {
     messages,
     setMessages,
@@ -57,7 +59,7 @@ export const SidePanelBody = ({
   )
   const uiMode = useUiModeStore((state) => state.mode)
   const scrollAnchorRef = React.useRef<number | null>(null)
-  const topPaddingClass = "pt-12"
+  const topPaddingClass = historySelection && historySelection.status !== "idle" ? "pt-4" : "pt-12"
   const stableHistoryId =
     temporaryChat || historyId === "temp" ? null : historyId
   const [conversationInstanceId, setConversationInstanceId] = React.useState(
@@ -80,6 +82,14 @@ export const SidePanelBody = ({
   const handleVariantSwipe = React.useCallback(
     (messageId: string | undefined, direction: "prev" | "next") => {
       if (!messageId) return
+      if (historySelection) {
+        const message = messages.find(row => row.id === messageId)
+        const variants = message?.variants || []
+        const currentIndex = message?.activeVariantIndex ?? variants.length - 1
+        const candidate = variants[currentIndex + (direction === "prev" ? -1 : 1)]
+        if (candidate?.id) void historySelection.choose({ kind: "after_message", message_id: candidate.id })
+        return
+      }
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== messageId) return msg
@@ -96,7 +106,7 @@ export const SidePanelBody = ({
         })
       )
     },
-    [setMessages]
+    [historySelection, messages, setMessages]
   )
 
   // Stable callbacks for PlaygroundMessage
@@ -110,7 +120,7 @@ export const SidePanelBody = ({
     [deleteMessage]
   )
   const handleNewBranch = React.useCallback(
-    (index: number) => createChatBranch(index),
+    (index: number) => createChatBranch(messagesRef.current[index]?.id ?? ""),
     [createChatBranch]
   )
   const handleSwipePrev = React.useCallback(
@@ -135,6 +145,7 @@ export const SidePanelBody = ({
   const parentEl = scrollParentRef?.current || null
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
+    getItemKey: index => messages[index].id || index,
     getScrollElement: () => parentEl,
     estimateSize: () => 120,
     // Reduced from 6 to 3 for better performance on large conversations
@@ -169,7 +180,7 @@ export const SidePanelBody = ({
       }
       const index = findIndex(timelineAction.messageId)
       if (index >= 0) {
-        void createChatBranch(index)
+        void createChatBranch(messagesRef.current[index]?.id ?? "")
       }
       onTimelineActionHandled?.()
       return
@@ -322,8 +333,8 @@ export const SidePanelBody = ({
                   activeVariantIndex={message.activeVariantIndex}
                   metadataExtra={message.metadataExtra}
                   dynamicUISurface="extension-sidepanel"
-                  onSwipePrev={() => handleSwipePrev(message.id)}
-                  onSwipeNext={() => handleSwipeNext(message.id)}
+                  onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleSwipePrev(message.id)}
+                  onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleSwipeNext(message.id)}
                 />
               </div>
             )

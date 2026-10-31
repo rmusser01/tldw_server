@@ -6,6 +6,44 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_user_id", [2, 3])
+async def test_worker_media_is_searchable_only_by_its_owner(monkeypatch, tmp_path, request_user_id):
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
+        MediaDBRetriever,
+        RetrievalConfig,
+    )
+
+    monkeypatch.setattr(worker.DatabasePaths, "get_media_db_path", lambda _: tmp_path / "media.db")
+    db = worker._create_db("2")
+    try:
+        media_id, _, _ = db.add_media_with_keywords(
+            url="https://example.test/cedar",
+            title="Project Cedar",
+            media_type="document",
+            content="Project Cedar launches in October.",
+            keywords=[],
+        )
+        with scoped_context(user_id=request_user_id, is_admin=False):
+            results, _ = search_media(db, "Cedar", search_fields=["title", "content"])
+            retriever = MediaDBRetriever(
+                str(tmp_path / "media.db"),
+                config=RetrievalConfig(use_vector=False),
+                user_id=str(request_user_id),
+                media_db=db,
+            )
+            documents = await retriever.retrieve("Cedar", allowed_media_ids=[media_id])
+
+        expected_ids = [str(media_id)] if request_user_id == 2 else []
+        assert [str(item["id"]) for item in results] == expected_ids
+        assert [item.id for item in documents] == expected_ids
+    finally:
+        db.close_connection()
+
+
 class _CollectionUpdateRecorder:
     def __init__(self) -> None:
         self.status_updates: list[dict] = []

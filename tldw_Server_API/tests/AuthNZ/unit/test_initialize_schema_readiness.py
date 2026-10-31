@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ import initialize
+from tldw_Server_API.app.core.AuthNZ import initialize, rbac_seed
 
 pytestmark = pytest.mark.unit
 
@@ -49,9 +50,20 @@ async def test_sqlite_schema_readiness_retries_then_caches_only_success(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "readiness-retry.db"
-    pool = SimpleNamespace(pool=None, _sqlite_fs_path=db_path)
+
+    # Since da2fb8e3b7 the key is only cached once the baseline RBAC seed also
+    # succeeds, so the fake pool must support the seed's transaction.
+    @contextlib.asynccontextmanager
+    async def _transaction():
+        yield SimpleNamespace()
+
+    async def _noop_seed(*_args, **_kwargs) -> None:
+        return None
+
+    pool = SimpleNamespace(pool=None, _sqlite_fs_path=db_path, transaction=_transaction)
     calls: list[Path] = []
     _reset_schema_ensure_state(monkeypatch)
+    monkeypatch.setattr(rbac_seed, "ensure_baseline_rbac_seed", _noop_seed)
 
     async def _get_db_pool() -> object:
         return pool

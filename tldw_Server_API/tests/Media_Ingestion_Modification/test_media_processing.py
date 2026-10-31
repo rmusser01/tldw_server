@@ -14,6 +14,7 @@ from typing import Dict
 from unittest.mock import AsyncMock, patch
 
 # 3rd-party Libraries
+import httpx
 import pytest
 from fastapi import status # Added
 from fastapi.testclient import TestClient
@@ -114,6 +115,8 @@ VALID_PDF_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/d
 VALID_EPUB_URL = "https://filesamples.com/samples/ebook/epub/Alices%20Adventures%20in%20Wonderland.epub"
 VALID_TXT_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/LICENSE.txt"
 VALID_MD_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/README.md"
+CONTROLLED_TXT_URL = "https://example.com/LICENSE.txt"
+CONTROLLED_MD_URL = "https://example.com/README.md"
 VALID_HTML_URL = "https://example.com/" # Use example.com for basic HTML
 INVALID_URL = "http://this.url.definitely.does.not.exist.invalid/resource.mp4"
 URL_404 = "https://example.com/status/404"
@@ -195,6 +198,21 @@ def client(client_user_only):
             pytest.skip(f"Essential test file missing, skipping module: {f_path}")
 
     return client_user_only
+
+
+@pytest.fixture
+def controlled_transcription():
+    """Provide segments at the STT seam and reject real provider/model dispatch."""
+    with patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
+        side_effect=AssertionError("External audio model dispatch is forbidden in audio batch contracts"),
+    ) as model_dispatch:
+        with patch(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files.speech_to_text",
+            return_value=[{"Text": "Controlled audio transcript.", "start_seconds": 0, "end_seconds": 1}],
+        ) as transcribe:
+            yield transcribe
+        model_dispatch.assert_not_called()
 
 
 # --- Define the factory directly in the test file for isolation ---
@@ -683,7 +701,7 @@ class TestProcessVideos:
 class TestProcessAudios:
     ENDPOINT = "/api/v1/media/process-audios"
 
-    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers):
+    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription):
 
         form_data = {
             "urls": [VALID_AUDIO_URL],
@@ -721,6 +739,8 @@ class TestProcessAudios:
                     "or unavailable local STT runtime"
                 )
 
+        controlled_transcription.assert_called_once()
+
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success", check_db_fields=True)
@@ -729,6 +749,7 @@ class TestProcessAudios:
         # Expect content because transcription should still happen
         assert result["content"] is not None # Might be empty if transcription fails silently, but shouldn't be None
         assert isinstance(result["content"], str)
+        assert controlled_transcription.return_value[0]["Text"] in result["content"]
         assert result["segments"] is not None and isinstance(result["segments"], list)
         # Analysis and Chunks should be None as they were disabled
         assert result["analysis"] == "[Analysis Not Requested]" or result["analysis"] is None, f"Analysis should be None/Not Requested, got: {result['analysis']}"
@@ -765,7 +786,7 @@ class TestProcessAudios:
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Expect chunks due to default
         assert result["analysis"] is not None and len(result["analysis"]) > 0 # Expect analysis due to default
 
-    def test_process_audio_multi_status_mixed(self, client, dummy_headers):
+    def test_process_audio_multi_status_mixed(self, client, dummy_headers, controlled_transcription):
 
         """Test one valid upload and one invalid URL -> 207."""
         form_data = {
@@ -774,9 +795,12 @@ class TestProcessAudios:
             "perform_chunking": "true"   # Keep chunking enabled (default)
         }
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
-            # Ensure the dummy audio file has some content for transcription to work
+            # Keep real upload validation and WAV conversion before the STT seam.
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        controlled_transcription.assert_called_once()
+        assert Path(controlled_transcription.call_args.kwargs["audio_input"]).name == SAMPLE_AUDIO_PATH.with_suffix(".wav").name
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
             pytest.fail("Still getting 400 'error parsing body' after auth fix (audio mixed).")
@@ -833,15 +857,19 @@ class TestProcessAudios:
 
         # Check successful item results (assuming defaults enabled chunking)
         assert success_result["content"] is not None
+        assert controlled_transcription.return_value[0]["Text"] in success_result["content"]
         assert success_result["chunks"] is not None # Chunking was true
 
-    def test_process_audio_upload_success(self, client, dummy_headers):
+    def test_process_audio_upload_success(self, client, dummy_headers, controlled_transcription):
 
         """Test processing a single valid audio file upload."""
         form_data = {"perform_analysis": "false"}
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        controlled_transcription.assert_called_once()
+        assert Path(controlled_transcription.call_args.kwargs["audio_input"]).name == SAMPLE_AUDIO_PATH.with_suffix(".wav").name
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
             pytest.fail("Still getting 400 'error parsing body' after auth fix (audio upload success).")
@@ -869,6 +897,7 @@ class TestProcessAudios:
         assert data["results"][0]["media_type"] == "audio"
         assert data["results"][0]["input_ref"] == SAMPLE_AUDIO_PATH.name
         assert data["results"][0]["content"] is not None and len(data["results"][0]["content"]) > 0
+        assert controlled_transcription.return_value[0]["Text"] in data["results"][0]["content"]
 
     def test_process_audio_no_input(self, client, dummy_headers):
 
@@ -1355,8 +1384,8 @@ class TestProcessDocuments:
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Default chunking=True
 
     @pytest.mark.parametrize("url, check_content_part, expected_status, expected_error_part", [
-        (VALID_TXT_URL, "license", 200, None),
-        (VALID_MD_URL, "FastAPI", 200, None),
+        (CONTROLLED_TXT_URL, "license", 200, None),
+        (CONTROLLED_MD_URL, "FastAPI", 200, None),
         pytest.param(
             VALID_HTML_URL,
             "Example Domain",
@@ -1365,41 +1394,39 @@ class TestProcessDocuments:
             marks=pytest.mark.skipif(not VALID_HTML_URL, reason="VALID_HTML_URL not defined"),
         ),
     ])
-    def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, dummy_headers):
-        """Test processing various document URLs."""
+    def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, dummy_headers, monkeypatch):
+        """Process controlled TXT, Markdown, and HTML through the real downloader."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing import download_utils
+
+        served = {
+            CONTROLLED_TXT_URL: ("text/plain", b"GNU GENERAL PUBLIC LICENSE\nThis license applies to the program."),
+            CONTROLLED_MD_URL: ("text/markdown", b"# tldw\n\nA FastAPI server for media analysis.\n"),
+            VALID_HTML_URL: (
+                "text/html",
+                b"<html><head><title>Example Domain</title></head><body>"
+                b"<h1>Example Domain</h1><p>Controlled document URL content.</p></body></html>",
+            ),
+        }
+        content_type, body = served[url]
+
+        def document_response(request: httpx.Request) -> httpx.Response:
+            assert request.method == "GET"
+            assert str(request.url) == url
+            return httpx.Response(
+                200,
+                headers={"content-type": content_type, "content-length": str(len(body))},
+                content=body,
+            )
+
+        transport = httpx.MockTransport(document_response)
+
+        def create_document_client(**kwargs):
+            return httpx.AsyncClient(timeout=kwargs.get("timeout", 60.0), transport=transport)
+
+        monkeypatch.setattr(download_utils, "_create_async_client", create_document_client)
+
         form_data = {"urls": [url], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-
-        # In environments without outbound network or with strict DNS/egress
-        # policies, external hosts (e.g., example.com) may not resolve and the
-        # endpoint will return a download/egress error instead of the expected
-        # processing behavior. Treat this as an environment quirk rather than a
-        # behavioral regression by skipping before strict assertions.
-        data_for_skip = None
-        try:
-            data_for_skip = response.json()
-        except Exception:
-            data_for_skip = None
-
-        if isinstance(data_for_skip, dict):
-            results_list = data_for_skip.get("results")
-            if isinstance(results_list, list) and results_list:
-                err_val = results_list[0].get("error")
-                if isinstance(err_val, str):
-                    network_error_markers = [
-                        "Download/preparation failed",
-                        "Host could not be resolved",
-                        "nodename nor servname provided",
-                        "Name or service not known",
-                        "Temporary failure in name resolution",
-                        "Network is unreachable",
-                        "Network/request error",
-                    ]
-                    if any(marker in err_val for marker in network_error_markers):
-                        pytest.skip(
-                            "Skipping document URL test due to network/DNS "
-                            "restrictions in test environment."
-                        )
 
         # Adjust expected counts based on status
         expected_processed = 1 if expected_status == 200 else 0
@@ -1422,6 +1449,10 @@ class TestProcessDocuments:
             assert result["content"] is not None and len(result["content"]) > 0
             assert check_content_part in result["content"] # Check if expected text is present
             assert result["chunks"] is not None and len(result["chunks"]) > 0
+            if url == VALID_HTML_URL:
+                assert result["source_format"] == "html"
+                assert Path(result["processing_source"]).suffix == ".html"
+                assert "Controlled document URL content." in result["content"]
         else: # Expected 207 (failure)
             check_media_item_result(result, "Error")
             assert result["input_ref"] == url

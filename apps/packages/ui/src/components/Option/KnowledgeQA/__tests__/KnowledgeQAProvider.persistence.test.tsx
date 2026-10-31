@@ -1,3 +1,4 @@
+import { TEST_HISTORY_STORAGE_KEY } from "./knowledgeQaAuthorityFixture"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -52,7 +53,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 let latestContext: ReturnType<typeof useKnowledgeQA> | null = null
 
 function ContextProbe() {
-  latestContext = useKnowledgeQA()
+  const context = useKnowledgeQA()
+  React.useEffect(() => { latestContext = context }, [context])
   return null
 }
 
@@ -89,6 +91,34 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
         json: async () => [],
         text: async () => "",
       }
+    })
+  })
+
+  it.each([
+    { generation_provider: "openai", generation_model: "gpt-4.1-mini" },
+    { generation_provider: null, generation_model: null },
+  ])("saves answer choices in canonical and account-owned history: %j", async (choices) => {
+    let savedContext: Record<string, unknown> | null = null
+    ragSearchMock.mockResolvedValue({ results: [], generated_answer: "Saved answer" })
+    fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.includes("/rag-context")) {
+        savedContext = JSON.parse(String(init?.body)).rag_context
+        return { ok: true, status: 200, json: async () => ({ success: true }) }
+      }
+      return { ok: true, status: 200, json: async () => [] }
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => {
+      latestContext!.updateSetting("generation_provider", choices.generation_provider)
+      latestContext!.updateSetting("generation_model", choices.generation_model)
+      latestContext!.setQuery("Remember this model selection")
+    })
+    await act(async () => { await latestContext!.search() })
+    expect(savedContext?.settings_snapshot).toMatchObject(choices)
+    await waitFor(() => {
+      const history = JSON.parse(localStorage.getItem(TEST_HISTORY_STORAGE_KEY) || "[]")
+      expect(history[0]?.settingsSnapshot).toMatchObject(choices)
     })
   })
 
@@ -135,7 +165,8 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     expect(searchCharactersMock).toHaveBeenCalled()
     expect(listCharactersMock).toHaveBeenCalled()
     expect(createChatMock).toHaveBeenCalledWith(
-      expect.not.objectContaining({ character_id: expect.anything() })
+      expect.not.objectContaining({ character_id: expect.anything() }),
+      expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) })
     )
     expect(latestContext!.currentThreadId).toBe("thread-1")
     expect(latestContext!.isLocalOnlyThread).toBe(false)
@@ -564,7 +595,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     expect(latestContext!.currentThreadId).toBe("remote-thread-2")
     expect(latestContext!.query).toBe("Selected thread question")
     expect(latestContext!.answer).toBe("Selected thread answer [1]")
-    expect(deleteChatMock).toHaveBeenCalledWith("fresh-topic-stale")
+    expect(deleteChatMock).toHaveBeenCalledWith("fresh-topic-stale", expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) }))
   })
 
   it("clears the active session after deleting the currently open remote thread", async () => {
@@ -619,7 +650,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
 
     await waitFor(() => expect(latestContext).not.toBeNull())
     localStorage.setItem(
-      "knowledge_qa_history",
+      TEST_HISTORY_STORAGE_KEY,
       JSON.stringify([
         {
           id: "history-remote-thread",
@@ -665,7 +696,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     })
 
     await waitFor(() => {
-      expect(deleteChatMock).toHaveBeenCalledWith("remote-thread")
+      expect(deleteChatMock).toHaveBeenCalledWith("remote-thread", expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) }))
       expect(latestContext!.currentThreadId).toBeNull()
       expect(latestContext!.query).toBe("")
       expect(latestContext!.answer).toBeNull()

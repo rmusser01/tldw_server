@@ -121,16 +121,24 @@ describe("KanbanPlayground empty-state copy", () => {
     render(<KanbanPlayground />)
 
     expect(
-      screen.getByText("No boards yet. Create your first board")
+      screen.getByText(
+        "Organize research tasks, track projects with boards and cards."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /Create Board/ })
     ).toBeInTheDocument()
   })
 
-  it("shows selection guidance when boards already exist", () => {
+  it("shows the board gallery when boards already exist", () => {
     mockQueryResponses(1)
     render(<KanbanPlayground />)
 
+    expect(screen.getByRole("button", { name: /Board 1/ })).toBeInTheDocument()
     expect(
-      screen.getByText("Select an existing board to get started")
-    ).toBeInTheDocument()
+      screen.queryByText(
+        "Organize research tasks, track projects with boards and cards."
+      )
+    ).not.toBeInTheDocument()
   })
 })

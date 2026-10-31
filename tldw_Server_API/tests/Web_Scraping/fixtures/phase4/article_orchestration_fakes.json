@@ -117,7 +117,7 @@
         },
         "fetch_requests": [
           {
-            "allow_redirects": true,
+            "allow_redirects": false,
             "backend": "httpx",
             "cookies": {
               "mode": "fixture",
@@ -292,7 +292,7 @@
         },
         "fetch_requests": [
           {
-            "allow_redirects": true,
+            "allow_redirects": false,
             "backend": "curl",
             "cookies": {
               "mode": "fixture",
@@ -317,7 +317,7 @@
             "url": "https://example.com/fallback"
           },
           {
-            "allow_redirects": true,
+            "allow_redirects": false,
             "backend": "httpx",
             "cookies": {
               "mode": "fixture",
@@ -486,7 +486,7 @@
         },
         "fetch_requests": [
           {
-            "allow_redirects": true,
+            "allow_redirects": false,
             "backend": "curl",
             "cookies": {
               "mode": "fixture",

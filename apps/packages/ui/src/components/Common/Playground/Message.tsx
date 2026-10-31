@@ -15,7 +15,9 @@ import { useTTS, type TtsClipMeta } from "@/hooks/useTTS"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { tagColors } from "@/utils/color"
 import { removeModelSuffix } from "@/db/dexie/models"
-import { parseReasoning } from "@/libs/reasoning"
+import {
+  parseReasoning, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
+} from "@/libs/reasoning"
 import {
   decodeChatErrorPayload,
   type ChatErrorPayload
@@ -84,6 +86,7 @@ import {
 import { resolveFallbackAudit } from "./routing-fallback-audit"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+  isImageGenerationMessageType,
   resolveImageGenerationMetadata,
   type ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
@@ -340,7 +343,8 @@ export type MessageResearchActions = {
 export const PlaygroundMessage = (props: Props) => {
   const articleRef = useRef<HTMLElement | null>(null)
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
-  const [editMode, setEditMode] = React.useState(false)
+  const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
+  const editMode = editPresentation !== null
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [isUserChatBubble] = useStorage("userChatBubble", true)
   const [autoCopyResponseToClipboard] = useStorage(
@@ -398,6 +402,11 @@ export const PlaygroundMessage = (props: Props) => {
   const [savingKnowledge, setSavingKnowledge] = React.useState<
     "note" | "flashcard" | null
   >(null)
+  const [flashcardDraft, setFlashcardDraft] = React.useState<{
+    front: string
+    back: string
+    sourceKey: string
+  } | null>(null)
   const responseDwellSentKeyRef = useRef<string | null>(null)
 
   // Disco Skills state
@@ -471,15 +480,22 @@ export const PlaygroundMessage = (props: Props) => {
   )
   const showUsageMetadata =
     isProMode && props.isBot && messageUsage.totalTokens > 0
-  const interruptedGeneration = Boolean(
+  const missingFinalAnswer = props.isBot && props.role !== "system" &&
+    !props.isStreaming && !props.isProcessing &&
+    !props.toolCalls?.length && !props.images?.length &&
+    !isImageGenerationMessageType(props.message_type) &&
+    isReasoningOnlyResponse(props.message || "")
+  const interruptedGeneration = missingFinalAnswer || Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)?.interrupted
   )
   const interruptionReason = React.useMemo(() => {
     const raw = (props.generationInfo as Record<string, unknown> | undefined)
       ?.interruptionReason
-    if (typeof raw !== "string" || raw.trim().length === 0) return null
+    if (typeof raw !== "string" || raw.trim().length === 0) {
+      return missingFinalAnswer ? MISSING_FINAL_ANSWER_MESSAGE : null
+    }
     return raw.trim()
-  }, [props.generationInfo])
+  }, [props.generationInfo, missingFinalAnswer])
   const streamTransportInterrupted = Boolean(
     (props.generationInfo as Record<string, unknown> | undefined)
       ?.streamTransportInterrupted
@@ -817,6 +833,16 @@ export const PlaygroundMessage = (props: Props) => {
   )
   const resolvedRole = props.role ?? (props.isBot ? "assistant" : "user")
   const isSystemMessage = resolvedRole === "system"
+  const prefersUserBubble = isUserChatBubble && !props.isBot && !isSystemMessage && !showCharacterPortraits
+  // Keep the active form mounted while presentation preferences hydrate/change.
+  // Identity, role and action authority continue to come from current props.
+  const renderUserBubble = !props.isBot && !isSystemMessage &&
+    (editPresentation === null ? prefersUserBubble : editPresentation === "bubble")
+  const setEditMode = React.useCallback((editing: boolean) => {
+    setEditPresentation(current => editing
+      ? current ?? (prefersUserBubble ? "bubble" : "flat")
+      : null)
+  }, [prefersUserBubble])
   const speakerMatchesCharacterIdentity =
     props.speakerCharacterId == null ||
     !props.characterIdentity?.id ||
@@ -947,7 +973,6 @@ export const PlaygroundMessage = (props: Props) => {
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    if (!props.isBot && isUserChatBubble) return
 
     const handleEditMessage = (event: Event) => {
       const detail = (event as CustomEvent<{ messageId?: string }>).detail
@@ -965,7 +990,7 @@ export const PlaygroundMessage = (props: Props) => {
     return () => {
       window.removeEventListener(EDIT_MESSAGE_EVENT, handleEditMessage)
     }
-  }, [isUserChatBubble, props.isBot, props.messageId, props.serverMessageId])
+  }, [setEditMode, props.isBot, props.messageId, props.serverMessageId])
 
   const {
     thumb,
@@ -1038,7 +1063,8 @@ export const PlaygroundMessage = (props: Props) => {
       messageId: props.serverMessageId ?? null,
       query: props.feedbackQuery ?? null,
       sources: props.sources ?? [],
-      enabled: feedbackImplicitAvailable
+      // Temporary mode reads saved chats without passive server writes.
+      enabled: feedbackImplicitAvailable && !props.temporaryChat
     })
 
   useEffect(() => {
@@ -1110,8 +1136,21 @@ export const PlaygroundMessage = (props: Props) => {
     )
   }, [errorFriendlyText, props.message, props.serverChatId, props.serverMessageId])
 
+  const knowledgeSnippet = React.useMemo(
+    () => parseReasoning(errorFriendlyText || props.message || "")
+      .filter((part) => part.type === "text")
+      .map((part) => part.content)
+      .join("\n\n")
+      .trim(),
+    [errorFriendlyText, props.message]
+  )
+  const knowledgeSourceKey = JSON.stringify([
+    props.serverChatId, props.serverMessageId, props.scope, knowledgeSnippet
+  ])
+  React.useEffect(() => { setFlashcardDraft(null) }, [knowledgeSourceKey])
+
   const handleSaveToWorkspaceNotes = React.useCallback(() => {
-    const snippet = (errorFriendlyText || props.message || "").trim()
+    const snippet = knowledgeSnippet
     if (!snippet || !props.onSaveToWorkspaceNotes) return
     props.onSaveToWorkspaceNotes({
       message: snippet,
@@ -1124,7 +1163,7 @@ export const PlaygroundMessage = (props: Props) => {
           : undefined
     })
   }, [
-    errorFriendlyText,
+    knowledgeSnippet,
     props.createdAt,
     props.isBot,
     props.message,
@@ -1134,13 +1173,24 @@ export const PlaygroundMessage = (props: Props) => {
     props.serverMessageId
   ])
 
-  const handleSaveKnowledge = async (makeFlashcard: boolean) => {
+  const handleSaveKnowledge = async (
+    makeFlashcard: boolean,
+    reviewedCard?: NonNullable<typeof flashcardDraft>
+  ) => {
     if (!props.serverChatId || !props.serverMessageId) return
-    const snippet = (errorFriendlyText || props.message || "").trim()
+    const snippet = knowledgeSnippet
     if (!snippet) {
       messageApi.error(t("saveToNotesEmpty", "Nothing to save yet."))
       return
     }
+    if (makeFlashcard && !reviewedCard) {
+      setFlashcardDraft({ front: "", back: snippet, sourceKey: knowledgeSourceKey })
+      return
+    }
+    if (makeFlashcard && (
+      reviewedCard?.sourceKey !== knowledgeSourceKey ||
+      !reviewedCard?.front.trim() || !reviewedCard?.back.trim()
+    )) return
     setSavingKnowledge(makeFlashcard ? "flashcard" : "note")
     try {
       await tldwClient.initialize().catch(() => null)
@@ -1149,7 +1199,11 @@ export const PlaygroundMessage = (props: Props) => {
           conversation_id: props.serverChatId,
           message_id: props.serverMessageId,
           snippet,
-          make_flashcard: makeFlashcard
+          make_flashcard: makeFlashcard,
+          ...(reviewedCard ? {
+            flashcard_front: reviewedCard.front.trim(),
+            flashcard_back: reviewedCard.back.trim()
+          } : {})
         },
         props.scope ? { scope: props.scope } : undefined
       )
@@ -1158,6 +1212,7 @@ export const PlaygroundMessage = (props: Props) => {
           ? t("savedToFlashcards", "Saved to Flashcards")
           : t("savedToNotes", "Saved to Notes")
       )
+      setFlashcardDraft((draft) => draft === reviewedCard ? null : draft)
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : t("somethingWentWrong")
@@ -1897,15 +1952,12 @@ export const PlaygroundMessage = (props: Props) => {
     total: props.totalMessages
   }) as string
 
-  if (
-    isUserChatBubble &&
-    !props.isBot &&
-    !isSystemMessage &&
-    !showCharacterPortraits
-  ) {
+  if (renderUserBubble) {
     return (
       <PlaygroundUserMessageBubble
         {...props}
+        editMode={editMode}
+        onEditModeChange={setEditMode}
         role={resolvedRole}
         onDelete={props.onDeleteMessage ? handleDelete : undefined}
       />
@@ -3022,6 +3074,36 @@ export const PlaygroundMessage = (props: Props) => {
           />
         </Modal>
       )}
+      <Modal
+        open={flashcardDraft !== null && flashcardDraft.sourceKey === knowledgeSourceKey}
+        title={t("reviewFlashcard", "Review flashcard")}
+        okText={t("saveFlashcard", "Save flashcard")}
+        confirmLoading={savingKnowledge === "flashcard"}
+        okButtonProps={{ disabled: !flashcardDraft?.front.trim() || !flashcardDraft?.back.trim() }}
+        onCancel={() => setFlashcardDraft(null)}
+        onOk={() => { if (flashcardDraft) void handleSaveKnowledge(true, flashcardDraft) }}
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1">
+            {t("flashcardQuestion", "Question")}
+            <textarea
+              className="rounded border border-border bg-surface p-2 text-text"
+              value={flashcardDraft?.front ?? ""}
+              onChange={(event) => setFlashcardDraft((draft) => draft && ({ ...draft, front: event.target.value }))}
+              rows={3}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            {t("flashcardAnswer", "Answer")}
+            <textarea
+              className="rounded border border-border bg-surface p-2 text-text"
+              value={flashcardDraft?.back ?? ""}
+              onChange={(event) => setFlashcardDraft((draft) => draft && ({ ...draft, back: event.target.value }))}
+              rows={5}
+            />
+          </label>
+        </div>
+      </Modal>
       {/* </div> */}
       {showFeedbackControls && (
         <FeedbackModal
@@ -3034,7 +3116,7 @@ export const PlaygroundMessage = (props: Props) => {
           initialNotes={detail?.notes ?? ""}
         />
       )}
-      {streamingComplete && (
+      {streamingComplete && !errorPayload && !props.isStreaming && !props.isProcessing && (
         <span aria-live="polite" className="sr-only">
           {t("playground:message.responseComplete", { defaultValue: "Response complete" })}
         </span>

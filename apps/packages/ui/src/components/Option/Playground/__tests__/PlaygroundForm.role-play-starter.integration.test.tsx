@@ -1,14 +1,23 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { PlaygroundEmpty } from "../PlaygroundEmpty"
 import { PlaygroundForm } from "../PlaygroundForm"
+import type { Character } from "@/types/character"
+import type { AssistantSelection } from "@/types/assistant-selection"
+import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
+import { createStartupTemplateBundle } from "../startup-template-bundles"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useBuddyManagementStore } from "@/store/buddy-management"
 
+const saveActorSettingsMock = vi.hoisted(() => vi.fn(async (_args: unknown) => true))
+const ownerGuardFixture = vi.hoisted(() => ({ capture: null as null | (() => () => boolean) }))
+const savedSetupFixture = vi.hoisted(() => ({ raw: "[]" }))
 const viewportState = vi.hoisted(() => ({ mobile: false }))
 const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
 const createChatCompletionMock = vi.hoisted(() =>
@@ -56,7 +65,12 @@ const playgroundFormConnectionState = vi.hoisted(() => ({
   isConnected: true
 }))
 const selectedAssistantMock = vi.hoisted(() => ({
+  isLoading: false,
+  defaultCharacter: null as Character | null,
+  ownedDefaultCharacter: null as Character | null,
   initialSelection: null as any,
+  currentSelection: undefined as AssistantSelection | null | undefined,
+  externalMirror: null as null | ((value: AssistantSelection | null) => void),
   setSelectedAssistant: vi.fn(async (_next: unknown) => undefined)
 }))
 const selectedCharacterState = vi.hoisted(() => ({
@@ -166,6 +180,10 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({ ownerKey: "account-a", isCurrent: () => true })
+}))
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
@@ -191,8 +209,8 @@ vi.mock("@tanstack/react-query", () => ({
   })
 }))
 
-vi.mock("antd", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("antd", async () => {
+  const React = await import("react")
 
   const InputComponent = React.forwardRef<HTMLInputElement, any>(
     (
@@ -405,7 +423,7 @@ vi.mock("antd", () => {
 })
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: unknown, defaultValue: unknown) => React.useState(defaultValue)
+  useStorage: (key: unknown, defaultValue: unknown) => React.useState(key === "playgroundStartupTemplateBundles" ? savedSetupFixture.raw : (key as { key?: string })?.key === "defaultCharacterSelection:owner:account-a" ? { ownerKey: "account-a", selection: selectedAssistantMock.ownedDefaultCharacter } : (key as { key?: string })?.key === "defaultCharacterSelection" ? selectedAssistantMock.defaultCharacter : defaultValue)
 }))
 
 vi.mock("react-router-dom", () => ({
@@ -458,7 +476,20 @@ vi.mock("~/hooks/useDynamicTextareaSize", () => ({
 }))
 
 vi.mock("~/hooks/useMessageOption", () => ({
-  useMessageOption: () => playgroundFormMessageOptionState.value
+  useMessageOption: () => {
+    const state = playgroundFormMessageOptionState.value
+    const selection = selectedAssistantMock.currentSelection === undefined
+      ? selectedAssistantMock.initialSelection
+      : selectedAssistantMock.currentSelection
+    return {
+      ...state,
+      selectedAssistant: state.selectedAssistant ?? selection,
+      effectiveAssistantState: state.effectiveAssistantState ?? resolveEffectiveAssistantState({
+        tracked: { assistantKind: state.serverChatAssistantKind, assistantId: state.serverChatAssistantId, characterId: state.serverChatCharacterId },
+        draftSelection: selection
+      })
+    }
+  }
 }))
 
 vi.mock("@/store/option", () => ({
@@ -623,14 +654,19 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: (initialValue: any = null) => {
     const [selectedAssistant, setSelectedAssistant] = React.useState(selectedAssistantMock.initialSelection ?? initialValue)
+    const publishSelection = (next: AssistantSelection | null) => {
+      selectedAssistantMock.currentSelection = next
+      setSelectedAssistant(next)
+    }
+    selectedAssistantMock.externalMirror = publishSelection
     const setSelectedAssistantWithBroadcast = async (next: any) => {
       await selectedAssistantMock.setSelectedAssistant(next)
-      setSelectedAssistant(next)
+      publishSelection(next)
     }
     return [
       selectedAssistant,
       setSelectedAssistantWithBroadcast,
-      { isLoading: false, setRenderValue: setSelectedAssistant }
+      { isLoading: selectedAssistantMock.isLoading, setRenderValue: publishSelection }
     ] as const
   }
 }))
@@ -697,16 +733,19 @@ vi.mock("../ComposerToolbar", () => ({
     toolsButton,
     sendControl,
     rolePlayActions,
+    contextItems,
     setSelectedSystemPrompt
   }: {
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
     sendControl?: React.ReactNode
+    contextItems?: { label?: React.ReactNode; value?: React.ReactNode }[]
     rolePlayActions?: { onOpenRolePlaySetup: () => void }
     setSelectedSystemPrompt?: (id: string | undefined) => void
   }) => (
     <div data-testid="composer-toolbar">
+      <span data-testid="composer-context-items">{JSON.stringify(contextItems?.map(item => ({label: item.label, value: item.value})))}</span>
       {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
@@ -730,8 +769,15 @@ vi.mock("../CompareToggle", () => ({
   CompareToggle: () => null
 }))
 
+vi.mock("@/services/actor-settings", () => ({ saveActorSettingsForChat: saveActorSettingsMock }))
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => null }))
+
+vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({ PromptAssistComposerAction: () => null }))
+
 vi.mock("../RolePlaySetupDrawer", () => ({
-  RolePlaySetupDrawer: ({ characterId, onApply, onClose, returnFocusRef }: { characterId?: string | null; onApply: (payload: unknown) => Promise<void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
+  RolePlaySetupDrawer: ({ characterId, onApply, onClose, returnFocusRef, savedRolePlaySetups, onPreviewSavedSetup, captureApplyGuard }: { captureApplyGuard?: () => () => boolean; savedRolePlaySetups?: Array<{ id: string }>; onPreviewSavedSetup?: (id: string) => void; characterId?: string | null; onApply: (payload: unknown) => Promise<void>; onClose: () => void; returnFocusRef?: React.RefObject<HTMLElement> }) => {
+    ownerGuardFixture.capture = captureApplyGuard ?? null
     const [result, setResult] = React.useState("")
     const apply = (payload: unknown) => {
       void onApply(payload).then(() => setResult("Applied"), () => setResult("Apply failed"))
@@ -744,10 +790,13 @@ vi.mock("../RolePlaySetupDrawer", () => ({
         generationPresetKey: "precise"
       })}>Apply Persona setup</button>
       <button onClick={() => apply({ clearIdentity: true })}>Apply clear identity</button>
+      <button onClick={() => onPreviewSavedSetup?.(savedRolePlaySetups![0].id)}>Preview saved setup</button>
       <span role="status">{result}</span>
     </section>
   }
 }))
+
+vi.mock("../PlaygroundStartupTemplateModal", () => ({ PlaygroundStartupTemplateModal: ({ onApply }: { onApply: () => Promise<void> }) => <button onClick={() => { void onApply() }}>Apply saved template</button> }))
 
 vi.mock("../ParameterPresets", () => ({
   detectCurrentPreset: () => "balanced",
@@ -1033,11 +1082,18 @@ vi.mock("@/hooks/playground", () => ({
 }))
 
 beforeEach(() => {
+  selectedAssistantMock.isLoading = false
+  selectedAssistantMock.defaultCharacter = null
+  selectedAssistantMock.ownedDefaultCharacter = null
+  savedSetupFixture.raw = "[]"
+  saveActorSettingsMock.mockReset().mockResolvedValue(true)
   viewportState.mobile = false
   useBuddyManagementStore.getState().close()
   onSubmitMock.mockClear()
   createChatCompletionMock.mockClear()
   selectedAssistantMock.initialSelection = null
+  selectedAssistantMock.currentSelection = undefined
+  selectedAssistantMock.externalMirror = null
   selectedAssistantMock.setSelectedAssistant.mockReset().mockResolvedValue(undefined)
   selectedCharacterState.value = null
   selectedCharacterState.setSelectedCharacter.mockClear()
@@ -1069,6 +1125,23 @@ const renderRolePlayStarterHarness = () =>
   )
 
 describe("PlaygroundForm role-play starter", () => {
+  it("does not adopt an unowned default Character while this account preference is unresolved", async () => {
+    selectedAssistantMock.defaultCharacter = { id: "4", name: "Alice private default", system_prompt: "Alice private prompt" }
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { await Promise.resolve() })
+    expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+  })
+
+  it("waits for account verification before applying the configured default Character", async () => {
+    selectedAssistantMock.isLoading = true
+    selectedAssistantMock.ownedDefaultCharacter = { id: "7", name: "Default Archivist" }
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+    selectedAssistantMock.isLoading = false
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: "character", id: "7", name: "Default Archivist" })))
+  })
+
   it("restores the opening control after the conditionally mounted setup drawer closes", async () => {
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)
@@ -1095,7 +1168,7 @@ describe("PlaygroundForm role-play starter", () => {
     expect(trigger).toHaveFocus()
   })
 
-  it("commits the staged identity before clearing the previous tracked chat", async () => {
+  it("detaches the previous tracked chat before persisting a deliberate replacement", async () => {
     const user = userEvent.setup()
     playgroundFormMessageOptionState.value.serverChatId = "chat-original"
     let finishCommit: () => void = () => undefined
@@ -1104,7 +1177,8 @@ describe("PlaygroundForm role-play starter", () => {
     await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
     await user.click(await screen.findByRole("button", { name: "Apply Persona setup" }))
     expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledWith(expect.objectContaining({ kind: "persona", id: "persona-guide" }))
-    expect(playgroundFormMessageOptionState.value.setHistoryId).not.toHaveBeenCalled()
+    expect(playgroundFormMessageOptionState.value.setHistoryId).toHaveBeenCalledWith(null, { preserveServerChatId: false })
+    expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledWith(null)
     expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled()
     finishCommit()
     await screen.findByText("Applied")
@@ -1114,7 +1188,7 @@ describe("PlaygroundForm role-play starter", () => {
     expect(chatModelSettingsState.updateSettings).toHaveBeenCalledOnce()
   })
 
-  it("keeps the tracked chat and generation settings when identity persistence rejects", async () => {
+  it("keeps the deliberate replacement detached and skips generation changes when persistence rejects", async () => {
     const user = userEvent.setup()
     playgroundFormMessageOptionState.value.serverChatId = "chat-original"
     selectedAssistantMock.setSelectedAssistant.mockRejectedValueOnce(new Error("storage unavailable"))
@@ -1122,9 +1196,131 @@ describe("PlaygroundForm role-play starter", () => {
     await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
     await user.click(await screen.findByRole("button", { name: "Apply Persona setup" }))
     await screen.findByText("Apply failed")
-    expect(playgroundFormMessageOptionState.value.setHistoryId).not.toHaveBeenCalled()
-    expect(playgroundFormMessageOptionState.value.setMessages).not.toHaveBeenCalled()
+    expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledWith(null)
     expect(chatModelSettingsState.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it("retains the active saved identity when inline setup chooses that same persona", async () => {
+    playgroundFormMessageOptionState.value.serverChatId = "chat-original"
+    playgroundFormMessageOptionState.value.serverChatAssistantKind = "persona"
+    playgroundFormMessageOptionState.value.serverChatAssistantId = "persona-guide"
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply Persona setup" }))
+    await screen.findByText("Applied")
+    expect(playgroundFormMessageOptionState.value.setServerChatId).not.toHaveBeenCalled()
+  })
+
+  it.each(["character", "persona"] as const)("detaches through the real Form and saved-template action before one %s selection write", async kind => {
+    const identity = { kind, id: "new-identity", name: "New identity" }
+    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({
+      name: "Saved setup", selectedModel: null, systemPrompt: "New behavior",
+      character: kind === "character" ? { id: identity.id, name: identity.name } as Character : null,
+      rolePlay: { source: "role-play-setup", identity, behavior: null, scene: null, generation: null, context: null }
+    })])
+    playgroundFormMessageOptionState.value.serverChatId = "chat-original"
+    let finishCommit!: () => void
+    selectedAssistantMock.setSelectedAssistant.mockImplementationOnce(() => new Promise<void>(resolve => { finishCommit = resolve }))
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
+    try {
+      expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledWith(null)
+      expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(identity))
+    } finally { finishCommit?.() }
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Apply saved template" })).not.toBeInTheDocument())
+  })
+
+  it.each(["inline", "template"].flatMap(origin => ["target", "history", "roundtrip"].map(change => ({ origin, change }))))("ignores late $origin settings after $change changes", async ({ origin, change }) => {
+    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({ name: "Replacement", selectedModel: "other-model", systemPrompt: "Stale template", character: { id: "new", name: "New" } as Character, rolePlay: { source: "role-play-setup", identity: { kind: "character", id: "new", name: "New" }, behavior: null, scene: null, generation: null, context: null } })])
+    playgroundFormMessageOptionState.value.serverChatId = "original"
+    let finishCommit!: () => void
+    const pending = new Promise<void>(resolve => { finishCommit = resolve })
+    selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    if (origin === "template") {
+      await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
+      await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
+    } else await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
+    const updatesBefore = chatModelSettingsState.updateSettings.mock.calls.length
+    const promptsBefore = chatModelSettingsState.updateSetting.mock.calls.length
+    if (change === "target") playgroundFormMessageOptionState.value.serverChatId = "newer-chat"
+    if (change === "history") playgroundFormMessageOptionState.value.historyId = "newer-history"
+    if (change === "roundtrip") usePlaygroundSessionStore.getState().cancelPendingRestore()
+    await act(async () => { finishCommit(); await pending })
+    expect(chatModelSettingsState.updateSettings.mock.calls.length).toBe(updatesBefore)
+    expect(chatModelSettingsState.updateSetting.mock.calls.length).toBe(promptsBefore)
+    expect(playgroundFormMessageOptionState.value.setSelectedModel).not.toHaveBeenCalledWith("other-model")
+  })
+
+  it.each(["inline", "template"])("ignores late %s settings after the Form unmounts", async origin => {
+    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({ name: "Replacement", selectedModel: "other-model", systemPrompt: "Stale template", character: { id: "new", name: "New" } as Character, rolePlay: { source: "role-play-setup", identity: { kind: "character", id: "new", name: "New" }, behavior: null, scene: null, generation: null, context: null } })])
+    let finishCommit!: () => void
+    const pending = new Promise<void>(resolve => { finishCommit = resolve })
+    selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    if (origin === "template") {
+      await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
+      await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
+    } else await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
+    const updatesBefore = chatModelSettingsState.updateSettings.mock.calls.length
+    view.unmount()
+    await act(async () => { finishCommit(); await pending })
+    expect(chatModelSettingsState.updateSettings.mock.calls.length).toBe(updatesBefore)
+    expect(playgroundFormMessageOptionState.value.setSelectedModel).not.toHaveBeenCalledWith("other-model")
+  })
+
+  it.each([true, false])("retains none-to-none identity only for metadata-ready neutral saved chats: %s", async ready => {
+    const canonical = resolveServerChatAssistantIdentity({ id: "neutral", source: "webui", character_id: null, assistant_kind: null, assistant_id: null })
+    Object.assign(playgroundFormMessageOptionState.value, { serverChatId: "neutral", serverChatMetaLoaded: ready, serverChatAssistantKind: canonical.assistantKind, serverChatAssistantId: canonical.assistantId, serverChatCharacterId: canonical.characterId })
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(screen.getByRole("button", { name: "Apply clear identity" }))
+    await screen.findByText("Applied")
+    expect(playgroundFormMessageOptionState.value.setServerChatId).toHaveBeenCalledTimes(ready ? 0 : 1)
+  })
+
+  it("detaches before saved role-play scene persistence and suppresses its late presentation", async () => {
+    savedSetupFixture.raw = JSON.stringify([createStartupTemplateBundle({ name: "Setup with scene", selectedModel: null, systemPrompt: "", rolePlay: { source: "role-play-setup", identity: { kind: "persona", id: "guide", name: "Guide" }, behavior: null, scene: null, generation: null, context: null } })])
+    playgroundFormMessageOptionState.value.serverChatId = "old-chat"
+    playgroundFormMessageOptionState.value.historyId = "old-history"
+    playgroundFormMessageOptionState.value.setServerChatId.mockImplementation((id: string | null) => { playgroundFormMessageOptionState.value.serverChatId = id })
+    playgroundFormMessageOptionState.value.setHistoryId.mockImplementation((id: string | null) => { playgroundFormMessageOptionState.value.historyId = id })
+    let finishScene!: () => void
+    const pending = new Promise<boolean>(resolve => { finishScene = () => resolve(true) })
+    saveActorSettingsMock.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(screen.getByRole("button", { name: "Preview saved setup" }))
+    await user.click(await screen.findByRole("button", { name: "Apply saved template" }))
+    try {
+      expect(saveActorSettingsMock).toHaveBeenCalledWith(expect.objectContaining({ historyId: null, serverChatId: null }))
+      expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledTimes(1)
+    } finally { view.unmount(); finishScene(); await pending }
+  })
+
+  it("passes the Form action guard to the drawer and invalidates it on a newer same-destination action", async () => {
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+    await user.click(screen.getByRole("button", { name: "Apply Persona setup" }))
+    const isCurrent = ownerGuardFixture.capture!()
+    expect(isCurrent()).toBe(true)
+    await user.click(screen.getByRole("button", { name: "Apply clear identity" }))
+    expect(isCurrent()).toBe(false)
+    await act(async () => { release(); await pending })
   })
 
   it("clears identity with one awaited canonical selection write", async () => {
@@ -1318,3 +1514,91 @@ describe("PlaygroundForm role-play starter", () => {
     expect(selector).not.toHaveTextContent("Ready")
   })
 })
+
+it("UAT355: a plain composer ignores an untracked cross-tab Character mirror", async () => {
+  Object.assign(playgroundFormMessageOptionState.value, {
+    historyId: null,
+    serverChatId: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatCharacterId: null,
+    serverChatMetaLoaded: false,
+    selectedAssistant: null,
+    selectedCharacter: null,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
+    }
+  })
+  const view = render(<PlaygroundForm droppedFiles={[]} />)
+  try {
+    await act(async () => {
+      selectedAssistantMock.externalMirror!({
+        kind: "character",
+        id: "foreign-robot",
+        name: "Foreign Robot",
+        greeting: "Foreign greeting",
+        system_prompt: "Foreign persona prompt"
+      })
+    })
+    expect
+      .soft(screen.getByTestId("composer-context-items").textContent)
+      .not.toContain("Foreign Robot")
+    expect
+      .soft(screen.getByTestId("composer-context-items").textContent)
+      .not.toContain("Character context")
+    expect
+      .soft(screen.queryByText("Add expression images for Foreign Robot."))
+      .toBeNull()
+  } finally {
+    view.unmount()
+  }
+})
+it.each(["tracked_character", "overlay"])(
+  "UAT355: preserves owned composer %s context",
+  async (mode) => {
+    const selection = {
+      kind: "character",
+      id: "owned",
+      name: "Owned Character",
+      greeting: "Owned greeting",
+      metadata: { selectionMode: mode === "overlay" ? "overlay" : "tracked" }
+    }
+    selectedAssistantMock.initialSelection = selection
+    Object.assign(playgroundFormMessageOptionState.value, {
+      historyId: null,
+      serverChatId: mode === "overlay" ? null : "owned-chat",
+      serverChatAssistantKind: mode === "overlay" ? null : "character",
+      serverChatAssistantId: mode === "overlay" ? null : "owned",
+      serverChatCharacterId: mode === "overlay" ? null : "owned",
+      serverChatMetaLoaded: true,
+      selectedAssistant: selection,
+      selectedCharacter: selection,
+      effectiveAssistantState: {
+        mode,
+        kind: "character",
+        id: "owned",
+        displayName: "Owned Character",
+        avatarUrl: null,
+        systemPromptSnapshot: null,
+        source: mode === "overlay" ? "overlay" : "tracked"
+      }
+    })
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      expect(screen.getByTestId("composer-context-items")).toHaveTextContent(
+        "Owned Character"
+      )
+      expect(screen.getByTestId("composer-context-items")).toHaveTextContent(
+        "Character context"
+      )
+    } finally {
+      view.unmount()
+    }
+  }
+)

@@ -1236,7 +1236,13 @@ async def get_llamacpp_metrics_endpoint(llm_manager: LLMInferenceManager = Depen
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
-@router.get("/llamafile/metrics", summary="Get Llamafile Metrics")
+@router.get(
+    "/llamafile/metrics",
+    summary="Get Llamafile Metrics",
+    # Matches get_llamacpp_metrics_endpoint directly above: the same operation
+    # for a sibling backend, admin-gated there and open here.
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
 async def get_llamafile_metrics_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
     try:
         if not getattr(llm_manager, "llamafile", None):
@@ -1279,14 +1285,31 @@ async def list_llamacpp_models_endpoint(llm_manager: LLMInferenceManager = Depen
 from tldw_Server_API.app.api.v1.schemas.llamacpp_schemas import LlamaCppInferenceRequest
 
 
-@router.post("/llamacpp/inference", summary="Run inference with Llama.cpp")
+@router.post(
+    "/llamacpp/inference",
+    summary="Run inference with Llama.cpp",
+    # Every other route on this router carries check_rate_limit; the management
+    # ones add RequireRole("admin"). This one had neither, so an unauthenticated
+    # caller could spend the box's GPU. Inference is a user operation, not an
+    # admin one, so it authenticates rather than requiring a role.
+    dependencies=[Depends(check_rate_limit)],
+)
 async def run_llamacpp_inference_endpoint(
-    payload: LlamaCppInferenceRequest, llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)
-):
-    """
-    Runs inference using the currently loaded Llama.cpp model.
-    Payload should be OpenAI compatible (e.g., include 'messages' list).
-    Example: {"messages": [{"role": "user", "content": "Hello!"}], "temperature": 0.7}
+    payload: LlamaCppInferenceRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+    current_user: User = Depends(get_request_user),
+) -> dict[str, Any]:
+    """Run inference using the currently loaded Llama.cpp model.
+
+    Args:
+        payload: OpenAI-compatible request, e.g. ``{"messages": [...], "temperature": 0.7}``.
+        llm_manager: Resolved inference manager for the active backend.
+        current_user: Authenticated caller. Required only to establish that
+            there is one -- inference is not scoped per user, but it must not be
+            free to anonymous callers.
+
+    Returns:
+        The backend's completion payload, with ``model`` and ``backend`` filled in.
     """
     try:
         supervisor = getattr(llm_manager, "llamacpp_supervisor", None)

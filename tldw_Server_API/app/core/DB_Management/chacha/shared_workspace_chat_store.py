@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
@@ -1235,12 +1236,7 @@ class SharedWorkspaceChatStore:
                 "Invalid shared workspace message cursor."
             )
         try:
-            padding = "=" * (-len(cursor) % 4)
-            raw = base64.b64decode(
-                (cursor + padding).encode("ascii"),
-                altchars=b"-_",
-                validate=True,
-            )
+            raw = decode_opaque_cursor_segment(cursor, max_encoded_len=_MAX_CURSOR_BYTES)
             decoded = json.loads(raw.decode("utf-8"))
         except (UnicodeError, ValueError, json.JSONDecodeError, binascii.Error) as exc:
             raise SharedWorkspaceCursorInputError(

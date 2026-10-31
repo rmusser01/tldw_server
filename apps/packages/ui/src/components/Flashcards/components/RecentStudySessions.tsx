@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Card, List, Tag, Typography } from "antd"
+import { Button, Card, Tag, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
@@ -169,9 +169,14 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
           })}
         />
       ) : (
-        <List
-          dataSource={sessions}
-          renderItem={(session) => {
+        <ul
+          role="list"
+          aria-label={t("option:flashcards.recentStudySessionsTitle", {
+            defaultValue: "Recent study sessions"
+          })}
+          className="m-0 list-none divide-y divide-border p-0"
+        >
+          {sessions.map((session) => {
             const isSelected = selectedSessionId === session.id
             const deckLabel = getDeckLabel(session, deckNamesById, t)
             const modeLabel = getSessionModeLabel(session, t)
@@ -181,7 +186,7 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
             )
 
             return (
-              <List.Item key={session.id}>
+              <li key={session.id} className="py-3">
                 <div className="flex w-full flex-col gap-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Text strong>{deckLabel}</Text>
@@ -216,10 +221,10 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
                     </Text>
                   ) : null}
                 </div>
-              </List.Item>
+              </li>
             )
-          }}
-        />
+          })}
+        </ul>
       )}
     </Card>
   )

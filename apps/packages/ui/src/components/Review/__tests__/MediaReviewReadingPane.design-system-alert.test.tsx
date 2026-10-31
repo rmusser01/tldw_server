@@ -1,20 +1,16 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { MediaReviewReadingPane } from "../MediaReviewReadingPane"
 import type { MediaDetail, MediaReviewActions, MediaReviewState } from "../media-review-types"
-
-vi.mock("@/components/Review/ContentRenderer", () => ({
-  ContentRenderer: ({ content }: { content: string }) => (
-    <div data-testid="mock-content-renderer">{content}</div>
-  )
-}))
+import englishReview from "@/assets/locale/en/review.json"
 
 vi.mock("@/components/Review/InContentSearch", () => ({
   InContentSearch: () => null
 }))
 
-vi.mock("@/components/Review/SectionNavigator", () => ({
+vi.mock("@/components/Review/SectionNavigator", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/Review/SectionNavigator")>()),
   SectionNavigator: () => null
 }))
 
@@ -181,6 +177,67 @@ const makeActions = (retryFetch = vi.fn()): MediaReviewActions =>
   }) as unknown as MediaReviewActions
 
 describe("MediaReviewReadingPane product-state alerts", () => {
+  it.each(["fallback", "English"])("hides selection removal from an unselected preview with the %s label", (locale) => {
+    const detail = makeDetail()
+    const actions = makeActions()
+    const state = {
+      ...makeState(detail, new Set()),
+      t: ((...args: Parameters<typeof t>) => locale === "English" && args[0] === "mediaPage.unstack"
+        ? englishReview.mediaPage.unstack
+        : t(...args)) as MediaReviewState["t"],
+      selectedIds: [],
+      viewerItems: [],
+      previewedId: detail.id,
+      previewedDetail: detail,
+      previewIndex: 0
+    }
+    render(<MediaReviewReadingPane state={state} actions={actions} />)
+
+    expect(screen.getByText("Transcript body")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^(Unstack|Remove from selection)$/ })).not.toBeInTheDocument()
+    expect(actions.removeFromSelection).not.toHaveBeenCalled()
+  })
+
+  it("does not offer removal for a rendered card whose ID is outside the selection", () => {
+    const state = { ...makeState(makeDetail(), new Set()), selectedIds: [99] }
+    render(<MediaReviewReadingPane state={state} actions={makeActions()} />)
+
+    expect(screen.getByText("Transcript body")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Remove from selection" })).not.toBeInTheDocument()
+  })
+
+  it.each([42, "42"])("keeps removal available for matching selected ID %s", (selectedId) => {
+    const detail = makeDetail()
+    const actions = makeActions()
+    const state = { ...makeState(detail, new Set()), selectedIds: [selectedId] }
+    render(<MediaReviewReadingPane state={state} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove from selection" }))
+
+    expect(actions.removeFromSelection).toHaveBeenCalledExactlyOnceWith(detail.id)
+  })
+
+  it("counts a visible preview when no items are selected", () => {
+    const detail = makeDetail()
+    const state = {
+      ...makeState(detail, new Set()),
+      selectedIds: [],
+      viewerItems: [],
+      previewedId: detail.id,
+      previewedDetail: detail,
+      previewIndex: 0
+    }
+    const view = render(<MediaReviewReadingPane state={state} actions={makeActions()} />)
+
+    expect(screen.getByText("1 open")).toBeInTheDocument()
+
+    view.rerender(<MediaReviewReadingPane state={{ ...state, previewedId: null, previewedDetail: null }} actions={makeActions()} />)
+    expect(screen.getByText("0 open")).toBeInTheDocument()
+
+    view.rerender(<MediaReviewReadingPane state={makeState(detail, new Set())} actions={makeActions()} />)
+    expect(screen.getByText("1 open")).toBeInTheDocument()
+  })
+
   it("renders failed content through the design-system Alert and keeps retry behavior", () => {
     const retryFetch = vi.fn()
 
@@ -217,5 +274,34 @@ describe("MediaReviewReadingPane product-state alerts", () => {
       screen.getByText("Persisted analysis from the real backend")
     ).toBeInTheDocument()
     expect(screen.queryByText("Analysis not available")).not.toBeInTheDocument()
+  })
+
+  it("renders analysis formatting and copies the complete original Markdown", async () => {
+    const analysis = "## Garden analysis\n\nThe **public** garden.\n\n- Seven beds"
+    const detail = { ...makeDetail(), processing: { analysis } } as MediaDetail
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) }
+    })
+    render(<MediaReviewReadingPane state={makeState(detail, new Set())} actions={makeActions()} />)
+
+    const panel = within(screen.getByTestId("media-review-analysis-panel-42"))
+    await waitFor(() => expect(panel.getByRole("heading", { level: 2, name: "Garden analysis" })).toBeInTheDocument())
+    expect(panel.getByText("public").tagName).toBe("STRONG")
+    expect(panel.getByRole("listitem")).toHaveTextContent("Seven beds")
+    fireEvent.click(screen.getByRole("button", { name: /Copy/ }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy Analysis" }))
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(analysis))
+  })
+
+  it("renders analysis links safely while preserving ordinary prose", async () => {
+    const analysis = "Plain explanation.\n\n[Safe](https://example.com/) [Unsafe](javascript:alert(1))\n\n<script>alert(1)</script><img src=x onerror=alert(1)>"
+    const detail = { ...makeDetail(), processing: { analysis } } as MediaDetail
+    render(<MediaReviewReadingPane state={makeState(detail, new Set())} actions={makeActions()} />)
+
+    const panel = screen.getByTestId("media-review-analysis-panel-42")
+    expect(await within(panel).findByRole("link", { name: "Safe" })).toHaveAttribute("href", "https://example.com/")
+    expect(within(panel).getByText("Plain explanation.")).toBeInTheDocument()
+    expect(panel.querySelector('a[href^="javascript:"], script, img[onerror]')).toBeNull()
   })
 })

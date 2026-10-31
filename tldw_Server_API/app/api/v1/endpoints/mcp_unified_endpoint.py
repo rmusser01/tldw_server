@@ -1162,6 +1162,7 @@ async def mcp_request_batch(
 @router.get("/status", response_model=ServerStatusResponse)
 async def get_server_status(
     _guard: None = Depends(enforce_http_security),
+    _auth: McpAuthContext = Depends(get_mcp_auth_context),
 ):
     """
     Get MCP server status.
@@ -1904,6 +1905,7 @@ class MCPConnectionTestResponse(BaseModel):
 async def list_mcp_catalog(
     archetype_key: str | None = None,
     _guard: None = Depends(enforce_http_security),
+    _auth: McpAuthContext = Depends(get_mcp_auth_context),
 ):
     """Return the curated external MCP server catalog."""
     from tldw_Server_API.app.core.MCP_unified.catalog_loader import list_catalog_entries

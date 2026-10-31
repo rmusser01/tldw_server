@@ -247,7 +247,7 @@ async def _init_rate_limiter(*, deferred: bool) -> None:
     try:
         from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
 
-        if _rg_enabled_flag(False):
+        if _rg_enabled_flag(True):
             logger.info(
                 ("Deferred startup: " if deferred else "App Startup: ")
                 + "Rate limiter skipped (RG enabled)"

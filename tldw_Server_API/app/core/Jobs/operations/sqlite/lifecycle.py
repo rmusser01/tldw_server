@@ -177,6 +177,9 @@ def _candidate_sql(
             "AND status='queued' AND available_at IS NOT NULL AND available_at > DATETIME(?)"
         )
         scheduled_params: list[Any] = [command.domain, command.queue, now_sql]
+        if command.owner_user_id:
+            scheduled_sql += " AND owner_user_id=?"
+            scheduled_params.append(command.owner_user_id)
         if command.job_type:
             scheduled_sql += " AND job_type=?"
             scheduled_params.append(command.job_type)

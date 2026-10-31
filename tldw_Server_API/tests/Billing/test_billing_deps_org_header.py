@@ -1,11 +1,11 @@
 """
 Unit tests for billing dependency org resolution logic.
 """
+
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
-from fastapi import Response
+from fastapi import HTTPException, Response
 
 from tldw_Server_API.app.api.v1.API_Deps import billing_deps
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -67,6 +67,43 @@ class _FakeRepoNoMembership:
 
     async def list_org_memberships_for_user(self, user_id: int):
         return []
+
+
+class _FakeRepoTwoOrgs:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def get_org_member(self, org_id: int, user_id: int):
+        return {"org_id": org_id, "user_id": user_id, "status": "active"}
+
+    async def list_org_memberships_for_user(self, user_id: int):
+        return [{"org_id": 10, "status": "active"}, {"org_id": 20, "status": "active"}]
+
+
+@pytest.mark.asyncio
+async def test_resolve_org_id_uses_active_org_before_first_membership(monkeypatch) -> None:
+    async def _fake_get_db_pool():
+        return object()
+
+    monkeypatch.setattr(billing_deps, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(billing_deps, "AuthnzOrgsTeamsRepo", _FakeRepoTwoOrgs)
+    principal = AuthPrincipal(kind="user", user_id=7, org_ids=[10, 20], active_org_id=20)
+
+    assert await billing_deps._resolve_org_id(principal) == 20
+
+
+@pytest.mark.asyncio
+async def test_resolve_org_id_rejects_org_outside_api_key_scope(monkeypatch) -> None:
+    async def _fake_get_db_pool():
+        return object()
+
+    monkeypatch.setattr(billing_deps, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(billing_deps, "AuthnzOrgsTeamsRepo", _FakeRepoTwoOrgs)
+    principal = AuthPrincipal(kind="api_key", user_id=7, org_ids=[10], active_org_id=10)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await billing_deps._resolve_org_id(principal, x_tldw_org_id=20)
+    assert exc_info.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -202,7 +239,8 @@ async def test_resolve_org_id_fails_closed_on_repo_errors(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_resolve_org_id_failure_log_omits_backend_details(monkeypatch) -> None:
     """Unexpected resolver errors should not log raw backend details."""
-    leaked_secret = "sk-billing-secret"
+    # Synthetic credential used only to assert log redaction.
+    leaked_secret = "sk-billing-secret"  # nosec B105
     leaked_path = "/private/billing/users.db"
     messages: list[str] = []
 

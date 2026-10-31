@@ -1,4 +1,3 @@
-import sqlite3
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -12,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
+    InputError,
 )
 from tldw_Server_API.app.core.Persona.buddy import ensure_persona_buddy_for_profile
 
@@ -31,21 +31,44 @@ def db_instance(db_path: Path) -> Iterator[CharactersRAGDB]:
     db.close_connection()
 
 
-def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) -> None:
-    seeded = CharactersRAGDB(db_path, "seed-client")
-    seeded.close_connection()
+def test_migration_v39_to_latest_creates_persona_buddies_table(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conversation_id = "6366587d-0381-41a2-8883-c5d334957537"
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (39, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS persona_buddies")
-        conn.commit()
+    def initialize_historical_v39(db: CharactersRAGDB) -> None:
+        # Current initialization also repairs newer schemas; build only the
+        # historical base and real migration steps for this seed database.
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 39):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 39)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical_v39)
+        seeded = CharactersRAGDB(db_path, "seed-client")
+        try:
+            with seeded.transaction() as conn:
+                assert seeded._get_db_version(conn) == 39
+                tables = {
+                    row["name"]
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+                }
+                assert {"persona_buddies", "note_attachments"}.isdisjoint(tables)
+                # Seed only columns present in the historical conversation schema.
+                conn.execute(
+                    "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
+                    (conversation_id, conversation_id, "Retained from v39", "seed-client"),
+                )
+        finally:
+            seeded.close_connection()
 
     migrated = CharactersRAGDB(db_path, "migration-check-client")
     raw_conn = migrated.get_connection()
+
     tables = {
         row["name"]
         for row in raw_conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
@@ -77,6 +100,9 @@ def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) ->
     assert "version" in buddy_columns
     assert "idx_persona_buddies_user" in buddy_indexes
     assert ("persona_profiles", "persona_id", "id") in fk_targets
+    conversation = migrated.get_conversation_by_id(conversation_id)
+    assert conversation["title"] == "Retained from v39"
+    assert conversation["client_id"] == "seed-client"
     migrated.close_connection()
 
 
@@ -166,6 +192,48 @@ def test_upsert_persona_buddy_is_noop_when_payload_is_unchanged(
     assert persisted["last_modified"] == original["last_modified"]
 
 
+def test_upsert_persona_buddy_validates_ambient_mode_and_preserves_unknown_overlay_keys(
+    db_instance: CharactersRAGDB,
+) -> None:
+    """Direct upserts validate ambient mode without replacing opaque preferences."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Opaque Overlay Persona"})
+    profile = db_instance.get_persona_profile(persona_id, user_id="user-1")
+    assert profile is not None
+    original = ensure_persona_buddy_for_profile(db_instance, profile)
+    seeded = db_instance.upsert_persona_buddy(
+        persona_id=persona_id,
+        user_id="user-1",
+        derivation_version=int(original["derivation_version"]),
+        source_fingerprint=str(original["source_fingerprint"]),
+        derived_core=original["derived_core"],
+        overlay_preferences={"future_key": {"keep": True}, "ambient_mode": "off"},
+    )
+
+    with pytest.raises(InputError, match="ambient_mode"):
+        db_instance.upsert_persona_buddy(
+            persona_id=persona_id,
+            user_id="user-1",
+            derivation_version=int(seeded["derivation_version"]),
+            source_fingerprint=str(seeded["source_fingerprint"]),
+            derived_core=seeded["derived_core"],
+            overlay_preferences={"ambient_mode": "chaotic"},
+        )
+
+    updated = db_instance.upsert_persona_buddy(
+        persona_id=persona_id,
+        user_id="user-1",
+        derivation_version=int(seeded["derivation_version"]),
+        source_fingerprint=str(seeded["source_fingerprint"]),
+        derived_core=seeded["derived_core"],
+        overlay_preferences={"ambient_mode": "roaming"},
+    )
+
+    assert updated["overlay_preferences"] == {
+        "future_key": {"keep": True},
+        "ambient_mode": "roaming",
+    }
+
+
 def test_ensure_persona_buddy_preserves_overlay_preferences_on_rederive(
     db_instance: CharactersRAGDB,
 ) -> None:
@@ -195,6 +263,68 @@ def test_ensure_persona_buddy_preserves_overlay_preferences_on_rederive(
 
     assert repaired["source_fingerprint"] != original["source_fingerprint"]
     assert repaired["overlay_preferences"] == overlay_preferences
+
+
+def test_overlay_patch_preserves_unknown_preferences_and_rejects_stale_versions(
+    db_instance: CharactersRAGDB,
+) -> None:
+    """A targeted ambient patch cannot discard unrelated overlay preferences."""
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Overlay Patch Persona"})
+    profile = db_instance.get_persona_profile(persona_id, user_id="user-1")
+    assert profile is not None
+    buddy = ensure_persona_buddy_for_profile(db_instance, profile)
+    seeded = db_instance.upsert_persona_buddy(
+        persona_id=persona_id,
+        user_id="user-1",
+        derivation_version=int(buddy["derivation_version"]),
+        source_fingerprint=str(buddy["source_fingerprint"]),
+        derived_core=buddy["derived_core"],
+        overlay_preferences={"accessory_id": "scarf", "eye_style": "round", "future_key": {"keep": True}},
+    )
+
+    updated = db_instance.patch_persona_buddy_overlay_preferences(
+        persona_id=persona_id,
+        user_id="user-1",
+        patch={"ambient_mode": "roaming"},
+        expected_version=int(seeded["version"]),
+    )
+
+    assert updated["overlay_preferences"] == {
+        "accessory_id": "scarf",
+        "eye_style": "round",
+        "future_key": {"keep": True},
+        "ambient_mode": "roaming",
+    }
+    with pytest.raises(ConflictError, match="version mismatch"):
+        db_instance.patch_persona_buddy_overlay_preferences(
+            persona_id=persona_id,
+            user_id="user-1",
+            patch={"ambient_mode": "off"},
+            expected_version=int(seeded["version"]),
+        )
+
+
+def test_global_ambient_preference_rejects_stale_version(db_instance: CharactersRAGDB) -> None:
+    """Global companion preferences use optimistic locking."""
+    created = db_instance.upsert_persona_buddy_preferences(
+        user_id="user-1",
+        ambient_mode="expressive",
+        expected_version=None,
+    )
+
+    assert db_instance.get_persona_buddy_preferences(user_id="user-1") == created
+    with pytest.raises(ConflictError, match="version mismatch"):
+        db_instance.upsert_persona_buddy_preferences(
+            user_id="user-1",
+            ambient_mode="off",
+            expected_version=int(created["version"]) + 1,
+        )
+    with pytest.raises(InputError, match="ambient_mode"):
+        db_instance.upsert_persona_buddy_preferences(
+            user_id="user-1",
+            ambient_mode="chaotic",
+            expected_version=int(created["version"]),
+        )
 
 
 def test_get_persona_buddy_surfaces_resolver_failures(

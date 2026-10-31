@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 # Subprocess verifies a fresh interpreter import with warnings promoted to errors.
 import subprocess  # nosec B404
@@ -47,6 +48,9 @@ assert "snapshot_schema" not in payload
         "PYTHONPATH": str(package_src),
         "PYTHONNOUSERSITE": "1",
     }
+    system_root = os.environ.get("SystemRoot")
+    if system_root and Path(system_root).is_dir():
+        env["SystemRoot"] = system_root
 
     # Safe subprocess: sys.executable, constant script, explicit PYTHONPATH, no shell.
     result = subprocess.run(  # nosec B603

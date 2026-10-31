@@ -82,6 +82,21 @@ describe("saveMessageOnError", () => {
     mocks.buildAssistantErrorContent.mockClear()
   })
 
+  it("persists an acknowledged user beside an interrupted assistant without changing local IDs", async () => {
+    await saveMessageOnError({
+      e: new Error("provider failed"), history: [], setHistory: vi.fn(), image: "",
+      userMessage: "Question", botMessage: "Partial", historyId: "history-1",
+      selectedModel: "test", setHistoryId: vi.fn(), isRegenerating: false,
+      userMessageId: "local-user", userServerMessageId: "server-user", assistantMessageId: "local-assistant", assistantServerMessageId: "server-assistant"
+    })
+    expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "local-user", serverMessageId: "server-user", role: "user", content: "Question"
+    }))
+    expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "local-assistant", serverMessageId: "server-assistant", role: "assistant"
+    }))
+  })
+
   it("falls back to store setter when setHistory is not callable", async () => {
     const history: ChatHistory = [
       {
@@ -143,7 +158,10 @@ describe("saveMessageOnError", () => {
     expect(mocks.saveHistory).toHaveBeenCalledWith(
       "Please summarize this cockpit error recovery path",
       false,
-      "web-ui"
+      "web-ui",
+      undefined,
+      undefined,
+      undefined
     )
     expect(mocks.updatePageTitle).toHaveBeenCalledWith(
       "Please summarize this cockpit error recovery path"

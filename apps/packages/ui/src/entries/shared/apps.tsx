@@ -10,12 +10,7 @@ import { platformConfig } from "@/config/platform"
 import { QuickChatHelperButton } from "@/components/Common/QuickChatHelper"
 import { WorkflowIntegrationHost } from "@/components/Common/Workflow"
 import { patchStaticAntdNotificationCompat } from "@/utils/antd-notification-compat"
-
-const PageHelpModal = React.lazy(() =>
-  import("@/components/Common/PageHelpModal").then((m) => ({
-    default: m.PageHelpModal
-  }))
-)
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 
 patchStaticAntdNotificationCompat()
 
@@ -76,9 +71,7 @@ export const SidepanelApp: React.FC = () => {
     <>
       {platformConfig.features.showQuickChatHelper && <QuickChatHelperButton />}
       {platformConfig.features.showKeyboardShortcutsModal && (
-        <React.Suspense fallback={null}>
-          <PageHelpModal />
-        </React.Suspense>
+        <PageHelpModalHost />
       )}
     </>
   )

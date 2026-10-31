@@ -187,6 +187,27 @@ describe("TldwAuthService logout", () => {
     vi.restoreAllMocks()
   })
 
+  it("completes local sign-out without a runtime error when remote logout is unavailable", async () => {
+    mocks.bgRequest.mockRejectedValue(new TypeError("Failed to fetch (POST /api/v1/auth/logout)"))
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    let tokensCleared = false
+    mocks.updateConfig.mockImplementation(async () => { tokensCleared = true })
+    const boundaries: boolean[] = []
+    const onBoundary = () => boundaries.push(tokensCleared)
+    window.addEventListener("tldw:auth-principal-changed", onBoundary)
+    try {
+      await expect(new TldwAuthService().logout()).resolves.toBeUndefined()
+    } finally {
+      window.removeEventListener("tldw:auth-principal-changed", onBoundary)
+    }
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({ path: "/api/v1/auth/logout", method: "POST" })
+    expect(mocks.updateConfig).toHaveBeenCalledWith({ accessToken: undefined, refreshToken: undefined })
+    expect(boundaries).toEqual([true])
+    expect(consoleError).not.toHaveBeenCalled()
+  })
+
   it("clears Task 14 records after tokens and before the logout boundary without reading values", async () => {
     const draftKey =
       "tldw:presentation-studio:html:draft:v1:https%3A%2F%2Ftldw.example:42"

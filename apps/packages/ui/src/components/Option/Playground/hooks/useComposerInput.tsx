@@ -103,6 +103,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   // wired separately below so we can size against `messageDisplayValue`.
   const composerText = useComposerText({
     draftKey: "tldw:playgroundChatDraft",
+    tabScopedDraft: true,
     textareaRef,
     isProMode,
     maxHeight: textareaMaxHeightOverride,
@@ -127,6 +128,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     promptAssistSavedAttemptId,
     textAreaFocus,
     draftSaved,
+    draftReady,
     textareaMaxHeight,
   } = composerText;
 
@@ -604,5 +606,6 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     wrapComposerProfile,
     // Draft persistence
     draftSaved,
+    draftReady,
   };
 }

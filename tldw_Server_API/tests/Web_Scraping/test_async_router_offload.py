@@ -252,8 +252,9 @@ async def test_enhanced_playwright_extraction_cancellation_closes_browser_resour
     class Page:
         closed = False
 
-        async def goto(self, *_args: Any, **_kwargs: Any) -> None:
-            return None
+        async def goto(self, *_args: Any, **_kwargs: Any) -> Any:
+            # 9d13180d3a: only a terminal 2xx navigation response is extracted.
+            return SimpleNamespace(status=200)
 
         async def wait_for_load_state(self, *_args: Any, **_kwargs: Any) -> None:
             return None

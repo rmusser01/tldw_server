@@ -10,21 +10,14 @@ from tldw_Server_API.app.core.http_client import (
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
-from tldw_Server_API.app.core.LLM_Calls.sse import (
-    finalize_stream,
-    is_done_line,
-    normalize_provider_line,
-    sse_done,
+from tldw_Server_API.app.core.LLM_Calls.streaming import (
+    iter_sse_lines_raising,
+    wrap_sync_stream,
 )
-from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 
 from .base import ChatProvider
 
 http_client_factory = _hc_create_client
-
-
-def _prefer_httpx_in_tests() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST"))
 
 
 class GroqAdapter(ChatProvider):
@@ -128,7 +121,7 @@ class GroqAdapter(ChatProvider):
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key)
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
@@ -153,7 +146,7 @@ class GroqAdapter(ChatProvider):
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key)
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
@@ -166,27 +159,7 @@ class GroqAdapter(ChatProvider):
                 with http_client_factory(timeout=resolved_timeout) as client:
                     with client.stream("POST", url, headers=headers, json=payload) as resp:
                         resp.raise_for_status()
-                        seen_done = False
-                        for raw in resp.iter_lines():
-                            if not raw:
-                                continue
-                            try:
-                                line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
-                            except Exception:
-                                line = str(raw)
-                            self._raise_if_in_band_provider_error(
-                                line,
-                                phase="stream_response",
-                            )
-                            if is_done_line(line):
-                                if not seen_done:
-                                    seen_done = True
-                                    yield sse_done()
-                                continue
-                            normalized = normalize_provider_line(line)
-                            if normalized is not None:
-                                yield normalized
-                        yield from finalize_stream(response=resp, done_already=seen_done)
+                        yield from iter_sse_lines_raising(resp, provider=self.name)
                 return
             except Exception as e:
                 self._raise_sanitized_provider_failure(e, phase="stream")

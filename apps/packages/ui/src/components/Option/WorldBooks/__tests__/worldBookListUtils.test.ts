@@ -67,6 +67,37 @@ describe("worldBookListUtils", () => {
     })
   })
 
+  it.each(["UTC", "America/Los_Angeles", "Pacific/Kiritimati"])(
+    "renders an explicit World Book API instant consistently in %s",
+    browserTimezone => {
+      const originalTimezone = process.env.TZ
+      process.env.TZ = browserTimezone
+      try {
+        expect(
+          formatWorldBookLastModified("2026-09-17T23:51:02.389993Z", {
+            nowMs: Date.parse("2026-09-17T23:51:12Z")
+          })
+        ).toMatchObject({
+          relative: "a few seconds ago",
+          absolute: "2026-09-17 23:51:02 UTC",
+          timestamp: Date.parse("2026-09-17T23:51:02.389Z")
+        })
+      } finally {
+        if (originalTimezone === undefined) delete process.env.TZ
+        else process.env.TZ = originalTimezone
+      }
+    }
+  )
+
+  it.each([
+    "2026-09-17T23:51:02.389993Z",
+    "2026-09-17T23:51:02.389993+00:00",
+    "2026-09-17T16:51:02.389993-07:00",
+    "2026-09-18T05:36:02.389993+05:45"
+  ])("preserves the instant from an explicit API offset: %s", value => {
+    expect(parseWorldBookTimestamp(value)).toBe(Date.parse(value))
+  })
+
   it("does not depend on dayjs for display-only relative timestamps", () => {
     const testDir = dirname(fileURLToPath(import.meta.url))
     const source = readFileSync(resolve(testDir, "../worldBookListUtils.ts"), "utf8")

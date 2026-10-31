@@ -8,6 +8,21 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, sort_keys=True)
 
 
+async def ensure_postgres_source_item_presence(db: Any) -> None:
+    """Upgrade pre-presence PostgreSQL catalogs while retaining existing rows."""
+    column = await db.execute(
+        "SELECT 1 FROM pg_catalog.pg_attribute "
+        "WHERE attrelid = 'ingestion_source_items'::regclass "
+        "AND attname = 'present_in_source' AND NOT attisdropped"
+    )
+    if await column.fetchone() is not None:
+        return
+    await db.execute(
+        "ALTER TABLE ingestion_source_items "
+        "ADD COLUMN IF NOT EXISTS present_in_source INTEGER NOT NULL DEFAULT 1"
+    )
+
+
 async def update_ingestion_source_record(
     db,
     *,

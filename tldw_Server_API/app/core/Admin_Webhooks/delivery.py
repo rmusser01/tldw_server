@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
 from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
+from tldw_Server_API.app.core.exceptions import WebhookKeyError
 
 from .audit import DeliveryMutationAudit, DeliveryMutationAuditSink
 from .catalog import EVENT_API_VERSION, EVENT_CATALOG
 from .config import AdminWebhookMode, AdminWebhookSettings
 from .crypto import (
     EVENT_BODY_MAX_BYTES,
-    WebhookKeyError,
     WebhookKeyLoadCode,
     WebhookKeyRing,
     WebhookKeyRingLoadResult,

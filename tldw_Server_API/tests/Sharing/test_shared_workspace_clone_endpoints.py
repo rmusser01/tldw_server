@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
 from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
     build_clone_admission_command,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -318,6 +319,26 @@ def test_same_key_replays_after_revocation_without_resolving_share(clone_api) ->
     assert len(audit_events) == 1
 
 
+@pytest.mark.parametrize("revoked", [True, False])
+def test_retained_clone_receipt_does_not_authorize_new_work(clone_api, revoked) -> None:
+    """Historical receipt recovery is independent of permission to start copying."""
+    client, manager, service, _audit, _app = clone_api
+    first = _post(client)
+    if revoked:
+        service.error = SharedWorkspaceNotFound()
+    else:
+        service.context = _context(allow_clone=False)
+
+    replay = _post(client)
+    status_response = client.get(first.json()["poll_href"])
+    new_request = _post(client, key="new-clone-request-0002")
+
+    assert replay.json() == first.json()
+    assert status_response.json() == first.json()
+    assert new_request.status_code == (404 if revoked else 403)
+    assert len(manager.list_jobs(domain="sharing", owner_user_id="9")) == 1
+
+
 def test_same_key_with_different_request_returns_conflict_before_access(clone_api) -> None:
     client, _manager, service, _audit, _app = clone_api
     first = _post(client, name="First name")
@@ -464,15 +485,15 @@ def test_clone_routes_use_canonical_models_and_recipient_route_contract(clone_ap
 
     routes = {
         route.path: route
-        for route in sharing.router.routes
-        if hasattr(route, "dependant")
+        for route in iter_served_routes(sharing.router.routes)
+        if route.dependant is not None
     }
     assert isinstance(
-        routes["/sharing/shared-with-me/{share_id}/clone"],
+        routes["/sharing/shared-with-me/{share_id}/clone"].route,
         sharing.SharedWorkspaceRecipientRoute,
     )
     assert isinstance(
-        routes["/sharing/shared-with-me/{share_id}/clone/{operation_id}"],
+        routes["/sharing/shared-with-me/{share_id}/clone/{operation_id}"].route,
         sharing.SharedWorkspaceRecipientRoute,
     )
     source = inspect.getsource(sharing)

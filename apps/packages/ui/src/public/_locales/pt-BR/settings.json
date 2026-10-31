@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "Não foi possível abrir as configurações de login. Tente novamente."
+  },
   "navigation_serverAndAuth": {
     "message": "Servidor e Autenticação"
   },

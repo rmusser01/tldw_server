@@ -18,6 +18,7 @@ type UseQueuedRequestsOptions = {
       | ((prev: QueuedRequest[]) => QueuedRequest[])
   ) => void
   sendQueuedRequest: (item: QueuedRequest) => Promise<void>
+  canCommitDispatchResult?: () => boolean
   stopStreamingRequest: (options?: { discardTurn?: boolean }) => void
 }
 
@@ -27,6 +28,7 @@ export function useQueuedRequests({
   queue,
   setQueue,
   sendQueuedRequest,
+  canCommitDispatchResult,
   stopStreamingRequest
 }: UseQueuedRequestsOptions) {
   const enqueue = React.useCallback(
@@ -158,9 +160,11 @@ export function useQueuedRequests({
 
     try {
       await sendQueuedRequest(sendingItem)
+      if (canCommitDispatchResult && !canCommitDispatchResult()) return null
       setQueue((prev) => prev.filter((item) => item.id !== sendingItem?.id))
       return sendingItem
     } catch (error) {
+      if (canCommitDispatchResult && !canCommitDispatchResult()) return null
       const blockedReason =
         error instanceof Error ? error.message : "dispatch_failed"
       setQueue((prev) =>
@@ -172,7 +176,7 @@ export function useQueuedRequests({
       )
       return null
     }
-  }, [isConnectionReady, isStreaming, sendQueuedRequest, setQueue])
+  }, [canCommitDispatchResult, isConnectionReady, isStreaming, sendQueuedRequest, setQueue])
 
   return {
     clear,

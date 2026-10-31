@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
+import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
+const knowledgeCapabilities = vi.hoisted(() => ({ enabled: false, actions: vi.fn() }))
 const storageOverrides = vi.hoisted(() => new Map<string, unknown>())
 const detectCharacterMoodMock = vi.hoisted(() =>
   vi.fn(() => ({ label: "neutral", confidence: 0.5, topic: null }))
@@ -51,11 +53,22 @@ vi.mock("antd", () => ({
   ),
   Modal: ({
     open,
-    children
+    children,
+    onOk,
+    onCancel,
+    okText,
+    okButtonProps
   }: {
     open?: boolean
     children: React.ReactNode
-  }) => (open ? <div>{children}</div> : null),
+    onOk?: () => void
+    onCancel?: () => void
+    okText?: string
+    okButtonProps?: { disabled?: boolean }
+  }) => (open ? <div role="dialog">{children}
+    {onOk && <button onClick={onOk} disabled={okButtonProps?.disabled}>{okText || "OK"}</button>}
+    {onCancel && <button onClick={onCancel}>Cancel</button>}
+  </div> : null),
   App: {
     useApp: () => ({ message: contextMessageMock })
   },
@@ -113,16 +126,21 @@ vi.mock("@/components/Sidepanel/Chat/ToolCallBlock", () => ({
 
 vi.mock("../MessageActionsBar", () => ({
   MessageActionsBar: ({
-    onSaveKnowledge
+    onSaveKnowledge, ...props
   }: {
     onSaveKnowledge?: (makeFlashcard: boolean) => void
-  }) => (
+    canSaveToNotes?: boolean
+    canSaveToFlashcards?: boolean
+  }) => { knowledgeCapabilities.actions(props); return (
     <div data-testid="message-actions">
       <button type="button" onClick={() => onSaveKnowledge?.(false)}>
         Save to Notes
       </button>
+      <button type="button" onClick={() => onSaveKnowledge?.(true)}>
+        Save to Flashcards
+      </button>
     </div>
-  )
+  ) }
 }))
 
 vi.mock("../ReasoningBlock", () => ({
@@ -168,6 +186,9 @@ vi.mock("@/hooks/useImplicitFeedback", () => ({
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
     capabilities: {
+      hasChatKnowledgeSave: knowledgeCapabilities.enabled,
+      hasNotes: knowledgeCapabilities.enabled,
+      hasFlashcards: knowledgeCapabilities.enabled,
       hasFeedbackExplicit: false,
       hasFeedbackImplicit: false
     }
@@ -233,10 +254,6 @@ vi.mock("@/hooks/useDiscoSkills", () => ({
     triggerProbabilityBase: 0,
     persistComments: false
   })
-}))
-
-vi.mock("@/libs/reasoning", () => ({
-  parseReasoning: (content: string) => [{ type: "message", content }]
 }))
 
 vi.mock("@/utils/chat-error-message", () => ({
@@ -314,6 +331,8 @@ const baseProps: React.ComponentProps<typeof PlaygroundMessage> = {
 
 describe("PlaygroundMessage routing fallback integration", () => {
   beforeEach(() => {
+    knowledgeCapabilities.enabled = false
+    knowledgeCapabilities.actions.mockClear()
     storageOverrides.clear()
     initializeMock.mockClear()
     saveChatKnowledgeMock.mockClear()
@@ -551,5 +570,81 @@ describe("PlaygroundMessage routing fallback integration", () => {
     )
     expect(contextMessageMock.success).toHaveBeenCalledWith("Saved to Notes")
     expect(staticMessageMock.success).not.toHaveBeenCalled()
+  })
+
+  it("offers saved knowledge actions for a canonical linked reply with a qualified local row ID", async () => {
+    knowledgeCapabilities.enabled = true
+    const [mapped] = mapServerChatMessagesToPlaygroundMessages({
+      serverMessages: [{ id: "canonical-answer", role: "assistant", content: "Cedar opens at 08:30.", created_at: "2026-09-15T10:00:00Z", version: 1 }],
+      assistantName: "Cedar", characterId: 4
+    })
+    render(<PlaygroundMessage {...baseProps} message={mapped.message} messageId="history-A:server:canonical-answer" serverMessageId={mapped.serverMessageId} serverChatId="cedar" temporaryChat={false} />)
+    expect(knowledgeCapabilities.actions).toHaveBeenLastCalledWith(expect.objectContaining({ canSaveToNotes: true, canSaveToFlashcards: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    await waitFor(() => expect(saveChatKnowledgeMock).toHaveBeenCalledWith(expect.objectContaining({ conversation_id: "cedar", message_id: "canonical-answer" }), undefined))
+  })
+
+  it("saves only the visible answer to Notes", async () => {
+    render(<PlaygroundMessage {...baseProps} serverChatId="chat-1" serverMessageId="message-1"
+      message="<think>Private reasoning.</think>The garden has seven raised beds." />)
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    await waitFor(() => expect(saveChatKnowledgeMock).toHaveBeenCalledWith(expect.objectContaining({
+      snippet: "The garden has seven raised beds."
+    }), undefined))
+  })
+
+  it("requires a question and answer before saving a Chat flashcard", async () => {
+    render(<PlaygroundMessage {...baseProps} serverChatId="chat-1" serverMessageId="message-1"
+      message="<think>Private reasoning.</think>The garden has seven raised beds." />)
+    fireEvent.click(screen.getByRole("button", { name: "Save to Flashcards" }))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByLabelText("Answer")).toHaveValue("The garden has seven raised beds.")
+    expect(screen.getByRole("button", { name: "Save flashcard" })).toBeDisabled()
+    expect(saveChatKnowledgeMock).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText("Question"), { target: { value: "How many raised beds does the garden have?" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save flashcard" }))
+    await waitFor(() => expect(saveChatKnowledgeMock).toHaveBeenCalledWith(expect.objectContaining({
+      snippet: "The garden has seven raised beds.",
+      flashcard_front: "How many raised beds does the garden have?",
+      flashcard_back: "The garden has seven raised beds.",
+      make_flashcard: true
+    }), undefined))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("does not save incomplete reasoning as an answer", async () => {
+    render(<PlaygroundMessage {...baseProps} serverChatId="chat-1" serverMessageId="message-1"
+      message="<think>Still reasoning" />)
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    expect(contextMessageMock.error).toHaveBeenCalledWith("Nothing to save yet.")
+    expect(saveChatKnowledgeMock).not.toHaveBeenCalled()
+  })
+
+  it("preserves newer draft edits when an earlier save finishes", async () => {
+    let finishSave!: () => void
+    saveChatKnowledgeMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finishSave = resolve }))
+    render(<PlaygroundMessage {...baseProps} serverChatId="chat-1" serverMessageId="message-1"
+      message="The garden has seven raised beds." />)
+    fireEvent.click(screen.getByRole("button", { name: "Save to Flashcards" }))
+    fireEvent.change(screen.getByLabelText("Question"), { target: { value: "How many beds?" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save flashcard" }))
+    await waitFor(() => expect(saveChatKnowledgeMock).toHaveBeenCalledOnce())
+    fireEvent.change(screen.getByLabelText("Question"), { target: { value: "How many raised beds are in the garden?" } })
+
+    await act(async () => finishSave())
+
+    expect(screen.getByLabelText("Question")).toHaveValue("How many raised beds are in the garden?")
+    expect(saveChatKnowledgeMock).toHaveBeenCalledWith(expect.objectContaining({ flashcard_front: "How many beds?" }), undefined)
+  })
+
+  it("closes a draft when its source message changes instead of saving stale content", () => {
+    const { rerender } = render(<PlaygroundMessage {...baseProps}
+      serverChatId="chat-1" serverMessageId="message-1" />)
+    fireEvent.click(screen.getByRole("button", { name: "Save to Flashcards" }))
+    fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Original question" } })
+    rerender(<PlaygroundMessage {...baseProps} serverChatId="chat-2" serverMessageId="message-2"
+      message="A different answer" />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(saveChatKnowledgeMock).not.toHaveBeenCalled()
   })
 })

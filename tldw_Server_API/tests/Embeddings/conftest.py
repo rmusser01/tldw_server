@@ -46,10 +46,12 @@ def admin_user():
                 yield call
             yield from _iter_dependency_calls(child)
 
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
     def _route_auth_dependency_keys(name: str) -> set[object]:
         keys: set[object] = set()
-        for route in getattr(app, "routes", []):
-            path = str(getattr(route, "path", ""))
+        for route in iter_served_routes(getattr(app, "routes", [])):
+            path = route.path
             if not (path.startswith("/api/v1/embeddings") or path.startswith("/api/v1/vector_stores")):
                 continue
             dependant = getattr(route, "dependant", None)

@@ -768,7 +768,8 @@ def test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows() -> No
         ]
     }
     assert job["runs-on"] == "${{ matrix.os }}"
-    assert job["needs"] == "admission"
+    # License-first: the matrix also waits on the license audit (cbd5697d5e).
+    assert job["needs"] == ["admission", "await_license"]
     assert workflow["jobs"]["admission"]["uses"] == "./.github/workflows/license-first-admission.yml"
     checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
     assert re.fullmatch(r"actions/checkout@[0-9a-f]{40}", checkout["uses"])

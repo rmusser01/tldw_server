@@ -843,3 +843,84 @@ class TestSseEventParser:
             ("custom", "with-cr"),
             ("message", "no-space"),
         ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport_name,transport_class", [
+    ("streamable_http", StreamableHttpExternalTransport),
+    ("sse", SseExternalTransport),
+])
+@pytest.mark.parametrize("header", [
+    "Mcp-Session-Id", "MCP-PROTOCOL-VERSION", "Content-Type", "ACCEPT", "Host",
+    "Content-Length", "Transfer-Encoding", "Connection", "TE", "Trailer", "Upgrade",
+    "Proxy-Connection", "Accept-Encoding",
+])
+async def test_runtime_credentials_reject_transport_headers_before_connect(
+    monkeypatch, transport_name, transport_class, header,
+) -> None:
+    transport = transport_class(_http_server_definition(
+        "https://example.com/mcp", transport=transport_name,
+    ))
+    async def unexpected_connect():
+        raise AssertionError("Invalid credential headers must fail before connecting")
+
+    monkeypatch.setattr(transport, "connect", unexpected_connect)
+    with pytest.raises(HttpExternalTransportError) as error:
+        await transport.call_tool(
+            "docs.search", {},
+            runtime_auth=BrokeredExternalCredential(headers={header: "secret-value"}),
+        )
+    assert error.value.reason_code == "invalid_runtime_headers"
+    assert "secret-value" not in str(error.value)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response_transport", ["json", "streamable_sse", "legacy_sse"])
+@pytest.mark.parametrize("version", [None, "1.0", 2.0])
+async def test_http_transport_rejects_matching_response_with_invalid_jsonrpc_version(
+    monkeypatch, response_transport, version,
+) -> None:
+    original_dispatch = _dispatch
+
+    def malformed_dispatch(message, headers):
+        payload = original_dispatch(message, headers)
+        if message.get("method") == "tools/list":
+            if version is None:
+                payload.pop("jsonrpc")
+            else:
+                payload["jsonrpc"] = version
+        return payload
+
+    monkeypatch.setitem(globals(), "_dispatch", malformed_dispatch)
+    legacy_sse = response_transport == "legacy_sse"
+    stub = SseStub() if legacy_sse else StreamableHttpStub(sse_responses=response_transport == "streamable_sse")
+    async with _run_stub(stub) as url:
+        transport = (
+            SseExternalTransport(_http_server_definition(url, transport="sse"))
+            if legacy_sse else StreamableHttpExternalTransport(_http_server_definition(url))
+        )
+        try:
+            await transport.connect()
+            with pytest.raises(HttpExternalTransportError) as error:
+                await transport.list_tools()
+            assert error.value.reason_code == "invalid_response"
+        finally:
+            await transport.close()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_legacy_sse_ignores_unmatched_malformed_notifications() -> None:
+    stub = SseStub()
+    async with _run_stub(stub) as url:
+        transport = SseExternalTransport(_http_server_definition(url, transport="sse"))
+        try:
+            await transport.connect()
+            for payload in ({"method": "notification"}, {"id": 99999, "jsonrpc": "1.0"}):
+                await stub._queue.put("event: message\ndata: " + json.dumps(payload) + "\n\n")
+            tools = await transport.list_tools()
+            assert [tool.name for tool in tools] == ["docs.search", "docs.defaulted"]
+        finally:
+            await transport.close()

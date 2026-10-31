@@ -10,7 +10,7 @@ import {
   getPromptById,
   updateHistory,
 } from "@/db/dexie/helpers";
-import { generateBranchFromMessageIds } from "@/db/dexie/branch";
+
 import type { UploadedFile } from "@/db/dexie/types";
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode";
 import { ragMode } from "@/hooks/chat-modes/ragMode";
@@ -296,71 +296,12 @@ export const useCompareSubmit = (opts: UseCompareSubmitOptions) => {
     }
   };
 
-  const createCompareBranch = async ({
-    clusterId,
-    modelId,
-    open = true,
-  }: {
+  const createCompareBranch = async (_request: {
     clusterId: string;
     modelId: string;
     open?: boolean;
-  }): Promise<string | null> => {
-    if (!historyId || historyId === "temp") {
-      return null;
-    }
-
-    const modelSelection = resolveCompareModelSelection(modelId);
-    const messageIds = getCompareBranchMessageIds(
-      messages,
-      clusterId,
-      modelSelection.historyModelKey,
-    );
-    if (messageIds.length === 0) {
-      return null;
-    }
-
-    try {
-      const newBranch = await generateBranchFromMessageIds(
-        historyId,
-        messageIds,
-      );
-      if (!newBranch) {
-        return null;
-      }
-
-      const splitTitle = buildCompareSplitTitle(newBranch.history.title || "");
-      await updateHistory(newBranch.history.id, splitTitle);
-
-      void trackCompareMetric({ type: "split_single" });
-
-      if (open) {
-        setHistory(formatToChatHistory(newBranch.messages));
-        setMessages(formatToMessage(newBranch.messages));
-        setHistoryId(newBranch.history.id);
-        const systemFiles = await getSessionFiles(newBranch.history.id);
-        setContextFiles(systemFiles);
-
-        const lastUsedPrompt = newBranch?.history?.last_used_prompt;
-        if (lastUsedPrompt) {
-          if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id);
-            if (prompt) {
-              setSelectedSystemPrompt(lastUsedPrompt.prompt_id);
-            }
-          }
-          if (currentChatModelSettings?.setSystemPrompt) {
-            currentChatModelSettings.setSystemPrompt(
-              lastUsedPrompt.prompt_content,
-            );
-          }
-        }
-      }
-
-      return newBranch.history.id;
-    } catch (e) {
-      console.log("[compare-branch] failed", e);
-      return null;
-    }
+  }): Promise<never> => {
+    throw new Error("history_selection_unavailable");
   };
 
   return {

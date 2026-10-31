@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -92,7 +93,7 @@ def _attach_whoami_router(app: FastAPI) -> None:
         }
 
     # Avoid attaching the router multiple times if the test reuses the app.
-    paths = {getattr(r, "path", "") for r in app.router.routes}
+    paths = {getattr(r, "path", "") for r in iter_served_routes(app.router.routes)}
     if "/api/v1/authnz/jwt-happy" not in paths:
         app.include_router(router, prefix="/api/v1")
 

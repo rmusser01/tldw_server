@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 class _LoggerStub:
@@ -104,7 +105,7 @@ def _build_app_with_overrides(
         # per-route token-scope/rate-limit enforcement dependencies.
         return None
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue
@@ -462,4 +463,6 @@ async def test_notes_graph_delete_link_maps_db_error_to_500():
         resp = client.delete("/api/v1/notes/links/e:123e4567-e89b-12d3-a456-426614174000")
 
     assert resp.status_code == 500
-    assert resp.json()["detail"] == "Link deletion failed"
+    # ed5da5ffff routed every link lifecycle error through one generic detail.
+    assert resp.json()["detail"] == "Notes link operation failed"
+    assert "delete backend unavailable" not in resp.text

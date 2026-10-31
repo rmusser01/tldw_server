@@ -154,16 +154,18 @@ export const ChatModelSelectorDropdown = React.memo(
       >
         <Tooltip
           title={
-            statusTitle ||
-            (statusWarning
-              ? t("playground:composer.selectModelTooltip", "Click to select a model")
-              : apiModelLabel)
+            modelDropdownOpen
+              ? null
+              : statusTitle ||
+                (statusWarning
+                  ? t("playground:composer.selectModelTooltip", "Click to select a model")
+                  : apiModelLabel)
           }
           placement="top"
         >
           <button
             type="button"
-            title={statusTitle}
+            title={modelDropdownOpen ? undefined : statusTitle}
             aria-label={statusTitle}
             aria-haspopup="listbox"
             aria-expanded={modelDropdownOpen}

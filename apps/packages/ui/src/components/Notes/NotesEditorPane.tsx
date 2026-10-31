@@ -120,6 +120,10 @@ export interface NotesEditorPaneProps {
   noteRelations: NoteRelationsShape
   noteNeighborsLoading: boolean
   noteNeighborsError: boolean
+  noteNeighborsUnavailable?: boolean
+  noteNeighborsState?: 'not_loaded' | 'loading' | 'success' | 'error'
+  noteNeighborsRequestKey?: string
+  onRequestNeighbors?: () => void
   onRetryNeighbors?: () => void
 
   // Pinning
@@ -323,6 +327,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   noteRelations,
   noteNeighborsLoading,
   noteNeighborsError,
+  noteNeighborsUnavailable = false,
+  noteNeighborsState,
+  noteNeighborsRequestKey,
+  onRequestNeighbors,
   onRetryNeighbors,
   selectedNotePinned,
   editorMode,
@@ -961,6 +969,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         </div>
         {selectedId != null && (
           <CollapsibleSection
+            key={noteNeighborsRequestKey}
             title={t('option:notesSearch.connectionsSectionTitle', {
               defaultValue: 'Connections'
             })}
@@ -977,11 +986,39 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 )}
               </Tooltip>
             }
-            defaultOpen
-            storageKey="connections"
+            defaultOpen={!onRequestNeighbors}
+            storageKey={onRequestNeighbors ? undefined : "connections"}
+            onOpenChange={(open) => { if (open) onRequestNeighbors?.() }}
             testId="notes-section-connections"
           >
-          <div
+          {noteNeighborsUnavailable ? (
+            <Typography.Text type="secondary" role="status">
+              {t('option:notesSearch.connectionsUnavailable', {
+                defaultValue: 'Note connections are unavailable for this account.'
+              })}
+            </Typography.Text>
+          ) : noteNeighborsLoading ? (
+            <Typography.Text type="secondary" role="status">
+              {t('option:notesSearch.connectionsLoading', {
+                defaultValue: 'Loading note connections...'
+              })}
+            </Typography.Text>
+          ) : noteNeighborsState === 'not_loaded' ? (
+            <Typography.Text type="secondary" role="status">
+              {!isOnline
+                ? t('option:notesSearch.connectionsOffline', { defaultValue: 'Connect to the server to load note connections.' })
+                : t('option:notesSearch.connectionsNotLoaded', { defaultValue: 'Note connections have not been loaded.' })}
+            </Typography.Text>
+          ) : noteNeighborsState === 'error' ? (
+            <div role="status" data-testid="notes-related-error">
+              <Typography.Text type="secondary">
+                {t('option:notesSearch.connectionsError', { defaultValue: 'Could not load note connections.' })}
+              </Typography.Text>
+              {onRetryNeighbors && <Button size="small" type="link" onClick={onRetryNeighbors} data-testid="notes-related-retry">
+                {t('option:notesSearch.relatedNotesRetry', { defaultValue: 'Retry' })}
+              </Button>}
+            </div>
+          ) : <div
             className="grid grid-cols-1 gap-3 xl:grid-cols-2"
             data-testid="notes-graph-relation-panels"
           >
@@ -1257,7 +1294,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 </div>
               )}
             </div>
-          </div>
+          </div>}
           </CollapsibleSection>
         )}
         {editorMode !== 'preview' && (

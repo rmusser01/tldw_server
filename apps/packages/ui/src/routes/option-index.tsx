@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from "react"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
@@ -6,13 +7,13 @@ import {
   type FirstSourceKind
 } from "@/components/Option/Onboarding/FirstSourceMilestonePrompt"
 import { PostSetupApiRecovery } from "@/components/Option/Onboarding/PostSetupApiRecovery"
-import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
 import {
   useConnectionActions,
   useConnectionState
 } from "@/hooks/useConnectionState"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
 import { usePostOnboardingMediaReadiness } from "@/hooks/usePostOnboardingMediaReadiness"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
@@ -25,6 +26,14 @@ import {
 import { isSetupStatusRequiringWizard } from "./setup-status"
 import { ConnectionPhase } from "@/types/connection"
 import { useNavigate } from "react-router-dom"
+import { useMilestoneStore } from "@/store/milestones"
+import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
+
+const LazyUnifiedSetupWizard = React.lazy(() =>
+  import("@/components/Option/Onboarding/UnifiedSetupWizard").then((module) => ({
+    default: module.UnifiedSetupWizard
+  }))
+)
 
 const LazyCompanionHomeShell = React.lazy(() =>
   import("@/components/Option/CompanionHome").then((module) => ({
@@ -53,10 +62,15 @@ const readFirstSourceDismissed = () => {
   }
 }
 
-const openFirstSourceQuickIngest = (kind: FirstSourceKind) => {
+const openFirstSourceQuickIngest = (
+  kind: FirstSourceKind,
+  ownerScope: string | null
+) => {
+  if (!ownerScope) return
   requestQuickIngestOpen(
     {
       source: "first_source_milestone",
+      ownerScope,
       preferredPreset: "quick",
       firstSource: true,
       firstSourceKind: kind
@@ -65,19 +79,22 @@ const openFirstSourceQuickIngest = (kind: FirstSourceKind) => {
   )
 }
 
-const discussFirstSource = (payload: {
+const persistFirstSourceDiscussion = async (payload: {
   mediaId: string
+  ownerScope: string
   title: string | null
   question?: string | null
 }) => {
   if (typeof window === "undefined") return
   const detail: {
     mediaId: string
+    ownerScope: string
     title: string
     mode: "rag_media"
     content?: string
   } = {
     mediaId: payload.mediaId,
+    ownerScope: payload.ownerScope,
     title: payload.title || "First source",
     mode: "rag_media"
   }
@@ -85,17 +102,24 @@ const discussFirstSource = (payload: {
   if (question) {
     detail.content = question
   }
-  window.dispatchEvent(
-    new CustomEvent("tldw:discuss-media", {
-      detail
-    })
-  )
+  return createMediaChatHandoff(detail)
 }
 
 const SETUP_BANNER_DISMISSED_KEY = "__tldw_setup_banner_dismissed"
 
 const OptionIndex = () => {
   const hostedMode = isHostedTldwDeployment()
+  const homeScope = useHomeMilestoneScope()
+  const handoffBoundaryRevision = React.useRef(0)
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1
+  }), [])
+  const handoffLifetime = React.useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    handoffLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [homeScope])
   const { phase, serverUrl } = useConnectionState()
   const { checkOnce } = useConnectionActions()
   const {
@@ -109,6 +133,35 @@ const OptionIndex = () => {
     readFirstSourceDismissed
   )
   const navigate = useNavigate()
+  const [handoffError, setHandoffError] = React.useState<string | null>(null)
+  const discussFirstSource = async (
+    payload: Omit<
+      Parameters<typeof persistFirstSourceDiscussion>[0],
+      "ownerScope"
+    >
+  ) => {
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (!homeScope || !lifetime || lifetime.signal.aborted) return
+    const requestOwnerScope = homeScope
+    setHandoffError(null)
+    try {
+      const token = await persistFirstSourceDiscussion({
+        ...payload,
+        ownerScope: requestOwnerScope
+      })
+      if (!token) return
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) {
+        await removeMediaChatHandoff(token)
+        return
+      }
+      navigate(buildMediaChatHandoffRoute(token))
+    } catch {
+      setHandoffError(
+        "Could not prepare this source for Chat. Please try again."
+      )
+    }
+  }
   // Dismissal is scoped per server so switching connections in the same
   // browser profile does not inherit another server's dismissal.
   const setupBannerDismissKey = `${SETUP_BANNER_DISMISSED_KEY}::${
@@ -158,6 +211,38 @@ const OptionIndex = () => {
   const mediaReadiness = usePostOnboardingMediaReadiness(
     shouldCheckPostOnboardingMedia
   )
+  const firstSourceOpenDetail = isFirstSourceOpenDetail(
+    quickIngestSession?.openDetail
+  )
+    ? quickIngestSession?.openDetail
+    : null
+  const firstSourceSession =
+    homeScope &&
+    firstSourceOpenDetail &&
+    "ownerScope" in firstSourceOpenDetail &&
+    firstSourceOpenDetail.ownerScope === homeScope
+      ? quickIngestSession
+      : null
+  const firstSourceRunSummary = firstSourceSession?.resultSummary ?? null
+  const firstSourceMediaId =
+    firstSourceSession?.lifecycle === "completed" &&
+    firstSourceRunSummary?.status === "success" &&
+    firstSourceRunSummary.firstMediaId
+      ? firstSourceRunSummary.firstMediaId
+      : null
+
+  React.useEffect(() => {
+    if (
+      homeScope &&
+      setupStatus === "completed" &&
+      firstSourceMediaId &&
+      mediaReadiness.status === "ready"
+    ) {
+      useMilestoneStore
+        .getState()
+        .markScopedMilestone(homeScope, "first_ingest")
+    }
+  }, [homeScope, setupStatus, firstSourceMediaId, mediaReadiness.status])
 
   if (hostedMode) {
     return (
@@ -197,11 +282,13 @@ const OptionIndex = () => {
   if (wizardRequired && !connectionReady) {
     return (
       <OptionLayout hideHeader hideSidebar>
-        <UnifiedSetupWizard
-          initialState={firstRunState}
-          initialMetadata={firstRunMetadata}
-          onStateChange={adoptFirstRunState}
-        />
+        <React.Suspense fallback={<PageAssistLoader />}>
+          <LazyUnifiedSetupWizard
+            initialState={firstRunState}
+            initialMetadata={firstRunMetadata}
+            onStateChange={adoptFirstRunState}
+          />
+        </React.Suspense>
       </OptionLayout>
     )
   }
@@ -218,21 +305,9 @@ const OptionIndex = () => {
   }
 
   const showFirstSourcePrompt =
-    shouldCheckPostOnboardingMedia && mediaReadiness.status === "ready"
-  const firstSourceOpenDetail = isFirstSourceOpenDetail(
-    quickIngestSession?.openDetail
-  )
-    ? quickIngestSession?.openDetail
-    : null
-  const firstSourceSession = firstSourceOpenDetail
-    ? quickIngestSession
-    : null
-  const firstSourceRunSummary = firstSourceSession?.resultSummary ?? null
-  const firstSourceMediaId =
-    firstSourceRunSummary?.status === "success" &&
-    firstSourceRunSummary.firstMediaId
-      ? firstSourceRunSummary.firstMediaId
-      : null
+    Boolean(homeScope) &&
+    shouldCheckPostOnboardingMedia &&
+    mediaReadiness.status === "ready"
   const firstSourceAskReady =
     Boolean(firstSourceMediaId) && mediaReadiness.status === "ready"
   const firstSourcePromptStatus =
@@ -268,13 +343,18 @@ const OptionIndex = () => {
         // Dismissal is best-effort frontend-only state.
       }
     }
-    setSessionDismissedBannerKeys(
-      (prev) => new Set(prev).add(setupBannerDismissKey)
+    setSessionDismissedBannerKeys((prev) =>
+      new Set(prev).add(setupBannerDismissKey)
     )
   }
 
   return (
     <OptionLayout>
+      {handoffError ? (
+        <p role="alert" className="mx-4 mt-4 text-destructive">
+          {handoffError}
+        </p>
+      ) : null}
       {wizardRequired && connectionReady && !setupBannerDismissed ? (
         <div
           role="status"
@@ -310,15 +390,18 @@ const OptionIndex = () => {
           errorMessage={firstSourceRunSummary?.errorMessage}
           onAddSource={(kind) => {
             setLastFirstSourceKind(kind)
-            openFirstSourceQuickIngest(kind)
+            openFirstSourceQuickIngest(kind, homeScope)
           }}
           onRetry={() =>
             openFirstSourceQuickIngest(
               firstSourceSession?.firstSourceAddMode ??
-                (isFirstSourceQuickIngestKind(firstSourceOpenDetail?.firstSourceKind)
+                (isFirstSourceQuickIngestKind(
+                  firstSourceOpenDetail?.firstSourceKind
+                )
                   ? firstSourceOpenDetail.firstSourceKind
                   : null) ??
-                lastFirstSourceKind
+                lastFirstSourceKind,
+              homeScope
             )
           }
           onAskAboutSource={
@@ -331,9 +414,7 @@ const OptionIndex = () => {
               : undefined
           }
           starterQuestions={
-            firstSourceAskReady
-              ? [...FIRST_SOURCE_STARTER_QUESTIONS]
-              : []
+            firstSourceAskReady ? [...FIRST_SOURCE_STARTER_QUESTIONS] : []
           }
           onAskStarterQuestion={
             firstSourceMediaId && firstSourceAskReady
@@ -353,6 +434,7 @@ const OptionIndex = () => {
           <PageAssistLoader
             label="Loading home..."
             description="Preparing your dashboard"
+            autoFocus={false}
           />
         }
       >

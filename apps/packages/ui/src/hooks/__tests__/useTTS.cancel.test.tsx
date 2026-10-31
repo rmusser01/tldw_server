@@ -6,6 +6,9 @@ import { resolveTtsProviderContext } from "@/services/tts-provider"
 import { getVoice } from "@/services/tts"
 
 const mocks = vi.hoisted(() => ({
+  runtime: {} as { id?: string },
+  browserSpeak: vi.fn(),
+  browserStop: vi.fn(),
   synthesize: vi.fn(async () => ({
     buffer: new ArrayBuffer(8),
     mimeType: "audio/mpeg",
@@ -38,7 +41,10 @@ vi.mock("@/services/tts", () => ({
   getVoice: vi.fn(async () => "voice")
 }))
 
-vi.mock("@/config/platform", () => ({ isChromiumTarget: false }))
+vi.mock("@/config/platform", () => ({ isChromiumTarget: true }))
+vi.mock("wxt/browser", () => ({
+  browser: { runtime: mocks.runtime, tts: { speak: mocks.browserSpeak, stop: mocks.browserStop } }
+}))
 
 vi.mock("@/db/dexie/tts-clips", () => ({ saveTtsClip: vi.fn() }))
 
@@ -94,9 +100,29 @@ const audioResult = () => ({
 
 describe("useTTS cancel-during-playback", () => {
   afterEach(() => {
+    delete mocks.runtime.id
     vi.clearAllMocks()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it("uses the extension browser TTS abstraction and stops it on cancellation", async () => {
+    mocks.runtime.id = "extension-id"
+    vi.stubGlobal("chrome", undefined)
+    vi.mocked(resolveTtsProviderContext).mockResolvedValueOnce({
+      provider: "browser", utterance: "Hello world.", playbackSpeed: 1,
+      supported: true
+    })
+    const { result } = renderHook(() => useTTS())
+    let speaking!: Promise<void>
+    act(() => { speaking = result.current.speak({ utterance: "Hello world." }) })
+    await waitFor(() => expect(mocks.browserSpeak).toHaveBeenCalled())
+    const options = mocks.browserSpeak.mock.calls[0][1]
+    act(() => options.onEvent({ type: "start" }))
+    expect(result.current.isSpeaking).toBe(true)
+    await act(async () => { result.current.cancel(); await speaking })
+    expect(mocks.browserStop).toHaveBeenCalled()
+    expect(result.current.isSpeaking).toBe(false)
   })
 
   it("frees the segment object URL and settles the playback promise when cancelled mid-playback", async () => {

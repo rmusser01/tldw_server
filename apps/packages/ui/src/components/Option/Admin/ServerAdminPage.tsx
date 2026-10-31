@@ -13,8 +13,7 @@ import {
   Input,
   Popconfirm,
   Form,
-  Modal,
-  message
+  Modal
 } from "antd"
 import { useTranslation } from "react-i18next"
 import {
@@ -38,6 +37,7 @@ import {
   StatePanel
 } from "@/components/ui/state"
 import { Alert } from "@/components/ui/primitives"
+import { useAntdMessage } from "@/hooks/useAntdMessage"
 
 const { Title, Text } = Typography
 const SYSTEM_STATS_TIMEOUT_MS = 10_000
@@ -95,6 +95,7 @@ const formatRetryAfterForAdmin = (value: number | null | undefined): string => {
 }
 
 export const ServerAdminPage: React.FC = () => {
+  const message = useAntdMessage()
   const { t } = useTranslation(["option", "settings"])
   const [config, setConfig] = React.useState<TldwConfig | null>(null)
   const [stats, setStats] = React.useState<any | null>(null)
@@ -124,6 +125,10 @@ export const ServerAdminPage: React.FC = () => {
   const [creatingRole, setCreatingRole] = React.useState(false)
   const [deletingRoleId, setDeletingRoleId] = React.useState<number | null>(null)
   const [roleForm] = Form.useForm()
+  const [createUserForm] = Form.useForm()
+  const [createUserOpen, setCreateUserOpen] = React.useState(false)
+  const [creatingUser, setCreatingUser] = React.useState(false)
+  const [createUserError, setCreateUserError] = React.useState<string | null>(null)
   const initialLoadRef = React.useRef(false)
   const openAdminDocumentation = React.useCallback(() => {
     window.open(TLDW_SERVER_DOCUMENTATION_URL, "_blank", "noopener,noreferrer")
@@ -232,8 +237,6 @@ export const ServerAdminPage: React.FC = () => {
   }, [markAdminGuardFromError, t])
 
   React.useEffect(() => {
-    if (initialLoadRef.current) return
-    initialLoadRef.current = true
     let cancelled = false
     const load = async () => {
       try {
@@ -244,20 +247,19 @@ export const ServerAdminPage: React.FC = () => {
       } catch {
         // ignore; health checks will surface errors
       }
-      // Not gated on `cancelled`: under StrictMode the first mount's cleanup
-      // fires while getConfig is still resolving, and the ref guard blocks the
-      // second mount — gating here meant system stats silently never loaded
-      // (#2870). Like users/roles below, the load must survive the remount.
-      void loadSystemStats()
-
-      // Initial users + roles
-      void loadUsers(1, usersPageSize, userRoleFilter, userActiveFilter)
-      void loadRoles()
     }
     load()
     return () => {
       cancelled = true
     }
+  }, [])
+
+  React.useEffect(() => {
+    if (initialLoadRef.current) return
+    initialLoadRef.current = true
+    void loadSystemStats()
+    void loadUsers(1, usersPageSize, userRoleFilter, userActiveFilter)
+    void loadRoles()
   }, [
     loadRoles,
     loadSystemStats,
@@ -700,6 +702,15 @@ export const ServerAdminPage: React.FC = () => {
               title={t("settings:admin.usersAndRolesTitle", "Users & roles")}
               extra={
                 <Space size="small">
+                  {config?.authMode === "multi-user" && (
+                    <Button size="small" type="primary" onClick={() => {
+                      createUserForm.resetFields()
+                      setCreateUserError(null)
+                      setCreateUserOpen(true)
+                    }}>
+                      {t("settings:admin.users.create", "Create user")}
+                    </Button>
+                  )}
                   <Button
                     size="small"
                     onClick={() =>
@@ -1108,6 +1119,65 @@ export const ServerAdminPage: React.FC = () => {
             </Button>
           </div>
         ) : null}
+      </Modal>
+      <Modal
+        title={t("settings:admin.users.create", "Create user")}
+        open={createUserOpen}
+        confirmLoading={creatingUser}
+        okText={t("settings:admin.users.create", "Create user")}
+        onCancel={() => {
+          if (creatingUser) return
+          setCreateUserOpen(false)
+          createUserForm.resetFields()
+        }}
+        onOk={() => createUserForm.submit()}
+      >
+        <Form
+          form={createUserForm}
+          layout="vertical"
+          initialValues={{ role: "user" }}
+          onFinish={async (values) => {
+            setCreatingUser(true)
+            setCreateUserError(null)
+            try {
+              await tldwClient.createAdminUser({
+                username: values.username.trim(),
+                email: values.email.trim(),
+                password: values.password,
+                role: values.role
+              })
+              setCreateUserOpen(false)
+              createUserForm.resetFields()
+              await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
+              message.success(t("settings:admin.users.created", "User created"))
+            } catch (err) {
+              setCreateUserError(sanitizeAdminErrorMessage(err, t("settings:admin.users.createFailed", "Unable to create user")))
+            } finally {
+              setCreatingUser(false)
+            }
+          }}
+        >
+          {createUserError && <Alert variant="error" title={createUserError} />}
+          <Form.Item name="username" label={t("settings:admin.users.username", "Username")} rules={[
+            { required: true, min: 3, max: 50, pattern: /^[a-zA-Z0-9_-]+$/, message: t("settings:admin.users.usernameRule", "Use 3–50 letters, numbers, underscores, or hyphens.") }
+          ]}>
+            <Input autoComplete="off" />
+          </Form.Item>
+          <Form.Item name="email" label={t("settings:admin.users.email", "Email")} rules={[{ required: true, type: "email" }]}>
+            <Input autoComplete="off" />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label={t("settings:admin.users.password", "Password")}
+            extra={t("settings:admin.users.passwordGuidance", "Use a long, unique password with uppercase and lowercase letters, a number, and a symbol. Avoid your username and sequences or repeats of three characters.")}
+            rules={[{ required: true, min: 10, max: 128 }]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item name="role" label={t("settings:admin.users.role", "Role")} rules={[{ required: true }]}>
+            <Select options={[{ value: "user", label: "User" }, { value: "admin", label: "Administrator" }]} />
+          </Form.Item>
+        </Form>
       </Modal>
     </PageShell>
   )

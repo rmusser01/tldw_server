@@ -221,6 +221,8 @@ export function useCreateQuizMutation() {
         workspace_tag: payload.workspace_tag ?? null,
         media_id: payload.media_id ?? null,
         total_questions: 0,
+        activity_type: payload.activity_type ?? "questions",
+        total_stations: 0,
         time_limit_seconds: payload.time_limit_seconds ?? null,
         passing_score: payload.passing_score ?? null,
         deleted: false,

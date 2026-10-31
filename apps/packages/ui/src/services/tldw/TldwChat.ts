@@ -15,6 +15,7 @@ import {
 import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 import type { ServicePromptRequestScope } from "./domains/service-prompts"
 import { isRequestConfigScopeChangedError } from "./service-prompt-scope-error"
+import { CHAT_STARTUP_TIMEOUT_DEFAULT_MS, ChatStreamTimeoutError } from "./chat-timeouts"
 
 const normalizeProvider = (value?: string): string =>
   String(value || "").trim().toLowerCase()
@@ -129,13 +130,15 @@ const createAbortError = (message = "Aborted"): Error => {
 
 const resolveStreamTimeoutError = (
   reason: "startup" | "idle" | null,
-  sawVisibleProgress: boolean
+  sawVisibleProgress: boolean,
+  startupTimeoutMs: number,
+  idleTimeoutMs: number
 ): Error | null => {
   if (reason === "startup" && !sawVisibleProgress) {
-    return new Error("Chat response timed out before any visible output arrived.")
+    return new ChatStreamTimeoutError("startup", startupTimeoutMs)
   }
   if (reason === "idle") {
-    return new Error("Chat response stalled after visible output began.")
+    return new ChatStreamTimeoutError("idle", idleTimeoutMs)
   }
   return null
 }
@@ -243,6 +246,16 @@ const buildRequestMessages = (
     withSystemPrompt = sanitizedMessages
   }
 
+  if (options.regenerateFromMessageId) {
+    // Saved regeneration uses canonical server history. Sending the local
+    // prefix again would turn response variants into new persisted turns.
+    const originalUser = withSystemPrompt.at(-1)
+    if (originalUser?.role !== "user") {
+      throw new Error("Reload the saved user turn before regenerating its reply.")
+    }
+    withSystemPrompt = [...withSystemPrompt.filter(message => message.role === "system"), originalUser]
+  }
+
   return normalizeMessagesForProvider(
     withSystemPrompt,
     options.apiProvider,
@@ -250,7 +263,74 @@ const buildRequestMessages = (
   )
 }
 
+/** Pure final wire projection shared by preparation and legacy streaming. */
+export const prepareChatCompletionRequest = (
+  messages: ChatMessage[], options: TldwChatOptions, stream = true
+): ChatCompletionRequest => {
+      const normalizedTools =
+        options.toolChoice === "none"
+          ? undefined
+          : normalizeChatToolsForRequest(options.tools)
+      const toolChoice =
+        normalizedTools &&
+        (options.toolChoice === "auto" || options.toolChoice === "required")
+          ? options.toolChoice
+          : undefined
+      const requestMessages = buildRequestMessages(messages, options)
+      if (requestMessages.length === 0) {
+        throw new Error(
+          "Cannot send chat request without any messages. Add a user message or a system prompt."
+        )
+      }
+
+      const request: ChatCompletionRequest = {
+        messages: requestMessages,
+        model: options.model,
+        routing: options.routing,
+        stream,
+        temperature: options.temperature,
+        logprobs: options.logprobs,
+        top_logprobs:
+          options.logprobs && Number.isFinite(options.topLogprobs)
+            ? options.topLogprobs
+            : undefined,
+        max_tokens: options.maxTokens,
+        top_p: options.topP,
+        frequency_penalty: options.frequencyPenalty,
+        presence_penalty: options.presencePenalty,
+        reasoning_effort: options.reasoningEffort,
+        ...(normalizedTools
+          ? {
+              ...(toolChoice ? { tool_choice: toolChoice } : {}),
+              tools: normalizedTools
+            }
+          : {}),
+        save_to_db: options.saveToDb,
+        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
+          ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
+          ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
+          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
+        } } : {}),
+        conversation_id: options.conversationId,
+        history_message_limit: options.historyMessageLimit,
+        history_message_order: options.historyMessageOrder,
+        slash_command_injection_mode: options.slashCommandInjectionMode,
+        api_provider: options.apiProvider,
+        extra_headers: options.extraHeaders,
+        extra_body: options.extraBody,
+        thinking_budget_tokens: options.thinkingBudgetTokens,
+        grammar_mode: options.grammarMode,
+        grammar_id: options.grammarId,
+        grammar_inline: options.grammarInline,
+        grammar_override: options.grammarOverride,
+        response_format: options.jsonMode ? { type: "json_object" } : undefined,
+        research_context: options.researchContext
+      }
+      return request
+}
+
 export interface TldwChatOptions {
+  preparedRequest?: ChatCompletionRequest
   model: string
   routing?: ChatCompletionRequest["routing"]
   temperature?: number
@@ -266,6 +346,9 @@ export interface TldwChatOptions {
   toolChoice?: "auto" | "none" | "required"
   tools?: Record<string, unknown>[]
   saveToDb?: boolean
+  retryFailedTurn?: boolean
+  clientMessageId?: string
+  regenerateFromMessageId?: string
   conversationId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
@@ -382,6 +465,11 @@ export class TldwChatService {
             }
           : {}),
         save_to_db: options.saveToDb,
+        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
+          ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
+          ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
+          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
+        } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
         history_message_order: options.historyMessageOrder,
@@ -458,22 +546,6 @@ export class TldwChatService {
 
     try {
       await tldwClient.initialize()
-      const normalizedTools =
-        options.toolChoice === "none"
-          ? undefined
-          : normalizeChatToolsForRequest(options.tools)
-      const toolChoice =
-        normalizedTools &&
-        (options.toolChoice === "auto" || options.toolChoice === "required")
-          ? options.toolChoice
-          : undefined
-      const requestMessages = buildRequestMessages(messages, options)
-      if (requestMessages.length === 0) {
-        throw new Error(
-          "Cannot send chat request without any messages. Add a user message or a system prompt."
-        )
-      }
-
       const cfg = (await tldwClient.getConfig().catch(() => null)) as
         | {
             chatRequestTimeoutMs?: number
@@ -482,44 +554,9 @@ export class TldwChatService {
           }
         | null
 
-      const request: ChatCompletionRequest = {
-        messages: requestMessages,
-        model: options.model,
-        routing: options.routing,
-        stream: true,
-        temperature: options.temperature,
-        logprobs: options.logprobs,
-        top_logprobs:
-          options.logprobs && Number.isFinite(options.topLogprobs)
-            ? options.topLogprobs
-            : undefined,
-        max_tokens: options.maxTokens,
-        top_p: options.topP,
-        frequency_penalty: options.frequencyPenalty,
-        presence_penalty: options.presencePenalty,
-        reasoning_effort: options.reasoningEffort,
-        ...(normalizedTools
-          ? {
-              ...(toolChoice ? { tool_choice: toolChoice } : {}),
-              tools: normalizedTools
-            }
-          : {}),
-        save_to_db: options.saveToDb,
-        conversation_id: options.conversationId,
-        history_message_limit: options.historyMessageLimit,
-        history_message_order: options.historyMessageOrder,
-        slash_command_injection_mode: options.slashCommandInjectionMode,
-        api_provider: options.apiProvider,
-        extra_headers: options.extraHeaders,
-        extra_body: options.extraBody,
-        thinking_budget_tokens: options.thinkingBudgetTokens,
-        grammar_mode: options.grammarMode,
-        grammar_id: options.grammarId,
-        grammar_inline: options.grammarInline,
-        grammar_override: options.grammarOverride,
-        response_format: options.jsonMode ? { type: "json_object" } : undefined,
-        research_context: options.researchContext
-      }
+      const request =
+        options.preparedRequest ??
+        prepareChatCompletionRequest(messages, options)
       captureChatRequestDebugSnapshot({
         endpoint: "/api/v1/chat/completions",
         method: "POST",
@@ -530,7 +567,7 @@ export class TldwChatService {
 
       const startupTimeoutMs = coercePositiveTimeout(
         cfg?.chatStartupTimeoutMs,
-        10_000
+        CHAT_STARTUP_TIMEOUT_DEFAULT_MS
       )
       const streamIdleTimeoutMs = coercePositiveTimeout(
         cfg?.chatStreamIdleTimeoutMs,
@@ -609,7 +646,9 @@ export class TldwChatService {
         } catch (error) {
           const timeoutError = resolveStreamTimeoutError(
             timeoutReason,
-            sawVisibleProgress
+            sawVisibleProgress,
+            startupTimeoutMs,
+            streamIdleTimeoutMs
           )
           if (timeoutError) {
             throw timeoutError
@@ -621,7 +660,9 @@ export class TldwChatService {
         }
         const timeoutError = resolveStreamTimeoutError(
           timeoutReason,
-          sawVisibleProgress
+          sawVisibleProgress,
+          startupTimeoutMs,
+          streamIdleTimeoutMs
         )
         if (timeoutError) {
           throw timeoutError
@@ -636,6 +677,7 @@ export class TldwChatService {
     } catch (error) {
       console.warn('Stream completion failed:', readErrorMessage(error))
       if (isRequestConfigScopeChangedError(error)) throw error
+      if (error instanceof ChatStreamTimeoutError) throw error
       if (isAbortLikeError(error)) {
         throw createAbortError(readErrorMessage(error))
       }

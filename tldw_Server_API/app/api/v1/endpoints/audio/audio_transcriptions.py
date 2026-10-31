@@ -895,11 +895,9 @@ async def create_transcription(
 
         minutes_est = duration_seconds / 60.0
         try:
-            allow, remaining_after = await _consume_daily_minutes(
-                current_user.id,
-                minutes_est,
-                operation_id=f"audio-transcription:{rid}:daily-minutes",
-            )
+            # No operation_id: the ledger generates one. rid is the client's X-Request-ID,
+            # and a repeated op_id would dedupe away later transcriptions' minutes.
+            allow, remaining_after = await _consume_daily_minutes(current_user.id, minutes_est)
         except _AUDIO_QUOTA_DB_EXC as e:
             logger.exception(
                 'consume_daily_minutes failed; allowing by default: user_id={}, error={}; request_id={}',

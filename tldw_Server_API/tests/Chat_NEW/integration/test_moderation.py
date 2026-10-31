@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import threading
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME, get_chacha_db_for_user
@@ -50,7 +52,9 @@ def _assert_mandatory_audit_detail(detail: dict[str, Any]) -> None:
     }
 
 
-def _cleanup_db_artifacts(db_path: str) -> None:
+def _cleanup_db_artifacts(db: CharactersRAGDB, db_path: str) -> None:
+    """Close this test-owned database after client exit, then remove its files."""
+    db.close_all_connections()
     os.unlink(db_path)
     if os.path.exists(db_path + "-wal"):
         os.unlink(db_path + "-wal")
@@ -61,7 +65,7 @@ def _make_test_db():
 
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
         db_path = tmp.name
-    db = CharactersRAGDB(db_path, "test_client")
+    db = CharactersRAGDB(db_path, "1", owner_user_id="1")
     # Minimal default character required by endpoint
     db.add_character_card({
         "name": DEFAULT_CHARACTER_NAME,
@@ -73,6 +77,82 @@ def _make_test_db():
         "creator_notes": "test"
     })
     return db, db_path
+
+
+@pytest.mark.unit
+def test_cleanup_db_artifacts_closes_owned_handles_before_unlink(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    """Close actual retired handles before unlink while another database remains usable."""
+    db, db_path = _make_test_db()
+    unrelated_db, unrelated_path = _make_test_db()
+    handles = [(db.get_connection(), threading.current_thread())]
+    unrelated_handle = unrelated_db.get_connection()
+    probe_app = FastAPI()
+
+    @probe_app.get("/db-handles")
+    async def capture_handles() -> dict[str, int]:
+        handles.append((db.get_connection(), threading.current_thread()))
+
+        def capture_worker() -> None:
+            handles.append((db.get_connection(), threading.current_thread()))
+
+        await run_in_threadpool(capture_worker)
+        return {"captured": len(handles)}
+
+    try:
+        with TestClient(probe_app) as client:
+            assert client.get("/db-handles").json() == {"captured": 3}
+        for _, owner in handles[1:]:
+            owner.join(timeout=5)
+            assert not owner.is_alive()
+        assert len({id(connection) for connection, _ in handles}) == 3
+        for connection, _ in handles:
+            assert connection.execute("SELECT 1").fetchone()[0] == 1
+
+        process_os = os
+        real_unlink = os.unlink
+        deleted_paths = []
+        background_errors = []
+        background_path = tmp_path / "unrelated-log-lock"
+        background_path.write_text("background log lock")
+
+        def delete_background_artifact() -> None:
+            try:
+                process_os.unlink(background_path)
+            except BaseException as exc:
+                background_errors.append(exc)
+
+        def unlink_after_owned_handles_close(path: str) -> None:
+            for connection, _ in handles:
+                with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                    connection.execute("SELECT 1")
+            assert unrelated_handle.execute("SELECT 1").fetchone()[0] == 1
+            deleted_paths.append(path)
+            real_unlink(path)
+
+        with monkeypatch.context() as cleanup_patch:
+            cleanup_patch.setattr(
+                __name__ + ".os",
+                SimpleNamespace(unlink=unlink_after_owned_handles_close, path=process_os.path),
+            )
+            background = threading.Thread(target=delete_background_artifact)
+            background.start()
+            background.join(timeout=5)
+            assert not background.is_alive()
+            assert background_errors == []
+            assert not background_path.exists()
+            assert deleted_paths == []
+            _cleanup_db_artifacts(db, db_path)
+        assert deleted_paths[0] == db_path
+        assert all(not os.path.exists(db_path + suffix) for suffix in ("", "-wal", "-shm"))
+    finally:
+        db.close_all_connections()
+        unrelated_db.close_all_connections()
+        for path in (db_path, unrelated_path):
+            for suffix in ("", "-wal", "-shm"):
+                if os.path.exists(path + suffix):
+                    os.unlink(path + suffix)
 
 
 def _add_non_default_character(db: CharactersRAGDB, name: str = "Guardian Character") -> dict[str, Any]:
@@ -218,14 +298,14 @@ async def _missing_audit_service_override():
 
 
 @pytest.mark.unit
-def test_input_block_returns_400(monkeypatch):
+def test_input_block_returns_400(monkeypatch, credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         policy = _StubPolicy(enabled=True, input_action='block', output_action='redact')
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -240,14 +320,14 @@ def test_input_block_returns_400(monkeypatch):
                 assert "violates" in r.json().get("detail", "").lower()
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
 @pytest.mark.unit
-def test_input_block_fails_closed_when_mandatory_audit_fails():
+def test_input_block_fails_closed_when_mandatory_audit_fails(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -256,7 +336,7 @@ def test_input_block_fails_closed_when_mandatory_audit_fails():
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_provider:
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -271,7 +351,7 @@ def test_input_block_fails_closed_when_mandatory_audit_fails():
                 assert not mock_provider.called
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -279,7 +359,7 @@ def test_input_block_fails_closed_when_mandatory_audit_fails():
 
 
 @pytest.mark.unit
-def test_input_block_fails_closed_when_audit_service_missing():
+def test_input_block_fails_closed_when_audit_service_missing(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -288,7 +368,7 @@ def test_input_block_fails_closed_when_audit_service_missing():
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_provider:
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -303,7 +383,7 @@ def test_input_block_fails_closed_when_audit_service_missing():
                 assert not mock_provider.called
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -346,7 +426,7 @@ def test_output_redaction_non_streaming(monkeypatch, credentialed_test_client_fa
                 assert got == "this has [REDACTED] token"
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -425,7 +505,7 @@ def test_output_redaction_non_streaming_with_real_moderation_service(
         body_completed = True
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             if body_completed:
                 raise
@@ -469,7 +549,7 @@ def test_output_redaction_non_streaming_fails_closed_when_mandatory_audit_fails(
                 _assert_mandatory_audit_detail(r.json().get("detail", {}))
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -512,7 +592,7 @@ def test_output_block_non_streaming_fails_closed_when_mandatory_audit_fails(
                 _assert_mandatory_audit_detail(r.json().get("detail", {}))
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -573,7 +653,7 @@ def test_streaming_redaction_applied(credentialed_test_client_factory):
                 assert "[REDACTED]" in full, r.text
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -643,7 +723,7 @@ def test_streaming_cross_chunk_redaction_output(
                 assert "[REDACTED]" in full
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -690,7 +770,7 @@ def test_streaming_block_emits_sse_error_and_finishes(
                 assert done_count == 1, "Expected exactly one [DONE] marker for graceful finish"
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -732,7 +812,7 @@ def test_streaming_block_emits_audit_failure_when_mandatory_audit_fails(
                 assert "[DONE]" in r.text
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -791,7 +871,7 @@ def test_streaming_redaction_emits_audit_failure_and_fails_closed(
                 assert stream_end_payload["success"] is False
     finally:
         try:
-            _cleanup_db_artifacts(db_path)
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -842,7 +922,7 @@ def test_streaming_cross_chunk_redaction_persisted(
                         if "[DONE]" in line:
                             break
 
-        convs = db.get_conversations_for_user("test_client", limit=1)
+        convs = db.get_conversations_for_user(db.client_id, limit=1)
         assert convs, "Expected a persisted conversation"
         conv_id = convs[0]["id"]
         msgs = db.get_messages_for_conversation(conv_id, order_by_timestamp="ASC")
@@ -852,18 +932,14 @@ def test_streaming_cross_chunk_redaction_persisted(
         assert "xqzp1234" not in saved.lower()
     finally:
         try:
-            os.unlink(db_path)
-            if os.path.exists(db_path + "-wal"):
-                os.unlink(db_path + "-wal")
-            if os.path.exists(db_path + "-shm"):
-                os.unlink(db_path + "-shm")
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
 @pytest.mark.unit
-def test_character_chat_input_guardian_overlay_uses_character_chat_type():
+def test_character_chat_input_guardian_overlay_uses_character_chat_type(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -903,7 +979,7 @@ def test_character_chat_input_guardian_overlay_uses_character_chat_type():
                 },
             ),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -921,18 +997,16 @@ def test_character_chat_input_guardian_overlay_uses_character_chat_type():
         assert engine.check_calls == [("input", "character", "please say secret")]
     finally:
         try:
-            os.unlink(db_path)
-            if os.path.exists(db_path + "-wal"):
-                os.unlink(db_path + "-wal")
-            if os.path.exists(db_path + "-shm"):
-                os.unlink(db_path + "-shm")
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
 @pytest.mark.unit
-def test_continued_character_conversation_input_guardian_overlay_uses_saved_conversation_chat_type():
+def test_continued_character_conversation_input_guardian_overlay_uses_saved_conversation_chat_type(
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -941,7 +1015,7 @@ def test_continued_character_conversation_input_guardian_overlay_uses_saved_conv
             {
                 "character_id": character["id"],
                 "title": "Guardian Continued Character Chat",
-                "client_id": "test_client",
+                "client_id": db.client_id,
             }
         )
         assert conversation_id
@@ -980,7 +1054,7 @@ def test_continued_character_conversation_input_guardian_overlay_uses_saved_conv
                 },
             ),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -998,11 +1072,7 @@ def test_continued_character_conversation_input_guardian_overlay_uses_saved_conv
         assert engine.check_calls == [("input", "character", "please say secret")]
     finally:
         try:
-            os.unlink(db_path)
-            if os.path.exists(db_path + "-wal"):
-                os.unlink(db_path + "-wal")
-            if os.path.exists(db_path + "-shm"):
-                os.unlink(db_path + "-shm")
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -1021,7 +1091,7 @@ def test_continued_ordinary_conversation_input_guardian_overlay_stays_regular_fo
             {
                 "character_id": default_character["id"],
                 "title": "Guardian Continued Ordinary Chat",
-                "client_id": "test_client",
+                "client_id": db.client_id,
             }
         )
         assert conversation_id
@@ -1079,11 +1149,7 @@ def test_continued_ordinary_conversation_input_guardian_overlay_stays_regular_fo
         assert engine.check_calls == [("input", "regular", "please say secret")]
     finally:
         try:
-            os.unlink(db_path)
-            if os.path.exists(db_path + "-wal"):
-                os.unlink(db_path + "-wal")
-            if os.path.exists(db_path + "-shm"):
-                os.unlink(db_path + "-shm")
+            _cleanup_db_artifacts(db, db_path)
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)

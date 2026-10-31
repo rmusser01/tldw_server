@@ -177,7 +177,7 @@ describe("RunsTab benchmark run mode", () => {
 
     render(<RunsTab />)
 
-    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
     expect(screen.getByText("Unable to load runs")).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
       "/api/v1/evaluations/eval-1/runs"

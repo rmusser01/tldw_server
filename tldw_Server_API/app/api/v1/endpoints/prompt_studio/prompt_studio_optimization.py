@@ -1014,10 +1014,10 @@ async def list_optimizations(
         )
 
     except DatabaseError as exc:
-        logger.error("Database error listing optimizations")
+        logger.error("Database error listing optimizations: {}", type(exc).__name__)
         raise map_db_error_to_http(exc, default_detail="Failed to list optimizations") from exc
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Unexpected error listing optimizations")
+        logger.error("Unexpected error listing optimizations: {}", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list optimizations",
@@ -1226,7 +1226,8 @@ async def cancel_optimization(
 ########################################################################################################################
 # Optimization Strategy Endpoints
 
-@router.get("/strategies", response_model=StandardResponse, openapi_extra={
+@router.get("/strategies", response_model=StandardResponse,
+            dependencies=[Depends(get_prompt_studio_user)], openapi_extra={
     "responses": {"200": {"description": "Strategies", "content": {"application/json": {"examples": {"list": {"summary": "Available strategies", "value": {"success": True, "data": [{"name": "iterative", "display_name": "Iterative Refinement"}]}}}}}}}
 })
 async def get_optimization_strategies() -> StandardResponse:

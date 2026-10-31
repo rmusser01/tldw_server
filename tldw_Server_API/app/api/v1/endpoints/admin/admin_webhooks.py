@@ -49,6 +49,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     WebhookTestRequest,
     WebhookTestResponse,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.Admin_Webhooks.audit import (
     DeliveryMutationAudit,
     DeliveryMutationAuditSink,
@@ -692,6 +693,16 @@ async def list_webhooks(
         total=page.total,
         limit=page.limit,
         offset=page.offset,
+        pagination=build_offset_pagination_meta(
+            limit=page.limit,
+            offset=page.offset,
+            total=page.total,
+            count=len(page.items),
+            has_more=(
+                page.offset + len(page.items) < page.total
+                and page.offset + page.limit <= 1_000
+            ),
+        ),
     )
 
 
@@ -796,6 +807,16 @@ async def list_webhook_deliveries(
         total=page.total,
         limit=page.limit,
         offset=page.offset,
+        pagination=build_offset_pagination_meta(
+            limit=page.limit,
+            offset=page.offset,
+            total=page.total,
+            count=len(page.items),
+            has_more=(
+                page.offset + len(page.items) < page.total
+                and page.offset + page.limit <= 1_000
+            ),
+        ),
     )
 
 

@@ -179,6 +179,16 @@ def _proof_query(proof: PersonalContextExchangeProof | None) -> dict[str, str]:
     }
 
 
+# These fixtures insert conflict rows directly, with no remote candidate. The product
+# creates a Personal Context conflict only through _attach_candidate, which stores and
+# journals its remote candidate first, so a Personal Context conflict built here can
+# never be resolved successfully. They serve tests that stop at the exchange gate or at
+# request-shape checks; a test that needs a Personal Context resolution to SUCCEED must
+# build its conflict through a real push, as test_sync_v2_personal_context_conflicts.py
+# does (TASK-13349). An earlier version pointed remote_envelope_id at a made-up id that
+# named no stored envelope.
+
+
 def _insert_conflict(
     service: SyncV2Service,
     *,
@@ -219,9 +229,7 @@ def _insert_conflict(
             object_id=envelope.object_id,
             conflict_type="revision_mismatch",
             local_envelope_id=(stored.client_envelope_id if stored is not None else None),
-            remote_envelope_id=(
-                f"remote-envelope-{conflict_id}" if stored is not None else None
-            ),
+            remote_envelope_id=None,
             server_sequence=(stored.server_cursor if stored is not None else None),
             metadata={"private_marker": f"secret-{conflict_id}"},
         )
@@ -270,7 +278,7 @@ def _insert_mixed_conflicts_with_sources(
                 object_id=envelope.object_id,
                 conflict_type="revision_mismatch",
                 local_envelope_id=envelope.client_envelope_id,
-                remote_envelope_id=f"remote-envelope-{conflict_id}",
+                remote_envelope_id=None,
                 server_sequence=envelope.server_cursor,
                 metadata={"private_marker": f"secret-{conflict_id}"},
             )
@@ -326,7 +334,7 @@ def _insert_conflict_set_with_sources(
                 object_id=envelope.object_id,
                 conflict_type="revision_mismatch",
                 local_envelope_id=envelope.client_envelope_id,
-                remote_envelope_id=f"remote-envelope-{conflict_id}",
+                remote_envelope_id=None,
                 server_sequence=envelope.server_cursor,
                 metadata={"private_marker": f"secret-{conflict_id}"},
             )
@@ -733,114 +741,6 @@ def test_mixed_dataset_resolves_selected_notes_conflict_without_exchange(
     assert response.json()["resolved"][0]["conflict_id"] == "notes-selected"
     assert service.store.get_conflict("notes-selected").status == "dismissed"
     assert service.store.get_conflict("personal-not-selected").status == "unresolved"
-
-
-def test_mixed_selected_conflicts_with_exact_proof_resolve_in_request_order(
-    tmp_path: Path,
-) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
-    conflict_ids = ["mixed-exact-note", "mixed-exact-personal"]
-    _insert_mixed_conflicts_with_sources(service, *conflict_ids)
-
-    response = _client(service).post(
-        "/api/v1/sync/conflicts/resolve",
-        json={
-            "dataset_id": DATASET_ID,
-            "device_id": "device-a",
-            "personal_context_exchange": EXCHANGE.model_dump(mode="json"),
-            "resolutions": [
-                {
-                    "conflict_id": conflict_ids[0],
-                    "action": "skip",
-                },
-                {
-                    "conflict_id": conflict_ids[1],
-                    "action": "skip",
-                    "expected_local_envelope_id": (
-                        f"client-envelope-{conflict_ids[1]}"
-                    ),
-                    "expected_remote_envelope_id": (
-                        f"remote-envelope-{conflict_ids[1]}"
-                    ),
-                    "idempotency_key": f"idempotency-{conflict_ids[1]}",
-                },
-            ],
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    assert [item["conflict_id"] for item in response.json()["resolved"]] == conflict_ids
-    assert response.json()["rejected"] == []
-    assert response.json()["personal_context_exchange"] == EXCHANGE.model_dump(
-        mode="json"
-    )
-    assert [service.store.get_conflict(item).status for item in conflict_ids] == [
-        "dismissed",
-        "dismissed",
-    ]
-
-
-@pytest.mark.parametrize("notes_action", ["overwrite", "duplicate_rename"])
-def test_mixed_exact_proof_preserves_native_notes_resolution_actions(
-    tmp_path: Path,
-    notes_action: Literal["overwrite", "duplicate_rename"],
-) -> None:
-    service, _target, _sqlite_path = _service(tmp_path)
-    service.materializers["notes.note"] = _OutcomeMaterializer()
-    note_id = f"mixed-{notes_action}-note"
-    personal_id = f"mixed-{notes_action}-personal"
-    _insert_conflict_set_with_sources(
-        service,
-        [(note_id, "notes.note"), (personal_id, DOMAIN)],
-    )
-
-    response = _client(service).post(
-        "/api/v1/sync/conflicts/resolve",
-        json={
-            "dataset_id": DATASET_ID,
-            "device_id": "device-a",
-            "personal_context_exchange": EXCHANGE.model_dump(mode="json"),
-            "resolutions": [
-                _notes_resolution(note_id, notes_action),
-                {
-                    "conflict_id": personal_id,
-                    "action": "skip",
-                    "expected_local_envelope_id": (
-                        f"client-envelope-{personal_id}"
-                    ),
-                    "expected_remote_envelope_id": (
-                        f"remote-envelope-{personal_id}"
-                    ),
-                    "idempotency_key": f"idempotency-{personal_id}",
-                },
-            ],
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    assert [item["conflict_id"] for item in response.json()["resolved"]] == [
-        note_id,
-        personal_id,
-    ]
-    assert response.json()["rejected"] == []
-    assert [service.store.get_conflict(item).status for item in (note_id, personal_id)] == [
-        "resolved",
-        "dismissed",
-    ]
-    resolved_note = service.store.get_conflict(note_id)
-    stored_resolution = service.store.get_envelope_by_client_id(
-        DATASET_ID,
-        f"resolution-envelope-{note_id}",
-    )
-    assert resolved_note is not None
-    assert stored_resolution is not None
-    assert resolved_note.resolved_by_envelope_id == stored_resolution.envelope_id
-    assert stored_resolution.apply_status == "applied"
-    assert stored_resolution.object_id == (
-        f"renamed-note-{note_id}"
-        if notes_action == "duplicate_rename"
-        else f"note-{note_id}"
-    )
 
 
 def test_bad_personal_context_item_shape_is_rejected_before_resolution_loop(

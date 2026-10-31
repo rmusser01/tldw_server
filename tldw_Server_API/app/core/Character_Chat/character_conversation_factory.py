@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
     resolve_character_prompt_preset,
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     build_materialized_behavior_settings,
@@ -817,11 +818,12 @@ def _load_world_books_for_participants(
                   JOIN character_world_books cwb ON cwb.world_book_id = wb.id
                   JOIN character_cards cc ON cc.id = cwb.character_id
                  WHERE cwb.character_id = ? AND cc.client_id = ?
+                   AND wb.client_id = ?
                    AND cc.deleted = FALSE AND wb.deleted = FALSE
                  ORDER BY cwb.priority DESC, wb.name, wb.id
                  LIMIT 65
                 """,
-                (character_id, owner_user_id),
+                (character_id, owner_user_id, owner_user_id),
             )
         else:
             books = _select_rows(
@@ -1540,10 +1542,15 @@ def _materialize_world_books_by_id(
             ).fetchone()
             if authorized is None:
                 raise InputError(f"World book ID {world_book_id} not found.")
-        result = conn.execute(
-            "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
-            (world_book_id,),
-        )
+            result = conn.execute(
+                "SELECT * FROM world_books WHERE id = ? AND client_id = ? AND deleted = FALSE LIMIT 1",
+                (world_book_id, owner_user_id),
+            )
+        else:
+            result = conn.execute(
+                "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
+                (world_book_id,),
+            )
         row = result.fetchone()
         if row is None:
             raise InputError(f"World book ID {world_book_id} not found.")
@@ -2329,6 +2336,7 @@ def create_character_conversation(
     db: CharactersRAGDB,
     *,
     conversation_data: Mapping[str, Any],
+    assistant_startup: AssistantStartup | None = None,
     participant_character_ids: Sequence[int] = (),
     prompt_preset_id: str | None = None,
     memory_by_character_id: Mapping[str, str] | None = None,
@@ -2344,7 +2352,11 @@ def create_character_conversation(
     conversation_settings: Mapping[str, Any] | None = None,
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
 ) -> str:
-    """Create conversation, settings, messages, and snapshot in one transaction."""
+    """Create conversation, settings, messages, snapshot and trusted origin atomically.
+
+    Provenance is a separate internal keyword; ordinary callers remain unknown.
+    World-book schema preflight must stay outside the creation transaction.
+    """
     owner_user_id = str(getattr(db, "client_id", "") or "").strip()
     if not owner_user_id:
         raise InputError("Character conversation requires a scoped database owner.")
@@ -2481,7 +2493,9 @@ def create_character_conversation(
                     conversation=conversation_payload,
                 )
 
-                conversation_id = db.add_conversation(conversation_payload, conn=conn)
+                conversation_id = db.add_conversation(
+                    conversation_payload, conn=conn, assistant_startup=assistant_startup,
+                )
                 if not conversation_id:
                     raise InputError("Failed to create character conversation.")
                 db.conversation_resume_store.put_creation_settings(

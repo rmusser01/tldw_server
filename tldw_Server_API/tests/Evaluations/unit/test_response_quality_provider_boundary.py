@@ -177,7 +177,12 @@ async def test_response_quality_public_call_bypasses_saturated_default_executor(
     assert task is not None
     metric, result = task.result()
     assert metric == "relevance"
-    assert result["score"] == pytest.approx(0.8)
+    # A judge score of 4 on the 1-5 scale normalizes to (4-1)/4 = 0.75.
+    # This asserted 0.8 under the old inline raw/5.0, which put a 20% floor under
+    # every metric (1 mapped to 0.2 rather than 0.0). See core/Evaluations/scoring.py
+    # for the recorded decision. The score is incidental to this test, which covers
+    # executor bypass.
+    assert result["score"] == pytest.approx(0.75)
     assert pool.active_count == 0
 
 

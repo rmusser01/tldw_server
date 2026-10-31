@@ -107,12 +107,13 @@ def test_db_path() -> Generator[Path, None, None]:
 
 @pytest.fixture
 def character_db(test_db_path) -> Generator[CharactersRAGDB, None, None]:
-    """Create a real CharactersRAGDB instance for testing."""
+    """Create a real DB owned by the HTTP fixture's user with test attribution."""
     # Use a temporary file database instead of in-memory to avoid threading issues
     # In-memory databases are not shared between connections in different threads
     db = CharactersRAGDB(
         db_path=str(test_db_path),
-        client_id="test_client"
+        client_id="test_client",
+        owner_user_id="1",
     )
 
     # Schema is initialized automatically in constructor

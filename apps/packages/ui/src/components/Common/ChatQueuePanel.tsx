@@ -17,6 +17,7 @@ type ChatQueuePanelProps = {
   onClearAll: () => void
   onOpenDiagnostics?: () => void
   forceRunDisabledReason?: string | null
+  dispatchDisabledReason?: string | null
 }
 
 const BLOCKED_STATE_LABEL = getDesignSystemState("blocked").label
@@ -60,7 +61,8 @@ export const ChatQueuePanel: React.FC<ChatQueuePanelProps> = ({
   onUpdate,
   onClearAll,
   onOpenDiagnostics,
-  forceRunDisabledReason
+  forceRunDisabledReason,
+  dispatchDisabledReason
 }) => {
   const { t } = useTranslation(["playground", "settings", "common"])
   const [expanded, setExpanded] = React.useState(false)
@@ -75,6 +77,7 @@ export const ChatQueuePanel: React.FC<ChatQueuePanelProps> = ({
 
   const nextItem = queue[0]
   const runNextDisabled =
+    Boolean(dispatchDisabledReason) ||
     !isConnectionReady ||
     nextItem.status === "sending" ||
     (isStreaming && Boolean(forceRunDisabledReason))
@@ -115,9 +118,9 @@ export const ChatQueuePanel: React.FC<ChatQueuePanelProps> = ({
             onClick={() => void onRunNext()}
             disabled={runNextDisabled}
             title={
-              isStreaming && forceRunDisabledReason
+              dispatchDisabledReason || (isStreaming && forceRunDisabledReason
                 ? forceRunDisabledReason
-                : undefined
+                : undefined)
             }
             className={`rounded-md border border-success/30 bg-surface px-2 py-1 font-medium text-success hover:bg-success/10 ${
               runNextDisabled
@@ -154,12 +157,13 @@ export const ChatQueuePanel: React.FC<ChatQueuePanelProps> = ({
             const isEditing = editingRequestId === item.id
             const isSendingItem = item.status === "sending"
             const runNowDisabled =
+              Boolean(dispatchDisabledReason) ||
               isSendingItem ||
               (isStreaming && Boolean(forceRunDisabledReason))
             const runNowTitle =
-              isStreaming && forceRunDisabledReason
+              dispatchDisabledReason || (isStreaming && forceRunDisabledReason
                 ? forceRunDisabledReason
-                : undefined
+                : undefined)
             const moveUpDisabled = isSendingItem || index === 0
             const moveDownDisabled = isSendingItem || index === queue.length - 1
 

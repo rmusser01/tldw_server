@@ -1,0 +1,21 @@
+{
+  "production_base": "6110d2ae436c805c3beeda8f84427b4890534ddf",
+  "tested_rebased_head": "8d4b7a76995c257f10f7594cea85f601879a5c44",
+  "reviewed_patch_preserved": true,
+  "apps_source_changes_from_prior_base": false,
+  "verification": {
+    "workspace_contracts": "37 passed in5.79s",
+    "independent_buddies_backend": "25 passed,1 PostgreSQL case skipped in107.49s",
+    "full_suite": false
+  },
+  "raw_logs": "local only",
+  "log_sha256": {
+    "workspace_contracts": "da8adf4491db7d3f233a45018f69dde77300e5857416131388ee15f4b3cb39a1",
+    "independent_buddies": "cd6129704c057d4741871e832cbf4d6e62ae3b8ec257bd965ac6b53ba22eda85"
+  },
+  "limits": [
+    "Earlier WebUI screenshots retain their original0da68530 source attribution",
+    "No PostgreSQL availability qualification",
+    "No additional native or physical voice qualification"
+  ]
+}

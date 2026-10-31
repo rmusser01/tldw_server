@@ -56,6 +56,9 @@ interface ServerChatListProps {
   searchQuery: string
   className?: string
   selectionMode?: boolean
+  /** Temporary mode: saved chats open read-only, without pin or management actions. */
+  readOnly?: boolean
+  onConversationSelected?: () => void
 }
 
 type UpdateChatRequestPayload = {
@@ -70,7 +73,9 @@ type UpdateChatRequestPayload = {
 export function ServerChatList({
   searchQuery,
   className,
-  selectionMode: selectionModeProp
+  selectionMode: selectionModeProp,
+  readOnly = false,
+  onConversationSelected
 }: ServerChatListProps) {
   const { t } = useTranslation([
     "common",
@@ -819,10 +824,10 @@ export function ServerChatList({
         return
       }
       if (isTrashView) return
-      if (chat.id === serverChatId) return
       selectServerChat(chat)
+      onConversationSelected?.()
     },
-    [isTrashView, selectionMode, selectServerChat, serverChatId, toggleChatSelected]
+    [isTrashView, onConversationSelected, selectionMode, selectServerChat, toggleChatSelected]
   )
 
   const selectionPropsForChat = React.useCallback(
@@ -1343,6 +1348,7 @@ export function ServerChatList({
                   isTrashView={isTrashView}
                   isPinned={pinnedChatSet.has(chat.id)}
                   isActive={serverChatId === chat.id}
+                  readOnly={readOnly}
                   openMenuFor={openMenuFor}
                   setOpenMenuFor={setOpenMenuFor}
                   onSelectChat={handleRowClick}
@@ -1374,6 +1380,7 @@ export function ServerChatList({
                   isTrashView={isTrashView}
                   isPinned={pinnedChatSet.has(chat.id)}
                   isActive={serverChatId === chat.id}
+                  readOnly={readOnly}
                   openMenuFor={openMenuFor}
                   setOpenMenuFor={setOpenMenuFor}
                   onSelectChat={handleRowClick}

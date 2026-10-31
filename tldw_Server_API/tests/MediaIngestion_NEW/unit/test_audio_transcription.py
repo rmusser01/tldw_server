@@ -110,6 +110,32 @@ def test_convert_to_wav_rejects_symlink_input(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
+def test_convert_to_wav_accepts_base_alias_but_rejects_upload_symlink(monkeypatch, tmp_path):
+    base = tmp_path.resolve() / "uploads"
+    base.mkdir()
+    alias = tmp_path.resolve() / "temp-alias"
+    try:
+        alias.symlink_to(base, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks not supported on this platform")
+    monkeypatch.setattr(atlib, "_ALLOWED_MEDIA_BASE_DIRS", [tmp_path.resolve()])
+
+    audio = base / "sample.wav"
+    audio.write_bytes(b"RIFF")
+    assert Path(convert_to_wav(str(alias / audio.name), base_dir=alias)) == audio
+
+    upload_link = base / "linked.wav"
+    upload_link.symlink_to(audio)
+    with pytest.raises(atlib.ConversionError, match="symlinks"):
+        convert_to_wav(str(alias / upload_link.name), base_dir=alias)
+
+    outside = tmp_path.resolve() / "outside.wav"
+    outside.write_bytes(b"RIFF")
+    with pytest.raises(atlib.ConversionError, match="must resolve under"):
+        convert_to_wav(str(alias / ".." / outside.name), base_dir=alias)
+
+
+@pytest.mark.unit
 def test_convert_to_wav_respects_ffmpeg_path(monkeypatch, tmp_path):
     ffmpeg_path = tmp_path / "ffmpeg-bin"
     ffmpeg_path.write_text("#!/bin/sh\necho ffmpeg\n")
@@ -552,6 +578,35 @@ def test_validate_qwen2audio_model_identifier_allows_local_path_under_base(monke
     monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", base_root)
 
     assert validate_qwen2audio_model_identifier(str(model_path)) == str(model_path.resolve(strict=False))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("identifier", ["organization/local-model", "./organization/local-model"])
+def test_qwen_loader_rejects_shadowing_directory_before_loading(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, identifier: str,
+) -> None:
+    """A Hub-shaped CWD directory must not reach Transformers outside the managed root."""
+    model_root = tmp_path / "approved-models"
+    model_root.mkdir()
+    (tmp_path / "organization" / "local-model").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", model_root)
+    monkeypatch.setattr(atlib, "qwen_processor", None)
+    monkeypatch.setattr(atlib, "qwen_model", None)
+    monkeypatch.setattr(atlib, "load_and_log_configs", lambda: {
+        "STT-Settings": {"qwen2audio_enabled": True, "qwen2audio_model_id": identifier},
+    })
+
+    def unexpected_torch(*, allow_import: bool) -> None:
+        """Reject any loader progress after an unconfined local identifier."""
+        pytest.fail("Unconfined local model reached runtime loading")
+
+    monkeypatch.setattr(atlib, "_get_torch", unexpected_torch)
+
+    with pytest.raises(ValueError, match="must resolve under"):
+        atlib.validate_qwen2audio_model_identifier(identifier)
+    with pytest.raises(RuntimeError, match="Invalid Qwen2Audio model identifier"):
+        atlib.load_qwen2audio()
 
 
 @pytest.mark.unit

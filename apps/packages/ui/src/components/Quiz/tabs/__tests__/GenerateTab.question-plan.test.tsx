@@ -448,3 +448,5 @@ describe("GenerateTab question plan controls", () => {
     );
   }, 20000);
 });
+
+vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), promptForRag: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {} }));

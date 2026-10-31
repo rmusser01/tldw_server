@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { StrictMode } from "react"
+import React, { StrictMode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { QuizPlayground } from "../QuizPlayground"
@@ -132,7 +132,7 @@ afterEach(() => {
 })
 
 vi.mock("../tabs/CreateTab", () => ({
-  CreateTab: ({ onNavigateToTake, onDirtyStateChange }: any) => (
+  CreateTab: ({ onNavigateToTake, onNavigateToManage, onDirtyStateChange }: any) => (
     <div>
       <button
         type="button"
@@ -148,19 +148,32 @@ vi.mock("../tabs/CreateTab", () => ({
       <button type="button" onClick={() => onDirtyStateChange?.(true)}>
         Mock Mark Create Dirty
       </button>
+      <button type="button" onClick={() => onNavigateToManage?.()}>
+        Mock Create Review
+      </button>
     </div>
   )
 }))
 
 vi.mock("../tabs/ManageTab", () => ({
-  ManageTab: ({ onStartQuiz, externalSearchQuery }: any) => (
-    <div>
-      <button type="button" onClick={() => onStartQuiz(99)}>
-        Mock Manage Start
-      </button>
-      <div data-testid="manage-search-intent">{externalSearchQuery ?? ""}</div>
-    </div>
-  )
+  ManageTab: ({ onStartQuiz, externalSearchQuery, onDirtyStateChange }: any) => {
+    const [localState, setLocalState] = React.useState(0)
+    return (
+      <div>
+        <button type="button" onClick={() => onStartQuiz(99)}>
+          Mock Manage Start
+        </button>
+        <button type="button" onClick={() => {
+          setLocalState((value) => value + 1)
+          onDirtyStateChange?.(true)
+        }}>
+          Mock Mark Manage Dirty
+        </button>
+        <div data-testid="manage-local-state">{localState}</div>
+        <div data-testid="manage-search-intent">{externalSearchQuery ?? ""}</div>
+      </div>
+    )
+  }
 }))
 
 vi.mock("../tabs/ResultsTab", () => ({
@@ -310,6 +323,25 @@ describe("QuizPlayground navigation intents", () => {
     fireEvent.click(screen.getByRole("button", { name: "Take Quiz" }))
 
     expect(screen.getByTestId("active-tab")).toHaveTextContent("take")
+
+    confirmSpy.mockRestore()
+  })
+
+  it("guards resetting a dirty Manage editor and remounts only after confirmation", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
+
+    render(<QuizPlayground />)
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Mock Mark Manage Dirty" }))
+    expect(screen.getByTestId("manage-local-state")).toHaveTextContent("1")
+
+    fireEvent.click(screen.getByTestId("quiz-reset-current-tab"))
+    expect(confirmSpy).toHaveBeenCalledWith("You have unsaved OSCE station changes. Reset Manage tab?")
+    expect(screen.getByTestId("manage-local-state")).toHaveTextContent("1")
+
+    confirmSpy.mockReturnValue(true)
+    fireEvent.click(screen.getByTestId("quiz-reset-current-tab"))
+    expect(screen.getByTestId("manage-local-state")).toHaveTextContent("0")
 
     confirmSpy.mockRestore()
   })
@@ -466,6 +498,15 @@ describe("QuizPlayground navigation intents", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Generate" }))
     fireEvent.click(await screen.findByRole("button", { name: "Mock Generate Review" }))
+
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("manage")
+  })
+
+  it("routes a completed OSCE create action into Manage tab", async () => {
+    render(<QuizPlayground />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Mock Create Review" }))
 
     expect(screen.getByTestId("active-tab")).toHaveTextContent("manage")
   })

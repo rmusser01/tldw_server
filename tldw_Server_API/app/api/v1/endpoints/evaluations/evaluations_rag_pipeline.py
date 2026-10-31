@@ -2,8 +2,6 @@
 RAG pipeline preset and cleanup endpoints extracted from evaluations_unified.
 """
 
-from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from loguru import logger
@@ -21,6 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     PipelinePresetListResponse,
     PipelinePresetResponse,
 )
+from tldw_Server_API.app.core.DB_Management.Evaluations_DB import to_unix_timestamp
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )
@@ -30,7 +29,6 @@ from tldw_Server_API.app.core.RAG.rag_service.vector_stores import (
 
 pipeline_router = APIRouter()
 
-_TS_PARSE_EXCEPTIONS = (TypeError, ValueError)
 _PIPELINE_ENDPOINT_EXCEPTIONS = (
     AttributeError,
     ConnectionError,
@@ -69,21 +67,11 @@ async def create_or_update_pipeline_preset(
         db.upsert_pipeline_preset(preset.name, preset.config, user_id=stable_user_id)
         row = db.get_pipeline_preset(preset.name, user_id=stable_user_id)
 
-        def to_ts(x: str) -> Optional[int]:
-            try:
-                if not x:
-                    return None
-                if "T" in x:
-                    return int(datetime.fromisoformat(x.replace("Z", "+00:00")).timestamp())
-                return int(datetime.strptime(x, "%Y-%m-%d %H:%M:%S").timestamp())
-            except _TS_PARSE_EXCEPTIONS:
-                return None
-
         return PipelinePresetResponse(
             name=row["name"],
             config=row["config"],
-            created_at=to_ts(row.get("created_at")),
-            updated_at=to_ts(row.get("updated_at")),
+            created_at=to_unix_timestamp(row.get("created_at")),
+            updated_at=to_unix_timestamp(row.get("updated_at")),
         )
     except _PIPELINE_ENDPOINT_EXCEPTIONS as e:
         logger.error("Failed to save preset")
@@ -113,22 +101,12 @@ async def list_pipeline_presets(
         items, total = db.list_pipeline_presets(limit=limit, offset=offset, user_id=stable_user_id)
         resp_items = []
 
-        def to_ts(x: str) -> Optional[int]:
-            try:
-                if not x:
-                    return None
-                if "T" in x:
-                    return int(datetime.fromisoformat(x.replace("Z", "+00:00")).timestamp())
-                return int(datetime.strptime(x, "%Y-%m-%d %H:%M:%S").timestamp())
-            except _TS_PARSE_EXCEPTIONS:
-                return None
-
         for r in items:
             resp_items.append(PipelinePresetResponse(
                 name=r["name"],
                 config=r["config"],
-                created_at=to_ts(r.get("created_at")),
-                updated_at=to_ts(r.get("updated_at")),
+                created_at=to_unix_timestamp(r.get("created_at")),
+                updated_at=to_unix_timestamp(r.get("updated_at")),
             ))
         pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(resp_items))
         return PipelinePresetListResponse(
@@ -170,21 +148,11 @@ async def get_pipeline_preset(
                 status_code=status.HTTP_404_NOT_FOUND,
             )
 
-        def to_ts(x: str) -> Optional[int]:
-            try:
-                if not x:
-                    return None
-                if "T" in x:
-                    return int(datetime.fromisoformat(x.replace("Z", "+00:00")).timestamp())
-                return int(datetime.strptime(x, "%Y-%m-%d %H:%M:%S").timestamp())
-            except _TS_PARSE_EXCEPTIONS:
-                return None
-
         return PipelinePresetResponse(
             name=row["name"],
             config=row["config"],
-            created_at=to_ts(row.get("created_at")),
-            updated_at=to_ts(row.get("updated_at")),
+            created_at=to_unix_timestamp(row.get("created_at")),
+            updated_at=to_unix_timestamp(row.get("updated_at")),
         )
     except HTTPException:
         raise

@@ -483,6 +483,8 @@ class ConversationResumeStore:
                        c.id AS conversation_id, c.version AS conversation_version,
                        c.client_id, c.character_id, c.assistant_kind, c.assistant_id,
                        c.persona_memory_mode, c.scope_type, c.workspace_id,
+                       c.required_projection_version, c.native_creation_operation_kind,
+                       c.native_creation_operation_id,
                        (SELECT COUNT(*) FROM messages m
                          WHERE m.conversation_id = c.id AND m.deleted = FALSE) AS message_count,
                        (SELECT m.id FROM messages m
@@ -518,6 +520,9 @@ class ConversationResumeStore:
                     "persona_memory_mode",
                     "scope_type",
                     "workspace_id",
+                    "required_projection_version",
+                    "native_creation_operation_kind",
+                    "native_creation_operation_id",
                     "message_count",
                     "tail_message_id",
                     "tail_message_version",
@@ -588,6 +593,16 @@ class ConversationResumeStore:
                     "character_id": record.get("character_id"),
                     "assistant_kind": record.get("assistant_kind"),
                     "assistant_id": record.get("assistant_id"),
+                    "assistant_binding_mode": (
+                        "snapshot_v1"
+                        if record.get("assistant_kind") == "character"
+                        and record.get("character_id") is None
+                        and record.get("assistant_id") == "snapshot:" + str(record["conversation_id"])
+                        and record.get("required_projection_version") == "native-fork-v1"
+                        and record.get("native_creation_operation_kind") == "native_fork_v1"
+                        and record.get("native_creation_operation_id")
+                        else None
+                    ),
                     "persona_memory_mode": record.get("persona_memory_mode"),
                     "scope_type": record.get("scope_type"),
                     "workspace_id": record.get("workspace_id"),

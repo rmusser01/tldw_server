@@ -7,7 +7,6 @@ import json
 import platform
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,7 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     build_audio_selection_key,
     get_audio_bundle_catalog,
 )
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now
 
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
 AUDIO_PACK_FORMAT = "audio_bundle_pack_manifest_v1"
@@ -34,10 +34,6 @@ PACK_ISSUE_ARCH_MISMATCH = "arch_mismatch"
 PACK_ISSUE_PYTHON_MISMATCH = "python_version_mismatch"
 PACK_ISSUE_INVALID_TTS_CHOICE = "invalid_tts_choice"
 PACK_ISSUE_SELECTION_KEY_MISMATCH = "selection_key_mismatch"
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _normalise_python_version(version: str | None = None) -> str:

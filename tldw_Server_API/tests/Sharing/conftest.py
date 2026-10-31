@@ -62,6 +62,11 @@ def sharing_db():
     )
     conn.execute("INSERT INTO org_members (org_id, user_id, status) VALUES (5, 1, 'active')")
     conn.execute("INSERT INTO team_members (team_id, user_id, status) VALUES (10, 1, 'active')")
+    # Bob is the recipient these tests resolve shares as. He was never actually
+    # added to the team, which went unnoticed while the resolver looked shares
+    # up by primary key and never checked membership. User 3 remains the
+    # non-member the denial tests use.
+    conn.execute("INSERT INTO team_members (team_id, user_id, status) VALUES (10, 2, 'active')")
     conn.commit()
     migration_077_create_sharing_tables(conn)
     migration_087_expand_share_tokens_resource_type_for_prototypes(conn)

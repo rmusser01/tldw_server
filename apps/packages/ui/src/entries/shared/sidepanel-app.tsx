@@ -9,18 +9,13 @@ import {
 } from "@/components/Common/PersonaBuddy"
 import { QuickChatHelperButton } from "@/components/Common/QuickChatHelper"
 import { patchStaticAntdNotificationCompat } from "@/utils/antd-notification-compat"
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 import { AppShell } from "./AppShell"
 import { SidepanelRouteShell } from "@/routes/sidepanel-route-shell"
 import {
   HashRouterWithFuture,
   SidepanelMemoryRouter
 } from "./router-utils"
-
-const PageHelpModal = React.lazy(() =>
-  import("@/components/Common/PageHelpModal").then((m) => ({
-    default: m.PageHelpModal
-  }))
-)
 
 const WorkflowIntegrationHost = React.lazy(() =>
   import("@/components/Common/Workflow/WorkflowIntegrationHost").then((module) => ({
@@ -42,9 +37,7 @@ export const SidepanelApp: React.FC = () => {
     <>
       {platformConfig.features.showQuickChatHelper && <QuickChatHelperButton />}
       {platformConfig.features.showKeyboardShortcutsModal && (
-        <React.Suspense fallback={null}>
-          <PageHelpModal />
-        </React.Suspense>
+        <PageHelpModalHost />
       )}
     </>
   )

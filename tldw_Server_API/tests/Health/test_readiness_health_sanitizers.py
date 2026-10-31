@@ -10,6 +10,10 @@ from tldw_Server_API.app.api.v1.endpoints import health as health_mod
 
 @contextmanager
 def _capture_health_logs() -> Iterator[list[str]]:
+    # api_health imports main for resource-governor state. Complete its logging
+    # setup before attaching our sink, so startup cannot remove the observer.
+    from tldw_Server_API.app import main  # noqa: F401
+
     messages: list[str] = []
     sink_id = health_mod.logger.add(
         lambda message: messages.append(str(message)) if message.record["name"] == health_mod.__name__ else None,

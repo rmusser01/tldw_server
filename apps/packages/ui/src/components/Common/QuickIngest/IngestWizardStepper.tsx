@@ -42,13 +42,12 @@ export const IngestWizardStepper: React.FC = () => {
 
   const { currentStep, highestStep, queueItems, selectedPreset, processingState } = state
 
-  // Compute overall progress percentage for the processing step indicator
-  const overallProgress = useMemo(() => {
-    const items = processingState.perItemProgress
-    if (items.length === 0) return 0
-    const total = items.reduce((sum, p) => sum + p.progressPercent, 0)
-    return Math.round(total / items.length)
-  }, [processingState.perItemProgress])
+  const finishedCount = useMemo(
+    () => processingState.perItemProgress.filter(
+      item => ["complete", "failed", "cancelled"].includes(item.status)
+    ).length,
+    [processingState.perItemProgress]
+  )
 
   // Build summary text shown on completed steps
   const getSummary = useCallback(
@@ -58,7 +57,7 @@ export const IngestWizardStepper: React.FC = () => {
         case 1: {
           const count = queueItems.length
           if (count === 0) return null
-          return qi("wizard.summary.addCount", "{{count}} items", { count })
+          return qi("wizard.summary.addCount", "{count, plural, one {# item} other {# items}}", { count })
         }
         case 2: {
           const presetLabel = selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1)
@@ -184,10 +183,13 @@ export const IngestWizardStepper: React.FC = () => {
                     </span>
                   )}
 
-                  {/* Progress percentage on the processing step */}
+                  {/* Confirmed finished-item count on the processing step */}
                   {isProcessingStep && (
                     <span className="whitespace-nowrap text-[10px] tabular-nums text-primary">
-                      {overallProgress}%
+                      {qi("wizard.summary.finishedItems", "{{done}}/{{total}} finished", {
+                        done: finishedCount,
+                        total: processingState.perItemProgress.length,
+                      })}
                     </span>
                   )}
                 </button>

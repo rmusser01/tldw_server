@@ -95,8 +95,19 @@ def _configure_error_mapping_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth_settings, "is_single_user_mode", lambda: False)
 
 
+# Called directly, FastAPI's Query() defaults would be passed through as filter values.
+_MATRIX_DEFAULTS = {
+    "category": None,
+    "search": None,
+    "role_search": None,
+    "role_names": None,
+    "roles_limit": 100,
+    "roles_offset": 0,
+}
+
+
 def _assert_postgres_role_query_uses_boolean_default(db: _PostgresMatrixDB) -> None:
-    role_queries = [query for query, _params in db.fetch_calls if "FROM roles" in query]
+    role_queries = [query for query, _params in db.fetch_calls if "FROM roles" in query and "is_system" in query]
     assert role_queries
     normalized = " ".join(role_queries[0].split()).replace(" ", "").lower()
     assert "coalesce(is_system,false)" in normalized
@@ -110,7 +121,7 @@ async def test_roles_matrix_postgres_uses_boolean_is_system_default(
     monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg_true)
     db = _PostgresMatrixDB()
 
-    response = await admin_rbac.get_roles_matrix(db=db)
+    response = await admin_rbac.get_roles_matrix(db=db, **_MATRIX_DEFAULTS)
 
     assert response.roles[0].name == "admin"
     _assert_postgres_role_query_uses_boolean_default(db)
@@ -123,7 +134,7 @@ async def test_roles_boolean_matrix_postgres_uses_boolean_is_system_default(
     monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg_true)
     db = _PostgresMatrixDB()
 
-    response = await admin_rbac.get_roles_matrix_boolean(db=db)
+    response = await admin_rbac.get_roles_matrix_boolean(db=db, **_MATRIX_DEFAULTS)
 
     assert response.roles[0].name == "admin"
     _assert_postgres_role_query_uses_boolean_default(db)

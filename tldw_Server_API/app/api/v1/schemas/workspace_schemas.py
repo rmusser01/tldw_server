@@ -471,6 +471,14 @@ class WorkspaceUpsertRequest(BaseModel):
     study_materials_policy: Literal["general", "workspace"] = "general"
     workspace_profile: WorkspaceProfile = "research"
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_explicit_none_input(cls, value: Any) -> Any:
+        """Reject the derived choice field without changing legacy extra handling."""
+        if isinstance(value, dict) and "assistant_defaults_explicit_none" in value:
+            raise ValueError("assistant_defaults_explicit_none is read-only; use assistant_defaults in PATCH")
+        return value
+
 
 class WorkspaceAssistantDefaults(BaseModel):
     """Persisted default assistant selection for new Workspace-scoped chats."""
@@ -545,6 +553,14 @@ class WorkspacePatchRequest(BaseModel):
     confirm_read_write_assistant_default: StrictBool | None = None
     version: int = Field(..., description="Current version for optimistic locking")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_explicit_none_input(cls, value: Any) -> Any:
+        """Require choice changes through assistant_defaults, including for null input."""
+        if isinstance(value, dict) and "assistant_defaults_explicit_none" in value:
+            raise ValueError("assistant_defaults_explicit_none is read-only; use assistant_defaults in PATCH")
+        return value
+
     @model_validator(mode="after")
     def _validate_assistant_default_confirmation(self) -> WorkspacePatchRequest:
         if self.assistant_defaults is None:
@@ -575,6 +591,11 @@ class WorkspaceResponse(BaseModel):
     audio_voice: str | None = None
     audio_speed: float | None = None
     assistant_defaults: WorkspaceAssistantDefaults | None = None
+    assistant_defaults_explicit_none: bool = Field(
+        default=False,
+        description="Stored opt-out derived from assistant_defaults writes, not a writable request field",
+        json_schema_extra={"readOnly": True},
+    )
     effective_assistant_default: WorkspaceEffectiveAssistantDefault
     created_at: str
     last_modified: str

@@ -9,6 +9,7 @@ from tldw_Server_API.app.api.v1.schemas.storage_schemas import GeneratedFile, Qu
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import FILE_CATEGORY_VOICE_CLONE
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 
 def _principal_is_storage_admin(principal: AuthPrincipal) -> bool:
@@ -21,9 +22,9 @@ def _principal_is_storage_admin(principal: AuthPrincipal) -> bool:
     }
     if bool(getattr(principal, "is_admin", False)):
         return True
-    if "admin" in roles:
+    if roles & PLATFORM_ADMIN_ROLES:
         return True
-    return bool(permissions & {"*", "system.configure"})
+    return bool(permissions & PLATFORM_ADMIN_PERMISSIONS)
 
 
 def _parse_datetime(value: object) -> datetime | None:

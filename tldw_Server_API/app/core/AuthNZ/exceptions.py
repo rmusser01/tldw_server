@@ -127,7 +127,14 @@ class RegistrationDisabledError(RegistrationError):
 
 class WeakPasswordError(RegistrationError):
     """Password does not meet requirements"""
-    def __init__(self, requirements: Optional[str] = None):
+    def __init__(
+        self,
+        requirements: Optional[str] = None,
+        *,
+        public_requirements: tuple[str, ...] = (),
+    ):
+        """Keep validator-authored, input-free guidance separate from raw details."""
+        self.public_requirements = public_requirements
         message = "Password does not meet security requirements"
         if requirements:
             message = f"{message}: {requirements}"

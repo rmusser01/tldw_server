@@ -2157,38 +2157,95 @@ def test_mcp_server_registers_shutdown_family_through_injected_lifecycle_guard()
     assert callable(registration["drain"])
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_mcp_server_drains_idempotency_before_module_registry_shutdown() -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+        build_default_runtime_dependencies,
+    )
+    from tldw_Server_API.app.core.MCP_unified.modules.base import (
+        BaseModule,
+        ModuleConfig,
+        create_tool_definition,
+    )
+    from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPRequest, RequestContext
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
     events: list[str] = []
-    deps = _real_server_runtime_dependencies()
-    deps.module_registry = _RecordingModuleRegistry(events)
+    operation_started = asyncio.Event()
+    release_operation = asyncio.Event()
+
+    class BlockingWriteModule(BaseModule):
+        async def on_initialize(self) -> None:
+            pass
+
+        async def on_shutdown(self) -> None:
+            events.append("modules")
+
+        async def check_health(self) -> dict[str, bool]:
+            return {"ok": True}
+
+        async def get_tools(self) -> list[dict[str, Any]]:
+            return [create_tool_definition(
+                name="shutdown_write", description="Write before shutdown",
+                parameters={"properties": {}}, metadata={"category": "ingestion"},
+            )]
+
+        def validate_tool_arguments(self, tool_name, arguments) -> None:
+            if tool_name != "shutdown_write" or arguments:
+                raise ValueError("Expected shutdown_write with empty arguments")
+
+        async def execute_tool(self, tool_name, arguments, context=None) -> str:
+            operation_started.set()
+            await release_operation.wait()
+            events.append("operation")
+            return "write completed"
+
+    class AllowAllRBAC:
+        async def check_permission(self, *args, **kwargs) -> bool:
+            return True
+
+    async def no_redis(**kwargs):
+        return None
+
+    deps = build_default_runtime_dependencies()
+    deps.module_registry = ModuleRegistry()
+    deps.rbac_policy = AllowAllRBAC()
+    deps.redis_client_factory = no_redis
+    deps.metrics_collector = _NoopMetrics()
+    await deps.module_registry.register_module(
+        "shutdown_write", BlockingWriteModule, ModuleConfig(name="shutdown_write"),
+    )
     server = MCPServer(dependencies=deps)
-    idempotency = server.protocol._idempotency
-    finalizer_started = asyncio.Event()
-    release_finalizer = asyncio.Event()
+    operation = asyncio.create_task(server.protocol.process_request(
+        MCPRequest(method="tools/call", id="shutdown-call", params={
+            "name": "shutdown_write", "arguments": {}, "idempotencyKey": "shutdown-key",
+        }),
+        RequestContext(request_id="shutdown-call", user_id="shutdown-user", client_id="test"),
+    ))
+    shutdown = None
+    try:
+        await asyncio.wait_for(operation_started.wait(), timeout=2.0)
+        shutdown = asyncio.create_task(server.shutdown())
+        finished, _ = await asyncio.wait({shutdown}, timeout=0.05)
+        events_before_release = list(events)
+        release_operation.set()
+        response = await asyncio.wait_for(operation, timeout=2.0)
+        await asyncio.wait_for(shutdown, timeout=2.0)
+    finally:
+        release_operation.set()
+        await asyncio.gather(operation, return_exceptions=True)
+        if shutdown is not None:
+            await shutdown
+        else:
+            await server.shutdown()
 
-    async def _finalize() -> str:
-        finalizer_started.set()
-        await release_finalizer.wait()
-        events.append("idempotency")
-        return "local"
-
-    finalizer = idempotency._create_finalizer(_finalize, bound=1.0)
-    assert finalizer is not None
-    await asyncio.wait_for(finalizer_started.wait(), timeout=0.5)
-    shutdown = asyncio.create_task(server.shutdown())
-    await asyncio.sleep(0)
-    events_before_release = list(events)
-    release_finalizer.set()
-    await asyncio.wait_for(shutdown, timeout=1.0)
-    await asyncio.wait_for(finalizer, timeout=0.5)
-
-    assert not hasattr(deps, "idempotency")
+    assert not finished
+    assert response.error is None
+    assert response.result["content"] == [{"type": "text", "text": "write completed"}]
     assert events_before_release == []
-    assert events == ["idempotency", "modules"]
-    assert idempotency._finalizers == set()
+    assert events == ["operation", "modules"]
 
 
 @pytest.mark.asyncio

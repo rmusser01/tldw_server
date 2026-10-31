@@ -825,16 +825,28 @@ def test_postgres_predecessor_selector_uses_dataset_cursor_and_nonapplied_status
         connection=connection,
     )
 
-    assert backend.calls == [
-        (
-            "SELECT server_sequence, apply_status FROM sync_envelopes "
-            "WHERE dataset_id = ? AND status = 'accepted' AND server_sequence < ? "
-            "AND apply_status NOT IN ('applied', 'superseded') "
-            "ORDER BY server_sequence ASC LIMIT 1",
-            ("dataset-1", 8),
-            connection,
-        )
-    ]
+    # Asserted as one exact SQL string until the selector gained a clause exempting
+    # personal-context envelopes that are under unresolved conflict review, which is a
+    # deliberate change: such an envelope must not block projection. A blob comparison
+    # went red and said only "index 0 differs", which does not identify the clause that
+    # moved. Each predicate this test is named for is asserted on its own, so dropping
+    # any one of them fails with a message that names it.
+    assert len(backend.calls) == 1
+    statement, params, used_connection = backend.calls[0]
+    assert params == ("dataset-1", 8)
+    assert used_connection is connection
+
+    assert "dataset_id = ?" in statement
+    assert "status = 'accepted'" in statement
+    assert "server_sequence < ?" in statement
+    assert "apply_status NOT IN ('applied', 'superseded')" in statement
+    assert "ORDER BY server_sequence ASC LIMIT 1" in statement
+
+    # The exemption itself, so it cannot be dropped silently either.
+    assert "'personal_context.record'" in statement
+    assert "apply_status = 'conflict'" in statement
+    assert "review.status = 'unresolved'" in statement
+    assert "review.remote_envelope_id IS NOT NULL" in statement
 
 
 def test_postgres_conflict_predecessor_is_nonretryable_and_blocks_projection() -> None:

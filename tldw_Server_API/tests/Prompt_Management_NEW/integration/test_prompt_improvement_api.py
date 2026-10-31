@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     META_PROMPT_VERSION,
     PROMPT_IMPROVEMENT_LIMITS,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -79,7 +80,7 @@ def _dispatch_module():
 
 
 def _prompt_route(app: FastAPI):
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         if getattr(route, "path", None) == "/api/v1/prompts/improve":
             return route
     raise AssertionError("POST /api/v1/prompts/improve is not registered")
@@ -956,7 +957,8 @@ def test_stable_error_mapping_never_exposes_internal_exception_text(
         assert "retry_after_seconds" not in body
 
 
-def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_disabled():
+def test_capabilities_enable_both_tracks_with_centralized_limits(monkeypatch):
+    monkeypatch.delenv("PROMPTS_REQUIRE_ADMIN", raising=False)
     with _isolated_prompt_client() as (client, _app, _route):
         response = client.get("/api/v1/prompts/capabilities")
 
@@ -991,7 +993,47 @@ def test_capabilities_enable_track_a_with_centralized_limits_and_keep_recipe_dis
                 ),
             },
         },
-        "single_text_recipe_v2": {"supported": False},
+        "single_text_recipe_v2": {
+            "supported": True,
+            "limits": dict(prompts.SINGLE_TEXT_RECIPE_LIMITS),
+        },
+        "prompt_persistence": {
+            "create_authorized": True,
+            "update_authorized": True,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("roles", "permissions", "expected"),
+    [
+        (["admin"], [], True),
+        (["user"], ["system.configure"], True),
+        (["user"], [], False),
+    ],
+)
+def test_capabilities_apply_the_prompt_write_admin_rule(
+    monkeypatch,
+    roles,
+    permissions,
+    expected,
+):
+    monkeypatch.setenv("PROMPTS_REQUIRE_ADMIN", "true")
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=7,
+        subject="capability-user",
+        roles=roles,
+        permissions=permissions,
+    )
+    with _isolated_prompt_client() as (client, app, _route):
+        app.dependency_overrides[get_auth_principal] = lambda: principal
+        response = client.get("/api/v1/prompts/capabilities")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.json()["prompt_persistence"] == {
+        "create_authorized": expected,
+        "update_authorized": expected,
     }
 
 

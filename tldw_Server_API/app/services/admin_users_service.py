@@ -207,7 +207,7 @@ async def create_user(
     except WeakPasswordError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password does not meet requirements.",
+            detail="; ".join(exc.public_requirements) or "Password does not meet requirements.",
         ) from exc
     except RegistrationDisabledError as exc:
         raise HTTPException(
@@ -219,7 +219,7 @@ async def create_user(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception(
+        logger.error(
             "Failed to create user (principal={}, username={})",
             created_by,
             payload.username,
@@ -260,7 +260,7 @@ async def list_users(
         )
         return users, total
     except Exception as e:
-        logger.exception(
+        logger.error(
             "Failed to list users (principal={}, page={}, limit={}, role={}, org_id={})",
             getattr(principal, "user_id", None),
             page,

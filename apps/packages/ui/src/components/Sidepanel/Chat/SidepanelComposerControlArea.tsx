@@ -10,9 +10,11 @@ export function SidepanelComposerControlArea({
   children
 }: SidepanelComposerControlAreaProps) {
   return (
-    <>
+    <div
+      data-testid="sidepanel-send-action-cluster"
+      className="flex shrink-0 items-center gap-2">
       {promptAssistAction}
       {children}
-    </>
+    </div>
   )
 }

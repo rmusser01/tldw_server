@@ -42,7 +42,7 @@ def build_suggestion_decision_service(
     owner_user_id: str,
     dataset_id: str,
 ) -> Any | None:
-    """Build owner/dataset-bound decision coordinators when canonical Sync is active."""
+    """Build decisions for the selected canonical or exact unbound local scope."""
 
     from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import NotesLinkCoordinator
     from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
@@ -53,10 +53,18 @@ def build_suggestion_decision_service(
     )
 
     from .suggestion_decisions import SuggestionDecisionService
+    from .suggestion_local_mutations import LocalSuggestionMutations
 
+    if str(note_db.client_id) != str(owner_user_id):
+        return None
     sync = get_active_server_origin_sync_service_for_user(owner_user_id)
     if sync is None:
-        return None
+        if not note_db.note_graph_suggestion_store.is_local_scope_available(dataset_id=dataset_id):
+            return None
+        return SuggestionDecisionService(
+            store=note_db.note_graph_suggestion_store,
+            local_mutations=LocalSuggestionMutations(note_db),
+        )
     dataset = sync.store.get_dataset(dataset_id)
     if dataset is None or dataset.owner_user_id != owner_user_id:
         return None

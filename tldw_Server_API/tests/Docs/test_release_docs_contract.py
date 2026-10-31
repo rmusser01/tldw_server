@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess  # nosec B404
 import sys
@@ -130,6 +131,11 @@ def test_strict_local_build_preserves_canonical_site_sources() -> None:
     assert canonical_dir.as_posix().casefold() != output.as_posix().casefold()
     if output.exists():
         shutil.rmtree(output)
+    # The full-suite jobs check out at fetch-depth 1. With GITHUB_ACTIONS set, the
+    # git-revision-date plugin then warns about the shallow clone and --strict aborts.
+    # That warning is about the runner, not the docs; the Pages workflow builds with
+    # full history.
+    build_env = {key: value for key, value in os.environ.items() if key != "GITHUB_ACTIONS"}
     try:
         result = subprocess.run(  # nosec B603
             [
@@ -142,6 +148,7 @@ def test_strict_local_build_preserves_canonical_site_sources() -> None:
                 "Docs/mkdocs.yml",
             ],
             cwd=REPO_ROOT,
+            env=build_env,
             capture_output=True,
             text=True,
             check=False,

@@ -3630,7 +3630,16 @@ def test_analytics_summary_returns_daily_metrics_and_deck_progress(client_with_f
     first_uuid = first.json()["uuid"]
     second_uuid = second.json()["uuid"]
 
-    # One successful recall + one lapse to verify retention/lapse calculations
+    # Graduate the second card so Again is a lapse of learned material. This
+    # setup review is part of today's history; its absent answer time is ignored.
+    r = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review",
+        json={"card_uuid": second_uuid, "rating": 5},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200
+
+    # One successful recall + one actual lapse, in addition to graduation.
     r = client_with_flashcards_db.post(
         "/api/v1/flashcards/review",
         json={"card_uuid": first_uuid, "rating": 3, "answer_time_ms": 2500},
@@ -3639,7 +3648,7 @@ def test_analytics_summary_returns_daily_metrics_and_deck_progress(client_with_f
     assert r.status_code == 200
     r = client_with_flashcards_db.post(
         "/api/v1/flashcards/review",
-        json={"card_uuid": second_uuid, "rating": 1, "answer_time_ms": 4500},
+        json={"card_uuid": second_uuid, "rating": 0, "answer_time_ms": 4500},
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 200
@@ -3649,11 +3658,11 @@ def test_analytics_summary_returns_daily_metrics_and_deck_progress(client_with_f
     assert r.status_code == 200
     payload = r.json()
 
-    assert payload["reviewed_today"] == 2
+    assert payload["reviewed_today"] == 3
     assert payload["study_streak_days"] >= 1
     assert payload["avg_answer_time_ms_today"] == pytest.approx(3500.0)
-    assert payload["retention_rate_today"] == pytest.approx(50.0)
-    assert payload["lapse_rate_today"] == pytest.approx(50.0)
+    assert payload["retention_rate_today"] == pytest.approx(200.0 / 3)
+    assert payload["lapse_rate_today"] == pytest.approx(100.0 / 3)
     assert payload.get("generated_at")
 
     deck = next((d for d in payload["decks"] if d["deck_id"] == deck_id), None)

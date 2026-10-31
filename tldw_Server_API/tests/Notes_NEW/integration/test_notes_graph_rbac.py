@@ -189,9 +189,15 @@ def test_graph_read_allows_with_correct_scope(client_with_user_override: TestCli
     assert "nodes" in data and "edges" in data
 
 
+@pytest.mark.parametrize("path", [
+    "/api/v1/notes/graph",
+    "/api/v1/notes/links",
+    "/api/v1/notes/links/11111111-1111-4111-8111-111111111111",
+])
 def test_graph_authorizes_dataset_before_cache_lookup(
     client_with_user_override: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    path: str,
 ) -> None:
     def reject_authority(**_kwargs):
         raise notes_graph_module.NotesLinkDatasetConflictError()
@@ -208,7 +214,7 @@ def test_graph_authorizes_dataset_before_cache_lookup(
     )
     token = _make_token(scope="notes")
     response = client_with_user_override.get(
-        "/api/v1/notes/graph",
+        path,
         headers={"Authorization": f"Bearer {token}"},
         params={"dataset_id": "wrong-dataset"},
     )

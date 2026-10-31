@@ -200,7 +200,7 @@ def _validate_downloaded_url_video_file(downloaded_path: Path) -> None:
         processing_filename=downloaded_path.name,
         media_type="video",
         form_data=None,
-        media_mod=None,
+        file_validator=None,
         allowed_extensions=None,
     )
 

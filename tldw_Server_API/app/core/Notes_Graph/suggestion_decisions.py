@@ -17,8 +17,10 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store i
     MutationResult,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
+    GuardedKeywordIdentityCollision,
     NotesOrganizationSyncStore,
 )
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
 from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
     GuardedProductMutation,
 )
@@ -47,14 +49,22 @@ class SuggestionDecisionService:
         self,
         *,
         store: Any,
-        link_coordinator: Any,
-        organization_coordinator: Any,
+        link_coordinator: Any = None,
+        organization_coordinator: Any = None,
+        local_mutations: Any = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.store = store
         self.links = link_coordinator
         self.organization = organization_coordinator
+        self.local = local_mutations
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+
+    @property
+    def note_db(self) -> Any:
+        """Resolve product storage only when a keyword decision needs it."""
+
+        return self.local.note_db if self.local is not None else self.organization.note_db
 
     @staticmethod
     def _step_key(suggestion_id: str, step: str) -> str:
@@ -219,16 +229,24 @@ class SuggestionDecisionService:
             after=self._after(fence, finalized),
         )
         try:
-            self.links.create(
-                source_note_id=fence.source_note_id,
-                target_note_id=str(fence.target_note_id),
-                directed=False,
-                weight=1.0,
-                label=None,
-                properties={},
-                idempotency_key=key,
-                guarded_mutation=guard,
-            )
+            if self.local is not None:
+                self.local.create_related_link(
+                    edge_id=expected_edge_id,
+                    source_note_id=fence.source_note_id,
+                    target_note_id=str(fence.target_note_id),
+                    guarded_mutation=guard,
+                )
+            else:
+                self.links.create(
+                    source_note_id=fence.source_note_id,
+                    target_note_id=str(fence.target_note_id),
+                    directed=False,
+                    weight=1.0,
+                    label=None,
+                    properties={},
+                    idempotency_key=key,
+                    guarded_mutation=guard,
+                )
         except SyncServerOriginBatchMaterializationError as exc:
             try:
                 existing = self.store.finalize_existing_acceptance(
@@ -257,6 +275,11 @@ class SuggestionDecisionService:
         conn: Any | None = None,
         for_update: bool = False,
     ) -> tuple[str | None, bool]:
+        if self.local is not None and fence.keyword_sync_id:
+            resource = self.note_db.keyword_store.resolve_merge_survivor(
+                fence.keyword_sync_id, conn=conn, for_update=for_update
+            )
+            return (str(resource["sync_id"]), False) if resource is not None else (None, True)
         if fence.keyword_sync_id:
             dataset = self.organization.active_dataset()
             resources = NotesOrganizationSyncStore(self.organization.note_db)
@@ -297,9 +320,9 @@ class SuggestionDecisionService:
                 sync_id = str(target["sync_id"])
             return None, True
         display = fence.normalized_tag or fence.display_tag or ""
-        resource = NotesOrganizationSyncStore(
-            self.organization.note_db
-        ).find_keyword_by_normalized_identity(
+        if self.local is not None:
+            return self.local.find_keyword_identity(display, conn=conn, for_update=for_update), False
+        resource = NotesOrganizationSyncStore(self.note_db).find_keyword_by_normalized_identity(
             display,
             conn=conn,
             for_update=for_update,
@@ -331,6 +354,8 @@ class SuggestionDecisionService:
         )
 
     def _accept_tag(self, fence: NoteGraphSuggestion) -> MutationResult:
+        if self.local is not None:
+            return self._accept_local_tag(fence)
         keyword_sync_id, stale = self._resolve_keyword(fence)
         if stale:
             stale_result = self._mark_keyword_acceptance_stale(
@@ -433,6 +458,68 @@ class SuggestionDecisionService:
                 now=self._clock(),
             )
             return existing if existing.disposition != "in_progress" else self._release(fence)
+        if len(finalized) != 1:
+            raise RuntimeError("notes_graph_acceptance_finalization_missing")
+        return finalized[0]
+
+    def _accept_local_tag(self, fence: NoteGraphSuggestion) -> MutationResult:
+        """Reuse decision fences while applying the ordinary local tag stores."""
+
+        keyword_sync_id, stale = self._resolve_keyword(fence)
+        if stale:
+            return self._mark_keyword_acceptance_stale(fence, now=self._clock())
+        identity = self._keyword_link_identity(fence, keyword_sync_id) if keyword_sync_id else None
+        existing = self.store.finalize_existing_acceptance(
+            fence=fence,
+            accepted_resource_identity=identity,
+            resolved_keyword_sync_id=keyword_sync_id,
+            now=self._clock(),
+        )
+        if existing.disposition != "in_progress":
+            return existing
+        if keyword_sync_id is None:
+            key = self._step_key(fence.id, "keyword")
+            digest = hashlib.sha256(f"{fence.dataset_id}:notes.keyword:{key}".encode()).digest()[:16]
+            keyword_sync_id = str(uuid.UUID(bytes=digest, version=4))
+            fence = self.store.renew_acceptance(fence=fence, now=self._clock())
+            try:
+                self.local.create_keyword(
+                    keyword_sync_id=keyword_sync_id,
+                    display=str(fence.display_tag),
+                    guarded_mutation=GuardedProductMutation(
+                        expected_domain="notes.keyword",
+                        expected_object_id=keyword_sync_id,
+                        before=self._before(fence),
+                        after=None,
+                    ),
+                )
+            except GuardedKeywordIdentityCollision as exc:
+                keyword_sync_id = exc.canonical_sync_id
+        identity = self._keyword_link_identity(fence, keyword_sync_id)
+        fence = self.store.renew_acceptance(fence=fence, now=self._clock())
+        finalized: list[MutationResult] = []
+
+        def before_membership(conn: Any) -> None:
+            self._before(fence)(conn)
+            current, missing = self._resolve_keyword(fence, conn=conn, for_update=True)
+            if missing or current != keyword_sync_id:
+                raise ConflictError("Suggestion keyword changed before membership")
+
+        try:
+            self.local.link_keyword(
+                note_id=fence.source_note_id,
+                keyword_sync_id=keyword_sync_id,
+                guarded_mutation=GuardedProductMutation(
+                    expected_domain="notes.keyword_link",
+                    expected_object_id=identity,
+                    before=before_membership,
+                    after=self._after(fence, finalized),
+                ),
+            )
+        except (ConflictError, InputError):
+            # Resolution changed under the product guard. Do not finalize using
+            # the earlier target, even if it already has an unrelated membership.
+            return self._release(fence)
         if len(finalized) != 1:
             raise RuntimeError("notes_graph_acceptance_finalization_missing")
         return finalized[0]

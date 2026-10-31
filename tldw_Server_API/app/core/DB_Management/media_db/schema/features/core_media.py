@@ -192,6 +192,10 @@ class _PostgresBackend(Protocol):
 
     def table_exists(self, table: str, *, connection: object) -> bool: ...
 
+    def get_table_info(self, table: str, *, connection: object) -> list[dict[str, Any]]: ...
+
+    def escape_identifier(self, identifier: str) -> str: ...
+
 
 class SupportsSqliteCoreMediaSchema(Protocol):
     db_path_str: str
@@ -221,6 +225,7 @@ class SupportsPostgresCoreMediaSchema(Protocol):
     _INDICES_SQL_V1: str
     _CURRENT_SCHEMA_VERSION: int
     backend: _PostgresBackend
+    _sync_entity_column: str
 
     def _convert_sqlite_sql_to_postgres_statements(self, sql: str) -> list[str]: ...
 
@@ -331,6 +336,64 @@ def apply_sqlite_core_media_schema(
         raise DatabaseError(f"Unexpected error applying schema V1: {exc}") from exc
 
 
+def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn: Any) -> None:
+    """Preserve either application-owned sync identity while ensuring Media's contract.
+
+    ChaCha may create this shared table first. Normalize only its known older
+    shape, in the caller's schema transaction, without renaming stored identities.
+    """
+    backend = db.backend
+    columns = {column["name"]: column for column in backend.get_table_info("sync_log", connection=conn)}
+    identifiers = columns.keys() & {"entity_id", "entity_uuid"}
+    if len(identifiers) != 1:
+        raise SchemaError("Unsupported sync_log identifier columns")
+    identifier = next(iter(identifiers))
+    for name in (identifier, "operation", "payload"):
+        if name not in columns or columns[name]["type"] != "text":
+            raise SchemaError("Unsupported sync_log column types")
+    if columns[identifier]["nullable"] or columns["operation"]["nullable"]:
+        raise SchemaError("Unsupported sync_log required columns")
+    for name in ("org_id", "team_id"):
+        if name in columns and (columns[name]["type"] not in {"integer", "bigint"} or not columns[name]["nullable"]):
+            raise SchemaError("Unsupported sync_log scope columns")
+
+    checks = backend.execute(
+        """SELECT c.conname, pg_get_constraintdef(c.oid) AS definition,
+                  c.conkey = ARRAY[a.attnum] AS only_operation
+           FROM pg_constraint c
+           JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attname='operation'
+           WHERE c.conrelid='sync_log'::regclass AND c.contype='c'
+             AND a.attnum=ANY(c.conkey)""",
+        connection=conn,
+    ).rows
+    known_old = "CHECK ((operation = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text])))"
+    known_current = "CHECK ((operation = ANY (ARRAY['create'::text, 'update'::text, 'delete'::text, 'link'::text, 'unlink'::text])))"
+    if len(checks) != 1 or not checks[0]["only_operation"]:
+        raise SchemaError("Unsupported sync_log operation constraints")
+    # Compare PostgreSQL's canonical output exactly; whitespace inside literals is data.
+    definition = checks[0]["definition"]
+    if definition not in {known_old, known_current}:
+        raise SchemaError("Unsupported sync_log operation constraint")
+
+    for name in ("org_id", "team_id"):
+        if name not in columns:
+            backend.execute(
+                f"ALTER TABLE sync_log ADD COLUMN {backend.escape_identifier(name)} BIGINT",
+                connection=conn,
+            )
+    if definition == known_old:
+        constraint = backend.escape_identifier(checks[0]["conname"])
+        backend.execute(f"ALTER TABLE sync_log DROP CONSTRAINT {constraint}", connection=conn)
+        backend.execute(
+            f"ALTER TABLE sync_log ADD CONSTRAINT {constraint} "
+            "CHECK (operation IN ('create','update','delete','link','unlink'))",
+            connection=conn,
+        )
+    if not columns["payload"]["nullable"]:
+        backend.execute("ALTER TABLE sync_log ALTER COLUMN payload DROP NOT NULL", connection=conn)
+    db._sync_entity_column = identifier
+
+
 def apply_postgres_core_media_schema(
     db: SupportsPostgresCoreMediaSchema,
     conn: Any,
@@ -365,8 +428,14 @@ def apply_postgres_core_media_schema(
         if not db.backend.table_exists(table, connection=conn):
             raise SchemaError(f"Postgres schema init missing table: {table}")
 
+    ensure_postgres_sync_log_contract(db, conn)
     index_statements = db._convert_sqlite_sql_to_postgres_statements(db._INDICES_SQL_V1)
     for statement in index_statements:
+        if statement.strip().rstrip(";") == "CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid)":
+            statement = (
+                "CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_id)"
+                if db._sync_entity_column == "entity_id" else statement
+            )
         logger.debug(f"Applying Postgres index DDL: {statement[:120]}...")
         db.backend.execute(statement, connection=conn)
 

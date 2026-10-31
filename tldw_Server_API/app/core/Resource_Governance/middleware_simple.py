@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Minimal ASGI middleware that derives a policy_id from route tags or path and
+Minimal ASGI middleware that derives a policy_id via policy_resolver (path, tag, default) and
 calls the Resource Governor before and after handlers.
 
 This is a thin adapter for Stage 1/2 validation and can be replaced by a
@@ -9,12 +9,14 @@ full-featured middleware later.
 """
 
 import contextlib
+import hashlib
 import os
 import re
+import time
 import uuid
+from collections import OrderedDict
 
 from loguru import logger
-from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -37,12 +39,31 @@ _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     re.error,
 )
 
+# ponytail: per-process identity cache. A revoked credential keeps charging its old
+# principal's bucket for up to _IDENTITY_TTL_SEC (route auth still rejects it); a shared
+# cache (Redis) or a revocation hook would close that if it ever matters.
+_IDENTITY_TTL_SEC = 60.0
+_IDENTITY_NEGATIVE_TTL_SEC = 30.0
+_IDENTITY_CACHE_MAX = 4096
+# ponytail: per-process, fixed-window budget of expensive identity resolutions (API key,
+# cookie: DB lookup plus key derivation) per RG client IP, so rotating fake credentials
+# cannot buy a KDF per request before the rate limit. JWTs are signature-only and never
+# spend it. Once an IP's budget is spent, its uncached API-key and cookie callers are
+# charged to that IP's shared bucket, which the flood also drains, so they can see 429s
+# until the window rolls over. A shared (Redis) budget would make it cluster-wide.
+_IDENTITY_RESOLVE_BUDGET_PER_MIN = 120
+_IDENTITY_RESOLVE_WINDOW_SEC = 60.0
+_BUDGET_SPENT = object()  # _resolve_principal_entity sentinel: charge the IP, cache nothing
+_IDENTITY_BUDGET_IPS_MAX = 4096
+
 
 class RGSimpleMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        # Compile simple path matchers from stub mapping
-        self._compiled_map: list[tuple[re.Pattern[str], str]] = []
+        # sha256(credentials) -> (expires_at, entity or None for "charge the IP"), LRU order.
+        self._identity_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
+        # RG client IP -> (window_start, misses resolved in that window), LRU order.
+        self._resolve_budget: OrderedDict[str, tuple[float, int]] = OrderedDict()
 
     async def _ensure_loader_matches_env(self, request: Request) -> None:
         """Ensure app.state.rg_policy_loader reflects current RG_POLICY_PATH.
@@ -75,88 +96,16 @@ class RGSimpleMiddleware:
             # Best-effort only; never block the request
             pass
 
-    def _init_route_map(self, request: Request) -> None:
-        try:
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            if not loader:
-                return
-            snap = loader.get_snapshot()
-            route_map = getattr(snap, "route_map", {}) or {}
-            by_path = dict(route_map.get("by_path") or {})
-            compiled = []
-            for pat, pol in by_path.items():
-                # Convert glob patterns (supports '*' anywhere, anchored unless trailing '*')
-                pat = str(pat)
-                if "*" in pat:
-                    regex = re.escape(pat).replace("\\*", ".*")
-                    if not pat.endswith("*"):
-                        regex += "$"
-                else:
-                    regex = re.escape(pat) + "$"
-                compiled.append((re.compile(regex), str(pol)))
-            self._compiled_map = compiled
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"RGSimpleMiddleware: route_map init skipped: {e}")
-
     def _derive_policy_id(self, request: Request) -> str | None:
-        # Prefer path-based routing (works even before route resolution)
-        try:
-            # Use compiled route_map if available
-            if not self._compiled_map:
-                self._init_route_map(request)
-            path = request.url.path or "/"
-            for pat, pol in self._compiled_map:
-                try:
-                    if pat.match(path):
-                        return str(pol)
-                except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-                    continue
-            # Fallback to simple string matching from snapshot if compiled map unavailable
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            snap = loader.get_snapshot() if loader else None
-            route_map = getattr(snap, "route_map", {}) or {}
-            by_path = dict(route_map.get("by_path") or {})
-            # Simple wildcard matching: '*' anywhere, anchored unless trailing '*'
-            for pat, pol in by_path.items():
-                pat = str(pat)
-                if "*" in pat:
-                    regex = re.escape(pat).replace("\\*", ".*")
-                    if not pat.endswith("*"):
-                        regex += "$"
-                    if re.match(regex, path):
-                        return str(pol)
-                elif path == pat:
-                    return str(pol)
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            pass
+        """Path, then the innermost mapped tag, then default (ADR-056)."""
+        from .policy_resolver import get_policy_resolver
 
-        # Fallback to tag-based routing (may not be available early in ASGI pipeline)
         try:
-            by_tag = {}
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            snap = loader.get_snapshot() if loader else None
-            route_map = getattr(snap, "route_map", {}) or {}
-            by_tag = dict(route_map.get("by_tag") or {})
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            by_tag = {}
-        try:
-            route = request.scope.get("route")
-            tags = list(getattr(route, "tags", []) or [])
-            for t in tags:
-                if t in by_tag:
-                    return str(by_tag[t])
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Heuristic fallback by path segments for common endpoints
-        try:
-            p = request.url.path or "/"
-            if p.startswith("/api/v1/chat/") or p == "/api/v1/chat/completions":
-                return "chat.default"
-            if p.startswith("/api/v1/audio/"):
-                return "audio.default"
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            pass
-        return None
+            resolver = get_policy_resolver(request.app)
+            return resolver.resolve(request.url.path or "/", request.method) if resolver else None
+        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("RGSimpleMiddleware: policy resolution failed: {}", exc)
+            return None
 
     def _derive_tenant_config(self, request: Request) -> TenantScopeConfig | None:
         try:
@@ -167,6 +116,112 @@ class RGSimpleMiddleware:
                 return parse_tenant_config(tenant_data)
         except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
             return None
+        return None
+
+    async def _principal_entity(self, request: Request) -> str | None:
+        """Charge the validated principal. Invalid or absent credentials charge the IP.
+
+        - A multi-user bearer JWT is keyed by its signature-verified ``sub``
+          (``decode_access_token``: no database access, no revocation check). Full
+          principal resolution before routing would run the scoped-token check,
+          which needs the matched route. For virtual keys that check always fails
+          pre-routing, and it would log a security warning on every request.
+          Revocation is still enforced by the route's own auth; a revoked token only
+          spends its own user's bucket.
+        - API keys, non-JWT bearers and the single-user session cookie go through
+          ``get_auth_principal``. On a cache miss it stores its AuthContext on
+          request state, so endpoint auth reuses this validation. The route
+          re-checks a failure and returns its own 401.
+        - Other cookies (CSRF, theme, analytics) are not credentials, so they are
+          never resolved.
+        - The outcome is cached per credential (60 s; 30 s for a failure) so a 429
+          or a repeated bad key does not cost a KDF. A failure is cached as "no
+          principal", never as an entity, so fake credentials still share the IP.
+        - API-key and cookie cache misses (the DB-lookup and key-derivation path) are
+          budgeted per client IP (_IDENTITY_RESOLVE_BUDGET_PER_MIN); past it the IP is
+          charged unresolved and nothing is cached. JWTs never spend the budget.
+        """
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+        settings = get_settings()
+        auth_header = request.headers.get("Authorization")
+        api_key = request.headers.get("X-API-KEY")
+        session = request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME)
+        if not (auth_header or api_key is not None or session):
+            return None
+        # Every credential the resolver may read is in the key, plus the client IP because
+        # validation is IP-gated (per-key allowed_ips); raw values are never stored. AuthNZ
+        # derives its own client IP for that gate, which can differ from RG's (TASK-13144).
+        from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
+
+        client_ip = str(getattr(request.state, "rg_client_ip", "") or "")
+        try:
+            authnz_ip = resolve_client_ip(request, settings) or ""
+        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
+            authnz_ip = ""
+        creds = (
+            ("ip", client_ip),
+            ("authnz-ip", authnz_ip),
+            ("bearer", auth_header),
+            ("x-api-key", api_key),
+            ("session-cookie", session),
+        )
+        key = hashlib.sha256("\0".join(f"{kind}\0{value}" for kind, value in creds if value is not None).encode()).hexdigest()
+        now = time.monotonic()
+        hit = self._identity_cache.get(key)
+        if hit is not None and hit[0] > now:
+            self._identity_cache.move_to_end(key)
+            return hit[1]
+        entity = await self._resolve_principal_entity(request, settings, auth_header or "", client_ip, now)
+        if entity is _BUDGET_SPENT:
+            return None  # budget spent: charge the IP and cache nothing
+        self._identity_cache[key] = (now + (_IDENTITY_TTL_SEC if entity else _IDENTITY_NEGATIVE_TTL_SEC), entity)
+        self._identity_cache.move_to_end(key)
+        while len(self._identity_cache) > _IDENTITY_CACHE_MAX:
+            self._identity_cache.popitem(last=False)
+        return entity
+
+    def _spend_resolve_budget(self, ip: str, now: float) -> bool:
+        """Spend one identity resolution from ``ip``'s window; False when it is spent."""
+        start, used = self._resolve_budget.pop(ip, (now, 0))
+        if now - start >= _IDENTITY_RESOLVE_WINDOW_SEC:
+            start, used = now, 0
+        allowed = used < _IDENTITY_RESOLVE_BUDGET_PER_MIN
+        self._resolve_budget[ip] = (start, used + allowed)
+        while len(self._resolve_budget) > _IDENTITY_BUDGET_IPS_MAX:
+            self._resolve_budget.popitem(last=False)
+        return allowed
+
+    async def _resolve_principal_entity(
+        self, request: Request, settings, auth_header: str, client_ip: str, now: float
+    ) -> str | None | object:
+        token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        if token and token.count(".") == 2 and settings.AUTH_MODE != "single_user":
+            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+
+            try:
+                sub = get_jwt_service().decode_access_token(token).get("sub")
+            except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
+                logger.debug("RG ingress JWT identity failed: {}", type(exc).__name__)
+                # get_auth_principal drops a failed JWT for X-API-KEY; charge whom the route will.
+                if not request.headers.get("X-API-KEY"):
+                    return None
+            else:
+                return f"user:{sub}" if sub else None
+        # Only this path costs a DB lookup and a key derivation, so only it spends the budget.
+        if not self._spend_resolve_budget(client_ip, now):
+            return _BUDGET_SPENT
+        from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
+
+        try:
+            principal = await auth_principal_resolver.get_auth_principal(request)
+        except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
+            logger.debug("RG ingress identity fell back to IP: {}", type(exc).__name__)
+            return None
+        if getattr(principal, "user_id", None) is not None:
+            return f"user:{principal.user_id}"
+        if getattr(principal, "api_key_id", None) is not None:
+            return f"api_key:{principal.api_key_id}"
         return None
 
     def _derive_entity(self, request: Request) -> str:
@@ -227,54 +282,22 @@ class RGSimpleMiddleware:
         request = Request(scope, receive=receive)
         # Make sure loader (and its route_map) tracks current env path
         await self._ensure_loader_matches_env(request)
-        # Compile route map for fast path matches (best-effort)
-        with contextlib.suppress(_RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS):
-            self._init_route_map(request)
         policy_id = self._derive_policy_id(request)
         if not policy_id:
             await self.app(scope, receive, send)
             return
 
-        # Cookie sessions must spend their validated owner's user quota when
-        # the policy cannot admit an anonymous request. The
-        # canonical resolver caches AuthContext on shared ASGI request state,
-        # so endpoint auth reuses this validation. Explicit headers (even empty
-        # ones) keep precedence over cookies, matching the resolver contract.
-        if (
-            request.cookies
-            and request.headers.get("Authorization") is None
-            and request.headers.get("X-API-KEY") is None
-        ):
-            from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-
-            settings = get_settings()
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            policy = (loader.get_policy(policy_id) or {}) if loader else {}
-            policy_scopes = set(policy.get("scopes") or ["global", "entity"])
-            requires_owner = bool(policy_scopes & {"user", "api_key"}) and not (
-                policy_scopes & {"global", "ip", "entity"}
-            )
-            if (
-                requires_owner
-                and settings.AUTH_MODE == "single_user"
-                and request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME)
-            ):
-                from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import (
-                    get_auth_principal,
-                )
-
-                try:
-                    await get_auth_principal(request)
-                except HTTPException as exc:
-                    # This middleware runs outside ExceptionMiddleware.
-                    response = JSONResponse(
-                        {"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers
-                    )
-                    await response(scope, receive, send)
-                    return
         # If governor not initialized, lazily create one using loader + backend env
         gov = getattr(request.app.state, "rg_governor", None)
         if gov is None:
+            from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+            if not bool(_rg_enabled_flag(True)):
+                # Governance is globally disabled: never lazily attach a governor
+                # (that would silently re-enable enforcement for every other call
+                # site reading app.state.rg_governor) and never fail closed.
+                await self.app(scope, receive, send)
+                return
             try:
                 loader = getattr(request.app.state, "rg_policy_loader", None)
                 if loader is not None:
@@ -303,7 +326,11 @@ class RGSimpleMiddleware:
         # Build RG request. Always include 'requests'. Specialized categories
         # (tokens/streams/jobs/minutes/etc.) are enforced at endpoint level.
         entity = self._derive_entity(request)
-        op_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        if not entity.startswith("tenant:"):
+            entity = await self._principal_entity(request) or entity
+        # Never derive the op_id from a client header: a repeated op_id replays the
+        # cached decision without charging, so a fixed X-Request-ID would bypass limits.
+        op_id = str(uuid.uuid4())
         cats: dict[str, dict[str, int]] = {"requests": {"units": 1}}
         # Note: tokens/streams/jobs require correct per-request units and are enforced
         # at the endpoint level (reserve/commit) rather than in this minimal middleware.
@@ -387,6 +414,9 @@ class RGSimpleMiddleware:
             return
 
         # Allowed; run handler with header injection wrapper and then commit in finally
+        # Record the entity ingress actually charged; auth's single-charge check keys on it.
+        with contextlib.suppress(_RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS):
+            request.state.rg_ingress_entity = entity
         # Prepare success-path rate-limit headers (using precise peek when available)
         try:
             _cats = dict((decision.details or {}).get("categories") or {})

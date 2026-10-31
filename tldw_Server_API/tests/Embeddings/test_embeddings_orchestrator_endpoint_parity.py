@@ -946,6 +946,23 @@ def test_dual_path_single_string_numeric_embedding_response(client, monkeypatch)
     assert result["legacy"]["json"]["usage"] == {"prompt_tokens": 2, "total_tokens": 2}
 
 
+def test_dual_path_rg_op_id_ignores_client_request_id(client, monkeypatch):
+    # A client-repeatable op_id replays the cached reservation without charging tokens.
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={"model": "sentence-transformers/all-MiniLM-L6-v2", "input": "red seed"},
+        headers={"x-provider": "huggingface", "X-Request-ID": "replayed-req-id"},
+    )
+
+    op_ids = [op_id for path in ("legacy", "orchestrator") for _req, op_id in result[path]["rg_reserves"]]
+    assert len(op_ids) == 2
+    assert not any("replayed-req-id" in str(op_id) for op_id in op_ids), op_ids
+
+
 def test_dual_path_batch_string_response_preserves_indexes(client, monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
 

@@ -7,6 +7,10 @@ import type {
   PersonaVisualManifest,
   PersonaVisualStateId
 } from "@/types/persona-visuals"
+import {
+  acquirePersonaVisualAsset,
+  type PersonaVisualAssetHandle
+} from "@/services/persona-visual-assets"
 
 import { usePersonaVisualAssetUrls } from "./usePersonaVisualAssetUrls"
 
@@ -19,12 +23,18 @@ import type {
 export type SpriteFrameRendererProps = {
   manifest: PersonaVisualManifest
   assets: Record<string, PersonaVisualAsset>
-  state: PersonaVisualStateId
+  state?: PersonaVisualStateId
+  requestedState?: PersonaVisualStateId
+  generation?: number
+  reducedMotion?: boolean
   fallbackLabel: string
   className?: string
   onRenderError?: PersonaVisualRenderErrorHandler
   animate?: boolean
   fitSize?: number
+  onReady?: () => void
+  onFailure?: (error: PersonaVisualRenderError) => void
+  onComplete?: () => void
 }
 
 type ResolvedAnimation = {
@@ -88,6 +98,7 @@ const resolveFrameDuration = (
 const renderFrame = ({
   frame,
   asset,
+  assetUrl,
   visualState,
   fallbackLabel,
   className,
@@ -95,6 +106,7 @@ const renderFrame = ({
 }: {
   frame: PersonaVisualFrame
   asset: PersonaVisualAsset
+  assetUrl: string
   visualState: PersonaVisualStateId
   fallbackLabel: string
   className?: string
@@ -119,7 +131,7 @@ const renderFrame = ({
           preserveAspectRatio="xMidYMid meet"
         >
           <image
-            href={asset.url}
+            href={assetUrl}
             width={asset.width ?? undefined}
             height={asset.height ?? undefined}
           />
@@ -136,7 +148,7 @@ const renderFrame = ({
         style={{
           width: `${region.width}px`,
           height: `${region.height}px`,
-          backgroundImage: `url(${asset.url})`,
+          backgroundImage: `url(${assetUrl})`,
           backgroundPosition: `${offsetX}px ${offsetY}px`,
           backgroundSize:
             asset.width && asset.height
@@ -151,7 +163,7 @@ const renderFrame = ({
     <img
       {...sharedProps}
       alt={fallbackLabel}
-      src={asset.url}
+      src={assetUrl}
       width={asset.width ?? undefined}
       height={asset.height ?? undefined}
       draggable={false}
@@ -192,15 +204,23 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
   manifest,
   assets,
   state,
+  requestedState,
+  generation = 0,
+  reducedMotion = false,
   fallbackLabel,
   className,
   onRenderError,
   animate = true,
-  fitSize
+  fitSize,
+  onReady,
+  onFailure,
+  onComplete
 }) => {
+  const companionMode = requestedState !== undefined
+  const visualState = requestedState ?? state ?? "idle"
   const resolved = React.useMemo(
-    () => resolveAnimationForState(manifest, state),
-    [manifest, state]
+    () => resolveAnimationForState(manifest, visualState),
+    [manifest, visualState]
   )
   const frames = React.useMemo(
     () => normalizePersonaVisualFrames(resolved?.animation),
@@ -211,50 +231,166 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
     [frames, resolved]
   )
   const [frameIndex, setFrameIndex] = React.useState(initialFrameIndex)
+  const handleRef = React.useRef<PersonaVisualAssetHandle | null>(null)
+  const requestRef = React.useRef(0)
+  const reportedFailureRef = React.useRef<string | null>(null)
+  const generationRef = React.useRef(generation)
+  const [presented, setPresented] = React.useState<{
+    frame: PersonaVisualFrame
+    asset: PersonaVisualAsset
+    url: string
+    generation: number
+  } | null>(null)
+  const [loadError, setLoadError] = React.useState<PersonaVisualRenderError | null>(null)
+
+  generationRef.current = generation
 
   React.useEffect(() => {
     setFrameIndex(initialFrameIndex)
-  }, [initialFrameIndex, resolved?.animationId, state])
+  }, [initialFrameIndex, resolved?.animationId, visualState])
 
   const frame = frames[frameIndex] ?? frames[0]
   const asset = frame ? assets[frame.asset_id] : null
-  const resolveAssetUrl = usePersonaVisualAssetUrls(assets, asset ?? null)
+  const resolveAssetUrl = usePersonaVisualAssetUrls(assets, companionMode ? null : asset ?? null)
   const assetUrl = asset ? resolveAssetUrl(asset) : null
+  const structuralError: PersonaVisualRenderError | null = !resolved || !frame
+    ? "missing_animation"
+    : !asset
+      ? "missing_asset"
+      : hasUnsupportedRegion(frame, asset)
+        ? "unsupported_region"
+        : reducedMotion && asset.mime_type !== "image/png"
+          ? "static_asset_unsupported"
+          : null
 
   React.useEffect(() => {
-    if (!animate || !assetUrl || !resolved || frames.length <= 1)
+    if (companionMode || !animate || !assetUrl || !resolved || frames.length <= 1) {
       return undefined
+    }
     const currentFrame = frames[frameIndex] ?? frames[0]
-    const timer = window.setTimeout(
-      () => {
-        setFrameIndex((current) => (current + 1) % frames.length)
-      },
-      resolveFrameDuration(currentFrame, resolved.animation)
-    )
+    const timer = window.setTimeout(() => {
+      setFrameIndex((current) => (current + 1) % frames.length)
+    }, resolveFrameDuration(currentFrame, resolved.animation))
     return () => window.clearTimeout(timer)
-  }, [animate, assetUrl, frameIndex, frames, resolved])
+  }, [animate, assetUrl, companionMode, frameIndex, frames, resolved])
 
-  const error: PersonaVisualRenderError | null =
-    !resolved || !frame
-      ? "missing_animation"
-      : !asset || assetUrl === null
-        ? "missing_asset"
-        : hasUnsupportedRegion(frame, asset)
-          ? "unsupported_region"
-          : null
+  React.useEffect(() => {
+    if (!companionMode) {
+      requestRef.current += 1
+      handleRef.current?.release()
+      handleRef.current = null
+      setPresented(null)
+      return undefined
+    }
+    if (structuralError || !frame || !asset) {
+      requestRef.current += 1
+      handleRef.current?.release()
+      handleRef.current = null
+      setPresented(null)
+      setLoadError(structuralError)
+      const failureKey = structuralError ? `${generation}:${structuralError}` : null
+      if (structuralError && reportedFailureRef.current !== failureKey) {
+        reportedFailureRef.current = failureKey
+        onFailure?.(structuralError)
+      }
+      return undefined
+    }
+    const request = ++requestRef.current
+    const controller = new AbortController()
+    let acquired: PersonaVisualAssetHandle | null = null
+    void acquirePersonaVisualAsset(asset, { signal: controller.signal })
+      .then((handle) => {
+        acquired = handle
+        if (
+          controller.signal.aborted
+          || request !== requestRef.current
+          || generation !== generationRef.current
+        ) {
+          handle.release()
+          return
+        }
+        const previous = handleRef.current
+        handleRef.current = handle
+        acquired = null
+        setPresented({ frame, asset, url: handle.url, generation })
+        setLoadError(null)
+        reportedFailureRef.current = null
+        previous?.release()
+        onReady?.()
+      })
+      .catch(() => {
+        if (controller.signal.aborted || request !== requestRef.current) return
+        setLoadError("asset_load_failed")
+        const failureKey = `${generation}:asset_load_failed`
+        if (reportedFailureRef.current !== failureKey) {
+          reportedFailureRef.current = failureKey
+          onFailure?.("asset_load_failed")
+        }
+      })
+    return () => {
+      controller.abort()
+      acquired?.release()
+    }
+  }, [asset, companionMode, frame, generation, onFailure, onReady, reducedMotion, structuralError])
+
+  React.useEffect(() => () => {
+    requestRef.current += 1
+    handleRef.current?.release()
+    handleRef.current = null
+  }, [])
+
+  React.useEffect(() => {
+    if (
+      !companionMode
+      || !animate
+      || reducedMotion
+      || !resolved
+      || !frame
+      || presented?.generation !== generation
+      || presented.frame !== frame
+      || (frames.length <= 1 && !onComplete)
+    ) return undefined
+    const currentFrame = frames[frameIndex] ?? frames[0]
+    const timer = window.setTimeout(() => {
+      if (generationRef.current !== generation) return
+      if (frames.length <= 1) {
+        onComplete?.()
+        return
+      }
+      setFrameIndex((current) => {
+        const next = (current + 1) % frames.length
+        if (next === initialFrameIndex) onComplete?.()
+        return next
+      })
+    }, resolveFrameDuration(currentFrame, resolved.animation))
+    return () => window.clearTimeout(timer)
+  }, [animate, companionMode, frame, frameIndex, frames, generation, initialFrameIndex, onComplete, presented, reducedMotion, resolved])
+
+  const legacyError: PersonaVisualRenderError | null = !resolved || !frame
+    ? "missing_animation"
+    : !asset || assetUrl === null
+      ? "missing_asset"
+      : hasUnsupportedRegion(frame, asset)
+        ? "unsupported_region"
+        : null
+  const error = companionMode ? structuralError ?? loadError : legacyError
 
   React.useEffect(() => {
     onRenderError?.(error)
   }, [error, onRenderError])
 
-  if (error || !frame || !asset || !assetUrl) {
+  if (companionMode && !presented) {
+    return <span>{fallbackLabel}</span>
+  }
+  if (!companionMode && (error || !frame || !asset || !assetUrl)) {
     return <span>{fallbackLabel}</span>
   }
 
   return renderFrame({
-    frame,
-    asset: { ...asset, url: assetUrl },
-    visualState: state,
+    frame: companionMode ? presented!.frame : frame!,
+    asset: companionMode ? presented!.asset : asset!,
+    assetUrl: companionMode ? presented!.url : assetUrl!,
+    visualState,
     fallbackLabel,
     className,
     fitSize

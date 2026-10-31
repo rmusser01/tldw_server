@@ -276,6 +276,8 @@ def _cohere_request(
             def stream_generator_cohere_text_chunks(response_iterator):
                 stream_properly_closed = False
                 try:
+                    # Own loop (TASK-13373): translates Cohere events into OpenAI deltas;
+                    # the shared SSE helpers only pass lines through.
                     for line_bytes in response_iterator:
                         if not line_bytes:
                             continue

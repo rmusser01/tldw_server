@@ -15,6 +15,7 @@ import { FAMILY_GUARDRAILS_WIZARD_TELEMETRY_STORAGE_KEY } from "@/utils/family-g
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const MILESTONES_STORAGE_KEY = "tldw:milestones"
+const SCOPED_MILESTONES_STORAGE_KEY = "tldw:milestones:scoped"
 
 /**
  * localStorage key used by onboarding-ingestion-telemetry.
@@ -43,6 +44,8 @@ export type MilestoneId =
   | "content_rules_tested"
 
 type MilestoneState = {
+  scopedMilestones: Record<string, Partial<Record<MilestoneId, number>>>
+  markScopedMilestone: (scope: string, id: MilestoneId) => void
   completedMilestones: Partial<Record<MilestoneId, number>>
   markMilestone: (id: MilestoneId) => void
   isMilestoneCompleted: (id: MilestoneId) => boolean
@@ -86,6 +89,34 @@ const persistMilestones = (
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
+  scopedMilestones: (() => {
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem(SCOPED_MILESTONES_STORAGE_KEY) || "{}"
+      )
+      return stored && typeof stored === "object" && !Array.isArray(stored)
+        ? stored
+        : {}
+    } catch {
+      return {}
+    }
+  })(),
+  markScopedMilestone: (scope, id) => {
+    if (!scope || get().scopedMilestones[scope]?.[id] != null) return
+    const scopedMilestones = {
+      ...get().scopedMilestones,
+      [scope]: { ...get().scopedMilestones[scope], [id]: Date.now() }
+    }
+    try {
+      localStorage.setItem(
+        SCOPED_MILESTONES_STORAGE_KEY,
+        JSON.stringify(scopedMilestones)
+      )
+    } catch {
+      /* Best-effort progress persistence. */
+    }
+    set({ scopedMilestones })
+  },
   completedMilestones: loadPersistedMilestones(),
 
   markMilestone: (id: MilestoneId) => {
@@ -127,7 +158,10 @@ export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
       if (raw) {
         const telemetry = JSON.parse(raw)
 
-        if (current.first_ingest == null && telemetry?.current_session?.first_ingest_at != null) {
+        if (
+          current.first_ingest == null &&
+          telemetry?.current_session?.first_ingest_at != null
+        ) {
           updates.first_ingest = telemetry.current_session.first_ingest_at
         }
         // Also check the counter as a fallback — the session may have been
@@ -135,7 +169,8 @@ export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
         if (
           current.first_ingest == null &&
           updates.first_ingest == null &&
-          typeof telemetry?.counters?.onboarding_first_ingest_success === "number" &&
+          typeof telemetry?.counters?.onboarding_first_ingest_success ===
+            "number" &&
           telemetry.counters.onboarding_first_ingest_success > 0
         ) {
           updates.first_ingest = now
@@ -145,12 +180,14 @@ export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
           current.first_chat == null &&
           telemetry?.current_session?.first_chat_after_ingest_at != null
         ) {
-          updates.first_chat = telemetry.current_session.first_chat_after_ingest_at
+          updates.first_chat =
+            telemetry.current_session.first_chat_after_ingest_at
         }
         if (
           current.first_chat == null &&
           updates.first_chat == null &&
-          typeof telemetry?.counters?.onboarding_first_chat_after_ingest === "number" &&
+          typeof telemetry?.counters?.onboarding_first_chat_after_ingest ===
+            "number" &&
           telemetry.counters.onboarding_first_chat_after_ingest > 0
         ) {
           updates.first_chat = now
@@ -163,7 +200,9 @@ export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
     // ── family mission milestones ────────────────────────────────────
     if (current.family_profiles_created == null) {
       try {
-        const raw = localStorage.getItem(FAMILY_GUARDRAILS_WIZARD_TELEMETRY_STORAGE_KEY)
+        const raw = localStorage.getItem(
+          FAMILY_GUARDRAILS_WIZARD_TELEMETRY_STORAGE_KEY
+        )
         if (raw) {
           const telemetry = JSON.parse(raw)
           if (
@@ -171,7 +210,9 @@ export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
             telemetry.counters.setup_completed > 0
           ) {
             updates.family_profiles_created =
-              typeof telemetry?.last_event_at === "number" ? telemetry.last_event_at : now
+              typeof telemetry?.last_event_at === "number"
+                ? telemetry.last_event_at
+                : now
           }
         }
       } catch {
@@ -218,11 +259,12 @@ export const useMilestoneStore = create<MilestoneState>()((set, get) => ({
   resetMilestones: () => {
     try {
       localStorage.removeItem(QUIZ_ATTEMPT_SCAN_DONE_KEY)
+      localStorage.removeItem(SCOPED_MILESTONES_STORAGE_KEY)
     } catch {
       // ignore
     }
     persistMilestones({})
-    set({ completedMilestones: {} })
+    set({ completedMilestones: {}, scopedMilestones: {} })
   }
 }))
 

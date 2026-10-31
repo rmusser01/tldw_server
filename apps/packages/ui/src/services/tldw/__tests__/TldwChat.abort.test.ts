@@ -29,6 +29,25 @@ describe("TldwChatService abort lifecycle", () => {
     mocks.getConfig.mockResolvedValue(null)
   })
 
+  it("identifies successful saved regeneration in both request transports", async () => {
+    mocks.createChatCompletion.mockResolvedValue({ json: async () => ({ choices: [{ message: { content: "answer" } }] }) })
+    mocks.streamChatCompletion.mockImplementation(async function* () { yield chunk("answer") })
+    const service = new TldwChatService()
+    const messages = [
+      { role: "system" as const, content: "Current instructions" },
+      { role: "user" as const, content: "Earlier question" },
+      { role: "assistant" as const, content: "Earlier answer" },
+      { role: "user" as const, content: "Repeated prompt" }
+    ]
+    const options = { model: "m", regenerateFromMessageId: "saved-reply" }
+    await service.sendMessage(messages, options)
+    for await (const _token of service.streamMessage(messages, options)) { /* consume */ }
+    for (const [request] of [mocks.createChatCompletion.mock.calls[0], mocks.streamChatCompletion.mock.calls[0]]) {
+      expect(request.metadata).toEqual({ tldw_regenerate_from_message_id: "saved-reply" })
+      expect(request.messages).toEqual([messages[0], messages[3]])
+    }
+  })
+
   it("passes the caller signal to non-streaming chat completion", async () => {
     mocks.createChatCompletion.mockResolvedValue({
       json: async () => ({ choices: [{ message: { content: "answer" } }] })
@@ -44,6 +63,32 @@ describe("TldwChatService abort lifecycle", () => {
     expect(mocks.createChatCompletion.mock.calls[0]?.[1]).toMatchObject({
       signal: controller.signal
     })
+  })
+
+  it.each([false, true])("keeps explicit retry intent in request metadata (retry=%s)", async (retryFailedTurn) => {
+    mocks.createChatCompletion.mockResolvedValue({ json: async () => ({ choices: [{ message: { content: "answer" } }] }) })
+    mocks.streamChatCompletion.mockImplementation(async function* () { yield chunk("answer") })
+    const service = new TldwChatService()
+    const messages = [{ role: "user" as const, content: "Retry question" }]
+    await service.sendMessage(messages, { model: "m", retryFailedTurn })
+    for await (const _token of service.streamMessage(messages, { model: "m", retryFailedTurn })) { /* consume */ }
+    for (const request of [mocks.createChatCompletion.mock.calls[0][0], mocks.streamChatCompletion.mock.calls[0][0]]) {
+      expect(request.metadata).toEqual(retryFailedTurn ? { tldw_retry_failed_turn: true } : undefined)
+      expect(request.messages).toEqual(messages)
+      expect(request.extra_body).toBeUndefined()
+    }
+  })
+
+  it("carries the current local user correlation as app metadata on both transports", async () => {
+    mocks.createChatCompletion.mockResolvedValue({ json: async () => ({ choices: [{ message: { content: "answer" } }] }) })
+    mocks.streamChatCompletion.mockImplementation(async function* () { yield chunk("answer") })
+    const service = new TldwChatService()
+    const messages = [{ role: "user" as const, content: "Question" }]
+    await service.sendMessage(messages, { model: "m", clientMessageId: "local-user" })
+    for await (const _token of service.streamMessage(messages, { model: "m", clientMessageId: "local-user", retryFailedTurn: true })) { /* consume */ }
+    expect(mocks.createChatCompletion.mock.calls[0][0].metadata).toEqual({ tldw_client_message_id: "local-user" })
+    expect(mocks.streamChatCompletion.mock.calls[0][0].metadata).toEqual({ tldw_client_message_id: "local-user", tldw_retry_failed_turn: true })
+    expect(mocks.createChatCompletion.mock.calls[0][0].messages).toEqual(messages)
   })
 
   it("passes the captured request scope to both completion transports", async () => {

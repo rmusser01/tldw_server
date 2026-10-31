@@ -615,15 +615,35 @@ class ToolExecutionSecurity:
         self,
         module: BaseModule,
         tool_args: Any,
+        *,
+        tool_name: str | None = None,
     ) -> Any:
-        """Normalize tool arguments before policy and execution checks."""
+        """Normalize tool arguments before policy and execution checks.
+
+        String values under keys the module declares verbatim for ``tool_name`` (file
+        content such as fs.write's ``content``) pass through byte-exact; every other value,
+        including a non-string under a verbatim key, is sanitised as before. TASK-13294.
+        """
         if not isinstance(tool_args, dict):
             return tool_args
         hardened_args = self.strip_forbidden_tool_argument_overrides(tool_args)
+        # Duck-typed modules (fakes, federation shims) may not inherit the hook.
+        declared = getattr(module, "verbatim_argument_keys", None)
+        verbatim_keys = declared(tool_name) if callable(declared) else frozenset()
+        verbatim = {
+            key: value
+            for key, value in hardened_args.items()
+            if key in verbatim_keys and isinstance(value, str)
+        }
         try:
-            return module.sanitize_input(hardened_args)
+            sanitized = module.sanitize_input(
+                {key: value for key, value in hardened_args.items() if key not in verbatim}
+            )
         except self._noncritical_exceptions as san_err:
             raise InvalidParamsException(f"Invalid arguments: {str(san_err)}") from san_err
+        if verbatim and isinstance(sanitized, dict):
+            sanitized.update(verbatim)
+        return sanitized
 
     @staticmethod
     def normalized_idempotency_key_digest(normalized_key: str | None) -> str:
@@ -2001,7 +2021,7 @@ class ToolExecutionSecurity:
                     tool_name=tool_name,
                     error_type=_safe_exception_family(exc),
                 )
-        tool_args = self.harden_and_sanitize_tool_arguments(module, tool_args)
+        tool_args = self.harden_and_sanitize_tool_arguments(module, tool_args, tool_name=tool_name)
         try:
             arguments_snapshot = self.build_canonical_snapshot(
                 tool_args,

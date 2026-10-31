@@ -176,18 +176,19 @@ def ensure_sqlite_post_core_structures(
 # declared current. The version check below is still performed on every
 # construction; only the redundant re-creation of known-present structures is
 # skipped once it has succeeded for a given database.
-_VERIFIED_SCHEMAS: set[tuple[str, int, int, int]] = set()
+_VERIFIED_SCHEMAS: dict[str, tuple[str, int, int, int, int]] = {}
 _VERIFIED_SCHEMAS_LOCK = threading.Lock()
 
 
 def _schema_verification_key(
     db: SupportsSqlitePostCoreStructures, target_version: int
-) -> tuple[str, int, int, int] | None:
+) -> tuple[str, int, int, int, int] | None:
     """Return a process-cache identity for an on-disk database, else ``None``.
 
-    The device/inode pair is part of the key so a database that is deleted and
-    recreated at the same path (test teardown, a restored backup) is verified
-    again rather than trusted. ``None`` disables caching entirely, which is the
+    Device/inode and change time distinguish a replaced or modified file, even
+    when the filesystem reuses an inode after deletion. Ordinary file changes
+    may require another verification; unchanged warm requests reuse it.
+    ``None`` disables caching entirely, which is the
     required behaviour for in-memory databases: those are distinct per
     connection despite sharing a path.
     """
@@ -200,7 +201,7 @@ def _schema_verification_key(
         stat = os.stat(path)
     except OSError:
         return None
-    return (str(path), int(target_version), stat.st_dev, stat.st_ino)
+    return (str(path), int(target_version), stat.st_dev, stat.st_ino, stat.st_ctime_ns)
 
 
 def reset_schema_verification_cache() -> None:
@@ -228,7 +229,10 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
 
         if current_db_version == target_version:
             verification_key = _schema_verification_key(db, target_version)
-            if verification_key is not None and verification_key in _VERIFIED_SCHEMAS:
+            if (
+                verification_key is not None
+                and _VERIFIED_SCHEMAS.get(verification_key[0]) == verification_key
+            ):
                 # Structures already verified for this database in this process.
                 return
 
@@ -248,7 +252,8 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                 # Only remember verifications that actually completed.
                 if verification_key is not None:
                     with _VERIFIED_SCHEMAS_LOCK:
-                        _VERIFIED_SCHEMAS.add(verification_key)
+                        # Retain only the latest verified state for each path.
+                        _VERIFIED_SCHEMAS[verification_key[0]] = verification_key
             return
 
         if current_db_version > target_version:

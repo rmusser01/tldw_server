@@ -6,9 +6,14 @@ Helpers and FastAPI dependencies for deriving Resource Governor entity keys.
 Preference order:
   1) Auth scopes (request.state.user_id → user:{id})
   2) API key scope (request.state.api_key_id → api_key:{id})
-  3) API key header (X-API-KEY → api_key:{hmac})
-  4) Authorization: Bearer ... (treated as api_key hash if present)
-  5) IP scope (trusted header via RG_CLIENT_IP_HEADER else request.client.host)
+  3) IP scope (trusted header via RG_CLIENT_IP_HEADER else request.client.host)
+
+Unvalidated credentials (a raw X-API-KEY or Authorization header that auth has
+not yet populated request.state for) are never hashed into their own bucket
+here: that would let a rotating fake key mint unlimited fresh buckets. Ingress
+identity for those cases is resolved by RGSimpleMiddleware._principal_entity,
+which validates the credential (or falls back to the IP) before this function
+ever runs.
 """
 
 import os
@@ -18,7 +23,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Security.trusted_proxy import resolve_trusted_client_ip
 
-from .tenant import TenantScopeConfig, get_tenant_id, hash_entity, parse_tenant_config
+from .tenant import TenantScopeConfig, get_tenant_id, parse_tenant_config
 
 _RG_DEPS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -131,24 +136,6 @@ def derive_entity_key(request: Request, tenant_config: TenantScopeConfig | None 
         kid = getattr(request.state, "api_key_id", None)
         if kid is not None:
             return f"api_key:{kid}"
-    except _RG_DEPS_NONCRITICAL_EXCEPTIONS:
-        pass
-
-    # Header-based API key fallback (hashed)
-    try:
-        raw = request.headers.get("X-API-KEY")
-        if raw:
-            return f"api_key:{hash_entity(raw)}"
-    except _RG_DEPS_NONCRITICAL_EXCEPTIONS:
-        pass
-
-    # Authorization bearer fallback (hashed as api_key)
-    try:
-        auth = request.headers.get("Authorization") or ""
-        if auth.lower().startswith("bearer "):
-            token = auth[len("Bearer "):].strip()
-            if token:
-                return f"api_key:{hash_entity(token)}"
     except _RG_DEPS_NONCRITICAL_EXCEPTIONS:
         pass
 

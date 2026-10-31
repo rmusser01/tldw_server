@@ -207,6 +207,30 @@ _DEFINITION_SEQUENCE = (
     ),
     *(
         ServicePromptDefinition(
+            id=f"writing.continuation.{mode}",
+            label=label,
+            description="Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed.",
+            parts=(ServicePromptPart(key="system", label="System instructions", mode="literal", required_variables=()),),
+            default_parts=MappingProxyType({"system": system}),
+            affected_workflows=(
+                ServicePromptWorkflow(id="writing.continuation", label="Writing Playground continuation"),
+            ),
+        )
+        for mode, label, system in (
+            (
+                "predict",
+                "Writing continuation: Predict",
+                "Continue the text from the prompt. Respond with only the continuation.",
+            ),
+            (
+                "fill",
+                "Writing continuation: Fill",
+                "Fill in the missing text between the prefix and suffix. Respond with only the missing text.",
+            ),
+        )
+    ),
+    *(
+        ServicePromptDefinition(
             id=f"study.assistant.{action}",
             label=label,
             description="Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",

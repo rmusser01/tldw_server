@@ -11,6 +11,7 @@ Note: This implementation requires psycopg (v3) to be installed:
     pip install psycopg-pool
 """
 
+import contextlib
 import os
 import threading
 import time
@@ -25,14 +26,19 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import (
+    AuthorizationDeniedError,
     BackendFeatures,
     BackendType,
     ConnectionPool,
+    ConstraintViolationError,
     DatabaseBackend,
     DatabaseConfig,
     DatabaseError,
     FTSQuery,
     QueryResult,
+    SavedViewNameUniqueConstraintError,
+    TransientContentionError,
+    UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
 from .query_utils import (
@@ -64,6 +70,10 @@ if PSYCOPG2_AVAILABLE:
     )
 else:
     _PSYCOPG_DRIVER_EXCEPTIONS = ()
+
+# SQLSTATEs a retry of the whole transaction can clear: serialization_failure,
+# deadlock_detected, lock_not_available.
+_CONTENTION_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 
 _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -107,6 +117,51 @@ _WRITE_COMMANDS = {
     "REINDEX",
     "CLUSTER",
 }
+
+
+def _reset_pooled_connection(conn: Any) -> None:
+    """Scrub per-request session state before a connection returns to the pool.
+
+    The tenant GUCs are written with ``set_config(..., false)``, which is
+    session-scoped: it outlives the transaction and rides the connection back
+    into the pool. A rollback does not clear it. Without this hook the next
+    borrower can inherit the previous request's ``app.current_user_id`` or, worse,
+    its ``app.is_admin``, whenever re-applying scope at checkout fails.
+
+    A connection that cannot be fully scrubbed must not be reused, so any
+    failure is raised rather than swallowed: psycopg_pool discards a connection
+    whose reset callback raises, which is exactly the outcome wanted. Returning
+    quietly would put a connection still carrying another account's identity
+    back into rotation.
+    """
+    failures: list[str] = []
+    for statement in ("RESET ROLE", "RESET SESSION AUTHORIZATION", "RESET ALL"):
+        try:
+            with conn.cursor() as cur:
+                cur.execute(statement)
+        except Exception as exc:  # noqa: BLE001 - recorded, then raised below
+            failures.append(f"{statement}: {exc}")
+
+    # psycopg_pool requires the callback to hand back a connection that is NOT
+    # in a transaction. The statements above open an implicit one, so it has to
+    # be closed here, and with a commit: SET and RESET are transactional in
+    # PostgreSQL, so a rollback would undo the very reset just performed.
+    try:
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 - recorded, then raised below
+        failures.append(f"COMMIT: {exc}")
+        # Leave no open transaction behind either way; the connection is being
+        # discarded, and the rollback cannot make the session state any staler
+        # than the failed commit already left it.
+        with contextlib.suppress(Exception):
+            conn.rollback()
+
+    if failures:
+        raise RuntimeError(
+            "Could not clear session state from a pooled PostgreSQL connection, "
+            "so it may still carry another account's tenant settings. Discarding "
+            "it rather than reusing it. Failures: " + "; ".join(failures)
+        )
 
 
 class PostgreSQLConnectionPool(ConnectionPool):
@@ -161,10 +216,17 @@ class PostgreSQLConnectionPool(ConnectionPool):
                     open=True,
                     # Ensure JSON is parsed into Python objects consistently
                     configure=lambda conn: setattr(conn, 'row_factory', dict_row),
+                    # Clear tenant GUCs on check-in so one request's identity
+                    # cannot be inherited by the next borrower.
+                    reset=_reset_pooled_connection,
                 )
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                # Fallback to defaults if parameters unsupported
-                self._pool = psycopg_pool.ConnectionPool(self._dsn, open=True)
+                # Fallback to defaults if parameters unsupported. The reset hook
+                # is not optional -- it is what stops tenant GUCs leaking between
+                # requests -- so it is kept on this path too.
+                self._pool = psycopg_pool.ConnectionPool(
+                    self._dsn, open=True, reset=_reset_pooled_connection
+                )
         else:
             self._pool = None
 
@@ -566,11 +628,14 @@ class PostgreSQLBackend(DatabaseBackend):
 
         statements = [
             # Maintain both keys for compatibility across modules/tests
-            ("SELECT set_config('app.current_user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.org_ids', %s, false)", (org_ids,)),
-            ("SELECT set_config('app.team_ids', %s, false)", (team_ids,)),
-            ("SELECT set_config('app.is_admin', %s, false)", (is_admin,)),
+            (
+                "SELECT set_config('app.current_user_id', %s, false), "
+                "set_config('app.user_id', %s, false), "
+                "set_config('app.org_ids', %s, false), "
+                "set_config('app.team_ids', %s, false), "
+                "set_config('app.is_admin', %s, false)",
+                (user_id, user_id, org_ids, team_ids, is_admin),
+            ),
         ]
 
         def _run_with_cursor(cur) -> None:
@@ -1009,6 +1074,11 @@ class PostgreSQLBackend(DatabaseBackend):
         start_time = time.time()
         query, params = self._prepare_query(query, params)
         redacted_failure = False
+        unique_failure = False
+        saved_view_name_failure = False
+        constraint_failure = False
+        contention_failure = False
+        authorization_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -1076,6 +1146,26 @@ class PostgreSQLBackend(DatabaseBackend):
             )
 
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
+            _sqlstate = (
+                getattr(e, "sqlstate", None)
+                if isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS)
+                else None
+            )
+            unique_failure = _sqlstate == "23505"
+            saved_view_name_failure = unique_failure and (
+                getattr(getattr(e, "diag", None), "constraint_name", None)
+                == "uq_workspace_source_saved_views_owner_name"
+            )
+            # SQLSTATE class 23 is integrity_constraint_violation: NOT NULL (23502),
+            # FOREIGN KEY (23503), UNIQUE (23505), CHECK (23514) and friends. The CLASS
+            # of failure only -- the driver exception is still never chained and the
+            # message is unchanged.
+            constraint_failure = bool(_sqlstate) and str(_sqlstate).startswith("23")
+            contention_failure = _sqlstate in _CONTENTION_SQLSTATES
+            # 42501 is how a row-level security denial surfaces. Without this the
+            # caller cannot tell a tenant boundary from a syntax error, because
+            # the driver message is redacted and the cause is not chained.
+            authorization_failure = _sqlstate == "42501"
             if not external_conn:
                 try:
                     conn.rollback()
@@ -1083,7 +1173,11 @@ class PostgreSQLBackend(DatabaseBackend):
                     logger.bind(
                         exception_type=type(rollback_exc).__name__,
                     ).debug("Rollback after failed execute() also failed")
-            logger.bind(exception_type=type(e).__name__).error(
+            # SQLSTATE is a fixed five-character class code -- it carries no
+            # query text, parameters or row values, so it can be logged where
+            # the driver message cannot, and it is the difference between
+            # "a tenant boundary held" and "the schema is wrong".
+            logger.bind(exception_type=type(e).__name__, sqlstate=_sqlstate).error(
                 "PostgreSQL query execution failed"
             )
             redacted_failure = True
@@ -1092,6 +1186,19 @@ class PostgreSQLBackend(DatabaseBackend):
                 self.get_pool().return_connection(conn)
 
         if redacted_failure:
+            if saved_view_name_failure:
+                raise SavedViewNameUniqueConstraintError("PostgreSQL query execution failed")
+            if unique_failure:
+                raise UniqueConstraintError("PostgreSQL query execution failed")
+            if authorization_failure:
+                raise AuthorizationDeniedError(
+                    "PostgreSQL denied the statement: row-level security policy "
+                    "or insufficient privilege (SQLSTATE 42501)"
+                )
+            if constraint_failure:
+                raise ConstraintViolationError("PostgreSQL query execution failed")
+            if contention_failure:
+                raise TransientContentionError("PostgreSQL query execution failed")
             raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(
@@ -1286,6 +1393,8 @@ class PostgreSQLBackend(DatabaseBackend):
                 UPDATE {source_table_ident}
                 SET {fts_column_ident} =
                     to_tsvector('english', {columns_concat_set})
+                WHERE {fts_column_ident} IS DISTINCT FROM
+                    to_tsvector('english', {columns_concat_set})
             """  # nosec B608
             cursor.execute(refresh_tsv_sql)
 
@@ -1324,11 +1433,7 @@ class PostgreSQLBackend(DatabaseBackend):
             """)
 
             # Record the mapping for fts_search when table_name != source_table.
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                self._fts_table_map[table_name] = {
-                    "source_table": source_table,
-                    "fts_column": fts_column,
-                }
+            self.register_fts_table(table_name, source_table)
 
             if not external_conn:
                 conn.commit()
@@ -1341,6 +1446,13 @@ class PostgreSQLBackend(DatabaseBackend):
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
+
+    def register_fts_table(self, table_name: str, source_table: str) -> None:
+        """Bind an existing FTS alias on this backend without rebuilding its schema."""
+        self._fts_table_map[table_name] = {
+            "source_table": source_table,
+            "fts_column": f"{table_name}_tsv",
+        }
 
     def fts_search(
         self,

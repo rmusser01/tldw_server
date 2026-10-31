@@ -51,8 +51,8 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
   ],
 }));
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: unknown) => unknown) =>
-    selector(mocks.option),
+  useStoreMessageOption: Object.assign((selector: (state: unknown) => unknown) =>
+    selector(mocks.option), { getState: () => mocks.option }),
 }));
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({
@@ -292,15 +292,17 @@ describe("conversation setup identity", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /could not be saved/i,
     );
-    expect(onApply).not.toHaveBeenCalled();
+    expect(onApply).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
     await user.click(
       await screen.findByRole("button", { name: "Apply", exact: true }),
     );
-    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
-  it("restores the saved scene when applying the other settings fails", async () => {
+  it("keeps the saved scene untouched when applying the other settings fails", async () => {
+    const originalActor = useActorStore.getState().settings;
     const onApply = vi
       .fn()
       .mockRejectedValueOnce(new Error("settings unavailable"));
@@ -316,12 +318,8 @@ describe("conversation setup identity", () => {
       /could not be applied/i,
     );
     expect(onClose).not.toHaveBeenCalled();
-    expect(mocks.saveScene).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        settings: expect.objectContaining({ notes: "Original scene" }),
-      }),
-    );
-    expect(useActorStore.getState().settings?.notes).not.toBe("Draft scene");
+    expect(mocks.saveScene).not.toHaveBeenCalled();
+    expect(useActorStore.getState().settings).toEqual(originalActor);
     expect(screen.getByRole("textbox", { name: "Scene notes" })).toHaveValue(
       "Draft scene",
     );

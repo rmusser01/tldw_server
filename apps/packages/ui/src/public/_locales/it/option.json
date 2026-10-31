@@ -2722,5 +2722,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "Chat e strumenti sono ora disponibili in Opzioni e nel pannello laterale."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "Il salvataggio offline non è disponibile finché il tuo account e l’archiviazione locale non sono confermati. Le tue modifiche restano non salvate."
   }
 }

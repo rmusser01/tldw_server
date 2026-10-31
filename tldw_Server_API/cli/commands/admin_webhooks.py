@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.legacy_import import (
     LegacyImportRequest,
     LegacyImportService,
     LegacyRejectionReason,
+    require_posix_private_artifacts,
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
@@ -91,8 +92,12 @@ def _run(
         [LegacyImportService, WebhookKeyRotationService, AdminWebhookRepository],
         Awaitable[T],
     ],
+    *,
+    requires_private_artifacts: bool = False,
 ) -> T:
     try:
+        if requires_private_artifacts:
+            require_posix_private_artifacts()
         return asyncio.run(_with_runtime(operation))
     except LegacyImportError as exc:
         raise click.ClickException(exc.code.value) from None
@@ -187,7 +192,7 @@ def import_legacy(
             "rollback_retirement_phase": state.rollback_retirement_phase,
         }
 
-    _print_json(_run(operation))
+    _print_json(_run(operation, requires_private_artifacts=True))
 
 
 @admin_webhooks_group.command("reject-source")
@@ -270,7 +275,7 @@ def extract_rollback_backup(
         )
         return {"result": result}
 
-    _print_json(_run(operation))
+    _print_json(_run(operation, requires_private_artifacts=True))
 
 
 @admin_webhooks_group.command("destroy-rollback-key")
@@ -307,7 +312,7 @@ def destroy_rollback_key(
         )
         return {"result": result}
 
-    _print_json(_run(operation))
+    _print_json(_run(operation, requires_private_artifacts=True))
 
 
 @admin_webhooks_group.group("rotate-key")

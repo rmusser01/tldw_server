@@ -23,6 +23,7 @@ export interface UseModelComparisonDeps {
   setSelectedModel: (model: string) => void
   /** Compare feature flags from useMessageOption */
   compareFeatureEnabled: boolean
+  compareFeatureReady?: boolean
   compareMode: boolean
   setCompareMode: (mode: boolean) => void
   compareSelectedModels: string[]
@@ -49,6 +50,7 @@ export function useModelComparison(deps: UseModelComparisonDeps) {
     selectedModel,
     setSelectedModel,
     compareFeatureEnabled,
+    compareFeatureReady = true,
     compareMode,
     setCompareMode,
     compareSelectedModels,
@@ -68,7 +70,7 @@ export function useModelComparison(deps: UseModelComparisonDeps) {
   // Ensure compare selection has a sensible default when enabling compare mode
   React.useEffect(() => {
     if (
-      compareFeatureEnabled &&
+      compareFeatureReady && compareFeatureEnabled &&
       compareMode &&
       compareSelectedModels.length === 0 &&
       selectedModel
@@ -76,6 +78,7 @@ export function useModelComparison(deps: UseModelComparisonDeps) {
       setCompareSelectedModels([selectedModel])
     }
   }, [
+    compareFeatureReady,
     compareFeatureEnabled,
     compareMode,
     compareSelectedModels.length,
@@ -84,10 +87,10 @@ export function useModelComparison(deps: UseModelComparisonDeps) {
   ])
 
   React.useEffect(() => {
-    if (!compareFeatureEnabled && compareMode) {
+    if (compareFeatureReady && !compareFeatureEnabled && compareMode) {
       setCompareMode(false)
     }
-  }, [compareFeatureEnabled, compareMode, setCompareMode])
+  }, [compareFeatureReady, compareFeatureEnabled, compareMode, setCompareMode])
 
   const compareModelMetaById = React.useMemo(
     () => buildCompareModelMetaById((composerModels as any[]) || []),

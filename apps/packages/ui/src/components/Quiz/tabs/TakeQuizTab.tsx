@@ -73,6 +73,17 @@ import {
 import { summarizeQuizSources } from "../utils/sourceBundle"
 import { QuizMarkdown } from "../components/QuizMarkdown"
 import { SourceCitations } from "../components/SourceCitations"
+import {
+  selectMostRecentlyModifiedOsceAttempt,
+  useActiveOsceAttemptsQuery,
+  useAllOsceStationsQuery,
+  useStartOsceAttemptMutation
+} from "../hooks/useOsceQueries"
+import { OscePracticePanel } from "../osce/OscePracticePanel"
+import { tldwAuth } from "@/services/tldw/TldwAuth"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import type { OsceAttemptSummary } from "@/services/osce"
 
 interface TakeQuizTabProps {
   onNavigateToGenerate: () => void
@@ -107,6 +118,206 @@ export const ASSERTION_REASONING_OPTIONS = [
   "The assertion is false, but the reason is true.",
   "Both the assertion and reason are false."
 ] as const
+
+const createClientAttemptId = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+    const random = Math.floor(Math.random() * 16)
+    const value = character === "x" ? random : (random & 0x3) | 0x8
+    return value.toString(16)
+  })
+}
+
+type OsceTakeWorkspaceProps = {
+  quiz: Quiz
+  onClose: () => void
+}
+
+const OsceTakeWorkspace: React.FC<OsceTakeWorkspaceProps> = ({ quiz, onClose }) => {
+  const { t } = useTranslation(["option", "common"])
+  const [userScope, setUserScope] = React.useState<string | null>(null)
+  const [selectedAttemptId, setSelectedAttemptId] = React.useState<number | null>(null)
+  const [selectedStationId, setSelectedStationId] = React.useState<number | null>(null)
+  const [choosingStation, setChoosingStation] = React.useState(false)
+  const [startError, setStartError] = React.useState<string | null>(null)
+  const activeAttemptsQuery = useActiveOsceAttemptsQuery(quiz.id)
+  const stationsQuery = useAllOsceStationsQuery(quiz.id)
+  const startMutation = useStartOsceAttemptMutation()
+  const activeAttempts = activeAttemptsQuery.data?.items ?? []
+  const stations = stationsQuery.data ?? []
+
+  React.useEffect(() => {
+    let cancelled = false
+    void Promise.all([tldwAuth.getCurrentUser(), tldwClient.getConfig()])
+      .then(([user, config]) => {
+        if (!cancelled) {
+          setUserScope(buildChatSurfaceScopeKeyFromConfig(config, { userId: user.id }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStartError("Your user identity could not be resolved for private draft storage.")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (selectedAttemptId != null || choosingStation || activeAttemptsQuery.isLoading) return
+    const mostRecent = selectMostRecentlyModifiedOsceAttempt(activeAttempts)
+    if (mostRecent) {
+      setSelectedAttemptId(mostRecent.id)
+      return
+    }
+    setChoosingStation(true)
+  }, [activeAttempts, activeAttemptsQuery.isLoading, choosingStation, selectedAttemptId])
+
+  React.useEffect(() => {
+    if (selectedStationId != null || stations.length === 0) return
+    const ordered = [...stations].sort(
+      (left, right) => left.order_index - right.order_index || left.id - right.id
+    )
+    setSelectedStationId(ordered[0]?.id ?? null)
+  }, [selectedStationId, stations])
+
+  const startSelectedStation = async () => {
+    if (selectedStationId == null || userScope == null) return
+    setStartError(null)
+    try {
+      const attempt = await startMutation.mutateAsync({
+        stationId: selectedStationId,
+        clientAttemptId: createClientAttemptId()
+      })
+      setSelectedAttemptId(attempt.id)
+      setChoosingStation(false)
+    } catch {
+      setStartError("This practice attempt could not be started.")
+    }
+  }
+
+  const activeAttemptOptions = activeAttempts.map((attempt: OsceAttemptSummary) => ({
+    value: attempt.id,
+    label: `${attempt.station_title} · ${attempt.state === "self_assessment" ? "Self-assessment" : "In progress"}`
+  }))
+  const selectedStationHasActiveAttempt = activeAttempts.some(
+    (attempt: OsceAttemptSummary) => attempt.station_id === selectedStationId
+  )
+
+  if (activeAttemptsQuery.isLoading || stationsQuery.isLoading) {
+    return (
+      <div className="space-y-4 py-2" data-testid="osce-take-loading">
+        <Skeleton active paragraph={{ rows: 3 }} />
+        <Skeleton active paragraph={{ rows: 6 }} />
+      </div>
+    )
+  }
+
+  if (selectedAttemptId != null && !choosingStation) {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm text-text-muted">
+            {t("option:quiz.osceActiveAttempts", { defaultValue: "Active OSCE attempts" })}
+            <Select
+              aria-label="Active OSCE attempts"
+              value={selectedAttemptId}
+              options={activeAttemptOptions}
+              onChange={setSelectedAttemptId}
+              className="w-full sm:max-w-lg"
+            />
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {stations.length > 0 && (
+              <Button className="min-h-11 whitespace-normal" onClick={() => setChoosingStation(true)}>
+                {t("option:quiz.osceStartAnother", { defaultValue: "Start another station" })}
+              </Button>
+            )}
+            <Button className="min-h-11 whitespace-normal" onClick={onClose}>
+              {t("option:quiz.backToList", { defaultValue: "Back to list" })}
+            </Button>
+          </div>
+        </div>
+        {userScope ? (
+          <OscePracticePanel
+            attemptId={selectedAttemptId}
+            userScope={userScope}
+            onClose={onClose}
+          />
+        ) : startError ? (
+          <DesignSystemAlert variant="error" title={startError} />
+        ) : (
+          <Skeleton active paragraph={{ rows: 4 }} />
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <Typography.Title level={4} className="!mb-1">{quiz.name}</Typography.Title>
+          <Typography.Text className="text-text-muted">
+            {t("option:quiz.osceChooseStation", { defaultValue: "Choose a station" })}
+          </Typography.Text>
+        </div>
+        <Button className="min-h-11 whitespace-normal" onClick={onClose}>
+          {t("option:quiz.backToList", { defaultValue: "Back to list" })}
+        </Button>
+      </div>
+
+      {activeAttempts.length > 0 && (
+        <label className="flex max-w-xl flex-col gap-1 text-sm text-text-muted">
+          {t("option:quiz.osceActiveAttempts", { defaultValue: "Active OSCE attempts" })}
+          <Select
+            aria-label="Active OSCE attempts"
+            placeholder="Resume an active attempt"
+            options={activeAttemptOptions}
+            onChange={(attemptId) => {
+              setSelectedAttemptId(attemptId)
+              setChoosingStation(false)
+            }}
+          />
+        </label>
+      )}
+
+      {stations.length === 0 ? (
+        <Empty description="No active stations are available. Existing attempts can still be resumed." />
+      ) : (
+        <div className="space-y-3">
+          {stations.length > 1 ? (
+            <label className="flex max-w-xl flex-col gap-1 text-sm text-text-muted">
+              {t("option:quiz.osceStationPicker", { defaultValue: "Choose a station" })}
+              <Select
+                aria-label="Choose a station"
+                value={selectedStationId}
+                options={[...stations]
+                  .sort((left, right) => left.order_index - right.order_index || left.id - right.id)
+                  .map((station) => ({ value: station.id, label: station.title }))}
+                onChange={setSelectedStationId}
+              />
+            </label>
+          ) : (
+            <Typography.Text strong>{stations[0]?.title}</Typography.Text>
+          )}
+          <Button
+            type={selectedStationHasActiveAttempt ? "default" : "primary"}
+            className="min-h-11 whitespace-normal"
+            loading={startMutation.isPending}
+            disabled={selectedStationId == null || userScope == null || startMutation.isPending}
+            onClick={() => void startSelectedStation()}
+          >
+            {t("option:quiz.osceStartNew", { defaultValue: "Start new practice" })}
+          </Button>
+        </div>
+      )}
+
+      {startError && <DesignSystemAlert variant="error" title={startError} />}
+    </div>
+  )
+}
 
 const normalizeQuestionTag = (tag: unknown): string =>
   String(tag).trim().toLowerCase().replace(/[\s/-]+/g, "_")
@@ -342,6 +553,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const [isRetryingQueuedSubmission, setIsRetryingQueuedSubmission] = React.useState(false)
   const [submissionQueueStorageUnavailable, setSubmissionQueueStorageUnavailable] = React.useState(false)
   const [highlightedQuizId, setHighlightedQuizId] = React.useState<number | null>(null)
+  const [activeOsceQuizId, setActiveOsceQuizId] = React.useState<number | null>(null)
   const lastAutoStartId = React.useRef<number | null>(null)
   const lastAutoHighlightId = React.useRef<number | null>(null)
   const lastExternalSearchToken = React.useRef<number | null>(null)
@@ -379,7 +591,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const { data: quizDetails } = useQuizQuery(detailQuizId, { enabled: detailQuizId != null })
   const directPreviewQuizId = startQuizId ?? highlightQuizId ?? null
   const { data: directPreviewQuiz } = useQuizQuery(directPreviewQuizId, {
-    enabled: directPreviewQuizId != null && detailQuizId == null
+    enabled: directPreviewQuizId != null && directPreviewQuizId !== detailQuizId
   })
   const startAttemptMutation = useStartAttemptMutation()
   const submitAttemptMutation = useSubmitAttemptMutation()
@@ -407,6 +619,10 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     }
     return items
   }, [directPreviewQuiz, quizzes, sortBy])
+  const autoStartQuiz = startQuizId == null
+    ? null
+    : quizzes.find((quiz) => quiz.id === startQuizId) ??
+      (directPreviewQuiz?.id === startQuizId ? directPreviewQuiz : null)
 
   const {
     storageUnavailable,
@@ -566,6 +782,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     setStudySessionLoading(false)
     lastExpiredPracticeQuestionIdRef.current = null
     setActiveQuizId(null)
+    setActiveOsceQuizId(null)
     setPendingQuizId(null)
   }
 
@@ -706,10 +923,17 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     if (lastAutoStartId.current === startQuizId) {
       return
     }
+    if (autoStartQuiz == null) return
     lastAutoStartId.current = startQuizId
-    requestGradedStart(startQuizId)
+    if (autoStartQuiz.activity_type === "osce") {
+      if (Number.isInteger(autoStartQuiz.total_stations)) {
+        setActiveOsceQuizId(autoStartQuiz.id)
+      }
+    } else {
+      requestGradedStart(startQuizId)
+    }
     onStartHandled?.()
-  }, [onStartHandled, requestGradedStart, startQuizId])
+  }, [autoStartQuiz, onStartHandled, requestGradedStart, startQuizId])
 
   React.useEffect(() => {
     if (highlightQuizId == null) {
@@ -2035,6 +2259,19 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     )
   }
 
+  if (activeOsceQuizId != null) {
+    const activeOsceQuiz = sortedQuizzes.find((quiz) => quiz.id === activeOsceQuizId)
+    if (activeOsceQuiz?.activity_type === "osce") {
+      return (
+        <div className="space-y-4">
+          {contextHolder}
+          {renderAssignmentAlert()}
+          <OsceTakeWorkspace quiz={activeOsceQuiz} onClose={() => setActiveOsceQuizId(null)} />
+        </div>
+      )
+    }
+  }
+
   if (attempt && result) {
     return (
       <div className="space-y-4">
@@ -2651,7 +2888,20 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                   : undefined}
                 data-testid={`take-quiz-card-${quiz.id}`}
                 data-highlighted={isHighlighted ? "true" : undefined}
-                actions={[
+                actions={quiz.activity_type === "osce" ? [
+                  <Button
+                    key="practice-osce"
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    className={TOUCH_TARGET_CLASS}
+                    onClick={() => {
+                      setHighlightedQuizId(null)
+                      setActiveOsceQuizId(quiz.id)
+                    }}
+                  >
+                    {t("option:quiz.oscePracticeStation", { defaultValue: "Practice station" })}
+                  </Button>
+                ] : [
                   <Button
                     key="start"
                     type="primary"
@@ -2678,16 +2928,22 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                         </p>
                       )}
                       <div className="flex flex-wrap gap-2">
-                        <Tag icon={<QuestionCircleOutlined />}>
-                          {quiz.total_questions}{" "}
-                          {t("option:quiz.questions", { defaultValue: "questions" })}
-                        </Tag>
+                        {quiz.activity_type === "osce" ? (
+                          <Tag icon={<PlayCircleOutlined />}>
+                            {quiz.total_stations} {quiz.total_stations === 1 ? "station" : "stations"}
+                          </Tag>
+                        ) : (
+                          <Tag icon={<QuestionCircleOutlined />}>
+                            {quiz.total_questions}{" "}
+                            {t("option:quiz.questions", { defaultValue: "questions" })}
+                          </Tag>
+                        )}
                         {quiz.time_limit_seconds && (
                           <Tag icon={<ClockCircleOutlined />}>
                             {formatQuizTimeLimit(quiz.time_limit_seconds)}
                           </Tag>
                         )}
-                        {quiz.passing_score != null && (
+                        {quiz.activity_type !== "osce" && quiz.passing_score != null && (
                           <Tag color="blue">
                             {t("option:quiz.passingScoreLabel", { defaultValue: "Pass" })}: {quiz.passing_score}%
                           </Tag>
@@ -2728,7 +2984,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                             </Typography.Link>
                           </Tag>
                         )}
-                        {lastScoreByQuizId.has(quiz.id) && (
+                        {quiz.activity_type !== "osce" && lastScoreByQuizId.has(quiz.id) && (
                           <Tag color="geekblue">
                             {t("option:quiz.lastScore", { defaultValue: "Last score: {{score}}%", score: lastScoreByQuizId.get(quiz.id) })}
                           </Tag>

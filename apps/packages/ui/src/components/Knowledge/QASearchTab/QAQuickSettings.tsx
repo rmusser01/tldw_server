@@ -138,8 +138,7 @@ export const QAQuickSettings: React.FC<QAQuickSettingsProps> = ({
     [providerEntries, t]
   )
 
-  const effectiveProviderKey =
-    generationProvider || providerCatalog?.default_provider || null
+  const effectiveProviderKey = generationProvider || null
 
   const selectedProviderConfig = React.useMemo(
     () =>
@@ -215,11 +214,13 @@ export const QAQuickSettings: React.FC<QAQuickSettingsProps> = ({
           </span>
           <Select
             value={generationProvider ?? SERVER_DEFAULT_PROVIDER_VALUE}
-            onChange={(value) =>
-              onGenerationProviderChange(
-                value === SERVER_DEFAULT_PROVIDER_VALUE ? null : String(value)
+            onChange={(value) => {
+              const provider = value === SERVER_DEFAULT_PROVIDER_VALUE ? null : String(value)
+              onGenerationProviderChange(provider)
+              onGenerationModelChange(
+                providerEntries.find((entry) => entry.name === provider)?.default_model?.trim() || ""
               )
-            }
+            }}
             options={providerOptions}
             size="small"
             className="w-full"

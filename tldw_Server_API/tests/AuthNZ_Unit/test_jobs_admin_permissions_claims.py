@@ -84,7 +84,7 @@ def _build_app_with_overrides(
             self.backend = backend
             self.db_url = db_url
 
-        def _get_queue_flags(self, domain: str, queue: str) -> dict:
+        def get_queue_flags(self, domain: str, queue: str) -> dict:
             return {"paused": False, "drain": False}
 
         def set_queue_control(self, domain: str, queue: str, action: str) -> dict:

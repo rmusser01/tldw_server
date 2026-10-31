@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_s
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
     apply_postgres_core_media_schema,
+    ensure_postgres_sync_log_contract,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
     ensure_postgres_fts,
@@ -39,7 +40,6 @@ class SupportsPostgresPostCoreStructures(Protocol):
     def _ensure_postgres_source_hash_column(self, conn: Any) -> None: ...
     def _ensure_postgres_claims_extensions(self, conn: Any) -> None: ...
     def _ensure_postgres_email_schema(self, conn: Any) -> None: ...
-    def _sync_postgres_sequences(self, conn: Any) -> None: ...
 
     _CURRENT_SCHEMA_VERSION: int
     backend: Any
@@ -103,6 +103,7 @@ def ensure_postgres_post_core_structures(
 ) -> None:
     """Ensure non-core PostgreSQL schema structures after base bootstrap or migration."""
 
+    ensure_postgres_sync_log_contract(db, conn)
     db._ensure_postgres_collections_tables(conn)
     db._ensure_postgres_tts_history(conn)
     db._ensure_postgres_audio_presets(conn)
@@ -112,7 +113,8 @@ def ensure_postgres_post_core_structures(
     db._ensure_postgres_source_hash_column(conn)
     db._ensure_postgres_claims_extensions(conn)
     db._ensure_postgres_email_schema(conn)
-    db._sync_postgres_sequences(conn)
+    # Sequence repair belongs to explicit migrations. A routine unscoped
+    # handle may see no rows under forced RLS and must not rewind global IDs.
     ensure_postgres_policies(db, conn)
 
 

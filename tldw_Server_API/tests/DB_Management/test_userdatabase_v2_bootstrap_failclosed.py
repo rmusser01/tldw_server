@@ -309,16 +309,27 @@ def test_metadata_only_update_preserves_success_without_advancing_profile_versio
     assert after == before
 
 
-def test_visible_update_of_missing_user_preserves_false_result(tmp_path):
-    db = UserDatabase(
-        config=DatabaseConfig(
+@pytest.mark.parametrize("backend_name", ["sqlite", "postgres"])
+@pytest.mark.parametrize("user_id", [None, 999])
+def test_visible_update_of_missing_user_preserves_false_result(
+    tmp_path: Path, request: pytest.FixtureRequest, backend_name: str, user_id: int | None
+) -> None:
+    """A missing target remains a no-op on both actual database backends."""
+    config = (
+        request.getfixturevalue("pg_database_config")
+        if backend_name == "postgres"
+        else DatabaseConfig(
             backend_type=BackendType.SQLITE,
             sqlite_path=str(tmp_path / "users.db"),
-        ),
-        client_id="test_suite",
+        )
     )
-
-    assert db.update_user(999, email="missing@example.com") is False
+    db = UserDatabase(config=config, client_id="test_suite")
+    try:
+        assert db.backend.backend_type == config.backend_type
+        assert db.update_user(user_id, email="missing@example.com") is False
+        assert db.delete_user(user_id) is False
+    finally:
+        db.backend.get_pool().close_all()
 
 
 def test_ensure_core_columns_handles_real_legacy_sqlite_uuid_migration(tmp_path):

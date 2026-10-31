@@ -828,3 +828,15 @@ def test_build_call_params_negotiates_structured_response_format(
             },
         },
     }
+
+
+def test_history_owner_envelopes_do_not_reach_provider_extensions():
+    req = ChatCompletionRequest.model_construct(
+        model="gpt-4o-mini", messages=[], tldw_history_selection_v1={"owner_key": "private-owner"},
+        extra_body={"tldw_history_selection_v1": {"private": True}, "tldw_history_admission_v1": {}, "safe": 1},
+        extra_headers={"tldw-history-admission-v1": "private", "X-Safe": "yes"})
+    params = build_call_params_from_request(request_data=req, target_api_provider="openai", provider_api_key="test",
+        templated_llm_payload=[], final_system_message=None, app_config=None)
+    assert "tldw_history_selection_v1" not in params
+    assert params["extra_body"] == {"safe": 1}
+    assert params["extra_headers"] == {"X-Safe": "yes"}

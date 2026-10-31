@@ -555,5 +555,11 @@
     "minutesAgoShort": "{{count}}分鐘前",
     "hoursAgoShort": "{{count}}小時前",
     "daysAgoShort": "{{count}}天前"
+  },
+  "help": {
+    "loadFailed": "無法載入說明。請重新連線，儲存修改，然後重新載入頁面。",
+    "loading": "正在載入說明…",
+    "confirmReload": "重新載入此頁面？未儲存的修改可能會遺失。",
+    "reload": "重新載入頁面"
   }
 }

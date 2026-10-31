@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from dataclasses import replace
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -23,6 +24,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_io import (
     load_chat_history_from_file_and_save_to_db,
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     ConversationResumeStore,
     build_materialized_behavior_settings,
@@ -1548,6 +1550,53 @@ def test_list_omits_detail_only_resume_authority_without_loading_snapshot_bodies
     assert tampered_detail.json()["resume_ineligible_reason"] == (
         "behavior_snapshot_invalid"
     )
+
+
+@pytest.mark.integration
+def test_startup_visibility_preserves_snapshot_resume_restore_and_greeting(
+    test_client: Any, auth_headers: dict[str, str], character_db: Any,
+) -> None:
+    """List redaction and both restore branches preserve frozen Character behavior."""
+    db = character_db
+    db.upsert_workspace("snapshot-private-origin", "Origin")
+    character_id = db.add_character_card({"name": "Startup history", "first_message": "Welcome back."})
+    cid = create_character_conversation(
+        db, conversation_data={"character_id": character_id, "title": "Independent history", "client_id": str(db.client_id)},
+        provider="local-llm", model="local-test",
+        initial_messages=[{"sender": "Startup history", "role": "assistant", "content": "Welcome back."}],
+        assistant_startup=AssistantStartup(source="system_fallback", workspace_id="snapshot-private-origin", workspace_version=1),
+    )
+    raw = db.get_conversation_by_id(cid)["assistant_startup_json"]
+    stored = _snapshot_storage_bytes(db, cid)
+    state = db.get_roleplay_resume_state(cid)
+    path = f"/api/v1/chats/{cid}"
+    before = test_client.get(path, headers=auth_headers)
+    assert before.status_code == 200, before.text
+    assert before.json()["assistant_startup"] == {
+        "schema_version": 1, "source": "system_fallback", "workspace_id": "snapshot-private-origin", "workspace_version": 1,
+    }
+    assert before.json()["resume_eligible"] is True
+    db.delete_workspace("snapshot-private-origin", expected_version=1)
+    listed = test_client.get("/api/v1/chats/", headers=auth_headers)
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json()["chats"] if item["id"] == cid)
+    assert item["assistant_startup"] == {"schema_version": 1, "source": "unknown", "workspace_id": None, "workspace_version": None}
+    assert {"behavior_snapshot", "resume_eligible", "settings_version", "history_version", "tail"}.isdisjoint(item)
+    for deleted in (True, False):
+        if deleted:
+            db.soft_delete_conversation(cid, db.get_conversation_by_id(cid)["version"])
+        restored = test_client.post(path + "/restore", headers=auth_headers)
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["assistant_startup"] == item["assistant_startup"]
+        for field in ("behavior_snapshot", "resume_eligible", "resume_ineligible_reason", "settings_version", "history_version", "tail"):
+            assert restored.json()[field] == before.json()[field]
+    assert _snapshot_storage_bytes(db, cid) == stored
+    after = db.get_roleplay_resume_state(cid)
+    assert {key: value for key, value in after.items() if key != "conversation"} == {
+        key: value for key, value in state.items() if key != "conversation"
+    }
+    assert db.get_messages_for_conversation(cid)[0]["content"] == "Welcome back."
+    assert db.get_conversation_by_id(cid)["assistant_startup_json"] == raw
 
 
 @pytest.mark.integration
@@ -4167,9 +4216,10 @@ def test_postgres_world_book_entry_budget_preserves_owner_linkage_before_expansi
     ]
     assert len(attachment_queries) == 2
     assert all("cc.client_id = ?" in query for query, _params in attachment_queries)
+    assert all("wb.client_id = ?" in query for query, _params in attachment_queries)
     assert [params for _query, params in attachment_queries] == [
-        (11, "alice"),
-        (12, "alice"),
+        (11, "alice", "alice"),
+        (12, "alice", "alice"),
     ]
 
 
@@ -5074,6 +5124,11 @@ def test_module_creator_uses_database_owner_for_postgres_custom_preset(
         section_templates={"system_prompt": "{{system_prompt}}"},
     )
     character_id = character_db.add_character_card({"name": "Owned Preset Creator"})
+    # This SQLite-backed dialect probe needs the shared PostgreSQL owner column.
+    # Actual cross-account storage is exercised by the official PostgreSQL suite.
+    WorldBookService(character_db)
+    with character_db.transaction() as conn:
+        conn.execute("ALTER TABLE world_books ADD COLUMN client_id TEXT")
     monkeypatch.setattr(
         character_conversation_factory,
         "resolve_character_prompt_preset",

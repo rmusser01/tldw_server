@@ -1,6 +1,7 @@
 import importlib
 import sqlite3
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -218,7 +219,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
         _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
         _ensure_postgres_email_schema=lambda value: calls.append(("email_schema", value)),
-        _sync_postgres_sequences=lambda value: calls.append(("sequence_sync", value)),
+        _sync_postgres_sequences=lambda value: pytest.fail("routine bootstrap must not rewind RLS-scoped sequences"),
     )
 
     monkeypatch.setattr(
@@ -233,9 +234,15 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         raising=False,
     )
 
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_sync_log_contract",
+        lambda value, connection: calls.append(("sync_contract", value, connection)),
+    )
     postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
 
     assert calls == [
+        ("sync_contract", db, conn),
         ("collections", conn),
         ("tts_history", conn),
         ("audio_presets", conn),
@@ -249,7 +256,6 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("source_hash", conn),
         ("claims_extensions", conn),
         ("email_schema", conn),
-        ("sequence_sync", conn),
         ("policies", db, conn),
     ]
 
@@ -748,12 +754,12 @@ def test_sync_postgres_sequences_skips_incomplete_rows() -> None:
 
 
 @pytest.mark.unit
-def test_sync_postgres_sequences_invalid_scalar_uses_safe_setval_branch() -> None:
+def test_sync_postgres_sequences_invalid_scalar_does_not_reset_sequence() -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.schema import (
         postgres_sequence_maintenance as postgres_sequence_maintenance_module,
     )
 
-    conn = object()
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
     execute_calls: list[tuple[str, tuple[object, ...] | None, object]] = []
 
     class FakeBackend:
@@ -780,7 +786,9 @@ def test_sync_postgres_sequences_invalid_scalar_uses_safe_setval_branch() -> Non
                         }
                     ]
                 )
-            if len(execute_calls) == 2:
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 41, "is_called": True}])
+            if query.startswith("SELECT COALESCE(MAX"):
                 return SimpleNamespace(scalar="not-an-int")
             return SimpleNamespace()
 
@@ -802,13 +810,15 @@ def test_sync_postgres_sequences_invalid_scalar_uses_safe_setval_branch() -> Non
                 "        JOIN pg_class tab ON tab.oid = dep.refobjid\n"
                 "        JOIN pg_namespace tab_ns ON tab_ns.oid = tab.relnamespace\n"
                 "        JOIN pg_attribute col ON col.attrelid = tab.oid AND col.attnum = dep.refobjsubid\n"
-                "        WHERE seq.relkind = 'S' AND tab_ns.nspname = 'public';"
+                "        WHERE seq.relkind = 'S' AND tab_ns.nspname = 'public'\n"
+                "        ORDER BY sequence_ns.nspname, seq.relname;"
             ),
             None,
             conn,
         ),
+        ('ALTER SEQUENCE "public"."media_id_seq" OWNED BY "public"."media"."id"', None, conn),
+        ('SELECT last_value, is_called FROM "public"."media_id_seq"', None, conn),
         ('SELECT COALESCE(MAX("id"), 0) AS max_id FROM "media"', None, conn),
-        ("SELECT setval(%s, %s, false)", ("public.media_id_seq", 1), conn),
     ]
 
 
@@ -818,7 +828,7 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
         postgres_sequence_maintenance as postgres_sequence_maintenance_module,
     )
 
-    conn = object()
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
     execute_calls: list[tuple[str, tuple[object, ...] | None, object]] = []
 
     class FakeBackend:
@@ -845,7 +855,9 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
                         }
                     ]
                 )
-            if len(execute_calls) == 2:
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 1, "is_called": False}])
+            if query.startswith("SELECT COALESCE(MAX"):
                 return SimpleNamespace(scalar=7)
             return SimpleNamespace()
 
@@ -855,7 +867,7 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
 
     assert execute_calls[-1] == (
         "SELECT setval(%s, %s)",
-        ("custom_schema.media_id_seq", 7),
+        ('"custom_schema"."media_id_seq"', 7),
         conn,
     )
 
@@ -1850,24 +1862,30 @@ def test_email_schema_structures_ensure_sqlite_email_schema_executes_scripts_in_
     assert missing_fts_conn.scripts == [
         "email schema sql",
         "email indexes sql",
+        email_schema_structures_module._EMAIL_SEARCH_LOOKUP_INDEXES,
         "email fts sql",
     ]
     assert existing_fts_conn.scripts == [
         "email schema sql",
         "email indexes sql",
+        email_schema_structures_module._EMAIL_SEARCH_LOOKUP_INDEXES,
         "email fts sql",
     ]
     assert missing_fts_conn.queries == [
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_fts' LIMIT 1",
+        "CREATE INDEX IF NOT EXISTS idx_email_message_count_cover "
+        "ON email_messages(tenant_id, internal_date, id, media_id, has_attachments, subject)",
         "INSERT INTO email_fts(email_fts) VALUES ('rebuild')",
     ]
     assert existing_fts_conn.queries == [
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_fts' LIMIT 1",
+        "CREATE INDEX IF NOT EXISTS idx_email_message_count_cover "
+        "ON email_messages(tenant_id, internal_date, id, media_id, has_attachments, subject)",
     ]
 
 
 @pytest.mark.unit
-def test_email_schema_structures_ensure_postgres_email_schema_executes_converted_statements_in_order_and_tolerates_failures() -> None:
+def test_email_schema_structures_ensure_postgres_email_schema_executes_converted_statements_in_order_and_tolerates_failures(monkeypatch) -> None:
     module_name = "tldw_Server_API.app.core.DB_Management.media_db.schema.email_schema_structures"
     try:
         email_schema_structures_module = importlib.import_module(module_name)
@@ -1888,10 +1906,11 @@ def test_email_schema_structures_ensure_postgres_email_schema_executes_converted
                 "CREATE TABLE email_sources (...)",
                 "CREATE TABLE email_messages (...)",
             ]
-        if sql == "email indexes sql":
+        if sql == "email indexes sql" + email_schema_structures_module._EMAIL_SEARCH_LOOKUP_INDEXES:
             return [
                 "CREATE INDEX idx_email_messages_tenant_date_id",
                 "CREATE INDEX idx_email_messages_labels_gin",
+                "CREATE INDEX lookup_indexes",
             ]
         raise AssertionError(f"unexpected sql blob {sql!r}")
 
@@ -1903,6 +1922,10 @@ def test_email_schema_structures_ensure_postgres_email_schema_executes_converted
         backend=FakeBackend(),
     )
 
+    monkeypatch.setattr(
+        email_schema_structures_module, "_ensure_postgres_email_search_acceleration",
+        lambda _db, connection: calls.append(("optional search acceleration", connection)),
+    )
     email_schema_structures_module.ensure_postgres_email_schema(db, conn)
 
     assert calls == [
@@ -1910,6 +1933,10 @@ def test_email_schema_structures_ensure_postgres_email_schema_executes_converted
         ("CREATE TABLE email_messages (...)", conn),
         ("CREATE INDEX idx_email_messages_tenant_date_id", conn),
         ("CREATE INDEX idx_email_messages_labels_gin", conn),
+        ("CREATE INDEX lookup_indexes", conn),
+        ("CREATE INDEX IF NOT EXISTS idx_email_message_count_cover "
+         "ON email_messages(tenant_id, internal_date, id, media_id, has_attachments)", conn),
+        ("optional search acceleration", conn),
     ]
 
 

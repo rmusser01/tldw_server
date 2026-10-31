@@ -1,15 +1,26 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { MemoryRouter } from "react-router-dom"
-import { render, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter, useNavigate } from "react-router-dom"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import OptionLayout, { useOptionLayoutShellOverrides } from "../Layout"
 
 const storeMessageOptionMock = vi.hoisted(() =>
   vi.fn(() => ({ historyId: null, serverChatId: null }))
 )
+const sidebarState = vi.hoisted(() => ({ enabled: false, mobile: false }))
+
+vi.mock("antd", async (importOriginal) => ({
+  ...await importOriginal<typeof import("antd")>(),
+  Drawer: ({ children, open }: { children: React.ReactNode; open: boolean }) => open ? <div role="dialog">{children}</div> : null
+}))
+
+vi.mock("@/components/Common/ChatSidebar", () => ({
+  ChatSidebar: ({ onConversationSelected }: { onConversationSelected?: () => void }) => <aside data-testid="chat-sidebar"><button onClick={onConversationSelected}>Select saved conversation</button></aside>
+}))
 
 vi.mock("@/hooks/useLayoutEffectsOwner", () => ({
   useLayoutEffectsOwner: () => false
@@ -46,11 +57,11 @@ vi.mock("@/hooks/useMigration", () => ({
 }))
 
 vi.mock("@/hooks/useFeatureFlags", () => ({
-  useChatSidebar: () => [false]
+  useChatSidebar: () => [sidebarState.enabled]
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false
+  useMobile: () => sidebarState.mobile
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
@@ -70,7 +81,7 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
 }))
 
 vi.mock("@/components/Layouts/Header", () => ({
-  Header: () => <div data-testid="header" />
+  Header: () => { const selection = useHistorySelectionContext(); return <div data-testid="header" data-history-controller={selection ? "present" : "absent"} /> }
 }))
 
 vi.mock("@/components/Layouts/QuickIngestButton", () => ({
@@ -145,6 +156,10 @@ vi.mock("@/context/demo-mode", () => ({
 }))
 
 describe("OptionLayout shell overrides", () => {
+  beforeEach(() => {
+    sidebarState.enabled = false
+    sidebarState.mobile = false
+  })
   afterEach(() => {
     delete (
       globalThis as typeof globalThis & {
@@ -152,6 +167,24 @@ describe("OptionLayout shell overrides", () => {
       }
     ).__tldwOptionShell
     storeMessageOptionMock.mockClear()
+  })
+
+  it("closes the mobile drawer on accepted selection without a route change", () => {
+    sidebarState.enabled = true
+    sidebarState.mobile = true
+    render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><div>Chat</div></OptionLayout></MemoryRouter>)
+    act(() => window.dispatchEvent(new CustomEvent("tldw:open-chat-sidebar")))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Select saved conversation" }))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("keeps the desktop sidebar mounted after selection", () => {
+    sidebarState.enabled = true
+    render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><div>Chat</div></OptionLayout></MemoryRouter>)
+    fireEvent.click(screen.getByRole("button", { name: "Select saved conversation" }))
+    expect(screen.getByTestId("chat-sidebar")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
   it("does not clear another shell override if this render never applied one", () => {
@@ -358,4 +391,38 @@ describe("OptionLayout bypass block (#2889)", () => {
     expect(main).toHaveAttribute("id", "main-content")
     expect(main).toHaveAttribute("tabindex", "-1")
   })
+})
+
+it("places the chat controller above both shell consumers and route content", () => {
+  delete (globalThis as any).__tldwOptionShell
+  function Probe() {
+    const selection = useHistorySelectionContext()
+    return <output data-testid="selection-probe">{selection ? "present" : "absent"}</output>
+  }
+  const view = render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><Probe /></OptionLayout></MemoryRouter>)
+  expect(view.getByTestId("header")).toHaveAttribute("data-history-controller", "present")
+  expect(view.getByTestId("selection-probe")).toHaveTextContent("present")
+})
+
+it("reuses the shell controller and gives chat route reentry a fresh lifetime", () => {
+  delete (globalThis as any).__tldwOptionShell
+  const seen: any[] = []
+  function Probe() {
+    const selection = useHistorySelectionContext()
+    const navigate = useNavigate()
+    seen.push(selection?.getReference ?? null)
+    return <><button onClick={() => navigate("/settings")}>Leave</button><button onClick={() => navigate("/chat")}>Return</button></>
+  }
+  function Content() {
+    const current = useHistorySelectionContext()
+    return current ? <HistorySelectionProvider><Probe /></HistorySelectionProvider> : <Probe />
+  }
+  const view = render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><Content /></OptionLayout></MemoryRouter>)
+  const first = seen.at(-1)
+  expect(first).toBeTypeOf("function")
+  fireEvent.click(view.getByText("Leave"))
+  expect(seen.at(-1)).toBeNull()
+  fireEvent.click(view.getByText("Return"))
+  expect(seen.at(-1)).toBeTypeOf("function")
+  expect(seen.at(-1)).not.toBe(first)
 })

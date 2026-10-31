@@ -21,18 +21,55 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+from loguru import logger
 
 METRICS = ("queue_depth", "db_pool_in_use", "storage_bytes")
 MAX_RESPONSE_BYTES = 1024 * 1024
 
 
+def _record_failure(errors: Counter[str], exc: Exception, **context: str) -> None:
+    """Count a bounded category and log its first occurrence without exception text."""
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+        category = "timeout"
+    elif isinstance(exc, httpx.HTTPError):
+        category = "http_error"
+    elif isinstance(exc, json.JSONDecodeError):
+        category = "invalid_json"
+    elif str(exc) == "response size limit exceeded":
+        category = "response_size_limit"
+    else:
+        category = "invalid_response"
+    errors[category] += 1
+    if errors[category] == 1:
+        logger.bind(
+            operation="release_soak", failure_category=category,
+            exception_type=type(exc).__name__, **context,
+        ).warning("Soak observation failed")
+
+
 def number(value: Any, minimum: float, maximum: float) -> bool:
-    """Reject booleans, nonfinite measurements and out-of-range values."""
+    """Check a measurement against inclusive finite bounds.
+
+    Args:
+        value: Candidate numeric measurement; booleans are invalid.
+        minimum: Inclusive lower bound.
+        maximum: Inclusive upper bound.
+    Returns:
+        Whether a plain int or float falls within the supplied bounds.
+    """
     return type(value) in (int, float) and minimum <= value <= maximum
 
 
 def path_is_local(value: Any) -> bool:
-    """Allow only origin-relative HTTP paths without redirect-like syntax."""
+    """Check whether an input is an origin-relative HTTP path.
+
+    Args:
+        value: Candidate path, with no fragment, control or redirect-like syntax.
+    Returns:
+        Whether the input is a permitted path string.
+    Raises:
+        ValueError: URL parsing rejects malformed syntax.
+    """
     return (
         isinstance(value, str)
         and value.startswith("/")
@@ -44,7 +81,16 @@ def path_is_local(value: Any) -> bool:
 
 
 def validate(profile: dict, dataset: list) -> None:
-    """Validate all run inputs before issuing requests; no defaults hide omissions."""
+    """Validate all run inputs before issuing requests; no defaults hide omissions.
+
+    Args:
+        profile: Complete operating envelope documented in Release_Capacity_Soak.md.
+        dataset: Two to 32 named authentication/workflow HTTP request definitions.
+    Returns:
+        None when all fields and threshold bounds are valid.
+    Raises:
+        ValueError: Inputs are incomplete, malformed, unsafe or outside bounds.
+    """
     try:
         if not isinstance(profile, dict) or not isinstance(dataset, list):
             raise ValueError("profile must be an object and dataset an array")
@@ -166,7 +212,20 @@ def validate(profile: dict, dataset: list) -> None:
 
 
 async def request(client: httpx.AsyncClient, row: dict, timeout: float, *, json_body: bool = False) -> tuple[int, Any]:
-    """Bound response memory and entire request time, including a slow body."""
+    """Bound response memory and entire request time, including a slow body.
+
+    Args:
+        client: HTTP client pinned to the validated profile origin.
+        row: Validated method/path and optional JSON request body.
+        timeout: Wall-clock seconds allowed for the entire response read.
+        json_body: Decode successful response bodies as JSON when true.
+    Returns:
+        HTTP status and decoded JSON, or None when decoding is not requested.
+    Raises:
+        httpx.HTTPError: Transport or HTTP protocol failure.
+        TimeoutError: The complete response exceeds the wall-clock limit.
+        ValueError: Response exceeds 1 MiB or expected JSON is malformed.
+    """
 
     async def fetch() -> tuple[int, Any]:
         async with client.stream(
@@ -187,14 +246,34 @@ async def request(client: httpx.AsyncClient, row: dict, timeout: float, *, json_
 
 
 def digest(value: Any) -> str:
-    """Hash normalized JSON so equivalent profile formatting compares equally."""
+    """Hash normalized JSON so equivalent profile formatting compares equally.
+
+    Args:
+        value: JSON-serializable profile or dataset, with finite numbers.
+    Returns:
+        Lowercase SHA-256 hex digest of canonical JSON bytes.
+    Raises:
+        TypeError: A value is not JSON-serializable.
+        ValueError: A value contains nonfinite numbers or circular references.
+    """
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()
 
 
 async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
-    """Run closed-loop phases and return evidence with explicit threshold failures."""
+    """Run closed-loop phases and return evidence with explicit threshold failures.
+
+    Args:
+        profile: Complete steady/overload/recovery envelope and collector identity.
+        dataset: Authentication/workflow request definitions accepted by validate.
+        client: Caller-owned async client whose origin matches the profile.
+    Returns:
+        JSON-compatible counters, bounded failure categories and measured limits;
+        request failures are evidence, not exceptions or release certification.
+    Raises:
+        ValueError: Inputs are invalid or the client origin differs from the profile.
+    """
     validate(profile, dataset)
     if str(client.base_url).rstrip("/") != profile["base_url"].rstrip("/"):
         raise ValueError("HTTP client origin differs from the profile")
@@ -212,6 +291,7 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
         "phases": [],
         "failures": [],
         "recovery_seconds": None,
+        "telemetry_error_categories": {"initial": Counter(), "final": Counter()},
     }
     failures: set[str] = set()
     storage_first = None
@@ -245,7 +325,8 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
     # Verify the target before generating potentially mutating workload traffic.
     try:
         await observe()
-    except (httpx.HTTPError, TimeoutError, ValueError):
+    except (httpx.HTTPError, TimeoutError, ValueError) as exc:
+        _record_failure(evidence["telemetry_error_categories"]["initial"], exc, phase="initial", workload="telemetry")
         failures.add("initial target identity/telemetry verification failed")
     else:
 
@@ -254,7 +335,8 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
             stop = phase_start + phase["duration_seconds"]
             counters = {row["name"]: Counter() for row in dataset}
             histograms = {row["name"]: Counter() for row in dataset}
-            telemetry = {"samples": 0, "errors": 0, "maxima": dict.fromkeys(METRICS, 0)}
+            error_categories = {row["name"]: Counter() for row in dataset}
+            telemetry = {"samples": 0, "errors": 0, "error_categories": Counter(), "maxima": dict.fromkeys(METRICS, 0)}
             stable_since = None
             stable_samples = 0
             next_row = 0
@@ -280,8 +362,9 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
                             count["successes"] += 1
                         else:
                             count["errors"] += 1
-                    except (httpx.HTTPError, TimeoutError, ValueError):
+                    except (httpx.HTTPError, TimeoutError, ValueError) as exc:
                         count["errors"] += 1
+                        _record_failure(error_categories[row["name"]], exc, phase=phase["name"], workload=row["name"])
                     # Millisecond ceilings are conservative; 120 seconds caps the histogram.
                     bucket = min(120001, math.ceil((time.monotonic() - before) * 1000))
                     histograms[row["name"]][bucket] += 1
@@ -302,8 +385,9 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
                             stable_samples += 1
                         else:
                             stable_since, stable_samples = None, 0
-                    except (httpx.HTTPError, TimeoutError, ValueError):
+                    except (httpx.HTTPError, TimeoutError, ValueError) as exc:
                         telemetry["errors"] += 1
+                        _record_failure(telemetry["error_categories"], exc, phase=phase["name"], workload="telemetry")
                         stable_since, stable_samples = None, 0
                     await asyncio.sleep(max(0, min(profile["sample_interval_seconds"], stop - time.monotonic())))
 
@@ -329,6 +413,7 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
                 result["workloads"][name] = {
                     **{key: counts[key] for key in ("attempts", "successes", "errors", "rejections")},
                     "category": row["category"],
+                    "error_categories": dict(error_categories[name]),
                     "p95_seconds_upper_bound": p95,
                     "completed_requests_per_second": attempts / result["elapsed_seconds"],
                     "statuses": {key: value for key, value in counts.items() if key.startswith("http_")},
@@ -362,7 +447,8 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
             if any(final[key] > profile["phases"][-1]["metric_maxima"][key] for key in METRICS):
                 failures.add("final observation exceeds recovery resource ceilings")
                 evidence["recovery_seconds"] = None
-        except (httpx.HTTPError, TimeoutError, ValueError):
+        except (httpx.HTTPError, TimeoutError, ValueError) as exc:
+            _record_failure(evidence["telemetry_error_categories"]["final"], exc, phase="final", workload="telemetry")
             failures.add("final target identity/telemetry verification failed")
             evidence["recovery_seconds"] = None
     growth = None if storage_first is None or storage_last is None else storage_last - storage_first
@@ -378,7 +464,15 @@ async def run(profile: dict, dataset: list, client: httpx.AsyncClient) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run a reviewed profile; return 0 for measured pass, 1 for fail, 2 for input error."""
+    """Run a reviewed profile and write exclusive JSON evidence.
+
+    Args:
+        argv: CLI arguments, or None to use the process arguments.
+    Returns:
+        0 for measured pass, 1 for measured failure, 2 for invalid input/output.
+    Raises:
+        SystemExit: Argument parsing reports help or invalid CLI syntax.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--dataset", type=Path, required=True)
@@ -404,10 +498,14 @@ def main(argv: list[str] | None = None) -> int:
             report = asyncio.run(execute(profile, dataset))
             json.dump(report, output, indent=2, allow_nan=False)
             output.write("\n")
-        print("PASS" if report["passed"] else "FAIL")
+        logger.bind(operation="release_soak", outcome="pass" if report["passed"] else "fail").info(
+            "Soak measurement {}", "PASS" if report["passed"] else "FAIL"
+        )
         return 0 if report["passed"] else 1
-    except (OSError, ValueError):
-        print("Invalid profile, dataset, or output path; no certification produced.")
+    except (OSError, ValueError) as exc:
+        logger.bind(operation="release_soak", outcome="invalid_input", exception_type=type(exc).__name__).error(
+            "Invalid profile, dataset, or output path; no certification produced."
+        )
         return 2
 
 

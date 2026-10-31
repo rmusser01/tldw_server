@@ -38,9 +38,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ImportDictionaryResponse,
     ProcessTextRequest,
     ProcessTextResponse,
+    parse_timed_effects,
     validate_regex_pattern_safety,
 )
-from tldw_Server_API.app.api.v1.utils.datetime_utils import coerce_datetime, parse_timed_effects
+from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc
 from tldw_Server_API.app.core.Character_Chat.chat_dictionary import (
     ChatDictionaryService,
     TokenBudgetExceededWarning,
@@ -111,27 +112,20 @@ def _entry_dict_to_response(
     )
 
 
-def _coerce_optional_datetime(value: Any) -> datetime.datetime | None:
-    """Best-effort conversion for optional datetime fields."""
-    if value is None:
-        return None
-    if isinstance(value, datetime.datetime):
-        return value
-    if isinstance(value, str):
-        normalized = value.replace("Z", "+00:00").replace(" ", "T")
-        try:
-            return datetime.datetime.fromisoformat(normalized)
-        except ValueError:
-            for fmt in (
-                "%Y-%m-%dT%H:%M:%S",
-                "%Y-%m-%dT%H:%M:%S.%f",
-            ):
-                try:
-                    return datetime.datetime.strptime(normalized, fmt)
-                except ValueError:
-                    continue
-            return None
-    return None
+# Optional timestamps: aware UTC, or None when missing/unparseable.
+_coerce_optional_datetime = parse_iso_utc
+
+
+def coerce_datetime(value: Any) -> datetime.datetime:
+    """Required response timestamps: aware UTC; a missing or unparseable value is
+    reported as the current time (logged), since the response models require one."""
+    parsed = parse_iso_utc(value)
+    if parsed is None:
+        if value is not None:
+            logger.warning("Chat dictionary timestamp could not be parsed; substituting current time")
+        return datetime.datetime.now(datetime.timezone.utc)
+    return parsed
+
 
 def _entry_has_timed_effects(entry_data: dict[str, Any]) -> bool:
     timed_effects = parse_timed_effects(entry_data.get("timed_effects"))

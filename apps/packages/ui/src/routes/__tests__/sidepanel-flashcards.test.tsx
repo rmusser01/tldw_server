@@ -66,7 +66,7 @@ const flashcardMocks = vi.hoisted(() => ({
 
 const browserMocks = vi.hoisted(() => ({
   runtimeGetURL: vi.fn((path: string) => `chrome-extension://flashcards${path}`),
-  tabsCreate: vi.fn(async () => undefined),
+  tabsCreate: vi.fn(async (): Promise<{ id: number } | undefined> => ({ id: 5 })),
   tabsQuery: vi.fn(async () => [
     {
       id: 42,
@@ -156,6 +156,11 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
+    window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://selection.test", authMode: "multi-user", accessToken: `test.${btoa(JSON.stringify({ sub: "1" }))}.signature` }))
+    let tail = Promise.resolve()
+    const locks = { request: (_name: string, work: () => unknown) => { const next = tail.then(work); tail = next.then(() => undefined, () => undefined); return next } }
+    vi.stubGlobal("navigator", new Proxy(window.navigator, { get: (target, key) => key === "locks" ? locks : Reflect.get(target, key, target) }))
     translationMocks.t.mockClear()
     browserMocks.runtimeGetURL.mockReset()
     browserMocks.tabsCreate.mockReset()
@@ -237,7 +242,7 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
     browserMocks.runtimeGetURL.mockImplementation(
       (path: string) => `chrome-extension://flashcards${path}`
     )
-    browserMocks.tabsCreate.mockResolvedValue(undefined)
+    browserMocks.tabsCreate.mockResolvedValue({ id: 5 })
     browserMocks.tabsQuery.mockResolvedValue([
       {
         id: 42,
@@ -830,17 +835,17 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
 
     const generatePath = browserMocks.runtimeGetURL.mock.calls
       .map(([path]) => path)
-      .find((path) => path.includes("generate=1"))
+      .find((path) => path.includes("generate_handoff="))
     expect(generatePath).toBeTruthy()
-    expect(generatePath).toContain("/options.html#/flashcards?")
+    expect(generatePath).toContain("options.html#/flashcards?")
 
     const query = generatePath?.slice(generatePath.indexOf("?") + 1) ?? ""
     const params = new URLSearchParams(query)
     expect(params.get("tab")).toBe("importExport")
-    expect(params.get("generate")).toBe("1")
-    expect(params.get("generate_text")).toBe("Key concept from the active page")
-    expect(params.get("generate_source_id")).toBe("https://example.test/source")
-    expect(params.get("generate_source_title")).toBe("Selection Source")
+    expect(params.get("generate_handoff")).toBeTruthy()
+    expect(params.has("generate_text")).toBe(false)
+    expect(generatePath).not.toContain("Selection Source")
+    expect(generatePath).not.toContain("Key concept")
     expect(browserMocks.tabsCreate).toHaveBeenCalledWith({
       url: `chrome-extension://flashcards${generatePath}`
     })
@@ -1450,3 +1455,11 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
     expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
   })
 })
+
+vi.mock("@plasmohq/storage", async () => import("../../../../../tldw-frontend/extension/shims/plasmo-storage"));
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }));
+vi.mock("@/utils/browser-runtime", () => ({ isExtensionRuntime: () => true }));
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { initialize: async () => {}, ensureConfigForRequest: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null") } }));
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) } }));
+
+afterEach(() => vi.unstubAllGlobals());

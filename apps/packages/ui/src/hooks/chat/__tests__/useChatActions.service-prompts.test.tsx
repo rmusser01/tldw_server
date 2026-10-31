@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChatActions } from "../useChatActions";
@@ -403,6 +403,16 @@ describe("useChatActions Compare service prompt snapshot", () => {
     });
   });
 
+  it.each([false, true])("stamps a new persisted Compare with its captured owner (webSearch=%s)", async webSearch => {
+    const options = createHookOptions({ webSearch });
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));
+    await act(async () => { await result.current.onSubmit({ message: "Compare my private question", image: "" }); });
+    expect(saveHistoryMock).toHaveBeenCalledWith(
+      expect.any(String), false, "web-ui", undefined, undefined, snapshot.requestScope,
+    );
+    expect(normalChatModeMock.mock.calls.every(call => call[6].servicePromptSnapshot === snapshot)).toBe(true);
+  });
+
   it("loads before shared side effects and gives every web-search branch the same snapshot", async () => {
     const options = createHookOptions();
     const { result } = renderHook(() =>
@@ -619,6 +629,47 @@ describe("useChatActions Compare service prompt snapshot", () => {
       historyId: "history-existing",
       removeHistory: false,
     });
+  });
+
+  it("does not publish old Compare branches or rollback over a replacement account", async () => {
+    const owner = new AbortController();
+    loadServicePromptSnapshotMock.mockResolvedValueOnce({ ...snapshot, scopeSignal: owner.signal, scopeInvalidatedSignal: owner.signal });
+    let finish!: () => void;
+    const held = new Promise<void>(resolve => { finish = resolve; });
+    const aliceMessages = [{ id: "alice-private", role: "user", message: "Alice private transcript", isBot: false, sources: [] }];
+    const aliceHistory = [{ role: "user", content: "Alice private transcript" }];
+    let currentMessages: unknown = aliceMessages;
+    let currentHistory: unknown = aliceHistory;
+    const options = {
+      ...createHookOptions({ webSearch: false }), messages: aliceMessages, history: aliceHistory,
+      setMessages: vi.fn((next: unknown) => { currentMessages = next; }),
+      setHistory: vi.fn((next: unknown) => { currentHistory = next; })
+    };
+    normalChatModeMock.mockImplementation(async (...args: unknown[]) => {
+      const params = args[6] as { setMessages: (next: unknown) => void; setHistory: (next: unknown) => void };
+      await held;
+      params.setMessages(aliceMessages);
+      params.setHistory(aliceHistory);
+      return { status: "skipped", reason: "Request scope changed" };
+    });
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));
+    let submission!: ReturnType<typeof result.current.onSubmit>;
+    act(() => { submission = result.current.onSubmit({ message: "Compare this", image: "" }); });
+    await waitFor(() => expect(normalChatModeMock).toHaveBeenCalledTimes(2));
+    const bobMessages = [{ message: "Bob replacement transcript" }];
+    const bobHistory = [{ role: "user", content: "Bob replacement transcript" }];
+    currentMessages = bobMessages;
+    currentHistory = bobHistory;
+    options.setAbortController.mockClear();
+    options.setIsProcessing.mockClear();
+    options.setStreaming.mockClear();
+    await act(async () => { owner.abort(); finish(); await submission; });
+    expect(currentMessages).toBe(bobMessages);
+    expect(currentHistory).toBe(bobHistory);
+    expect(options.setAbortController).not.toHaveBeenCalled();
+    expect(options.setIsProcessing).not.toHaveBeenCalled();
+    expect(options.setStreaming).not.toHaveBeenCalled();
+    expect(rollbackScopedComparePersistenceMock).toHaveBeenCalled();
   });
 
   it("applies existing-history metadata only after every scoped Compare branch succeeds", async () => {
@@ -1269,6 +1320,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
       "server-chat-7",
       undefined,
       snapshot.scopeInvalidatedSignal,
+      snapshot,
     );
     expect(events.indexOf("loadSnapshot")).toBeLessThan(
       events.indexOf("ensureHistory"),
@@ -1324,7 +1376,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not read a Service Prompt and preserves server history when Compare web search is disabled", async () => {
+  it("captures only owner scope and preserves server history when Compare web search is disabled", async () => {
     const options = createHookOptions({
       webSearch: false,
       serverChatId: "server-chat-7",
@@ -1345,7 +1397,9 @@ describe("useChatActions Compare service prompt snapshot", () => {
       await result.current.onSubmit({ message: "Compare this", image: "" });
     });
 
-    expect(loadServicePromptSnapshotMock).not.toHaveBeenCalled();
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith([], expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(options.ensureServerChatHistoryId.mock.calls[0][3]).toBe(snapshot);
+    expect(releaseSnapshotMock).toHaveBeenCalledTimes(1);
     expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(1);
     expect(saveMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({ history_id: "history-from-server" }),
@@ -1378,7 +1432,10 @@ describe("useChatActions Compare service prompt snapshot", () => {
       });
     });
 
-    expect(loadServicePromptSnapshotMock).not.toHaveBeenCalled();
+    expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(
+      [], expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(normalChatModeMock.mock.calls.every(call => call[6].servicePromptSnapshot === snapshot)).toBe(true);
 
     vi.clearAllMocks();
     events.length = 0;

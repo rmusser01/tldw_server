@@ -30,6 +30,8 @@ Exit status is 0 for measured pass, 1 for measured failure, and 2 for invalid
 inputs or output paths. The output file must not already exist. Interrupted or
 killed runs may leave an incomplete file; only valid JSON with `passed: true`,
 three complete phases and no failures represents a completed passing run.
+CLI outcomes use Loguru with structured operation/outcome fields; raw input,
+exception messages and credentials are not logged.
 
 ## Example inputs: edit before use
 
@@ -112,6 +114,13 @@ response content is not retained. Requests already running when a phase ends
 are drained within the configured timeout before the next phase begins; reports
 include both requested duration and actual elapsed time. Client pacing makes
 this a closed-loop concurrency test, not a guaranteed offered request rate.
+
+Workload and telemetry `error_categories` count caught request failures as
+`timeout`, `http_error`, `invalid_json`, `response_size_limit` or `invalid_response`.
+Initial and final collector failures appear under `telemetry_error_categories`.
+Unexpected HTTP statuses and mismatched expected fields remain in the existing
+HTTP/error counters. The first exception in each phase/workload/category is
+logged with safe context; repeated failures increase counts without flooding logs.
 
 A successful submission or polling GET does **not** demonstrate completion of
 new jobs. For an ingestion or long-running workflow claim, prepare terminal

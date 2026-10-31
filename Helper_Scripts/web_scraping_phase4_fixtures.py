@@ -376,6 +376,17 @@ def _validate_fixture_set(
 def _resolve_output_path(output: Path, source_root: Path) -> Path:
     try:
         candidate = output if output.is_absolute() else Path.cwd() / output
+        # Windows resolves lexical parents before symlinks; resolve each prefix first.
+        physical_prefix = Path(candidate.anchor)
+        for component in candidate.parts[1:]:
+            if component == "..":
+                physical_prefix = physical_prefix.resolve(strict=True)
+                if not physical_prefix.is_dir():
+                    raise ValueError
+                physical_prefix = physical_prefix.parent
+            else:
+                physical_prefix /= component
+        candidate = physical_prefix
         missing_parts: list[str] = []
         while True:
             try:
@@ -804,6 +815,7 @@ def _fsync_directory(
 
 def _read_recovery_file(path: Path) -> tuple[tuple[int, int, int], bytes]:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError:
@@ -938,6 +950,7 @@ def _write_recovery_record(
     raw = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("ascii")
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
     temporary_identity: tuple[int, int, int] | None = None
     published = False
     try:

@@ -20,6 +20,7 @@ from .exception_types import (  # noqa: F401 - centralized compatibility exports
 )
 
 if TYPE_CHECKING:
+    from .Admin_Webhooks.crypto import WebhookKeyErrorCode
     from .Admin_Webhooks.domain import WebhookErrorCode
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
@@ -40,6 +41,14 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
     "internal_error": "The prompt improvement request could not be completed.",
 }
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
+
+
+class WebhookKeyError(Exception):
+    """Expected key-ring failure that exposes only a stable code."""
+
+    def __init__(self, code: WebhookKeyErrorCode) -> None:
+        self.code = code
+        super().__init__(code.value)
 
 
 class BuddyNotFoundError(LookupError):
@@ -125,6 +134,13 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
+class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
+    """Source-key validation failed without distinguishing absence from ownership."""
+
+    def __init__(self) -> None:
+        super().__init__("API key not found or unauthorized")
+
+
 class BuiltinCharacterSeedError(TransactionPassthroughError):
     """Raised when a bundled character cannot be installed with verified assets."""
 
@@ -192,6 +208,53 @@ class ClaimsAnalyticsExportError(RuntimeError):
         self.code = code
         self.retryable = retryable
         self.http_status = http_status
+
+
+class QuizMalformedOutputError(ValueError):
+    """Generated quiz content violates a required output contract."""
+
+
+class OsceGenerationError(ValueError):
+    """Base class for bounded OSCE generation failures."""
+
+    code = "osce_malformed_output"
+
+    def __init__(self, private_detail: object | None = None) -> None:
+        super().__init__(str(private_detail) if private_detail else self.code)
+
+
+class OsceProviderError(OsceGenerationError):
+    """An OSCE generation provider call failed."""
+
+    code = "osce_provider_failure"
+
+
+class OsceMalformedOutputError(OsceGenerationError):
+    """An OSCE generation provider returned malformed output."""
+
+    code = "osce_malformed_output"
+
+
+class OsceUnsupportedContractError(OsceGenerationError):
+    """An OSCE generation request or response uses an unsupported contract."""
+
+    code = "osce_unsupported_contract"
+
+
+class OsceCitationError(OsceGenerationError):
+    """Generated OSCE evidence citations are missing or inconsistent."""
+
+    code = "osce_citation_failure"
+
+
+class OsceVerificationError(OsceGenerationError):
+    """Generated OSCE evidence could not be verified safely."""
+
+    code = "osce_verification_failure"
+
+
+class OsceStationIdentityError(ValueError):
+    """A nested OSCE station identity violates reconciliation rules."""
 
 
 class NotesOrganizationValidationError(ValueError):
@@ -746,6 +809,14 @@ class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
 
 
+class CompanionBehaviorValidationError(BadRequestError):
+    """Raised when pack-level Persona companion behavior is invalid."""
+
+
+class PersonaBuddyValidationError(BadRequestError):
+    """Raised when Persona Buddy preferences violate the domain contract."""
+
+
 class ChatAPIError(Exception):
     """Base exception for chat API call errors."""
 
@@ -892,6 +963,40 @@ def raise_detached_error(error: BaseException) -> NoReturn:
         detached.__context__ = None
         detached.__suppress_context__ = True
         raise
+
+
+class SchemaReadinessError(RuntimeError):
+    """A schema readiness check failed.
+
+    Messages are fixed operator-facing reasons, never row data, so transaction
+    boundaries that sanitize other failures pass this reason through.
+    """
+
+
+def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
+    """Return ``Outer <- Inner <- ...`` type names for ``error``'s cause/context chain.
+
+    For server-side logs at ``raise ... from None`` boundaries: suppression hides the
+    chain from display, but ``__context__`` is still set, and the inner type is usually
+    the whole diagnosis. Types only, never messages -- a database error message can
+    carry row values (a unique-violation detail includes the email address).
+
+    Args:
+        error: The exception to describe, outermost first.
+        limit: Maximum number of type names to include; the walk also stops at a cycle.
+
+    Returns:
+        Type names joined by ``" <- "``, e.g. ``"TransactionError <- ProfileUserWriteRejected"``.
+    """
+
+    names: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(names) < limit:
+        seen.add(id(current))
+        names.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return " <- ".join(names)
 
 
 class InvalidMetadataOrderKeyError(ValueError):
@@ -1880,6 +1985,14 @@ class WorkflowAdapterError(Exception):
 
 class AdapterError(WorkflowAdapterError):
     """Workflow adapter-specific error."""
+
+
+class ScheduledTaskPersistenceError(RuntimeError):
+    """A terminal run write failed and the enclosing Jobs attempt must retry."""
+
+
+class ScheduledTaskClaimBusy(RuntimeError):
+    """Execution may still be active; Jobs must not acknowledge this delivery."""
 
 
 class MacroValidationError(ValueError):

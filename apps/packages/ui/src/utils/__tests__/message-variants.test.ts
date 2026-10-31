@@ -3,6 +3,7 @@ import type { Message } from "@/store/option"
 import {
   applyVariantToMessage,
   buildMessageVariant,
+  mergeMessageVariants,
   updateActiveVariant
 } from "../message-variants"
 
@@ -17,6 +18,9 @@ const createMessage = (overrides: Partial<Message> = {}): Message => ({
 })
 
 describe("message variant metadata", () => {
+  it("preserves distinct stable IDs with identical response text", () => {
+    expect(mergeMessageVariants([{ id: "a1", message: "same" }], { id: "a2", message: "same" }).map(v => v.id)).toEqual(["a1", "a2"])
+  })
   it("copies dynamic UI metadata when building a variant", () => {
     const metadataExtra = {
       dynamic_ui: {

@@ -94,6 +94,7 @@ router = APIRouter()
 # Load subrouters defensively so one optional import failure does not disable
 # the full media route surface.
 _MEDIA_ENDPOINT_MODULES: tuple[str, ...] = (
+    "capabilities",
     "listing",
     "item",
     "versions",

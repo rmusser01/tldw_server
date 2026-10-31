@@ -1,10 +1,13 @@
+import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
 import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat"
+
+const storedPreferences = vi.hoisted(() => new Map<string, unknown>())
 
 const decodeChatErrorPayloadMock = vi.hoisted(() => vi.fn(() => null))
 const updateChatModelSettingMock = vi.hoisted(() => vi.fn())
@@ -17,8 +20,8 @@ const antdMessageApi = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string, options?: Record<string, unknown>) => {
-      const template = fallback || key
+    t: (key: string, fallback?: string | { defaultValue?: string }, options?: Record<string, unknown>) => {
+      const template = typeof fallback === "string" ? fallback : fallback?.defaultValue || key
       if (!options) return template
       return template.replace(/\{\{(\w+)\}\}/g, (_match, token) => {
         const value = options[token]
@@ -58,7 +61,7 @@ vi.mock("antd", () => {
 })
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: string, defaultValue: unknown) => [defaultValue, vi.fn()]
+  useStorage: (key: string, defaultValue: unknown) => [storedPreferences.has(key) ? storedPreferences.get(key) : defaultValue, vi.fn()]
 }))
 
 vi.mock("@/components/Common/Markdown", () => ({
@@ -69,16 +72,6 @@ vi.mock("@/components/Common/Markdown", () => ({
 
 vi.mock("../ActionInfo", () => ({
   LoadingStatus: () => null
-}))
-
-vi.mock("../EditMessageForm", () => ({
-  EditMessageForm: () => <div data-testid="edit-form" />
-}))
-
-vi.mock("../PlaygroundUserMessage", () => ({
-  PlaygroundUserMessageBubble: ({ message }: { message: string }) => (
-    <div>{message}</div>
-  )
 }))
 
 vi.mock("@/components/Sidepanel/Chat/FeedbackModal", () => ({
@@ -127,21 +120,27 @@ vi.mock("@/hooks/useFeedback", () => ({
   })
 }))
 
-vi.mock("@/hooks/useImplicitFeedback", () => ({
-  useImplicitFeedback: () => ({
+const implicitFeedback = vi.hoisted(() => ({
+  available: false,
+  hook: vi.fn((_options: { enabled?: boolean }) => ({
     trackCopy: vi.fn(),
     trackSourcesExpanded: vi.fn(),
     trackSourceClick: vi.fn(),
     trackCitationUsed: vi.fn(),
     trackDwellTime: vi.fn()
-  })
+  }))
+}))
+
+vi.mock("@/hooks/useImplicitFeedback", () => ({
+  useImplicitFeedback: (options: { enabled?: boolean }) =>
+    implicitFeedback.hook(options)
 }))
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
     capabilities: {
       hasFeedbackExplicit: false,
-      hasFeedbackImplicit: false
+      hasFeedbackImplicit: implicitFeedback.available
     }
   })
 }))
@@ -207,10 +206,6 @@ vi.mock("@/hooks/useDiscoSkills", () => ({
   })
 }))
 
-vi.mock("@/libs/reasoning", () => ({
-  parseReasoning: (content: string) => [{ type: "message", content }]
-}))
-
 vi.mock("@/utils/chat-error-message", () => ({
   decodeChatErrorPayload: decodeChatErrorPayloadMock
 }))
@@ -253,6 +248,7 @@ vi.mock("@/utils/character-mood", () => ({
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
+  generateID: () => crypto.randomUUID(),
   updateMessageDiscoSkillComment: vi.fn(async () => undefined)
 }))
 
@@ -284,10 +280,101 @@ const baseProps: React.ComponentProps<typeof PlaygroundMessage> = {
   conversationInstanceId: "conversation-1"
 }
 
+describe("PlaygroundMessage implicit feedback in temporary mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    implicitFeedback.available = true
+  })
+
+  afterEach(() => {
+    implicitFeedback.available = false
+  })
+
+  it.each([
+    [true, false],
+    [false, true]
+  ])("temporaryChat=%s leaves passive feedback enabled=%s on a saved chat", (temporaryChat, enabled) => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        serverChatId="chat-1"
+        serverMessageId="message-1"
+        temporaryChat={temporaryChat}
+      />
+    )
+    expect(implicitFeedback.hook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled })
+    )
+  })
+})
+
 describe("PlaygroundMessage error recovery integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     decodeChatErrorPayloadMock.mockReturnValue(null)
+  })
+
+  it.each(["isStreaming", "isProcessing"] as const)("announces successful completion after %s ends", activeFlag => {
+    const view = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />)
+    view.rerender(<PlaygroundMessage {...baseProps} />)
+    expect(screen.getByText("Response complete")).toHaveAttribute("aria-live", "polite")
+  })
+
+  it.each(["isStreaming", "isProcessing"] as const)("announces the error without successful completion after %s fails", activeFlag => {
+    const view = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />)
+    decodeChatErrorPayloadMock.mockReturnValue({
+      summary: "Image support is not confirmed for this model.",
+      hint: "Choose a model that supports images.",
+      detail: ""
+    })
+    view.rerender(<PlaygroundMessage {...baseProps} message="failed response" />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Image support is not confirmed")
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it("removes a pending completion announcement when the message becomes an error", () => {
+    const view = render(<PlaygroundMessage {...baseProps} isStreaming />)
+    view.rerender(<PlaygroundMessage {...baseProps} />)
+    expect(screen.getByText("Response complete")).toBeInTheDocument()
+    decodeChatErrorPayloadMock.mockReturnValue({
+      summary: "Transport failed",
+      hint: "Retry the request.",
+      detail: ""
+    })
+    view.rerender(<PlaygroundMessage {...baseProps} message="failed response" />)
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it.each(["isStreaming", "isProcessing"] as const)("does not resurrect completion when a failed response restarts %s", activeFlag => {
+    const view = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />)
+    decodeChatErrorPayloadMock.mockReturnValue({
+      summary: "Request failed",
+      hint: "Retry the request.",
+      detail: ""
+    })
+    view.rerender(<PlaygroundMessage {...baseProps} message="failed response" />)
+    decodeChatErrorPayloadMock.mockReturnValue(null)
+    view.rerender(<PlaygroundMessage {...baseProps} message="Retrying" {...{ [activeFlag]: true }} />)
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it.each(["<think>Only reasoning</think>", "<think>Only reasoning"])("offers recovery for a settled restored reasoning-only row: %s", async message => {
+    const retry = vi.fn()
+    render(<PlaygroundMessage {...baseProps} message={message} onRegenerate={retry} />)
+    expect(screen.getByText(/No final answer/)).toBeInTheDocument()
+    expect(screen.getByText("Only reasoning")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /Retry/ }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { message: "<think>Working", isStreaming: true },
+    { message: "<think>Working</think>Final answer" },
+    { message: "<think>Working</think>", role: "user" as const, isBot: false },
+    { message: "<think>Working</think>", toolCalls: [{ id: "tool", name: "lookup", args: {} }] }
+  ])("does not label active or usable output as missing final: %j", overrides => {
+    render(<PlaygroundMessage {...baseProps} {...overrides} />)
+    expect(screen.queryByText(/No final answer/)).not.toBeInTheDocument()
   })
 
   it("wires retry/switch/fallback/continue actions for explicit provider errors", async () => {
@@ -572,3 +659,146 @@ describe("PlaygroundMessage error recovery integration", () => {
     })
   })
 })
+
+
+it('opens a user editor from timeline navigation when portrait cards own rendering', () => {
+  render(<PlaygroundMessage {...baseProps} isBot={false} role="user" messageId="timeline-user" message="Selected user row" />)
+  act(() => window.dispatchEvent(new CustomEvent('tldw:edit-message', { detail: { messageId: 'timeline-user' } })))
+  expect(screen.getByRole('textbox')).toBeInTheDocument()
+})
+
+for (const initialPortraits of [true, false]) {
+  it.each(["save", "cancel"])(`keeps the active editor and draft while portrait preference changes from ${initialPortraits} until %s`, async (action) => {
+    const user = userEvent.setup()
+    storedPreferences.set('chatShowCharacterPortraits', initialPortraits)
+    const submit = vi.fn()
+    const props = { ...baseProps, isBot: false, role: 'user' as const, messageId: 'stable-user', message: 'Original row', onEditFormSubmit: submit }
+    const view = render(<PlaygroundMessage {...props} />)
+    act(() => window.dispatchEvent(new CustomEvent('tldw:edit-message', { detail: { messageId: 'stable-user' } })))
+    const editor = screen.getByRole('textbox')
+    await user.clear(editor)
+    await user.type(editor, 'Retained authored draft')
+    storedPreferences.set('chatShowCharacterPortraits', !initialPortraits)
+    view.rerender(<PlaygroundMessage {...props} />)
+    expect(screen.getByRole('textbox')).toBe(editor)
+    expect(editor).toHaveValue('Retained authored draft')
+    await user.click(screen.getByRole('button', { name: action, exact: true }))
+    if (action === 'save') expect(submit).toHaveBeenCalledWith('Retained authored draft', false)
+    else expect(submit).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.getByTestId('chat-message').tagName).toBe(initialPortraits ? 'DIV' : 'ARTICLE')
+    storedPreferences.clear()
+  })
+}
+
+// Keep the real parent, timeline, message and edit form together for reconciliation.
+const parentChat = vi.hoisted(() => ({
+  messages: [] as Array<{
+    id: string
+    message: string
+    name: string
+    isBot: boolean
+    role: string
+  }>,
+  historyId: "identity-chat",
+  editMessage: vi.fn()
+}))
+vi.mock("@/hooks/useMessageOption", () => ({
+  useMessageOption: () => ({
+    ...parentChat,
+    compareMode: false,
+    compareFeatureEnabled: false,
+    streaming: false,
+    isProcessing: false,
+    setMessages: vi.fn(),
+    onSubmit: vi.fn()
+  })
+}))
+vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: [] }) }))
+vi.mock("@/hooks/useSelectedCharacter", () => ({
+  useSelectedCharacter: () => [null]
+}))
+vi.mock("@/hooks/useAntdNotification", () => ({
+  useAntdNotification: () => antdMessageApi
+}))
+vi.mock("@/hooks/chat/useDynamicUIActionBridge", () => ({
+  useDynamicUIActionBridge: () => vi.fn()
+}))
+
+it.each([false, true])(
+  "real parent preserves a moving editor through removal/reorder, bubble=%s",
+  async (bubble) => {
+    storedPreferences.set("chatShowCharacterPortraits", !bubble)
+    storedPreferences.set("userChatBubble", true)
+    parentChat.historyId = "identity-chat"
+    const row = (id: string) => ({
+      id,
+      message: `Original ${id}`,
+      name: "You",
+      isBot: false,
+      role: "user"
+    })
+    parentChat.messages = [row("before"), row("retained"), row("after")]
+    const submitted: Array<{ id: string; value: string; send: boolean }> = []
+    parentChat.editMessage
+      .mockReset()
+      .mockImplementation((index, value, _isUser, send) => {
+        submitted.push({ id: parentChat.messages[index].id, value, send })
+      })
+    const view = render(<PlaygroundChat />)
+    const user = userEvent.setup()
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "retained" }
+        })
+      )
+    )
+    const editor = screen.getByRole("textbox")
+    const form = editor.closest("form")
+    await user.clear(editor)
+    await user.type(editor, "retained unsaved draft")
+    parentChat.messages = parentChat.messages.slice(1)
+    view.rerender(<PlaygroundChat />)
+    expect(screen.getByRole("textbox")).toBe(editor)
+    expect(editor.closest("form")).toBe(form)
+    expect(editor).toHaveValue("retained unsaved draft")
+    parentChat.messages = [...parentChat.messages].reverse()
+    view.rerender(<PlaygroundChat />)
+    expect(screen.getByRole("textbox")).toBe(editor)
+    await user.click(screen.getByRole("button", { name: "save", exact: true }))
+    expect(submitted).toEqual([
+      { id: "retained", value: "retained unsaved draft", send: false }
+    ])
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "retained" }
+        })
+      )
+    )
+    const cancelEditor = screen.getByRole("textbox")
+    await user.clear(cancelEditor)
+    await user.type(cancelEditor, "cancel draft")
+    parentChat.messages = [...parentChat.messages].reverse()
+    view.rerender(<PlaygroundChat />)
+    expect(screen.getByRole("textbox")).toBe(cancelEditor)
+    await user.click(
+      screen.getByRole("button", { name: "cancel", exact: true })
+    )
+    expect(submitted).toHaveLength(1)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "retained" }
+        })
+      )
+    )
+    await user.type(screen.getByRole("textbox"), " private old owner")
+    parentChat.historyId = "replacement-owner"
+    view.rerender(<PlaygroundChat />)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    storedPreferences.clear()
+  }
+)

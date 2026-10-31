@@ -12,6 +12,7 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import { updatePageTitle } from "@/utils/update-page-title"
+import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 
 type UseClearChatOptions = {
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
@@ -91,7 +92,13 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
 
   return React.useCallback(() => {
     const destination = resolveClearChatPath()
-    if (!requestSettingsNavigation(destination)) return
+    if (!requestSettingsNavigation(destination)) return false
+    const current = useStoreMessageOption.getState()
+    dispatchChatRouteReplacement({
+      serverChatId: current.serverChatId,
+      historyId: current.historyId,
+      restoreRevision: usePlaygroundSessionStore.getState().restoreRevision
+    })
     if (typeof window !== "undefined") {
       Modal.destroyAll()
       cleanupAntOverlays()
@@ -140,6 +147,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     })
     clearReplyTarget()
     usePlaygroundSessionStore.getState().clearSession()
+    return true
   }, [
     clearQueuedMessages,
     clearReplyTarget,

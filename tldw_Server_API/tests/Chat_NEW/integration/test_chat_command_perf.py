@@ -35,7 +35,6 @@ async def test_chat_command_p50_latency(async_client, auth_headers, monkeypatch)
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "1000")
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "1000")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
-    monkeypatch.delenv("CHAT_COMMANDS_ASYNC_ONLY", raising=False)
 
     command_router._buckets.clear()
     command_router._global_buckets.clear()

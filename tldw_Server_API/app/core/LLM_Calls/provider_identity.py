@@ -26,7 +26,7 @@ PROVIDER_ALIASES: dict[str, tuple[str, ...]] = {
     "novita": ("novita-ai",),
     "poe": ("poe-api",),
     "together": ("together-ai", "togetherai"),
-    "llama.cpp": ("llama-cpp", "llama_cpp", "llamacpp"),
+    "llama.cpp": ("llama-cpp", "llama_cpp", "llamacpp", "llama"),
     "kobold": ("kobold-cpp", "kobold_cpp", "koboldcpp"),
     "ooba": ("oobabooga", "text-generation-webui", "text_generation_webui"),
     "tabbyapi": ("tabby-api", "tabby_api", "tabby"),

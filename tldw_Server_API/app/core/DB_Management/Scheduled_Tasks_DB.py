@@ -9,6 +9,7 @@ validation and lifecycle rules; this layer provides owner-scoped persistence.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import sqlite3
 from collections.abc import Iterable, Iterator
@@ -2508,6 +2509,68 @@ class ScheduledTasksDatabase:
             )
         return _legacy_scheduled_task_run_from_run(run)
 
+    def claim_scheduled_task_run(
+        self,
+        *,
+        owner_id: int,
+        run_id: str,
+        claim_id: str,
+        job_id: str | None,
+        lease_id: str | None,
+    ) -> bool:
+        """Atomically claim an unclaimed running slot.
+
+        A Jobs lease change cannot prove that execution has stopped. Existing
+        claims must be explicitly released by the stopped executor, or by an
+        operator who has verified that it can no longer run.
+        """
+        with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            transaction = ScheduledTasksTransaction(conn)
+            current = transaction.get_run(owner_id=owner_id, run_id=run_id)
+            if current is None or _legacy_status_from_run(current) != "running":
+                return False
+            summary = dict(current.run_summary)
+            claim = summary.get("execution_claim")
+            if claim is not None:
+                return False
+            summary["execution_claim"] = {
+                "id": claim_id,
+                "job_id": job_id,
+                "lease_fingerprint": hashlib.sha256(lease_id.encode()).hexdigest() if lease_id else None,
+            }
+            transaction.update_run(
+                owner_id=owner_id,
+                run_id=run_id,
+                patch={"run_summary": summary, "job_id": job_id},
+            )
+            return True
+
+    def release_scheduled_task_run_claim(
+        self,
+        *,
+        owner_id: int,
+        run_id: str,
+        claim_id: str,
+    ) -> None:
+        """Release only this attempt's claim after execution has stopped."""
+        with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            transaction = ScheduledTasksTransaction(conn)
+            current = transaction.get_run(owner_id=owner_id, run_id=run_id)
+            if current is None:
+                return
+            summary = dict(current.run_summary)
+            claim = summary.get("execution_claim") or {}
+            if claim.get("id") != claim_id:
+                return
+            summary.pop("execution_claim", None)
+            transaction.update_run(
+                owner_id=owner_id,
+                run_id=run_id,
+                patch={"run_summary": summary},
+            )
+
     def update_scheduled_task_run_status(
         self,
         *,
@@ -2516,6 +2579,7 @@ class ScheduledTasksDatabase:
         error: str | None = None,
         result_summary: str | None = None,
         completed_at: str | None = None,
+        execution_claim_id: str | None = None,
     ) -> dict[str, Any]:
         """Update an agent-task run row through the normalized run table."""
         with self._connect() as conn:
@@ -2527,6 +2591,11 @@ class ScheduledTasksDatabase:
             if current is None:
                 raise KeyError(f"scheduled_task_run_not_found: {run_id}")
             run_summary = dict(current.run_summary)
+            if (
+                execution_claim_id is not None
+                and (run_summary.get("execution_claim") or {}).get("id") != execution_claim_id
+            ):
+                raise ValueError("stale execution claim")
             run_summary["legacy_status"] = status
             if result_summary is not None:
                 run_summary["result_summary"] = result_summary

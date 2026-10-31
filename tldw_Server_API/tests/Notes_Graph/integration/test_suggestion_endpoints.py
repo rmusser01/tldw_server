@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from threading import Event, get_ident
 from types import SimpleNamespace
@@ -30,6 +31,7 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_api import SuggestionAPIErr
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -172,7 +174,13 @@ def _app(
     principal: AuthPrincipal | None = None,
     override_rate_limit: bool = True,
 ) -> FastAPI:
-    app = FastAPI()
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI):
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(endpoint, "build_notes_graph_suggestions_api", lambda **_kwargs: fake)
+            yield
+
+    app = FastAPI(lifespan=lifespan)
     app.include_router(endpoint.router, prefix="/api/v1/notes")
     principal = principal or _principal(permissions)
 
@@ -193,12 +201,11 @@ def _app(
     app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: SimpleNamespace()
     app.dependency_overrides[endpoint.try_get_job_manager] = lambda: SimpleNamespace()
     app.dependency_overrides[auth_deps.get_db_pool] = lambda: SimpleNamespace()
-    endpoint.build_notes_graph_suggestions_api = lambda **_kwargs: fake
 
     async def allow() -> None:
         return None
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue

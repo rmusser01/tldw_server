@@ -3,11 +3,22 @@ import { buildQuery } from "../client-utils"
 import type {
   AdminUserListResponse,
   AdminUserUpdateRequest,
+  AdminUserCreateRequest,
+  AdminUserSummary,
   AdminRole,
 } from "../TldwApiClient"
 
 export const adminMethods = {
   // ── Admin Users & Roles ──
+
+  async createAdminUser(payload: AdminUserCreateRequest): Promise<AdminUserSummary> {
+    return await bgRequest<AdminUserSummary>({
+      path: "/api/v1/admin/users",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
 
   async listAdminUsers(params?: {
     page?: number

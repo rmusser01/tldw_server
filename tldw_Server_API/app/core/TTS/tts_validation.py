@@ -217,12 +217,6 @@ class ProviderLimits:
         return cls.LIMITS.get(provider, default_limits)
 
     @classmethod
-    def get_max_text_length(cls, provider: str) -> int:
-        """Get maximum text length for provider"""
-        limits = cls.get_limits(provider)
-        return limits.get("max_text_length", 5000)  # Default 5000
-
-    @classmethod
     def is_valid_voice(cls, provider: str, voice: str) -> bool:
         """Check if voice is valid for provider"""
         limits = cls.get_limits(provider)

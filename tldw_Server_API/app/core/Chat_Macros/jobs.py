@@ -188,57 +188,61 @@ def post_chat_macro_final_output(
 ) -> str:
     """Persist a final macro output as a visible assistant message, idempotently."""
 
-    run = repository.get_run(run_id)
-    if run is None:
-        raise MacroStorageError(f"macro run not found: {run_id}")
-    if not run.conversation_id:
-        return ""
+    if repository.db is not chat_db:
+        raise MacroStorageError("macro repository and message writes must use the same database")
 
-    existing = run.final_message_id or _find_existing_macro_post(
-        chat_db,
-        conversation_id=run.conversation_id,
-        post_idempotency_key=post_idempotency_key,
-    )
-    if existing:
-        message_id = str(existing)
-        repository.mark_final_posted(
-            run_id,
-            final_message_id=message_id,
+    with chat_db.transaction():
+        run = repository.get_run(run_id)
+        if run is None:
+            raise MacroStorageError(f"macro run not found: {run_id}")
+        if not run.conversation_id:
+            return ""
+
+        existing = run.final_message_id or _find_existing_macro_post(
+            chat_db,
+            conversation_id=run.conversation_id,
             post_idempotency_key=post_idempotency_key,
         )
-    else:
-        content = final_output if final_output else "Macro completed with no output."
-        message_id = chat_db.add_message(
-            {
-                "conversation_id": run.conversation_id,
-                "sender": "assistant",
-                "content": content,
-                "client_id": f"chat_macro:{run.user_id}",
+        if existing:
+            message_id = str(existing)
+            repository.mark_final_posted(
+                run_id,
+                final_message_id=message_id,
+                post_idempotency_key=post_idempotency_key,
+            )
+        else:
+            content = final_output if final_output else "Macro completed with no output."
+            message_id = chat_db.add_message(
+                {
+                    "conversation_id": run.conversation_id,
+                    "sender": "assistant",
+                    "content": content,
+                    "client_id": f"chat_macro:{run.user_id}",
+                }
+            )
+            if not message_id:
+                raise MacroStorageError("failed to persist chat macro final message")
+            message_id = str(message_id)
+            repository.mark_final_posted(
+                run_id,
+                final_message_id=message_id,
+                post_idempotency_key=post_idempotency_key,
+            )
+
+        metadata = {
+            "chat_macro": {
+                "run_id": run.run_id,
+                "name": run.macro_name,
+                "command": run.macro_command,
+                "status": "completed",
+                "detail_url": f"/api/v1/chat/macros/runs/{run.run_id}",
+                "output_profile": run.output_profile,
+                "post_idempotency_key": post_idempotency_key,
             }
-        )
-        if not message_id:
-            raise MacroStorageError("failed to persist chat macro final message")
-        message_id = str(message_id)
-        repository.mark_final_posted(
-            run_id,
-            final_message_id=message_id,
-            post_idempotency_key=post_idempotency_key,
-        )
-
-    metadata = {
-        "chat_macro": {
-            "run_id": run.run_id,
-            "name": run.macro_name,
-            "command": run.macro_command,
-            "status": "completed",
-            "detail_url": f"/api/v1/chat/macros/runs/{run.run_id}",
-            "output_profile": run.output_profile,
-            "post_idempotency_key": post_idempotency_key,
         }
-    }
-    if not chat_db.add_message_metadata(message_id, extra=metadata):
-        raise MacroStorageError(f"failed to persist chat macro metadata for message {message_id}")
-    return message_id
+        if not chat_db.add_message_metadata(message_id, extra=metadata):
+            raise MacroStorageError(f"failed to persist chat macro metadata for message {message_id}")
+        return message_id
 
 
 def _default_job_manager() -> JobManager:

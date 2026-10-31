@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,9 @@ from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerEr
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 pytestmark = pytest.mark.unit
+requires_posix_snapshots = pytest.mark.skipif(
+    not hasattr(os, "O_NOFOLLOW"), reason="secure snapshots require POSIX confinement"
+)
 
 
 class FakeProcess:
@@ -126,6 +130,7 @@ def test_runner_reports_defined_before_first_start(tmp_path: Path):
     assert runtime.warnings == []
 
 
+@requires_posix_snapshots
 def test_full_cache_changes_snapshot_identity_but_false_matches_omitted(tmp_path):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_compatibility import (
         build_fingerprint,
@@ -148,6 +153,7 @@ def test_full_cache_changes_snapshot_identity_but_false_matches_omitted(tmp_path
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1", "[::1]"])
+@requires_posix_snapshots
 async def test_snapshot_launch_generations_and_private_working_path(tmp_path, monkeypatch, host):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
@@ -183,6 +189,7 @@ async def test_snapshot_launch_generations_and_private_working_path(tmp_path, mo
 
 
 @pytest.mark.parametrize("failure", ["fingerprint", "logs", "spawn"])
+@requires_posix_snapshots
 async def test_failed_snapshot_restart_removes_only_unspawned_launch(tmp_path, monkeypatch, failure):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
@@ -223,6 +230,7 @@ async def test_failed_snapshot_restart_removes_only_unspawned_launch(tmp_path, m
         assert list(prior_path.parent.iterdir()) == [prior_path]
 
 
+@requires_posix_snapshots
 async def test_failed_snapshot_cleanup_still_closes_startup_log(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import (
         SnapshotStorageUnavailableError,
@@ -252,6 +260,7 @@ async def test_failed_snapshot_cleanup_still_closes_startup_log(tmp_path, monkey
 
 
 @pytest.mark.parametrize("phase", ["directory", "fingerprint", "spawn", "readiness"])
+@requires_posix_snapshots
 async def test_snapshot_start_cancellation_keeps_only_child_owned_directory(tmp_path, monkeypatch, phase):
     import threading
 
@@ -332,6 +341,7 @@ async def test_snapshot_start_cancellation_keeps_only_child_owned_directory(tmp_
 @pytest.mark.parametrize(
     "host", ["0.0.0.0", "::", "[::]", "192.168.1.10", "8.8.8.8", "2001:db8::1", "localhost", "example.com"]
 )
+@requires_posix_snapshots
 async def test_snapshot_launch_rejects_non_loopback_before_spawn(tmp_path, monkeypatch, host):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore

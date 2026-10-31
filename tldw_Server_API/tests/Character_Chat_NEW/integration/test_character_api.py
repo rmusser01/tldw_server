@@ -10,6 +10,8 @@ pytestmark = pytest.mark.integration
 import json
 from datetime import datetime
 from fastapi.testclient import TestClient
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 # ========================================================================
 # Character Card Endpoint Tests
@@ -809,6 +811,33 @@ class TestImportExportEndpoints:
         data = response.json()
         assert 'messages' in data
         assert len(data['messages']) >= 2
+
+@pytest.mark.integration
+@pytest.mark.parametrize("export_format", ["json", "text"])
+def test_chat_export_omits_private_local_startup(
+    test_client: TestClient, auth_headers: dict[str, str], character_db: CharactersRAGDB, export_format: str,
+) -> None:
+    """Actual metadata-enabled exports omit stored origin in both supported formats."""
+    db = character_db
+    db.upsert_workspace("http-export-private-origin", "Private origin")
+    character_id = db.add_character_card({"name": "Export boundary", "system_prompt": "Help."})
+    cid = db.add_conversation(
+        {"title": "Export boundary", "character_id": character_id, "client_id": db.client_id},
+        assistant_startup=AssistantStartup(
+            source="workspace_default", workspace_id="http-export-private-origin", workspace_version=1,
+        ),
+    )
+    db.add_message({"conversation_id": cid, "sender": "user", "content": "Export this message."})
+    before = db.get_conversation_by_id(cid)["assistant_startup_json"]
+    response = test_client.get(
+        f"/api/v1/chats/{cid}/export", params={"format": export_format, "include_metadata": True}, headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert "Export this message." in response.text
+    for forbidden in ("assistant_startup", "assistant_startup_json", "http-export-private-origin"):
+        assert forbidden not in response.text
+    assert db.get_conversation_by_id(cid)["assistant_startup_json"] == before
+
 
 # ========================================================================
 # Rate Limiting Tests

@@ -5,10 +5,15 @@ import importlib
 import json
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from threading import Thread
+from typing import Any
 
 import httpx
 import pytest
+from loguru import logger
+
+pytestmark = pytest.mark.integration
 
 
 def profile():
@@ -286,6 +291,7 @@ def test_cli_writes_failed_evidence_without_credentials(tmp_path, monkeypatch):
 
     class Collector(BaseHTTPRequestHandler):
         def do_GET(self):
+            time.sleep(0.2)
             seen_headers.append(self.headers.get("X-API-KEY"))
             body = json.dumps({"artifact_sha256": "wrong-target"}).encode()
             self.send_response(200)
@@ -304,6 +310,7 @@ def test_cli_writes_failed_evidence_without_credentials(tmp_path, monkeypatch):
         monkeypatch.setenv("SOAK_TEST_TOKEN", "DO_NOT_WRITE_THIS_CREDENTIAL")
         config = profile()
         config["base_url"] = f"http://127.0.0.1:{server.server_port}"
+        config["timeout_seconds"] = 5
         inputs = tmp_path / "profile.json"
         rows = tmp_path / "dataset.json"
         output = tmp_path / "evidence.json"
@@ -365,6 +372,16 @@ async def test_final_observation_cannot_regress_after_sustained_recovery():
     runner = importlib.import_module("Helper_Scripts.load_tests.release_soak")
     config = profile()
     config["sample_interval_seconds"] = 0.04
+
+    class TrackedPhases(list):
+        complete = False
+
+        def __iter__(self):
+            self.complete = False
+            yield from super().__iter__()
+            self.complete = True
+
+    config["phases"] = TrackedPhases(config["phases"])
     samples = 0
     requests = 0
 
@@ -377,8 +394,8 @@ async def test_final_observation_cannot_regress_after_sustained_recovery():
                 json={
                     "artifact_sha256": "a" * 64,
                     "source_revision": "b" * 40,
-                    "sampled_at": time.time(),
-                    "queue_depth": 99 if samples == 8 else 0,
+                    "sampled_at": int(time.time() * 10) / 10 + samples * 0.001,
+                    "queue_depth": 99 if samples > 1 and config["phases"].complete else 0,
                     "db_pool_in_use": 0,
                     "storage_bytes": 0,
                 },
@@ -389,7 +406,137 @@ async def test_final_observation_cannot_regress_after_sustained_recovery():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(responder), base_url="http://fixture.local") as client:
         report = await runner.run(config, dataset(), client)
-    assert samples == 8
+    assert samples == 2 + sum(phase["telemetry"]["samples"] for phase in report["phases"])
     assert all(phase["telemetry"]["maxima"]["queue_depth"] == 0 for phase in report["phases"])
+    assert report["final_metrics"]["queue_depth"] == 99
     assert not report["passed"]
     assert "final observation exceeds recovery resource ceilings" in report["failures"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault,category",
+    [("timeout", "timeout"), ("transport", "http_error"), ("json", "invalid_json"), ("size", "response_size_limit")],
+)
+async def test_request_failure_categories_are_bounded_and_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    category: str,
+) -> None:
+    """Attribute failed workloads without retaining exception payloads or flooding logs."""
+    runner = importlib.import_module("Helper_Scripts.load_tests.release_soak")
+    canary = "PRIVATE_REQUEST_CREDENTIAL"
+    telemetry_samples = 0
+
+    async def failing_request(
+        client: httpx.AsyncClient,
+        row: dict[str, Any],
+        timeout: float,
+        *,
+        json_body: bool = False,
+    ) -> tuple[int, Any]:
+        nonlocal telemetry_samples
+        if row["path"] == "/observations":
+            telemetry_samples += 1
+            return 200, {
+                "artifact_sha256": "a" * 64,
+                "source_revision": "b" * 40,
+                "sampled_at": int(time.time() * 10) / 10 + telemetry_samples * 0.001,
+                "queue_depth": 0,
+                "db_pool_in_use": 0,
+                "storage_bytes": 0,
+            }
+        if fault == "timeout":
+            raise TimeoutError(canary)
+        if fault == "transport":
+            raise httpx.ConnectError(canary)
+        if fault == "json":
+            raise json.JSONDecodeError(canary, canary, 0)
+        raise ValueError("response size limit exceeded")
+
+    monkeypatch.setattr(runner, "request", failing_request)
+    messages = []
+    sink = logger.add(messages.append, format="{message} {extra}")
+    try:
+        async with httpx.AsyncClient(base_url="http://fixture.local") as client:
+            report = await runner.run(profile(), dataset(), client)
+    finally:
+        logger.remove(sink)
+    for phase in report["phases"]:
+        for workload in phase["workloads"].values():
+            assert workload["error_categories"] == {category: workload["errors"]}
+    warnings = [message for message in messages if message.record["level"].name == "WARNING"]
+    assert len(warnings) == 6  # Once per phase/workload/category, not per failed request.
+    assert all(message.record["extra"]["failure_category"] == category for message in warnings)
+    assert canary not in json.dumps(report) + "".join(messages)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("when", ["initial", "phase", "final"])
+async def test_telemetry_failures_retain_safe_categories(
+    monkeypatch: pytest.MonkeyPatch, when: str,
+) -> None:
+    """Identify telemetry failures at every catch boundary without exception text."""
+    runner = importlib.import_module("Helper_Scripts.load_tests.release_soak")
+    config = profile()
+    observation_stage = "initial"
+    phases = 0
+    original_gather = asyncio.gather
+
+    async def track_phase(*awaitables: Any, **kwargs: Any) -> list[Any]:
+        nonlocal observation_stage, phases
+        phases += 1
+        observation_stage = "phase"
+        try:
+            return await original_gather(*awaitables, **kwargs)
+        finally:
+            observation_stage = "final" if phases == 3 else "between"
+
+    monkeypatch.setattr(runner.asyncio, "gather", track_phase)
+
+    async def responder(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/observations":
+            return httpx.Response(200, json={"state": "complete"})
+        if observation_stage == when:
+            raise httpx.ConnectError("PRIVATE_TELEMETRY_CREDENTIAL")
+        return httpx.Response(200, json={
+            "artifact_sha256": "a" * 64, "source_revision": "b" * 40,
+            "sampled_at": time.time(), "queue_depth": 0,
+            "db_pool_in_use": 0, "storage_bytes": 0,
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(responder), base_url=config["base_url"]) as client:
+        report = await runner.run(config, dataset(), client)
+    if when == "phase":
+        for phase in report["phases"]:
+            assert phase["telemetry"]["errors"] > 0
+            assert phase["telemetry"]["error_categories"] == {"http_error": phase["telemetry"]["errors"]}
+    else:
+        assert report["telemetry_error_categories"][when] == {"http_error": 1}
+    assert "PRIVATE_TELEMETRY_CREDENTIAL" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("passed", [True, False, None])
+def test_cli_emits_structured_safe_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, passed: bool | None,
+) -> None:
+    """Publish measured and rejected CLI outcomes through the configured Loguru sinks."""
+    runner = importlib.import_module("Helper_Scripts.load_tests.release_soak")
+    inputs, rows, output = (tmp_path / name for name in ("profile.json", "dataset.json", "evidence.json"))
+    inputs.write_text(json.dumps(profile()) if passed is not None else "PRIVATE_INVALID_INPUT")
+    rows.write_text(json.dumps(dataset()))
+
+    async def measured(*args: Any) -> dict[str, bool | None]:
+        return {"passed": passed}
+
+    monkeypatch.setattr(runner, "run", measured)
+    messages = []
+    sink = logger.add(messages.append, format="{message} {extra}")
+    try:
+        code = runner.main(["--profile", str(inputs), "--dataset", str(rows), "--output", str(output)])
+    finally:
+        logger.remove(sink)
+    assert code == (2 if passed is None else 0 if passed else 1)
+    assert messages[-1].record["extra"]["operation"] == "release_soak"
+    assert messages[-1].record["extra"]["outcome"] == ("invalid_input" if passed is None else "pass" if passed else "fail")
+    assert "PRIVATE_INVALID_INPUT" not in "".join(messages)

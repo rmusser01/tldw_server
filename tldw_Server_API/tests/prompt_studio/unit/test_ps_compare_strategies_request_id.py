@@ -1,8 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
-
 
 class _StubDB:
     def __init__(self):
@@ -35,7 +33,7 @@ class _StubDB:
 
 
 @pytest.fixture
-def override_db_dependency(monkeypatch):
+def override_db_dependency(app, monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps as deps
     from tldw_Server_API.app.api.v1.endpoints.prompt_studio import (
         prompt_studio_optimization as pso,
@@ -58,7 +56,7 @@ def override_db_dependency(monkeypatch):
     app.dependency_overrides.pop(deps.get_prompt_studio_db, None)
 
 
-def test_compare_strategies_propagates_request_id_for_each_job(monkeypatch, override_db_dependency):
+def test_compare_strategies_propagates_request_id_for_each_job(app, monkeypatch, override_db_dependency):
 
 
     captured_payloads = []
@@ -112,7 +110,7 @@ def test_compare_strategies_propagates_request_id_for_each_job(monkeypatch, over
     ]
 
 
-def test_compare_strategies_mixed_case_request_id_header(monkeypatch, override_db_dependency):
+def test_compare_strategies_mixed_case_request_id_header(app, monkeypatch, override_db_dependency):
 
 
     captured_payloads = []
@@ -163,6 +161,7 @@ def test_compare_strategies_mixed_case_request_id_header(monkeypatch, override_d
 
 
 def test_compare_rejects_unsupported_strategy_before_side_effects(
+    app,
     monkeypatch,
     override_db_dependency,
 ):

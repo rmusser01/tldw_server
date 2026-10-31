@@ -471,3 +471,14 @@ def test_migration_fingerprint_rejects_caller_controlled_domain(
     with pytest.raises(WebhookKeyError) as exc_info:
         key_ring.fingerprint_migration_source("caller-controlled", b"source")
     assert exc_info.value.code is WebhookKeyErrorCode.FINGERPRINT_DOMAIN_INVALID
+
+
+@pytest.mark.unit
+def test_key_failures_use_central_exception_with_compatible_export() -> None:
+    from tldw_Server_API.app.core import exceptions
+
+    central_error = getattr(exceptions, "WebhookKeyError", None)
+    assert central_error is WebhookKeyError
+    with pytest.raises(central_error) as error:
+        WebhookKeyRing.from_environment({})
+    assert error.value.code is WebhookKeyErrorCode.KEY_UNAVAILABLE

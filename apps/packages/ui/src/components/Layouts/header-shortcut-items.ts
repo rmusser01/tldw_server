@@ -197,6 +197,15 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         descriptionDefault: "Three-pane workspace: sources, chat, and generated outputs"
       },
       {
+        id: "explainer",
+        to: "/explainer",
+        icon: Workflow,
+        labelKey: "option:header.explainer",
+        labelDefault: "Explainer",
+        descriptionKey: "option:header.explainerDesc",
+        descriptionDefault: "Explore topics and sources through branching explanations"
+      },
+      {
         id: "knowledge-qa",
         to: "/knowledge",
         icon: CombineIcon,
@@ -662,6 +671,7 @@ export const PERSONA_SHORTCUT_DEFAULTS: Record<
     "chat",
     "prompts",
     "deep-research",
+    "explainer",
     "knowledge-qa",
     "media",
     "research-workspace",

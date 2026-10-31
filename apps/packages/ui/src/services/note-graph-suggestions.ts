@@ -64,7 +64,8 @@ const CAPABILITY_UNAVAILABLE_REASONS = [
   "notes_graph_provider_retry_policy_unsupported",
   "notes_graph_provider_unavailable",
   "notes_graph_suggestions_disabled",
-  "notes_graph_suggestions_worker_unavailable"
+  "notes_graph_suggestions_worker_unavailable",
+  "notes_graph_sync_not_ready"
 ] as const
 
 const RUN_ERROR_CODES = [
@@ -600,7 +601,24 @@ const graphInputSchema = z.strictObject({
 })
 
 const normalizeGraph = (value: unknown): NotesGraphResponse => {
-  return parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
+  const graph = parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
+  const noteIds = new Map(
+    graph.nodes
+      .filter((node) => node.type === "note" && !node.id.startsWith("note:"))
+      .map((node) => [node.id, `note:${node.id}`])
+  )
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => ({
+      ...node,
+      id: noteIds.get(node.id) ?? node.id
+    })),
+    edges: graph.edges.map((edge) => ({
+      ...edge,
+      source: noteIds.get(edge.source) ?? edge.source,
+      target: noteIds.get(edge.target) ?? edge.target
+    }))
+  }
 }
 
 export const fetchNotesGraph = async (

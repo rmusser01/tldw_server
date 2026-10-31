@@ -28,7 +28,6 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 
 _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -1492,21 +1491,6 @@ class UnifiedEvaluationService:
         elif raw.isdigit():
             variants.add(f"user_{raw}")
         return variants
-
-    @staticmethod
-    def _extract_created_ts(record: dict[str, Any]) -> Optional[int]:
-        value = record.get("created_at")
-        if value is None:
-            value = record.get("created")
-        if isinstance(value, (int, float)):
-            return int(value)
-        if isinstance(value, str):
-            try:
-                ts = value.replace("Z", "+00:00")
-                return int(datetime.fromisoformat(ts).timestamp())
-            except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
-                return None
-        return None
 
     async def _store_evaluation_result(
         self,

@@ -942,6 +942,35 @@ def resolve_tiktoken_encoding(model: str) -> Any:
     return _resolve_tiktoken_encoding_cached(normalized_model)
 
 
+@lru_cache(maxsize=128)
+def _resolve_tiktoken_encoding_or_default_cached(model: str) -> Any:
+    import tiktoken  # type: ignore
+
+    if model:
+        try:
+            return tiktoken.encoding_for_model(model)
+        except Exception:  # noqa: BLE001 - any resolution failure degrades to the default
+            pass
+    return tiktoken.get_encoding("cl100k_base")
+
+
+def resolve_tiktoken_encoding_or_default(model: Any) -> Any:
+    """Lenient twin of :func:`resolve_tiktoken_encoding`.
+
+    The strict version raises ``TokenizerUnavailable`` deliberately, so the
+    strict-token-counting machinery can refuse an approximate count. That is exactly why
+    eleven call sites re-implemented the ``encoding_for_model`` -> ``cl100k_base``
+    fallback by hand rather than adopting it, and three of those caught only ``KeyError``
+    while tiktoken raises ``AttributeError`` for a non-string model -- so a workflow step
+    written ``model: null`` crashed instead of degrading.
+
+    This twin never raises for a bad model name: it normalizes anything falsy or
+    unresolvable to ``cl100k_base``. ``ImportError`` still propagates, because callers
+    already fall back to a character-count estimate when tiktoken is absent.
+    """
+    return _resolve_tiktoken_encoding_or_default_cached(str(model or "").strip())
+
+
 def _resolve_tiktoken_tokenizer_name(model: str) -> str | None:
     try:
         encoding = resolve_tiktoken_encoding(model)

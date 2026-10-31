@@ -204,6 +204,44 @@ describe("PromptReviewSurface", () => {
     )
   })
 
+  it("keeps each pressed review control associated with its named content group", async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <PromptReviewSurface {...defaultProps()} />
+        <PromptReviewSurface {...defaultProps()} />
+      </>
+    )
+
+    const editButtons = screen.getAllByRole("button", { name: "Edit" })
+    const changesButtons = screen.getAllByRole("button", {
+      name: "Changes"
+    })
+    const editGroups = screen.getAllByRole("group", { name: "Edit" })
+    expect(editGroups).toHaveLength(2)
+    editGroups.forEach((group, index) => {
+      expect(group.id).toBeTruthy()
+      expect(group.id).not.toBe(editButtons[index].id)
+      expect(group).toHaveAttribute("aria-labelledby", editButtons[index].id)
+      expect(editButtons[index]).toHaveAttribute("aria-controls", group.id)
+    })
+
+    await user.click(changesButtons[0])
+
+    const changesGroup = screen.getByRole("group", { name: "Changes" })
+    expect(changesGroup.id).toBeTruthy()
+    expect(changesGroup.id).not.toBe(changesButtons[0].id)
+    expect(changesGroup).toHaveAttribute(
+      "aria-labelledby",
+      changesButtons[0].id
+    )
+    expect(changesButtons[0]).toHaveAttribute(
+      "aria-controls",
+      changesGroup.id
+    )
+    expect(screen.getAllByRole("group", { name: "Edit" })).toHaveLength(1)
+  })
+
   it("supports Apply, Copy, and Cancel in review mode", async () => {
     const user = userEvent.setup()
     const writeText = vi

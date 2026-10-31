@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.Persona.visual_artwork import artwork_manifest_for_import
+from tldw_Server_API.app.core.Persona.companion_behavior import (
+    CompanionBehaviorValidationError,
+    normalize_companion_behavior,
+)
 from tldw_Server_API.app.core.Persona.visual_import_preview_validators import (
     preview_renderer_import,
 )
@@ -21,6 +25,7 @@ from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
 )
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
+    resolved_visual_state_ids,
     validate_visual_manifest,
 )
 
@@ -91,6 +96,7 @@ class PersonaVisualPackImportPreviewer:
             visual_manifest = artwork_manifest_for_import(pack)
             renderer_import_preview: dict[str, Any] | None = None
             resolved_required_states: Mapping[str, str] = {}
+            behavior_state_ids: set[str] = set()
             if _uses_renderer_import_preview(visual_manifest):
                 renderer_import_preview = preview_renderer_import(
                     manifest=visual_manifest,
@@ -117,6 +123,14 @@ class PersonaVisualPackImportPreviewer:
                 except PersonaVisualManifestError as exc:
                     raise ValueError("malformed_visual_manifest") from exc
                 resolved_required_states = manifest_validation.resolved_required_states
+                behavior_state_ids = resolved_visual_state_ids(manifest_validation.manifest)
+            try:
+                pack["companion_behavior"] = normalize_companion_behavior(
+                    pack.get("companion_behavior"),
+                    resolvable_state_ids=behavior_state_ids,
+                )
+            except CompanionBehaviorValidationError as exc:
+                raise ValueError("malformed_companion_behavior") from exc
 
         validation_warnings = _validation_warnings(assets)
         source_persona_id = str(pack.get("source_persona_id") or "")

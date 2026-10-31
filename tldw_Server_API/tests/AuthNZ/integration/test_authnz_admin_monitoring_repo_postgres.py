@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
 
 pytestmark = pytest.mark.integration
 
@@ -18,29 +20,12 @@ async def test_authnz_admin_monitoring_repo_postgres_round_trip(test_db_pool: An
     repo = AuthnzAdminMonitoringRepo(pool)
     await repo.ensure_schema()
 
-    async with pool.acquire() as conn:
-        actor_id = await conn.fetchval(
-            """
-            INSERT INTO users (username, email, password_hash, role, is_active, is_verified)
-            VALUES ($1, $2, $3, $4, TRUE, TRUE)
-            RETURNING id
-            """,
-            "pg-monitor-actor",
-            "pg-monitor-actor@example.com",
-            "hashed",
-            "admin",
-        )
-        assignee_id = await conn.fetchval(
-            """
-            INSERT INTO users (username, email, password_hash, role, is_active, is_verified)
-            VALUES ($1, $2, $3, $4, TRUE, TRUE)
-            RETURNING id
-            """,
-            "pg-monitor-assignee",
-            "pg-monitor-assignee@example.com",
-            "hashed",
-            "admin",
-        )
+    actor_id = await ensure_test_user(
+        pool, "pg-monitor-actor", "pg-monitor-actor@example.com", role="admin", is_verified=True
+    )
+    assignee_id = await ensure_test_user(
+        pool, "pg-monitor-assignee", "pg-monitor-assignee@example.com", role="admin", is_verified=True
+    )
 
     created_rule = await repo.create_rule(
         metric="queue_depth",

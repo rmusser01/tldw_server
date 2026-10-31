@@ -106,6 +106,13 @@ Endpoints
 - Chat/LLM cost and tokens: `GET /api/v1/metrics/chat`.
 - Unified circuit breaker status (admin): `GET /api/v1/admin/circuit-breakers` (requires admin role + `system.logs` permission).
 
+Connected clients, including Chatbook, must send an API key or bearer token
+belonging to a principal with `system.logs` when requesting `/api/v1/health`
+or its readiness, liveness, metrics, and security subroutes. A regular user
+credential alone does not grant operator access. Use `/health` for an anonymous
+connection/liveness check. The compatibility readiness response retains `ready`,
+`engine`, `db`, and `time` alongside the sanitized operator fields.
+
 Grafana + Prometheus
 - Use the sample dashboards and alerts referenced in `Docs/Deployment/Monitoring/Metrics_Cheatsheet.md`.
 - Set `TLDW_METRICS_API_KEY_FILE` to a mode-0600 file containing an API key for

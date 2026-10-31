@@ -1,19 +1,71 @@
+import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import type { AssistantSelection } from "@/types/assistant-selection"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 const STORAGE_KEY = "tldw-playground-session"
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24 hours
+type SyncStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
 
-const createMemoryStorage = (): StateStorage => ({
+const createMemoryStorage = (): SyncStorage => ({
   getItem: () => null,
   setItem: () => {},
   removeItem: () => {}
 })
 
+const bestEffortStorage = (getStorage: () => Storage): SyncStorage => {
+  let storage: Storage
+  try {
+    storage = getStorage()
+  } catch {
+    return createMemoryStorage()
+  }
+  return {
+    getItem: (key) => {
+      try { return storage.getItem(key) } catch { return null }
+    },
+    setItem: (key, value) => {
+      try {
+        storage.setItem(key, value)
+      } catch {
+        // A rejected replacement must not leave an older restore target pinned.
+        try { storage.removeItem(key) } catch { /* Storage may be blocked entirely. */ }
+      }
+    },
+    removeItem: (key) => {
+      try { storage.removeItem(key) } catch { /* Preserve the other backing store. */ }
+    }
+  }
+}
+
+const createBrowserStorage = (): StateStorage => {
+  const tabStorage = bestEffortStorage(() => sessionStorage)
+  const durableStorage = bestEffortStorage(() => localStorage)
+  return {
+    getItem: (key) => {
+      const current = tabStorage.getItem(key)
+      if (current !== null) return current
+      // New tabs keep last-session recovery, then own their restore target.
+      const previous = durableStorage.getItem(key)
+      if (previous !== null) tabStorage.setItem(key, previous)
+      return previous
+    },
+    setItem: (key, value) => {
+      tabStorage.setItem(key, value)
+      durableStorage.setItem(key, value)
+    },
+    removeItem: (key) => {
+      tabStorage.removeItem(key)
+      durableStorage.removeItem(key)
+    }
+  }
+}
+
 export interface PlaygroundSessionData {
   // Core identifier (used to restore messages from Dexie)
+  historySelectionReference?: HistorySelectionReference | null
   historyId: string | null
   serverChatId: string | null
   trackedAssistantSelection: AssistantSelection | null
@@ -32,6 +84,7 @@ export interface PlaygroundSessionData {
   compareSelectedModels: string[]
 
   // RAG settings (when chatMode === "rag")
+  fileRetrievalEnabled: boolean
   ragMediaIds: number[] | null
   ragSearchMode: "hybrid" | "vector" | "fts"
   ragTopK: number | null
@@ -44,16 +97,21 @@ export interface PlaygroundSessionData {
 }
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
+  serverChatSelectionIntent: { chatId: string } | null
+  requestServerChatSelection: (chatId: string) => void
   restoreRevision: number
+  sourceSelectionRevision: number
   // Actions
   saveSession: (data: Partial<PlaygroundSessionData>) => void
   clearSession: () => void
   cancelPendingRestore: () => void
+  markSourceSelectionIntent: () => void
   isSessionStale: () => boolean
   isSessionValid: (expectedScopeKey?: string | null) => boolean
 }
 
 const initialState: PlaygroundSessionData = {
+  historySelectionReference: null,
   historyId: null,
   serverChatId: null,
   trackedAssistantSelection: null,
@@ -68,6 +126,7 @@ const initialState: PlaygroundSessionData = {
   webSearch: false,
   compareMode: false,
   compareSelectedModels: [],
+  fileRetrievalEnabled: false,
   ragMediaIds: null,
   ragSearchMode: "hybrid",
   ragTopK: null,
@@ -82,6 +141,10 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
     (set, get) => ({
       ...initialState,
       restoreRevision: 0,
+      sourceSelectionRevision: 0,
+      serverChatSelectionIntent: null,
+      requestServerChatSelection: (chatId) =>
+        set({ serverChatSelectionIntent: { chatId } }),
 
       saveSession: (data) =>
         set((state) => ({
@@ -93,12 +156,16 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       clearSession: () =>
         set((state) => ({
           ...initialState,
+          serverChatSelectionIntent: null,
           lastUpdated: 0,
           restoreRevision: state.restoreRevision + 1
         })),
 
       cancelPendingRestore: () =>
         set((state) => ({ restoreRevision: state.restoreRevision + 1 })),
+
+      markSourceSelectionIntent: () =>
+        set((state) => ({ sourceSelectionRevision: state.sourceSelectionRevision + 1 })),
 
       isSessionStale: () => {
         const { lastUpdated } = get()
@@ -134,9 +201,10 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       version: 1,
       migrate: (persisted) => persisted as any,
       storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? localStorage : createMemoryStorage()
+        typeof window !== "undefined" ? createBrowserStorage() : createMemoryStorage()
       ),
       partialize: (state) => ({
+        historySelectionReference: state.historySelectionReference,
         historyId: state.historyId,
         serverChatId: state.serverChatId,
         trackedAssistantSelection: state.trackedAssistantSelection,
@@ -151,6 +219,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         webSearch: state.webSearch,
         compareMode: state.compareMode,
         compareSelectedModels: state.compareSelectedModels,
+        fileRetrievalEnabled: state.fileRetrievalEnabled,
         ragMediaIds: state.ragMediaIds,
         ragSearchMode: state.ragSearchMode,
         ragTopK: state.ragTopK,
@@ -162,6 +231,12 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
     }
   )
 )
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (invalidated) usePlaygroundSessionStore.getState().clearSession()
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)
 
 if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

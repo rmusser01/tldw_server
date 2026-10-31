@@ -111,6 +111,321 @@ These commands never run automatically from `plist`, `status`, `smoke`, or
 server startup. They are operator-owned scaffolding and do not validate host
 reboot behavior.
 
+### Live-Session Launchd Restart
+
+The manual host test below restarts its own LaunchAgent **after** a real guest
+command. It requires a changed helper generation, replaces the stale session
+VM, verifies guest stdout and exit status, then reuses the replacement VM for a
+third command. This is separate from `launchd-drill`, whose initial kickstart
+occurs before smoke execution. It does not reboot the host or restart an
+operator's existing helper.
+
+Run from the repository root on a prepared Apple Silicon macOS host with a
+logged-in GUI user. Set `SOURCE_BUNDLE` to a canonical bundle containing the
+current guest agent; never pass that source directly as the writable test image.
+The test skips unless both real-E2E and launchd-restart opt-ins are set.
+
+```bash
+(
+  set -eu
+  umask 077
+  source .venv/bin/activate
+  swift build --package-path tools/macos-vz-helper
+  python tools/macos-vz-helper/scripts/vz-helperctl.py sign \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements
+
+  evidence_root="$HOME/Library/Logs/tldw/vz-launchd-recovery"
+  install -d -m 700 "$evidence_root"
+  evidence_dir="$(mktemp -d "$evidence_root/run.XXXXXX")"
+  printf 'Retaining evidence in %s\n' "$evidence_dir"
+  bundle="$(python tools/vz-linux-image/scripts/prepare-smoke-bundle.py \
+    --source-bundle "${SOURCE_BUNDLE:?Set SOURCE_BUNDLE to a prepared canonical bundle}" \
+    --store-root "$evidence_dir/image-store" --run-id launchd-recovery)"
+
+  TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+  TLDW_SANDBOX_VZ_LINUX_LAUNCHD_RESTART_DRILL=1 \
+  TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE="$bundle" \
+  TLDW_SANDBOX_MACOS_HELPER_BINARY="$PWD/tools/macos-vz-helper/.build/debug/macos-vz-helper" \
+    python -m pytest \
+      tldw_Server_API/tests/sandbox/test_vz_linux_launchd_recovery_host_gated.py \
+      -q -rs --junitxml="$evidence_dir/pytest.xml" --basetemp="$evidence_dir/pytest"
+)
+```
+
+Acceptance requires **1 passed, 0 skipped, 0 errors**, not merely pytest exit 0.
+`launchd-recovery.json`, the generated plist, and helper/serial logs live under
+the pytest artifact tree. The receipt includes helper generations, VM IDs,
+command output, and cleanup checks. Only the short private socket directory is
+removed automatically after service absence and socket unavailability are
+confirmed. Evidence and disposable disks are retained deliberately; remove that
+run's evidence directory after review when it is no longer needed. Hard host
+termination can bypass Python cleanup; inspect the receipt's unique label and
+plist before any manual cleanup. Do not add this opt-in to scheduled CI.
+
+### Reproducible Guest Failure Workflow
+
+Use this explicit, manual-only command to prepare and run the capability-mismatch,
+acknowledged-handshake readiness-timeout, guest protocol-version mismatch,
+advertised-workspace mismatch, missing-agent startup, and initramfs boot-stall drills.
+It also runs a negative control for each drill. Production guest code, normal
+smoke behavior, and scheduled CI are unchanged.
+
+Prerequisites: Apple Silicon macOS, the project Python environment (including
+pytest-timeout), Go with this repository's agent dependencies already cached,
+native `cpio`, an explicitly selected signed helper, and a known-good Debian arm64 bundle.
+The bundle must use an ext4 `rootfs.img` and contain `e2fsck`, `debugfs`, `cmp`,
+`sha256sum`, `sed`, `mv`, `/bin/sleep`, and `unmkinitramfs`. The manifest must name
+a regular initrd with a simple filename, containing Debian's shell `/init` and
+its normal early-userspace utilities. It must not be in use or modified by another process. Preparation
+is offline: the command does not download Go dependencies or provision Debian.
+Use the existing build/sign instructions above for the helper.
+
+```bash
+source .venv/bin/activate
+# This parent already exists on a prepared macOS host; choose a new run name.
+evidence_dir="$HOME/Library/Logs/tldw-vz-failure-$(date +%Y%m%d-%H%M%S)"
+python tools/macos-vz-helper/scripts/vz-failure-drill.py \
+  --allow-fault-injection \
+  --source-bundle "${SOURCE_BUNDLE:?Set SOURCE_BUNDLE to the canonical healthy bundle}" \
+  --helper "${HELPER_BINARY:?Set HELPER_BINARY to the signed helper executable}" \
+  --evidence-dir "$evidence_dir"
+```
+
+The evidence directory must be new and its parent must already exist. The
+workflow builds four **test-only Go overlays** and stages a test-only shell
+launcher and initramfs wrapper. A separate disposable healthy VM prepares each artifact in an
+**offline image-store clone**, verifies the installed bytes, and checks the
+filesystem. The missing-agent installer also preserves and verifies the
+original agent under a second path. The launcher records a fresh nonce and VM
+ID in the guest workspace before withholding agent startup; its negative
+control starts the preserved original agent through that same launcher.
+Each test attempt gets fresh healthy/fault clones;
+neither canonical nor prepared fault sources are booted. The command manages
+its own direct helper with a unique private socket and PID file. It never
+attaches to an existing helper, installs launchd services, or reboots the host.
+
+Exit zero requires six passing live tests, six negative controls failing at
+their specific execution assertions, no skipped tests, no cleanup errors, empty
+VM inventory, closed disposable disks, helper shutdown, and unchanged source
+boot-artifact/manifest/build-provenance hashes. This is not a full directory
+inventory: unrelated files such as operator notes are outside the fingerprint.
+An unrelated boot failure is not a successful negative control.
+
+The missing-agent fixture replaces the guest executable in a disposable rootfs
+with a shell launcher. A nonce-matched proof in the guest workspace must show
+that its service started before the host accepts `guest_transport_timeout` as
+the intended failure. No fault-VM exec may be dispatched, and helper and
+session-control state must be empty afterward. The negative control boots a
+separate clone of that same launcher, asks it to exec the preserved original
+agent, and requires completed real execution. Healthy recovery then runs two
+commands on one VM. This proves service startup and missing VSock connection;
+it does not prove kernel boot-hang recovery or mount isolation.
+
+The boot-stall fixture instead wraps initramfs `/init`, before mounting the rootfs
+or starting the guest agent. The preparer reads the original `/init` from the
+offline cloned initrd; the host preserves it in an appended aligned `newc`
+archive. Rootfs and kernel bytes are not modified by this preparation. Each run
+clone receives a fresh nonce and stall/continue setting. Its helper serial log
+must contain exactly one marker matching that nonce, VM ID, mode, and
+`stage=initramfs`. Missing, stale, unrelated, malformed or oversized proof fails
+acceptance; a transport timeout alone is insufficient.
+
+The positive test requires bounded `guest_transport_timeout`, no exec dispatch,
+empty reusable control state, then healthy execution and same-session reuse.
+The negative control boots the same wrapper in continue mode, executes the
+preserved original `/init`, and must complete a real command before the intended
+failure assertion. The workflow also checks VM inventory and disk handles,
+stops its helper, and verifies unchanged canonical and prepared fault-source
+hashes. Per-case initrd challenge changes are expected only in disposable run
+clones. This proves an early-userspace stall, **not** arbitrary kernel-hang or
+stalled Apple VZ start-callback recovery, host reboot recovery, or mount isolation.
+
+The rootfs installers recover any pending ext4 journal on their **offline
+disposable target** before raw `debugfs` writes. Only `e2fsck -p` status 0 (clean)
+or 1 (corrected) permits installation; other statuses fail before writes. A
+read-only filesystem check alone skips journal replay and can leave later boot
+recovery overwriting freshly installed agent data or permissions. The final
+read-only check and installed-byte verification remain mandatory.
+
+The protocol fixture changes only the guest's initial VSock handshake version
+to `999`, not the host-helper JSON protocol or guest capability metadata. A
+fresh workspace challenge and proof identify the attempted version and VM;
+the positive test additionally requires the helper's `guest_protocol_mismatch`
+rejection before any exec dispatch. Its negative control changes only the test
+challenge back to the supported guest version. The real helper validation stays
+enabled, and completed execution with exact stdout is required to accept that
+control. Each positive drill then proves healthy recovery and same-session reuse.
+
+The workspace fixture changes only the handshake's advertised root to
+`/workspace-mismatch/<nonce>`. Its actual workspace remains `/workspace`, and
+protocol/capabilities remain valid. The helper's real returned metadata must
+match that run's nonce; the runner must reject with only
+`vz_linux_guest_agent_workspace_mismatch` before exec. The negative control
+restores only the advertised root, with real admission still enabled, and must
+execute successfully. This tests metadata admission, not mount isolation or
+path-escape resistance.
+
+Retained artifacts include `receipt.json` (including hashes of helperctl and
+the image-store materializer), per-case `result.json`, JUnit and
+guest receipts, build overlays/binaries/hashes, installation logs, helper/serial
+logs, and image-store manifests/provenance. Treat these as private operator evidence;
+review them before sharing. **Disposable rootfs/kernel/initrd payloads are removed
+by default**, including after failed or canceled drills. Removal happens only
+after canonical/completed prepared-source hash verification, confirmed VM/helper teardown,
+and a fresh closed-handle check. `receipt.json` records final payload hashes,
+removed filenames and any retention/cleanup failure. Bundle metadata, test
+binaries, wrappers, logs and receipts remain; canonical inputs and older evidence
+are never cleanup candidates. Partial copies are tracked before materialization.
+Setup copies that fail before becoming prepared sources have no completed-source
+baseline; their final payload hashes are retained before removal under the same
+ownership and teardown checks. Interrupted final source verification retains
+payloads, records the failure and still writes the final receipt.
+Receipt rewrites are atomic. Allocation-time filesystem identities and final
+payload size/change timestamps are rechecked before deletion. Directory handles
+anchor each atomic claim into a private staging directory; a claimed replacement
+is restored without overwriting newer names, or retained at the receipt's
+`retained_path` if restoration fails. Replacement trees are not adopted as owned
+bundles. Handled signals are deferred across claim/restore/unlink and
+its deletion record. An interruption during one bundle's cleanup records a failure and
+retains its remaining payloads while still attempting other safe allocations.
+
+Pass `--keep-bundles` only when disk inspection or reuse is deliberately needed;
+this retains all allocated boot payloads and records the override in the receipt.
+Unknown safety checks, changed source hashes, invalid paths or deletion failures
+retain affected payloads and make the run fail. Review the receipt before any
+manual deletion. No background cleanup scans or removes previous runs.
+A failure retains logs and returns nonzero; unavailable
+cleanup checks are not reported as empty. Ctrl-C/SIGTERM and command timeouts
+terminate the active build/test process group and reap its direct child before
+helper cleanup (three-second TERM grace, then KILL). Signals arriving during
+process creation coalesce into one cancellation after
+child ownership is registered; later signals retain their normal behavior.
+An installation error stays primary if preparer cleanup also fails, with the
+cleanup diagnostic attached to the retained traceback.
+SIGKILL, a host crash, or power loss can bypass cleanup. In that case inspect the
+receipt's unique runtime/socket/PID paths and any `.payload-cleanup-*` staging
+directory in an owned bundle before manual recovery. Never enable
+these fault fixtures on a production guest or run this in scheduled CI.
+
+The standalone tests below remain useful when operating an already isolated
+helper or investigating one drill independently.
+
+### Guest Protocol Mismatch Drill
+
+The repository workflow above prepares the protocol fixture and runs both
+controls automatically. For standalone diagnosis, the test entrypoint is
+`tldw_Server_API/tests/sandbox/test_vz_linux_protocol_host_gated.py::test_vz_linux_protocol_mismatch_then_healthy_session_reuse`.
+It requires `TLDW_SANDBOX_VZ_LINUX_PROTOCOL_DRILL=1` in addition to the normal
+real-E2E opt-in, a fresh disposable protocol-overlay bundle in
+`TLDW_SANDBOX_VZ_LINUX_PROTOCOL_BASE_IMAGE`, a separate healthy disposable bundle
+in `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE`, and an explicit isolated helper socket.
+Use a helper rebuilt from this checkout so protocol rejection has its specific
+diagnostic instead of the older `helper_internal_error`. The retained
+`guest-protocol.json` records the challenged version/VM, failure, exec dispatches,
+recovery/reuse output, and cleanup. Proof written before a handshake alone is
+not acceptance: the specific helper rejection must also be observed.
+
+### Guest Workspace Metadata Mismatch Drill
+
+The workflow prepares this fixture and runs both controls. The standalone
+entrypoint is
+`tldw_Server_API/tests/sandbox/test_vz_linux_workspace_host_gated.py::test_vz_linux_workspace_mismatch_then_healthy_session_reuse`.
+It requires `TLDW_SANDBOX_VZ_LINUX_WORKSPACE_DRILL=1`, normal real-E2E opt-in,
+a fresh disposable overlay bundle in `TLDW_SANDBOX_VZ_LINUX_WORKSPACE_BASE_IMAGE`,
+a separate healthy disposable bundle in `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE`,
+and an explicit isolated helper socket. The test writes a fresh challenge into
+the fault VM's workspace before boot. `guest-workspace.json` retains helper
+metadata, rejection, exec dispatches, public reconciliation and cleanup evidence.
+Do not change the actual guest mount or remove `exec` capability to create this
+fault: either would test a different failure or mask a broken workspace gate.
+
+### Guest Capability Mismatch Drill
+
+This manual test exercises the existing runner's required-capability gate. It
+requires an isolated, operator-owned helper and **two separate disposable
+bundles**: a healthy bundle and a test-only guest advertising
+`["output_cap_v1"]` without `exec`. Removing the capability from the host-side
+manifest is not fault injection: the metadata must arrive from the running
+guest's VSock handshake. Keep the test guest's exec handler intact so an
+accidental dispatch is observable.
+
+Never install a test agent in the canonical bundle. Build a purpose-specific
+test guest, install it into an offline image-store clone, then create another
+disposable run clone for each attempt. Keep source and installed-agent hashes,
+filesystem checks, and helper lifecycle receipts. Ensure adequate host free
+space before preparing or booting images.
+
+With that private helper already running:
+
+```bash
+TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+TLDW_SANDBOX_VZ_LINUX_GUEST_MISMATCH_DRILL=1 \
+TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=/path/to/healthy/run/bundle \
+TLDW_SANDBOX_VZ_LINUX_MISMATCH_BASE_IMAGE=/path/to/missing-exec/run/bundle \
+TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/private/helper.sock \
+python -m pytest -q \
+  tldw_Server_API/tests/sandbox/test_vz_linux_guest_mismatch_host_gated.py::test_vz_linux_rejects_real_guest_missing_exec_then_runs_healthy_session
+```
+
+The test removes its own sessions/VMs and writes `guest-mismatch.json` under
+pytest's artifact directory. The caller remains responsible for stopping its
+helper and retaining the receipt. A passing run proves capability rejection,
+no dispatch or reusable state for that guest, followed by healthy execution and
+session reuse on the same helper. It does not prove protocol-version rejection
+or host reboot recovery. Missing prerequisites/skips are not acceptance.
+
+Local live acceptance was recorded on 2026-09-13, including a negative control
+that caught actual guest execution when the runner gate was bypassed. See
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` and TASK-13243.3. A low `df`
+free-space value alone is not a definitive capacity check on macOS: account for
+reclaimable capacity and verify the actual write path before declaring a blocker.
+
+### Guest Readiness Timeout Drill
+
+This separate manual drill verifies a guest that has booted and completed its
+VSock handshake but never sends `ready`. It is not a missing-agent or kernel
+boot-failure test. Use an isolated operator-owned helper and separate disposable
+healthy/fault bundles, prepared through the same offline image-store cloning
+procedure as the capability-mismatch drill. Never alter a canonical image.
+
+The purpose-built test guest must implement this **test-only** contract after
+`sendHandshake` has validated the real helper acknowledgement:
+
+- Read `/workspace/.tldw-readiness-challenge.json`, containing a fresh `nonce`
+  and boolean `withhold_ready` written by the test before VM creation.
+- Write `/workspace/.tldw-readiness-proof.json` as a regular file with the same
+  nonce, its actual `vm_id`, and `handshake_acknowledged: true`.
+- When `withhold_ready` is true, keep the connection alive without sending
+  readiness, with a two-minute guest-side watchdog. Do not block solely on
+  `context.Background().Done()`: its nil channel can trigger Go deadlock exit.
+- Otherwise continue the unchanged readiness/exec path. The negative control
+  sets the test module's `_WITHHOLD_READY` to false and must fail specifically
+  because the guest actually executes, not because the image fails to boot.
+
+Keep this behavior in a purpose-built Go build overlay, not production source
+or runtime flags. Retain the overlay, binary, offline-install comparison, source
+hashes, and per-attempt lifecycle receipt. With the private helper running:
+
+```bash
+TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+TLDW_SANDBOX_VZ_LINUX_READINESS_DRILL=1 \
+TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=/path/to/healthy/run/bundle \
+TLDW_SANDBOX_VZ_LINUX_READINESS_BASE_IMAGE=/path/to/withheld-ready/run/bundle \
+TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/private/helper.sock \
+python -m pytest -q --timeout=90 --timeout-method=signal \
+  tldw_Server_API/tests/sandbox/test_vz_linux_readiness_host_gated.py::test_vz_linux_readiness_timeout_then_healthy_session_reuse
+```
+
+The test requires a fresh acknowledged-handshake proof, a bounded
+`guest_transport_timeout`, no execution or reusable control state after failure,
+then two healthy commands in one new session VM on the same helper. It retains
+`guest-readiness.json` in pytest's artifact directory and attempts all owned
+cleanup even after a deletion error. A skip is not acceptance. The caller must
+stop its helper and retain its logs/receipt; also check disposable disk handles
+before helper shutdown, since registry emptiness alone is not shutdown proof.
+Local acceptance and the failed initial test-image attempt are recorded in
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` under TASK-13243.4.
+
 ### Host Reboot Validation Drill
 
 `host-reboot-drill` records bounded helper evidence before a manual host reboot

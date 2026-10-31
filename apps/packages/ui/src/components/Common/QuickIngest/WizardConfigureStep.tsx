@@ -17,6 +17,7 @@ import { PresetSelector } from "./PresetSelector"
 import type { CommonOptions, DetectedMediaType, TypeDefaults } from "./types"
 import { SUPPORTED_LANGUAGES } from "@/utils/supported-languages"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { getQuickIngestAnalysisProviderWarning } from "@/services/tldw/quick-ingest-batch"
 
 const DRAFT_STORAGE_CAP_BYTES = 5 * 1024 * 1024
 const CUSTOM_AUDIO_LANGUAGE_SENTINEL = "__custom__"
@@ -105,6 +106,24 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
     React.ComponentRef<typeof AutoComplete>
   >(null)
   const [showAdvanced, setShowAdvanced] = React.useState(false)
+  const [attemptedNext, setAttemptedNext] = React.useState(false)
+  const requiredAnalysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+    common: presetConfig.common,
+    advancedValues: presetConfig.advancedValues,
+  })
+  const visibleAnalysisProviderWarning =
+    analysisProviderWarning ||
+    (attemptedNext && requiredAnalysisProviderWarning
+      ? qi("analysisProvider.required", requiredAnalysisProviderWarning)
+      : null)
+  const handleNext = () => {
+    if (requiredAnalysisProviderWarning) {
+      setAttemptedNext(true)
+      analysisProviderRef.current?.focus()
+      return
+    }
+    goNext()
+  }
   const chunkingMode =
     presetConfig.common.chunking_mode === "manual" ? "manual" : "auto"
   const autoChunkingGoal =
@@ -709,8 +728,8 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                 id="quick-ingest-analysis-provider"
                 className="w-full"
                 aria-label={qi("analysisProvider.label", "Analysis provider")}
-                aria-describedby={`quick-ingest-analysis-provider-help${analysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
-                aria-invalid={analysisProviderWarning ? true : undefined}
+                aria-describedby={`quick-ingest-analysis-provider-help${visibleAnalysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
+                aria-invalid={visibleAnalysisProviderWarning ? true : undefined}
                 autoFocus={focusAnalysisProvider}
                 value={normalizedAnalysisProvider}
                 options={analysisProviderOptions}
@@ -742,14 +761,14 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                   "Configured providers are suggestions. This choice is only for this ingest."
                 )}
               </p>
-              {analysisProviderWarning ? (
+              {visibleAnalysisProviderWarning ? (
                 <p
                   id="quick-ingest-analysis-provider-warning"
                   role="alert"
                   aria-live="assertive"
                   className="mt-1 text-xs text-danger"
                 >
-                  {analysisProviderWarning}
+                  {visibleAnalysisProviderWarning}
                 </p>
               ) : null}
             </div>
@@ -1075,7 +1094,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
           <ArrowLeft className="mr-1 h-4 w-4" />
           {qi("wizard.back", "Back")}
         </Button>
-        <Button type="primary" onClick={goNext}>
+        <Button type="primary" onClick={handleNext}>
           {qi("wizard.next", "Next")}
           <ArrowRight className="ml-1 h-4 w-4" />
         </Button>

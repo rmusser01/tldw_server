@@ -555,11 +555,16 @@ describe("prompt improvement service", () => {
 })
 
 describe("prompt capability discovery", () => {
+  const unknownPromptPersistence = {
+    create_authorized: null,
+    update_authorized: null
+  }
+
   beforeEach(() => {
     mocks.apiSend.mockReset()
   })
 
-  it("keeps both advertised unsupported capabilities disabled", async () => {
+  it("treats a valid response with both capabilities advertised unsupported as known", async () => {
     mocks.apiSend.mockResolvedValue({
       ok: true,
       status: 200,
@@ -570,9 +575,35 @@ describe("prompt capability discovery", () => {
     })
 
     await expect(fetchPromptCapabilities()).resolves.toEqual({
-      availability: "unavailable",
+      availability: "available",
       prompt_improvement_v1: { supported: false, limits },
-      single_text_recipe_v2: { supported: false }
+      single_text_recipe_v2: { supported: false },
+      prompt_persistence: unknownPromptPersistence
+    })
+  })
+
+  it("parses create and update authorization independently", async () => {
+    mocks.apiSend.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        prompt_improvement_v1: { supported: true, limits },
+        single_text_recipe_v2: { supported: true },
+        prompt_persistence: {
+          create_authorized: true,
+          update_authorized: false
+        }
+      }
+    })
+
+    await expect(fetchPromptCapabilities()).resolves.toEqual({
+      availability: "available",
+      prompt_improvement_v1: { supported: true, limits },
+      single_text_recipe_v2: { supported: true },
+      prompt_persistence: {
+        create_authorized: true,
+        update_authorized: false
+      }
     })
   })
 
@@ -594,7 +625,8 @@ describe("prompt capability discovery", () => {
     await expect(fetchPromptCapabilities()).resolves.toEqual({
       availability: "available",
       prompt_improvement_v1: { supported: true, limits },
-      single_text_recipe_v2: { supported: false }
+      single_text_recipe_v2: { supported: false },
+      prompt_persistence: unknownPromptPersistence
     })
   })
 
@@ -616,7 +648,8 @@ describe("prompt capability discovery", () => {
     await expect(fetchPromptCapabilities()).resolves.toEqual({
       availability: "unavailable",
       prompt_improvement_v1: { supported: false, limits: null },
-      single_text_recipe_v2: { supported: false }
+      single_text_recipe_v2: { supported: false },
+      prompt_persistence: unknownPromptPersistence
     })
   })
 
@@ -631,7 +664,8 @@ describe("prompt capability discovery", () => {
     await expect(fetchPromptCapabilities()).resolves.toEqual({
       availability: "unavailable",
       prompt_improvement_v1: { supported: false, limits: null },
-      single_text_recipe_v2: { supported: false }
+      single_text_recipe_v2: { supported: false },
+      prompt_persistence: unknownPromptPersistence
     })
   })
 })

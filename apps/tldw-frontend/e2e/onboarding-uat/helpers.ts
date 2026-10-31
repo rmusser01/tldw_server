@@ -397,32 +397,32 @@ export async function clickFirstSourceStarterQuestion(
   page: Page,
   question = "Summarize this source."
 ): Promise<FirstSourceStarterHandoff> {
-  await page.evaluate(() => {
-    type DiscussMediaWindow = Window & {
-      __tldwLastDiscussMediaDetail?: FirstSourceStarterHandoff | null
-    }
-    const target = window as DiscussMediaWindow
-    target.__tldwLastDiscussMediaDetail = null
-    window.addEventListener(
-      "tldw:discuss-media",
-      ((event: CustomEvent<FirstSourceStarterHandoff>) => {
-        target.__tldwLastDiscussMediaDetail = event.detail
-      }) as EventListener,
-      { once: true }
-    )
-  })
   await page.getByRole("button", { name: question }).click()
-  const handoffHandle = await page.waitForFunction(
-    () =>
-      (
-        window as Window & {
-          __tldwLastDiscussMediaDetail?: FirstSourceStarterHandoff | null
-        }
-      ).__tldwLastDiscussMediaDetail,
-    undefined,
-    { timeout: 10_000 }
-  )
-  return (await handoffHandle.jsonValue()) as FirstSourceStarterHandoff
+  await expect(page).toHaveURL(/\/chat(?:[?#]|$)/)
+  const composer = page.locator("#textarea-message, [data-testid='chat-input']").first()
+  await expect(composer).toBeVisible()
+  await expect(composer).toHaveValue(new RegExp(question.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+  await expect.poll(() => page.evaluate(() => {
+    const store = (window as Window & {
+      __tldw_useStoreMessageOption?: { getState: () => { chatMode?: string; ragMediaIds?: number[] } }
+    }).__tldw_useStoreMessageOption
+    const state = store?.getState()
+    return state?.chatMode === "rag" && Boolean(state.ragMediaIds?.length)
+  })).toBe(true)
+  const mediaId = await page.evaluate(() => {
+    const store = (window as Window & {
+      __tldw_useStoreMessageOption?: { getState: () => { ragMediaIds?: number[] } }
+    }).__tldw_useStoreMessageOption
+    return String(store?.getState().ragMediaIds?.[0])
+  })
+  const value = await composer.inputValue()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("tldw:discussMediaPrompt"))).toBeNull()
+  return {
+    mediaId,
+    title: value.split("\n")[0].replace(/^Chat with this media: /, ""),
+    mode: "rag_media",
+    content: value.split("\n\n").slice(1).join("\n\n")
+  }
 }
 
 export async function waitForWizardFirstChatRecovery(
@@ -553,8 +553,6 @@ type DiagnosticsAllowance = {
 }
 
 const MODEL_METADATA_ENDPOINT = "/api/v1/llm/models/metadata"
-const CHAT_SETTINGS_ENDPOINT_PREFIX = "/api/v1/chats/"
-const CHAT_SETTINGS_ENDPOINT_SUFFIX = "/settings?scope_type=global"
 
 function isBenignOnboardingConsoleEntry(entry: ConsoleDiagnostic): boolean {
   if (isBenign(entry.text)) {
@@ -568,12 +566,7 @@ function isBenignOnboardingConsoleEntry(entry: ConsoleDiagnostic): boolean {
     return true
   }
 
-  const locationUrl = entry.location?.url ?? ""
-  return (
-    /404 \(Not Found\)/.test(entry.text) &&
-    locationUrl.includes(CHAT_SETTINGS_ENDPOINT_PREFIX) &&
-    locationUrl.includes(CHAT_SETTINGS_ENDPOINT_SUFFIX)
-  )
+  return false
 }
 
 const matchesExpectedEndpoint = (

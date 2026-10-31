@@ -41,6 +41,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import DuplicateRoleError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.rbac import get_effective_permissions
+from tldw_Server_API.app.core.AuthNZ.repos import rbac_admin_repo
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import InputError, KanbanDB, KanbanDBError
@@ -240,32 +241,10 @@ async def create_tool_permission(
         tool = payload.tool_name.strip()
         name = f"tools.execute:{'*' if tool == '*' else tool}"
         desc = payload.description or ("Wildcard tool execution" if tool == "*" else f"Execute tool {tool}")
-
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            await db.execute(
-                "INSERT INTO permissions (name, description, category) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING",
-                name,
-                desc,
-                "tools",
-            )
-            row = await db.fetchrow(
-                "SELECT name, description, category FROM permissions WHERE name = $1",
-                name,
-            )
-            return ToolPermissionResponse(**dict(row))
-        else:
-            # SQLite doesn't support upsert on all versions; emulate
-            cur = await db.execute("SELECT name, description, category FROM permissions WHERE name = ?", (name,))
-            r = await cur.fetchone()
-            if not r:
-                await db.execute(
-                    "INSERT INTO permissions (name, description, category) VALUES (?, ?, ?)",
-                    (name, desc, "tools"),
-                )
-                cur = await db.execute("SELECT name, description, category FROM permissions WHERE name = ?", (name,))
-                r = await cur.fetchone()
-            return ToolPermissionResponse(name=r[0], description=r[1], category=r[2])
+        row = await rbac_admin_repo.ensure_permission(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), name=name, description=desc, category="tools"
+        )
+        return ToolPermissionResponse(name=row["name"], description=row["description"], category=row["category"])
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to create tool permission")
         raise HTTPException(status_code=500, detail="Failed to create tool permission") from e
@@ -332,32 +311,10 @@ async def revoke_tool_permission_from_role(role_id: int, tool_name: str, db=Depe
 async def list_role_tool_permissions(role_id: int, db=Depends(get_db_transaction)) -> list[ToolPermissionResponse]:
     """List tool execution permissions assigned to a role."""
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            rows = await db.fetch(
-                """
-                SELECT p.name, p.description, p.category
-                FROM permissions p
-                JOIN role_permissions rp ON rp.permission_id = p.id
-                WHERE rp.role_id = $1 AND p.name LIKE 'tools.execute:%'
-                ORDER BY p.name
-                """,
-                role_id,
-            )
-            return [ToolPermissionResponse(**dict(r)) for r in rows]
-        else:
-            cur = await db.execute(
-                """
-                SELECT p.name, p.description, p.category
-                FROM permissions p
-                JOIN role_permissions rp ON rp.permission_id = p.id
-                WHERE rp.role_id = ? AND p.name LIKE 'tools.execute:%'
-                ORDER BY p.name
-                """,
-                (role_id,),
-            )
-            rows = await cur.fetchall()
-            return [ToolPermissionResponse(name=r[0], description=r[1], category=r[2]) for r in rows]
+        rows = await rbac_admin_repo.list_role_tool_permissions(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), role_id=role_id
+        )
+        return [ToolPermissionResponse(**row) for row in rows]
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to list role tool permissions")
         raise HTTPException(status_code=500, detail="Failed to list role tool permissions") from e
@@ -369,52 +326,21 @@ async def grant_tool_permissions_batch(
 ) -> list[ToolPermissionResponse]:
     """Grant multiple tool execution permissions to a role in one call."""
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        results: list[ToolPermissionResponse] = []
-        # Reuse single-grant logic inline
+        wanted: list[tuple[str, str]] = []
         for tool in payload.tool_names:
             tool = tool.strip()
             if not tool:
                 continue
-            name = f"tools.execute:{'*' if tool == '*' else tool}"
-            desc = "Wildcard tool execution" if tool == "*" else f"Execute tool {tool}"
-
-            if is_pg:
-                await db.execute(
-                    "INSERT INTO permissions (name, description, category) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING",
-                    name,
-                    desc,
-                    "tools",
+            wanted.append(
+                (
+                    f"tools.execute:{'*' if tool == '*' else tool}",
+                    "Wildcard tool execution" if tool == "*" else f"Execute tool {tool}",
                 )
-                row = await db.fetchrow("SELECT id, name, description, category FROM permissions WHERE name = $1", name)
-                if not row:
-                    continue
-                await db.execute(
-                    "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    role_id,
-                    row["id"],
-                )
-                results.append(
-                    ToolPermissionResponse(name=row["name"], description=row["description"], category=row["category"])
-                )
-            else:
-                cur = await db.execute(
-                    "SELECT id, name, description, category FROM permissions WHERE name = ?", (name,)
-                )
-                r = await cur.fetchone()
-                if not r:
-                    await db.execute(
-                        "INSERT INTO permissions (name, description, category) VALUES (?, ?, ?)", (name, desc, "tools")
-                    )
-                    cur = await db.execute(
-                        "SELECT id, name, description, category FROM permissions WHERE name = ?", (name,)
-                    )
-                    r = await cur.fetchone()
-                await db.execute(
-                    "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (role_id, r[0])
-                )
-                results.append(ToolPermissionResponse(name=r[1], description=r[2], category=r[3]))
-        return results
+            )
+        rows = await rbac_admin_repo.grant_tool_permissions(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), role_id=role_id, permissions=wanted
+        )
+        return [ToolPermissionResponse(name=r["name"], description=r["description"], category=r["category"]) for r in rows]
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to grant tool permissions")
         raise HTTPException(status_code=500, detail="Failed to grant tool permissions") from e
@@ -426,28 +352,12 @@ async def revoke_tool_permissions_batch(
 ) -> dict:
     """Revoke multiple tool execution permissions from a role."""
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        revoked: list[str] = []
-        for tool in payload.tool_names:
-            tool = tool.strip()
-            if not tool:
-                continue
-            name = f"tools.execute:{'*' if tool == '*' else tool}"
-            if is_pg:
-                row = await db.fetchrow("SELECT id FROM permissions WHERE name = $1", name)
-                if row:
-                    await db.execute(
-                        "DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2", role_id, row["id"]
-                    )
-                    revoked.append(name)
-            else:
-                cur = await db.execute("SELECT id FROM permissions WHERE name = ?", (name,))
-                r = await cur.fetchone()
-                if r:
-                    await db.execute(
-                        "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?", (role_id, r[0])
-                    )
-                    revoked.append(name)
+        names = [
+            f"tools.execute:{'*' if tool.strip() == '*' else tool.strip()}" for tool in payload.tool_names if tool.strip()
+        ]
+        revoked = await rbac_admin_repo.revoke_tool_permissions(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), role_id=role_id, names=names
+        )
         return {"revoked": revoked, "count": len(revoked)}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to revoke tool permissions")
@@ -470,32 +380,12 @@ async def grant_tool_permissions_by_prefix(
     """Grant all existing tool permissions with names starting with the prefix."""
     try:
         is_pg = await _get_is_postgres_backend_fn()()
-        prefix = _normalize_tool_prefix(payload.prefix)
-        results: list[ToolPermissionResponse] = []
-        if is_pg:
-            rows = await db.fetch(
-                "SELECT id, name, description, category FROM permissions WHERE name LIKE $1", prefix + "%"
-            )
-            for r in rows:
-                await db.execute(
-                    "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    role_id,
-                    r["id"],
-                )
-                results.append(
-                    ToolPermissionResponse(name=r["name"], description=r["description"], category=r["category"])
-                )
-        else:
-            cur = await db.execute(
-                "SELECT id, name, description, category FROM permissions WHERE name LIKE ?", (prefix + "%",)
-            )
-            rows = await cur.fetchall()
-            for r in rows:
-                await db.execute(
-                    "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)", (role_id, r[0])
-                )
-                results.append(ToolPermissionResponse(name=r[1], description=r[2], category=r[3]))
-        return results
+        rows = await rbac_admin_repo.permissions_with_prefix(
+            db, is_postgres=is_pg, prefix=_normalize_tool_prefix(payload.prefix)
+        )
+        for row in rows:
+            await rbac_admin_repo.grant_permission(db, is_postgres=is_pg, role_id=role_id, permission_id=int(row["id"]))
+        return [ToolPermissionResponse(name=r["name"], description=r["description"], category=r["category"]) for r in rows]
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to grant tool permissions by prefix")
         raise HTTPException(status_code=500, detail="Failed to grant permissions by prefix") from e
@@ -508,27 +398,20 @@ async def revoke_tool_permissions_by_prefix(
     """Revoke all tool permissions with names starting with the prefix from a role."""
     try:
         is_pg = await _get_is_postgres_backend_fn()()
-        prefix = _normalize_tool_prefix(payload.prefix)
-        names: list[str] = []
-        if is_pg:
-            rows = await db.fetch("SELECT id, name FROM permissions WHERE name LIKE $1", prefix + "%")
-            for r in rows:
-                await db.execute(
-                    "DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2", role_id, r["id"]
-                )
-                names.append(r["name"])
-        else:
-            cur = await db.execute("SELECT id, name FROM permissions WHERE name LIKE ?", (prefix + "%",))
-            rows = await cur.fetchall()
-            for r in rows:
-                await db.execute(
-                    "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?", (role_id, r[0])
-                )
-                names.append(r[1])
+        rows = await rbac_admin_repo.permissions_with_prefix(
+            db, is_postgres=is_pg, prefix=_normalize_tool_prefix(payload.prefix)
+        )
+        for row in rows:
+            await rbac_admin_repo.revoke_permission(db, is_postgres=is_pg, role_id=role_id, permission_id=int(row["id"]))
+        names = [str(row["name"]) for row in rows]
         return {"revoked": names, "count": len(names)}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to revoke tool permissions by prefix")
         raise HTTPException(status_code=500, detail="Failed to revoke permissions by prefix") from e
+
+
+def _role_response(row: dict[str, Any]) -> RoleResponse:
+    return RoleResponse(id=row["id"], name=row["name"], description=row["description"], is_system=bool(row["is_system"]))
 
 
 @router.get("/roles/matrix", response_model=RolePermissionMatrixResponse)
@@ -549,113 +432,16 @@ async def get_roles_matrix(
     """
     try:
         is_pg = await _get_is_postgres_backend_fn()()
-        # Role filters + pagination
-        role_clauses = []
-        role_params: list[Any] = []
-        total_roles = 0
-        if is_pg:
-            # Postgres
-            if role_search:
-                role_clauses.append(f"name ILIKE ${len(role_params)+1}")
-                role_params.append(f"%{role_search}%")
-            if role_names:
-                role_clauses.append(f"name = ANY(${len(role_params)+1})")
-                role_params.append(role_names)
-            role_where = (" WHERE " + " AND ".join(role_clauses)) if role_clauses else ""
-            # total count
-            total_roles = await db.fetchval(
-                f"SELECT COUNT(*) FROM roles{role_where}",  # nosec B608
-                *role_params,
-            )
-            # fetch with limit/offset
-            role_rows = await db.fetch(
-                f"SELECT id, name, description, COALESCE(is_system,FALSE) as is_system FROM roles{role_where} ORDER BY name LIMIT ${len(role_params)+1} OFFSET ${len(role_params)+2}",  # nosec B608
-                *role_params,
-                roles_limit,
-                roles_offset,
-            )
-            roles = [RoleResponse(**dict(r)) for r in role_rows]
-        else:
-            # SQLite
-            if role_search:
-                role_clauses.append("name LIKE ?")
-                role_params.append(f"%{role_search}%")
-            if role_names:
-                placeholders = ",".join(["?"] * len(role_names))
-                role_clauses.append(f"name IN ({placeholders})")
-                role_params.extend(role_names)
-            role_where = (" WHERE " + " AND ".join(role_clauses)) if role_clauses else ""
-            # total count
-            cur = await db.execute(f"SELECT COUNT(*) FROM roles{role_where}", role_params)  # nosec B608
-            row = await cur.fetchone()
-            total_roles = int(row[0]) if row else 0
-            # fetch with limit/offset
-            cur = await db.execute(
-                f"SELECT id, name, description, COALESCE(is_system,0) FROM roles{role_where} ORDER BY name LIMIT ? OFFSET ?",  # nosec B608
-                [*role_params, roles_limit, roles_offset],
-            )
-            role_rows = await cur.fetchall()
-            roles = [
-                RoleResponse(id=row[0], name=row[1], description=row[2], is_system=bool(row[3])) for row in role_rows
-            ]
-
-        # Build WHERE for permissions
-        clauses = []
-        params: list[Any] = []
-        if is_pg:
-            # Postgres
-            if category:
-                clauses.append(f"category = ${len(params)+1}")
-                params.append(category)
-            if search:
-                idx = len(params) + 1
-                clauses.append(f"(name ILIKE ${idx} OR description ILIKE ${idx})")
-                params.append(f"%{search}%")
-            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-            perm_rows = await db.fetch(
-                f"SELECT id, name, description, category FROM permissions{where} ORDER BY name", *params  # nosec B608
-            )
-            permissions = [PermissionResponse(**dict(r)) for r in perm_rows]
-
-            # Grants limited to filtered permissions via join
-            grant_sql = (  # nosec B608
-                "SELECT rp.role_id, rp.permission_id "  # nosec B608
-                "FROM role_permissions rp "
-                "JOIN permissions p ON p.id = rp.permission_id"
-                f"{where}"
-            )
-            grant_rows = await db.fetch(grant_sql, *params)  # nosec B608
-            grants = [RolePermissionGrant(role_id=r["role_id"], permission_id=r["permission_id"]) for r in grant_rows]
-        else:
-            # SQLite
-            if category:
-                clauses.append("category = ?")
-                params.append(category)
-            if search:
-                clauses.append("(name LIKE ? OR description LIKE ?)")
-                params.extend([f"%{search}%", f"%{search}%"])
-            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-            cur = await db.execute(
-                f"SELECT id, name, description, category FROM permissions{where} ORDER BY name",  # nosec B608
-                params,
-            )
-            perm_rows = await cur.fetchall()
-            permissions = [
-                PermissionResponse(id=row[0], name=row[1], description=row[2], category=row[3]) for row in perm_rows
-            ]
-
-            grant_sql = (  # nosec B608
-                "SELECT rp.role_id, rp.permission_id "  # nosec B608
-                "FROM role_permissions rp "
-                "JOIN permissions p ON p.id = rp.permission_id"
-                f"{where}"
-            )
-            cur = await db.execute(grant_sql, params)  # nosec B608
-            grant_rows = await cur.fetchall()
-            grants = [RolePermissionGrant(role_id=row[0], permission_id=row[1]) for row in grant_rows]
-
+        total_roles, role_rows = await rbac_admin_repo.roles_page(
+            db, is_postgres=is_pg, role_search=role_search, role_names=role_names, limit=roles_limit, offset=roles_offset
+        )
+        permissions = await rbac_admin_repo.list_permissions(db, is_postgres=is_pg, category=category, search=search)
+        grants = await rbac_admin_repo.role_permission_grants(db, is_postgres=is_pg, category=category, search=search)
         return RolePermissionMatrixResponse(
-            roles=roles, permissions=permissions, grants=grants, total_roles=total_roles
+            roles=[_role_response(row) for row in role_rows],
+            permissions=[PermissionResponse(**row) for row in permissions],
+            grants=[RolePermissionGrant(role_id=role_id, permission_id=perm_id) for role_id, perm_id in grants],
+            total_roles=total_roles,
         )
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to build roles/permissions matrix")
@@ -675,124 +461,22 @@ async def get_roles_matrix_boolean(
     """Return a compact boolean matrix: roles x permission_names, with optional filters."""
     try:
         is_pg = await _get_is_postgres_backend_fn()()
-        # Roles with filters + pagination
-        role_clauses = []
-        role_params: list[Any] = []
-        total_roles = 0
-        if is_pg:
-            if role_search:
-                role_clauses.append(f"name ILIKE ${len(role_params)+1}")
-                role_params.append(f"%{role_search}%")
-            if role_names:
-                role_clauses.append(f"name = ANY(${len(role_params)+1})")
-                role_params.append(role_names)
-            role_where = (" WHERE " + " AND ".join(role_clauses)) if role_clauses else ""
-            total_roles = await db.fetchval(
-                f"SELECT COUNT(*) FROM roles{role_where}",  # nosec B608
-                *role_params,
+        total_roles, role_rows = await rbac_admin_repo.roles_page(
+            db, is_postgres=is_pg, role_search=role_search, role_names=role_names, limit=roles_limit, offset=roles_offset
+        )
+        roles = [_role_response(row) for row in role_rows]
+        permissions = await rbac_admin_repo.list_permissions(db, is_postgres=is_pg, category=category, search=search)
+        role_ids = [role.id for role in roles]
+        grants_set = set(
+            await rbac_admin_repo.role_permission_grants(
+                db, is_postgres=is_pg, category=category, search=search, role_ids=role_ids
             )
-            role_rows = await db.fetch(
-                f"SELECT id, name, description, COALESCE(is_system,FALSE) as is_system FROM roles{role_where} ORDER BY name LIMIT ${len(role_params)+1} OFFSET ${len(role_params)+2}",  # nosec B608
-                *role_params,
-                roles_limit,
-                roles_offset,
-            )
-            roles = [RoleResponse(**dict(r)) for r in role_rows]
-        else:
-            if role_search:
-                role_clauses.append("name LIKE ?")
-                role_params.append(f"%{role_search}%")
-            if role_names:
-                placeholders = ",".join(["?"] * len(role_names))
-                role_clauses.append(f"name IN ({placeholders})")
-                role_params.extend(role_names)
-            role_where = (" WHERE " + " AND ".join(role_clauses)) if role_clauses else ""
-            cur = await db.execute(f"SELECT COUNT(*) FROM roles{role_where}", role_params)  # nosec B608
-            row = await cur.fetchone()
-            total_roles = int(row[0]) if row else 0
-            cur = await db.execute(
-                f"SELECT id, name, description, COALESCE(is_system,0) FROM roles{role_where} ORDER BY name LIMIT ? OFFSET ?",  # nosec B608
-                [*role_params, roles_limit, roles_offset],
-            )
-            role_rows = await cur.fetchall()
-            roles = [
-                RoleResponse(id=row[0], name=row[1], description=row[2], is_system=bool(row[3])) for row in role_rows
-            ]
-
-        # Build WHERE for permissions
-        clauses = []
-        params: list[Any] = []
-        if is_pg:
-            if category:
-                clauses.append(f"category = ${len(params)+1}")
-                params.append(category)
-            if search:
-                idx = len(params) + 1
-                clauses.append(f"(name ILIKE ${idx} OR description ILIKE ${idx})")
-                params.append(f"%{search}%")
-            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-            perm_rows = await db.fetch(
-                f"SELECT id, name FROM permissions{where} ORDER BY name",  # nosec B608
-                *params,
-            )
-            perm_ids = [r["id"] for r in perm_rows]
-            perm_names = [r["name"] for r in perm_rows]
-        else:
-            if category:
-                clauses.append("category = ?")
-                params.append(category)
-            if search:
-                clauses.append("(name LIKE ? OR description LIKE ?)")
-                params.extend([f"%{search}%", f"%{search}%"])
-            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-            cur = await db.execute(f"SELECT id, name FROM permissions{where} ORDER BY name", params)  # nosec B608
-            perm_rows = await cur.fetchall()
-            perm_ids = [row[0] for row in perm_rows]
-            perm_names = [row[1] for row in perm_rows]
-
-        # Grants set (also restrict to selected roles if any)
-        if is_pg:
-            role_ids = [r.id for r in roles]
-            grant_sql = (  # nosec B608
-                "SELECT rp.role_id, rp.permission_id "  # nosec B608
-                "FROM role_permissions rp "
-                "JOIN permissions p ON p.id = rp.permission_id"
-                f"{where}"
-            )
-            grant_params = list(params)
-            if role_ids:
-                grant_sql += f" AND rp.role_id = ANY(${len(grant_params)+1})"
-                grant_params.append(role_ids)
-            grant_rows = await db.fetch(grant_sql, *grant_params)  # nosec B608
-            grants_set = {(r["role_id"], r["permission_id"]) for r in grant_rows}
-        else:
-            role_ids = [r.id for r in roles]
-            grant_sql = (  # nosec B608
-                "SELECT rp.role_id, rp.permission_id "  # nosec B608
-                "FROM role_permissions rp "
-                "JOIN permissions p ON p.id = rp.permission_id"
-                f"{where}"
-            )
-            grant_params = list(params)
-            if role_ids:
-                placeholders = ",".join(["?"] * len(role_ids))
-                grant_sql += f" AND rp.role_id IN ({placeholders})"
-                grant_params.extend(role_ids)
-            cur = await db.execute(grant_sql, grant_params)  # nosec B608
-            grant_rows = await cur.fetchall()
-            grants_set = {(row[0], row[1]) for row in grant_rows}
-
-        # Build matrix: rows per role, cols per permission (same order as perm_names)
-        role_ids = [r.id for r in roles]
-        matrix: list[list[bool]] = []
-        for rid in role_ids:
-            row = [(rid, pid) in grants_set for pid in perm_ids]
-            matrix.append(row)
-
+        )
+        perm_ids = [int(row["id"]) for row in permissions]
         return RolePermissionBooleanMatrixResponse(
             roles=roles,
-            permission_names=perm_names,
-            matrix=matrix,
+            permission_names=[str(row["name"]) for row in permissions],
+            matrix=[[(rid, pid) in grants_set for pid in perm_ids] for rid in role_ids],
             total_roles=total_roles,
         )
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
@@ -804,18 +488,7 @@ async def get_roles_matrix_boolean(
 async def list_permission_categories(db=Depends(get_db_transaction)) -> list[str]:
     """List distinct permission categories (for UI filters)."""
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            rows = await db.fetch(
-                "SELECT DISTINCT category FROM permissions WHERE category IS NOT NULL ORDER BY category"
-            )
-            return [r["category"] for r in rows]
-        else:
-            cur = await db.execute(
-                "SELECT DISTINCT category FROM permissions WHERE category IS NOT NULL ORDER BY category"
-            )
-            rows = await cur.fetchall()
-            return [row[0] for row in rows]
+        return await rbac_admin_repo.permission_categories(db, is_postgres=await _get_is_postgres_backend_fn()())
     except _RBAC_NONCRITICAL_EXCEPTIONS:
         logger.error("Failed to list permission categories")
         return []
@@ -826,34 +499,10 @@ async def list_permissions(
     category: str | None = None, search: str | None = None, db=Depends(get_db_transaction)
 ) -> list[PermissionResponse]:
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        clauses = []
-        params = []
-        if category:
-            clauses.append("category = $1" if is_pg else "category = ?")
-            params.append(category)
-        if search:
-            if is_pg:
-                clauses.append(f"(name ILIKE ${len(params)+1} OR description ILIKE ${len(params)+1})")
-                params.append(f"%{search}%")
-            else:
-                clauses.append("(name LIKE ? OR description LIKE ?)")
-                params.append(f"%{search}%")
-                params.append(f"%{search}%")
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        if is_pg:
-            rows = await db.fetch(
-                f"SELECT id, name, description, category FROM permissions{where} ORDER BY name",  # nosec B608
-                *params,
-            )
-            return [PermissionResponse(**dict(r)) for r in rows]
-        else:
-            cur = await db.execute(
-                f"SELECT id, name, description, category FROM permissions{where} ORDER BY name",  # nosec B608
-                params,
-            )
-            rows = await cur.fetchall()
-            return [PermissionResponse(id=row[0], name=row[1], description=row[2], category=row[3]) for row in rows]
+        rows = await rbac_admin_repo.list_permissions(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), category=category, search=search
+        )
+        return [PermissionResponse(**row) for row in rows]
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to list permissions")
         raise HTTPException(status_code=500, detail="Failed to list permissions") from e
@@ -862,43 +511,16 @@ async def list_permissions(
 @router.post("/permissions", response_model=PermissionResponse)
 async def create_permission(payload: PermissionCreateRequest, db=Depends(get_db_transaction)) -> PermissionResponse:
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            # Pre-check (case-insensitive)
-            exists = await db.fetchrow("SELECT 1 FROM permissions WHERE LOWER(name) = LOWER($1)", payload.name)
-            if exists:
-                raise HTTPException(status_code=409, detail=f"Permission '{payload.name}' already exists")
-            row = await db.fetchrow(
-                "INSERT INTO permissions (name, description, category) VALUES ($1, $2, $3) RETURNING id, name, description, category",
-                payload.name,
-                payload.description,
-                payload.category,
-            )
-            return PermissionResponse(**dict(row))
-        else:
-            # SQLite: explicit pre-check, return 409 if exists (case-insensitive)
-            curx = await db.execute(
-                "SELECT 1 FROM permissions WHERE LOWER(name) = LOWER(?)",
-                (payload.name,),
-            )
-            if await curx.fetchone():
-                raise HTTPException(status_code=409, detail=f"Permission '{payload.name}' already exists")
-            await db.execute(
-                "INSERT INTO permissions (name, description, category) VALUES (?, ?, ?)",
-                (payload.name, payload.description, payload.category),
-            )
-            # Fetch the row via adapter
-            cur = await db.execute(
-                "SELECT id, name, description, category FROM permissions WHERE name = ?",
-                (payload.name,),
-            )
-            row = await cur.fetchone()
-            try:
-                if isinstance(row, dict):
-                    return PermissionResponse(**row)
-            except _RBAC_NONCRITICAL_EXCEPTIONS:
-                pass
-            return PermissionResponse(id=row[0], name=row[1], description=row[2], category=row[3])
+        row = await rbac_admin_repo.create_permission(
+            db,
+            is_postgres=await _get_is_postgres_backend_fn()(),
+            name=payload.name,
+            description=payload.description,
+            category=payload.category,
+        )
+        if row is None:
+            raise HTTPException(status_code=409, detail=f"Permission '{payload.name}' already exists")
+        return PermissionResponse(**row)
     except HTTPException:
         # Preserve explicit status codes like 409 Conflict
         raise
@@ -910,18 +532,9 @@ async def create_permission(payload: PermissionCreateRequest, db=Depends(get_db_
 @router.post("/roles/{role_id}/permissions/{permission_id}")
 async def grant_permission_to_role(role_id: int, permission_id: int, db=Depends(get_db_transaction)) -> dict:
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            await db.execute(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                role_id,
-                permission_id,
-            )
-        else:
-            await db.execute(
-                "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
-                (role_id, permission_id),
-            )
+        await rbac_admin_repo.grant_permission(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), role_id=role_id, permission_id=permission_id
+        )
         return {"message": "Permission granted to role"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to grant permission to role")
@@ -931,15 +544,9 @@ async def grant_permission_to_role(role_id: int, permission_id: int, db=Depends(
 @router.delete("/roles/{role_id}/permissions/{permission_id}")
 async def revoke_permission_from_role(role_id: int, permission_id: int, db=Depends(get_db_transaction)) -> dict:
     try:
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            await db.execute(
-                "DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2", role_id, permission_id
-            )
-        else:
-            await db.execute(
-                "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?", (role_id, permission_id)
-            )
+        await rbac_admin_repo.revoke_permission(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), role_id=role_id, permission_id=permission_id
+        )
         return {"message": "Permission revoked from role"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to revoke permission from role")
@@ -980,18 +587,9 @@ async def add_role_to_user(
 ) -> dict:
     try:
         await _enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            await db.execute(
-                "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT (user_id, role_id) DO NOTHING",
-                user_id,
-                role_id,
-            )
-        else:
-            await db.execute(
-                "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)",
-                (user_id, role_id),
-            )
+        await rbac_admin_repo.add_user_role(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), user_id=user_id, role_id=role_id
+        )
         return {"message": "Role added to user"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to add role to user")
@@ -1007,11 +605,9 @@ async def remove_role_from_user(
 ) -> dict:
     try:
         await _enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
-        is_pg = await _get_is_postgres_backend_fn()()
-        if is_pg:
-            await db.execute("DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2", user_id, role_id)
-        else:
-            await db.execute("DELETE FROM user_roles WHERE user_id = ? AND role_id = ?", (user_id, role_id))
+        await rbac_admin_repo.remove_user_role(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), user_id=user_id, role_id=role_id
+        )
         return {"message": "Role removed from user"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to remove role from user")
@@ -1094,40 +690,18 @@ async def upsert_user_override(
         # Resolve permission_id if only name provided
         perm_id = payload.permission_id
         if not perm_id and payload.permission_name:
-            if _is_pg:
-                perm_id = await db.fetchval("SELECT id FROM permissions WHERE name = $1", payload.permission_name)
-            else:
-                cur = await db.execute("SELECT id FROM permissions WHERE name = ?", (payload.permission_name,))
-                row = await cur.fetchone()
-                perm_id = row[0] if row else None
+            perm_id = await rbac_admin_repo.permission_id_by_name(db, is_postgres=_is_pg, name=payload.permission_name)
         if not perm_id:
             raise HTTPException(status_code=400, detail="permission_id or permission_name required")
 
-        granted = payload.effect == OverrideEffect.allow
-        if _is_pg:
-            await db.execute(
-                """
-                INSERT INTO user_permissions (user_id, permission_id, granted, expires_at)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (user_id, permission_id)
-                DO UPDATE SET granted = EXCLUDED.granted, expires_at = EXCLUDED.expires_at
-                """,
-                user_id,
-                perm_id,
-                granted,
-                payload.expires_at,
-            )
-        else:
-            cur = await db.execute(
-                """
-                INSERT OR REPLACE INTO user_permissions (user_id, permission_id, granted, expires_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                user_id,
-                perm_id,
-                granted,
-                payload.expires_at,
-            )
+        await rbac_admin_repo.upsert_user_override(
+            db,
+            is_postgres=_is_pg,
+            user_id=user_id,
+            permission_id=int(perm_id),
+            granted=payload.effect == OverrideEffect.allow,
+            expires_at=payload.expires_at,
+        )
         return {"message": "Override upserted"}
     except HTTPException:
         raise
@@ -1145,15 +719,9 @@ async def delete_user_override(
 ) -> dict:
     try:
         await _enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
-        _is_pg = await _get_is_postgres_backend_fn()()
-        if _is_pg:
-            await db.execute(
-                "DELETE FROM user_permissions WHERE user_id = $1 AND permission_id = $2", user_id, permission_id
-            )
-        else:
-            await db.execute(
-                "DELETE FROM user_permissions WHERE user_id = ? AND permission_id = ?", (user_id, permission_id)
-            )
+        await rbac_admin_repo.delete_user_override(
+            db, is_postgres=await _get_is_postgres_backend_fn()(), user_id=user_id, permission_id=permission_id
+        )
         return {"message": "Override deleted"}
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.exception("Failed to delete user override")
@@ -1193,25 +761,10 @@ async def get_role_effective_permissions(
     - all_permissions: union of both, sorted
     """
     try:
-        _is_pg = await _get_is_postgres_backend_fn()()
-        if _is_pg:
-            role_row = await db.fetchrow(
-                "SELECT id, name FROM roles WHERE id = $1",
-                int(role_id),
-            )
-        else:
-            cur = await db.execute(
-                "SELECT id, name FROM roles WHERE id = ?",
-                (int(role_id),),
-            )
-            role_row = await cur.fetchone()
+        role_row = await rbac_admin_repo.get_role(db, is_postgres=await _get_is_postgres_backend_fn()(), role_id=role_id)
         if not role_row:
             raise HTTPException(status_code=404, detail="Role not found")
-
-        if _is_pg:
-            role_name = str(role_row["name"])
-        else:
-            role_name = str(role_row[1])
+        role_name = str(role_row["name"])
 
         perm_rows = await svc_list_role_permissions(db, int(role_id))
         names = sorted(str(row.get("name")) for row in perm_rows if row.get("name"))

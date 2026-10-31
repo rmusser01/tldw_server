@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     should_enforce_sqlite_schema_strictness,
     validate_required_sqlite_api_key_schema,
 )
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 
 
 def _affected_row_count(result: Any) -> int:
@@ -792,9 +793,9 @@ class AuthnzApiKeysRepo:
                             llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
                             metadata
                         ) VALUES (
-                            $1,$2,$3,$4,$5,$6,$7,'active',$8,
-                            TRUE,$9,$10,$11,
-                            $12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,
+                            $1, $2, $3, $4, $5, $6, $7, 'active', $8,
+                            TRUE, $9, $10, $11,
+                            $12, $13, $14, $15, $16::jsonb, $17::jsonb, $18::jsonb,
                             ($19)::jsonb
                         ) RETURNING id
                         """,
@@ -829,9 +830,9 @@ class AuthnzApiKeysRepo:
                             llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
                             metadata
                         ) VALUES (
-                            $1,$2,$3,$4,$5,$6,$7,'active',$8,
-                            TRUE,$9,$10,$11,
-                            $12,$13,$14,$15,$16,$17,$18,
+                            $1, $2, $3, $4, $5, $6, $7, 'active', $8,
+                            TRUE, $9, $10, $11,
+                            $12, $13, $14, $15, $16, $17, $18,
                             $19
                         ) RETURNING id
                         """,
@@ -1218,7 +1219,7 @@ class AuthnzApiKeysRepo:
                     active_status,
                 )
                 if _affected_row_count(old_update_result) == 0:
-                    raise ValueError("API key not found or inactive")
+                    raise APIKeyRotationRejected()
                 await conn.execute(
                     "UPDATE api_keys SET rotated_from = $1 WHERE id = $2",
                     old_key_id,
@@ -1267,7 +1268,7 @@ class AuthnzApiKeysRepo:
                     ),
                 )
                 if _affected_row_count(old_update_cursor) == 0:
-                    raise ValueError("API key not found or inactive")
+                    raise APIKeyRotationRejected()
                 await conn.execute(
                     "UPDATE api_keys SET rotated_from = ? WHERE id = ?",
                     (old_key_id, new_key_id),

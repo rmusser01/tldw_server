@@ -265,7 +265,7 @@ class NeuTTSAdapter(TTSAdapter):
 
             # Convert to requested format (single shot)
             audio_bytes = await self.convert_audio_format(
-                audio_i16, source_format=AudioFormat.PCM, target_format=request.format, sample_rate=self.sample_rate
+                audio_i16, target_format=request.format, sample_rate=self.sample_rate
             )
             return TTSResponse(
                 audio_data=audio_bytes,

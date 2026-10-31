@@ -4,6 +4,8 @@ import { Settings, Move, RotateCcw, Unplug } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useSafeDemoMode } from "@/context/demo-mode"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { useConnectionState } from "@/hooks/useConnectionState"
+import { ConnectionPhase } from "@/types/connection"
 import { useBuddyManagementStore } from "@/store/buddy-management"
 import {
   clampPersonaBuddyShellPosition,
@@ -34,6 +36,7 @@ const emptyAttachment: BuddyAttachmentState = {
   version: 0,
   attachment: null
 }
+const passiveReadOptions = { suppressBackendUnavailableEvent: true }
 export const IndependentBuddySession = ({
   root = "web"
 }: {
@@ -118,13 +121,13 @@ export const IndependentBuddySession = ({
         const [collections, next] = await Promise.all([
           Promise.all(
             Array.from({ length: profilePages }, (_, index) =>
-              listBuddies({
-                limit: BUDDY_PAGE_SIZE,
-                offset: index * BUDDY_PAGE_SIZE
-              })
+              listBuddies(
+                { limit: BUDDY_PAGE_SIZE, offset: index * BUDDY_PAGE_SIZE },
+                passiveReadOptions
+              )
             )
           ),
-          getBuddyAttachment()
+          getBuddyAttachment(passiveReadOptions)
         ])
         if (!active) return
         setAttached(Boolean(next.attachment || next.unavailable_reason))
@@ -143,7 +146,7 @@ export const IndependentBuddySession = ({
         const attachedProfile =
           next.attachment &&
           !profiles.some((profile) => profile.id === next.attachment!.buddy_id)
-            ? await getBuddy(next.attachment.buddy_id).catch((error) => {
+            ? await getBuddy(next.attachment.buddy_id, passiveReadOptions).catch((error) => {
                 if (active) {
                   // Keep the independent attachment authoritative while artwork is
                   // unavailable; never fall back to an unrelated legacy Buddy.
@@ -161,10 +164,10 @@ export const IndependentBuddySession = ({
         const pages = next.attachment
           ? await Promise.all(
               Array.from({ length: nextConversationPages }, (_, index) =>
-                listBuddyConversations({
-                  limit: BUDDY_PAGE_SIZE,
-                  offset: index * BUDDY_PAGE_SIZE
-                })
+                listBuddyConversations(
+                  { limit: BUDDY_PAGE_SIZE, offset: index * BUDDY_PAGE_SIZE },
+                  passiveReadOptions
+                )
               )
             )
           : []
@@ -593,6 +596,7 @@ export const IndependentBuddyHost = ({
 }) => {
   const { demoEnabled } = useSafeDemoMode()
   const { config, loading } = useCanonicalConnectionConfig()
+  const connection = useConnectionState()
   // Authentication changes create a new ephemeral UI lifetime. No credential or
   // conversation identity is written to localStorage or exposed in a React key.
   const identity = [
@@ -609,7 +613,11 @@ export const IndependentBuddyHost = ({
   ) {
     previous.current = { identity, generation: previous.current.generation + 1 }
   }
-  if (demoEnabled || loading || !config?.serverUrl) return null
+  if (
+    demoEnabled || loading || !config?.serverUrl || !connection.isConnected ||
+    connection.phase !== ConnectionPhase.CONNECTED ||
+    connection.mode === "demo" || connection.offlineBypass
+  ) return null
   return (
     <IndependentBuddySession key={previous.current.generation} root={root} />
   )

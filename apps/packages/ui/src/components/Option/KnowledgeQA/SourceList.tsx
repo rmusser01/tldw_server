@@ -8,7 +8,7 @@ import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { SourceCard, type SourceAskTemplate } from "./SourceCard"
 import { cn } from "@/libs/utils"
 import type { RagResult } from "./types"
-import { getFeedbackSessionId, submitExplicitFeedback } from "@/services/feedback"
+import { getFeedbackSessionId } from "@/services/feedback"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
 import {
@@ -30,6 +30,7 @@ import {
   type SourceListItem,
   type SourceSortMode,
 } from "./sourceListUtils"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const PAGE_SIZE = 10
 const SOURCE_LIST_FILTER_STORAGE_PREFIX = "knowledge_qa_source_filters:"
@@ -79,12 +80,13 @@ type PersistedSourceListFilters = {
   keyword: string
 }
 
-function getSourceFilterStorageKey(threadId: string | null): string {
+function getSourceFilterStorageKey(threadId: string | null, storageScopeKey: string | null): string | null {
+  if (!storageScopeKey) return null
   const normalizedThreadId =
     typeof threadId === "string" && threadId.trim().length > 0
       ? threadId.trim()
       : "global"
-  return `${SOURCE_LIST_FILTER_STORAGE_PREFIX}${normalizedThreadId}`
+  return `${SOURCE_LIST_FILTER_STORAGE_PREFIX}v1:${storageScopeKey}:${normalizedThreadId}`
 }
 
 function parsePersistedSourceListFilters(
@@ -129,9 +131,9 @@ function parsePersistedSourceListFilters(
 }
 
 function readPersistedSourceListFilters(
-  storageKey: string
+  storageKey: string | null
 ): PersistedSourceListFilters | null {
-  if (typeof window === "undefined") return null
+  if (!storageKey || typeof window === "undefined") return null
 
   try {
     const rawStoredValue = window.localStorage.getItem(storageKey)
@@ -143,10 +145,10 @@ function readPersistedSourceListFilters(
 }
 
 function persistSourceListFilters(
-  storageKey: string,
+  storageKey: string | null,
   payload: PersistedSourceListFilters
 ): void {
-  if (typeof window === "undefined") return
+  if (!storageKey || typeof window === "undefined") return
 
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(payload))
@@ -249,6 +251,9 @@ function resolvePinnedSourceTarget(result: RagResult): PinnedSourceTarget {
 
 export function SourceList({ className, layout = "main" }: SourceListProps) {
   const {
+    client: qaClient,
+    isAuthorityCurrent,
+    storageScopeKey,
     results = [],
     citations = [],
     focusedSourceIndex = null,
@@ -288,8 +293,8 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
     Record<string, SourceFeedbackState>
   >({})
   const filterStorageKey = useMemo(
-    () => getSourceFilterStorageKey(currentThreadId),
-    [currentThreadId]
+    () => getSourceFilterStorageKey(currentThreadId, storageScopeKey),
+    [currentThreadId, storageScopeKey]
   )
   const activeAnswerSessionKeyRef = React.useRef("")
   const feedbackSessionId = React.useMemo(() => getFeedbackSessionId(), [])
@@ -466,7 +471,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
   }, [filterStorageKey])
 
   useEffect(() => {
-    if (hydratedFilterStorageKey !== filterStorageKey) return
+    if (!isAuthorityCurrent() || hydratedFilterStorageKey !== filterStorageKey) return
 
     const payload: PersistedSourceListFilters = {
       sortMode,
@@ -482,6 +487,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
     dateFilter,
     filterStorageKey,
     hydratedFilterStorageKey,
+    isAuthorityCurrent,
     keywordFilter,
     sortMode,
   ])
@@ -530,14 +536,10 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
           'button, a, input, select, textarea, [role="button"], [role="link"], [contenteditable]'
         )
       )
-      const isEditableTarget =
-        target instanceof HTMLElement &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
+      const typing = isEditableTarget(target)
 
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        if (isEditableTarget) return
+        if (typing) return
         event.preventDefault()
         setShortcutsOpen(true)
         return
@@ -551,7 +553,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
         !event.ctrlKey &&
         !event.altKey
       ) {
-        if (isEditableTarget) return
+        if (typing) return
 
         const visiblePosition = Number.parseInt(event.key, 10) - 1
         const selectedItem = visibleItems[visiblePosition]
@@ -639,6 +641,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
 
   const submitSourceFeedback = useCallback(
     async (result: RagResult, resultIndex: number, thumb: "up" | "down") => {
+      if (!isAuthorityCurrent()) return
       const requestSessionKey = answerSessionKey
       const sourceKey = getResultFeedbackKey(result, resultIndex)
       const chunkId = getResultChunkId(result) ?? undefined
@@ -654,7 +657,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
       }))
 
       try {
-        await submitExplicitFeedback({
+        await qaClient.submitSourceFeedback({
           conversation_id: currentThreadId || undefined,
           message_id: latestAssistantMessageId || undefined,
           query: query.trim() || undefined,
@@ -664,7 +667,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
           chunk_ids: chunkId ? [chunkId] : undefined,
           session_id: feedbackSessionId,
         })
-        if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeAnswerSessionKeyRef.current !== requestSessionKey) {
           return
         }
         setFeedbackBySource((previous) => ({
@@ -681,7 +684,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
           relevant: thumb === "up",
         })
       } catch (feedbackError) {
-        if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
+        if (!isAuthorityCurrent() || activeAnswerSessionKeyRef.current !== requestSessionKey) {
           return
         }
         const detail =
@@ -711,6 +714,8 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
       messageApi,
       query,
       answerSessionKey,
+      isAuthorityCurrent,
+      qaClient,
     ]
   )
 

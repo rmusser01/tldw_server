@@ -97,6 +97,7 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.services.registration_service import RegistrationService, get_registration_service
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 # Narrowed exception tuple for auth dependency safety (BLE001)
 _AUTH_DEPS_NONCRITICAL_EXCEPTIONS = (
@@ -373,7 +374,17 @@ def _activate_scope_context(
     try:
         active_org = getattr(request.state, "active_org_id", None)
         active_team = getattr(request.state, "active_team_id", None)
-        token = set_scope(
+        # No reset token is kept, and none is needed. Starlette runs each request
+        # in its own copied context -- for threadpool handlers as well as async
+        # ones -- so a scope set here cannot reach another request. See
+        # tests/API_Deps/test_content_scope_does_not_leak_between_requests.py,
+        # which pins that invariant rather than leaving it assumed.
+        #
+        # Work that outlives the request is a different matter: a task spawned
+        # here captures the context as it was at creation, and resetting here
+        # would not affect it. Such workers must establish their own scope, as
+        # services/media_ingest_jobs_worker.py does with scoped_context.
+        set_scope(
             user_id=user_id,
             org_ids=org_ids or (),
             team_ids=team_ids or (),
@@ -381,7 +392,6 @@ def _activate_scope_context(
             active_team_id=active_team,
             is_admin=is_admin,
         )
-        request.state._content_scope_token = token
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(
             "Unable to establish content scope context: {}",
@@ -390,18 +400,28 @@ def _activate_scope_context(
 
 
 async def get_login_db_connection() -> AsyncGenerator[Any, None]:
-    """Yield a statement-autocommit connection for the login lifecycle.
+    """Yield a statement-autocommit connection for sign-in and token refresh.
 
-    Login's lockout and session services use separate database connections. A
+    Lockout and session services use separate database connections. A
     SQLite ``BEGIN IMMEDIATE`` around the whole request would block those
     security checks against the same database, while a normal deferred
     connection could retain a rehash write lock. SQLite therefore uses a true
     autocommit connection; asyncpg statements are already autocommit outside an
     explicit transaction.
     """
-    db_pool = await get_db_pool()
-    async with db_pool.acquire_statement_autocommit() as conn:
-        yield conn
+    connection_entered = False
+    try:
+        db_pool = await get_db_pool()
+        async with db_pool.acquire_statement_autocommit() as conn:
+            connection_entered = True
+            yield conn
+    except (DatabaseLockError, ConnectionPoolExhaustedError) as exc:
+        # Only acquisition failure guarantees that the request has not written.
+        if connection_entered:
+            raise
+        raise _authnz_busy_http_exception(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ) from exc
 
 
 async def get_db_transaction() -> AsyncGenerator[Any, None]:
@@ -1260,7 +1280,12 @@ def _principal_from_legacy_active_user_override(
     is_admin = bool(data.get("is_admin"))
     if not is_admin:
         roles_lc = {str(value).strip().lower() for value in roles}
-        is_admin = ("admin" in roles_lc) or bool(permissions_lc & {"*", "system.configure"})
+        # Both canonical sets: this path re-derives admin from a raw claims dict with no
+        # resolver behind it, and used to accept only the literal "admin" role and omit
+        # the service-account "admin" permission (TASK-13353, see platform_admin.py).
+        is_admin = bool(roles_lc & PLATFORM_ADMIN_ROLES) or bool(
+            permissions_lc & PLATFORM_ADMIN_PERMISSIONS
+        )
 
     org_ids = [
         int(org_id)
@@ -1902,7 +1927,7 @@ async def get_org_policy_from_principal(
 
 
 _ADMIN_BYPASS_PERMISSIONS = frozenset({"*"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _normalized_claim_values(values: list[Any] | tuple[Any, ...] | None) -> set[str]:
@@ -1949,11 +1974,6 @@ def _principal_has_admin_claims(principal: AuthPrincipal | None) -> bool:
 def _rg_enabled_for_request(request: Request) -> bool:
     state = getattr(request, "state", None)
     return bool(state is not None and getattr(state, "rg_policy_id", None))
-
-
-def _rg_enabled_flag() -> bool:
-    raw = os.getenv("RG_ENABLED", "")
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _log_auth_deps_rg_diagnostics_only_shim(
@@ -2092,10 +2112,24 @@ async def _enforce_auth_deps_ingress_guard(
     fallback_limit_default: int,
     fallback_window_default: float,
     limit_exceeded_detail: str,
+    honor_rg_switch: bool = False,
 ) -> None:
-    """Apply fail-closed ingress fallback limits when RG policy metadata is absent."""
+    """Apply fail-closed ingress fallback limits when RG policy metadata is absent.
+
+    ``honor_rg_switch`` makes this fallback part of the single-switch rule: when
+    True and Resource Governor is globally disabled (``RG_ENABLED``/config.txt),
+    this fallback does not enforce either, so turning RG off is honest end to end.
+    ``check_auth_rate_limit`` passes False deliberately -- its 30/min auth-endpoint
+    floor is a brute-force guard, not RG enforcement, and stays on regardless.
+    """
     if _rg_enabled_for_request(request):
         return
+
+    if honor_rg_switch:
+        from tldw_Server_API.app.core.config import rg_enabled
+
+        if not rg_enabled(True):
+            return
 
     principal = _auth_deps_request_principal(request)
     if is_single_user_principal(principal):
@@ -2139,7 +2173,11 @@ async def _enforce_auth_deps_ingress_guard(
 
 
 async def check_rate_limit(request: Request, rate_limiter=None) -> None:
-    """General ingress rate-limit guard with fail-closed fallback enforcement."""
+    """General ingress rate-limit guard with fail-closed fallback enforcement.
+
+    Honors the RG single switch: with RG_ENABLED=false this fallback does not
+    enforce either (see ``_enforce_auth_deps_ingress_guard``'s ``honor_rg_switch``).
+    """
     _ = rate_limiter
     endpoint = request.url.path if getattr(request, "url", None) else "unknown"
     await _enforce_auth_deps_ingress_guard(
@@ -2151,11 +2189,17 @@ async def check_rate_limit(request: Request, rate_limiter=None) -> None:
         fallback_limit_default=120,
         fallback_window_default=60.0,
         limit_exceeded_detail=f"Rate limit exceeded for endpoint: {endpoint}",
+        honor_rg_switch=True,
     )
 
 
 async def check_auth_rate_limit(request: Request, rate_limiter=None) -> None:
-    """Auth endpoint ingress rate-limit guard with fail-closed fallback enforcement."""
+    """Auth endpoint ingress rate-limit guard with fail-closed fallback enforcement.
+
+    Deliberately does *not* honor the RG single switch: this is the brute-force
+    floor for auth endpoints, not Resource Governor enforcement, and stays on
+    even when RG_ENABLED=false.
+    """
     _ = rate_limiter
     endpoint = request.url.path if getattr(request, "url", None) else "auth"
     await _enforce_auth_deps_ingress_guard(
@@ -2196,60 +2240,20 @@ def _catalog_rate_limit_for_resource(resource: str) -> tuple[int, int] | None:
 async def enforce_rbac_rate_limit(
     request: Request,
     resource: str,
-    db_pool: DatabasePool = Depends(get_db_pool)
+    db_pool: DatabasePool = Depends(get_db_pool),
+    *,
+    per_user: bool = False,
 ):
-    """Enforce the strictest catalog, user, or role per-minute limit."""
+    """Enforce configured limits, optionally sharing a user's budget across auth kinds."""
     user_id = getattr(request.state, "user_id", None)
     if not user_id:
         return
 
     candidates: list[tuple[int | None, int | None]] = []
     try:
-        user_limit = None
-        role_limit = None
+        from tldw_Server_API.app.core.AuthNZ.repos.rbac_rate_limits_repo import effective_limits
 
-        # SQLite vs Postgres param binding
-        if db_pool.pool:  # Postgres
-            user_limit = await db_pool.fetchone(
-                "SELECT limit_per_min, burst FROM rbac_user_rate_limits WHERE user_id = $1 AND resource = $2",
-                user_id, resource
-            )
-            # Get roles for user
-            role_ids = await db_pool.fetchall(
-                """
-                SELECT role_id FROM user_roles
-                WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-                """,
-                user_id
-            )
-            if role_ids:
-                role_ids_list = [r['role_id'] for r in role_ids]
-                # Take the strictest (min) among role limits
-                role_limit = await db_pool.fetchone(
-                    """
-                    SELECT MIN(limit_per_min) as limit_per_min, MIN(burst) as burst
-                    FROM rbac_role_rate_limits WHERE role_id = ANY($1) AND resource = $2
-                    """,
-                    role_ids_list, resource
-                )
-        else:  # SQLite
-            async with db_pool.acquire() as conn:
-                c1 = await conn.execute(
-                    "SELECT limit_per_min, burst FROM rbac_user_rate_limits WHERE user_id = ? AND resource = ?",
-                    (user_id, resource)
-                )
-                user_limit = await c1.fetchone()
-                c2 = await conn.execute(
-                    """
-                    SELECT MIN(rl.limit_per_min), MIN(rl.burst)
-                    FROM rbac_role_rate_limits rl
-                    JOIN user_roles ur ON ur.role_id = rl.role_id
-                    WHERE ur.user_id = ? AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP)
-                      AND rl.resource = ?
-                    """,
-                    (user_id, resource)
-                )
-                role_limit = await c2.fetchone()
+        user_limit, role_limit = await effective_limits(db_pool, user_id, resource)
 
         if user_limit:
             lp = user_limit[0] if not isinstance(user_limit, dict) else user_limit.get('limit_per_min')
@@ -2293,7 +2297,7 @@ async def enforce_rbac_rate_limit(
     ]
     limit_per_min = min(per_minute_values)
     burst = min(burst_values) if burst_values else limit_per_min
-    identifier = _auth_deps_rate_limit_identifier(request, resource)
+    identifier = f"user:{user_id}:{resource}" if per_user else _auth_deps_rate_limit_identifier(request, resource)
     try:
         allowed, retry_after = _consume_auth_deps_fallback_rate_token(
             dependency=f"rbac_rate_limit:{resource}",
@@ -2320,11 +2324,14 @@ async def enforce_rbac_rate_limit(
         )
 
 
-def rbac_rate_limit(resource: str, *, detail: Any | None = None):
-    """Factory returning an enforcing RBAC resource-rate dependency."""
+def rbac_rate_limit(resource: str, *, detail: Any | None = None, per_user: bool = False):
+    """Build a rate dependency; opt into per-user buckets independent of auth kind."""
     async def _dep(request: Request, db_pool: DatabasePool = Depends(get_db_pool)):
         try:
-            await enforce_rbac_rate_limit(request, resource, db_pool)
+            if per_user:
+                await enforce_rbac_rate_limit(request, resource, db_pool, per_user=True)
+            else:
+                await enforce_rbac_rate_limit(request, resource, db_pool)
         except HTTPException as exc:
             if detail is None or exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
                 raise

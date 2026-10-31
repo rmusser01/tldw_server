@@ -1,6 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import type { KnowledgeTab } from "./KnowledgePanel"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type KnowledgeTabsProps = {
   activeTab: KnowledgeTab
@@ -62,12 +63,7 @@ export const KnowledgeTabs: React.FC<KnowledgeTabsProps> = ({
   // Handle keyboard navigation (arrow keys and 1/2/3/4 to switch tabs)
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Only handle when focus is on tablist, not inside text inputs
-    const target = e.target as HTMLElement
-    if (
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable
-    ) {
+    if (isEditableTarget(e.target)) {
       return
     }
 

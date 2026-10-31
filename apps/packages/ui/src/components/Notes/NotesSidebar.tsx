@@ -396,7 +396,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           }`}
         >
           {/* Toolbar Section */}
-          <div className="flex-shrink-0 border-b border-border p-4 bg-surface">
+          <div
+            className="min-h-0 flex-shrink overflow-y-auto border-b border-border p-4 bg-surface"
+            style={{ maxHeight: '50%' }}
+            data-testid="notes-sidebar-controls"
+          >
             {/* ---- Always visible: Header row ---- */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex min-w-0 items-baseline">
@@ -1005,7 +1009,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           </div>
 
           {/* Notes List Section */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-h-[240px] flex-1 overflow-y-auto" data-testid="notes-sidebar-results">
             {listMode === 'active' && listViewMode === 'timeline' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-timeline-view">
                 {listErrorState || (isFetching && (

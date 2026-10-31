@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import json
 import os
-import time
+import uuid
 from datetime import date, datetime, timezone
 from sqlite3 import Error as SQLiteError
 from typing import Any, Mapping
@@ -487,11 +487,9 @@ async def log_llm_usage(
                         entity_value = None
 
                     if entity_scope and entity_value:
-                        rid = str(request_id or "").strip()
-                        if rid:
-                            op_id = f"llm:{rid}:{operation}:{provider}:{model}:{pt}:{ct}:{tt}"
-                        else:
-                            op_id = f"llm:{operation}:{provider}:{model}:{int(time.time())}:{pt}:{ct}:{tt}"
+                        # One entry per logged call. Not keyed on request_id: callers pass the
+                        # client's X-Request-ID, and a repeated key dedupes away real usage.
+                        op_id = f"llm:{operation}:{provider}:{model}:{uuid.uuid4().hex}"
                         entry = LedgerEntry(  # type: ignore[call-arg]
                             entity_scope=entity_scope,
                             entity_value=entity_value,

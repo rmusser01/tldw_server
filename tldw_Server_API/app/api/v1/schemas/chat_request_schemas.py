@@ -13,13 +13,15 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
-#
-# Local Imports
-from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     is_safe_extra_header_value,
     is_server_managed_extra_header,
 )
+
+#
+# Local Imports
+from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 from tldw_Server_API.app.core.testing import is_test_mode
 
 #
@@ -1137,6 +1139,7 @@ class ChatCompletionRequest(BaseModel):
         ),
     )
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
+    tldw_history_selection_v1: HistorySelectionV1 | None = None
     tldw_continuation: Optional[TLDWContinuationSpec] = Field(
         None,
         description=(
@@ -1214,6 +1217,20 @@ class ChatCompletionRequest(BaseModel):
         if top_logprobs is not None and not logprobs:
             raise ValueError("If top_logprobs is specified, logprobs must be set to true.")
         return values
+
+    @model_validator(mode="after")
+    def validate_history_selection_request(self) -> "ChatCompletionRequest":
+        if self.tldw_history_selection_v1 is not None:
+            if self.tldw_continuation is not None:
+                raise ValueError("Versioned selection cannot be combined with legacy continuation controls")
+            if not self.conversation_id or self.save_to_db is not True:
+                raise ValueError("Versioned completion requires conversation_id and save_to_db=true")
+            if self.conversation_id != self.tldw_history_selection_v1.conversation_id:
+                raise ValueError("Selection conversation mismatch")
+            roles = [message.role for message in self.messages]
+            if not any(role in {"user", "tool"} for role in roles) or any(role not in {"system", "user", "tool"} for role in roles):
+                raise ValueError("Versioned messages must contain only current system/user/tool inputs")
+        return self
 
     @model_validator(mode="after")
     def validate_llamacpp_grammar_fields(self) -> "ChatCompletionRequest":

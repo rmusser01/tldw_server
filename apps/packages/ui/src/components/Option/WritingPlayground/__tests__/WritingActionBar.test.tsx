@@ -115,6 +115,24 @@ const documentTarget: WritingRevisionTarget = {
 }
 
 describe("WritingActionBar", () => {
+  it("locks preset changes while continuation owns the editor and unlocks them afterward", () => {
+    const onPresetChange = vi.fn()
+    const view = render(
+      <WritingActionBar generationAvailable target={selectionTarget}
+        presetDisabled onPresetChange={onPresetChange} onRequest={vi.fn()} />
+    )
+    const preset = view.getByRole("radio", { name: /make concise/i }) as HTMLInputElement
+    fireEvent.click(preset)
+    expect(preset.disabled).toBe(true)
+    expect(onPresetChange).not.toHaveBeenCalled()
+    view.rerender(
+      <WritingActionBar generationAvailable target={selectionTarget}
+        presetDisabled={false} onPresetChange={onPresetChange} onRequest={vi.fn()} />
+    )
+    fireEvent.click(view.getByRole("radio", { name: /make concise/i }))
+    expect(onPresetChange).toHaveBeenCalledWith("make_concise")
+  })
+
   it("disables actions when generation is unavailable", () => {
     const onRequest = vi.fn()
 

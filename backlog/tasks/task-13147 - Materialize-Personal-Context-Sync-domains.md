@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-08-30 19:38'
-updated_date: '2026-08-30 21:31'
+updated_date: '2026-09-29 01:24'
 labels:
   - personal-context
   - sync
@@ -17,7 +17,7 @@ references:
     backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
 documentation:
   - Docs/Design/2026-08-30-personal-context-profile-server-design.md
-  - IMPLEMENTATION_PLAN_personal_context_sync_transport.md
+  - Docs/Plans/IMPLEMENTATION_PLAN_personal_context_sync_transport.md
 priority: high
 ---
 

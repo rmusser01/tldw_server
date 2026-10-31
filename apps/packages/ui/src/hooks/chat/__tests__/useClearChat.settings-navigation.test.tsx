@@ -71,7 +71,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
 vi.mock("@/store/option", () => {
   const useStoreMessageOption = Object.assign(
     (selector: (state: typeof optionState) => unknown) => selector(optionState),
-    { setState: optionStoreSetStateMock }
+    { setState: optionStoreSetStateMock, getState: () => ({ serverChatId: "saved", historyId: "local" }) }
   )
   return { useStoreMessageOption }
 })
@@ -82,7 +82,7 @@ vi.mock("@/store", () => ({
 
 vi.mock("@/store/playground-session", () => ({
   usePlaygroundSessionStore: {
-    getState: () => ({ clearSession: clearSessionMock })
+    getState: () => ({ clearSession: clearSessionMock, restoreRevision: 0 })
   }
 }))
 
@@ -113,7 +113,9 @@ describe("useClearChat settings navigation", () => {
     )
     const { result } = renderHook(() => useClearChat())
 
-    act(() => result.current())
+    let accepted: boolean | undefined
+    act(() => { accepted = result.current() })
+    expect(accepted).toBe(false)
 
     expect(declineNavigation).toHaveBeenCalledOnce()
     expect((declineNavigation.mock.calls[0][0] as CustomEvent<
@@ -133,7 +135,7 @@ describe("useClearChat settings navigation", () => {
   it("navigates and resets once when navigation is allowed", () => {
     const { result } = renderHook(() => useClearChat())
 
-    act(() => result.current())
+    act(() => expect(result.current()).toBe(true))
 
     expect(navigateMock).toHaveBeenCalledOnce()
     expect(navigateMock).toHaveBeenCalledWith("/chat")

@@ -1442,23 +1442,27 @@ def test_workspace_chat_api_write_stays_direct_when_sync_active(
 
     app.dependency_overrides[chat_sessions_endpoint.get_chacha_db_for_user] = _db_override
     app.dependency_overrides[chat_sessions_endpoint.get_request_user] = _user_override
-    created_conversations: dict[str, dict] = {}
-
-    def _fake_add_conversation(data: dict) -> str:
-        row = dict(data)
-        row["state"] = row.get("state") or "active"
-        row["version"] = row.get("version") or 1
-        row["deleted"] = row.get("deleted") or 0
-        row["assistant_display_name"] = row.get("assistant_display_name") or "Workspace Assistant"
-        created_conversations[data["id"]] = row
-        return data["id"]
-
-    def _fake_get_conversation_by_id(conversation_id: str, include_deleted: bool = False):
-        return created_conversations.get(conversation_id)
-
-    monkeypatch.setattr(chacha_db, "add_conversation", _fake_add_conversation)
-    monkeypatch.setattr(chacha_db, "get_conversation_by_id", _fake_get_conversation_by_id)
-    monkeypatch.setattr(chacha_db, "upsert_conversation_settings", lambda *args, **kwargs: True)
+    # The conversation write is left REAL. This test used to fake add_conversation and
+    # get_conversation_by_id into a dict, which worked while the workspace-scoped path
+    # returned before touching the database. It now takes the direct branch through
+    # create_character_conversation -- which is exactly what "stays direct" means and
+    # what this test asserts -- and that writes participant rows keyed on the
+    # conversation, so a conversation that exists only in a dict fails the foreign key.
+    # Letting the real write happen is both simpler and a truer test of the branch.
+    # Workspace-scoped creation now resolves Workspace Persona defaults first, and
+    # Workspaces/assistant_defaults.py:19-21 answers 404 when the workspace does not
+    # exist. This test predates that check and posted workspace_id="workspace-1"
+    # without ever creating it, so it failed with "Workspace not found" rather than
+    # exercising its actual subject. A real row is inserted rather than a faked
+    # get_workspace, because conversations.workspace_id is a FOREIGN KEY -- stubbing
+    # the lookup alone gets past the 404 and then fails the constraint. The request
+    # carries character_id, so resolve_new_conversation_assistant returns early and no
+    # Persona default is consulted.
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO workspaces (id, name) VALUES (?, ?)",
+            ("workspace-1", "Workspace"),
+        )
     monkeypatch.setattr(
         chat_sessions_endpoint,
         "get_active_server_origin_sync_service_for_user",

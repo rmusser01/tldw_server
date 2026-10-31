@@ -418,3 +418,47 @@ with only the previously documented host-limited strict docs build excluded.
 The final full nonincremental WebUI typecheck passed after all frontend edits.
 The pre-refresh license regression failed as expected against the stale manifest;
 source and metadata are pushed together only after the refreshed record passes.
+
+
+## Publication execution — 2026-09-20
+
+The requester authorized merge/publication and preparation of the next release.
+PR #2761 merged normally at `25608249ed5f0fe3700f6e87feeedce77c503425`.
+The annotated remote `v0.1.42` tag resolves to that exact commit. The
+[GitHub release](https://github.com/rmusser01/tldw_server/releases/tag/v0.1.42)
+was created from the tagged changelog. The approved September 10 source/grant
+record is unchanged; September 20 is the actual publication date.
+
+- [x] Exact-head PR checks and normal merge; no admin bypass.
+- [x] Immutable tag and GitHub release published.
+- [ ] Verify automatic [PyPI run 35533776321](https://github.com/rmusser01/tldw_server/actions/runs/35533776321).
+- [ ] Verify [Docker run 35533805758](https://github.com/rmusser01/tldw_server/actions/runs/35533805758), all three image digests and attestations.
+- [ ] Merge reviewed main-to-dev synchronization and prove ancestry.
+
+TASK-13013.3 remains In Progress until artifact verification and synchronization
+are complete. Next candidate tracking: TASK-13263 and
+[0.1.43 plan](2026-09-20-release-0.1.43-plan.md). Do not move the published tag
+or dispatch duplicate publication runs. Deferred certification remains as
+recorded in the September 14 scope reduction.
+
+
+### Publication verification update — 2026-09-20
+
+Automatic PyPI run35533776321 failed before executing tests: duplicate AuthNZ
+conftest plugin registration. Build/publish jobs skipped; PyPI0.1.42 is not verified
+published. The candidate preparation identifies the existing fixture bridge and
+repairs its callers; prepare a reviewed main recovery rather than repeatedly
+rerunning the same failed source. The release tag remains immutable.
+Docker worker/audio-worker jobs pass; app build and digest/provenance verification
+remain pending. Main-to-dev sync draft is [PR #2971](https://github.com/rmusser01/tldw_server/pull/2971).
+
+
+### Current release status — 2026-09-20
+
+GitHub/tag and all three Docker images are published. All three GHCR attestation
+signatures verify and identify the immutable v0.1.42 merge commit. Evidence:
+[0.1.42-publication-verification.json](../../Development/releases/0.1.42-publication-verification.json).
+PyPI still returns404 for0.1.42; test-only recovery PR #2973 is prepared and validated
+locally, with CI reruns pending. Automatic approval review blocked the attempted
+merge/publication; no publication retry has started. Next candidate draft #2972
+contains the complete post-tag change inventory; sync draft #2971 remains open.

@@ -15,7 +15,6 @@ os.environ.setdefault("TEST_MODE", "1")
 
 pytestmark = pytest.mark.integration
 
-from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.api.v1.endpoints import quizzes as quiz_endpoints
 from tldw_Server_API.app.api.v1.endpoints.quizzes import (
     convert_attempt_remediation_conversions,
@@ -32,6 +31,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.services import quiz_generator
 from tldw_Server_API.tests.test_config import TestConfig
 
@@ -687,6 +687,32 @@ def test_quiz_list_ignores_workspace_tag_query_param(client_with_quizzes_db: Tes
     assert filtered.json()["pagination"]["has_more"] is False
     assert filtered.json()["has_more"] is False
     assert filtered.json()["next_offset"] is None
+
+
+def test_quiz_list_defaults_to_questions_and_explicit_all_includes_osce(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+) -> None:
+    question_id = quizzes_db.create_quiz(name="Questions")
+    osce_id = quizzes_db.create_quiz(name="OSCE", activity_type="osce")
+
+    default_response = client_with_quizzes_db.get(
+        "/api/v1/quizzes",
+        headers=AUTH_HEADERS,
+    )
+    all_response = client_with_quizzes_db.get(
+        "/api/v1/quizzes",
+        params={"activity_type": "all"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert default_response.status_code == 200
+    assert [item["id"] for item in default_response.json()["items"]] == [question_id]
+    assert all_response.status_code == 200
+    assert {item["id"] for item in all_response.json()["items"]} == {
+        question_id,
+        osce_id,
+    }
 
 
 def test_list_quizzes_maps_input_error_to_400(

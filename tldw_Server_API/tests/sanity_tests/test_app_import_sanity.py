@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app
 
 
@@ -34,7 +35,7 @@ def test_app_imports_and_registers_routes() -> None:
 @pytest.mark.unit
 def test_app_exposes_the_versioned_api_prefix() -> None:
     """Every documented endpoint hangs off this prefix."""
-    paths = {getattr(route, "path", "") for route in app.routes}
+    paths = {getattr(route, "path", "") for route in iter_served_routes(app.routes)}
     assert any(path.startswith("/api/v1/") for path in paths), (
         "no /api/v1 routes are registered; the v1 router did not load"
     )

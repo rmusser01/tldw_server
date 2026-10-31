@@ -98,8 +98,8 @@ vi.mock('@plasmohq/storage', () => ({
   }
 }))
 
-vi.mock('@plasmohq/storage/hook', () => ({
-  useStorage: () => [undefined, mocks.setSelectedModel]
+vi.mock('@/hooks/chat/useSelectedModel', () => ({
+  useSelectedModel: () => ({ selectedModel: undefined, setSelectedModel: mocks.setSelectedModel })
 }))
 
 vi.mock('@/services/background-proxy', () => ({
@@ -113,7 +113,8 @@ vi.mock('@/services/tldw', () => ({
   }
 }))
 
-vi.mock('@/utils/resolve-api-provider', () => ({
+vi.mock('@/utils/resolve-api-provider', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/utils/resolve-api-provider')>(),
   resolveApiProviderForModel: mocks.resolveApiProviderForModel
 }))
 

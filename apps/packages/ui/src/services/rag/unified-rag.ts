@@ -575,7 +575,12 @@ export const buildRagSearchRequest = (settings: RagSettings) => {
     options[key] = value
   }
   if (generation_model) options.generation_model = generation_model
-  if (generation_provider) options.generation_provider = generation_provider
+  if (generation_provider) {
+    const provider = generation_provider.trim().toLowerCase()
+    options.generation_provider = ["llama", "llamacpp", "llama_cpp", "llama-cpp"].includes(provider)
+      ? "llama.cpp"
+      : provider
+  }
   if (generation_prompt) options.generation_prompt = generation_prompt
   if (rag_profile && rag_profile !== "none") options.rag_profile = rag_profile
   if (user_id) options.user_id = user_id

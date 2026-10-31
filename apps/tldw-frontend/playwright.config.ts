@@ -42,6 +42,8 @@ const webServerEnv = {
 };
 
 export default defineConfig({
+  // Vitest *.test files under e2e/__tests__ belong to the unit runner.
+  testMatch: '**/*.spec.?(c|m)[jt]s?(x)',
   timeout: 60_000,
   expect: {
     timeout: 15_000,

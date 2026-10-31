@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-08-30 22:21'
-updated_date: '2026-08-31 05:04'
+updated_date: '2026-09-29 01:24'
 labels:
   - personal-context
   - sync
@@ -17,7 +17,7 @@ references:
     backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md
 documentation:
   - Docs/superpowers/plans/2026-08-28-personal-context-04-sync-multidevice.md
-  - IMPLEMENTATION_PLAN_personal_context_bootstrap.md
+  - Docs/Plans/IMPLEMENTATION_PLAN_personal_context_bootstrap.md
 priority: high
 ---
 

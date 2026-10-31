@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
 
 def _small_wav_bytes(duration_sec: float = 0.25, sr: int = 16000) -> bytes:
@@ -66,9 +67,11 @@ def client(monkeypatch):
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     # Ensure errors are not embedded as audio bytes
     monkeypatch.setenv("TTS_STREAM_ERRORS_AS_AUDIO", "0")
+    reset_settings()
     app = FastAPI()
     app.include_router(audio_router, prefix="/api/v1/audio")
-    with TestClient(app) as c:
+    # /audio/health requires auth since 0fa12b8c26.
+    with TestClient(app, headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}) as c:
         yield c
 
 

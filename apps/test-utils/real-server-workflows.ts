@@ -4081,7 +4081,8 @@ test.describe("Real server end-to-end workflows", () => {
       )
       await ensureServerPersistence(chatPage)
 
-        const userMessage = `E2E flashcards flow ${unique}`
+        const flashcardQuestion = "What is one benefit of spaced repetition?"
+        const userMessage = `${flashcardQuestion} Answer in one plain-text sentence. E2E flashcards flow ${unique}`
         await sendChatMessage(chatPage, userMessage)
         await waitForAssistantMessage(chatPage)
         await waitForMessageStore(
@@ -4164,6 +4165,22 @@ test.describe("Real server end-to-end workflows", () => {
           assistantMessage,
           /Save to Flashcards/i
         )
+        const flashcardReview = chatPage.getByRole("dialog", {
+          name: /Review flashcard/i
+        })
+        await expect(flashcardReview).toBeVisible()
+        const questionField = flashcardReview.getByLabel("Question", { exact: true })
+        const answerField = flashcardReview.getByLabel("Answer", { exact: true })
+        const saveFlashcardButton = flashcardReview.getByRole("button", { name: /^Save flashcard$/i })
+        await expect(questionField).toHaveValue("")
+        await expect(saveFlashcardButton).toBeDisabled()
+        const flashcardAnswer = (await answerField.inputValue()).trim()
+        expect(flashcardAnswer).not.toBe("")
+        expect(flashcardAnswer).not.toMatch(/<\/?think(?:ing)?>/i)
+        await questionField.fill(flashcardQuestion)
+        await expect(saveFlashcardButton).toBeEnabled()
+        await saveFlashcardButton.click()
+        await expect(flashcardReview).toBeHidden({ timeout: 15000 })
         await expect(chatPage.getByText(/Saved to Flashcards/i)).toBeVisible({
           timeout: 15000
         })
@@ -4180,24 +4197,15 @@ test.describe("Real server end-to-end workflows", () => {
             normalizedServerUrl,
             apiKey,
             baselineFlashcardIds,
-            assistantText
+            flashcardAnswer
           )
           savedFlashcardUuid = String(savedFlashcard?.uuid || "").trim() || null
           if (!savedFlashcardUuid) {
             throw new Error("Saved flashcard did not include a UUID.")
           }
+          expect(savedFlashcard.front).toBe(flashcardQuestion)
+          expect(savedFlashcard.back).toBe(flashcardAnswer)
         } catch (error) {
-          await probeSaveChatKnowledge(
-            normalizedServerUrl,
-            apiKey,
-            {
-              conversation_id: serverChatId,
-              message_id: serverMessageId,
-              snippet: assistantText.slice(0, 1000),
-              make_flashcard: true
-            },
-            "after-save-timeout"
-          )
           await logChatMessagesSnapshot(
             normalizedServerUrl,
             apiKey,

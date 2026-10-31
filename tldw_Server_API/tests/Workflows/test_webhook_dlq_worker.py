@@ -155,3 +155,18 @@ async def test_dlq_worker_stops_retrying_after_max_attempts(monkeypatch, tmp_pat
     all_rows = db.list_webhook_dlq_all(limit=10)
     assert all_rows
     assert "max_attempts" in str(all_rows[0].get("last_error", "")).lower()
+
+
+def test_dlq_retry_written_in_iso_t_form_is_due_once_its_time_passes(tmp_path):
+    """The worker writes next_attempt_at via isoformat() ('T' separator); SQLite's
+    datetime('now') uses a space. Compared as text, a retry scheduled earlier today
+    never looked due until the date rolled over."""
+    import datetime as _dt
+
+    db = WorkflowsDatabase(str(tmp_path / "wf_dlq_due.db"))
+    db.enqueue_webhook_dlq(tenant_id="default", run_id="r1", url="https://example.com/hook", body={})
+    dlq_id = db.list_webhook_dlq_due(limit=10)[0]["id"]
+    past = (_dt.datetime.utcnow() - _dt.timedelta(seconds=5)).isoformat()
+    db.update_webhook_dlq_failure(dlq_id=dlq_id, last_error="boom", next_attempt_at_iso=past, attempts=1)
+
+    assert [row["id"] for row in db.list_webhook_dlq_due(limit=10)] == [dlq_id]

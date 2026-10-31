@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ViewMediaPage from '../ViewMediaPage'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
@@ -30,37 +31,6 @@ vi.mock('react-i18next', () => ({
     }
   })
 }))
-
-vi.mock('@tanstack/react-query', async () => {
-  const React = await import('react')
-  return {
-    useQuery: ({ queryFn, queryKey }: { queryFn: () => Promise<any>; queryKey: unknown[] }) => {
-      const [data, setData] = React.useState<any[]>([])
-      const [isFetching, setIsFetching] = React.useState(false)
-      const queryFnRef = React.useRef(queryFn)
-      queryFnRef.current = queryFn
-
-      const refetch = React.useCallback(async () => {
-        setIsFetching(true)
-        const nextData = await queryFnRef.current()
-        setData(Array.isArray(nextData) ? nextData : [])
-        setIsFetching(false)
-        return { data: nextData }
-      }, [])
-
-      React.useEffect(() => {
-        void refetch()
-      }, [JSON.stringify(queryKey), refetch])
-
-      return {
-        data,
-        refetch,
-        isLoading: false,
-        isFetching
-      }
-    }
-  }
-})
 
 vi.mock('@plasmohq/storage', () => ({
   Storage: class {
@@ -368,12 +338,14 @@ vi.mock('@/components/Media/MediaLibraryStatsPanel', () => ({
 
 const renderMediaPage = (initialEntry: string) => {
   return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/" element={<div data-testid="root-route" />} />
         <Route path="/media" element={<ViewMediaPage />} />
       </Routes>
     </MemoryRouter>
+    </QueryClientProvider>
   )
 }
 

@@ -15,6 +15,29 @@ export type ChatSurfaceScopeInput = {
   apiKey?: string | null
 }
 
+/** Compare connection authority while allowing token refresh for the same known user. */
+export const connectionAuthoritiesMatch = (
+  current: Partial<TldwConfig> | null | undefined,
+  previous: Partial<TldwConfig> | null | undefined
+): boolean => {
+  if (!current || !previous) return current == null && previous == null
+  const authMode = current.authMode || "single-user"
+  if (
+    String(current.serverUrl || "").trim().replace(/\/+$/, "") !==
+      String(previous.serverUrl || "").trim().replace(/\/+$/, "") ||
+    authMode !== (previous.authMode || "single-user") ||
+    (current.authSource || "manual") !== (previous.authSource || "manual") ||
+    (current.orgId ?? null) !== (previous.orgId ?? null)
+  ) return false
+  if (authMode === "single-user") {
+    return String(current.apiKey || "").trim() === String(previous.apiKey || "").trim()
+  }
+  if (current.accessToken === previous.accessToken) return true
+  const principal = deriveScopedUserId({ authMode, accessToken: current.accessToken })
+  return principal !== deriveScopedUserId({ authMode }) &&
+    principal === deriveScopedUserId({ authMode, accessToken: previous.accessToken })
+}
+
 const normalizeAuthMode = (authMode: string | null | undefined): string => {
   const normalized = String(authMode || "").trim().toLowerCase()
   return normalized || "unknown"
@@ -71,6 +94,27 @@ export const deriveSingleUserApiKeyCredentialScope = (
     )
   )
   return `key:sha256:${bytesToHex(digest)}`
+}
+
+export const derivePromptAssistAuthorizationRevision = (
+  config:
+    | Pick<TldwConfig, "authMode" | "accessToken" | "apiKey">
+    | null
+    | undefined
+): string => {
+  const authMode = normalizeAuthMode(config?.authMode)
+  const kind = authMode === "single-user" ? "key" : "token"
+  const credential = String(
+    kind === "key" ? config?.apiKey || "" : config?.accessToken || ""
+  ).trim()
+  if (!credential) return `${authMode}:${kind}:none`
+
+  const digest = sha256(
+    utf8ToBytes(
+      `tldw:prompt-assist-capability-authorization:v1\0${kind}\0${credential}`
+    )
+  )
+  return `${authMode}:${kind}:sha256:${bytesToHex(digest)}`
 }
 
 export const buildChatSurfaceScopeKey = (

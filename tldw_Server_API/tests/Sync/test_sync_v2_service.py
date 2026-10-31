@@ -93,6 +93,12 @@ def _clock() -> str:
     return "2026-05-10T12:00:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _fixed_sync_storage_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep database expiry checks on the service fixture's fixed clock."""
+    monkeypatch.setattr(sync_db_module, "utcnow_iso", _clock)
+
+
 def _sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
@@ -7758,6 +7764,89 @@ def test_versioned_pull_does_not_advance_past_unresolved_conflict(
     ]
 
 
+
+@pytest.mark.unit
+def test_legacy_pull_holds_cursor_and_reports_no_more_for_unresolved_conflict(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The adapter-v1 path (a device that never negotiated versions) holds the cursor too."""
+    registry = SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note")])
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            max_pull_page_size=10,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={"requested_domains": ["notes.note"]},
+    )
+    service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-1", domains=["notes.note"]
+    )
+    blocked = sync_store.insert_envelope(
+        _envelope(client_envelope_id="blocked-v1", status="accepted", apply_status="applied")
+    )
+    later = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="later-v1",
+            entity_id="note-later-v1",
+            stable_key="note:later-v1",
+            payload_hash="sha256:later-v1",
+            status="accepted",
+            apply_status="applied",
+        )
+    )
+    blocked = sync_store.mark_envelope_apply_status(
+        blocked.server_sequence,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-blocked-v1",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            object_id=blocked.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=blocked.client_envelope_id,
+            server_cursor=blocked.server_sequence,
+        )
+    )
+
+    first = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        include_own_changes=True,
+    )
+    monkeypatch.setattr(
+        sync_store,
+        "get_unresolved_materialization_conflict",
+        lambda _dataset_id: None,
+    )
+    second = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor=first.next_cursor,
+        include_own_changes=True,
+    )
+
+    assert first.envelopes == []
+    assert int(first.next_cursor or 0) < later.server_sequence
+    assert first.has_more is False
+    assert [item.client_envelope_id for item in second.envelopes] == [
+        later.client_envelope_id
+    ]
+
 def test_pull_token_rejects_tampering_oversize_and_negotiated_version_set_change(
     sync_store: SyncV2Store,
 ) -> None:
@@ -8834,6 +8923,10 @@ def test_blob_upload_session_chunk_and_complete_flow_commits_blob(
         blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
         settings=SyncV2Settings(
             supports_attachments=True,
+            # The fixed _clock stamps the session deadline, but the store enforces it
+            # against its real now (ADR 048 blob-upload addendum), so a TTL would have
+            # already expired. Expiry is covered by test_sync_v2_blob_upload_expiry.py.
+            blob_upload_session_ttl_seconds=0,
             max_blob_bytes=64,
             max_chunk_bytes=8,
             user_blob_quota_bytes=128,
@@ -8924,6 +9017,10 @@ def test_blob_upload_completion_returns_committed_blob_when_cleanup_fails(
         blob_store=blob_store,
         settings=SyncV2Settings(
             supports_attachments=True,
+            # The fixed _clock stamps the session deadline, but the store enforces it
+            # against its real now (ADR 048 blob-upload addendum), so a TTL would have
+            # already expired. Expiry is covered by test_sync_v2_blob_upload_expiry.py.
+            blob_upload_session_ttl_seconds=0,
             max_blob_bytes=64,
             max_chunk_bytes=16,
             server_trusted_encryption=_ready_encryption(),
@@ -8984,6 +9081,10 @@ def test_blob_upload_conflicting_duplicate_chunk_does_not_overwrite_existing_chu
         blob_store=blob_store,
         settings=SyncV2Settings(
             supports_attachments=True,
+            # The fixed _clock stamps the session deadline, but the store enforces it
+            # against its real now (ADR 048 blob-upload addendum), so a TTL would have
+            # already expired. Expiry is covered by test_sync_v2_blob_upload_expiry.py.
+            blob_upload_session_ttl_seconds=0,
             max_blob_bytes=64,
             max_chunk_bytes=16,
             server_trusted_encryption=_ready_encryption(),
@@ -9368,3 +9469,115 @@ def test_store_attachment_rejects_before_domain_size_and_policy_checks_in_m1(
             payload_hash="sha256:forbidden",
             encryption_policy="client_private_v1",
         )
+
+
+def test_legacy_pull_does_not_advance_past_unresolved_conflict(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression guard for TASK-13298 -- the v1 mirror of the versioned test above.
+
+    The legacy adapter-v1 pull path derived its next cursor from the UNFILTERED
+    envelope list, while the versioned path derives it from `safe_raw_envelopes`
+    (filtered by the blocker cursor). A device that never negotiated
+    `supported_adapter_versions` -- the default -- therefore had its watermark advanced
+    past envelopes withheld behind an unresolved conflict, and was told it was caught
+    up. Silent, permanent, per-device data loss on the default path.
+
+    `test_versioned_pull_does_not_advance_past_unresolved_conflict` proved the v2 path
+    correct; no v1 equivalent existed, which is why this survived.
+    """
+    registry = SyncAdapterRegistry(
+        [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            max_pull_page_size=10,
+            pull_token_signing_secret="test-only-pull-secret",
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    # No supported_adapter_versions: the un-negotiated default, which routes through
+    # the legacy pull path.
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={"requested_domains": ["notes.note"]},
+    )
+    service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-1", domains=["notes.note"]
+    )
+
+    blocked = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="blocked-v1",
+            adapter_version=1,
+            schema_version=1,
+            status="accepted",
+            apply_status="applied",
+        )
+    )
+    later = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="later-v1",
+            entity_id="note-later-v1",
+            stable_key="note:later-v1",
+            payload_hash="sha256:later-v1",
+            adapter_version=1,
+            schema_version=1,
+            status="accepted",
+            apply_status="applied",
+        )
+    )
+    blocked = sync_store.mark_envelope_apply_status(
+        blocked.server_sequence,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-blocked-v1",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            object_id=blocked.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=blocked.client_envelope_id,
+            server_cursor=blocked.server_sequence,
+        )
+    )
+
+    first = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        include_own_changes=True,
+    )
+    assert conflict.server_sequence == blocked.server_sequence
+    assert first.envelopes == [], "the blocked envelope must not be delivered"
+
+    # Clear the blocker, then resume from the cursor the first pull handed back.
+    monkeypatch.setattr(
+        sync_store,
+        "get_unresolved_materialization_conflict",
+        lambda _dataset_id: None,
+    )
+    second = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor=first.next_cursor,
+        include_own_changes=True,
+    )
+
+    assert [item.client_envelope_id for item in second.envelopes] == [
+        later.client_envelope_id
+    ], (
+        "the deliverable envelope behind the blocker was skipped: the legacy pull "
+        "advanced its watermark past withheld envelopes, so this device never "
+        "receives it and was told it was caught up"
+    )

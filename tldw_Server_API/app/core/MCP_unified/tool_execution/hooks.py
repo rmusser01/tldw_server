@@ -30,7 +30,6 @@ except ImportError:  # pragma: no cover - redis not installed
 
 
 _HOOK_HELPER_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

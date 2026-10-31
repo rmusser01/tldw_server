@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -13,7 +13,8 @@ const {
   mockNavigate,
   mockConfirmDanger,
   mockGetSetting,
-  mockClearSetting
+  mockClearSetting,
+  ownerFixture
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -23,7 +24,8 @@ const {
   mockNavigate: vi.fn(),
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
-  mockClearSetting: vi.fn()
+  mockClearSetting: vi.fn(),
+  ownerFixture: { real: false, token: `test.${btoa(JSON.stringify({ sub: "7" }))}.signature` }
 }))
 
 vi.mock("react-i18next", () => ({
@@ -119,8 +121,34 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: () => <div data-testid="notes-list-panel" />
+  default: ({ onSelectNote }: { onSelectNote: (id: string) => void }) => (
+    <button data-testid="notes-list-panel" onClick={() => onSelectNote("11")}>Open saved note</button>
+  )
 }))
+
+
+// This page fixture starts with a verified owner; the interacting hook suite
+// separately exercises pending discovery, identity changes, and permission loss.
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => {
+  let config = { serverUrl: "https://notes.test", authMode: "multi-user", accessToken: ownerFixture.token }
+  return { useCanonicalConnectionConfig: () => {
+    if (config.accessToken !== ownerFixture.token) config = { ...config, accessToken: ownerFixture.token }
+    return { config, loading: false }
+  } }
+})
+vi.mock("../hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../hooks/useNotesGraphAuthorityScope")>()
+  return { ...actual, useNotesGraphAuthorityScope: (options: Parameters<typeof actual.useNotesGraphAuthorityScope>[0]) =>
+    ownerFixture.real ? actual.useNotesGraphAuthorityScope(options) : actual.createNotesGraphAuthorityScope("https://notes.test", 7) }
+})
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })) }
+}))
+vi.mock("@/hooks/useCallerCapabilities", () => {
+  const capabilities = { monitoringAlerts: "allowed", userId: 7,
+    refreshAfterForbidden: vi.fn(async () => undefined) }
+  return { useCallerCapabilities: () => capabilities }
+})
 
 const renderPage = () => {
   const queryClient = new QueryClient({
@@ -129,11 +157,13 @@ const renderPage = () => {
       mutations: { retry: false }
     }
   })
-  return render(
+  const page = () => (
     <QueryClientProvider client={queryClient}>
       <NotesManagerPage />
     </QueryClientProvider>
   )
+  const view = render(page())
+  return { ...view, rerenderPage: () => view.rerender(page()) }
 }
 
 const createCalls = () =>
@@ -196,10 +226,63 @@ const seedBaseNotesMock = () => {
 describe("NotesManagerPage stage 47 save state and recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ownerFixture.real = false
+    ownerFixture.token = `test.${btoa(JSON.stringify({ sub: "7" }))}.signature`
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
     seedBaseNotesMock()
+  })
+
+  it("preserves a dirty editor when the same verified account rotates its access token", async () => {
+    ownerFixture.real = true
+    const view = renderPage()
+    await act(async () => {})
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), { target: { value: "Unsaved draft before refresh" } })
+    ownerFixture.token = `test.${btoa(JSON.stringify({ sub: "7", exp: 2000000000 }))}.refreshed`
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    view.rerenderPage()
+    await act(async () => {})
+    expect(screen.getByPlaceholderText("Write your note here... (Markdown supported)")).toHaveValue("Unsaved draft before refresh")
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "dirty")
+    expect(createCalls()).toHaveLength(0)
+  })
+
+  it.each([false, true])("keeps a committed create through a benign event with token rotation=%s in the mounted Page", async rotateToken => {
+    ownerFixture.real = true
+    const original = mockBgRequest.getMockImplementation()!
+    let acknowledge!: (value: unknown) => void
+    const pending = new Promise(resolve => { acknowledge = resolve })
+    mockBgRequest.mockImplementation(request => request.method === "POST" ? pending : original(request))
+    const view = renderPage()
+    await act(async () => {})
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), { target: { value: "Own draft" } })
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+    await waitFor(() => expect(createCalls()).toHaveLength(1))
+    if (rotateToken) ownerFixture.token = `test.${btoa(JSON.stringify({ sub: "7", exp: 2000000000 }))}.refreshed`
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    view.rerenderPage()
+    await act(async () => { acknowledge({ id: 11, version: 1, last_modified: "2026-09-15T12:00:00Z" }) })
+    await waitFor(() => expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saved"))
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), { target: { value: "Updated own draft" } })
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+    await waitFor(() => expect(updateCalls()).toHaveLength(1))
+    expect(createCalls()).toHaveLength(1)
+  })
+
+  it("announces Saved for a loaded versioned Note and Unsaved changes after editing", async () => {
+    renderPage()
+    fireEvent.click(screen.getByText("Open saved note"))
+    await waitFor(() => expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saved"))
+    expect(screen.getByTestId("notes-save-status")).toHaveTextContent("Saved")
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("aria-live", "polite")
+    expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1")
+    expect(createCalls()).toHaveLength(0)
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
+      target: { value: "A new unsaved edit" }
+    })
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "dirty")
+    expect(screen.getByTestId("notes-save-status")).toHaveTextContent("Unsaved changes")
   })
 
   it("announces dirty and saving states and blocks duplicate saves while one is pending", async () => {

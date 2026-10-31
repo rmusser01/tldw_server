@@ -25,6 +25,9 @@ const PROVIDER_ALIASES: Record<string, string> = {
   "custom-openai-api2": "custom-openai-api-2",
   "custom_openai_api_2": "custom-openai-api-2",
   "local_llm": "local-llm",
+  "llama": "llama.cpp",
+  "llama-cpp": "llama.cpp",
+  "llama_cpp": "llama.cpp",
   "llamacpp": "llama.cpp"
 }
 

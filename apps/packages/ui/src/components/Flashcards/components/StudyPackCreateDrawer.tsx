@@ -99,9 +99,18 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     if (!response) return
     if (handledTerminalJobIdRef.current === response.job.id) return
 
-    if (response.job.status === "completed" && response.study_pack?.deck_id) {
+    if (response.job.status === "completed") {
       handledTerminalJobIdRef.current = response.job.id
       const pack = response.study_pack
+      if (!pack?.deck_id) {
+        message.error(
+          t("option:flashcards.studyPackResultUnavailable", {
+            defaultValue: "Study pack completed, but its review deck is unavailable."
+          })
+        )
+        setJobId(null)
+        return
+      }
       onCreated?.(pack)
       onClose()
       navigate(`/flashcards?tab=review&deck_id=${pack.deck_id}`, {
@@ -125,7 +134,27 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   const trimmedTitle = title.trim()
   const trimmedSourceId = sourceId.trim()
   const trimmedSourceTitle = sourceTitle.trim()
-  const canSubmit = trimmedTitle.length > 0 && sourceItems.length > 0 && !createMutation.isPending
+  const hasPendingJob = jobId != null
+  const canSubmit =
+    trimmedTitle.length > 0 &&
+    sourceItems.length > 0 &&
+    !createMutation.isPending &&
+    !hasPendingJob
+  const pendingJobMessage = jobQuery.isError
+    ? t("option:flashcards.studyPackJobStatusUnavailable", {
+        defaultValue: "Unable to check study pack progress. Checking again shortly."
+      })
+    : jobQuery.data?.job.status === "running"
+      ? t("option:flashcards.studyPackJobRunning", {
+          defaultValue: "Creating your study pack."
+        })
+      : jobQuery.data?.job.status === "queued"
+        ? t("option:flashcards.studyPackJobQueued", {
+            defaultValue: "Study pack queued. Waiting for generation to start."
+          })
+        : t("option:flashcards.studyPackJobAccepted", {
+            defaultValue: "Study pack request accepted. Waiting for a status update."
+          })
 
   const handleAddSource = React.useCallback(() => {
     if (!trimmedSourceId) return
@@ -195,7 +224,7 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
               void handleSubmit()
             }}
             disabled={!canSubmit}
-            loading={createMutation.isPending || (jobId != null && jobQuery.isFetching)}
+            loading={createMutation.isPending || hasPendingJob}
           >
             {t("option:flashcards.studyPackCreateButton", {
               defaultValue: "Create study pack"
@@ -205,6 +234,11 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
       }
     >
       <div className="space-y-4">
+        {hasPendingJob ? (
+          <Text role="status" aria-live="polite" aria-atomic="true" className="block">
+            {pendingJobMessage}
+          </Text>
+        ) : null}
         <div className="space-y-1">
           <Text strong>Title</Text>
           <Input

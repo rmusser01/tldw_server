@@ -45,7 +45,12 @@ class SharedWorkspaceDBResolver:
         source_media_db: MediaDbLike,
         conversation_chacha_db: CharactersRAGDB,
     ) -> SharedWorkspaceContext:
-        share = await self._repo.get_share(share_id)
+        # get_share is a primary-key lookup: it says the share exists, not that
+        # this accessor may use it. Taking accessor_user_id and echoing it back
+        # unverified meant any authenticated caller could reach any non-revoked
+        # share by guessing its id. get_active_share_for_user applies the
+        # recipient, team and org membership checks the share actually grants.
+        share = await self._repo.get_active_share_for_user(share_id, accessor_user_id)
         if not share:
             raise PermissionError(f"Share {share_id} not found")
 

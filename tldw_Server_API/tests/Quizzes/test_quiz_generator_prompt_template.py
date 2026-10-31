@@ -16,10 +16,14 @@ from tldw_Server_API.app.services.quiz_generator import (
 )
 
 
-@pytest.mark.parametrize("profile", ["unknown-profile", "osce_scenario"])
-def test_profile_normalization_uses_domain_error_for_invalid_requests(profile: str):
+def test_profile_normalization_uses_domain_error_for_invalid_requests():
     with pytest.raises(BadRequestError):
-        quiz_generator._normalize_generation_profile(profile)
+        quiz_generator._normalize_generation_profile("unknown-profile")
+
+
+def test_profile_normalization_accepts_available_osce_profile():
+    assert quiz_generator._normalize_generation_profile("osce_scenario") == "osce_scenario"
+    assert quiz_generator._normalize_generation_profile("osce") == "osce_scenario"
 
 
 def test_quiz_generation_prompt_template_formats_with_literal_citation_object():

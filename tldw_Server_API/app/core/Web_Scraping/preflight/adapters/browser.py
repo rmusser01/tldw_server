@@ -189,6 +189,14 @@ class _BrowserCleanupHandle:
             if force_method is not None:
                 async with self._operation_lock:
                     self._terminal = True
+                    operation = self._operation_task
+                    if (
+                        operation is not None
+                        and operation.done()
+                        and not operation.cancelled()
+                        and operation.exception() is None
+                    ):
+                        return
                 result = force_method()
                 if inspect.isawaitable(result):
                     await result

@@ -1,37 +1,40 @@
 # conftest.py
 # Pytest configuration for Prompt Studio tests
 
+from collections.abc import AsyncIterator, Iterator
 import os
 import tempfile
 import sqlite3
 from pathlib import Path
 import uuid
 from unittest.mock import patch
-import importlib
-
-import pytest
-from fastapi.testclient import TestClient
 from typing import Any
 
-# Prompt Studio routes are not included in minimal test app mode.
-os.environ["MINIMAL_TEST_APP"] = "0"
-# Ensure test flags are set before loading the app module.
-os.environ["TEST_MODE"] = "true"
-os.environ["AUTH_MODE"] = "single_user"
-os.environ["CSRF_ENABLED"] = "false"
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-import tldw_Server_API.app.main as main_mod
-
-if getattr(main_mod, "_MINIMAL_TEST_APP", True):
-    main_mod = importlib.reload(main_mod)
-fastapi_app = main_mod.app
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 
-# Environment variables already set before app import above.
+@pytest.fixture
+def app(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
+    """Build the full production app only for tests that need Prompt Studio HTTP routes.
+
+    Keep collection side-effect free and restore the shared main module after
+    the test, including its original app and route profile.
+    """
+    from tldw_Server_API.tests.helpers.app_main_state import app_main_isolated, reload_app_main
+
+    monkeypatch.setenv("MINIMAL_TEST_APP", "0")
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("CSRF_ENABLED", "false")
+    with app_main_isolated():
+        yield reload_app_main().app
 
 # Postgres setup is unified via tests._plugins.postgres.
 
@@ -291,11 +294,12 @@ def prompt_studio_dual_backend_db(
 
 @pytest.fixture
 def prompt_studio_dual_backend_client(
-    prompt_studio_dual_backend_db,
-    mock_current_user,
-    tmp_path,
-    monkeypatch,
-):
+    app: FastAPI,
+    prompt_studio_dual_backend_db: tuple[str, PromptStudioDatabase],
+    mock_current_user: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[str, TestClient, PromptStudioDatabase]]:
     """Yield a FastAPI TestClient wired to the selected Prompt Studio backend."""
 
     from tldw_Server_API.app.core.config import settings as app_settings
@@ -308,7 +312,7 @@ def prompt_studio_dual_backend_client(
     monkeypatch.setitem(app_settings, "USER_DB_BASE_DIR", tmp_path)
     monkeypatch.setenv("TEST_MODE", "true")
 
-    async def override_user():
+    async def override_user() -> User:
         return User(
             id=mock_current_user.get("id", "test-user-123"),
             username=mock_current_user.get("username", "testuser"),
@@ -316,7 +320,7 @@ def prompt_studio_dual_backend_client(
             is_active=True,
         )
 
-    async def override_db():
+    async def override_db() -> AsyncIterator[PromptStudioDatabase]:
         try:
             yield db_instance
         finally:
@@ -325,7 +329,7 @@ def prompt_studio_dual_backend_client(
             except Exception:
                 _ = None
 
-    _app: Any = fastapi_app  # appease static analyzers about dynamic attributes
+    _app = app
     _app.dependency_overrides[get_request_user] = override_user
     _app.dependency_overrides[get_prompt_studio_db] = override_db
     # get_prompt_studio_user calls ps_deps.get_current_active_user directly; patch it

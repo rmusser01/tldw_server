@@ -1,3 +1,4 @@
+import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 // @vitest-environment jsdom
 import React from 'react';
 import { readFileSync } from 'node:fs';
@@ -234,6 +235,7 @@ vi.mock('@/components/Layouts/Header', () => ({
     sidebarCollapsed?: boolean;
   }) => (
     <button
+      data-history-controller={useHistorySelectionContext() ? "present" : "absent"}
       type="button"
       data-testid="header"
       aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -293,7 +295,7 @@ vi.mock('@/hooks/useServerOnline', () => ({
 vi.mock('@/components/Common/ChatSidebar', () => ({
   ChatSidebar: (props: Record<string, unknown>) => {
     chatSidebarMockState.props.push(props);
-    return <aside data-testid="chat-sidebar" />;
+    return <aside data-testid="chat-sidebar" data-history-controller={useHistorySelectionContext() ? "present" : "absent"}><button onClick={() => (props.onConversationSelected as (() => void) | undefined)?.()}>Select saved conversation</button></aside>;
   },
 }));
 
@@ -366,14 +368,16 @@ vi.mock('@web/lib/api', () => ({
 vi.mock('@web/lib/authStorage', () => ({
   getApiBearer: () => null,
   getApiKey: () => 'test-api-key',
+  getSessionAccessToken: () => null,
+  getEffectiveStoredTldwConfig: () => null,
 }));
 
 vi.mock('@web/components/ui/ToastProvider', () => ({
   useToast: () => ({ show: vi.fn() }),
 }));
 
-vi.mock('@/components/Common/CommandPalette', () => ({
-  CommandPalette: () => null,
+vi.mock('@/components/Common/CommandPaletteHost', () => ({
+  CommandPaletteHost: () => null,
 }));
 
 vi.mock('@/components/Common/TutorialRunner', () => ({
@@ -382,6 +386,10 @@ vi.mock('@/components/Common/TutorialRunner', () => ({
 
 vi.mock('@/components/Common/KeyboardShortcutsModal', () => ({
   KeyboardShortcutsModal: () => null,
+}));
+
+vi.mock('@/components/Timeline', () => ({
+  TimelineModal: () => null,
 }));
 
 vi.mock('@/hooks/useConnectionState', () => ({
@@ -805,6 +813,37 @@ describe('WebLayout /chat scroll contract', () => {
     );
   });
 
+  it('closes the mobile drawer after an accepted conversation selection on the same route', () => {
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    render(<OptionLayout><div>Chat content</div></OptionLayout>);
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select saved conversation' }));
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+    expect(routerState.location.pathname).toBe('/chat');
+  });
+
+  it('keeps the desktop sidebar after selecting a conversation', () => {
+    featureFlagState.showChatSidebar = true;
+    render(<OptionLayout><div>Chat content</div></OptionLayout>);
+    layoutUiState.value.setChatSidebarCollapsed.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Select saved conversation' }));
+    expect(screen.getByTestId('chat-sidebar')).toBeInTheDocument();
+    expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalled();
+  });
+
+  it('still closes an open mobile drawer on an ordinary route change', () => {
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    const view = render(<OptionLayout><div>Content</div></OptionLayout>);
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    routerState.location.pathname = '/notes';
+    view.rerender(<OptionLayout><div>Content</div></OptionLayout>);
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+  });
+
   it('labels and opens the legacy sidebar from the Drawer state', () => {
     featureFlagState.showChatSidebar = false;
     layoutUiState.value.chatSidebarCollapsed = false;
@@ -984,3 +1023,43 @@ describe('WebLayout bypass block (#2889)', () => {
     expect(main).toHaveAttribute('tabindex', '-1');
   });
 });
+
+it('shares one H1 controller across the WebUI shell and page only for the chat lifetime', () => {
+  delete (globalThis as any).__tldwOptionShell;
+  routerState.location.pathname = '/chat';
+  featureFlagState.showChatSidebar = true;
+  mediaQueryState.isMobile = false;
+  const seen: any[] = [];
+  let outer: any;
+  function Probe() {
+    const current = useHistorySelectionContext();
+    seen.push(current?.getReference ?? null);
+    return <output data-testid="web-controller">{current ? 'present' : 'absent'}</output>;
+  }
+  function Page() {
+    const current = useHistorySelectionContext()?.getReference ?? null;
+    React.useEffect(() => { outer = current; }, [current]);
+    return current ? <HistorySelectionProvider><Probe /></HistorySelectionProvider> : <Probe />;
+  }
+  const view = render(<OptionLayout><Page /></OptionLayout>);
+  expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'present');
+  expect(view.getByTestId('chat-sidebar')).toHaveAttribute('data-history-controller', 'present');
+  expect(seen.at(-1)).toBe(outer);
+  const first = outer;
+  routerState.location.pathname = '/workspace';
+  view.rerender(<OptionLayout><Page /></OptionLayout>);
+  expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'absent');
+  expect(seen.at(-1)).toBeNull();
+  routerState.location.pathname = '/chat';
+  view.rerender(<OptionLayout><Page /></OptionLayout>);
+  expect(seen.at(-1)).toBe(outer);
+  expect(outer).not.toBe(first);
+  cleanup();
+  delete (globalThis as any).__tldwOptionShell;
+});
+
+vi.mock('@/services/chat-history-selection', () => ({
+  captureHistorySnapshot: vi.fn(),
+  confirmLegacyHistoryProjection: vi.fn(),
+}));
+vi.mock('@/db/dexie/helpers', () => ({ formatSelectedHistory: vi.fn() }));

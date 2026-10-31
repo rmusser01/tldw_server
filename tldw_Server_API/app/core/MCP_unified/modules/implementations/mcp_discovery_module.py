@@ -281,11 +281,13 @@ class MCPDiscoveryModule(BaseModule):
         return org_ids, team_ids
 
     async def _is_admin(self, context: RequestContext, pool: Any) -> bool:
-        metadata = getattr(context, "metadata", {}) or {}
-        roles = metadata.get("roles") or []
-        if isinstance(roles, str):
-            roles = [roles]
-        if any(str(r).lower() == "admin" for r in roles):
+        """Claims check first, then the user_roles table.
+
+        The claims half is BaseModule.caller_is_admin, shared with the other modules.
+        The DB lookup is this module's own: discovery is the one site that can fall
+        back to the stored role assignment when the request carries no admin claim.
+        """
+        if self.caller_is_admin(context):
             return True
 
         uid = self._coerce_user_id(context.user_id)

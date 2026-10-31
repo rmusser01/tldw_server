@@ -573,6 +573,11 @@ async def test_admin_rate_limit_bypass_is_principal_first(
 
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    # check_rate_limit's fallback now honors the RG single switch (R27): under
+    # pytest, rg_enabled() defaults to False unless RG_ENABLED is set explicitly,
+    # which would short-circuit before get_auth_governor(). Pin it on so this
+    # test keeps exercising principal-first ordering, independent of the switch.
+    monkeypatch.setenv("RG_ENABLED", "1")
     # Compatibility: these helpers may no longer be imported by auth_deps in
     # claim-first paths; patch with raising=False so the assertion remains valid
     # regardless of symbol exposure.
@@ -609,9 +614,17 @@ async def test_admin_rate_limit_bypass_is_principal_first(
 
 
 @pytest.mark.asyncio
-async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
+async def test_check_rate_limit_fallback_is_off_when_rg_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """R27 / ADR-056: RG_ENABLED=false must silence the general fallback too.
+
+    Previously this fallback kept enforcing a hidden 120/min cap even with RG
+    fully disabled, breaking the one-switch rule. It now honors the switch
+    (``honor_rg_switch=True`` in ``check_rate_limit``); ``check_auth_rate_limit``
+    deliberately does not (see the sibling tests below) since it is the
+    auth-endpoint brute-force floor, not RG enforcement.
+    """
     monkeypatch.setenv("RG_ENABLED", "0")
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
@@ -619,10 +632,10 @@ async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_LIMIT", "1")
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_WINDOW_SECONDS", "60")
 
-    async def _fake_get_auth_governor() -> object:
-        return object()
+    async def _boom_get_auth_governor() -> object:
+        raise AssertionError("get_auth_governor should not run once RG_ENABLED=false short-circuits")
 
-    monkeypatch.setattr(auth_deps, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr(auth_deps, "get_auth_governor", _boom_get_auth_governor)
     auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
 
     request = _DummyRequest()
@@ -640,10 +653,9 @@ async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
             _ = kwargs
             raise AssertionError("legacy limiter should not be used by auth_deps fallback")
 
+    # limit=1/min: a leftover enforcement path would 429 on the second call.
     await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
-    with pytest.raises(HTTPException) as exc_info:
-        await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
-    assert exc_info.value.status_code == 429
+    await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
 
 
 @pytest.mark.asyncio
@@ -780,6 +792,35 @@ async def test_rbac_rate_limit_zero_rpm_or_burst_denies_without_bucket(
 
     assert captured.value.status_code == 429
     assert auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("per_user", [False, True])
+async def test_rbac_per_user_bucket_shares_budget_across_auth_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+    per_user: bool,
+) -> None:
+    """User-wide buckets are opt-in and remain isolated from other users."""
+    monkeypatch.setattr(auth_deps.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(auth_deps, "_AUTH_DEPS_FALLBACK_RATE_WINDOWS", {})
+    monkeypatch.setattr(auth_deps, "_catalog_rate_limit_for_resource", lambda _resource: (1, 1))
+    request = _DummyRequest()
+    request.state.user_id = 41
+    request.state.auth = AuthContext(principal=AuthPrincipal(kind="user", user_id=41))
+    dependency = auth_deps.rbac_rate_limit("vn_assets.preflight", per_user=per_user)
+
+    await dependency(request, _NoRbacOverridePool())
+    request.state.auth = AuthContext(principal=AuthPrincipal(kind="api_key", user_id=41, api_key_id=99))
+    if per_user:
+        with pytest.raises(HTTPException) as captured:
+            await dependency(request, _NoRbacOverridePool())
+        assert captured.value.status_code == 429
+    else:
+        await dependency(request, _NoRbacOverridePool())
+
+    request.state.user_id = 42
+    request.state.auth = AuthContext(principal=AuthPrincipal(kind="user", user_id=42))
+    await dependency(request, _NoRbacOverridePool())
 
 
 def test_fallback_rate_bucket_honors_burst_above_rpm_and_principal_isolation(

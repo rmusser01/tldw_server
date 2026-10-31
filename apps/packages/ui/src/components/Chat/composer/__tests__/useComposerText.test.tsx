@@ -2,6 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/hooks/useChatDraftOwner", () => {
+  const owner = { ownerKey: "unit-owner", isCurrent: () => true }
+  return { useChatDraftOwner: () => owner }
+})
+
 import { useComposerText } from "../hooks/useComposerText"
 
 const createRef = () => React.createRef<HTMLTextAreaElement>()
@@ -89,7 +95,9 @@ describe("useComposerText", () => {
 
   it("increments exactly once when a stored draft is restored", async () => {
     const draftKey = "tldw:test:restore-revision"
-    window.localStorage.setItem(draftKey, "restored draft")
+    window.localStorage.setItem(`registry:draft:${draftKey}:owner:unit-owner`, JSON.stringify({
+      value: "restored draft", updatedAt: Date.now()
+    }))
 
     const { result } = renderHook(() =>
       useComposerText({

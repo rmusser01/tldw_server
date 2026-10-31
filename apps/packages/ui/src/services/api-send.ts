@@ -1,10 +1,29 @@
-import { browser } from 'wxt/browser'
-import { createSafeStorage } from '@/utils/safe-storage'
-import { tldwRequest } from '@/services/tldw/request-core'
-import type { PathOrUrl, AllowedMethodFor, UpperLower } from '@/services/tldw/openapi-guard'
-import { resolveDirectBrowserConfig as resolveDirectConfig } from '@/services/tldw/direct-browser-config'
+import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
+import {
+  directRecipeRequestAuthority,
+  hasRecipeExtensionRuntime
+} from "@/services/recipe-persistence-uncertainty"
+import { resolveDirectBrowserConfig as resolveDirectConfig } from "@/services/tldw/direct-browser-config"
+import type {
+  AllowedMethodFor,
+  PathOrUrl,
+  UpperLower
+} from "@/services/tldw/openapi-guard"
+import type {
+  RecipePersistenceDispatch,
+  RecipePersistenceRequestPolicy
+} from "@/services/tldw/recipe-request-snapshot"
+import { tldwRequest } from "@/services/tldw/request-core"
+import { createSafeStorage } from "@/utils/safe-storage"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
+import { browser } from "wxt/browser"
 
-export interface ApiSendPayload<P extends PathOrUrl = PathOrUrl, M extends AllowedMethodFor<P> = AllowedMethodFor<P>> {
+export interface ApiSendPayload<
+  P extends PathOrUrl = PathOrUrl,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+> {
   path: P
   method?: UpperLower<M>
   headers?: Record<string, string>
@@ -12,6 +31,7 @@ export interface ApiSendPayload<P extends PathOrUrl = PathOrUrl, M extends Allow
   noAuth?: boolean
   timeoutMs?: number
   responseType?: "json" | "text" | "arrayBuffer"
+  recipePersistence?: RecipePersistenceRequestPolicy
 }
 
 export interface ApiSendResponse<T = any> {
@@ -19,16 +39,29 @@ export interface ApiSendResponse<T = any> {
   status: number
   data?: T
   error?: string
+  code?: string
   headers?: Record<string, string>
   retryAfterMs?: number | null
+  /** Transport metadata, never supplied by the server response body. */
+  recipePersistence?: RecipePersistenceDispatch
+  /** Client-only operation guard; sync acknowledges after local settlement. */
+  recipeDelivery?: RecipeDeliveryReceipt
 }
 
 const isSafeFallbackMethod = (method?: string): boolean => {
   const methodUpper = String(method || "GET").toUpperCase()
-  return methodUpper === "GET" || methodUpper === "HEAD" || methodUpper === "OPTIONS"
+  return (
+    methodUpper === "GET" || methodUpper === "HEAD" || methodUpper === "OPTIONS"
+  )
 }
 
 const inFlightGetRequests = new Map<string, Promise<ApiSendResponse<unknown>>>()
+
+interface ApiSendOptions {
+  coalesce?: boolean
+  /** Captured connection owner; only the authenticated readiness GET may refresh. */
+  readiness?: { config: TldwConfig; isCurrent: () => boolean }
+}
 
 const normalizeHeaders = (
   headers?: Record<string, string>
@@ -46,6 +79,7 @@ const getCoalescingKey = (payload: ApiSendPayload): string | null => {
   const method = String(payload.method || "GET").toUpperCase()
   if (
     method !== "GET" ||
+    payload.recipePersistence ||
     payload.body ||
     payload.responseType
   ) {
@@ -63,15 +97,22 @@ const getCoalescingKey = (payload: ApiSendPayload): string | null => {
   })
 }
 
-export async function apiSend<T = any, P extends PathOrUrl = PathOrUrl, M extends AllowedMethodFor<P> = AllowedMethodFor<P>>(
-  payload: ApiSendPayload<P, M>
+export async function apiSend<
+  T = any,
+  P extends PathOrUrl = PathOrUrl,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+>(
+  payload: ApiSendPayload<P, M>,
+  // Client-local scheduling policy: never forwarded to a transport or server.
+  options: ApiSendOptions = {}
 ): Promise<ApiSendResponse<T>> {
-  const coalescingKey = getCoalescingKey(payload)
+  const coalescingKey =
+    options.coalesce === false || options.readiness ? null : getCoalescingKey(payload)
   if (coalescingKey) {
     const existing = inFlightGetRequests.get(coalescingKey)
     if (existing) return existing as Promise<ApiSendResponse<T>>
 
-    const pending = apiSendImpl<T, P, M>(payload).finally(() => {
+    const pending = apiSendImpl<T, P, M>(payload, options).finally(() => {
       if (inFlightGetRequests.get(coalescingKey) === pending) {
         inFlightGetRequests.delete(coalescingKey)
       }
@@ -83,12 +124,28 @@ export async function apiSend<T = any, P extends PathOrUrl = PathOrUrl, M extend
     return pending
   }
 
-  return apiSendImpl(payload)
+  return apiSendImpl(payload, options)
 }
 
-async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends AllowedMethodFor<P> = AllowedMethodFor<P>>(
-  payload: ApiSendPayload<P, M>
-): Promise<ApiSendResponse<T>> {
+async function apiSendImpl<
+  T = any,
+  P extends PathOrUrl = PathOrUrl,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+>(payload: ApiSendPayload<P, M>, options: ApiSendOptions): Promise<ApiSendResponse<T>> {
+  const recipeExtension = Boolean(
+    payload.recipePersistence && hasRecipeExtensionRuntime()
+  )
+  if (
+    recipeExtension &&
+    !(browser?.runtime?.sendMessage && browser?.runtime?.id)
+  ) {
+    return {
+      ok: false,
+      status: 0,
+      error: "Recipe background authority unavailable",
+      recipePersistence: { state: "not_dispatched", actualOwnerId: null }
+    }
+  }
   const methodIsSafeFallback = isSafeFallbackMethod(
     payload?.method ? String(payload.method) : "GET"
   )
@@ -96,12 +153,14 @@ async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends A
     // In web mode the wxt/browser shim provides sendMessage but no runtime.id.
     // Only use extension messaging when a real runtime is present.
     if (browser?.runtime?.sendMessage && browser?.runtime?.id) {
-
       // Add timeout to extension messaging - if it doesn't respond quickly, fall back to direct request
       // Must be less than CONNECTION_TIMEOUT_MS (20s) so health checks can fall back to direct fetch
       // Increased from 5s to 10s to reduce premature fallbacks during slow operations
       const extensionTimeout = 10000 // 10 second timeout for extension messaging
-      const extensionPromise = browser.runtime.sendMessage({ type: 'tldw:request', payload })
+      const extensionPromise = browser.runtime.sendMessage({
+        type: "tldw:request",
+        payload
+      })
       const timeoutPromise = new Promise<null>((resolve) => {
         setTimeout(() => resolve(null), extensionTimeout)
       })
@@ -111,13 +170,29 @@ async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends A
       if (resp) {
         return resp as ApiSendResponse<T>
       }
-      if (!methodIsSafeFallback) {
+      if (!methodIsSafeFallback || recipeExtension) {
         throw new Error("Extension messaging timeout")
       }
       // If resp is null (timeout), fall through to direct request for safe methods.
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message.toLowerCase() : String(err || "").toLowerCase()
+    if (
+      payload.recipePersistence &&
+      (!methodIsSafeFallback || recipeExtension)
+    ) {
+      // The background may already have written. Never replay this mutation or
+      // invent its owner from the page's independently selected connection.
+      return {
+        ok: false,
+        status: 0,
+        error: "Extension request outcome is unknown",
+        recipePersistence: { state: "unknown", actualOwnerId: null }
+      }
+    }
+    const message =
+      err instanceof Error
+        ? err.message.toLowerCase()
+        : String(err || "").toLowerCase()
     if (
       !methodIsSafeFallback &&
       message.includes("extension messaging timeout")
@@ -127,7 +202,49 @@ async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends A
     // fall through to direct request
   }
   const storage = createSafeStorage({ area: "local" })
+  const readiness = options.readiness
+  if (readiness && String(payload.path) === "/api/v1/auth/sessions" &&
+    String(payload.method || "GET").toUpperCase() === "GET" &&
+    !payload.noAuth && !payload.recipePersistence &&
+    readiness.config.authMode === "multi-user" && readiness.config.refreshToken) {
+    const assertCurrent = () => {
+      if (!readiness.isCurrent()) throw createServicePromptScopeChangedError()
+    }
+    const guardedStorage = {
+      get: async <V,>(key: string): Promise<V> => {
+        assertCurrent()
+        const value = await storage.get<V>(key)
+        assertCurrent()
+        return value
+      },
+      set: async <V,>(key: string, value: V) => {
+        assertCurrent()
+        await storage.set(key, value)
+        assertCurrent()
+      },
+      remove: async (key: string) => {
+        assertCurrent()
+        await storage.remove(key)
+        assertCurrent()
+      }
+    }
+    const { createDirectRuntime } = await import("@/services/background-proxy")
+    const runtime = createDirectRuntime(guardedStorage, {
+      ...readiness.config,
+      expectedUserId: deriveScopedUserId(readiness.config).replace(/^user:/, "")
+    })
+    return await tldwRequest(payload, {
+      ...runtime,
+      getConfig: async () => {
+        assertCurrent()
+        const config = await runtime.getConfig()
+        assertCurrent()
+        return config
+      }
+    })
+  }
   return await tldwRequest(payload, {
+    ...directRecipeRequestAuthority,
     // IMPORTANT: getConfig must fetch fresh config each time it's called
     // (not pre-fetch once), because the config may change or not be seeded yet.
     getConfig: () => resolveDirectConfig(storage)

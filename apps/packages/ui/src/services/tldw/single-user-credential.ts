@@ -5,6 +5,8 @@ import type {
 import { isExactOriginCookieSessionConfig } from "@/services/tldw/browser-networking"
 import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 
 export type ApiKeyPersistence = "device" | "session"
 export type CredentialSource = "manual" | "cookie-session"
@@ -28,6 +30,7 @@ export interface CredentialStorage {
 
 export const MANUAL_SESSION_KEY = "tldwManualSessionApiKey"
 export const REFRESH_ROTATION_KEY = "tldwRefreshRotation"
+export const REFRESH_SESSION_INVALIDATION_PREFIX = "tldwInvalidRefreshSession:"
 
 /**
  * A possibly-untrusted request-scope target (e.g. parsed from a runtime
@@ -122,7 +125,7 @@ const applicableRefreshRotation = (
   return record
 }
 
-const applyRefreshRotation = (
+export const applyRefreshRotation = (
   stored: TldwConfig,
   value: unknown
 ): TldwConfig => {
@@ -134,6 +137,51 @@ const applyRefreshRotation = (
         refreshToken: record.refreshToken
       }
     : stored
+}
+
+export const refreshSessionInvalidationKey = (config: TldwConfig): string | null => {
+  if (config.authMode !== "multi-user" || !config.accessToken || !config.refreshToken) return null
+  const identity = JSON.stringify([
+    String(config.serverUrl || "").trim().replace(/\/+$/, ""),
+    config.authSource || "manual", config.orgId ?? null,
+    config.accessToken.trim(), config.refreshToken.trim()
+  ])
+  return REFRESH_SESSION_INVALIDATION_PREFIX + bytesToHex(sha256(utf8ToBytes(identity)))
+}
+
+export const hasInvalidatedRefreshSession = async (
+  persistent: CredentialStorage,
+  config: TldwConfig
+): Promise<boolean> => {
+  const key = refreshSessionInvalidationKey(config)
+  return Boolean(key && await persistent.get(key) === true)
+}
+
+/** An immutable marker cannot overwrite another tab's login or successful rotation. */
+export const invalidateRefreshSessionIfCurrent = async (
+  persistent: CredentialStorage,
+  checked: TldwConfig
+): Promise<boolean> => {
+  const key = refreshSessionInvalidationKey(checked)
+  if (!key) return false
+  const currentKey = async () => {
+    const stored = await persistent.get<TldwConfig>("tldwConfig")
+    if (!stored) return null
+    return refreshSessionInvalidationKey(applyRefreshRotation(
+      stored, await persistent.get(REFRESH_ROTATION_KEY)
+    ))
+  }
+  if (await currentKey() !== key) return false
+  await persistent.set(key, true)
+  const invalidated = await currentKey() === key
+  if (invalidated && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+      // This is a revalidation hint. Storage reads can finish after a newer
+      // login, so only a consumer's current authority can decide to sign out.
+      detail: { refreshSessionInvalidated: true }
+    }))
+  }
+  return invalidated
 }
 
 export const hasNewerCurrentRefreshRotation = async (
@@ -177,9 +225,9 @@ export const hasNewerCurrentAccessToken = async (
     stored,
     await persistent.get<unknown>(REFRESH_ROTATION_KEY)
   )
-  if (record && record.accessToken !== captured) {
-    return true
-  }
+  // An applicable rotation owns the effective credential. Its unchanged source
+  // JWT is older, even when it identifies the same account as the captured JWT.
+  if (record) return record.accessToken !== captured
   const current = nonEmptySecret(stored.accessToken)
   if (!current || current === captured) return false
   const unknownPrincipal = deriveScopedUserId({
@@ -384,6 +432,10 @@ export const resolveEffectiveTldwConfig = async (
     .get<unknown>(REFRESH_ROTATION_KEY)
     .catch(() => null)
   const effective = { ...applyRefreshRotation(stored, refreshRotation) }
+  if (await hasInvalidatedRefreshSession(stores.persistent, effective)) {
+    delete effective.accessToken
+    delete effective.refreshToken
+  }
   const apiKey = await resolveManualCredential(effective, {
     session: stores.session
   })

@@ -710,3 +710,33 @@ class TestNoteStoreGraphHelpers:
         assert {row["id"] for row in store.get_keywords_for_note(first_note_id)} == {keyword_two_id}
         assert db.unlink_note_to_keyword(first_note_id, keyword_two_id)
         assert store.get_keywords_for_note(first_note_id) == []
+
+
+@pytest.mark.parametrize("backend_message", ["PostgreSQL query execution failed", "duplicate key in graph projection"])
+def test_add_note_projection_unique_failure_is_not_note_conflict(db, monkeypatch, backend_message):
+    from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+
+    def fail_projection(**kwargs):
+        raise UniqueConstraintError(backend_message)
+
+    monkeypatch.setattr(db.note_graph_projection_store, "replace_projection", fail_projection)
+    with pytest.raises(CharactersRAGDBError) as error:
+        db.add_note("Projection failure", "body", note_id="projection-failure")
+    assert not isinstance(error.value, ConflictError)
+    assert db.get_note_by_id("projection-failure") is None
+
+
+def test_postgres_note_insert_duplicate_reports_exact_note_conflict(db):
+    # The INSERT/ON CONFLICT statement is portable; execute it against a real
+    # SQLite transaction while exercising NoteStore's PostgreSQL branch.
+    class PostgresInsertFacade:
+        backend_type = BackendType.POSTGRESQL
+
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+    store = NoteStore(PostgresInsertFacade())
+    store.add_note("Original", "body", note_id="duplicate-id")
+    with pytest.raises(ConflictError, match="Note with ID 'duplicate-id' already exists"):
+        store.add_note("Replacement", "new body", note_id="duplicate-id")
+    assert db.get_note_by_id("duplicate-id")["title"] == "Original"

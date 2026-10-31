@@ -1,3 +1,5 @@
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
 import React, { lazy, Suspense, useContext, useState } from "react"
 
 import { Drawer, Tooltip } from "antd"
@@ -30,7 +32,6 @@ import { useLayoutEffectsOwner } from "@/hooks/useLayoutEffectsOwner"
 import { useChatSidebar } from "@/hooks/useFeatureFlags"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { ChatSidebar } from "@/components/Common/ChatSidebar"
-import { EventOnlyHosts } from "@/components/Common/EventHosts"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { setSettingsReturnTo } from "@/utils/settings-return"
@@ -41,16 +42,11 @@ import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStoreMessageOption } from "@/store/option"
 import { usePromptPaletteCommands } from "@/components/Option/Prompt/usePromptPaletteCommands"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
 const TimelineModal = lazy(() =>
   import("@/components/Timeline").then((m) => ({ default: m.TimelineModal }))
-)
-
-const PageHelpModal = lazy(() =>
-  import("@/components/Common/PageHelpModal").then((m) => ({
-    default: m.PageHelpModal
-  }))
 )
 
 const TutorialRunner = lazy(() =>
@@ -75,6 +71,7 @@ import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useHelpModal } from "@/store/tutorials"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { DemoModeProvider, useDemoMode } from "@/context/demo-mode"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type OptionLayoutProps = {
   children: React.ReactNode
@@ -280,11 +277,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if user is typing in an input
-      const target = e.target as HTMLElement
-      const isInputField =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
+      const isInputField = isEditableTarget(e.target)
 
       // ? key to open help modal (without Ctrl/Cmd to avoid double-fire)
       if (
@@ -477,6 +470,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 collapsed={false}
                 openResetKey={chatSidebarOpenResetKey}
                 onToggleCollapse={() => setSidebarOpen(false)}
+                onConversationSelected={() => setSidebarOpen(false)}
               />
             </Drawer>
           )}
@@ -604,16 +598,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           )}
 
           {/* Command Palette - global keyboard shortcut ⌘K */}
-          {!hideHeader && (
-            <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
-          )}
+          <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
 
           {/* Page Help Modal (Tutorials + Shortcuts) - triggered by ? */}
-          {!hideHeader && (
-            <Suspense fallback={null}>
-              <PageHelpModal />
-            </Suspense>
-          )}
+          <PageHelpModalHost />
 
           {/* Tutorial Runner - executes active tutorials */}
           {!hideHeader && (
@@ -634,11 +622,6 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           {/* Notes Dock Host - floating notes panel */}
           <NotesDockHost />
-
-          {/* Ensure event-driven modals are available even when the header is hidden */}
-          {hideHeader && (
-            <EventOnlyHosts commandPaletteProps={commandPaletteProps} />
-          )}
         </main>
       </div>
     </>
@@ -790,7 +773,7 @@ function RootLayoutShell({
     }
   }, [location.pathname, overrides?.sourcePath])
 
-  return (
+  const content = (
     <DemoModeProvider>
       <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
         <OptionLayoutInner
@@ -801,6 +784,18 @@ function RootLayoutShell({
       </LayoutShellContext.Provider>
     </DemoModeProvider>
   )
+  return location.pathname === "/chat" ? (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture)
+        useStoreMessageOption.getState().setHistory(display.history)
+        useStoreMessageOption.getState().setMessages(display.messages)
+      }}
+    >
+      {content}
+    </HistorySelectionProvider>
+  ) : content
 }
 
 export default function OptionLayout(props: OptionLayoutProps) {

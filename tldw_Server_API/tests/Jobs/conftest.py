@@ -115,12 +115,13 @@ def route_debugger():
     """
     def _debug(app):
         try:
-            from starlette.routing import BaseRoute
+            from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
             lines = []
-            for r in getattr(app, "routes", []):
-                path = getattr(r, "path", None) or getattr(r, "path_format", None) or str(r)
-                methods = sorted(list(getattr(r, "methods", set()))) if hasattr(r, "methods") else []
-                name = getattr(r, "name", "")
+            for r in iter_served_routes(getattr(app, "routes", [])):
+                path = r.path or str(r.route)
+                methods = sorted(r.methods)
+                name = r.name or ""
                 lines.append(f"- {path} [{','.join(methods)}] name={name}")
             print("[route-debug] Mounted routes:\n" + "\n".join(lines))
         except Exception as e:  # pragma: no cover - debugging helper

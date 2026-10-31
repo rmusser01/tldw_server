@@ -31,7 +31,7 @@ from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from starlette.responses import StreamingResponse
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
@@ -180,8 +180,11 @@ from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import resolve_provider_model_value
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -198,6 +201,7 @@ from tldw_Server_API.app.core.Moderation.review_service import (
     is_moderation_review_capture_enabled,
 )
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
 )
@@ -794,9 +798,7 @@ async def _resolve_default_character_id(
         return None
 
     try:
-        default_character = await loop.run_in_executor(
-            None,
-            get_character_card_by_name,
+        default_character = await asyncio.to_thread(get_character_card_by_name,
             DEFAULT_CHARACTER_NAME,
         )
     except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -836,6 +838,9 @@ async def resolve_input_moderation_chat_type(
     loop: Any,
 ) -> str:
     """Resolve chat_type for input moderation from request fields and saved conversation state."""
+    if getattr(request_data, "tldw_history_selection_v1", None) is not None:
+        conversation = await loop.run_in_executor(None, chat_db.get_conversation_by_id, request_data.conversation_id)
+        return "character" if conversation and (conversation.get("character_id") or conversation.get("assistant_kind")) else "regular"
     default_character_id = await _resolve_default_character_id(chat_db, loop)
     requested_character_id = getattr(request_data, "character_id", None)
     # Also check legacy persona_id alias so moderation scope is consistent
@@ -856,7 +861,7 @@ async def resolve_input_moderation_chat_type(
     existing_conversation: dict[str, Any] | None = None
     get_conversation_by_id = getattr(chat_db, "get_conversation_by_id", None)
     if conversation_id and callable(get_conversation_by_id):
-        existing_conversation = await loop.run_in_executor(None, get_conversation_by_id, conversation_id)
+        existing_conversation = await asyncio.to_thread(get_conversation_by_id, conversation_id)
 
     assistant_context = _normalize_conversation_assistant_context(
         existing_conversation,
@@ -893,47 +898,34 @@ async def _resolve_assistant_context_for_chat(
     loop: Any,
     conversation_id: str | None,
 ) -> tuple[dict[str, Any] | None, int | None, dict[str, Any] | None, dict[str, Any]]:
-    """Resolve character or persona context for ordinary chat."""
+    """Recheck current Persona admission before resolving ordinary chat context."""
     existing_conversation: dict[str, Any] | None = None
     get_conversation_by_id = getattr(chat_db, "get_conversation_by_id", None)
     if conversation_id and callable(get_conversation_by_id):
-        existing_conversation = await loop.run_in_executor(None, get_conversation_by_id, conversation_id)
+        existing_conversation = await asyncio.to_thread(get_conversation_by_id, conversation_id)
+
+    if existing_conversation:
+        persona_profile = await asyncio.to_thread(
+            require_current_persona, chat_db,
+            owner_id=chat_db.owner_user_id, conversation=existing_conversation,
+        )
+        if persona_profile is not None:
+            assistant_context = _normalize_conversation_assistant_context(existing_conversation)
+            return (
+                _build_persona_chat_projection(
+                    persona_profile, fallback_persona_id=assistant_context["assistant_id"],
+                ),
+                None,
+                existing_conversation,
+                assistant_context,
+            )
 
     default_character_id = await _resolve_default_character_id(chat_db, loop)
     assistant_context = _normalize_conversation_assistant_context(
         existing_conversation,
         default_character_id=default_character_id,
     )
-    assistant_kind = assistant_context.get("assistant_kind")
     assistant_id = assistant_context.get("assistant_id")
-
-    if assistant_kind == "persona":
-        if not assistant_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Persona-backed conversation is missing assistant_id.",
-            )
-
-        persona_owner = str(getattr(chat_db, "client_id", "") or "").strip()
-        persona_profile = await loop.run_in_executor(
-            None,
-            partial(
-                chat_db.get_persona_profile,
-                assistant_id,
-                user_id=persona_owner,
-            ),
-        )
-        if persona_profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Persona profile not found for persona-backed conversation.",
-            )
-        return (
-            _build_persona_chat_projection(persona_profile, fallback_persona_id=assistant_id),
-            None,
-            existing_conversation,
-            assistant_context,
-        )
 
     character_lookup = getattr(request_data, "character_id", None)
     if character_lookup is None and existing_conversation:
@@ -954,9 +946,8 @@ async def _resolve_assistant_context_for_chat(
     return character_card, character_db_id, existing_conversation, assistant_context
 
 
-@lru_cache(maxsize=64)
-def _configured_models_for_provider_cached(provider: str) -> tuple[str, ...]:
-    """Return models explicitly configured for a provider in config files."""
+def _configured_models_for_provider(provider: str) -> tuple[str, ...]:
+    """Read current models using the same config/env precedence as discovery."""
     provider_key = (provider or "").strip().lower()
     mapping = _PROVIDER_MODEL_CONFIG_FIELDS.get(provider_key)
     if not mapping:
@@ -964,18 +955,17 @@ def _configured_models_for_provider_cached(provider: str) -> tuple[str, ...]:
 
     section, field = mapping
     try:
-        if not _config or not _config.has_section(section):
-            return ()
-        raw_value = _config.get(section, field, fallback="")
+        raw_value = resolve_provider_model_value(
+            provider_key, load_comprehensive_config(), section, field
+        )
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return ()
 
     return tuple(_split_model_list(raw_value))
 
 
-@lru_cache(maxsize=64)
 def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
-    """Return known model IDs for a provider from catalog + configured values."""
+    """Combine cached sources without retaining inventory across config refreshes."""
     provider_key = (provider or "").strip().lower()
     if not provider_key:
         return ()
@@ -989,7 +979,7 @@ def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         pass
 
-    for model_name in _configured_models_for_provider_cached(provider_key):
+    for model_name in _configured_models_for_provider(provider_key):
         normalized = str(model_name).strip()
         if normalized:
             known.add(normalized)
@@ -1641,22 +1631,42 @@ def infer_provider_from_model_catalog(
     return current_provider, debug
 
 
-def _split_inline_provider_model(model_str: str) -> tuple[str | None, str | None, str | None]:
-    """Split frontend provider-qualified model ids into provider/model parts."""
+def _split_inline_provider_model(
+    model_str: str, api_provider: str | None = None
+) -> tuple[str | None, str | None, str | None]:
+    """Split recognized provider prefixes without changing opaque model IDs."""
     model_value = (model_str or "").strip()
     if not model_value:
         return None, None, None
+    explicit_provider = (
+        canonical_provider_name(normalize_catalog_provider_for_chat(api_provider))
+        if api_provider else None
+    )
+    preserve_local_namespace = (
+        explicit_provider in _adapter_registry.ChatProviderRegistry.DEFAULT_LOCAL_PROVIDERS
+    )
 
     if "/" in model_value:
         model_provider, model_name = model_value.split("/", 1)
-        return model_provider.strip(), model_name.strip(), "/"
+        normalized_provider = canonical_provider_name(
+            normalize_catalog_provider_for_chat(model_provider)
+        )
+        if normalized_provider in _INLINE_MODEL_PROVIDER_NAMES and (
+            not preserve_local_namespace or normalized_provider == explicit_provider
+        ):
+            return model_provider.strip(), model_name.strip(), "/"
+        # Model identifiers can be paths or repository names. Only registered
+        # provider prefixes qualify for stripping; a colon prefix may precede
+        # a path (for example, "llamacpp:../../models/model.gguf").
 
     if ":" not in model_value:
         return None, None, None
 
     model_provider, model_name = model_value.split(":", 1)
-    normalized_provider = normalize_catalog_provider_for_chat(model_provider.strip().lower())
-    if normalized_provider not in _INLINE_MODEL_PROVIDER_NAMES:
+    normalized_provider = canonical_provider_name(normalize_catalog_provider_for_chat(model_provider))
+    if normalized_provider not in _INLINE_MODEL_PROVIDER_NAMES or (
+        preserve_local_namespace and normalized_provider != explicit_provider
+    ):
         return None, None, None
     return model_provider.strip(), model_name.strip(), ":"
 
@@ -1676,10 +1686,6 @@ def invalidate_model_alias_caches() -> None:
         _provider_has_model_cached.cache_clear()
     with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
         _find_catalog_providers_for_model_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _configured_models_for_provider_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        known_models_for_provider_cached.cache_clear()
     with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
         _clear_openrouter_model_cache_shared()
 
@@ -1792,7 +1798,7 @@ def parse_provider_model_for_metrics(
         else "unknown"
     )
     api_provider = getattr(request_data, "api_provider", None)
-    model_provider, model_name, _ = _split_inline_provider_model(model_str)
+    model_provider, model_name, _ = _split_inline_provider_model(model_str, api_provider)
     if model_provider is not None and model_name is not None:
         raw_provider = api_provider or model_provider
         provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
@@ -1829,7 +1835,7 @@ def normalize_request_provider_and_model(
         inline_provider: str | None = None
         inline_model_part: str | None = None
         inline_separator: str | None = None
-        inline_provider, inline_model_part, inline_separator = _split_inline_provider_model(model_str)
+        inline_provider, inline_model_part, inline_separator = _split_inline_provider_model(model_str, api_provider)
         provider_for_mapping = normalize_catalog_provider_for_chat(
             ((inline_provider or api_provider or default_provider) or "").strip().lower()
         )
@@ -1898,7 +1904,7 @@ def normalize_request_provider_and_model(
     provider = normalize_catalog_provider_for_chat(
         ((api_provider or default_provider) or "").strip().lower()
     )
-    model_provider, actual_model, inline_separator = _split_inline_provider_model(model_str)
+    model_provider, actual_model, inline_separator = _split_inline_provider_model(model_str, api_provider)
     if model_provider is not None and actual_model is not None:
         inline_provider_lower = normalize_catalog_provider_for_chat(
             model_provider.strip().lower()
@@ -2763,6 +2769,8 @@ def build_call_params_from_request(
             "prompt_template_name",
             "stream",
             "save_to_db",
+            "tldw_history_selection_v1",
+            "tldw_history_admission_v1",
             "history_message_limit",
             "history_message_order",
             "research_context",
@@ -2871,6 +2879,10 @@ def build_call_params_from_request(
         grammar_record=grammar_record,
         runtime_caps=resolve_llamacpp_runtime_caps(app_config=app_config),
     )["extra_body"]
+    for extension in ("extra_body", "extra_headers"):
+        if isinstance(call_params.get(extension), dict):
+            call_params[extension] = {key: value for key, value in call_params[extension].items()
+                if key.lower().replace("-", "_") not in {"tldw_history_selection_v1", "tldw_history_admission_v1"}}
     billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
     if billing_prompt_cache_intent is not None:
         call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
@@ -3073,7 +3085,7 @@ def _inspect_nonstream_text_output(value: str) -> tuple[bool, bool]:
     stripped = value.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
     if not stripped:
         return False, False
-    if stripped.lower() in {"[done]", "data: [done]"}:
+    if stripped.lower() == "[done]" or is_done_line(stripped):
         return False, True
     first_line = stripped.splitlines()[0].strip().lower()
     if first_line.startswith(("data:", "event:", "id:", "retry:", ":")):
@@ -3245,13 +3257,45 @@ def _nonstream_provider_result_is_usable(result: Any) -> bool:
     return True
 
 
+def _nonstream_reasoning_exhausted_output_limit(result: Any) -> bool:
+    """Recognize valid hidden-only output stopped by the provider token limit."""
+    if not isinstance(result, dict) or provider_payload_has_structural_error(result):
+        return False
+    choices = result.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        return False
+    choice = choices[0]
+    if not isinstance(choice, dict) or choice.get("finish_reason") != "length":
+        return False
+    message = choice.get("message")
+    if not isinstance(message, dict) or message.get("content") not in (None, ""):
+        return False
+    if any(
+        message.get(field) is not None
+        for field in ("tool_calls", "function_call", "refusal")
+    ):
+        return False
+    reasoning_seen = False
+    for field in _NONSTREAM_REASONING_FIELDS:
+        if field not in message:
+            continue
+        has_text, rejected = _inspect_nonstream_reasoning_output(message[field])
+        if rejected:
+            return False
+        reasoning_seen = reasoning_seen or has_text
+    return reasoning_seen
+
+
 def _require_usable_nonstream_provider_result(result: Any) -> None:
     """Raise one bounded, non-replayable error for an invalid provider result."""
 
     if not _nonstream_provider_result_is_usable(result):
-        raise_detached_error(
-            sanitized_provider_stream_exception("provider_unavailable")
+        code = (
+            "provider_output_limit"
+            if _nonstream_reasoning_exhausted_output_limit(result)
+            else "provider_unavailable"
         )
+        raise_detached_error(sanitized_provider_stream_exception(code))
 
 
 def _apply_redaction_to_content(content: Any, moderation: Any, policy: Any) -> Any:
@@ -3851,7 +3895,7 @@ async def _resolve_tldw_continuation_history(
     history_order: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Resolve continuation anchor/chain and return history records + metadata."""
-    anchor_record = await loop.run_in_executor(None, chat_db.get_message_by_id, from_message_id)
+    anchor_record = await asyncio.to_thread(chat_db.get_message_by_id, from_message_id)
     if not anchor_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3864,9 +3908,7 @@ async def _resolve_tldw_continuation_history(
         )
 
     if mode == "append":
-        latest_message = await loop.run_in_executor(
-            None,
-            chat_db.get_latest_message_for_conversation,
+        latest_message = await asyncio.to_thread(chat_db.get_latest_message_for_conversation,
             conversation_id,
         )
         latest_id = str((latest_message or {}).get("id") or "")
@@ -3898,7 +3940,7 @@ async def _resolve_tldw_continuation_history(
         parent_id = parent_id_raw.strip() if isinstance(parent_id_raw, str) else ""
         if not parent_id:
             break
-        parent_record = await loop.run_in_executor(None, chat_db.get_message_by_id, parent_id)
+        parent_record = await asyncio.to_thread(chat_db.get_message_by_id, parent_id)
         if not parent_record:
             break
         if str(parent_record.get("conversation_id") or "") != str(conversation_id):
@@ -3924,6 +3966,142 @@ async def _resolve_tldw_continuation_history(
     return ordered_chain, metadata
 
 
+def _is_saved_chat_error_envelope(message: dict[str, Any]) -> bool:
+    """Recognize the WebUI's assistant diagnostic envelope, never user text."""
+    if message.get("role") != "assistant":
+        return False
+    content = message.get("content")
+    if (
+        isinstance(content, list)
+        and len(content) == 1
+        and isinstance(content[0], dict)
+        and content[0].get("type") == "text"
+    ):
+        content = content[0].get("text")
+    prefix = "__tldw_error__:"
+    if not isinstance(content, str) or not content.startswith(prefix):
+        return False
+    try:
+        payload = _json.loads(content[len(prefix):])
+    except (ValueError, TypeError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("summary"), str)
+        and isinstance(payload.get("hint"), str)
+    )
+
+
+def _retry_content_components(content: Any) -> tuple[str, tuple[tuple[str, bytes, str], ...]]:
+    """Compare representable stored text and ordered images, never partial input."""
+    from tldw_Server_API.app.core.Utils.image_validation import validate_image_url
+
+    if isinstance(content, str):
+        return content, ()
+    if not isinstance(content, list):
+        raise HTTPException(status_code=409, detail="The failed image turn cannot be matched safely.")
+    text = ""
+    text_count = 0
+    images = []
+    for part in content:
+        if not isinstance(part, dict):
+            raise HTTPException(status_code=409, detail="The failed image turn cannot be matched safely.")
+        if part.get("type") == "text" and set(part) <= {"type", "text"} and isinstance(part.get("text"), str):
+            text_count += 1
+            text = part["text"]
+            if text_count > 1:
+                raise HTTPException(status_code=409, detail="Retry does not support multiple text segments in one image turn.")
+        elif part.get("type") == "image_url" and set(part) <= {"type", "image_url"}:
+            image = part.get("image_url")
+            if not isinstance(image, dict) or set(image) - {"url", "detail"} or image.get("detail", "auto") not in {"auto", "high", "low"}:
+                raise HTTPException(status_code=409, detail="Retry cannot discard image detail or unsupported image options.")
+            url = image.get("url")
+            if not isinstance(url, str) or not url.startswith("data:image/"):
+                raise HTTPException(status_code=409, detail="Retry requires a saved inline image.")
+            valid, mime, data = validate_image_url(url)
+            if not valid or not data or not mime:
+                raise HTTPException(status_code=409, detail="A failed-turn image is invalid or unavailable.")
+            images.append((mime, data, image.get("detail", "auto")))
+        else:
+            raise HTTPException(status_code=409, detail="Retry cannot discard unsupported message content.")
+    return text, tuple(images)
+
+
+def _saved_image_text(row: dict[str, Any], extra: Any) -> str:
+    """Only unedited server-generated image placeholders represent empty text."""
+    text = row.get("content") or ""
+    images = row.get("images") or ([row] if row.get("image_data") else [])
+    if (str(row.get("sender", "")).lower() == "user" and row.get("version") == 1
+            and isinstance(extra, dict) and extra.get("content_placeholder_reason") == "image_attachment"
+            and images and text == f"<Image attachment x{len(images)}>"):
+        return ""
+    return text
+
+
+def _saved_image_details(extra: Any, image_count: int) -> list[str]:
+    """Restore ordered image options, defaulting only legacy rows to auto."""
+    details = extra.get("image_details") if isinstance(extra, dict) else None
+    if details is None:
+        return ["auto"] * image_count
+    if (not isinstance(details, list) or len(details) != image_count
+            or any(not isinstance(detail, str) or detail not in {"auto", "high", "low"} for detail in details)):
+        raise HTTPException(status_code=409, detail="Saved image options are incomplete or unsupported.")
+    return details
+
+
+def _saved_user_content_parts(row: dict[str, Any], extra: Any) -> list[dict[str, Any]]:
+    """Reconstruct the literal saved user text and every attachment for reuse."""
+    text = _saved_image_text(row, extra)
+    parts = [{"type": "text", "text": text}] if text else []
+    images = row.get("images") or ([row] if row.get("image_data") else [])
+    details = _saved_image_details(extra, len(images))
+    for image, detail in zip(images, details):
+        data = image.get("image_data")
+        if not data:
+            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete.")
+        mime = image.get("image_mime_type") or "image/png"
+        parts.append({"type": "image_url", "image_url": {
+            "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}", "detail": detail
+        }})
+    return parts
+
+
+async def _resolve_saved_regeneration(
+    chat_db: Any, conversation_id: str, reply_id: str, requested_user: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Validate the current answered turn, returning its user and legacy reply."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+    tail = await asyncio.to_thread(partial(
+        chat_db.get_messages_for_conversation, conversation_id, 2, 0, "DESC", strict_images=True,
+    ))
+    reply = await asyncio.to_thread(chat_db.get_message_by_id, reply_id)
+    if not reply or str(reply.get("conversation_id")) != conversation_id:
+        raise HTTPException(status_code=404, detail="The reply to regenerate was not found in this conversation.")
+    if (requested_user.get("role") != "user" or not tail
+            or str(reply.get("sender", "")).lower() != "assistant"
+            or str(tail[0].get("sender", "")).lower() != "assistant"
+            or _is_saved_chat_error_envelope({"role": "assistant", "content": tail[0].get("content", "")})):
+        raise HTTPException(status_code=409, detail="The answered turn changed. Reload before regenerating.")
+    user_id = tail[0].get("parent_message_id")
+    if not user_id and len(tail) > 1 and str(tail[1].get("sender", "")).lower() == "user":
+        user_id = tail[1]["id"]
+    legacy_reply = reply if not reply.get("parent_message_id") and reply["id"] == tail[0]["id"] else None
+    if not user_id or (reply.get("parent_message_id") != user_id and legacy_reply is None):
+        raise HTTPException(status_code=409, detail="The reply no longer belongs to the current turn. Reload before regenerating.")
+    try:
+        user = await asyncio.to_thread(partial(chat_db.get_message_by_id, user_id, strict_images=True))
+    except CharactersRAGDBError as exc:
+        raise HTTPException(status_code=409, detail="The saved chat attachments could not be read completely.") from exc
+    if not user or user.get("conversation_id") != conversation_id or str(user.get("sender", "")).lower() != "user":
+        raise HTTPException(status_code=409, detail="The saved user turn is unavailable. Reload before regenerating.")
+    metadata = await asyncio.to_thread(chat_db.get_message_metadata, user_id)
+    parts = _saved_user_content_parts(user, (metadata or {}).get("extra"))
+    if _retry_content_components(requested_user.get("content")) != _retry_content_components(parts):
+        raise HTTPException(status_code=409, detail="The saved user text or attachments changed. Reload before regenerating.")
+    return user, legacy_reply
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -3938,18 +4116,74 @@ async def build_context_and_messages(
 
     Returns (character_card, character_db_id, final_conversation_id, conversation_created, llm_payload_messages, should_persist)
     """
-    # Assistant context
-    (
-        character_card,
-        character_db_id,
-        existing_conversation,
-        assistant_context,
-    ) = await _resolve_assistant_context_for_chat(
-        chat_db=chat_db,
-        request_data=request_data,
-        loop=loop,
-        conversation_id=final_conversation_id,
-    )
+    request_metadata = getattr(request_data, "metadata", None)
+    explicit_failed_retry = isinstance(request_metadata, dict) and request_metadata.get("tldw_retry_failed_turn") is True
+    regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
+    if regenerate_reply_id is not None:
+        if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
+            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+        if (not final_conversation_id or explicit_failed_retry
+                or getattr(request_data, "tldw_continuation", None) is not None):
+            raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
+    reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
+
+    history_selection = getattr(request_data, "tldw_history_selection_v1", None)
+    if history_selection is not None and reuse_saved_turn:
+        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
+    versioned = history_selection is not None
+    history_runtime = runtime_state or {}
+    if versioned and (not final_conversation_id or not history_runtime.get("history_owner_key")):
+        raise HTTPException(409, detail={"code": "missing_authenticated_history_binding"})
+    selected_content = ()
+    history_snapshot = None
+    admission = None
+    if versioned:
+        from tldw_Server_API.app.core.Chat.history_context import project_history_context
+        from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
+        if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
+        selection = history_selection.model_dump(mode="json")
+        owner = history_runtime["history_owner_key"]
+        def accept_history() -> tuple[
+            HistorySelectionSnapshotV1,
+            tuple[dict[str, Any], ...],
+            dict[str, Any],
+            dict[str, Any],
+            tuple[dict[str, Any] | None, int | None, dict[str, Any]],
+        ]:
+            with chat_db.transaction() as conn:
+                state = chat_db.get_roleplay_resume_state(final_conversation_id, conn=conn, lock_for_update=True,
+                    owner_client_id=history_runtime["history_owner_client_id"])
+                snap, content = chat_db.validate_history_selection(final_conversation_id, selection,
+                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                for item in content:
+                    _saved_image_details(item.get("extra_metadata"), len(item["images"]))
+                accepted = chat_db.append_selected_history_inputs(final_conversation_id, selection, history_runtime["history_inputs"],
+                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                return snap, content, accepted, state["conversation"], context
+        try:
+            history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
+        except HistorySelectionError as exc:
+            failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
+            raise HTTPException(409, detail={"status": failure, "code": exc.code}) from exc
+        character_card, character_db_id, assistant_context = context
+        for field, value in assistant_context.pop("history_sampling", {}).items():
+            if field not in request_data.model_fields_set:
+                setattr(request_data, field, value)
+    else:
+        # Assistant context
+        (
+            character_card,
+            character_db_id,
+            existing_conversation,
+            assistant_context,
+        ) = await _resolve_assistant_context_for_chat(
+            chat_db=chat_db,
+            request_data=request_data,
+            loop=loop,
+            conversation_id=final_conversation_id,
+        )
     if character_card:
         logger.debug(
             "Loaded assistant context name={} system_prompt_summary={}",
@@ -3984,6 +4218,17 @@ async def build_context_and_messages(
         and assistant_context.get("assistant_kind") == "persona"
         and assistant_context.get("assistant_id")
     )
+    # Workspace chats can intentionally have no saved assistant identity. An
+    # implicit default character supplies prompt context, not a request to fork.
+    is_owned_neutral_conversation = bool(
+        existing_conversation
+        and client_id_from_db is not None
+        and existing_conversation.get("client_id") == client_id_from_db
+        and getattr(request_data, "character_id", None) is None
+        and existing_conversation.get("character_id") is None
+        and existing_conversation.get("assistant_kind") is None
+        and existing_conversation.get("assistant_id") is None
+    )
     from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
 
     publication = current_buddy_publication.get()
@@ -3997,15 +4242,24 @@ async def build_context_and_messages(
         and str(client_id_from_db) == publication.repository.user_id
     )
     # Ensure a valid assistant identity is present before attempting persistence
-    if should_persist and character_db_id is None and not (is_existing_persona_conversation or is_accepted_buddy_conversation):
+    if should_persist and character_db_id is None and not (
+        is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
+    ):
         logger.warning(
             'Persistence requested but no compatible assistant identity is available; disabling persistence for conversation {}.',
             final_conversation_id or "<new>",
         )
         should_persist = False
 
-    if should_persist:
-        if (is_existing_persona_conversation or is_accepted_buddy_conversation) and conv_id:
+    if regenerate_reply_id:
+        if (not should_persist or not existing_conversation
+                or existing_conversation.get("client_id") != client_id_from_db
+                or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
+                        or existing_conversation.get("character_id") == character_db_id)):
+            raise HTTPException(status_code=409, detail="Regeneration requires the existing saved assistant and conversation.")
+        # This operation can only reuse its existing target; it must never fork.
+    elif should_persist:
+        if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned) and conv_id:
             conversation_created = False
         else:
             conv_id, conversation_created = await get_or_create_conversation(
@@ -4031,7 +4285,7 @@ async def build_context_and_messages(
     continuation_metadata: dict[str, Any] | None = None
     assistant_parent_message_id: str | None = None
     assistant_prefill: str | None = None
-    if continuation_spec:
+    if continuation_spec and not versioned:
         assistant_parent_message_id, _mode, assistant_prefill = continuation_spec
         if conversation_created:
             raise HTTPException(
@@ -4060,8 +4314,10 @@ async def build_context_and_messages(
     db_order = "ASC" if history_order == "asc" else "DESC"
 
     historical_msgs: list[dict[str, Any]] = []
-    if conv_id and (not conversation_created):
-        raw_hist: list[dict[str, Any]] = []
+    historical_ids: list[str | None] = []
+    retry_history_content: dict[int, Any] = {}
+    raw_hist: list[dict[str, Any]] = []
+    if conv_id and (not conversation_created) and not versioned:
         if continuation_spec:
             from_message_id, mode, assistant_prefill = continuation_spec
             resolved_hist, continuation_metadata = await _resolve_tldw_continuation_history(
@@ -4077,19 +4333,15 @@ async def build_context_and_messages(
                 raw_hist = resolved_hist
             continuation_metadata["anchor_message_id"] = from_message_id
         elif history_limit > 0:
-            raw_hist = await loop.run_in_executor(
-                None,
-                chat_db.get_messages_for_conversation,
-                conv_id,
-                history_limit,
-                0,
-                db_order,
+            raw_hist = await asyncio.to_thread(partial(chat_db.get_messages_for_conversation,
+                    conv_id, history_limit, 0, db_order,
+                    **({"strict_images": True} if reuse_saved_turn else {})),
             )
         for db_msg in raw_hist:
             sender_val = str(db_msg.get("sender", "") or "")
             metadata = None
             try:
-                metadata = await loop.run_in_executor(None, chat_db.get_message_metadata, db_msg.get("id"))
+                metadata = await asyncio.to_thread(chat_db.get_message_metadata, db_msg.get("id"))
             except _CHAT_NONCRITICAL_EXCEPTIONS as meta_err:
                 logger.debug("Metadata lookup failed for message {}: {}", db_msg.get("id"), meta_err)
 
@@ -4114,8 +4366,11 @@ async def build_context_and_messages(
             if not should_persist_message_role(role):
                 continue
             char_name_hist = character_card.get("name", "Char") if character_card else "Char"
-            text_content = db_msg.get("content", "")
-            if text_content and role != "tool":
+            text_content = _saved_image_text(db_msg, metadata.get("extra") if isinstance(metadata, dict) else None)
+            raw_user_text = text_content
+            # Normal/persona Retry compares and sends the literal saved user input.
+            preserve_literal_retry = reuse_saved_turn and role == "user" and (is_owned_neutral_conversation or is_existing_persona_conversation)
+            if text_content and role != "tool" and not preserve_literal_retry:
                 text_content = replace_placeholders(text_content, char_name_hist, "User")
             msg_parts = []
             if text_content:
@@ -4128,20 +4383,28 @@ async def build_context_and_messages(
                     "image_mime_type": db_msg.get("image_mime_type"),
                 }]
 
-            for image_entry in raw_images:
+            image_details = _saved_image_details(metadata.get("extra") if isinstance(metadata, dict) else None, len(raw_images))
+            for image_entry, image_detail in zip(raw_images, image_details):
                 try:
                     img_bytes = image_entry.get("image_data")
                     if isinstance(img_bytes, memoryview):
                         img_bytes = img_bytes.tobytes()
                     if not img_bytes:
+                        if reuse_saved_turn:
+                            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete. Reload after repairing the source message.")
                         continue
                     img_mime = image_entry.get("image_mime_type") or db_msg.get("image_mime_type") or "image/png"
                     b64_img = await loop.run_in_executor(None, base64.b64encode, img_bytes)
-                    msg_parts.append({
+                    image_part = {
                         "type": "image_url",
-                        "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}
-                    })
+                        "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}", "detail": image_detail}
+                    }
+                    if reuse_saved_turn:
+                        _retry_content_components([image_part])
+                    msg_parts.append(image_part)
                 except _CHAT_NONCRITICAL_EXCEPTIONS as e:
+                    if reuse_saved_turn:
+                        raise HTTPException(status_code=409, detail="A saved chat attachment could not be read completely.") from e
                     logger.warning(
                         "Error encoding DB image for history msg_id={} error={}",
                         db_msg.get("id"),
@@ -4174,8 +4437,23 @@ async def build_context_and_messages(
                         db_msg.get("id"),
                     )
                     continue
+                if reuse_saved_turn and role == "user":
+                    retry_history_content[id(hist_entry)] = ([{"type": "text", "text": raw_user_text}] if raw_user_text else []) + [part for part in msg_parts if part.get("type") == "image_url"]
                 historical_msgs.append(hist_entry)
+                historical_ids.append(db_msg.get("id"))
         logger.info(f"Loaded {len(historical_msgs)} historical messages for conv_id '{conv_id}'.")
+
+    # Keep failure diagnostics in saved history, but never send them as model
+    # replies. Only a matching retry of the trailing failure can reuse its user
+    # turn; ordinary repeated user messages retain their existing semantics.
+    history_ended_with_error = bool(
+        historical_msgs
+        and _is_saved_chat_error_envelope(historical_msgs[0 if history_order == "desc" else -1])
+    )
+    visible_history = [(message, message_id) for message, message_id in zip(historical_msgs, historical_ids)
+                       if not _is_saved_chat_error_envelope(message)]
+    historical_msgs = [message for message, _ in visible_history]
+    historical_ids = [message_id for _, message_id in visible_history]
 
     # Process current turn messages (persist if needed)
     request_messages: list[dict[str, Any]] = []
@@ -4192,9 +4470,88 @@ async def build_context_and_messages(
                 msg_dict.pop("name", None)
         request_messages.append(msg_dict)
 
+    metadata = getattr(request_data, "metadata", None)
+    client_message_id = metadata.get("tldw_client_message_id") if isinstance(metadata, dict) else None
+    if not isinstance(client_message_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_message_id):
+        client_message_id = None
+    explicit_failed_retry = isinstance(metadata, dict) and metadata.get("tldw_retry_failed_turn") is True
+    retry_user_message_id: str | None = None
+    saved_retry_system_messages: list[dict[str, Any]] = []
+    legacy_regenerated_reply: dict[str, Any] | None = None
+    if regenerate_reply_id:
+        if not request_messages:
+            raise HTTPException(status_code=409, detail="Regeneration requires the saved user turn.")
+        if any(message.get("role") != "system" for message in request_messages[:-1]):
+            raise HTTPException(status_code=409, detail="Regeneration uses saved history. Send only the original user turn and current system instructions.")
+        # System instructions still participate in prompt construction through
+        # request_data. Neither they nor a supplied history prefix are new turns.
+        request_messages = request_messages[-1:]
+        regenerated_user, legacy_regenerated_reply = await _resolve_saved_regeneration(
+            chat_db, conv_id, regenerate_reply_id, request_messages[-1],
+        )
+        retry_user_message_id = str(regenerated_user["id"])
+        # Prior variants are alternatives to the answer being generated, not
+        # preceding conversation context. Retain earlier turns unchanged.
+        variant_ids = {row["id"] for row in raw_hist if
+                       row.get("parent_message_id") == retry_user_message_id
+                       or row["id"] == regenerate_reply_id}
+        retained = [(message, message_id) for message, message_id in zip(historical_msgs, historical_ids)
+                    if message_id not in variant_ids]
+        historical_msgs = [message for message, _ in retained]
+        historical_ids = [message_id for _, message_id in retained]
+    if explicit_failed_retry and should_persist and not conversation_created and request_messages:
+        # Read the actual tail independently of the requested context window.
+        # Retry is an explicit operation; equal text on an ordinary send is new.
+        tail_rows = await asyncio.to_thread(partial(chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC", strict_images=True))
+        if (any(message.get("role") == "system" for message in request_messages)
+                or any(str(row.get("sender", "")).lower() == "system" for row in tail_rows)):
+            tail_ids, saved_retry_system_messages = await asyncio.to_thread(chat_db.get_retry_message_context, conv_id)
+            tail_rows = [await asyncio.to_thread(partial(chat_db.get_message_by_id, message_id, strict_images=True))
+                         for message_id in tail_ids]
+            if any(row is None for row in tail_rows):
+                raise HTTPException(status_code=409, detail="The failed turn changed. Reload before retrying.")
+        tail_metadata = {row["id"]: await asyncio.to_thread(chat_db.get_message_metadata, row["id"]) for row in tail_rows}
+        requested_user = request_messages[-1]
+        if requested_user.get("role") != "user":
+            raise HTTPException(status_code=409, detail="The failed turn changed. Reload the conversation before retrying.")
+
+        def matches_saved_user(row: dict[str, Any]) -> bool:
+            if str(row.get("sender", "")).lower() != "user":
+                return False
+            stored_metadata = tail_metadata.get(row["id"]) or {}
+            parts = _saved_user_content_parts(row, stored_metadata.get("extra"))
+            return _retry_content_components(requested_user.get("content")) == _retry_content_components(parts)
+
+        if tail_rows:
+            tail = tail_rows[0]
+            if str(tail.get("sender", "")).lower() == "user":
+                if not matches_saved_user(tail):
+                    raise HTTPException(status_code=409, detail="The unanswered turn changed. Reload the conversation before retrying.")
+                retry_user_message_id = str(tail["id"])
+            elif len(tail_rows) > 1 and matches_saved_user(tail_rows[1]):
+                if _is_saved_chat_error_envelope({"role": "assistant", "content": tail.get("content", "")}):
+                    retry_user_message_id = str(tail_rows[1]["id"])
+                else:
+                    saved_extra = (tail_metadata.get(tail_rows[1]["id"]) or {}).get("extra")
+                    saved_client_id = saved_extra.get("client_message_id") if isinstance(saved_extra, dict) else None
+                    saved_identity_is_valid = (
+                        isinstance(saved_client_id, str)
+                        and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", saved_client_id)
+                    )
+                    if not (client_message_id and saved_identity_is_valid and saved_client_id != client_message_id):
+                        raise HTTPException(status_code=409, detail="This turn already has an answer. Reload the conversation before retrying.")
+
+    retry_system_messages: list[dict[str, Any]] = []
+    if explicit_failed_retry and retry_user_message_id:
+        # Instructions are the requested current block, even when the client
+        # also supplies overlapping history. A matched user suffix must not
+        # trim a deliberately changed system prefix from persistence.
+        retry_system_messages = [message for message in request_messages if message.get("role") == "system"]
+        request_messages = [message for message in request_messages if message.get("role") != "system"]
+
     # If the client included history with conversation_id, trim overlaps against DB history
     overlap_cut = 0
-    if conv_id and historical_msgs and request_messages:
+    if conv_id and historical_msgs and request_messages and not versioned:
         has_non_user_role = any(
             msg.get("role") in {"assistant", "tool"} for msg in request_messages
         )
@@ -4209,7 +4566,7 @@ async def build_context_and_messages(
         def _msg_sig(msg: dict[str, Any]) -> str:
             payload = {
                 "role": msg.get("role"),
-                "content": _normalize_content(msg.get("content")),
+                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_content(msg.get("content"))),
                 "tool_calls": msg.get("tool_calls"),
                 "function_call": msg.get("function_call"),
                 "tool_call_id": msg.get("tool_call_id"),
@@ -4228,6 +4585,10 @@ async def build_context_and_messages(
             )
             hist_sigs = [_msg_sig(m) for m in hist_for_overlap]
             req_sigs = [_msg_sig(m) for m in request_messages]
+            # An ordinary final user is a new turn, even when its text equals
+            # an interrupted saved user. Only explicit Retry may reuse it.
+            if request_messages[-1].get("role") == "user" and not retry_user_message_id:
+                req_sigs = req_sigs[:-1]
             max_k = min(len(hist_sigs), len(req_sigs))
             overlap_start = None
             overlap_k = 0
@@ -4240,6 +4601,18 @@ async def build_context_and_messages(
                         break
                 if overlap_k:
                     break
+            if not overlap_k:
+                # A restored client can lag behind an interrupted canonical
+                # turn. Trim only its exact historical PREFIX, including an
+                # assistant, proven within the loaded history window. Later
+                # canonical rows remain model context; do not replay them.
+                for k in range(max_k, 0, -1):
+                    if not any(message.get("role") == "assistant" for message in request_messages[:k]):
+                        continue
+                    if any(hist_sigs[i:i + k] == req_sigs[:k] for i in range(len(hist_sigs) - k + 1)):
+                        overlap_start = 0
+                        overlap_k = k
+                        break
             if overlap_k and overlap_start is not None:
                 overlap_cut = overlap_start + overlap_k
                 if overlap_cut > 0:
@@ -4258,7 +4631,8 @@ async def build_context_and_messages(
                 }
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 user_only_trim = False
-            if user_only_trim and all_user_roles:
+            retrying_failed_turn = (history_ended_with_error or retry_user_message_id is not None) and len(request_messages) == 1
+            if (user_only_trim or retrying_failed_turn) and all_user_roles:
                 hist_for_overlap = (
                     list(reversed(historical_msgs)) if history_order == "desc" else historical_msgs
                 )
@@ -4273,23 +4647,120 @@ async def build_context_and_messages(
                             conv_id,
                         )
 
-    current_turn: list[dict[str, Any]] = []
-    for msg_dict in request_messages[overlap_cut:]:
+    if versioned:
+        source_nodes = {row["id"]: row for row in history_snapshot.nodes}
+        for item in selected_content:
+            extra = item.get("extra_metadata") or {}
+            source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
+            role = extra.get("sender_role") or source_role
+            text = _saved_image_text({
+                "content": item["message"], "images": item["images"],
+                "sender": source_nodes[item["id"]]["role"], "version": item["_message_version"],
+            }, extra)
+            image_details = _saved_image_details(extra, len(item["images"]))
+            if text and role != "tool":
+                text = replace_placeholders(text, character_card.get("name", "Char"), "User")
+            entry = {"role": role, "content": text}
+            if item["images"]:
+                entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
+                    {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                    for image, detail in zip(item["images"], image_details)]
+            if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
+                entry["content"] = None
+            if item.get("tool_calls") is not None:
+                entry["tool_calls"] = item["tool_calls"]
+            for key in ("function_call", "tool_call_id"):
+                if extra.get(key) is not None:
+                    entry[key] = extra[key]
+            if extra.get("sender_name") or extra.get("tool_name"):
+                entry["name"] = extra.get("sender_name") or extra.get("tool_name")
+            historical_msgs.append(entry)
+        assistant_parent_message_id = admission["input_message_id"]
+        runtime_state["assistant_parent_message_id"] = assistant_parent_message_id
+        runtime_state["tldw_history_admission_v1"] = admission
+
+    if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
+        raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
+    if retry_user_message_id and client_message_id:
+        saved_metadata = await asyncio.to_thread(chat_db.get_message_metadata, retry_user_message_id)
+        saved_extra = (saved_metadata or {}).get("extra")
+        saved_client_id = saved_extra.get("client_message_id") if isinstance(saved_extra, dict) else None
+        if saved_client_id and saved_client_id != client_message_id:
+            raise HTTPException(status_code=409, detail="The failed turn identity changed. Reload the conversation before retrying.")
+
+    if legacy_regenerated_reply is not None:
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+
+        try:
+            await asyncio.to_thread(
+                chat_db.update_message, legacy_regenerated_reply["id"],
+                {"parent_message_id": retry_user_message_id}, legacy_regenerated_reply["version"],
+            )
+        except ConflictError as exc:
+            raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
+
+    persisted_user_message_id: str | None = admission["input_message_id"] if versioned else retry_user_message_id
+    system_block_id = str(_uuid.uuid4())
+    if (should_persist and retry_system_messages
+            and _extract_system_messages(retry_system_messages) != _extract_system_messages(saved_retry_system_messages)):
+        import sqlite3
+
+        from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
+        from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        publication = current_buddy_publication.get()
+
+        def persist_retry_instructions() -> None:
+            """Keep publication receipts and the complete block in one transaction."""
+            with chat_db.transaction() as conn:
+                if publication is not None:
+                    publication.repository.assert_publication(conn, publication.turn, conv_id)
+                message_ids = chat_db.add_retry_system_instruction_block(
+                    conv_id, retry_system_messages, system_block_id,
+                )
+                if publication is not None:
+                    for message_id in message_ids:
+                        publication.repository.record_message(conn, publication.turn["id"], "system", message_id)
+
+        try:
+            await asyncio.to_thread(persist_retry_instructions)
+        except (CharactersRAGDBError, sqlite3.Error, BackendDatabaseError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to save updated retry instructions. Try again.",
+            ) from exc
+    current_turn: list[dict[str, Any]] = list(retry_system_messages)
+    for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
         msg_for_db = msg_dict.copy()
+        if role == "system":
+            msg_for_db["system_instruction_block_id"] = system_block_id
         if role == "assistant" and character_card:
             # Persist assistant sender as sanitized character name
             msg_for_db["name"] = sanitize_sender_name(character_card.get("name", "Assistant"))
-        if should_persist:
-            await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
+        reused_retry = retry_user_message_id is not None and index == len(request_messages) - 1
+        if should_persist and not reused_retry and not versioned:
+            if role == "user" and index == len(request_messages) - 1 and client_message_id:
+                msg_for_db["client_message_id"] = client_message_id
+            saved_message_id = await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
+            if role == "user":
+                persisted_user_message_id = str(saved_message_id) if saved_message_id else None
         msg_for_llm = msg_dict.copy()
         if role == "assistant" and character_card and character_card.get("name"):
             name = sanitize_sender_name(character_card.get("name"))
             if name:
                 msg_for_llm["name"] = name
-        current_turn.append(msg_for_llm)
+        if not reused_retry or retry_user_message_id not in historical_ids:
+            current_turn.append(msg_for_llm)
 
-    if continuation_spec and assistant_prefill:
+    if retry_user_message_id is not None and retry_user_message_id in historical_ids:
+        # Overlap and identity checks above have accepted this exact saved turn.
+        # Keep its validated content, but make it current even with DESC history.
+        retry_index = historical_ids.index(retry_user_message_id)
+        current_turn.append(historical_msgs.pop(retry_index))
+
+    if continuation_spec and assistant_prefill and not versioned:
         prefill_payload: dict[str, Any] = {
             "role": "assistant",
             "content": assistant_prefill,
@@ -4304,6 +4775,9 @@ async def build_context_and_messages(
             continuation_metadata["assistant_prefill_applied"] = True
 
     if runtime_state is not None:
+        runtime_state["user_message_id"] = persisted_user_message_id
+        if persisted_user_message_id:
+            runtime_state["assistant_parent_message_id"] = persisted_user_message_id
         runtime_state["assistant_context"] = dict(assistant_context)
         if continuation_spec and continuation_metadata is not None:
             runtime_state["tldw_continuation"] = continuation_metadata
@@ -4387,7 +4861,8 @@ def apply_prompt_templating(
 
     Returns (final_system_message, templated_llm_payload)
     """
-    active_template = load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name)
+    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if getattr(request_data, "tldw_history_selection_v1", None) is not None
+        else load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name))
     template_data: dict[str, Any] = {}
     if character_card:
         template_data.update({k: v for k, v in character_card.items() if isinstance(v, (str, int, float))})
@@ -4605,6 +5080,7 @@ async def execute_streaming_call(
     chat_db: Any,
     save_message_fn: Callable[..., Any],
     system_message_id: str | None = None,
+    user_message_id: str | None = None,
     audit_service: Any | None,
     audit_context: Any | None,
     client_id: str,
@@ -4624,6 +5100,7 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
+    history_persistence_ack: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -4681,6 +5158,8 @@ async def execute_streaming_call(
         if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
             payload["conversation_id"] = final_conversation_id
             payload["tldw_conversation_id"] = final_conversation_id
+            if user_message_id:
+                payload["tldw_user_message_id"] = user_message_id
             if system_message_id:
                 payload["tldw_system_message_id"] = system_message_id
             if normalized_continuation_metadata:
@@ -4688,8 +5167,8 @@ async def execute_streaming_call(
         return payload
 
     async def _terminal_stream_error(payload: dict[str, Any]) -> AsyncIterator[str]:
-        yield f"data: {_json.dumps(payload)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_data(payload)
+        yield sse_done()
 
     try:
         try:
@@ -4946,16 +5425,16 @@ async def execute_streaming_call(
                                     stream_channel.get_nowait()
                             except asyncio.QueueEmpty:
                                 pass
-                            yield f"data: {_json.dumps(_public_stream_error_payload('provider_unavailable'))}\n\n"
+                            yield sse_data(_public_stream_error_payload('provider_unavailable'))
                             break
                         if item is None:
                             graceful_end = True
                             break
                         if isinstance(item, QueueStreamTerminalError):
                             yield (
-                                f"data: {_json.dumps(_public_stream_error_payload(item.code))}\n\n"
+                                sse_data(_public_stream_error_payload(item.code))
                             )
-                            yield "data: [DONE]\n\n"
+                            yield sse_done()
                             break
                         yield item
                 except asyncio.CancelledError:
@@ -5698,11 +6177,13 @@ async def execute_streaming_call(
                     "conversation_id": final_conversation_id,
                     "tldw_conversation_id": final_conversation_id,
                 }
+                if user_message_id:
+                    metadata_payload["tldw_user_message_id"] = user_message_id
                 if system_message_id:
                     metadata_payload["tldw_system_message_id"] = system_message_id
                 if normalized_continuation_metadata:
                     metadata_payload["tldw_continuation"] = normalized_continuation_metadata
-                yield f"data: {_json.dumps(metadata_payload)}\n\n"
+                yield sse_data(metadata_payload)
             try:
                 stream_buffer_limit = int(os.getenv("MODERATION_STREAM_BUFFER_CHARS", "1024"))
             except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -5947,7 +6428,9 @@ async def execute_streaming_call(
                     text_transform=_out_transform,
                     before_success_callback=_await_mandatory_moderation_audits,
                     system_message_id=system_message_id,
+                    user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
+                    history_persistence_ack=history_persistence_ack or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )
@@ -5987,7 +6470,7 @@ async def execute_streaming_call(
                 async for ln in streaming_generator:
                     if not ln:
                         continue
-                    if ln.strip().lower() == "data: [done]":
+                    if is_done_line(ln):
                         # Suppress provider DONE; emit unified DONE immediately and stop producing
                         if not done_seen:
                             await sse_stream.done()
@@ -6061,6 +6544,7 @@ async def _execute_non_stream_call_impl(
     chat_db: Any,
     save_message_fn: Callable[..., Any],
     system_message_id: str | None = None,
+    user_message_id: str | None = None,
     audit_service: Any | None,
     audit_context: Any | None,
     client_id: str,
@@ -6924,7 +7408,7 @@ async def _execute_non_stream_call_impl(
                                 pending_tool_messages = []
                             continuation_payload = _build_assistant_message_payload(
                                 character_card_for_context=character_card_for_context,
-                                assistant_parent_message_id=None,
+                                assistant_parent_message_id=assistant_parent_message_id,
                                 content=content_to_save,
                                 tool_calls=tool_calls_to_save,
                                 function_call=function_call_to_save,
@@ -7028,6 +7512,8 @@ async def _execute_non_stream_call_impl(
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
         encoded_payload["tldw_conversation_id"] = final_conversation_id
+        if user_message_id:
+            encoded_payload["tldw_user_message_id"] = user_message_id
         if assistant_message_id:
             encoded_payload["tldw_message_id"] = assistant_message_id
         if system_message_id:

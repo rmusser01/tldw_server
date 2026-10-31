@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import date, datetime
 from json import JSONDecodeError
 from typing import Any
@@ -197,6 +198,38 @@ class ChatMacroRepository:
                 (user_id, _json_dumps(settings)),
             )
         return self.get_settings(user_id)
+
+    def update_settings(
+        self,
+        user_id: str,
+        update: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Apply a settings mutation under a database write lock for this user."""
+        with self.db.transaction() as conn:
+            # The upsert locks existing rows on PostgreSQL and acquires SQLite's
+            # write lock before reading; it also handles first-use races.
+            conn.execute(
+                """
+                INSERT INTO chat_macro_settings (user_id, settings_json, updated_at)
+                VALUES (?, '{}', CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id) DO UPDATE SET user_id = excluded.user_id
+                """,
+                (user_id,),
+            )
+            row = conn.execute(
+                "SELECT settings_json FROM chat_macro_settings WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            current = _json_loads(row["settings_json"], {}, field_name="settings_json")
+            updated = update(current if isinstance(current, dict) else {})
+            conn.execute(
+                """
+                UPDATE chat_macro_settings SET settings_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (_json_dumps(updated), user_id),
+            )
+        return updated
 
     def create_run(
         self,

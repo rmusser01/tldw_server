@@ -77,7 +77,12 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 }))
 
 vi.mock("~/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState
+  useMessageOption: () => ({
+    ...messageOptionState,
+    effectiveAssistantState: selectedCharacter
+      ? { mode: "tracked_character", kind: "character", displayName: selectedCharacter.name }
+      : { mode: "plain", kind: null, displayName: null }
+  })
 }))
 
 vi.mock("@/db", () => ({
@@ -221,6 +226,16 @@ describe("Header character mode sequencing", () => {
     expect(setTemporaryChatMock).not.toHaveBeenCalled()
     expect(clearChatMock).not.toHaveBeenCalled()
     expect(navigateMock).not.toHaveBeenCalled()
+  })
+
+  it("preserves identity and temporary mode when the clear action is declined", () => {
+    selectedCharacter = { id: "char-1", name: "Rin" }
+    clearChatMock.mockReturnValueOnce(false).mockReturnValueOnce(false)
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "New saved chat" }))
+    fireEvent.click(screen.getByRole("button", { name: "Temporary chat" }))
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    expect(setTemporaryChatMock).not.toHaveBeenCalled()
   })
 
   it("clears character state when switching back to saved or temporary chat", () => {

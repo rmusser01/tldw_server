@@ -29,6 +29,8 @@ class StreamingPipelineRequest:
     before_success_callback: Callable[..., Any] | None = None
     system_message_id: str | None = None
     continuation_metadata: dict[str, Any] | None = None
+    history_persistence_ack: bool | None = None
+    user_message_id: str | None = None
 
 
 def create_chat_streaming_response(
@@ -51,7 +53,9 @@ def create_chat_streaming_response(
         "text_transform": request.text_transform,
         "before_success_callback": request.before_success_callback,
         "system_message_id": request.system_message_id,
+        "user_message_id": request.user_message_id,
         "continuation_metadata": request.continuation_metadata,
+        "history_persistence_ack": request.history_persistence_ack,
     }
     factory_kwargs.update(
         {

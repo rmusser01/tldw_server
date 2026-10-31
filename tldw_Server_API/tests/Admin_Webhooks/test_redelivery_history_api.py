@@ -147,7 +147,15 @@ def test_task10_response_schemas_expose_only_bounded_delivery_metadata() -> None
         "finished_at",
     }
     assert set(history_model.model_fields) == {"delivery", "attempts"}
-    assert set(list_model.model_fields) == {"items", "total", "limit", "offset"}
+    assert set(list_model.model_fields) == {
+        "items",
+        "total",
+        "limit",
+        "offset",
+        "pagination",
+        "has_more",
+        "next_offset",
+    }
     assert set(test_model.model_fields) == {
         "delivery",
         "attempt",

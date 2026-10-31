@@ -2,6 +2,7 @@ import React from "react"
 import { Input, Button, Select } from "antd"
 import type { MediaReviewState, MediaReviewActions } from "@/components/Review/media-review-types"
 import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
+import { useMediaCapabilities } from "@/hooks/useMediaCapabilities"
 
 interface MediaReviewBatchBarProps {
   state: MediaReviewState
@@ -9,6 +10,7 @@ interface MediaReviewBatchBarProps {
 }
 
 export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state, actions }) => {
+  const { canDelete, loading: permissionsLoading } = useMediaCapabilities()
   const {
     t,
     selectedIds,
@@ -94,7 +96,8 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         danger
         className="ml-auto"
         onClick={() => { void handleBatchMoveToTrash() }}
-        disabled={batchActionLoading != null && batchActionLoading !== "trash"}
+        disabled={!canDelete || (batchActionLoading != null && batchActionLoading !== "trash")}
+        title={!canDelete ? permissionsLoading ? "Checking delete permission…" : "Your account does not have permission to delete media." : undefined}
       >
         {t("mediaPage.batchTrashAction", "Move to trash")}
       </Button>

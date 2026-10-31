@@ -247,7 +247,9 @@ def build_source_health_source_sets(
         configured.add("media_db")
     else:
         empty.add("media_db")
-    if "chacha_db" in existing_paths:
+    # Media and ChaCha use the shared PostgreSQL content backend. Neither
+    # creates a per-user SQLite file when that backend is configured.
+    if "chacha_db" in existing_paths or media_backend_uses_non_file_storage:
         configured.update({"notes", "chats", "characters", "world_books", "dictionaries"})
     else:
         empty.update({"notes", "chats", "characters", "world_books", "dictionaries"})

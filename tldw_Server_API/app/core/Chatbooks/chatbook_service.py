@@ -5008,7 +5008,9 @@ class ChatbookService:
             import hashlib
             import hmac
             exp = int(expires_at.timestamp())
-            msg = f"{job_id}:{exp}".encode()
+            # Bind the owner into the signature. Without it the token proves
+            # only "this job, this expiry" and is valid in anyone's hands.
+            msg = f"{job_id}:{exp}:{self.user_id}".encode()
             sig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
             return f"{base}?exp={exp}&token={sig}"
         return base
@@ -8299,11 +8301,16 @@ class ChatbookService:
                 if not self.db.get_character_card_by_name(new_name):
                     return new_name
             elif item_type == "world_book":
-                # Check in world books table
-                result = self.db.execute_query(
-                    "SELECT id FROM world_books WHERE name = ?",
-                    (new_name,)
-                )
+                if self._uses_postgres_backend():
+                    result = self.db.execute_query(
+                        "SELECT id FROM world_books WHERE name = ? AND client_id = ?",
+                        (new_name, self.db.client_id),
+                    )
+                else:
+                    result = self.db.execute_query(
+                        "SELECT id FROM world_books WHERE name = ?",
+                        (new_name,),
+                    )
                 rows = self._fetch_results(result) if result is not None else []
                 if not rows:
                     return new_name
@@ -8686,16 +8693,21 @@ class ChatbookService:
                         items = self._fetch_results(cursor)
                         result["notes"] = len(items) if items else 0
                     elif content_type == "world_books":
-                        # Try without user_id first
                         try:
-                            cursor = self.db.execute_query(
-                                "SELECT id FROM world_books WHERE deleted = 0",
-                                ()
-                            )
+                            if self._uses_postgres_backend():
+                                cursor = self.db.execute_query(
+                                    "SELECT id FROM world_books WHERE deleted = FALSE AND client_id = ?",
+                                    (self.db.client_id,),
+                                )
+                            else:
+                                cursor = self.db.execute_query(
+                                    "SELECT id FROM world_books WHERE deleted = 0",
+                                    (),
+                                )
                             items = self._fetch_results(cursor)
                         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as q_err:
                             # Table might not exist or have different schema
-                            logger.debug(f"world_books count query failed (no user filter): error={q_err}")
+                            logger.debug(f"world_books count query failed: error={q_err}")
                             items = []
                         result["world_books"] = len(items) if items else 0
                     elif content_type == "dictionaries":

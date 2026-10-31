@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     WebhookRepositoryError,
     WebhookRepositoryErrorCode,
 )
+from tldw_Server_API.app.core.exceptions import WebhookKeyError
 
 from .audit import MutationAction, MutationAudit, MutationAuditSink, MutationOutcome
 from .catalog import (
@@ -45,7 +46,6 @@ from .catalog import (
 from .config import AdminWebhookMode, AdminWebhookSettings, WebhookRouteSelection
 from .crypto import (
     ProtectedValue,
-    WebhookKeyError,
     WebhookKeyLoadCode,
     WebhookKeyRing,
     WebhookKeyRingLoadResult,

@@ -13,16 +13,16 @@ Usage::
 """
 from __future__ import annotations
 
-from contextlib import suppress
 import os
+from contextlib import suppress
 
-from fastapi import Depends, HTTPException, Request, Response, UploadFile, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
-from tldw_Server_API.app.core.Storage.quota_enforcement import check_storage_quota
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Storage.quota_enforcement import check_storage_quota, quota_fail_open_enabled
 
 _NONCRITICAL = (
     AttributeError,
@@ -54,7 +54,7 @@ async def guard_storage_quota(
     * Disabled when ``STORAGE_QUOTA_ENFORCEMENT=0``.
     * Quota backend errors fail closed by default; set
       ``STORAGE_QUOTA_FAIL_OPEN=1`` to explicitly allow fail-open writes.
-    * Dependency/setup errors in this guard are logged and allowed.
+    * Dependency/setup errors follow ``STORAGE_QUOTA_FAIL_OPEN`` (closed by default).
     * Adds ``X-Storage-Warning`` header when the soft limit is reached.
     * Returns HTTP 413 when the hard limit is reached or remaining quota is 0.
     """
@@ -104,9 +104,19 @@ async def guard_storage_quota(
             org_id=org_id,
         )
     except _NONCRITICAL as exc:
-        # Fail-open: log and allow
-        logger.warning("Storage quota guard failed (fail-open): {}", type(exc).__name__)
-        return
+        logger.warning("Storage quota guard unavailable: {}", type(exc).__name__)
+        if quota_fail_open_enabled():
+            return
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Storage quota check unavailable",
+        ) from exc
+
+    if result.get("unavailable") and not result.get("allowed", True):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Storage quota check unavailable",
+        )
 
     if not result.get("allowed", True):
         reason = result.get("reason", "Storage quota exceeded")

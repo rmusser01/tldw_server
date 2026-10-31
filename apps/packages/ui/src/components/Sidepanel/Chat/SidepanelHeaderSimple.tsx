@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import logoImage from "@/assets/icon.png"
 import { useMessage } from "@/hooks/useMessage"
 import { Link } from "react-router-dom"
@@ -36,6 +37,7 @@ export const SidepanelHeaderSimple = ({
   onRenameTitle,
   onOpenChatInWebUi
 }: SidepanelHeaderSimpleProps = {}) => {
+  const historySelection = useHistorySelectionContext()
   const { temporaryChat } = useMessage()
   const { t } = useTranslation(["sidepanel", "common", "option"])
   const notification = useAntdNotification()
@@ -58,11 +60,11 @@ export const SidepanelHeaderSimple = ({
   const sidebarToggleLabel = sidebarOpen
     ? t("common:chatSidebar.collapse", "Collapse sidebar")
     : t("common:chatSidebar.expand", "Expand sidebar")
-  const openFullChatLabel = t(
+  const openFullChatLabel = historySelection ? t("playground:historySelection.expand", "Expand in full page") : t(
     "sidepanel:header.openFullChatWebui",
     "Open full chat in WebUI"
   )
-  const openFullChatDescription = t(
+  const openFullChatDescription = historySelection ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : t(
     "sidepanel:header.openFullChatWebuiDescription",
     "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
   )
@@ -105,7 +107,7 @@ export const SidepanelHeaderSimple = ({
     setIsEditingTitle(false)
   }, [activeTitle, draftTitle, onRenameTitle])
 
-  const openFullScreen = React.useCallback(() => {
+  const openFullScreen = React.useCallback(async () => {
     const showFailure = () => {
       notification.error({
         message: t(
@@ -114,14 +116,16 @@ export const SidepanelHeaderSimple = ({
         )
       })
     }
-    if (onOpenChatInWebUi) {
+    if (!historySelection && onOpenChatInWebUi) {
       Promise.resolve(onOpenChatInWebUi()).catch((error) => {
         console.error("Failed to open WebUI chat handoff:", error)
         showFailure()
       })
       return
     }
-    const url = browser.runtime.getURL(`/options.html#${CHAT_PATH}`)
+    const route = historySelection ? await historySelection.prepareExpansionPath() : CHAT_PATH
+    if (!route) { showFailure(); return }
+    const url = browser.runtime.getURL(`/options.html#${route}`)
     const openFallback = () => {
       const opened = window.open(url, "_blank")
       if (!opened) {
@@ -136,7 +140,7 @@ export const SidepanelHeaderSimple = ({
       return
     }
     openFallback()
-  }, [notification, onOpenChatInWebUi, t])
+  }, [historySelection, notification, onOpenChatInWebUi, t])
 
   const openDashboard = React.useCallback(() => {
     const url = browser.runtime.getURL("/options.html#/flashcards")

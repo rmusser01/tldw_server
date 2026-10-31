@@ -1,25 +1,21 @@
 from __future__ import annotations
 
-import os
 from uuid import uuid4
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
-    DatabaseConfig,
+    DatabaseBackend,
     DatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-_LIVE_POSTGRES_DSN = os.getenv("TEST_DATABASE_URL") or os.getenv("POSTGRES_TEST_DSN")
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not str(_LIVE_POSTGRES_DSN or "").lower().startswith("postgres"),
-        reason="A PostgreSQL TEST_DATABASE_URL or POSTGRES_TEST_DSN is required",
-    ),
-]
+# Runs under `pg_restricted_backend`, whose role is NOSUPERUSER NOBYPASSRLS.
+# The plain `pg_database_config` role is a superuser, and a superuser is exempt
+# from row-level security even under FORCE -- under it the cross-owner UPDATE
+# below succeeds and this test fails, which is what it did while it was gated
+# behind a hand-set DSN and therefore never ran.
+pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 
 def _create_owner_clip(
@@ -51,17 +47,15 @@ def _create_owner_clip(
 
 
 def test_postgres_web_clipper_same_clip_is_owner_isolated_by_rls(
-    pg_database_config: DatabaseConfig,
+    pg_restricted_backend: DatabaseBackend,
 ) -> None:
     owner_a = "910001"
     owner_b = "910002"
     clip_id = "shared-public-clip"
     note_a = str(uuid4())
     note_b = str(uuid4())
-    backend_a = DatabaseBackendFactory.create_backend(pg_database_config)
-    backend_b = DatabaseBackendFactory.create_backend(pg_database_config)
-    db_a = CharactersRAGDB(db_path=":memory:", client_id=owner_a, backend=backend_a)
-    db_b = CharactersRAGDB(db_path=":memory:", client_id=owner_b, backend=backend_b)
+    db_a = CharactersRAGDB(db_path=":memory:", client_id=owner_a, backend=pg_restricted_backend)
+    db_b = CharactersRAGDB(db_path=":memory:", client_id=owner_b, backend=pg_restricted_backend)
 
     try:
         _create_owner_clip(

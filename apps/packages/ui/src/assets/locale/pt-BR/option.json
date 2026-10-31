@@ -488,7 +488,8 @@
     "collapseSidebar": "Recolher barra lateral",
     "titlePlaceholder": "Título",
     "keywordsEditorPlaceholder": "Palavras-chave (tags)",
-    "tagsHelp": "Palavras-chave ajudam você a encontrar esta nota usando o filtro de palavras-chave à esquerda."
+    "tagsHelp": "Palavras-chave ajudam você a encontrar esta nota usando o filtro de palavras-chave à esquerda.",
+    "offlineSaveUnavailable": "O salvamento offline não está disponível até que sua conta e o armazenamento local sejam confirmados. Suas alterações permanecem sem salvar."
   },
   "tts": {
     "playground": "Playground de TTS"

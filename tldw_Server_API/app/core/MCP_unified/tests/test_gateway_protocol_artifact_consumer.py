@@ -15,7 +15,10 @@ from typing import Any
 import pytest
 from Helper_Scripts import mcp_unified_rc
 
-pytestmark = pytest.mark.unit
+# Every test here builds a wheel or sdist and shells out, so it carries the
+# packaging marker as well as integration: a shard can deselect it with `-m "not packaging"`,
+# and a dedicated packaging job can select it with `-m packaging`.
+pytestmark = [pytest.mark.integration, pytest.mark.packaging]
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 SUCCESS_MARKER = "MCP_UNIFIED_ARTIFACT_CONSUMER_OK"

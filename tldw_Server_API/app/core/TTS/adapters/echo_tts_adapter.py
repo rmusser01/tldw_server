@@ -688,7 +688,6 @@ class EchoTTSAdapter(TTSAdapter):
         )
         return await self.convert_audio_format(
             audio_np,
-            source_format=AudioFormat.PCM,
             target_format=request_format,
             sample_rate=self.sample_rate,
         )
@@ -910,7 +909,6 @@ class EchoTTSAdapter(TTSAdapter):
         full_audio = np.concatenate(audio_segments).astype(np.float32)
         return await self.convert_audio_format(
             full_audio,
-            source_format=AudioFormat.PCM,
             target_format=request.format,
             sample_rate=self.sample_rate,
         )

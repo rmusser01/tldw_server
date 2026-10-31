@@ -277,3 +277,15 @@ def test_sqlite_acquire_moves_ready_counter_to_processing(
         "WHERE domain='acquire' AND queue='default' AND job_type='work'"
     ).fetchone()
     assert tuple(counter) == (0, 0, 1)
+
+
+@pytest.mark.parametrize("scheduled_owner, expected_index", [("other", 1), ("owner", 0)])
+def test_chatbooks_implicit_ordering_scopes_future_jobs_to_owner(conn, scheduled_owner, expected_index):
+    ready = [_insert_job(conn, uuid=f"ready-{index}", domain="chatbooks") for index in range(2)]
+    _insert_job(
+        conn, uuid="future", domain="chatbooks", owner_user_id=scheduled_owner, available_at="2026-01-03 00:00:00"
+    )
+    result = acquire_job(
+        conn, command=_command(domain="chatbooks", owner_user_id="owner"), now=NOW, counters_enabled=False
+    )
+    assert result.row["id"] == ready[expected_index]

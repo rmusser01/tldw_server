@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -371,13 +372,14 @@ def schedule_auto_tagging(
 
     def _runner() -> None:
         try:
-            auto_tag_conversation(
-                db,
-                conversation_id,
-                owner_user_id=owner_user_id,
-                force=force,
-                min_new_messages=min_new_messages,
-            )
+            with chacha_operation(independent=True):
+                auto_tag_conversation(
+                    db,
+                    conversation_id,
+                    owner_user_id=owner_user_id,
+                    force=force,
+                    min_new_messages=min_new_messages,
+                )
         except Exception as exc:
             logger.warning("Auto-tagging job failed for {}: {}", conversation_id, exc)
 
@@ -396,7 +398,8 @@ def schedule_conversation_clustering(
 
     def _runner() -> None:
         try:
-            cluster_conversations_for_user(db, client_id=client_id)
+            with chacha_operation(independent=True):
+                cluster_conversations_for_user(db, client_id=client_id)
         except Exception as exc:
             logger.warning("Conversation clustering job failed: {}", exc)
 

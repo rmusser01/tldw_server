@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
+from .exceptions import TransactionError
 from .postgres_profile_version_schema import (
     ensure_postgres_profile_version_on_connection,
     ensure_postgres_user_timestamp_timezones_on_connection,
@@ -1266,6 +1267,38 @@ _CREATE_AUTHNZ_CORE_TABLES = [
         (),
     ),
     ("CREATE INDEX IF NOT EXISTS idx_teams_org ON public.teams(org_id)", ()),
+    # SQLite migration 051: shared org/team storage quotas used by upload admission.
+    (
+        """
+        CREATE TABLE IF NOT EXISTS public.storage_quotas (
+            id SERIAL PRIMARY KEY,
+            org_id INTEGER REFERENCES public.organizations(id) ON DELETE CASCADE,
+            team_id INTEGER REFERENCES public.teams(id) ON DELETE CASCADE,
+            quota_mb INTEGER NOT NULL DEFAULT 10240,
+            used_mb DOUBLE PRECISION DEFAULT 0,
+            soft_limit_pct INTEGER DEFAULT 80,
+            hard_limit_pct INTEGER DEFAULT 100,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            CHECK ((org_id IS NOT NULL AND team_id IS NULL) OR
+                   (org_id IS NULL AND team_id IS NOT NULL) OR
+                   (org_id IS NULL AND team_id IS NULL))
+        )
+        """,
+        (),
+    ),
+    ("CREATE INDEX IF NOT EXISTS idx_storage_quotas_org_id ON public.storage_quotas(org_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_storage_quotas_team_id ON public.storage_quotas(team_id)", ()),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_quotas_org_unique "
+        "ON public.storage_quotas(org_id) WHERE org_id IS NOT NULL",
+        (),
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_quotas_team_unique "
+        "ON public.storage_quotas(team_id) WHERE team_id IS NOT NULL",
+        (),
+    ),
     (
         """
         CREATE TABLE IF NOT EXISTS public.team_members (
@@ -3560,6 +3593,10 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
             await ensure_postgres_profile_version_on_connection(conn)
             await repair_postgres_profile_candidate_timestamps(conn)
             await validate_postgres_profile_candidate_schema(conn)
+    except TransactionError as exc:
+        # Sanitized at the transaction boundary; it keeps only a readiness reason.
+        logger.warning("Failed to ensure PostgreSQL AuthNZ core tables: {}", exc)
+        return False
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.bind(exception_type=type(exc).__name__).warning(
             "Failed to ensure PostgreSQL AuthNZ core tables"

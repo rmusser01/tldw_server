@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_proc
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, get_media_by_id
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
@@ -293,15 +294,20 @@ def _sync_collection_item_terminal_result(
     )
 
 
-def _resolve_user_id(job: dict[str, Any], payload: dict[str, Any]) -> str:
-    owner = job.get("owner_user_id") or payload.get("user_id")
-    if owner is None or str(owner).strip() == "":
+def _resolve_user_id(job: dict[str, Any]) -> str:
+    owner = job.get("owner_user_id")
+    if (
+        isinstance(owner, bool)
+        or not isinstance(owner, (str, int))
+        or not re.fullmatch(r"[0-9]+", str(owner))
+        or int(owner) <= 0
+    ):
         raise MediaIngestJobError(
-            "missing owner_user_id",
+            "missing or invalid owner_user_id",
             retryable=False,
             failure_code="media_ingest_missing_owner",
         )
-    return str(owner)
+    return str(int(owner))
 
 
 def _should_cancel(jm: JobManager, job_id: int) -> bool:
@@ -349,7 +355,8 @@ def _build_form_data(payload: dict[str, Any]) -> AddMediaForm:
 
 def _create_db(user_id: str):
     db_path = DatabasePaths.get_media_db_path(user_id)
-    return create_media_database(client_id=f"media_ingest_worker:{user_id}", db_path=str(db_path))
+    # Media writes derive ownership from the same user identity as API writes.
+    return create_media_database(client_id=str(user_id), db_path=str(db_path))
 
 
 async def _schedule_embeddings(
@@ -406,7 +413,7 @@ async def _schedule_embeddings(
 async def _handle_workspace_source_job(job: dict[str, Any], jm: JobManager, progress: _ProgressState) -> dict[str, Any]:
     job_id = int(job.get("id"))
     payload = _normalize_payload(job.get("payload"))
-    user_id = _resolve_user_id(job, payload)
+    user_id = _resolve_user_id(job)
     workspace_id, source_id, media_id = _workspace_source_job_fields(payload)
 
     db = None
@@ -468,6 +475,15 @@ async def _handle_workspace_source_job(job: dict[str, Any], jm: JobManager, prog
 
 
 async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressState) -> dict[str, Any]:
+    """Authorize content work from the persisted owner, independent of dispatcher scope."""
+    if str(job.get("job_type") or "").lower() not in {_MEDIA_JOB_TYPE, _WORKSPACE_SOURCE_JOB_TYPE}:
+        return await _handle_job_in_scope(job, jm, progress)
+    user_id = _resolve_user_id(job)
+    with scoped_context(user_id=int(user_id), is_admin=False):
+        return await _handle_job_in_scope(job, jm, progress)
+
+
+async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _ProgressState) -> dict[str, Any]:
     job_id = int(job.get("id"))
     latest_job_id = str(job_id)
     payload = _normalize_payload(job.get("payload"))
@@ -481,7 +497,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
             failure_code="media_ingest_unsupported_job_type",
         )
 
-    user_id = _resolve_user_id(job, payload)
+    user_id = _resolve_user_id(job)
     planned_item_id = _planned_collection_item_id(payload)
     source = payload.get("source")
     if not source:
@@ -528,7 +544,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
 
         db = _create_db(user_id)
         db_path = getattr(db, "db_path_str", None) or getattr(db, "db_path", None) or ""
-        client_id = getattr(db, "client_id", None) or f"media_ingest_worker:{user_id}"
+        client_id = getattr(db, "client_id", None) or str(user_id)
         loop = asyncio.get_running_loop()
 
         def cancel_check():

@@ -281,6 +281,10 @@ def test_strict_generation_json_rejects_duplicate_nonfinite_surrogate_or_malform
         b"[" + b"0," * 2048 + b"0]",
         b'"' + b"a" * (3 * 1024 * 1024 + 1) + b'"',
     ],
+    # Explicit ids: pytest otherwise names each case after its body, and the 3 MB
+    # string became a 3 MB test id that --durations printed three times, which
+    # stalled the CI runner's log processing until the job limit (core-security).
+    ids=["depth", "array-items", "array-numbers", "string-bytes"],
 )
 def test_generation_json_structure_budgets_use_exact_redacted_error(body: bytes) -> None:
     _, sent, _ = asyncio.run(_invoke(GENERATION_PATH, _request_events(body)))

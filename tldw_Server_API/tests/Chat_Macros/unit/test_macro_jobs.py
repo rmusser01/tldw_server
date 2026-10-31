@@ -522,3 +522,49 @@ def test_postback_metadata_retry_reuses_created_message(
     metadata = chat_db.get_message_metadata(message_id)
     assert metadata is not None
     assert metadata["extra"]["chat_macro"]["run_id"] == run.run_id
+
+
+def test_postback_marker_failure_rolls_back_visible_message(chat_db, monkeypatch):
+    jobs = _jobs_module()
+    repository = ChatMacroRepository(chat_db)
+    conversation_id = _conversation_id(chat_db)
+    run = repository.create_run(
+        run_id="run-marker-retry",
+        user_id="42",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+        status="completed",
+        conversation_id=conversation_id,
+    )
+    original = repository.mark_final_posted
+
+    def fail_marker(*args, **kwargs):
+        raise RuntimeError("marker unavailable")
+
+    monkeypatch.setattr(repository, "mark_final_posted", fail_marker)
+    kwargs = dict(
+        chat_db=chat_db,
+        repository=repository,
+        run_id=run.run_id,
+        final_output="Final wrapup.",
+        post_idempotency_key="marker-retry",
+    )
+    with pytest.raises(RuntimeError, match="marker unavailable"):
+        jobs.post_chat_macro_final_output(**kwargs)
+    assert chat_db.get_messages_for_conversation(conversation_id) == []
+    monkeypatch.setattr(repository, "mark_final_posted", original)
+    message_id = jobs.post_chat_macro_final_output(**kwargs)
+    assert [row["id"] for row in chat_db.get_messages_for_conversation(conversation_id)] == [message_id]
+
+
+def test_postback_rejects_repository_using_another_database(chat_db):
+    jobs = _jobs_module()
+    with pytest.raises(jobs.MacroStorageError, match="same database"):
+        jobs.post_chat_macro_final_output(
+            chat_db=chat_db,
+            repository=ChatMacroRepository(object()),
+            run_id="run",
+            final_output="answer",
+            post_idempotency_key="key",
+        )

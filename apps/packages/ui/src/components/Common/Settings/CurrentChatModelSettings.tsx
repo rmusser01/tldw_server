@@ -368,12 +368,15 @@ export const CurrentChatModelSettings = ({
       return getCanonicalModelKey(canonicalMatch)
     }
 
-    const selectedModelId = providerSelection.modelId
-    const selectedProviderHint =
+    const selectedModelId = getModelId({ model: providerSelection.modelId })
+    const selectedProvider =
       providerSelection.provider ||
       (typeof apiProvider === "string" && apiProvider.trim()
-        ? apiProvider.trim().toLowerCase()
+        ? apiProvider.trim()
         : null)
+    const selectedProviderHint = selectedProvider
+      ? getModelProvider({ provider: selectedProvider })
+      : null
 
     const providerMatch = selectedProviderHint
       ? models.find(
@@ -410,9 +413,35 @@ export const CurrentChatModelSettings = ({
         typeof settingsScope === "string" && settingsScope.trim()
           ? settingsScope.trim()
           : null
+      const activeScope = latestSettingsState.activeSettingsScope || ""
+      const scopeSeparator = activeScope.indexOf(":")
+      const activeSelection = parseProviderQualifiedModelSelection(activeScope)
+      const activeModelKey = getCanonicalModelKey({
+        provider:
+          activeSelection.provider ||
+          (scopeSeparator > 0
+            ? activeScope.slice(0, scopeSeparator)
+            : latestSettingsState.apiProvider),
+        model: activeSelection.isProviderQualified
+          ? activeSelection.modelId
+          : scopeSeparator > 0
+            ? activeScope.slice(scopeSeparator + 1)
+            : activeScope
+      })
+      // The cockpit may use a provider alias/internal model prefix. Keep its
+      // live scope for the same model so Save and Reset share one prompt record.
+      const activeScopeIsRawSelectedModel =
+        !latestSettingsState.apiProvider?.trim() &&
+        !activeSelection.isProviderQualified &&
+        activeScope === selectedModel?.trim()
+      const selectedSettingsScope =
+        activeScopeIsRawSelectedModel ||
+        activeModelKey === selectedModelSettingsScope
+          ? latestSettingsState.activeSettingsScope
+          : selectedModelSettingsScope
       const targetSettingsScope =
         explicitSettingsScope ||
-        selectedModelSettingsScope ||
+        selectedSettingsScope ||
         latestSettingsState.activeSettingsScope
 
       if (targetSettingsScope) {
@@ -453,6 +482,7 @@ export const CurrentChatModelSettings = ({
       serverChatId,
       settingsScope,
       selectedModelSettingsScope,
+      selectedModel,
       setActiveSettingsScope,
       setActorSettings,
       updateScopedSetting,
@@ -856,6 +886,8 @@ export const CurrentChatModelSettings = ({
         {!isLoading ? (
           <Form
             form={form}
+            // A remounted dialog may reuse cached config without rerunning its query.
+            initialValues={{ systemPrompt: systemPrompt ?? "" }}
             layout="vertical"
             onFinish={(values) => {
               saveSettings({

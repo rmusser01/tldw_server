@@ -1,3 +1,5 @@
+"""Real PostgreSQL snapshots plus POSIX-only private migration artifacts."""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,6 +26,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.legacy_import import (
     LegacyImportRequest,
     LegacyImportService,
     LegacySecretDecryptor,
+    posix_private_artifacts_supported,
 )
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
     ensure_admin_webhook_canonical_tables_pg,
@@ -34,6 +37,13 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 
 pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 pytestmark = pytest.mark.postgres
+
+# The repository snapshot is platform-neutral. Apply/extract cases also publish
+# private files and retain their complete POSIX security assertions.
+_requires_posix_artifacts = pytest.mark.skipif(
+    not posix_private_artifacts_supported(),
+    reason="Legacy private artifacts require POSIX ownership and mode-0600 enforcement",
+)
 
 NOW = datetime(2026, 8, 22, 21, 0, tzinfo=timezone.utc)
 
@@ -223,6 +233,7 @@ async def test_postgres_legacy_snapshot_uses_real_legacy_table(test_db_pool) -> 
 
 
 @pytest.mark.integration
+@_requires_posix_artifacts
 async def test_postgres_database_only_apply_commits_mapping_sequence_and_readback(
     test_db_pool,
     tmp_path: Path,
@@ -328,6 +339,7 @@ async def test_postgres_database_only_apply_commits_mapping_sequence_and_readbac
 
 
 @pytest.mark.integration
+@_requires_posix_artifacts
 async def test_postgres_extract_rechecks_canonical_activity_before_publication(
     test_db_pool,
     tmp_path: Path,
@@ -370,6 +382,7 @@ async def test_postgres_extract_rechecks_canonical_activity_before_publication(
 
 
 @pytest.mark.integration
+@_requires_posix_artifacts
 async def test_postgres_extract_rechecks_retirement_before_publication(
     test_db_pool,
     tmp_path: Path,
@@ -416,6 +429,7 @@ async def test_postgres_extract_rechecks_retirement_before_publication(
 
 @pytest.mark.parametrize("closing_action", ["activity", "retirement"])
 @pytest.mark.integration
+@_requires_posix_artifacts
 async def test_postgres_extract_holds_migration_lock_through_plaintext_publication(
     test_db_pool,
     tmp_path: Path,

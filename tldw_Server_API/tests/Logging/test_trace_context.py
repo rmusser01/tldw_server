@@ -4,13 +4,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Logging.log_context import ensure_traceparent
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
 
 def _route_exists(path: str, method: str) -> bool:
     wanted_method = method.upper()
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         route_path = getattr(route, "path", None)
         route_methods = getattr(route, "methods", set()) or set()
         if route_path == path and wanted_method in route_methods:

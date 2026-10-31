@@ -249,7 +249,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   )
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex min-h-0 flex-col h-full">
       {/* Export header */}
       <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-surface2">
         <div className="flex items-center justify-between">
@@ -429,7 +429,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
       </div>
 
       {/* Content area */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="notes-results-scroll">
       {isFetching ? (
         <div
           className="flex items-center justify-center gap-2 py-10 text-sm text-text-muted"

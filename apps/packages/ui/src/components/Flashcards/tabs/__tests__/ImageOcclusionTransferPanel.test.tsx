@@ -1,7 +1,25 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { useDecksQuery } from "../../hooks"
 import { ImageOcclusionTransferPanel } from "../ImageOcclusionTransferPanel"
+
+const undoRequests = vi.hoisted(() => ({ get: vi.fn(), remove: vi.fn() }))
+vi.mock("@/services/flashcards", async (original) => ({
+  ...await original<typeof import("@/services/flashcards")>(),
+  getFlashcard: undoRequests.get,
+  deleteFlashcard: undoRequests.remove
+}))
+
+const snapshot = () => {
+  const controller = new AbortController()
+  const scope: ServicePromptSnapshot = {
+    scopeKey: "owner-1", requestScope: { config: { serverUrl: "https://owner.test", authMode: "multi-user" }, userId: 1 },
+    scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal, capability: "unchecked", definitions: {}, release: () => controller.abort()
+  }
+  return { scope, controller }
+}
 
 const messageSpies = {
   success: vi.fn(),
@@ -91,7 +109,8 @@ vi.mock("../../hooks", () => ({
         version: 1
       }
     ],
-    isLoading: false
+    isLoading: false,
+    isSuccess: true
   }))
 }))
 
@@ -151,6 +170,9 @@ describe("ImageOcclusionTransferPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     createDeckMutateAsync.mockReset()
+    uploadFlashcardAssetMock.mockReset()
+    undoRequests.get.mockResolvedValue({ version: 4 })
+    undoRequests.remove.mockResolvedValue(undefined)
     generateImageOcclusionAssetsMock.mockResolvedValue({
       source: {
         blob: new Blob(["source"], { type: "image/webp" }),
@@ -196,6 +218,139 @@ describe("ImageOcclusionTransferPanel", () => {
       count: 1,
       total: 1
     })
+  })
+
+  it.each(["canvas", "upload", "bulk"])("stops the %s continuation after captured authority invalidation", async phase => {
+    const { scope, controller } = snapshot()
+    const onTransferAction = vi.fn()
+    let finish!: (value: unknown) => void
+    const deferred = new Promise<unknown>(resolve => { finish = resolve })
+    if (phase === "canvas") generateImageOcclusionAssetsMock.mockReturnValueOnce(deferred)
+    if (phase === "upload") { uploadFlashcardAssetMock.mockReset(); uploadFlashcardAssetMock.mockReturnValueOnce(deferred) }
+    if (phase === "bulk") createBulkMutateAsync.mockReturnValueOnce(deferred)
+    render(<ImageOcclusionTransferPanel generationScope={scope} onTransferAction={onTransferAction} />)
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+    if (phase === "upload") await waitFor(() => expect(uploadFlashcardAssetMock).toHaveBeenCalledTimes(1))
+    if (phase === "bulk") {
+      fireEvent.click(await screen.findByTestId("flashcards-occlusion-save-button"))
+      await waitFor(() => expect(createBulkMutateAsync).toHaveBeenCalledTimes(1))
+      onTransferAction.mockClear()
+      messageSpies.success.mockClear()
+    }
+    await act(async () => {
+      controller.abort()
+      finish(phase === "canvas" ? { source: { blob: new Blob(["source"]) }, regions: [] } : phase === "upload" ? { reference: "old", asset_uuid: "old" } : { items: [{ uuid: "old" }] })
+    })
+    expect(uploadFlashcardAssetMock).toHaveBeenCalledTimes(phase === "canvas" ? 0 : phase === "upload" ? 1 : 3)
+    expect(showUndoNotificationMock).not.toHaveBeenCalled()
+    expect(onTransferAction).not.toHaveBeenCalled()
+    expect(messageSpies.success).not.toHaveBeenCalled()
+    expect(messageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it("blocks unresolved authority before asset work", () => {
+    render(<ImageOcclusionTransferPanel generationScope={null} />)
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+    expect(generateImageOcclusionAssetsMock).not.toHaveBeenCalled()
+  })
+
+  it.each(["current", "invalidated", "unmounted"])("binds retained Undo to its %s owner", async state => {
+    const { scope, controller } = snapshot()
+    const view = render(<ImageOcclusionTransferPanel generationScope={scope} />)
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+    fireEvent.click(await screen.findByTestId("flashcards-occlusion-save-button"))
+    await waitFor(() => expect(showUndoNotificationMock).toHaveBeenCalledTimes(1))
+    const options = { requestScope: scope.requestScope, signal: scope.scopeSignal }
+    expect(uploadFlashcardAssetMock.mock.calls.every(call => call[1]?.requestScope === scope.requestScope)).toBe(true)
+    expect(createBulkMutateAsync).toHaveBeenCalledWith({ cards: expect.any(Array), requestOptions: options })
+    const undo = showUndoNotificationMock.mock.calls[0][0].onUndo
+    if (state === "invalidated") controller.abort()
+    if (state === "unmounted") view.unmount()
+    if (state === "current") {
+      await undo()
+      expect(undoRequests.get).toHaveBeenCalledWith("card-1", options)
+      expect(undoRequests.remove).toHaveBeenCalledWith("card-1", 4, options)
+    } else {
+      await expect(undo()).rejects.toMatchObject({ name: "AbortError" })
+      expect(undoRequests.get).not.toHaveBeenCalled()
+      expect(undoRequests.remove).not.toHaveBeenCalled()
+    }
+  })
+
+  it("stops Undo between its scoped read and delete when authority changes", async () => {
+    const { scope, controller } = snapshot()
+    render(<ImageOcclusionTransferPanel generationScope={scope} />)
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+    fireEvent.click(await screen.findByTestId("flashcards-occlusion-save-button"))
+    await waitFor(() => expect(showUndoNotificationMock).toHaveBeenCalledTimes(1))
+    let finish!: (value: { version: number }) => void
+    undoRequests.get.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const undo = showUndoNotificationMock.mock.calls[0][0].onUndo()
+    const rejection = expect(undo).rejects.toMatchObject({ name: "AbortError" })
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    controller.abort()
+    finish({ version: 4 })
+    await rejection
+    expect(undoRequests.remove).not.toHaveBeenCalled()
+  })
+
+  it("discards a late canvas continuation after unmount", async () => {
+    const { scope } = snapshot()
+    let finish!: (value: unknown) => void
+    generateImageOcclusionAssetsMock.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const view = render(<ImageOcclusionTransferPanel generationScope={scope} />)
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+    view.unmount()
+    await act(async () => { finish({ source: { blob: new Blob(["source"]) }, regions: [] }) })
+    expect(uploadFlashcardAssetMock).not.toHaveBeenCalled()
+    expect(messageSpies.error).not.toHaveBeenCalled()
+  })
+
+  it.each(["current", "invalidated"])("handles a delayed new-deck acknowledgment for its %s owner", async state => {
+    const { scope, controller } = snapshot()
+    let finish!: (value: unknown) => void
+    createDeckMutateAsync.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    render(<ImageOcclusionTransferPanel generationScope={scope} />)
+    fireEvent.mouseDown(screen.getByTestId("flashcards-occlusion-deck"))
+    fireEvent.click(await screen.findByText("Create new deck"))
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+    fireEvent.click(await screen.findByTestId("flashcards-occlusion-save-button"))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    expect(createDeckMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ requestOptions: { requestScope: scope.requestScope, signal: scope.scopeSignal } }))
+    if (state === "invalidated") controller.abort()
+    await act(async () => { finish({ id: 8, name: "New owned deck", version: 1 }) })
+    if (state === "current") {
+      await waitFor(() => expect(createBulkMutateAsync).toHaveBeenCalledWith({ cards: [expect.objectContaining({ deck_id: 8 })], requestOptions: { requestScope: scope.requestScope, signal: scope.scopeSignal } }))
+      expect(screen.getByTestId("flashcards-occlusion-deck")).toHaveTextContent("New owned deck")
+    } else {
+      expect(createBulkMutateAsync).not.toHaveBeenCalled()
+      expect(showUndoNotificationMock).not.toHaveBeenCalled()
+      expect(messageSpies.error).not.toHaveBeenCalled()
+    }
+  })
+
+  it("expires a new occlusion deck proof after a fresh successful empty catalogue", async () => {
+    const { scope } = snapshot()
+    const original = vi.mocked(useDecksQuery).getMockImplementation()!
+    vi.mocked(useDecksQuery).mockReturnValue({ data: [], isSuccess: true, isLoading: false, dataUpdatedAt: 1 } as ReturnType<typeof useDecksQuery>)
+    try {
+      createDeckMutateAsync.mockResolvedValueOnce({ id: 8, name: "New owned deck", version: 1 })
+      const view = render(<ImageOcclusionTransferPanel generationScope={scope} />)
+      fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+      fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+      fireEvent.click(await screen.findByTestId("flashcards-occlusion-save-button"))
+      await waitFor(() => expect(createBulkMutateAsync).toHaveBeenCalled())
+      expect(screen.getByTestId("flashcards-occlusion-deck")).toHaveTextContent("New owned deck")
+      vi.mocked(useDecksQuery).mockReturnValue({ data: [], isSuccess: true, isLoading: false, dataUpdatedAt: 2 } as ReturnType<typeof useDecksQuery>)
+      view.rerender(<ImageOcclusionTransferPanel generationScope={scope} />)
+      await waitFor(() => expect(screen.getByTestId("flashcards-occlusion-deck")).not.toHaveTextContent("New owned deck"))
+    } finally { vi.mocked(useDecksQuery).mockImplementation(original) }
   })
 
   it("uploads source and derived images, creates editable drafts, and saves them via bulk create", async () => {

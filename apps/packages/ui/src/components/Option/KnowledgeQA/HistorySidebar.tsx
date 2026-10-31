@@ -99,6 +99,7 @@ function safePersistExpandHintSeen(): void {
 
 export function HistorySidebar({ className }: HistorySidebarProps) {
   const {
+    isAuthorityCurrent,
     searchHistory,
     historyHydrated,
     currentThreadId,
@@ -160,6 +161,7 @@ export function HistorySidebar({ className }: HistorySidebarProps) {
   }, [setHistorySidebarOpen])
 
   const handleExportAll = useCallback(() => {
+    if (!isAuthorityCurrent()) return
     if (knowledgeHistory.length === 0) {
       message.open({
         type: "info",
@@ -187,7 +189,7 @@ export function HistorySidebar({ className }: HistorySidebarProps) {
         duration: 4,
       })
     }
-  }, [knowledgeHistory, message])
+  }, [isAuthorityCurrent, knowledgeHistory, message])
 
   const renderExpandedContent = () => (
     <>

@@ -45,6 +45,27 @@ describe('useMediaNavigationState permalink hydration', () => {
     vi.clearAllMocks()
   })
 
+  it("clears selected private details and rejects their late replacement on logout", async () => {
+    vi.mocked(bgRequest).mockResolvedValue({ media_id: 7, content: { text: "Prior private body" } })
+    const { result } = renderHook(() => useMediaNavigationState(createDeps([])), {
+      wrapper: ({ children }) => <MemoryRouter initialEntries={["/media?id=7"]}>{children}</MemoryRouter>
+    })
+    await waitFor(() => expect(result.current.selectedContent).toBe("Prior private body"))
+    const pending = createDeferred<{ media_id: number; content: { text: string } }>()
+    vi.mocked(bgRequest).mockReturnValueOnce(pending.promise)
+    let reload!: Promise<boolean>
+    act(() => { reload = result.current.loadSelectedDetails(result.current.selected!) })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")))
+    expect(result.current.selected).toBeNull()
+    expect(result.current.selectedDetail).toBeNull()
+    expect(result.current.selectedContent).toBe("")
+    await act(async () => {
+      pending.resolve({ media_id: 7, content: { text: "Late private body" } })
+      await reload
+    })
+    expect(result.current.selectedContent).toBe("")
+  })
+
   it('reuses the pending detail request when search results rerender', async () => {
     const detailRequest = createDeferred<any>()
     vi.mocked(bgRequest)

@@ -1,8 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
-
 
 class _StubDB:
     def __init__(self):
@@ -30,7 +28,7 @@ class _StubDB:
 
 
 @pytest.fixture
-def override_db_dependency(monkeypatch):
+def override_db_dependency(app, monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps as deps
 
     async def _override_db():
@@ -48,7 +46,7 @@ def override_db_dependency(monkeypatch):
     app.dependency_overrides.pop(deps.get_prompt_studio_db, None)
 
 
-def test_create_optimization_includes_request_id_in_job_payload(monkeypatch, override_db_dependency):
+def test_create_optimization_includes_request_id_in_job_payload(app, monkeypatch, override_db_dependency):
 
 
     # Force TEST_MODE for deterministic behavior (skip background task spawn)

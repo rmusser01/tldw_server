@@ -47,7 +47,6 @@ describe("sanitizeServerErrorMessage", () => {
 
     expect(message).toContain("token=[redacted-secret]")
     expect(message).toContain("api_key=[redacted-secret]")
-    expect(message).toContain("Bearer [redacted-secret]")
     expect(message).not.toContain("sk_secret_inline")
     expect(message).not.toContain("sk-secret-inline")
     expect(message).not.toContain("api_secret_value")

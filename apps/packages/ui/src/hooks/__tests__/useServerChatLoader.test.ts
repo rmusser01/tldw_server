@@ -1,8 +1,7 @@
-import fs from "node:fs"
-import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import type { Message } from "@/store/option"
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
+import { formatToMessage } from "@/db/dexie/helpers"
 import {
   applyAssistantPresentationToMessages,
   fetchAllServerChatMessages,
@@ -28,6 +27,25 @@ const createMessage = (overrides: Partial<Message> = {}): Message => ({
 })
 
 describe("shouldPreserveLocalMessagesForServerLoad", () => {
+  it.each([true, false])("recognizes confirmed old mirror IDs after real formatting (greeting: %s)", withGreeting => {
+    const storedRows = [
+      ...(withGreeting ? [{ id: "saved-greeting", role: "assistant", content: "Welcome to Cedar.", messageType: "character:greeting" }] : []),
+      { id: "saved-question", role: "user", content: "When does Cedar open?" }
+    ].map((row, index) => ({ ...row, history_id: "owned-mirror", name: row.role === "user" ? "You" : "Cedar Guide", images: [], createdAt: 1000 + index }))
+    const currentMessages = formatToMessage(storedRows)
+    const serverMessages = mapServerChatMessagesToPlaygroundMessages({
+      serverMessages: [
+        ...storedRows.map(row => ({ id: row.id, role: row.role, content: row.content, created_at: new Date(row.createdAt).toISOString() })),
+        { id: "saved-answer", role: "assistant", content: "Cedar opens at 08:30.", created_at: new Date(2000).toISOString() }
+      ] as ServerChatMessage[],
+      assistantName: "Cedar Guide", characterId: "4"
+    })
+    expect(currentMessages.every(message => message.serverMessageId == null)).toBe(true)
+    expect(shouldPreserveLocalMessagesForServerLoad({
+      currentMessages, serverMessages, isStreaming: false, isProcessing: false
+    })).toBe(false)
+  })
+
   it("preserves local messages while streaming", () => {
     const currentMessages = [createMessage({ message: "draft response" })]
     expect(
@@ -523,17 +541,6 @@ describe("mapServerChatMessagesToPlaygroundMessages", () => {
       "flux-test-backend"
     )
     expect(mapped[0].generationInfo?.image_generation?.sync?.status).toBe("synced")
-  })
-})
-
-describe("useServerChatLoader local mirror guard", () => {
-  it("persists normalized metadataExtra when seeding the local server-chat mirror", () => {
-    const source = fs.readFileSync(
-      path.resolve(__dirname, "../chat/useServerChatLoader.ts"),
-      "utf8"
-    )
-
-    expect(source).toContain("metadataExtra: m.metadataExtra")
   })
 })
 

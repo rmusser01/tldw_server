@@ -35,10 +35,7 @@ async def _get_databases_for_user(user_id: str) -> tuple[Any, Any]:
         normalized_user_id = int(str(user_id).strip())
     except (ValueError, TypeError) as exc:
         raise ValueError(f"Invalid owner_user_id for study-suggestions worker: {user_id!r}") from exc
-    note_db = await get_chacha_db_for_user_id(
-        normalized_user_id,
-        client_id=f"study-suggestions-worker-{normalized_user_id}",
-    )
+    note_db = await get_chacha_db_for_user_id(normalized_user_id)
     return note_db, None
 
 

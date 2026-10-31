@@ -326,9 +326,10 @@ def _load_store() -> dict[str, Any]:
 
 
 def _atomic_write_store(path: Path, store: dict[str, Any]) -> None:
-    """Publish one complete JSON object with file and directory durability."""
+    """Publish complete JSON with file and supported parent-directory durability."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(store, indent=2, sort_keys=False).encode("utf-8")
+    # mkstemp creates the file with owner-only permissions on supporting platforms.
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.",
         dir=path.parent,
@@ -336,7 +337,6 @@ def _atomic_write_store(path: Path, store: dict[str, Any]) -> None:
     temporary_path = Path(temporary_name)
     descriptor_open = True
     try:
-        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb", closefd=True) as stream:
             descriptor_open = False
             written = stream.write(payload)
@@ -346,6 +346,9 @@ def _atomic_write_store(path: Path, store: dict[str, Any]) -> None:
             os.fsync(stream.fileno())
         os.replace(temporary_path, path)
 
+        # Windows cannot open directory descriptors for fsync.
+        if os.name == "nt":
+            return
         directory_fd = os.open(path.parent, os.O_RDONLY)
         try:
             try:

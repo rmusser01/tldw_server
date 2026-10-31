@@ -751,7 +751,7 @@ async def test_standalone_html_composite_reopens_admission_after_readiness_recov
     task = asyncio.create_task(startup_pollers._run_standalone_html_generation_jobs_service(context, stop_event))
     await asyncio.wait_for(handler_started.wait(), timeout=1)
     for _ in range(100):
-        if reconciler.calls >= 3:
+        if reconciler.calls >= 3 and runtime.admission_gate.open:
             break
         await asyncio.sleep(0.001)
 

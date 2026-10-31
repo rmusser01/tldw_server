@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 from tldw_profile_core import (
     ProfileControls,
     ProfilePayload,
@@ -23,7 +23,7 @@ class StrictRequest(BaseModel):
 
 
 class ProfileCreateRequest(StrictRequest):
-    runtime_enabled: bool = False
+    runtime_enabled: StrictBool = False
 
 
 class WorkspaceScopeCreateRequest(StrictRequest):
@@ -37,7 +37,7 @@ class RecordCreateRequest(StrictRequest):
     semantic_key: SemanticKey | None = None
     controls: ProfileControls
     expires_at: datetime | None = None
-    no_expiry: bool = False
+    no_expiry: StrictBool = False
 
 
 class RecordUpdateRequest(StrictRequest):
@@ -46,7 +46,7 @@ class RecordUpdateRequest(StrictRequest):
     semantic_key: SemanticKey | None = None
     controls: ProfileControls | None = None
     expires_at: datetime | None = None
-    no_expiry: bool | None = None
+    no_expiry: StrictBool | None = None
 
     @model_validator(mode="after")
     def require_mutation(self):
@@ -71,7 +71,7 @@ class ProposalReviewRequest(StrictRequest):
 
 
 class RuntimeUpdateRequest(StrictRequest):
-    enabled: bool
+    enabled: StrictBool
     expected_version_id: str | None = Field(default=None, max_length=128)
 
 
@@ -95,7 +95,7 @@ class ExportRequest(StrictRequest):
 class PurgeRequest(StrictRequest):
     mode: Literal["local_copy", "everywhere"]
     confirmation: str = Field(min_length=1, max_length=128)
-    expected_purge_generation: int = Field(ge=0)
+    expected_purge_generation: StrictInt = Field(ge=0)
 
 
 class ScopeListResponse(BaseModel):

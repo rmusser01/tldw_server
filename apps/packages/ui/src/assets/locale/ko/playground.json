@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "미디어 가져오기 충돌",
+    "conflict": "메시지 입력란에 이미 초안이 있습니다. 미디어 소스를 삽입하거나, 초안을 바꾸거나, 가져오기를 취소하세요.",
+    "insert": "미디어 소스 삽입",
+    "replace": "현재 초안 바꾸기",
+    "cancel": "가져오기 취소"
+  },
   "formError": {
     "noModel": "모델을 선택하세요",
     "noEmbeddingModel": "설정 > RAG 페이지에서 임베딩 모델을 설정하세요"

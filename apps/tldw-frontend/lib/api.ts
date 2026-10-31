@@ -1,10 +1,11 @@
 import { addRequestHistory, clearRequestHistory } from '@web/lib/history';
 import { dispatchAuthCredentialsChanged } from '@web/lib/auth-events';
-import { getApiBearer, getApiKey, hasEnvApiAuth } from '@web/lib/authStorage';
+import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
 import { isExplicitRequestCancellation } from '@/services/request-events';
 import type { ApiErrorResponse, ApiRequestConfig, ApiRequestConfigWithMetadata } from '@web/types/common';
+import { asVNGenerationRejectionCode, VN_GENERATION_REJECTION_MESSAGES, type VNGenerationRejectionCode } from '@web/lib/api/vnGenerationErrors';
 
 type ApiResponse<T = unknown> = {
   data: T;
@@ -83,6 +84,7 @@ const PUBLIC_PROVIDER_ERROR_MESSAGES = {
 } as const;
 
 type PublicProviderErrorCode = keyof typeof PUBLIC_PROVIDER_ERROR_MESSAGES;
+type PublicErrorCode = PublicProviderErrorCode | VNGenerationRejectionCode;
 
 function asPublicProviderErrorCode(value: unknown): PublicProviderErrorCode | undefined {
   if (
@@ -94,9 +96,9 @@ function asPublicProviderErrorCode(value: unknown): PublicProviderErrorCode | un
   return undefined;
 }
 
-function normalizeApiErrorBody(errorBody: ApiErrorResponse, statusCode: number): {
+function normalizeApiErrorBody(errorBody: ApiErrorResponse, statusCode: number, vnGenerationRequest: boolean): {
   detail?: string;
-  errorCode?: PublicProviderErrorCode;
+  errorCode?: PublicErrorCode;
 } {
   if (errorBody.detail && typeof errorBody.detail === 'object') {
     const errorCode = asPublicProviderErrorCode(errorBody.detail.error_code);
@@ -106,6 +108,9 @@ function normalizeApiErrorBody(errorBody: ApiErrorResponse, statusCode: number):
         errorCode,
       };
     }
+    const rejection = statusCode === 409 && vnGenerationRequest
+      ? asVNGenerationRejectionCode(errorBody.detail.code) : undefined;
+    if (rejection) return { detail: VN_GENERATION_REJECTION_MESSAGES[rejection], errorCode: rejection };
   }
   // Untyped 5xx bodies are not a public contract and may contain raw upstream
   // or internal details. Typed, allowlisted provider envelopes above remain
@@ -124,13 +129,13 @@ function normalizeApiErrorBody(errorBody: ApiErrorResponse, statusCode: number):
 
 function buildSafeErrorHistoryBody(
   detail: string | undefined,
-  errorCode: PublicProviderErrorCode | undefined,
+  errorCode: PublicErrorCode | undefined,
 ): ApiErrorResponse | undefined {
   if (errorCode) {
     return {
       detail: {
         error_code: errorCode,
-        message: PUBLIC_PROVIDER_ERROR_MESSAGES[errorCode],
+        message: detail,
       },
     };
   }
@@ -142,7 +147,7 @@ function buildSafeErrorHistoryBody(
 
 function isCompleteProviderAuthenticationError(
   errorBody: ApiErrorResponse,
-  errorCode: PublicProviderErrorCode | undefined,
+  errorCode: PublicErrorCode | undefined,
 ): boolean {
   if (errorCode !== 'provider_authentication_failed') {
     return false;
@@ -161,7 +166,7 @@ export function shouldIncludeBrowserCredentials(): boolean {
     return true;
   }
 
-  const hasJwtToken = !!localStorage.getItem('access_token');
+  const hasJwtToken = !!getSessionAccessToken();
   if (hasJwtToken) {
     return true;
   }
@@ -314,7 +319,7 @@ function applyBrowserHeaders(headers: Headers, method: RequestMethod): void {
   }
 
   // Bearer token (multi-user JWT auth)
-  const token = localStorage.getItem('access_token');
+  const token = getSessionAccessToken();
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -558,7 +563,7 @@ function handleUnauthorized(
   const requestToken = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
     : null;
-  const currentToken = localStorage.getItem('access_token');
+  const currentToken = getSessionAccessToken();
   if (
     !requestToken ||
     !sessionTokenAtStart ||
@@ -600,7 +605,7 @@ async function request<T = unknown>(
   const requestUrl = joinUrl(baseURL, url, config.params);
   const metadata = { start: Date.now() };
   const sessionTokenAtStart =
-    typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    typeof window !== 'undefined' ? getSessionAccessToken() : null;
 
   applyBrowserHeaders(headers, method);
 
@@ -645,6 +650,7 @@ async function request<T = unknown>(
     const { detail, errorCode } = normalizeApiErrorBody(
       errorBody,
       response.status,
+      method === 'POST' && /^\/vn\/vn-assets\/packs\/[1-9]\d*\/(?:generate|slots\/[1-9]\d*\/retry)$/.test(url),
     );
     const safeErrorHistoryBody = buildSafeErrorHistoryBody(detail, errorCode);
     if (
@@ -758,7 +764,7 @@ export function buildAuthHeaders(method: string = 'GET', contentType?: string): 
     const sessionId = getOrCreateSessionId();
     if (sessionId) headers[SESSION_HEADER_NAME] = sessionId;
 
-    const token = localStorage.getItem('access_token');
+    const token = getSessionAccessToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const apiBearer = getApiBearer();
@@ -790,7 +796,7 @@ export function hasExplicitAuthHeaders(): boolean {
     return false;
   }
 
-  const token = localStorage.getItem('access_token');
+  const token = getSessionAccessToken();
   if (token) {
     return true;
   }

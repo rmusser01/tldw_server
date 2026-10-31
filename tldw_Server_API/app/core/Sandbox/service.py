@@ -93,7 +93,6 @@ _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS = (
 )
 
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

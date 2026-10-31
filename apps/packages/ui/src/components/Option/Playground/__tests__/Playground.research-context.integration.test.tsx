@@ -35,6 +35,15 @@ const messageOptionState = vi.hoisted(() => ({
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
     selectedAssistant: null,
+    effectiveAssistantState: {
+      mode: "plain" as const,
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none" as const
+    },
     setSelectedAssistant: vi.fn(),
     serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
     temporaryChat: false,
@@ -75,6 +84,17 @@ const smartScrollState = vi.hoisted(() => ({
 
 const mobileViewportState = vi.hoisted(() => ({
   value: false
+}))
+
+const historySelectionState = vi.hoisted(() => ({
+  status: "idle",
+  forkCandidate: null,
+  forkSettings: null,
+  settingsMode: () => "ordinary" as const,
+  getCurrent: () => ({ status: "idle", owner: null, capture: null }),
+  getStoredReference: () => null,
+  canAutomaticallyLoad: () => false,
+  fence: () => () => true
 }))
 
 const storeOptionState = vi.hoisted(() => ({
@@ -419,6 +439,17 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => messageOptionState.value
 }))
+
+vi.mock("@/hooks/chat/useHistorySelection", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/chat/useHistorySelection")>(
+    "@/hooks/chat/useHistorySelection"
+  )
+  return {
+    ...actual,
+    HistorySelectionProvider: ({ children }: { children: React.ReactNode }) => children,
+    useHistorySelectionContext: () => historySelectionState
+  }
+})
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => ({

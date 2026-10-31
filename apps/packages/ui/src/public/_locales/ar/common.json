@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "تعذّر تحميل المساعدة. أعد الاتصال، واحفظ أي تعديلات، ثم أعد تحميل الصفحة."
+  },
+  "help_loading": {
+    "message": "جارٍ تحميل المساعدة…"
+  },
+  "help_confirmReload": {
+    "message": "هل تريد إعادة تحميل هذه الصفحة؟ قد تفقد التعديلات غير المحفوظة."
+  },
+  "help_reload": {
+    "message": "إعادة تحميل الصفحة"
   }
 }

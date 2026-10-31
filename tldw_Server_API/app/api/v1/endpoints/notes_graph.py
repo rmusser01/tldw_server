@@ -611,7 +611,7 @@ async def list_manual_links(
             after_edge_id=after_edge_id,
             limit=limit + 1,
             include_deleted_links=include_deleted,
-            include_deleted_endpoints=False,
+            include_deleted_endpoints=include_deleted,
         )
         has_more = len(links) > limit
         page = links[:limit]

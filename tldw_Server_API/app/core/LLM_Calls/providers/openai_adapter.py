@@ -33,13 +33,10 @@ from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
     openai_credential_headers,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
-from tldw_Server_API.app.core.LLM_Calls.sse import (
-    finalize_stream,
-    is_done_line,
-    normalize_provider_line,
-    sse_done,
+from tldw_Server_API.app.core.LLM_Calls.streaming import (
+    iter_sse_lines_raising,
+    wrap_sync_stream,
 )
-from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 
 from .base import ChatProvider
 
@@ -365,29 +362,7 @@ class OpenAIAdapter(ChatProvider):
                 with http_client_factory(timeout=resolved_timeout) as client:
                     with client.stream("POST", url, headers=headers, json=payload) as resp:
                         resp.raise_for_status()
-                        seen_done = False
-                        for raw in resp.iter_lines():
-                            if not raw:
-                                continue
-                            try:
-                                line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
-                            except (AttributeError, TypeError, UnicodeError):
-                                line = str(raw)
-                            self._raise_if_in_band_provider_error(
-                                line,
-                                phase="stream_response",
-                            )
-                            # Canonicalize provider lines to OpenAI-style SSE
-                            if is_done_line(line):
-                                if not seen_done:
-                                    seen_done = True
-                                    yield sse_done()
-                                continue
-                            normalized = normalize_provider_line(line)
-                            if normalized is not None:
-                                yield normalized
-                        # Ensure a single terminal DONE marker
-                        yield from finalize_stream(response=resp, done_already=seen_done)
+                        yield from iter_sse_lines_raising(resp, provider=self.name)
                 return
             except _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
                 self._raise_sanitized_provider_failure(

@@ -157,7 +157,7 @@ describe("resolveEffectiveAssistantState", () => {
     })
   })
 
-  it("lets a different tracked draft selection override stale tracked chat metadata", () => {
+  it("keeps saved tracked identity when an unrelated global draft changes", () => {
     expect(
       resolveEffectiveAssistantState({
         tracked: {
@@ -182,12 +182,25 @@ describe("resolveEffectiveAssistantState", () => {
     ).toEqual({
       mode: "tracked_character",
       kind: "character",
-      id: "char-new",
-      displayName: "New Character",
-      avatarUrl: "https://cdn.example.test/new.png",
-      systemPromptSnapshot: "New prompt",
+      id: "char-old",
+      displayName: "Old Character",
+      avatarUrl: "https://cdn.example.test/old.png",
+      systemPromptSnapshot: "Old prompt",
       source: "tracked"
     })
+  })
+
+  it("uses tracked draft identity for a fresh conversation", () => {
+    expect(resolveEffectiveAssistantState({
+      draftSelection: { kind: "character", id: "new", name: "New character", metadata: { selectionMode: "tracked" } }
+    })).toMatchObject({ mode: "tracked_character", id: "new", displayName: "New character" })
+  })
+
+  it("keeps a saved persona when a global tracked character preference changes", () => {
+    expect(resolveEffectiveAssistantState({
+      tracked: { assistantKind: "persona", assistantId: "saved-persona" },
+      draftSelection: { kind: "character", id: "other", name: "Other", metadata: { selectionMode: "tracked" } }
+    })).toMatchObject({ mode: "tracked_persona", id: "saved-persona" })
   })
 
   it("falls back to draft metadata when overlay presentation fields are sparse", () => {

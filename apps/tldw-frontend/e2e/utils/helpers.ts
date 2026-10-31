@@ -61,6 +61,10 @@ export async function seedAuth(
   const finalConfig = {
     ...TEST_CONFIG,
     ...config,
+    // Strict journeys must verify real credentials and health before private APIs run.
+    allowOffline: process.env.TLDW_LIVE_TIER_UAT === '1'
+      ? false
+      : (config.allowOffline ?? TEST_CONFIG.allowOffline),
     serverUrl: resolveSeedServerUrl(config),
   };
   await page.addInitScript((cfg) => {
@@ -207,11 +211,7 @@ export async function seedAuth(
         globalWindow.chrome = {};
       }
       const chromeLike = globalWindow.chrome as Record<string, unknown>;
-      if (!chromeLike.runtime) {
-        chromeLike.runtime = { id: "mock-runtime-id" };
-      } else if (typeof (chromeLike.runtime as { id?: unknown }).id === "undefined") {
-        (chromeLike.runtime as { id?: string }).id = "mock-runtime-id";
-      }
+      // Seed storage without manufacturing extension identity in WebUI tests.
 
       const storageShim = {
         sync: areaApi,
@@ -241,6 +241,10 @@ export async function seedAuth(
     const authConfig = {
       serverUrl: cfg.serverUrl,
       authMode: 'single-user',
+      authSource: 'manual',
+      credentialSource: 'manual',
+      apiKeyPersistence: 'device',
+      apiKeyServerOrigin: new URL(cfg.serverUrl).origin,
       apiKey: cfg.apiKey,
     };
 
@@ -265,10 +269,15 @@ export async function seedAuth(
     } catch {}
     try {
       localStorage.setItem('assistant_setup_dismissed', 'true');
+      // Authenticated workflow fixtures begin after onboarding. Notes starts
+      // its own tour after one second unless this shared-storage flag is set.
+      writeStorageValue('notes-tutorial-shown', '1');
     } catch {}
     try {
       if (cfg.allowOffline) {
         localStorage.setItem('__tldw_allow_offline', 'true');
+      } else {
+        localStorage.removeItem('__tldw_allow_offline');
       }
     } catch {}
     try {
@@ -377,7 +386,7 @@ export async function waitForConnection(page: Page, timeoutMs = 20000): Promise<
     await logConnectionState(page, 'connection-timeout');
   }
 
-  // Dismiss any connection error modals that might block interaction
+  // Dismiss the server connection toast, if present
   await dismissConnectionModals(page);
 
 }
@@ -495,37 +504,17 @@ export async function dispatchKeyboardShortcut(
 }
 
 /**
- * Dismiss any connection/server error modals (Ant Design modals).
- * Also removes the modal backdrop via DOM manipulation to prevent
- * modals from re-blocking interaction.
+ * Dismiss only the server connection toast through its own control.
+ * Feature dialogs and development overlays must remain available to the test.
  */
 export async function dismissConnectionModals(page: Page): Promise<void> {
-  // Try clicking Dismiss button first
-  try {
-    const dismissBtn = page.getByRole('button', { name: /dismiss/i });
-    if (await dismissBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await dismissBtn.click();
-      await dismissBtn.waitFor({ state: 'hidden', timeout: 2_000 }).catch(() => {});
-    }
-  } catch {
-    // No modal to dismiss
+  const dismissBtn = page
+    .locator('.tldw-connection-toast')
+    .getByRole('button', { name: 'Dismiss', exact: true });
+  if (await dismissBtn.isVisible().catch(() => false)) {
+    await dismissBtn.click();
+    await dismissBtn.waitFor({ state: 'hidden', timeout: 2_000 });
   }
-
-  // Force-remove any remaining modal backdrops via DOM
-  await page.evaluate(() => {
-    document.querySelectorAll('.ant-modal-root, .ant-modal-wrap, .ant-modal-mask').forEach(el => {
-      el.remove();
-    });
-    // Remove nextjs-portal if it has blocking overlays
-    document.querySelectorAll('nextjs-portal').forEach(el => {
-      if (el.children.length > 0) el.remove();
-    });
-    // Remove tldw portal root overlays
-    const portalRoot = document.getElementById('tldw-portal-root');
-    if (portalRoot) {
-      portalRoot.querySelectorAll('.ant-modal-root, .ant-modal-wrap').forEach(el => el.remove());
-    }
-  }).catch(() => {});
 }
 
 /**

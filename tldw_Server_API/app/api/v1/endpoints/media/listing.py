@@ -33,9 +33,11 @@ from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
+    count_trashed_media,
     fetch_keywords_for_media_batch,
     get_paginated_files,
     get_paginated_trash_files,
+    list_trashed_media_ids,
     search_media,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -567,6 +569,7 @@ async def list_media_trash_endpoint(
                     "id": rid,
                     "title": str(title),
                     "type": str(rtype),
+                    "deleted_at": r.get("trash_date") if isinstance(r, dict) else (r[4] if len(r) > 4 else None),
                 }
             )
 
@@ -611,6 +614,8 @@ async def list_media_trash_endpoint(
                 "type": item["type"],
                 "url": f"/api/v1/media/{mid}",
             }
+            if item.get("deleted_at") is not None:
+                base_payload["deleted_at"] = item["deleted_at"]
             if include_keywords:
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)
@@ -671,12 +676,7 @@ async def empty_media_trash_endpoint(
     Permanently delete all items currently in trash.
     """
     try:
-        cursor = db.execute_query(
-            "SELECT id FROM Media "
-            "WHERE deleted = 0 AND is_trash = 1 AND system_operation_id IS NULL"
-        )
-        rows = cursor.fetchall()
-        media_ids = [row["id"] for row in rows] if rows else []
+        media_ids = list_trashed_media_ids(db)
 
         deleted_count = 0
         failed_ids: list[int] = []
@@ -698,12 +698,7 @@ async def empty_media_trash_endpoint(
 
         remaining_count = -1
         try:
-            count_cursor = db.execute_query(
-                "SELECT COUNT(*) AS total_items FROM Media "
-                "WHERE deleted = 0 AND is_trash = 1 AND system_operation_id IS NULL"
-            )
-            count_row = count_cursor.fetchone()
-            remaining_count = count_row["total_items"] if count_row else 0
+            remaining_count = count_trashed_media(db)
         except _MEDIA_LISTING_NONCRITICAL_EXCEPTIONS:
             pass
 

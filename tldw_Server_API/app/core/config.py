@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
     iter_custom_openai_provider_numbers,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -3978,6 +3979,7 @@ def load_and_log_configs(
 
         llama_api_IP = config_parser_object.get('Local-API', 'llama_api_IP', fallback='http://127.0.0.1:8080/v1/chat/completions')
         llama_api_key = config_parser_object.get('Local-API', 'llama_api_key', fallback='')
+        llama_model = config_parser_object.get('Local-API', 'llama_model', fallback=None)
         llama_streaming = config_parser_object.get('Local-API', 'llama_streaming', fallback='False')
         llama_temperature = config_parser_object.get('Local-API', 'llama_temperature', fallback='0.7')
         llama_top_p = config_parser_object.get('Local-API', 'llama_top_p', fallback='0.95')
@@ -4317,14 +4319,24 @@ def load_and_log_configs(
         chat_dict_replacement_strategy = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_replacement_strategy', fallback='character_lore_first')
         chat_dict_max_tokens = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_max_tokens', fallback='1000')
         default_rag_prompt = config_parser_object.get('Chat-Dictionaries', 'default_rag_prompt', fallback='')
-        rag_default_llm_provider = env.get("RAG_DEFAULT_LLM_PROVIDER") or (
+        configured_rag_provider = (
             config_parser_object.get('RAG', 'default_llm_provider', fallback=None)
             if config_parser_object.has_section('RAG') else None
         )
+        rag_default_llm_provider = env.get("RAG_DEFAULT_LLM_PROVIDER") or configured_rag_provider
         rag_default_llm_model = env.get("RAG_DEFAULT_LLM_MODEL") or (
             config_parser_object.get('RAG', 'default_llm_model', fallback=None)
             if config_parser_object.has_section('RAG') else None
         )
+        if (
+            env.get("RAG_DEFAULT_LLM_PROVIDER")
+            and not env.get("RAG_DEFAULT_LLM_MODEL")
+            and canonical_provider_name(str(configured_rag_provider or "").strip() or default_api)
+            != canonical_provider_name(rag_default_llm_provider)
+        ):
+            # Preserve model/provider provenance before environment merging loses it.
+            # Generation resolves the selected provider's own configured model.
+            rag_default_llm_model = None
 
         # Auto-Save Values
         save_character_chats = config_parser_object.get('Auto-Save', 'save_character_chats', fallback='False')
@@ -5137,6 +5149,7 @@ def load_and_log_configs(
             'llama_api': {
                 'api_ip': llama_api_IP,
                 'api_key': llama_api_key,
+                'model': llama_model,
                 'streaming': llama_streaming,
                 'temperature': llama_temperature,
                 'top_p': llama_top_p,

@@ -27,7 +27,8 @@ def _assert_warning_logs_are_sanitized(logger: _RecordingLogger):
     for args, kwargs in logger.warning_calls:
         assert not kwargs.get("exc_info")
         rendered = " ".join(str(arg) for arg in args)
-        assert "/tmp/source" not in rendered
+        # A synthetic path is used only to assert log redaction.
+        assert "/tmp/source" not in rendered  # nosec B108
         assert "token=secret" not in rendered
 
 
@@ -161,6 +162,33 @@ async def test_guard_blocks_when_quota_exceeded(_pool, _check, _mode):
     assert "storage_quota_exceeded" in str(exc_info.value.detail)
 
 
+@pytest.mark.asyncio
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.is_single_user_profile_mode",
+    return_value=False,
+)
+@patch(
+    "tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo.AuthnzStorageQuotasRepo.check_quota_status",
+    new_callable=AsyncMock,
+    side_effect=ConnectionError("private backend detail"),
+)
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.get_db_pool",
+    new_callable=AsyncMock,
+    return_value=MagicMock(),
+)
+async def test_guard_reports_repository_outage_as_503(_pool, _check, _mode, monkeypatch):
+    monkeypatch.setenv("STORAGE_QUOTA_FAIL_OPEN", "0")
+    with pytest.raises(HTTPException) as exc_info:
+        await guard_storage_quota(
+            request=_fake_request(org_id=10),
+            response=_fake_response(),
+            current_user=_fake_user(user_id=1, org_ids=[10]),
+        )
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Storage quota check unavailable"
+
+
 # ---------------------------------------------------------------------------
 # Soft limit → warning header
 # ---------------------------------------------------------------------------
@@ -220,8 +248,9 @@ async def test_guard_sets_warning_header_at_soft_limit(_pool, _check, _mode):
     new_callable=AsyncMock,
     return_value=MagicMock(),
 )
-async def test_guard_fails_open_on_error(_pool, _check, _mode):
+async def test_guard_fails_open_on_error(_pool, _check, _mode, monkeypatch):
     """When the quota check itself fails, the request is allowed (fail-open)."""
+    monkeypatch.setenv("STORAGE_QUOTA_FAIL_OPEN", "1")
     result = await guard_storage_quota(
         request=_fake_request(org_id=10),
         response=_fake_response(),
@@ -247,6 +276,7 @@ async def test_guard_fails_open_on_error(_pool, _check, _mode):
 )
 async def test_guard_fail_open_log_is_sanitized(_pool, _check, _mode, monkeypatch):
     """Quota backend failures are swallowed without logging raw backend details."""
+    monkeypatch.setenv("STORAGE_QUOTA_FAIL_OPEN", "1")
     recording_logger = _RecordingLogger()
     monkeypatch.setattr(quota_guard_mod, "logger", recording_logger)
 
@@ -257,6 +287,39 @@ async def test_guard_fail_open_log_is_sanitized(_pool, _check, _mode, monkeypatc
     )
 
     assert result is None
+    _assert_warning_logs_are_sanitized(recording_logger)
+
+
+@pytest.mark.asyncio
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.is_single_user_profile_mode",
+    return_value=False,
+)
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.check_storage_quota",
+    new_callable=AsyncMock,
+    side_effect=ConnectionError("db unavailable /tmp/source token=secret"),
+)
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.get_db_pool",
+    new_callable=AsyncMock,
+    return_value=MagicMock(),
+)
+async def test_guard_fails_closed_by_default_on_backend_error(_pool, _check, _mode, monkeypatch):
+    """A quota outage must not permit writes unless fail-open is explicitly set."""
+    monkeypatch.setenv("STORAGE_QUOTA_FAIL_OPEN", "0")
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(quota_guard_mod, "logger", recording_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await guard_storage_quota(
+            request=_fake_request(org_id=10),
+            response=_fake_response(),
+            current_user=_fake_user(user_id=1, org_ids=[10]),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Storage quota check unavailable"
     _assert_warning_logs_are_sanitized(recording_logger)
 
 

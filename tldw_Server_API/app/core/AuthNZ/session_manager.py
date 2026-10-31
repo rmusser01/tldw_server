@@ -28,7 +28,7 @@ import time
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from jose import jwt as jose_jwt
@@ -44,7 +44,10 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import (
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseError,
+    DatabaseLockError,
     InvalidSessionError,
     SessionError,
     SessionRevokedException,
@@ -454,7 +457,29 @@ class SessionManager:
         return key_bytes
 
     def _derive_secret_key_candidates(self) -> list[bytes]:
-        """Derive deterministic Fernet keys from configured secret material."""
+        """Derive deterministic Fernet keys from configured secret material.
+
+        Current keys come from crypto_utils.derive_hmac_key_candidates, the one
+        AuthNZ KDF, so source selection, salting and the production guard cannot
+        drift from JWT/API-key/CSRF. The older session-only derivation (static salt,
+        600k rounds, raw SINGLE_USER_API_KEY) follows as trailing rotation candidates
+        so sessions encrypted before the switch still decrypt.
+        """
+        try:
+            canonical = derive_hmac_key_candidates(self.settings)
+        except ValueError as exc:
+            # No configured secret: the derived keys are only a fallback here, so
+            # defer to the persisted/generated key and the not-configured error.
+            logger.debug(f"Session key: no canonical derived candidates: {exc}")
+            canonical = []
+        derived_keys = [base64.urlsafe_b64encode(key) for key in canonical]
+        for key_material in self._derive_legacy_secret_key_candidates():
+            if key_material not in derived_keys:
+                derived_keys.append(key_material)
+        return derived_keys
+
+    def _derive_legacy_secret_key_candidates(self) -> list[bytes]:
+        """Pre-TASK-13325 session key derivation, kept for decrypting old sessions only."""
         secrets_order: list[Optional[str | bytes]] = []
 
         def _add_secret(value: Optional[str | bytes]) -> None:
@@ -927,7 +952,7 @@ class SessionManager:
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to decode stored session token: {e}")
             log_counter("session_token_decode_error")
-            raise InvalidSessionError("Failed to decrypt session token") from e
+            raise InvalidSessionError() from e
 
         last_error: Optional[Exception] = None
         num_candidates = len(self._fernet_candidates or [])
@@ -941,7 +966,7 @@ class SessionManager:
                     log_counter("session_decrypt_secondary_key_used")
                     logger.info(f"Session token decrypted with secondary key candidate {idx}")
                 return decrypted.decode('utf-8')
-            except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            except (InvalidToken, *_SESSION_MANAGER_NONCRITICAL_EXCEPTIONS) as exc:
                 last_error = exc
                 errors_by_candidate.append(f"candidate[{idx}]: {type(exc).__name__}")
                 logger.debug(f"Session token decryption failed with candidate {idx}: {exc}")
@@ -953,7 +978,7 @@ class SessionManager:
             f"Failed to decrypt token after examining {num_candidates} key candidates. "
             f"Errors: {', '.join(errors_by_candidate)}"
         )
-        raise InvalidSessionError("Failed to decrypt session token") from last_error
+        raise InvalidSessionError() from last_error
 
     @staticmethod
     def _extract_token_metadata(token: Optional[str]) -> tuple[Optional[str], Optional[datetime]]:
@@ -1407,6 +1432,7 @@ class SessionManager:
                 datetime.now(timezone.utc) + timedelta(days=self.settings.REFRESH_TOKEN_EXPIRE_DAYS)
             )
 
+        tokens_updated = False
         try:
             db_pool = await self._ensure_db_pool()
             repo = AuthnzSessionsRepo(db_pool)
@@ -1467,6 +1493,7 @@ class SessionManager:
             if not updated:
                 # Compare-and-swap failed: session was refreshed/revoked/expired concurrently.
                 raise InvalidSessionError()
+            tokens_updated = True
 
             # Update cache
             if self.redis_client:
@@ -1494,6 +1521,12 @@ class SessionManager:
         except InvalidSessionError:
             raise
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
+            # Only known failures before the atomic update completed are safe to retry.
+            # Cache/acknowledgement failures must not imply that the old token is usable.
+            if not tokens_updated and isinstance(
+                e, (DatabaseLockError, ConnectionPoolExhaustedError, DatabaseConcurrencyConflict)
+            ):
+                raise
             logger.error(f"Failed to refresh session: {e}")
             raise SessionError(f"Failed to refresh session: {e}") from e
 
@@ -1561,13 +1594,16 @@ class SessionManager:
             logger.error(f"Failed to update session tokens: {e}")
             raise SessionError(f"Failed to update session tokens: {e}") from e
 
-    async def is_token_blacklisted(self, token: str, jti: Optional[str] = None) -> bool:
+    async def is_token_blacklisted(
+        self, token: str, jti: Optional[str] = None, *, strict: bool = False
+    ) -> bool:
         """
         Check if a token has been blacklisted/revoked
 
         Args:
             token: JWT token to check
             jti: Optional JWT ID (if already parsed by caller)
+            strict: Propagate storage failures so refresh can distinguish them from revocation.
 
         Returns:
             True if token is blacklisted, False otherwise
@@ -1599,9 +1635,11 @@ class SessionManager:
             # Consult shared token blacklist (fail-closed on error)
             try:
                 blacklist = get_token_blacklist()
-                if await blacklist.is_blacklisted(jti_value):
+                if await blacklist.is_blacklisted(jti_value, strict=strict):
                     return True
             except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+                if strict:
+                    raise
                 logger.error(f"Token blacklist check failed; treating token as revoked: {exc}")
                 return True
 
@@ -1622,6 +1660,8 @@ class SessionManager:
             return bool(await repo.has_revoked_session_for_token_hash_candidates(token_hashes))
 
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
+            if strict:
+                raise
             logger.error(f"Error checking token blacklist; treating token as revoked: {e}")
             return True
 

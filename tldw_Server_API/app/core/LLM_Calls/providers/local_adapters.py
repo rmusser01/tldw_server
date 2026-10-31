@@ -471,6 +471,9 @@ def _chat_with_openai_compatible_local_server(
                         response_obj = response
                         response.raise_for_status()
                         logging.debug("{}: Streaming response received", safe_provider_name)
+                        # Own loop (TASK-13373): stops reading at DONE or an error event and
+                        # defers the error frame and terminal DONE until the response context
+                        # exits; the shared SSE helpers keep reading and emit inline.
                         for line in response.iter_lines():
                             if not line:
                                 continue

@@ -122,6 +122,8 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "workspace_file_inventory_jobs_task",
     "writing_annotation_review_jobs_task",
     "shared_workspace_clone_jobs_task",
+    "notes_graph_suggestions_jobs_task",
+    "notes_graph_suggestions_maintenance_task",
 }
 
 TASK6_BACKGROUND_SPEC_NAMES = {
@@ -149,6 +151,7 @@ TASK7_SERVICE_TAIL_SPEC_NAMES = {
     "loop_lag_task",
     "jobs_metrics_reconcile_task",
     "jobs_crypto_rotate_task",
+    "admin_webhook_delivery_runtime_task",
     "jobs_webhooks_task",
     "meetings_webhook_dlq_task",
     "workflows_dlq_task",

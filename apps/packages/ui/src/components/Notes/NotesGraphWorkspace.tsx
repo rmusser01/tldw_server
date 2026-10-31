@@ -293,44 +293,66 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
           </Tooltip>
         </div>
       ) : null}
-      <NotesGraphToolbar
-        viewMode={viewMode}
-        suggestionsAuthorized={suggestionsAuthorized}
-        search={workspace.search}
-        searchResults={workspace.searchResults}
-        radius={radius}
-        maxNodes={maxNodesInput}
-        maxNodeCap={maxNodeCap}
-        layout={workspace.layout}
-        scope={workspace.scope}
-        allNotes={workspace.allNotes}
-        visibleEdgeTypes={workspace.visibleEdgeTypes}
-        showProvisional={showProvisional}
-        canExpand={workspace.canExpand}
-        isRefreshing={workspace.graphQuery.isFetching}
-        onSearchChange={workspace.setSearch}
-        onViewModeChange={setViewMode}
-        onSelectSearchResult={handleSelectSearchResult}
-        onRadiusChange={setRadius}
-        onMaxNodesChange={setMaxNodesInput}
-        onLayoutChange={workspace.setLayout}
-        onShowFocused={showFocused}
-        onShowAllNotes={workspace.showAllNotes}
-        onToggleEdgeType={workspace.toggleEdgeType}
-        onToggleProvisional={() => setShowProvisional((visible) => !visible)}
-        onFocusCurrent={focusCurrent}
-        onExpand={() => {
-          void workspace.expand()
-        }}
-        onRefresh={() => {
-          void workspace.refresh()
-        }}
-        onZoomIn={() => canvasRef.current?.zoomIn()}
-        onZoomOut={() => canvasRef.current?.zoomOut()}
-        onFit={() => canvasRef.current?.fit()}
-      />
+      {workspace.isPermissionDenied ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-sm">
+          <p role="alert">
+            {t("option:notesSearch.graphPermissionUnavailable", {
+              defaultValue:
+                "Notes graph is unavailable for this account. Ask an administrator for access."
+            })}
+          </p>
+          <button
+            type="button"
+            className="border border-border bg-surface px-3 py-2 text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50"
+            disabled={!isOnline || workspace.graphQuery.isFetching}
+            onClick={() => {
+              void workspace.refresh()
+            }}>
+            {t("option:notesSearch.graphRefresh", {
+              defaultValue: "Refresh graph"
+            })}
+          </button>
+        </div>
+      ) : (
+        <NotesGraphToolbar
+          viewMode={viewMode}
+          suggestionsAuthorized={suggestionsAuthorized}
+          search={workspace.search}
+          searchResults={workspace.searchResults}
+          radius={radius}
+          maxNodes={maxNodesInput}
+          maxNodeCap={maxNodeCap}
+          layout={workspace.layout}
+          scope={workspace.scope}
+          allNotes={workspace.allNotes}
+          visibleEdgeTypes={workspace.visibleEdgeTypes}
+          showProvisional={showProvisional}
+          canExpand={workspace.canExpand}
+          isRefreshing={workspace.graphQuery.isFetching}
+          onSearchChange={workspace.setSearch}
+          onViewModeChange={setViewMode}
+          onSelectSearchResult={handleSelectSearchResult}
+          onRadiusChange={setRadius}
+          onMaxNodesChange={setMaxNodesInput}
+          onLayoutChange={workspace.setLayout}
+          onShowFocused={showFocused}
+          onShowAllNotes={workspace.showAllNotes}
+          onToggleEdgeType={workspace.toggleEdgeType}
+          onToggleProvisional={() => setShowProvisional((visible) => !visible)}
+          onFocusCurrent={focusCurrent}
+          onExpand={() => {
+            void workspace.expand()
+          }}
+          onRefresh={() => {
+            void workspace.refresh()
+          }}
+          onZoomIn={() => canvasRef.current?.zoomIn()}
+          onZoomOut={() => canvasRef.current?.zoomOut()}
+          onFit={() => canvasRef.current?.fit()}
+        />
+      )}
       {disabledReason}
-      {workspace.isOffline ? (
+      {workspace.isOffline && !workspace.isPermissionDenied ? (
         <p
           className="border-b border-border bg-surface px-3 py-2 text-xs text-text-muted"
           data-testid="notes-graph-offline-state"
@@ -360,7 +382,8 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
           })}
         </p>
       ) : null}
-      {workspace.isLoading && !workspace.graph ? (
+      {workspace.isPermissionDenied ? null : workspace.isLoading &&
+        !workspace.graph ? (
         <div
           className="flex flex-1 items-center justify-center text-sm text-text-muted"
           role="status">

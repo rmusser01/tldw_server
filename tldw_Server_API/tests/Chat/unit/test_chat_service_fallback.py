@@ -1022,10 +1022,12 @@ def test_nonstream_visible_content_cannot_mask_reasoning_protocol_strings(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["stop", "length"])
 @pytest.mark.parametrize("reasoning_field", _REASONING_OUTPUT_FIELDS)
 async def test_reasoning_only_real_adapter_boundary_fails_without_side_effects(
     monkeypatch: pytest.MonkeyPatch,
     reasoning_field: str,
+    finish_reason: str,
 ) -> None:
     """A real adapter's hidden-only response fails before success side effects."""
 
@@ -1033,6 +1035,7 @@ async def test_reasoning_only_real_adapter_boundary_fails_without_side_effects(
         reasoning_field,
         _valid_reasoning_value(reasoning_field),
     )
+    response["choices"][0]["finish_reason"] = finish_reason
     transport_calls: list[str] = []
     metrics = _DummyMetrics()
     provider_manager = _DummyProviderManager()
@@ -1077,16 +1080,64 @@ async def test_reasoning_only_real_adapter_boundary_fails_without_side_effects(
     with pytest.raises(SanitizedProviderStreamError) as captured:
         await execute_non_stream_call(**kwargs)
 
-    assert captured.value.code == "provider_unavailable"
+    expected_code = "provider_output_limit" if finish_reason == "length" else "provider_unavailable"
+    assert captured.value.code == expected_code
+    assert captured.value.allow_non_stream_fallback is False
+    assert "provider reasoning" not in str(captured.value)
     assert transport_calls == ["Bearer reasoning-boundary-key"]
     assert provider_manager.success_records == []
-    assert metrics.llm_calls == [
-        ("openai", "gpt-4o", False, "SanitizedProviderStreamError")
-    ]
+    assert metrics.llm_calls == [("openai", "gpt-4o", False, "SanitizedProviderStreamError")]
     mark_used.assert_not_awaited()
     log_usage.assert_not_awaited()
     save_message.assert_not_awaited()
     moderation.check_text.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["top-error", "malformed-message", "nested-error", "framed-reasoning", "missing-reasoning", "multiple-choices"],
+)
+def test_output_limit_does_not_reclassify_invalid_provider_payloads(change: str) -> None:
+    """Output-limit guidance must not replace malformed/error response handling."""
+    response = _reasoning_only_nonstream_response("reasoning_content", "private reasoning")
+    choice = response["choices"][0]
+    choice["finish_reason"] = "length"
+    if change == "top-error":
+        response["error"] = {"message": "provider secret"}
+    elif change == "malformed-message":
+        choice["message"] = []
+    elif change == "nested-error":
+        choice["message"]["reasoning_content"] = {"error": {"code": "provider_unavailable"}}
+    elif change == "framed-reasoning":
+        choice["message"]["reasoning_content"] = "data: [DONE]"
+    elif change == "missing-reasoning":
+        choice["message"].pop("reasoning_content")
+    else:
+        response["choices"].append({"message": {}, "finish_reason": "stop"})
+
+    with pytest.raises(SanitizedProviderStreamError) as captured:
+        chat_service._require_usable_nonstream_provider_result(response)
+
+    assert captured.value.code == "provider_unavailable"
+
+
+@pytest.mark.parametrize("content", ["A usable partial answer", None])
+def test_output_limit_preserves_usable_partial_answers_and_tool_calls(content: str | None) -> None:
+    """Length termination may still carry a usable visible answer or tool call."""
+    response = _reasoning_only_nonstream_response("reasoning_content", "private reasoning")
+    choice = response["choices"][0]
+    choice["finish_reason"] = "length"
+    choice["message"]["content"] = content
+    if content is None:
+        choice["message"]["tool_calls"] = [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+
+    assert chat_service._require_usable_nonstream_provider_result(response) is None
 
 
 @pytest.mark.asyncio

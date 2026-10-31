@@ -87,6 +87,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncNotesAttachmentSourceMap,
     SyncObjectState,
     SyncRestoreManifestStats,
+    blob_upload_session_is_expired,
     normalize_sync_timestamp,
     resolve_personal_context_ingress_result_revision,
 )
@@ -1547,6 +1548,44 @@ def _sqlite_path_from_url(database_url: str, default_path: Path) -> Path | str:
     return Path(resolved)
 
 
+def _reject_shared_sync_store_in_multi_user_mode(target: str) -> None:
+    """Refuse a sync store that every account would share.
+
+    Sync v2 isolates accounts by storage location: each user gets their own
+    SQLite file under their database directory. The schema cannot isolate them
+    any other way -- the core tables carry no owner column at all
+    (sync_envelopes, sync_object_state, sync_current_heads, sync_device_cursors,
+    sync_conflicts, sync_attachments, sync_blob_chunks, sync_domain_state), and
+    no query in this module filters on one. Ownership exists only on the
+    periphery: datasets, devices, blobs.
+
+    SYNC_V2_DATABASE_URL and SYNC_V2_SQLITE_PATH both override that location
+    with a single fixed target and drop the user id, so in multi-user mode every
+    account's synced content -- notes, chat messages, attachments -- lands in one
+    store with no way to tell it apart afterwards.
+
+    Adding predicates would not fix it; the columns to filter on do not exist.
+    So this refuses the configuration rather than silently commingling. Single-
+    user mode is unaffected: there is only one account to isolate.
+    """
+    from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_mode
+
+    try:
+        single_user = is_single_user_mode()
+    except Exception:  # noqa: BLE001 - treat an unknown auth mode as multi-user
+        single_user = False
+    if single_user:
+        return
+    raise SyncStoreError(
+        "Sync v2 is configured with a shared store "
+        f"({target!r}) while running in multi-user mode. Sync isolates accounts "
+        "by storage location and its core tables carry no owner column, so a "
+        "shared store would commingle every account's synced content with no "
+        "way to separate it. Unset SYNC_V2_DATABASE_URL and SYNC_V2_SQLITE_PATH "
+        "to use the per-user database directory."
+    )
+
+
 def _default_sync_db_path(user_id: int | str | None) -> Path:
     user_dir = DatabasePaths.get_user_base_directory(user_id)
     return user_dir / SYNC_DB_FILENAME
@@ -2437,6 +2476,9 @@ class SyncDatabase:
         default_path = _default_sync_db_path(user_id)
         custom_url = os.getenv("SYNC_V2_DATABASE_URL", "").strip()
         custom_path = sqlite_path or os.getenv("SYNC_V2_SQLITE_PATH", "").strip()
+
+        if user_id is not None and (custom_url or custom_path):
+            _reject_shared_sync_store_in_multi_user_mode(custom_url or str(custom_path))
 
         if custom_url:
             parsed = urlparse(custom_url)
@@ -10388,11 +10430,11 @@ class SyncDatabase:
                    AND resolution_action = ?
                    AND (
                         resolved_by_device_id = ?
-                        OR (resolved_by_device_id IS NULL AND ? IS NULL)
+                        OR (resolved_by_device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                    )
                    AND (
                         resolution_notes = ?
-                        OR (resolution_notes IS NULL AND ? IS NULL)
+                        OR (resolution_notes IS NULL AND CAST(? AS TEXT) IS NULL)
                    )
                 """,
                 (
@@ -11847,7 +11889,7 @@ class SyncDatabase:
                            AND owner_user_id = ?
                            AND (
                                 device_id = ?
-                                OR (device_id IS NULL AND ? IS NULL)
+                                OR (device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                            )
                            AND idempotency_key = ?
                         """,
@@ -11969,6 +12011,83 @@ class SyncDatabase:
                 connection=conn,
             )
 
+    def expire_blob_upload_sessions(
+        self,
+        *,
+        dataset_id: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """Mark timed-out upload sessions expired, releasing slot and reserved quota.
+
+        Nothing reaped these before. Sessions are capped at max_active_blob_uploads and
+        the upload_id is minted server-side and never returned to the client, so the
+        cancel endpoint could not reach an orphan: eight transient failures permanently
+        disabled attachment upload for that user with no self-service recovery.
+
+        Expiry is compared in Python because expires_at is TEXT on SQLite and TIMESTAMPTZ
+        on PostgreSQL. Rows with no expires_at are left alone -- they predate the TTL and
+        releasing them here would be a silent change of meaning, not a repair.
+
+        Returns the expired upload_ids so the caller can discard their staged chunks.
+        """
+
+        now = _parse_iso_datetime(utcnow_iso())
+        now_iso = utcnow_iso()
+        if dataset_id is None:
+            rows = self.execute(
+                """
+                SELECT upload_id, expires_at
+                  FROM sync_blob_upload_sessions
+                 WHERE status IN ('created', 'uploading')
+                """,
+            )
+        else:
+            rows = self.execute(
+                """
+                SELECT upload_id, expires_at
+                  FROM sync_blob_upload_sessions
+                 WHERE status IN ('created', 'uploading')
+                   AND dataset_id = ?
+                """,
+                (dataset_id,),
+            )
+
+        stale: list[str] = []
+        for row in rows or ():
+            raw = _timestamp_to_string(row.get("expires_at"))
+            if not raw:
+                continue
+            try:
+                if _parse_iso_datetime(raw) > now:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            stale.append(str(row["upload_id"]))
+            if len(stale) >= limit:
+                break
+
+        if not stale:
+            return []
+
+        expired: list[str] = []
+        with self.backend.transaction() as conn:
+            for upload_id in stale:
+                updated = self.execute(
+                    """
+                    UPDATE sync_blob_upload_sessions
+                       SET status = ?, updated_at = ?
+                     WHERE upload_id = ?
+                       AND status IN ('created', 'uploading')
+                    """,
+                    ("expired", now_iso, upload_id),
+                    connection=conn,
+                )
+                # A session completed or cancelled since the SELECT is not ours to
+                # discard.
+                if updated.rowcount == 1:
+                    expired.append(upload_id)
+        return expired
+
     def get_blob_chunk(
         self,
         upload_id: str,
@@ -12014,6 +12133,12 @@ class SyncDatabase:
             )
             if session["status"] not in {"created", "uploading"}:
                 raise SyncStoreError("Sync blob upload session is not accepting chunks")
+            if blob_upload_session_is_expired(session["expires_at"], now=now):
+                # Releasing the reservation at read time is only sound if the session is
+                # also closed to writes. Otherwise a client could let a session expire --
+                # freeing its budget for another upload -- then resume it and exceed the
+                # quota. See TASK-13321.
+                raise SyncStoreError("Sync blob upload session has expired")
             if chunk.chunk_index < 0 or chunk.chunk_index >= int(session["chunk_count"]):
                 raise SyncStoreError("Sync blob chunk index is outside the upload session")
             expected_offset = int(session["chunk_size"]) * chunk.chunk_index
@@ -12148,6 +12273,13 @@ class SyncDatabase:
                 raise SyncDatasetNotFoundError(f"Sync dataset not found: {blob.dataset_id}")
             session = self._find_active_blob_session_for_blob(blob, connection=conn)
             if session is not None:
+                if blob_upload_session_is_expired(session["expires_at"], now=now):
+                    # summarize_blob_quota stops counting this session's reservation
+                    # at its deadline, so another upload may already have taken that
+                    # allowance. Committing it now would push committed usage past the
+                    # quota -- completion must honour the deadline exactly as chunk
+                    # writes do. See TASK-13321.
+                    raise SyncStoreError("Sync blob upload session has expired")
                 uploaded_chunks = self._blob_chunk_indexes(
                     session["upload_id"],
                     connection=conn,
@@ -12281,11 +12413,11 @@ class SyncDatabase:
                       FROM sync_blob_objects
                      WHERE dataset_id = ?
                        AND (? = 1 OR status = 'available')
-                       AND (? IS NULL OR owner_user_id = ?)
-                       AND (? IS NULL OR blob_id = ?)
-                       AND (? IS NULL OR payload_hash = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR owner_user_id = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR blob_id = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR payload_hash = ?)
                        AND (
-                            ? IS NULL
+                            CAST(? AS TEXT) IS NULL
                             OR attachment_id = ?
                             OR payload_hash IN (
                                 SELECT payload_hash
@@ -12374,7 +12506,7 @@ class SyncDatabase:
             SELECT *
               FROM sync_blob_objects
              WHERE dataset_id = ?
-               AND (? IS NULL OR status = ?)
+               AND (CAST(? AS TEXT) IS NULL OR status = ?)
              ORDER BY updated_at ASC, blob_id ASC
             """,
             (dataset_id, status, status),
@@ -12595,8 +12727,14 @@ class SyncDatabase:
         *,
         dataset_id: str | None = None,
     ) -> SyncBlobQuotaUsage:
-        """Return committed and pending blob quota usage for one user."""
+        """Return committed and pending blob quota usage for one user.
 
+        Expired upload sessions are excluded, so a client that abandoned an upload stops
+        paying for it without any reaper having run. See TASK-13321.
+        """
+
+        # One timestamp for both branches, so a quota answer cannot straddle two instants.
+        quota_as_of = utcnow_iso()
         if dataset_id is None:
             reserved_row = _first(
                 self.execute(
@@ -12606,8 +12744,9 @@ class SyncDatabase:
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND status IN ('created', 'uploading')
+                       AND (expires_at IS NULL OR expires_at > ?)
                     """,
-                    (owner_user_id,),
+                    (owner_user_id, quota_as_of),
                 )
             )
             used_row = _first(
@@ -12631,8 +12770,9 @@ class SyncDatabase:
                      WHERE owner_user_id = ?
                        AND dataset_id = ?
                        AND status IN ('created', 'uploading')
+                       AND (expires_at IS NULL OR expires_at > ?)
                     """,
-                    (owner_user_id, dataset_id),
+                    (owner_user_id, dataset_id, quota_as_of),
                 )
             )
             used_row = _first(

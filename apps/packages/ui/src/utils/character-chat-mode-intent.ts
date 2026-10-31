@@ -66,3 +66,23 @@ export const dispatchCharacterChatModeIntent = (
     )
   )
 }
+
+// Accepted local actions retire their captured route before asynchronous routing.
+export const CHAT_ROUTE_REPLACEMENT_EVENT = "tldw:chat-route-replacement"
+export type ChatRouteReplacementDetail = {
+  href: string
+  serverChatId: string | null
+  historyId: string | null
+  restoreRevision: number
+  // Undefined means the clear action owns navigation; null is a neutral assistant.
+  characterId?: string | null
+  nextChatId?: string | null
+}
+export const dispatchChatRouteReplacement = (
+  owner: Omit<ChatRouteReplacementDetail, "href">
+) => {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new CustomEvent<ChatRouteReplacementDetail>(
+    CHAT_ROUTE_REPLACEMENT_EVENT, { detail: { ...owner, href: window.location.href } }
+  ))
+}

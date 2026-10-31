@@ -391,7 +391,7 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
       >
         {status === "success" &&
           t("settings:manageCharacters.aria.searchResults", {
-            defaultValue: "{{count}} characters found",
+            defaultValue: "{count, plural, one {# character found} other {# characters found}}",
             count: totalCharacters
           })}
       </div>

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 # Stub heavy modules before importing the full app
 if "torch" not in sys.modules:
@@ -150,7 +151,7 @@ def _media_db_dependency_calls(
     paths: set[str],
 ) -> set[Callable[..., object]]:
     calls: set[Callable[..., object]] = set()
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         if getattr(route, "path", None) not in paths:
             continue
         dependant = getattr(route, "dependant", None)

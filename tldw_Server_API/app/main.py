@@ -83,6 +83,7 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     ensure_chacha_rls,
     ensure_prompt_studio_rls,
@@ -1296,29 +1297,33 @@ async def lifespan(app: FastAPI):
 
     _run_startup_config_validation()
 
-    yield
-    from tldw_Server_API.app.services.lifespan_shutdown_sequence import (
-        run_lifespan_shutdown_sequence,
-    )
+    try:
+        yield
+    finally:
+        # Forced ASGI shutdown cancels this suspended lifespan. Owned workers
+        # still need teardown before cancellation can leave the application.
+        from tldw_Server_API.app.services.lifespan_shutdown_sequence import (
+            run_lifespan_shutdown_sequence,
+        )
 
-    await run_lifespan_shutdown_sequence(
-        app=app,
-        worker_runtime=worker_runtime,
-        readiness_state=READINESS_STATE,
-        db_pool=locals().get("db_pool"),
-        session_manager=locals().get("session_manager"),
-        heavy_startup_handles=locals().get("heavy_startup_handles"),
-        build_legacy_shutdown_context=_build_legacy_shutdown_context,
-        apply_shutdown_transition_gate=_apply_shutdown_transition_gate,
-        quiesce_owned_job_pollers_for_shutdown=_quiesce_owned_job_pollers_for_shutdown,
-        run_coordinated_shutdown=_run_coordinated_shutdown,
-        startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
-        import_exceptions=_IMPORT_EXCEPTIONS,
-        in_pytest_runtime=_shared_is_explicit_pytest_runtime(),
-        test_db_instance_ref=test_db_instance_ref,
-        timed_shutdown_segment=_timed_shutdown_segment,
-        record_shutdown_timing_total=_record_shutdown_timing_total,
-    )
+        await run_lifespan_shutdown_sequence(
+            app=app,
+            worker_runtime=worker_runtime,
+            readiness_state=READINESS_STATE,
+            db_pool=db_pool,
+            session_manager=session_manager,
+            heavy_startup_handles=heavy_startup_handles,
+            build_legacy_shutdown_context=_build_legacy_shutdown_context,
+            apply_shutdown_transition_gate=_apply_shutdown_transition_gate,
+            quiesce_owned_job_pollers_for_shutdown=_quiesce_owned_job_pollers_for_shutdown,
+            run_coordinated_shutdown=_run_coordinated_shutdown,
+            startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
+            import_exceptions=_IMPORT_EXCEPTIONS,
+            in_pytest_runtime=_shared_is_explicit_pytest_runtime(),
+            test_db_instance_ref=test_db_instance_ref,
+            timed_shutdown_segment=_timed_shutdown_segment,
+            record_shutdown_timing_total=_record_shutdown_timing_total,
+        )
 
 
 #
@@ -1760,7 +1765,7 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.42",
+    version="0.1.46",
     description=APP_DESCRIPTION,
     terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
@@ -1786,19 +1791,21 @@ _startup_trace("FastAPI app created")
 def _iter_route_method_pairs(app: FastAPI) -> list[tuple[str, str, str]]:
     """Return explicit route method/path pairs for duplicate detection."""
     rows: list[tuple[str, str, str]] = []
-    for route in getattr(app, "routes", []):
-        if not isinstance(route, APIRoute):
+    # Served routes: under FastAPI >= 0.137 app.routes holds one _IncludedRouter per
+    # include_router, so a direct walk would check only the top-level routes.
+    for route in iter_served_routes(getattr(app, "routes", [])):
+        if not isinstance(route.route, APIRoute):
             continue
-        path = str(getattr(route, "path", "") or "")
+        path = route.path
         if not path:
             continue
-        methods = set(getattr(route, "methods", set()) or set())
+        methods = set(route.methods)
         for method in sorted(methods):
             method_upper = str(method).upper()
             # Ignore framework-generated methods to keep duplicate checks focused.
             if method_upper in {"HEAD", "OPTIONS"}:
                 continue
-            rows.append((path, method_upper, str(getattr(route, "name", "<unnamed>"))))
+            rows.append((path, method_upper, str(route.name or "<unnamed>")))
     return rows
 
 
@@ -2060,7 +2067,7 @@ try:
     from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag  # noqa: E402
 
     try:
-        _rg_global_enabled = bool(_rg_enabled_flag(False))
+        _rg_global_enabled = bool(_rg_enabled_flag(True))
     except _STARTUP_GUARD_EXCEPTIONS:
         _rg_global_enabled = False
 
@@ -2580,6 +2587,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Security middleware (headers + request size limit)
 from tldw_Server_API.app.core.AuthNZ.usage_logging_middleware import UsageLoggingMiddleware
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware
 from tldw_Server_API.app.core.Sandbox.middleware import SandboxArtifactTraversalGuardMiddleware
 from tldw_Server_API.app.core.Security.drain_gate_middleware import DrainGateMiddleware
@@ -2779,6 +2787,7 @@ else:
 
 # Request ID context should be available before the drain gate, and the drain gate
 # should reject work before the LLM budget middleware gets a chance to do heavier setup.
+app.add_middleware(ChaChaOperationMiddleware)
 app.add_middleware(DrainGateMiddleware)
 app.add_middleware(RequestIDMiddleware)
 

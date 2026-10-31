@@ -434,7 +434,6 @@ class TTSAdapter(ABC):
     async def convert_audio_format(
         self,
         audio_data: np.ndarray,
-        source_format: AudioFormat,
         target_format: AudioFormat,
         sample_rate: int = 24000
     ) -> bytes:
@@ -443,7 +442,6 @@ class TTSAdapter(ABC):
 
         Args:
             audio_data: Audio data as numpy array
-            source_format: Source audio format
             target_format: Target audio format
             sample_rate: Sample rate of the audio
 

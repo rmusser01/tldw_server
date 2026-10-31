@@ -12,6 +12,7 @@ import { ReviewItemDetail } from "./ReviewItemDetail"
 import { ReviewQueueList } from "./ReviewQueueList"
 import { ReviewQueueToolbar } from "./ReviewQueueToolbar"
 import { ReviewStatePanels } from "./ReviewStatePanels"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type ModerationReviewShellProps = {
   compact?: boolean
@@ -46,20 +47,6 @@ const backendStatusCopy = (online: boolean, uxState: string) => {
   }
 }
 
-const shouldIgnoreShortcut = (target: EventTarget | null) => {
-  const element = target as HTMLElement | null
-  if (!element) {
-    return false
-  }
-  const tagName = element.tagName.toLowerCase()
-  return (
-    tagName === "input" ||
-    tagName === "textarea" ||
-    tagName === "select" ||
-    element.isContentEditable
-  )
-}
-
 export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
   compact = false
 }) => {
@@ -83,7 +70,7 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
       if (event.metaKey || event.ctrlKey || event.altKey) {
         return
       }
-      if (shouldIgnoreShortcut(event.target)) {
+      if (isEditableTarget(event.target)) {
         return
       }
       if (event.key === "n" || event.key === "ArrowDown") {

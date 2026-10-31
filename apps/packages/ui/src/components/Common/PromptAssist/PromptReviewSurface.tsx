@@ -204,6 +204,7 @@ export function PromptReviewSurface({
           </button>
         </div>
         <div
+          role="group"
           id={viewPanelId}
           aria-labelledby={
             activeTab === "edit" ? editButtonId : changesButtonId

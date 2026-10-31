@@ -1,4 +1,7 @@
 {
+  "chat_restoreFailed": {
+    "message": "Could not restore your saved chat. Retry to load it."
+  },
   "tooltip_embed": {
     "message": "It may take a few minutes to embed the page. Please wait..."
   },

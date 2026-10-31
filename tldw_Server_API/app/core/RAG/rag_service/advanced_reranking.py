@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from fnmatch import fnmatch
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -146,11 +147,27 @@ def _load_cross_encoder_model_from_config() -> Optional[str]:
     return None
 
 
+# Reranker models are hundreds of MB of weights; build each one once per process,
+# keyed on every input that changes what gets loaded. Exceptions are not cached,
+# so a failed load is retried on the next request.
+# ponytail: small fixed LRU bound, no per-entry memory accounting
+_RERANKER_MODEL_CACHE_SIZE = 4
+
+
+@lru_cache(maxsize=_RERANKER_MODEL_CACHE_SIZE)
+def _load_flashrank_ranker(model_name: str, cache_dir: str) -> Any:
+    """Load (once per process) a FlashRank ranker."""
+    from flashrank import Ranker
+
+    return Ranker(model_name=model_name, cache_dir=cache_dir)
+
+
+@lru_cache(maxsize=_RERANKER_MODEL_CACHE_SIZE)
 def _load_preinstalled_flashrank_ranker(
     *,
     model_name: str,
     model_dir: Path,
-    required_files: Iterable[str],
+    required_files: tuple[str, ...],
 ) -> Any:
     """Load FlashRank from one verified local bundle without download fallback."""
     from flashrank import Ranker
@@ -449,7 +466,7 @@ class FlashRankReranker(BaseReranker):
             self._ranker = _load_preinstalled_flashrank_ranker(
                 model_name=config.model_name,
                 model_dir=resolved_model_dir,
-                required_files=required_local_files,
+                required_files=tuple(sorted(required_local_files)),
             )
             return
         default_model_name, default_cache_dir = _load_flashrank_defaults_from_config()
@@ -457,7 +474,6 @@ class FlashRankReranker(BaseReranker):
         self._flashrank_cache_dir = _resolve_flashrank_cache_dir(None)
 
         try:
-            from flashrank import Ranker
             configured_model = (
                 config.model_name
                 or default_model_name
@@ -466,10 +482,7 @@ class FlashRankReranker(BaseReranker):
             resolved_cache_dir = _resolve_flashrank_cache_dir(configured_cache)
             os.makedirs(resolved_cache_dir, exist_ok=True)
 
-            self._ranker = Ranker(
-                model_name=str(configured_model),
-                cache_dir=resolved_cache_dir
-            )
+            self._ranker = _load_flashrank_ranker(str(configured_model), resolved_cache_dir)
             self._flashrank_model_name = str(configured_model)
             self._flashrank_cache_dir = resolved_cache_dir
             logger.info(
@@ -821,6 +834,57 @@ class LlamaCppReranker(BaseReranker):
         return arrays if arrays else None
 
 
+@lru_cache(maxsize=_RERANKER_MODEL_CACHE_SIZE)
+def _load_cross_encoder_model(
+    model_id: str,
+    device: str,
+    revision: Optional[str],
+    local_files_only: bool,
+    trust_remote_code: bool,
+) -> tuple[Any, Any, Any, Any]:
+    """Load (once per process) a cross-encoder.
+
+    Returns ``(cross_encoder, None, None, None)`` when sentence-transformers loaded it,
+    else ``(None, tokenizer, model, torch)`` from the raw transformers fallback.
+    """
+    # Prefer sentence-transformers CrossEncoder if available
+    try:
+        from sentence_transformers import CrossEncoder
+
+        ce = CrossEncoder(
+            model_id,
+            device=None if device == "auto" else device,
+            trust_remote_code=trust_remote_code,
+            revision=revision,
+            local_files_only=local_files_only,
+        )
+        logger.info(f"Loaded CrossEncoder model via sentence-transformers: {model_id}")
+        return ce, None, None, None
+    except Exception:  # noqa: BLE001 - fallback to transformers
+        pass
+    # Fallback: raw transformers pipeline if provided
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
+        model_id,
+        revision=revision,
+        trust_remote_code=trust_remote_code,
+        local_files_only=local_files_only,
+    )
+    model = AutoModelForSequenceClassification.from_pretrained(  # nosec B615
+        model_id,
+        revision=revision,
+        trust_remote_code=trust_remote_code,
+        local_files_only=local_files_only,
+    )
+    model.eval()
+    if device != "auto":
+        model.to(device)
+    logger.info(f"Loaded cross-encoder model via transformers: {model_id}")
+    return None, tokenizer, model, torch
+
+
 class TransformersCrossEncoderReranker(BaseReranker):
     """Cross-encoder reranking using HuggingFace/Sentence-Transformers models.
 
@@ -863,41 +927,20 @@ class TransformersCrossEncoderReranker(BaseReranker):
 
         if model_id:
             try:
-                # Prefer sentence-transformers CrossEncoder if available
-                try:
-                    from sentence_transformers import CrossEncoder
-
-                    self._ce = CrossEncoder(
-                        model_id,
-                        device=None if self._device == "auto" else self._device,
-                        trust_remote_code=self._trust_remote_code,
-                        revision=self._hf_revision,
-                        local_files_only=self._local_files_only,
-                    )
+                ce, tokenizer, model, torch_mod = _load_cross_encoder_model(
+                    model_id,
+                    self._device,
+                    self._hf_revision,
+                    self._local_files_only,
+                    self._trust_remote_code,
+                )
+                if ce is not None:
+                    self._ce = ce
                     self._using_st = True
-                    logger.info(f"Loaded CrossEncoder model via sentence-transformers: {model_id}")
-                except Exception:  # noqa: BLE001 - fallback to transformers
-                    # Fallback: raw transformers pipeline if provided
-                    import torch
-                    from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-                    self._tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
-                        model_id,
-                        revision=self._hf_revision,
-                        trust_remote_code=self._trust_remote_code,
-                        local_files_only=self._local_files_only,
-                    )
-                    self._model = AutoModelForSequenceClassification.from_pretrained(  # nosec B615
-                        model_id,
-                        revision=self._hf_revision,
-                        trust_remote_code=self._trust_remote_code,
-                        local_files_only=self._local_files_only,
-                    )
-                    self._model.eval()
-                    self._torch = torch
-                    if self._device != "auto":
-                        self._model.to(self._device)
-                    logger.info(f"Loaded cross-encoder model via transformers: {model_id}")
+                else:
+                    self._tokenizer = tokenizer
+                    self._model = model
+                    self._torch = torch_mod
             except Exception as e:  # noqa: BLE001 - model loading best-effort
                 logger.warning("Failed to load transformers reranker model (error_type={})", type(e).__name__)
 
@@ -1000,6 +1043,45 @@ class TransformersCrossEncoderReranker(BaseReranker):
             ]
 
 
+@lru_cache(maxsize=_RERANKER_MODEL_CACHE_SIZE)
+def _load_qwen3_reranker_model(model_id: str, revision: Optional[str], device: str) -> tuple[Any, Any, Any]:
+    """Load (once per process) the Qwen3 reranker tokenizer and model."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    # Mirror official example behavior
+    tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
+        model_id,
+        revision=revision,
+        padding_side='left',
+    )
+    model = AutoModelForCausalLM.from_pretrained(  # nosec B615
+        model_id,
+        revision=revision,
+    ).eval()
+    # Optional: honor configured device if provided
+    if device != "auto":
+        try:
+            model.to(device)
+        except Exception as device_move_error:  # noqa: BLE001 - device move best-effort
+            logger.debug(
+                "LLM scoring reranker device move failed; keeping default device (error_type={})",
+                type(device_move_error).__name__,
+            )
+    return tokenizer, model, torch
+
+
+def clear_reranker_model_cache() -> None:
+    """Drop every cached reranker model (tests, or to free memory)."""
+    for loader in (
+        _load_flashrank_ranker,
+        _load_preinstalled_flashrank_ranker,
+        _load_cross_encoder_model,
+        _load_qwen3_reranker_model,
+    ):
+        loader.cache_clear()
+
+
 class Qwen3CausalLMReranker(BaseReranker):
     """
     Qwen3 Transformers reranker that follows the official yes/no next-token
@@ -1014,33 +1096,12 @@ class Qwen3CausalLMReranker(BaseReranker):
 
     def __init__(self, config: RerankingConfig):
         super().__init__(config)
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
         model_id = config.model_name or "Qwen/Qwen3-Reranker-8B"
         model_revision = config.hf_revision or os.getenv("RAG_QWEN3_RERANKER_REVISION") or None
-
-        # Mirror official example behavior
-        self.tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
-            model_id,
-            revision=model_revision,
-            padding_side='left',
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(  # nosec B615
-            model_id,
-            revision=model_revision,
-        ).eval()
-        self._torch = torch
-        # Optional: honor configured device if provided
         self._device = (config.transformers_device or "auto").lower()
-        if self._device != "auto":
-            try:
-                self.model.to(self._device)
-            except Exception as device_move_error:  # noqa: BLE001 - device move best-effort
-                logger.debug(
-                    "LLM scoring reranker device move failed; keeping default device (error_type={})",
-                    type(device_move_error).__name__,
-                )
+        self.tokenizer, self.model, self._torch = _load_qwen3_reranker_model(
+            model_id, model_revision, self._device
+        )
 
         # Yes/No token ids
         self.token_false_id = self.tokenizer.convert_tokens_to_ids("no")

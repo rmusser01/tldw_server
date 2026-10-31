@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react'
+import { isEditableTarget } from "@/utils/editable-target"
 
 interface UseCharacterShortcutsOptions {
   /** Whether any modal is currently open */
@@ -76,10 +77,7 @@ export function useCharacterShortcuts(options: UseCharacterShortcutsOptions) {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if user is typing in an input/textarea
       const target = e.target as HTMLElement
-      const isTyping =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
+      const isTyping = isEditableTarget(target)
 
       // Always allow Escape
       if (e.key === 'Escape') {

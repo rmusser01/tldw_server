@@ -53,6 +53,7 @@ from tldw_Server_API.app.services.telegram_delivery_service import TelegramDeliv
 from tldw_Server_API.app.services.telegram_execution_identity_service import (
     get_telegram_execution_identity_service,
 )
+from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc as _coerce_datetime
 
 _PROVIDER = "telegram"
 _DEFAULT_BOT_USERNAME = "example_bot"
@@ -117,24 +118,6 @@ def _collect_scope_ids(values: list[int] | None) -> list[int]:
         except (TypeError, ValueError):
             continue
     return sorted(out)
-
-
-def _coerce_datetime(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    return None
 
 
 async def build_telegram_approval_callback_data(

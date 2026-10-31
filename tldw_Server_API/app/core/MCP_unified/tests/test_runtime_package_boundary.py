@@ -377,8 +377,18 @@ def _sdist_project_members(sdist_members: set[str]) -> set[str]:
 def standalone_distributions(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, Path]:
-    """Build standalone artifacts once for distribution metadata tests."""
+    """Build standalone artifacts once for distribution metadata tests.
 
+    The same environment guard the one direct caller of the build already used. Without
+    it, every test depending on this fixture ERRORed rather than skipped whenever the
+    build-system requirements were unresolvable -- e.g. a venv where setuptools is
+    importable but has no dist-info metadata, which makes `python -m build` fail with
+    "Backend 'setuptools.build_meta' is not available" under the PIP_NO_INDEX=1 and
+    --no-build-isolation this smoke uses. An unrunnable environment must skip; only a
+    real regression should fail. See TASK-13291.
+    """
+
+    _require_offline_build_tools()
     return _build_standalone_distributions(
         tmp_path_factory.mktemp("mcp_unified_distribution")
     )
@@ -586,13 +596,19 @@ def test_mcp_unified_publish_metadata_is_ready_for_public_alpha() -> None:
 
 
 def test_mcp_unified_package_license_file_is_local_to_project() -> None:
-    """Standalone artifacts should include a package-local license file."""
+    """Standalone artifacts ship the verbatim GPL-3.0-only text as their licence file.
 
-    root_license = REPO_ROOT / "LICENSE"
+    Compared against LICENSES/GPL-3.0-only.txt, not the root LICENSE. The root file is
+    the repository's multi-licence scope map (it places apps/mcp-unified under
+    GPL-3.0-only as unlisted material), not a licence text, so byte-equality with it
+    could never hold once the scope map was introduced.
+    """
 
-    assert root_license.is_file()  # nosec B101
+    canonical = REPO_ROOT / "LICENSES" / "GPL-3.0-only.txt"
+
+    assert canonical.is_file()  # nosec B101
     assert PACKAGE_LICENSE.is_file()  # nosec B101
-    assert PACKAGE_LICENSE.read_text(encoding="utf-8") == root_license.read_text(encoding="utf-8")  # nosec B101
+    assert PACKAGE_LICENSE.read_text(encoding="utf-8") == canonical.read_text(encoding="utf-8")  # nosec B101
 
 
 def test_mcp_unified_package_declares_pep561_typed_marker() -> None:
@@ -826,11 +842,11 @@ def test_host_mcp_import_bootstraps_standalone_src_for_source_checkout() -> None
 
     script = (
         "import json, sys; "
-        "sys.path = [p for p in sys.path if 'apps/mcp-unified/src' not in p]; "
+        "sys.path = [p for p in sys.path if 'apps/mcp-unified/src' not in p.replace(chr(92), '/')]; "
         "import tldw_Server_API.app.core.MCP_unified.modules.base; "
         "import mcp_unified; "
         "print(json.dumps({'file': mcp_unified.__file__, 'paths': ["
-        "p for p in sys.path if 'apps/mcp-unified/src' in p"
+        "p for p in sys.path if 'apps/mcp-unified/src' in p.replace(chr(92), '/')"
         "]}))"
     )
     result = subprocess.run(  # nosec B603
@@ -851,6 +867,7 @@ def test_host_mcp_import_bootstraps_standalone_src_for_source_checkout() -> None
     assert payload["paths"] == [str(STANDALONE_SRC_ROOT)]  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -896,6 +913,7 @@ def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     )  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_artifacts_declare_bounded_jsonschema_base_dependency(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -910,6 +928,7 @@ def test_mcp_unified_artifacts_declare_bounded_jsonschema_base_dependency(
         assert str(requirement.specifier) == "<5,>=4.23"  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -957,6 +976,7 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     assert "src/mcp_unified/gateway/cli.py" in members  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_artifacts_include_typed_marker(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -970,6 +990,7 @@ def test_mcp_unified_standalone_artifacts_include_typed_marker(
     assert "src/mcp_unified/py.typed" in sdist_members  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_artifacts_include_package_docs(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -1007,12 +1028,17 @@ def _workflow_triggers(workflow: dict[str, object]) -> dict[str, object]:
 
 
 def _workflow_run_blocks(workflow: dict[str, object]) -> list[str]:
-    """Return shell run blocks from every workflow job step."""
+    """Return shell run blocks from every workflow job step.
+
+    A job that calls a reusable workflow has ``uses:`` and no ``steps:`` at all --
+    legal GitHub syntax, and both mcp-unified-rc.yml and pypi-package.yml now have an
+    ``admission`` job of that shape. Indexing job["steps"] raised KeyError on them.
+    """
 
     return [
         str(step.get("run", ""))
         for job in workflow["jobs"].values()
-        for step in job["steps"]
+        for step in (job.get("steps") or [])
     ]
 
 
@@ -1100,14 +1126,30 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
     testpypi_job = jobs["publish-testpypi"]
     pypi_job = jobs["publish-pypi"]
 
-    assert set(triggers) == {"workflow_dispatch"}  # nosec B101
+    # This asserted workflow_dispatch was the ONLY trigger. e4231f6d82 ("Auto publish
+    # MCP Unified version bumps") deliberately added a push trigger, and this test was
+    # quarantined out of CI at the time, so nothing flagged the contradiction. The
+    # deliberate design is encoded here instead of the old absolute -- but every safety
+    # property the original protected is still asserted, one by one, below.
+    assert set(triggers) == {"workflow_dispatch", "push"}  # nosec B101
     inputs = triggers["workflow_dispatch"]["inputs"]
     assert inputs["target"]["options"] == ["dry-run", "testpypi", "pypi"]  # nosec B101
     assert inputs["target"]["default"] == "dry-run"  # nosec B101
     assert inputs["confirm_publish"]["required"] is False  # nosec B101
     assert workflow["permissions"] == {"contents": "read"}  # nosec B101
+
+    # A pull request must never be able to reach this workflow at all.
     assert "pull_request" not in serialized_workflow  # nosec B101
-    assert "push:" not in serialized_workflow  # nosec B101
+
+    # The push trigger is narrow: main only, and only for the files that carry the
+    # version. A push anywhere else cannot start a publish.
+    push_trigger = triggers["push"]
+    assert push_trigger["branches"] == ["main"]  # nosec B101
+    assert push_trigger["paths"] == [  # nosec B101
+        "apps/mcp-unified/pyproject.toml",
+        "apps/mcp-unified/src/mcp_unified/__init__.py",
+        ".github/workflows/mcp-unified-publish.yml",
+    ]
     assert "make mcp-unified-rc" in run_blocks  # nosec B101
     assert "mcp-unified-publish-dry-run" in run_blocks  # nosec B101
     assert "MCP_UNIFIED_ALLOW_PUBLISH=1" in run_blocks  # nosec B101
@@ -1123,10 +1165,22 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
         ),
     ):
         job = jobs[job_name]
-        assert job["needs"] == "publish-plan"  # nosec B101
+        assert "publish-plan" in job["needs"]  # nosec B101
+        # A manual run still cannot publish without the typed confirmation token.
         assert "inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH'" in job["if"]  # nosec B101
         assert job["permissions"] == permissions  # nosec B101
         assert job["environment"]["name"] == environment_name  # nosec B101
+
+    # TestPyPI stays manual-only: the push path must not reach it.
+    assert "github.event_name == 'push'" not in testpypi_job["if"]  # nosec B101
+
+    # The push path to PyPI is conditional on a DETECTED VERSION CHANGE, never on the
+    # push alone, and still lands in the protected `pypi` environment.
+    assert (  # nosec B101
+        "github.event_name == 'push' && needs.detect-version-change.outputs.publish_candidate == 'true'"
+        in pypi_job["if"]
+    )
+    assert "detect-version-change" in pypi_job["needs"]  # nosec B101
     assert testpypi_job["env"]["TWINE_USERNAME"] == "__token__"  # nosec B101
     assert "MCP_UNIFIED_TESTPYPI_API_TOKEN" in testpypi_job["env"]["TWINE_PASSWORD"]  # nosec B101
     assert "env" not in pypi_job  # nosec B101
@@ -1198,7 +1252,9 @@ def test_root_pypi_package_workflow_is_tldw_server_only() -> None:
     upload_names = [
         step.get("with", {}).get("name")
         for job in workflow["jobs"].values()
-        for step in job["steps"]
+        # Same reason as _workflow_run_blocks: the "admission" job calls a reusable
+        # workflow and carries no steps.
+        for step in (job.get("steps") or [])
         if "upload-artifact" in str(step.get("uses", ""))
     ]
 
@@ -1247,12 +1303,22 @@ def test_mcp_unified_publish_workflow_uses_trusted_publishing_for_pypi() -> None
         "contents": "read",
         "id-token": "write",
     }
+    # A "Guard against duplicate PyPI version" step was added between the download and
+    # the upload. It is a safety improvement, so it is accommodated rather than
+    # rejected -- but the security property this assertion protects is unchanged: the
+    # UPLOAD step must remain a pinned action with no shell of its own, so no workflow
+    # command ever handles a credential. The guard step only queries PyPI's public API.
     assert [step["name"] for step in pypi_job["steps"]] == [  # nosec B101
         "Download MCP Unified distributions",
+        "Guard against duplicate PyPI version",
         "Publish MCP Unified to PyPI",
     ]
     assert "env" not in pypi_job  # nosec B101
-    assert all("run" not in step for step in pypi_job["steps"])  # nosec B101
+    assert "run" not in download_step  # nosec B101
+    assert "run" not in publish_step  # nosec B101
+    guard_step = pypi_steps["Guard against duplicate PyPI version"]
+    assert "uses" not in guard_step  # nosec B101
+    assert set(guard_step.get("env", {})) == {"MCP_UNIFIED_PACKAGE_VERSION"}  # nosec B101
     assert download_step["uses"] == (  # nosec B101
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
     )

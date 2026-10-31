@@ -199,7 +199,7 @@ class TestParakeetMLX:
             raise AssertionError("Runtime installation should not be attempted")
 
         monkeypatch.setattr(mlx_mod, "install_parakeet_mlx", _unexpected_install)
-        mlx_mod._mlx_model_cache = None
+        mlx_mod._mlx_model_cache = {}
 
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
         assert model is None
@@ -407,7 +407,7 @@ class TestParakeetMLX:
         monkeypatch.setattr(mlx_mod, 'check_mlx_available', lambda: True)
         monkeypatch.setattr(config_mod, "get_stt_config", lambda: {})
         _install_fake_mlx_core(monkeypatch)
-        mlx_mod._mlx_model_cache = None
+        mlx_mod._mlx_model_cache = {}
 
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
 
@@ -467,7 +467,7 @@ class TestParakeetMLX:
         mock_check_mlx.return_value = False
         # Ensure cache is clear to avoid reuse of previously mocked models
         import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
-        mlx_mod._mlx_model_cache = None
+        mlx_mod._mlx_model_cache = {}
 
         result = transcribe_with_parakeet_mlx(audio_data, sample_rate)
 
@@ -803,3 +803,80 @@ class TestParakeetMLXPerformance:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _fake_mlx_loader(monkeypatch, stt_cfg):
+    """Stub parakeet_mlx.from_pretrained to return a distinct object per model id."""
+    import types
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_Parakeet_MLX as mlx_mod,
+    )
+    import tldw_Server_API.app.core.config as config_mod
+
+    fake = types.ModuleType("parakeet_mlx")
+    fake.from_pretrained = MagicMock(side_effect=lambda model_id, **_kw: object())
+    monkeypatch.setitem(sys.modules, "parakeet_mlx", fake)
+    monkeypatch.setattr(mlx_mod, "IS_MACOS", True)
+    monkeypatch.setattr(mlx_mod, "check_mlx_available", lambda: True)
+    monkeypatch.setattr(mlx_mod, "check_parakeet_mlx_installed", lambda: True)
+    monkeypatch.setattr(config_mod, "get_stt_config", lambda: stt_cfg)
+    monkeypatch.setattr(mlx_mod, "_mlx_model_cache", None)
+    monkeypatch.setattr(mlx_mod, "_mlx_model_cache_key", None)
+    _install_fake_mlx_core(monkeypatch)
+    return mlx_mod, fake.from_pretrained
+
+
+def test_mlx_loader_cache_discriminates_by_model_path(monkeypatch):
+    """Regression: the cache was a single slot, so a request for a different
+    model_path received whichever model was loaded first while still reporting
+    the requested name upstream."""
+    mlx_mod, from_pretrained = _fake_mlx_loader(monkeypatch, {})
+
+    model_a = mlx_mod.load_parakeet_mlx_model(model_path="org/model-a")
+    model_b = mlx_mod.load_parakeet_mlx_model(model_path="org/model-b")
+
+    assert model_a is not None and model_b is not None
+    assert model_a is not model_b
+    # Single slot (models are 1-3 GB): the resident model is reused only for its own key.
+    assert mlx_mod.load_parakeet_mlx_model(model_path="org/model-b") is model_b
+    assert from_pretrained.call_count == 2
+
+
+
+def test_mlx_loader_concurrent_same_key_loads_once(monkeypatch):
+    """Two threads asking for one model must not both run from_pretrained."""
+    import threading
+    import time
+
+    mlx_mod, from_pretrained = _fake_mlx_loader(monkeypatch, {})
+
+    def slow_load(model_id, **_kw):
+        time.sleep(0.2)
+        return object()
+
+    from_pretrained.side_effect = slow_load
+    results: list[object] = []
+    threads = [
+        threading.Thread(target=lambda: results.append(mlx_mod.load_parakeet_mlx_model(model_path="org/model-a")))
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert from_pretrained.call_count == 1
+    assert results[0] is results[1]
+
+def test_mlx_loader_cache_keys_on_resolved_config_model_id(monkeypatch):
+    """With no model_path the loader resolves the id from config; the cache must
+    key on that resolved id, or a config change keeps serving the old model."""
+    stt_cfg = {"mlx_model_id": "org/model-a"}
+    mlx_mod, _ = _fake_mlx_loader(monkeypatch, stt_cfg)
+
+    model_a = mlx_mod.load_parakeet_mlx_model()
+    stt_cfg["mlx_model_id"] = "org/model-b"
+    model_b = mlx_mod.load_parakeet_mlx_model()
+
+    assert model_a is not model_b

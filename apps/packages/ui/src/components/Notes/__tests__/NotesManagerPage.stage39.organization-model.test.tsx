@@ -200,8 +200,8 @@ describe("NotesManagerPage stage 39 organization model", () => {
     seededServerNotebooks = []
     mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
       const key = String(setting?.key || "")
-      if (key === "tldw:notesRecentOpened") return []
-      if (key === "tldw:notesPinnedIds") return []
+      if (key === "tldw:notesRecentOpened:test-notes-authority") return []
+      if (key === "tldw:notesPinnedIds:test-notes-authority") return []
       if (key === "tldw:notesNotebooks") return seededNotebookSettings
       if (key === "tldw:notesPageSize") return 20
       if (key === "tldw:lastNoteId") return null
@@ -405,7 +405,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
       expect(screen.getByTestId("notes-timeline-view")).toBeInTheDocument()
     })
 
-    expect(screen.getByTestId("notes-timeline-group-2026-02")).toHaveTextContent("Alpha")
+    expect(await screen.findByTestId("notes-timeline-group-2026-02")).toHaveTextContent("Alpha")
     expect(screen.getByTestId("notes-timeline-group-2026-01")).toHaveTextContent("Beta")
 
     fireEvent.click(screen.getByTestId("notes-timeline-item-2"))

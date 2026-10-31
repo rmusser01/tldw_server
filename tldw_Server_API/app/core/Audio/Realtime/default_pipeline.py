@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 
 PipelineStage = Literal["stt", "llm", "tts"]
 
@@ -512,7 +513,7 @@ def _extract_text_delta(chunk: Any, *, streaming: bool) -> str:
 
 def _extract_text_from_string_chunk(chunk: str) -> str:
     raw = chunk.strip("\r\n")
-    if not raw or raw.strip().lower() == "data: [done]":
+    if not raw or is_done_line(raw):
         return ""
     if raw.startswith("data:"):
         import json

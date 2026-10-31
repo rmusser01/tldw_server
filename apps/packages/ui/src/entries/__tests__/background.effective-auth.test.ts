@@ -151,6 +151,8 @@ const flushPromises = async () => {
 import background from "@/entries/background"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { browser } from "wxt/browser"
 
 const WORKER_API_KEY_SCOPE = deriveSingleUserApiKeyCredentialScope(
   "single-user",
@@ -208,6 +210,110 @@ describe("background effective extension auth", () => {
       ok: true,
       pong: true
     })
+  })
+
+  it.each(["request", "stream"])("refreshes an expired worker %s without messaging itself", async (transport) => {
+    const accessToken = jwtForUser(42)
+    const rotatedAccessToken = `header.${btoa(JSON.stringify({ sub: "42", nonce: 2 }))}.signature`
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
+      accessToken, refreshToken: "valid-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    // A runtime message does not loop back into its sending worker's listener.
+    vi.mocked(browser.runtime.sendMessage).mockResolvedValue(undefined)
+    const requests: { path: string; authorization: string | null; body?: BodyInit | null }[] = []
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname
+      const authorization = new Headers(init?.headers).get("Authorization")
+      requests.push({ path, authorization, body: init?.body })
+      if (path === "/api/v1/auth/refresh") return new Response(JSON.stringify({
+        access_token: rotatedAccessToken, refresh_token: "rotated-refresh", token_type: "bearer"
+      }), { headers: { "content-type": "application/json" } })
+      if (authorization !== `Bearer ${rotatedAccessToken}`) return new Response("expired", { status: 401 })
+      return transport === "stream"
+        ? new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
+        : new Response(JSON.stringify({ id: 42 }), { headers: { "content-type": "application/json" } })
+    }))
+    if (transport === "request") {
+      await expect(sendRuntimeMessage({
+        type: "tldw:request", payload: { path: "/api/v1/auth/me", method: "GET" }
+      })).resolves.toMatchObject({ ok: true, status: 200, data: { id: 42 } })
+    } else {
+      const port = connectRuntimePort("tldw:stream")
+      await port.postMessage({ path: "/api/v1/chat/completions", method: "POST", body: { stream: true } })
+      expect(port.messages).toContainEqual({ event: "done" })
+    }
+    expect(requests.map(({ path }) => path)).toEqual([
+      transport === "stream" ? "/api/v1/chat/completions" : "/api/v1/auth/me",
+      "/api/v1/auth/refresh",
+      transport === "stream" ? "/api/v1/chat/completions" : "/api/v1/auth/me"
+    ])
+    expect(JSON.parse(String(requests[1].body))).toEqual({ refresh_token: "valid-refresh" })
+    expect(requests[2].authorization).toBe(`Bearer ${rotatedAccessToken}`)
+    // Rotation uses the existing separate record, leaving the connection intact.
+    expect(storageState.persistent.get("tldwConfig")).toEqual(config)
+    await tldwClient.initialize()
+    expect(await tldwClient.getConfig()).toMatchObject({
+      ...config, accessToken: rotatedAccessToken, refreshToken: "rotated-refresh"
+    })
+  })
+
+  it.each([false, true])("preserves a transient worker refresh failure without replaying a write (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
+      accessToken: jwtForUser(42), refreshToken: "valid-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    if (!scoped) {
+      vi.spyOn(tldwAuth, "refreshToken").mockRejectedValue(Object.assign(
+        new Error("Authentication service is busy"), { status: 503, retryAfterMs: 2000 }
+      ))
+    }
+    const writes: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ detail: "Authentication service is busy" }), {
+        status: 503, headers: { "content-type": "application/json", "retry-after": "2" }
+      })
+      writes.push(url)
+      return new Response("unauthorized", { status: 401 })
+    }))
+    await expect(sendRuntimeMessage({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/notes/", method: "POST", body: { content: "Private draft" },
+        ...(scoped ? { servicePromptConfig: {
+          serverUrl: config.serverUrl, authMode: "multi-user", authSource: "manual", expectedUserId: 42
+        } } : {})
+      }
+    })).resolves.toMatchObject({ ok: false, status: 503, retryAfterMs: 2000 })
+    expect(writes).toHaveLength(1)
+    expect(storageState.persistent.get("tldwConfig")).toEqual(config)
+  })
+
+  it("invalidates a rejected scoped worker refresh in shared effective credentials", async () => {
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
+      accessToken: jwtForUser(42), refreshToken: "expired-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })))
+    await expect(sendRuntimeMessage({
+      type: "tldw:request", payload: {
+        path: "/api/v1/notes/private-note", method: "GET",
+        servicePromptConfig: { serverUrl: config.serverUrl, authMode: "multi-user", authSource: "manual", expectedUserId: 42 }
+      }
+    })).resolves.toMatchObject({ ok: false, status: 401 })
+    const { resolveEffectiveTldwConfig } = await import("@/services/tldw/single-user-credential")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    expect(await resolveEffectiveTldwConfig({
+      persistent: createSafeStorage({ area: "local" }), session: createSafeStorage({ area: "session" })
+    })).not.toHaveProperty("refreshToken")
+    expect(storageState.persistent.get("tldwConfig")).toEqual(config)
   })
 
   it("authenticates ordinary worker requests with session credentials", async () => {
@@ -883,7 +989,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/chats/chat%2fid/messages", "POST"],
     ["/api/v1/chats/chat%5cid/messages", "POST"],
     ["/api/v1/chats/chat-123/messages/search", "POST"],
-    ["/api/v1/chats/chat-123/messages", "GET"]
+    ["/api/v1/chats/chat-123/messages/search", "GET"]
   ] as const)("rejects a checked target on non-allowlisted worker route %s %s", async (path, method) => {
     const fetchSpy = vi.fn()
     vi.stubGlobal("fetch", fetchSpy)

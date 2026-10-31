@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
     SharedWorkspaceNotFound,
     SharedWorkspaceUnavailable,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -1228,7 +1229,7 @@ def test_recipient_routes_have_isolated_permission_and_rate_dependencies() -> No
         "/sharing/shared-with-me/{share_id}/clone": "sharing.clone",
         "/sharing/shared-with-me/{share_id}/clone/{operation_id}": "sharing.read",
     }
-    routes = {route.path: route for route in sharing.router.routes if hasattr(route, "dependant")}
+    routes = {route.path: route for route in iter_served_routes(sharing.router.routes) if route.dependant is not None}
 
     for path, expected_resource in recipient_paths.items():
         route = routes[path]
@@ -1246,4 +1247,4 @@ def test_recipient_routes_have_isolated_permission_and_rate_dependencies() -> No
             )
             for dependency in route.dependant.dependencies
         )
-        assert isinstance(route, sharing.SharedWorkspaceRecipientRoute)
+        assert isinstance(route.route, sharing.SharedWorkspaceRecipientRoute)

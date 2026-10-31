@@ -21,6 +21,50 @@ class DatabaseError(Exception):
     pass
 
 
+class ConstraintViolationError(DatabaseError):
+    """A constraint violation, without driver diagnostics or identifying payload.
+
+    Covers CHECK, NOT NULL, FOREIGN KEY and uniqueness. Exists because the backends
+    deliberately redact the driver message -- the raise sits outside the except block
+    so the original is never chained, keeping query text and bound parameters out of
+    any traceback -- which otherwise leaves callers unable to tell a constraint
+    violation from a disk error or a locked database without re-running the query.
+
+    The TYPE carries that distinction instead, which is the mechanism this module
+    already used for uniqueness. Message strings are unchanged, and several tests pin
+    them with anchored patterns precisely to assert that nothing is appended.
+    """
+
+
+class UniqueConstraintError(ConstraintViolationError):
+    """A uniqueness conflict, without driver diagnostics or identifying payload."""
+
+
+class SavedViewNameUniqueConstraintError(UniqueConstraintError):
+    """A saved-view owner/workspace/name conflict without driver payload."""
+
+
+class TransientContentionError(DatabaseError):
+    """Lock or serialization contention that retrying the whole transaction can clear.
+
+    Carries the CLASS of failure only, like ConstraintViolationError: the message is
+    unchanged and the driver exception is never chained. PostgreSQL SQLSTATE 40001
+    (serialization_failure), 40P01 (deadlock_detected) and 55P03 (lock_not_available);
+    SQLite "database is locked". See core/DB_Management/retry_policy.py.
+    """
+
+
+class AuthorizationDeniedError(DatabaseError):
+    """PostgreSQL refused the statement under SQLSTATE 42501.
+
+    Covers both a row-level security policy denial and a plain table privilege
+    denial; PostgreSQL reports them with the same code, and telling them apart
+    would mean parsing the driver message, which is exactly what stays
+    redacted. Naming the class of refusal is enough to diagnose it, and carries
+    no query text, parameters or row values.
+    """
+
+
 class NotSupportedError(DatabaseError):
     """Raised when a feature is not supported by the backend."""
     pass

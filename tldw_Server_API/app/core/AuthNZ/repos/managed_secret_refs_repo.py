@@ -8,6 +8,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import load_json, row_dict
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     normalize_provider_name,
     normalize_secret_owner_scope_type,
@@ -53,35 +54,14 @@ class ManagedSecretRefsRepo:
             return None
         return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
 
-    @staticmethod
-    def _parse_json_field(value: Any) -> dict[str, Any]:
-        if isinstance(value, dict):
-            return dict(value)
-        if isinstance(value, str) and value.strip():
-            try:
-                parsed = json.loads(value)
-            except (TypeError, ValueError):
-                return {}
-            return dict(parsed) if isinstance(parsed, dict) else {}
-        return {}
-
     @classmethod
     def _row_to_dict(cls, row: Any) -> dict[str, Any]:
-        if isinstance(row, dict):
-            raw = dict(row)
-        else:
-            try:
-                raw = {key: row[key] for key in row.keys()}
-            except Exception as row_keys_error:
-                logger.bind(error_type=type(row_keys_error).__name__).debug(
-                    "Managed secret ref row key materialization failed; falling back to dict(row)",
-                )
-                raw = dict(row)
+        raw = row_dict(row)
 
         if "capabilities_json" in raw:
-            raw["capabilities"] = cls._parse_json_field(raw.get("capabilities_json"))
+            raw["capabilities"] = load_json(raw.get("capabilities_json"), dict)
         if "metadata_json" in raw:
-            raw["metadata"] = cls._parse_json_field(raw.get("metadata_json"))
+            raw["metadata"] = load_json(raw.get("metadata_json"), dict)
         return raw
 
     async def ensure_backend_registration(

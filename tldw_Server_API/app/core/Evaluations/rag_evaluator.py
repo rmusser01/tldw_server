@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_owned_worker,
 )
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_likert
 
 _RAG_EVAL_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -134,6 +135,15 @@ def _simple_tokens(text: str) -> list[str]:
     cleaned = ''.join(ch if ch.isalnum() or ch.isspace() else ' ' for ch in text)
     tokens = [tok for tok in cleaned.split() if tok and tok not in stop and len(tok) > 2]
     return tokens
+
+
+# Alias metric keys are recorded alongside their canonical twins (pointing at the
+# same result dict) so the response stays OpenAI-style. They must not be scored as
+# independent metrics, or the aliased metric is weighted twice.
+_CANONICAL_METRIC_FOR_ALIAS = {
+    "answer_relevance": "relevance",
+    "answer_faithfulness": "faithfulness",
+}
 
 
 class RAGEvaluator:
@@ -553,7 +563,7 @@ class RAGEvaluator:
             )
 
             raw = float(score_str.strip())
-            llm_score = raw / 5.0  # Normalize to 0-1
+            llm_score = normalize_likert(raw)
 
             # Clamp heuristics for obvious mismatches/strong matches to stabilize outputs
             # Only apply when we have enough lexical signal (>=3 distinct tokens)
@@ -632,7 +642,7 @@ class RAGEvaluator:
             )
 
             raw = float(score_str.strip())
-            llm_score = raw / 5.0
+            llm_score = normalize_likert(raw)
 
             # Clamp for obvious hallucinations (very low coverage) / strong coverage
             score = llm_score
@@ -812,7 +822,7 @@ class RAGEvaluator:
                 provider_credentials=self.provider_credentials,
             )
 
-            score = float((score_str or "").strip()) / 5.0
+            score = normalize_likert(float((score_str or "").strip()))
 
             return ("answer_similarity", {
                 "name": "answer_similarity",
@@ -859,7 +869,7 @@ class RAGEvaluator:
                     provider_credentials=self.provider_credentials,
                 )
 
-                relevance_scores.append(float(score_str.strip()) / 5.0)
+                relevance_scores.append(normalize_likert(float(score_str.strip())))
 
             except DaemonCapacityError:
                 raise
@@ -917,7 +927,7 @@ class RAGEvaluator:
                 # Parse score and handle invalid responses
                 try:
                     score = float((score_str or "").strip())
-                    relevance_scores.append(score / 5.0)
+                    relevance_scores.append(normalize_likert(score))
                 except (ValueError, AttributeError):
                     # Invalid response format - treat as 0.0
                     logger.warning("Invalid score format from evaluation provider")
@@ -982,7 +992,7 @@ class RAGEvaluator:
                 provider_credentials=self.provider_credentials,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return ("context_recall", {
                 "name": "context_recall",
@@ -1034,10 +1044,9 @@ class RAGEvaluator:
         Returns:
             Normalized score on 0-1 scale
         """
-        # Clamp score to 1-5 range
-        score = max(1, min(5, score))
-        # Normalize to 0-1
-        return (score - 1) / 4
+        # Delegates to the one normalizer; this method always implemented the correct
+        # affine mapping but had zero production callers while 11 sites inlined raw/5.0.
+        return normalize_likert(score)
 
     def _calculate_overall_score(self, metrics: dict[str, dict], weights: Optional[dict[str, float]] = None) -> float:
         """
@@ -1053,9 +1062,34 @@ class RAGEvaluator:
         if not metrics:
             return 0.0
 
+        # Drop alias keys whose canonical twin is also present: both point at the
+        # same result dict, so scoring both weights that metric twice and inflates
+        # the overall score. An alias that is the only remaining copy (the caller
+        # dropped the canonical) is scored normally. Aliases stay in the response.
+        dropped_aliases = {
+            name: canonical
+            for name, canonical in (
+                (n, _CANONICAL_METRIC_FOR_ALIAS.get(n)) for n in metrics
+            )
+            if canonical is not None and canonical in metrics
+        }
+        metrics = {n: d for n, d in metrics.items() if n not in dropped_aliases}
+
         # Default to equal weights
         if weights is None:
             weights = dict.fromkeys(metrics.keys(), 1.0)
+        elif dropped_aliases:
+            # A caller may legitimately weight a metric under its alias, since
+            # evaluate() treats an alias request as a request for the canonical
+            # computation. The alias entry was just dropped, so carry its weight onto
+            # the canonical key -- otherwise the scoring loop below, which requires an
+            # exact weight key per retained metric, leaves that metric unweighted and
+            # the aggregate collapses to 0.0. Canonical keys take precedence when both
+            # forms are supplied.
+            weights = dict(weights)
+            for alias, canonical in dropped_aliases.items():
+                if alias in weights and canonical not in weights:
+                    weights[canonical] = weights[alias]
 
         total_weight = 0
         weighted_sum = 0

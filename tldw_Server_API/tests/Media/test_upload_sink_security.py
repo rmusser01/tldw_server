@@ -1,12 +1,9 @@
 import io
-import os
 import stat
-import zipfile
 import tarfile
-from pathlib import Path
+import zipfile
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -190,3 +187,23 @@ def test_svg_treated_as_xml_and_allowed(tmp_path):
     assert res, res.issues
     # Expect MIME either detected as image/svg+xml or via fallback
     assert (res.detected_mime_type or "").lower() in ("image/svg+xml", "text/xml", "application/xml")
+
+
+def test_missing_mime_libraries_warn_about_extension_fallback(monkeypatch):
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import Upload_Sink as sink
+
+    monkeypatch.setattr(sink, "puremagic", None)
+    monkeypatch.setattr(sink, "_get_python_magic_module", lambda: None)
+    output = []
+    token = logger.add(
+        output.append, level="WARNING", filter=lambda record: record["name"] == sink.__name__
+    )
+    try:
+        sink.FileValidator()
+    finally:
+        logger.remove(token)
+    messages = " ".join(message.record["message"] for message in output).lower()
+    assert "mime" in messages and "extension" in messages
+    assert "permit scanner errors" not in messages

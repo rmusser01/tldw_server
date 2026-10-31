@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 
 
 TASK_PROJECTION_ROUTING_KEY = "task_projection"
+# Mirrors TaskStore._LOCAL_UNBOUND: the dataset id of a task graph never bound to Sync.
+_LOCAL_UNBOUND_TASK_SCOPE = "local-unbound"
 _PROJECTION_METADATA_FIELDS = {
     "projection_version",
     "task_id",
@@ -230,6 +232,21 @@ def resolve_notes_task_coordinator(
         raise SyncStoreError("notes_task_sync_scope_invalid")
     service = get_active_server_origin_sync_service_for_user(owner)
     if service is None:
+        return None
+    if selected_dataset == _LOCAL_UNBOUND_TASK_SCOPE:
+        # The task graph was never bound to a dataset (task domains are dormant by
+        # default), so legacy local behavior applies -- unless some active personal
+        # dataset already claims task authority, which would mean the binding was lost.
+        if any(
+            dataset.scope_type == "personal"
+            and dataset.archived_at is None
+            and (
+                {"notes.task", "notes.task_activity"}.intersection(dataset.domains)
+                or dataset.metadata.get("task_activity_capture_enabled") is True
+            )
+            for dataset in service.store.list_datasets_for_user(owner)
+        ):
+            raise SyncStoreError("notes_task_sync_scope_conflict")
         return None
     matches = [
         dataset

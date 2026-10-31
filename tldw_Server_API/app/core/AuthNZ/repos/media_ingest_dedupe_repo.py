@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     build_postgres_in_clause,
     build_sqlite_in_clause,
 )
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 from tldw_Server_API.app.core.DB_Management.sqlite_schema_helpers import ensure_sqlite_column_exists
 
 
@@ -94,20 +95,7 @@ class MediaIngestDedupeRepo:
             return value
         return value.astimezone(timezone.utc).replace(tzinfo=None)
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if row is None:
-            return {}
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            return dict(row)
-        except Exception:
-            try:
-                keys = row.keys()
-                return {key: row[key] for key in keys}
-            except Exception:
-                return {}
+    _row_to_dict = staticmethod(row_dict)
 
     async def lookup_source(
         self,

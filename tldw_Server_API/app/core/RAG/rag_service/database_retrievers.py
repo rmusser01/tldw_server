@@ -16,6 +16,7 @@ import sqlite3
 import time
 import urllib.parse as _urlparse
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -32,8 +33,13 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatProviderError,
 )
+from tldw_Server_API.app.core.Chat.knowledge_save import visible_knowledge_text
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import (
+    get_chat_history_metadata,
+    search_chat_history,
+)
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -41,6 +47,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
+    append_sqlite_media_visibility,
 )
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 
@@ -550,6 +559,32 @@ def _allocate_slides_source_projection_caps(
     return selected, caps
 
 
+def _slides_source_db_error(
+    message: str,
+    *,
+    database_name: str,
+    db: Any,
+    exc: BaseException,
+) -> RAGDatabaseError:
+    """Normalize a slides-source DB failure, naming the backend and the cause type.
+
+    Only the exception class is included: driver messages can echo SQL or params.
+
+    SQL splicing convention for the slides-source methods (media, notes, chats):
+    ``retrieve_slides_source_candidates_v1`` writes one SQL string per backend, so
+    each branch is an f-string; ``project_slides_source_documents_v1`` shares one
+    template across backends and fills the backend-specific fragments with
+    ``str.format``. Every splice is a fixed expression, never user input, and a
+    template left un-interpolated reaches PostgreSQL as a literal ``{`` (TASK-13292).
+    """
+    backend = getattr(getattr(db, "backend_type", None), "value", "unknown")
+    return RAGDatabaseError(
+        f"{message} (backend={backend}, cause={type(exc).__name__})",
+        database_name=database_name,
+        operation_type="slides_source_retrieval",
+    )
+
+
 def _slides_source_requested_values(count: int) -> str:
     """Return a fixed-placeholder derived table for at most 100 candidates."""
     if not 1 <= count <= 100:
@@ -1057,11 +1092,12 @@ class MediaDBRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Media source candidate retrieval failed.",
                 database_name="media",
-                operation_type="slides_source_retrieval",
+                db=self.media_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -1171,11 +1207,12 @@ class MediaDBRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded media source projection failed.",
                 database_name="media",
-                operation_type="slides_source_retrieval",
+                db=self.media_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -1354,6 +1391,11 @@ class MediaDBRetriever(BaseRetriever):
             if filter_parts:
                 sql += f" AND ({' OR '.join(filter_parts)})"
 
+        visibility_conditions: list[str] = []
+        append_sqlite_media_visibility(visibility_conditions, params)
+        for condition in visibility_conditions:
+            sql += " AND " + condition
+
         # Add ordering and limit (bm25: lower is better on SQLite)
         sql += " ORDER BY rank ASC LIMIT ?"
         params.append(self.config.max_results)
@@ -1381,6 +1423,9 @@ class MediaDBRetriever(BaseRetriever):
                     "created_at": row.get("ingestion_date"),
                     "transcription_model": row.get("transcription_model"),
                     "source": "media_db",
+                    "source_id": str(row["id"]),
+                    "source_type": "media_db",
+                    "evidence_origin": "local_library",
                 },
                 score=float(score),
             )
@@ -1616,6 +1661,12 @@ class MediaDBRetriever(BaseRetriever):
             sql += " AND m.ingestion_date BETWEEN ? AND ?"
             params.extend([start_date.isoformat(), end_date.isoformat()])
 
+        if backend_type == BackendType.SQLITE:
+            visibility_conditions: list[str] = []
+            append_sqlite_media_visibility(visibility_conditions, params)
+            for condition in visibility_conditions:
+                sql += " AND " + condition
+
         # Order by relevance: SQLite bm25 prefers ASC; Postgres ts_rank prefers DESC
         if backend_type == BackendType.SQLITE:
             sql += " ORDER BY rank ASC LIMIT ?"
@@ -1717,6 +1768,13 @@ class MediaDBRetriever(BaseRetriever):
                             if key not in md and value is not None:
                                 md[key] = value
 
+            # Source identity comes from the owning row, even without descriptive metadata.
+            md.update({
+                "media_id": str(row["media_id"]),
+                "source_id": str(row["media_id"]),
+                "source_type": "media_db",
+                "evidence_origin": "local_library",
+            })
             chunk_uuid = str(row.get("chunk_uuid"))
             content_text = row.get("chunk_text") or ""
 
@@ -1814,9 +1872,10 @@ class MediaDBRetriever(BaseRetriever):
                 include_trash=False,
                 include_deleted=False,
             )
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"MediaDatabase search failed: {exc}")
-            return [], 0
+        except (MediaDatabaseError, AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            raise RAGDatabaseError(
+                "Media search failed.", database_name="media", operation_type="search",
+            ) from None
 
         return results, len(results)
 
@@ -1863,6 +1922,11 @@ class MediaDBRetriever(BaseRetriever):
             # Use numeric media ID for Document.id to match callers/tests that
             # expect Media DB identifiers, and keep uuid in metadata if needed.
             doc_id = row.get("id")
+            metadata.update({
+                "source_id": str(doc_id),
+                "source_type": "media_db",
+                "evidence_origin": "local_library",
+            })
             title_text = (row.get("title") or "").strip()
             body_text = (row.get("content") or "").strip()
             if title_text and (not body_text or title_text.lower() not in body_text.lower()):
@@ -2533,11 +2597,31 @@ class MediaDBRetriever(BaseRetriever):
         Returns:
             Merged and re-ranked documents
         """
-        # Perform both searches in parallel
+        async def _read_component(
+            search: Awaitable[list[Document]],
+        ) -> list[Document] | RAGDatabaseError:
+            try:
+                return await search
+            except RAGDatabaseError as error:
+                return error
+
+        # Retain usable documents across database failures. Provider/credential
+        # errors and cancellation still propagate immediately through gather.
         fts_task = self._retrieve_fts(query, media_type, **kwargs)
         vector_task = self._retrieve_vector(query, media_type, **kwargs)
 
-        fts_docs, vector_docs = await asyncio.gather(fts_task, vector_task)
+        results = await asyncio.gather(
+            _read_component(fts_task), _read_component(vector_task)
+        )
+        fts_docs, vector_docs = [
+            [] if isinstance(result, RAGDatabaseError) else result for result in results
+        ]
+        if any(isinstance(result, RAGDatabaseError) for result in results) and not (
+            fts_docs or vector_docs
+        ):
+            raise RAGDatabaseError(
+                "Media search failed.", database_name="media", operation_type="search"
+            )
 
         # Merge using reciprocal rank fusion
         return self._reciprocal_rank_fusion(fts_docs, vector_docs, alpha)
@@ -2694,7 +2778,7 @@ class NotesDBRetriever(BaseRetriever):
 ' || COALESCE(n.content, '')
         """
         if is_postgres:
-            sql = """
+            sql = f"""
                 SELECT
                     n.id,
                     LENGTH({formatted_text}) AS _standalone_source_full_chars,
@@ -2744,11 +2828,12 @@ class NotesDBRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Note source candidate retrieval failed.",
                 database_name="notes",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -2848,11 +2933,12 @@ class NotesDBRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded note source projection failed.",
                 database_name="notes",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -2922,11 +3008,13 @@ class NotesDBRetriever(BaseRetriever):
                     self._retrieve_allowed_notes_via_chacha,
                     allowed_note_ids,
                     notebook_id,
+                    query,
                 )
             return await asyncio.to_thread(
                 self._retrieve_allowed_notes_via_sql,
                 allowed_note_ids,
                 notebook_id,
+                query,
             )
 
         if self.chacha_db is not None and not self.config.tags_filter:
@@ -2957,12 +3045,9 @@ class NotesDBRetriever(BaseRetriever):
 
         # Convert to documents
         for row in results:
-            # Calculate simple relevance score
-            title_match = query.lower() in row["title"].lower()
-            content_match = query.lower() in row["content"].lower()
-            score = (1.0 if title_match else 0.0) + (0.5 if content_match else 0.0)
-
-            documents.append(self._row_to_document(row, score=score))
+            documents.append(
+                self._row_to_document(row, score=self._text_match_score(query, row))
+            )
 
         # Sort by score
         documents.sort(key=lambda x: x.score, reverse=True)
@@ -2987,8 +3072,14 @@ class NotesDBRetriever(BaseRetriever):
         self,
         allowed_note_ids: list[str],
         notebook_id: Optional[int],
+        query: str = "",
     ) -> list[Document]:
-        """Retrieve selected notes by ID without requiring a text-search match."""
+        """Retrieve selected notes by ID without requiring a text-search match.
+
+        No text match is REQUIRED -- the include list is the filter -- but the rows are
+        still scored against the query so the caller gets relevance order rather than
+        the order the ids happened to arrive in. See _retrieve_allowed_notes_via_sql.
+        """
         documents: list[Document] = []
         for note_id in allowed_note_ids[: int(self.config.max_results)]:
             try:
@@ -3000,15 +3091,27 @@ class NotesDBRetriever(BaseRetriever):
                 continue
             if notebook_id and row.get("notebook_id") != notebook_id:
                 continue
-            documents.append(self._row_to_document(row, score=1.0))
+            documents.append(
+                self._row_to_document(row, score=self._text_match_score(query, row))
+            )
+        documents.sort(key=lambda document: document.score, reverse=True)
         return documents
 
     def _retrieve_allowed_notes_via_sql(
         self,
         allowed_note_ids: list[str],
         notebook_id: Optional[int],
+        query: str = "",
     ) -> list[Document]:
-        """Retrieve selected notes by ID through the raw SQL fallback."""
+        """Retrieve selected notes by ID through the raw SQL fallback.
+
+        The include list decides WHICH notes come back; the query decides their order
+        and their score. This used to stamp score=1.0 on every row and return them in
+        last_modified order, so a caller asking for relevance got recency wearing a
+        perfect-relevance score. Cross-source fusion (ADR-053) stopped those rows
+        crowding out other sources, but within a single-source notes query nothing
+        rescued the ordering.
+        """
         bounded_note_ids = allowed_note_ids[: int(self.config.max_results)]
         if not bounded_note_ids:
             return []
@@ -3027,9 +3130,33 @@ class NotesDBRetriever(BaseRetriever):
         if notebook_id is not None:
             sql += " AND n.notebook_id = ?"
             params.append(notebook_id)
+        # last_modified stays the TIE-BREAK, applied by the database; relevance is
+        # applied below, where the query text is available.
         sql += " ORDER BY n.last_modified DESC LIMIT ?"
         params.append(self.config.max_results)
-        return [self._row_to_document(row, score=1.0) for row in self._execute_query(sql, tuple(params))]
+        documents = [
+            self._row_to_document(row, score=self._text_match_score(query, row))
+            for row in self._execute_query(sql, tuple(params))
+        ]
+        documents.sort(key=lambda document: document.score, reverse=True)
+        return documents
+
+    @staticmethod
+    def _text_match_score(query: str, row: dict[str, Any]) -> float:
+        """Score a note row against the query: title match 1.0, content match 0.5.
+
+        The same formula the unrestricted notes path has always used, lifted here so
+        the include-list paths can share it instead of stamping 1.0 on everything.
+
+        An empty query scores every row equally at 1.0: there is no relevance to
+        measure, so claiming a difference would be worse than claiming none.
+        """
+        needle = (query or "").strip().lower()
+        if not needle:
+            return 1.0
+        title = str(row.get("title") or "").lower()
+        content = str(row.get("content") or "").lower()
+        return (1.0 if needle in title else 0.0) + (0.5 if needle in content else 0.0)
 
     def _row_to_document(self, row: dict[str, Any], *, score: float) -> Document:
         """Convert a note row into the RAG document shape."""
@@ -3691,11 +3818,12 @@ class ChatHistoryRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Chat source candidate retrieval failed.",
                 database_name="chats",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -3802,11 +3930,12 @@ class ChatHistoryRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded chat source projection failed.",
                 database_name="chats",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -3894,32 +4023,21 @@ class ChatHistoryRetriever(BaseRetriever):
     async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
         documents: list[Document] = []
         max_results = int(self.config.max_results)
-
-        sql = """
-            SELECT
-                m.id,
-                m.conversation_id,
-                m.content,
-                m.sender,
-                m.timestamp,
-                conv.character_id,
-                conv.source AS conversation_source,
-                cc.name AS character_name
-            FROM messages m
-            JOIN conversations conv ON m.conversation_id = conv.id
-            LEFT JOIN character_cards cc ON conv.character_id = cc.id
-            WHERE m.deleted = 0
-              AND m.content LIKE ?
-              AND COALESCE(conv.source, '') != ?
-            ORDER BY m.timestamp DESC
-            LIMIT ?
-        """
-        rows = await self._execute_query_async(sql, (f"%{query}%", "knowledge_qa", max_results))
+        rows = await asyncio.to_thread(
+            search_chat_history,
+            self._execute_query,
+            query,
+            db_adapter=self._db_adapter,
+            limit=max_results,
+        )
         for row in rows:
+            visible = visible_knowledge_text(row.get("content") or "")
+            if not visible:
+                continue
             documents.append(
                 Document(
                     id=f"chat_{row['id']}",
-                    content=f"[{row.get('sender')}]: {row.get('content', '')}",
+                    content=f"[{row.get('sender')}]: {visible}",
                     source=DataSource.CHAT_HISTORY,
                     metadata={
                         "message_id": row.get("id"),
@@ -3929,6 +4047,9 @@ class ChatHistoryRetriever(BaseRetriever):
                         "character_id": row.get("character_id"),
                         "character_name": row.get("character_name"),
                         "conversation_source": row.get("conversation_source"),
+                        "title": row.get("conversation_title") or "Untitled conversation",
+                        "source_type": "chats",
+                        "source_id": str(row["conversation_id"]),
                         "type": "chat_message",
                         "source": "chats",
                     },
@@ -3949,15 +4070,21 @@ class ChatHistoryRetriever(BaseRetriever):
                     conv_id = row.get("conversation_id")
                     if self._is_excluded_conversation_source(conv_id):
                         continue
+                    visible = visible_knowledge_text(row.get("content") or "")
+                    if not visible:
+                        continue
 
                     documents.append(
                         Document(
                             id=f"chat_{row['id']}",
-                            content=f"{row.get('sender')}: {row.get('content', '')}",
+                            content=f"{row.get('sender')}: {visible}",
                             source=DataSource.CHAT_HISTORY,
                             metadata={
                                 "message_id": row.get("id"),
                                 "conversation_id": conv_id,
+                                "title": row.get("conversation_title") or "Untitled conversation",
+                                "source_type": "chats",
+                                "source_id": str(conv_id),
                                 "sender": row.get("sender"),
                                 "timestamp": row.get("timestamp"),
                                 "character_id": row.get("character_id"),
@@ -3983,16 +4110,11 @@ class ChatHistoryRetriever(BaseRetriever):
 
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
         chat_id = doc_id.replace("chat_", "")
-        results = self._execute_query(
-            """
-            SELECT m.*, conv.character_id
-            FROM messages m
-            JOIN conversations conv ON m.conversation_id = conv.id
-            WHERE m.id = ?
-            """,
-            (chat_id,),
+        return get_chat_history_metadata(
+            self._execute_query,
+            chat_id,
+            db_adapter=self._db_adapter,
         )
-        return dict(results[0]) if results else {}
 
 
 class WorldBooksRetriever(BaseRetriever):
@@ -4000,7 +4122,9 @@ class WorldBooksRetriever(BaseRetriever):
 
     async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
         max_results = int(self.config.max_results)
-        sql = """
+        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
+        owner_clause = "AND wb.client_id = ?" if is_postgres else ""
+        sql = f"""
             SELECT
                 wb.id AS world_book_id,
                 wb.name AS world_book_name,
@@ -4016,6 +4140,7 @@ class WorldBooksRetriever(BaseRetriever):
             WHERE wb.deleted = 0
               AND wb.enabled = 1
               AND e.enabled = 1
+              {owner_clause}
               AND (
                 wb.name LIKE ?
                 OR wb.description LIKE ?
@@ -4025,8 +4150,9 @@ class WorldBooksRetriever(BaseRetriever):
               )
             ORDER BY e.priority DESC, e.id DESC
             LIMIT ?
-        """
-        rows = await self._execute_query_async(sql, (*([f"%{query}%"] * 5), max_results))
+        """  # nosec B608 - fixed owner predicate; every value remains bound.
+        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
+        rows = await self._execute_query_async(sql, (*owner_params, *([f"%{query}%"] * 5), max_results))
         documents: list[Document] = []
         query_lower = query.lower()
         for row in rows:
@@ -4061,14 +4187,18 @@ class WorldBooksRetriever(BaseRetriever):
 
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
         entry_id = doc_id.replace("world_book_entry_", "")
+        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
+        owner_clause = "AND wb.client_id = ?" if is_postgres else ""
+        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
         rows = self._execute_query(
-            """
+            f"""
             SELECT e.*, wb.name AS world_book_name
             FROM world_book_entries e
             JOIN world_books wb ON e.world_book_id = wb.id
             WHERE e.id = ?
-            """,
-            (entry_id,),
+              {owner_clause}
+            """,  # nosec B608 - fixed owner predicate; every value remains bound.
+            (entry_id, *owner_params),
         )
         return dict(rows[0]) if rows else {}
 
@@ -4161,6 +4291,21 @@ class ChatDictionariesRetriever(BaseRetriever):
         return dict(rows[0]) if rows else {}
 
 
+def _format_character_evidence(row: dict[str, Any]) -> str:
+    """Keep Character evidence readable in the plain-text source preview."""
+    sections = [row.get("name") or "(Unnamed)"]
+    for field, label in (
+        ("description", "Description"),
+        ("personality", "Personality"),
+        ("scenario", "Scenario"),
+        ("first_message", "First Message"),
+    ):
+        value = row.get(field)
+        if value and value.strip():
+            sections.append(f"{label}: {value}")
+    return "\n\n".join(sections)
+
+
 class CharacterCardsRetriever(BaseRetriever):
     """Retriever for character cards and chats."""
 
@@ -4214,27 +4359,20 @@ class CharacterCardsRetriever(BaseRetriever):
                 min_score = float(self.config.min_score or 0.0)
                 for idx, row in enumerate(card_rows):
                     name = row.get("name") or "(Unnamed)"
-                    description = row.get("description") or ""
-                    personality = row.get("personality") or ""
-                    scenario = row.get("scenario") or ""
-                    first_message = row.get("first_message") or ""
                     score_val = norm_map.get(idx, 0.75)
                     if score_val < min_score:
                         continue
 
-                    content = (
-                        f"# {name}\n\n"
-                        f"**Description:** {description}\n\n"
-                        f"**Personality:** {personality}\n\n"
-                        f"**Scenario:** {scenario}\n\n"
-                        f"**First Message:** {first_message}"
-                    )
+                    content = _format_character_evidence(row)
                     doc = Document(
                         id=f"character_{row['id']}",
                         content=content,
                         source=DataSource.CHARACTER_CARDS,
                         metadata={
                             "name": name,
+                            "title": name,
+                            "source_type": "characters",
+                            "source_id": str(row["id"]),
                             "creator": row.get("creator"),
                             "version": row.get("version"),
                             "type": "character_card",
@@ -4248,6 +4386,9 @@ class CharacterCardsRetriever(BaseRetriever):
                     limit_msgs = max(1, self.config.max_results // 2)
                     msg_rows = self.chacha_db.search_messages_by_content(query, limit=limit_msgs)
                     for row in msg_rows:
+                        visible = visible_knowledge_text(row.get("content") or "")
+                        if not visible:
+                            continue
                         character_name = None
                         character_id = None
                         conv_id = row.get("conversation_id")
@@ -4262,8 +4403,11 @@ class CharacterCardsRetriever(BaseRetriever):
                                     if card:
                                         character_name = card.get("name")
 
-                        content = f"{row.get('sender')}: {row.get('content', '')}"
+                        content = f"{row.get('sender')}: {visible}"
                         metadata = {
+                            "title": row.get("conversation_title") or "Untitled conversation",
+                            "source_type": "chats",
+                            "source_id": str(conv_id),
                             "sender": row.get("sender"),
                             "timestamp": row.get("timestamp"),
                             "character_id": character_id,
@@ -4319,7 +4463,7 @@ class CharacterCardsRetriever(BaseRetriever):
         params = [f"%{query}%"] * 5 + [self.config.max_results // 2]
         card_results = self._execute_query(card_sql, tuple(params))
         for row in card_results:
-            content = f"""# {row['name']}\n\n**Description:** {row['description']}\n\n**Personality:** {row['personality']}\n\n**Scenario:** {row['scenario']}\n\n**First Message:** {row['first_message']}"""
+            content = _format_character_evidence(row)
             matches = sum(
                 [
                     query.lower() in (row[field] or "").lower()
@@ -4333,6 +4477,9 @@ class CharacterCardsRetriever(BaseRetriever):
                 source=DataSource.CHARACTER_CARDS,
                 metadata={
                     "name": row["name"],
+                    "title": row["name"],
+                    "source_type": "characters",
+                    "source_id": str(row["id"]),
                     "creator": row["creator"],
                     "version": row["version"],
                     "type": "character_card",
@@ -4346,10 +4493,12 @@ class CharacterCardsRetriever(BaseRetriever):
             chat_sql = """
                 SELECT
                     m.id,
+                    m.conversation_id,
                     m.content,
                     m.sender,
                     m.timestamp,
                     conv.character_id,
+                    conv.title AS conversation_title,
                     cc.name as character_name
                 FROM messages m
                 JOIN conversations conv ON m.conversation_id = conv.id
@@ -4361,12 +4510,18 @@ class CharacterCardsRetriever(BaseRetriever):
             chat_params = [f"%{query}%", self.config.max_results // 2]
             chat_results = self._execute_query(chat_sql, tuple(chat_params))
             for row in chat_results:
-                content = f"[{row['sender']}]: {row['content']}"
+                visible = visible_knowledge_text(row.get("content") or "")
+                if not visible:
+                    continue
+                content = f"[{row['sender']}]: {visible}"
                 doc = Document(
                     id=f"chat_{row['id']}",
                     content=content,
                     source=DataSource.CHAT_HISTORY,
                     metadata={
+                        "title": row.get("conversation_title") or "Untitled conversation",
+                        "source_type": "chats",
+                        "source_id": str(row["conversation_id"]),
                         "sender": row["sender"],
                         "timestamp": row["timestamp"],
                         "character": row["character_name"],
@@ -4702,6 +4857,7 @@ class MultiDatabaseRetriever:
         # Optional per-source restrictions
         allowed_media_ids: Optional[list[int]] = None,
         allowed_note_ids: Optional[list[str]] = None,
+        source_failures: Optional[set[DataSource]] = None,
     ) -> list[Document]:
         """
         Retrieve documents from one or more configured data sources.
@@ -4711,6 +4867,7 @@ class MultiDatabaseRetriever:
             sources: Optional explicit list of `DataSource` to query. Defaults to all configured.
             config: Optional `RetrievalConfig` to apply to each retriever
             index_namespace: Optional namespace for vector stores
+            source_failures: Optional request-owned collector for failed sources.
 
         Returns:
             A list of `Document` objects sorted by score (desc), capped by config.max_results if provided.
@@ -4744,6 +4901,7 @@ class MultiDatabaseRetriever:
 
         documents: list[Document] = []
         tasks: list[Any] = []
+        task_sources: list[DataSource] = []
 
         async def _run_with_config(
             retriever: BaseRetriever,
@@ -4770,6 +4928,7 @@ class MultiDatabaseRetriever:
             retr = self.retrievers.get(src)
             if retr is None:
                 continue
+            task_sources.append(src)
 
             # Prefer hybrid/vector when requested and available for Media DB
             if (
@@ -4850,38 +5009,148 @@ class MultiDatabaseRetriever:
                     tasks.append(_run_with_config(retr, retr.retrieve, query))
 
         # Execute all retrievals concurrently
+        had_source_failure = False
         if tasks:
             try:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-            except (RuntimeError, TypeError, ValueError) as e:
-                logger.error(f"Multi-database retrieval failed: {e}")
+            except (RuntimeError, TypeError, ValueError) as error:
+                logger.bind(
+                    operation="multi_database_retrieval",
+                    exception_type=type(error).__name__,
+                    source_count=len(task_sources),
+                ).error("Multi-database retrieval failed (error={})", type(error).__name__)
+                had_source_failure = True
+                if source_failures is not None:
+                    source_failures.update(task_sources)
                 results = []
         else:
             results = []
 
-        # Flatten and filter out failures
-        for res in results:
+        # Filter out failures, keeping each source's results in their own list. The
+        # grouping is what makes rank-based fusion possible below; flattening first
+        # throws away the only information that tells the two scales apart.
+        per_source: list[list[Document]] = []
+        for source, res in zip(task_sources, results):
             if (
                 getattr(self, "credential_runtime", None) is not None
                 and isinstance(res, (ByokResolutionError, ChatAPIError))
             ):
                 raise res
             if isinstance(res, Exception):
+                # Keep diagnostics useful without logging SQL, credentials, or queries
+                # carried in exception messages or traceback locals.
+                logger.bind(
+                    operation="multi_database_retrieval",
+                    source=source.value,
+                    exception_type=type(res).__name__,
+                ).error(
+                    "Database source retrieval failed (source={}, error={})",
+                    source.value, type(res).__name__,
+                )
                 # Skip failed sources (partial success expected)
+                had_source_failure = True
+                if source_failures is not None:
+                    source_failures.add(source)
                 continue
-            if isinstance(res, list):
+            if isinstance(res, list) and res:
+                per_source.append(res)
                 documents.extend(res)
 
-        # Sort globally by score desc and cap by max_results
-        documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)
+        if had_source_failure and not documents:
+            raise RAGDatabaseError(
+                "Document retrieval failed.", operation_type="search",
+            ) from None
+
+        documents = self._order_across_sources(per_source, documents)
         if config is not None and getattr(config, "max_results", None):
             documents = documents[: int(config.max_results)]
 
         return documents
 
+    def _order_across_sources(
+        self,
+        per_source: list[list[Document]],
+        documents: list[Document],
+    ) -> list[Document]:
+        """Order documents drawn from several sources without comparing raw scores.
+
+        The sources do not share a scale. Across the retrievers here, `score` is
+        min-max normalised (media, chunk FTS, vector), a constant 1.0 (both notes
+        paths), a constant 0.5 (chat history, character cards, SQL) or a constant
+        0.6/0.4 (claims). Sorting them together compared numbers that mean different
+        things, and the constants won.
+
+        Worked example, from the review that found this: sources=["media_db","notes"]
+        with top_k=10 and an include list of 20 note ids. _retrieve_allowed_notes_via_sql
+        returns notes ordered by last_modified with no text match required at all, and
+        stamps every one score=1.0. Media is min-max normalised, so exactly one media
+        document reaches 1.0. The global sort put all 20 notes at or above every media
+        document, and the top-10 cut returned notes only -- zero media documents,
+        including the best BM25 matches -- after which generation answered from
+        documents never scored for relevance at all. The same flaw decided ordinary
+        ties by dict insertion order, since min-max maps every source's best hit to
+        exactly 1.0 and list.sort is stable.
+
+        Reciprocal rank fusion uses only each document's RANK WITHIN ITS OWN SOURCE, so
+        no calibration between scales is needed. Each source keeps its own ordering,
+        which is self-consistent; only the interleaving changes.
+
+        Scores are rescaled onto (0, 1] rather than left as raw RRF values (~0.016 at
+        rank 1), because callers depend on that range: unified_pipeline re-sorts by
+        score and caps to top_k in three places, applies a [0,1]-bounded boost
+        (min(1.0, score * 1.1 + 0.02)), and Research/providers/local.py returns the
+        value in an API response. Rescaling keeps the fused order under those re-sorts
+        while leaving the range they assume intact.
+
+        Single-source results are returned untouched: their scores are meaningful
+        within one scale, there is nothing to fuse, and rank-based scores would be a
+        loss of fidelity. This is a cross-source fix only.
+
+        One further change when fusing: a document returned by two sources now appears
+        once, with its ranks summed, where the global sort listed it twice. That is
+        standard RRF and matches the existing _reciprocal_rank_fusion, but it means a
+        multi-source result set can be shorter than before for the same inputs.
+
+        See Docs/ADR/053-rag-cross-source-fusion.md.
+        """
+        if len(per_source) < 2:
+            documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)
+            return documents
+
+        k = 60  # standard RRF damping; rank 1 contributes 1/61, rank 2 1/62, ...
+        fused: dict[str, float] = {}
+        first_seen: dict[str, Document] = {}
+        for docs in per_source:
+            for rank, doc in enumerate(docs, start=1):
+                key = getattr(doc, "id", None)
+                if key is None:
+                    key = f"_anon:{id(doc)}"
+                fused[key] = fused.get(key, 0.0) + 1.0 / (k + rank)
+                first_seen.setdefault(key, doc)
+
+        ordered = sorted(
+            first_seen.values(),
+            key=lambda d: fused[getattr(d, "id", None) or f"_anon:{id(d)}"],
+            reverse=True,
+        )
+
+        # Rescale onto (0, 1], preserving the fused order.
+        top = max(fused.values())
+        if top > 0:
+            for doc in ordered:
+                key = getattr(doc, "id", None) or f"_anon:{id(doc)}"
+                try:
+                    doc.score = fused[key] / top
+                except (AttributeError, TypeError):
+                    # A frozen or exotic Document: order still holds, score is stale.
+                    pass
+        return ordered
+
     async def retrieve_from_plan(
         self,
         plan: RetrievalPlan,
+        *,
+        source_failures: Optional[set[DataSource]] = None,
         **kwargs: Any,
     ) -> list[Document]:
         """Retrieve documents using a normalized retrieval plan."""
@@ -4889,6 +5158,7 @@ class MultiDatabaseRetriever:
         return await self.retrieve(
             plan.query,
             retrieval_plan=plan,
+            source_failures=source_failures,
             **kwargs,
         )
 

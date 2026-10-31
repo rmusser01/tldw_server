@@ -4,7 +4,6 @@ import {
   Button,
   Card,
   Empty,
-  List,
   Space,
   Tag,
   Tooltip,
@@ -207,11 +206,12 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
             description="No llama.cpp runtime profiles are available."
           />
         ) : (
-          <List
-            size="small"
-            bordered
-            dataSource={rows}
-            renderItem={(row) => {
+          <ul
+            role="list"
+            aria-label="Runtime profiles"
+            className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0"
+          >
+            {rows.map((row) => {
               const label = profileLabel(row)
               const state = row.runtime?.state || "defined"
               const endpoint = formatEndpoint(row.profile, row.runtime)
@@ -316,8 +316,11 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
               }
 
               return (
-                <List.Item actions={actions}>
-                  <Space orientation="vertical" size={4} className="w-full">
+                <li
+                  key={row.profileId}
+                  className="flex flex-col gap-3 px-4 py-2 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <Space orientation="vertical" size={4} className="min-w-0 flex-1">
                     <Space wrap size="small">
                       <Text strong>{label}</Text>
                       <Tag color={stateColor(state)}>{state}</Tag>
@@ -362,10 +365,11 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
                       </Space>
                     )}
                   </Space>
-                </List.Item>
+                  <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>
+                </li>
               )
-            }}
-          />
+            })}
+          </ul>
         )}
       </Space>
     </Card>

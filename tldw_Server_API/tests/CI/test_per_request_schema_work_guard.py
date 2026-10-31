@@ -20,6 +20,8 @@ The invariant: after the first request has verified the schema,
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 WARMUP_REQUESTS = 3
@@ -71,8 +73,8 @@ def test_warm_media_listing_does_not_reverify_schema(
 def test_schema_verification_memo_is_keyed_per_database(tmp_path) -> None:
     """The memo must not let a different database skip verification.
 
-    Keyed on path plus device/inode, so a database recreated at the same path
-    (test teardown, a restored backup) is verified again rather than trusted.
+    Distinct paths and schema versions cannot share verified state; replacing
+    a database must also invalidate it.
     """
     from tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers import (
         _schema_verification_key,
@@ -98,12 +100,26 @@ def test_schema_verification_memo_is_keyed_per_database(tmp_path) -> None:
     # A different target schema version must also miss the memo.
     assert _schema_verification_key(_Db(first), 2) != key_first
 
-    # Recreating the file at the same path changes the inode, so the memo misses.
-    first.unlink()
-    first.write_bytes(b"")
+    # Replacing with an already existing file guarantees a distinct inode.
+    # Unlink/create may immediately reuse an inode on Linux filesystems.
+    second.replace(first)
     assert _schema_verification_key(_Db(first), 1) != key_first, (
         "a recreated database must be verified again, not served from the memo"
     )
+
+
+def test_schema_verification_rejects_reused_inode_after_file_change(monkeypatch) -> None:
+    """An inode may be reused after deletion; its prior verification is stale."""
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import sqlite_helpers
+
+    metadata = SimpleNamespace(st_dev=1, st_ino=42, st_ctime_ns=100)
+    monkeypatch.setattr(sqlite_helpers, "os", SimpleNamespace(stat=lambda _path: metadata))
+    db = SimpleNamespace(is_memory_db=False, db_path_str="recreated.db")
+    before = sqlite_helpers._schema_verification_key(db, 1)
+
+    metadata.st_ctime_ns = 200
+
+    assert sqlite_helpers._schema_verification_key(db, 1) != before
 
 
 @pytest.mark.integration

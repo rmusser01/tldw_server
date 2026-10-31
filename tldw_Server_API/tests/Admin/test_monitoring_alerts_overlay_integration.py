@@ -25,6 +25,7 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
     from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB import TopicAlert, TopicMonitoringDB
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
     from tldw_Server_API.tests.helpers.app_main_state import (
         reload_app_main,
         restore_app_main,
@@ -62,30 +63,20 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
         pool = await get_db_pool()
         repo = AuthnzAdminMonitoringRepo(pool)
         await repo.ensure_schema()
-        await pool.execute(
-            """
-            INSERT OR IGNORE INTO users (id, uuid, username, email, password_hash, is_active)
-            VALUES (?, ?, ?, ?, ?, 1)
-            """,
-            1,
-            "single-user-admin-uuid",
-            "single-user-admin",
-            "single-user-admin@example.com",
-            "x",
+        assignee_id = await ensure_test_user(
+            pool, "single-user-admin", "single-user-admin@example.com"
         )
         await repo.upsert_alert_state(
             alert_identity=f"alert:{alert_id}",
-            assigned_to_user_id=1,
+            assigned_to_user_id=assignee_id,
             snoozed_until="2026-03-10T11:00:00Z",
             escalated_severity="critical",
-            updated_by_user_id=1,
+            updated_by_user_id=assignee_id,
         )
 
-        monitoring_paths = sorted(
-            route.path for route in app.routes if getattr(route, "path", "").startswith("/api/v1/monitoring")
-        )
-        assert "/api/v1/monitoring/alerts" in monitoring_paths, monitoring_paths
-
+        # No app.routes pre-check: newer FastAPI keeps included routers as
+        # opaque _IncludedRouter entries, so their paths are not listed there.
+        # The 200 below fails with a 404 if the monitoring router is missing.
         with TestClient(app, headers=headers) as client:
             list_resp = client.get("/api/v1/monitoring/alerts")
             assert list_resp.status_code == 200, list_resp.text
@@ -100,7 +91,7 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
             items = payload["items"]
             assert len(items) == 1
             assert items[0]["alert_identity"] == f"alert:{alert_id}"
-            assert items[0]["assigned_to_user_id"] == 1
+            assert items[0]["assigned_to_user_id"] == assignee_id
             assert items[0]["snoozed_until"] == "2026-03-10T11:00:00Z"
             assert items[0]["escalated_severity"] == "critical"
 
@@ -114,7 +105,7 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
             assert read_payload["item"]["is_read"] is True
             assert read_payload["item"]["read_at"] is not None
             assert read_payload["item"]["acknowledged_at"] is None
-            assert read_payload["item"]["assigned_to_user_id"] == 1
+            assert read_payload["item"]["assigned_to_user_id"] == assignee_id
             assert read_payload["item"]["snoozed_until"] == "2026-03-10T11:00:00Z"
             assert read_payload["item"]["escalated_severity"] == "critical"
 
@@ -127,7 +118,7 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
             assert acknowledge_payload["item"]["alert_identity"] == f"alert:{alert_id}"
             assert acknowledge_payload["item"]["is_read"] is True
             assert acknowledge_payload["item"]["acknowledged_at"] is not None
-            assert acknowledge_payload["item"]["assigned_to_user_id"] == 1
+            assert acknowledge_payload["item"]["assigned_to_user_id"] == assignee_id
 
             dismiss_resp = client.delete(f"/api/v1/monitoring/alerts/{alert_id}")
             assert dismiss_resp.status_code == 200, dismiss_resp.text

@@ -218,7 +218,8 @@ vi.mock("@/hooks/useDiscoSkills", () => ({
   })
 }))
 
-vi.mock("@/libs/reasoning", () => ({
+vi.mock("@/libs/reasoning", async importOriginal => ({
+  ...await importOriginal<typeof import("@/libs/reasoning")>(),
   parseReasoning: parseReasoningMock
 }))
 

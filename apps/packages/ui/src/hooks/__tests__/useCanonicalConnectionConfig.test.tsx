@@ -1,4 +1,4 @@
-import { cleanup, renderHook, waitFor } from "@testing-library/react"
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const useStorageMock = vi.hoisted(() => vi.fn())
@@ -187,5 +187,58 @@ describe("useCanonicalConnectionConfig", () => {
     })
     expect(getConfigMock).toHaveBeenCalledTimes(2)
   })
+  it("keeps ordinary loading observable while proving only a source-linked authority refresh", async () => {
+    const token = (revision: number) =>
+      `test.${btoa(JSON.stringify({ sub: "7", revision }))}.signature`
+    const source = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user",
+      accessToken: token(1),
+      refreshToken: "refresh-one"
+    }
+    let record: unknown
+    useStorageMock.mockImplementation((key: string, fallback: unknown) =>
+      key === "tldwConfig"
+        ? [source, vi.fn()]
+        : createUseStorageImplementation({
+            serverUrl: source.serverUrl,
+            authMode: source.authMode,
+            accessToken: source.accessToken,
+            refreshRotation: record
+          })(key, fallback)
+    )
+    getConfigMock.mockResolvedValueOnce(source)
+    const { result, rerender } = renderHook(useCanonicalConnectionConfig)
+    expect(result.current.authorityLoading).toBe(true)
+    await waitFor(() => expect(result.current.authorityLoading).toBe(false))
+    let reject!: (error: Error) => void
+    getConfigMock.mockReturnValue(new Promise((_, no) => { reject = no }))
+    record = {
+      version: 1,
+      serverUrl: source.serverUrl,
+      authMode: source.authMode,
+      sourceAccessToken: source.accessToken,
+      sourceRefreshToken: source.refreshToken,
+      accessToken: token(2),
+      refreshToken: "refresh-two"
+    }
+    rerender()
+    expect(result.current.loading).toBe(true)
+    expect(result.current.authorityLoading).toBe(false)
+    await act(async () => reject(new Error("Canonical read failed")))
+    expect(result.current.loading).toBe(false)
+    expect(result.current.authorityLoading).toBe(true)
+    expect(result.current.config).toMatchObject({
+      serverUrl: source.serverUrl,
+      accessToken: source.accessToken
+    })
+  })
 
+  it("does not treat fallback configuration as resolved authority", async () => {
+    getConfigMock.mockResolvedValue(null)
+    const { result } = renderHook(useCanonicalConnectionConfig)
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.config).not.toBeNull()
+    expect(result.current.authorityLoading).toBe(true)
+  })
 })

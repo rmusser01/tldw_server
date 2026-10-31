@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "تنظیمات ورود باز نشد. دوباره تلاش کنید."
+  },
   "navigation_serverAndAuth": {
     "message": "سرور و احراز هویت"
   },

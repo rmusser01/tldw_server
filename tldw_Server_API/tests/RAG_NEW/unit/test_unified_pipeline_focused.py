@@ -66,6 +66,27 @@ class TestUnifiedPipelineCore:
     """Core tests for the unified pipeline - the main entry point."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("allowed,expected", [
+        (["text", "code", "table", "list"], {"whole-text", "code", "paragraph"}),
+        (["text"], {"whole-text", "paragraph"}),
+        (["code"], {"code"}),
+    ])
+    async def test_chunk_filter_treats_untyped_text_as_text(self, allowed, expected):
+        docs = [
+            Document(id="whole-text", content="Observatory guide", source=DataSource.CHARACTER_CARDS, metadata={"type": "character_card"}, score=0.9),
+            Document(id="code", content="print('Rowan')", source=DataSource.MEDIA_DB, metadata={"chunk_type": "code"}, score=0.8),
+            Document(id="paragraph", content="Rowan tour", source=DataSource.NOTES, metadata={"chunk_type": "paragraph"}, score=0.7),
+            Document(id="unknown", content="Unknown format", source=DataSource.MEDIA_DB, metadata={"chunk_type": "unknown-format"}, score=0.6),
+        ]
+        with patch.object(up, "MultiDatabaseRetriever") as factory:
+            factory.return_value.retrieve = AsyncMock(return_value=docs)
+            result = await unified_rag_pipeline(
+                query="Observatory", sources=["characters", "notes", "media_db"],
+                chunk_type_filter=allowed, enable_generation=False, enable_cache=False, enable_reranking=False,
+            )
+        assert {doc["id"] for doc in result.documents} == expected
+
+    @pytest.mark.asyncio
     async def test_minimal_query_execution(self):
         """Test the most basic query execution with minimal parameters."""
         # This is what most users will actually use

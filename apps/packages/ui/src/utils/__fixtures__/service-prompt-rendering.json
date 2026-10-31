@@ -20,6 +20,12 @@
     "writing.agent.brainstorm": {
       "system": "You are a creative brainstorming partner. Generate ideas freely, suggest alternatives, explore possibilities. The WRITER writes. You ASSIST and ADVISE."
     },
+    "writing.continuation.predict": {
+      "system": "Continue the text from the prompt. Respond with only the continuation."
+    },
+    "writing.continuation.fill": {
+      "system": "Fill in the missing text between the prefix and suffix. Respond with only the missing text."
+    },
     "study.assistant.explain": {
       "guidance": "Explain the material clearly and stay anchored to the provided study context only."
     },

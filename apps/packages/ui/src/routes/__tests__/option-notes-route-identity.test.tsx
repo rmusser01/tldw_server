@@ -5,6 +5,7 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import OptionNotes from "../option-notes"
+import { MemoryRouter } from "react-router-dom"
 
 const testDirectory = dirname(fileURLToPath(import.meta.url))
 const sharedRegistryRelative = "apps/packages/ui/src/routes/route-registry.tsx"
@@ -61,7 +62,7 @@ vi.mock("@/components/Notes/NotesManagerPage", () => ({
 
 describe("notes option route identity", () => {
   it("wraps /notes in the Notes route boundary and page", () => {
-    render(<OptionNotes />)
+    render(<MemoryRouter><OptionNotes /></MemoryRouter>)
 
     const boundary = screen.getByTestId("route-boundary")
 
@@ -91,7 +92,7 @@ describe("notes option route identity", () => {
       expect(optionModule).toContain(
         'import NotesManagerPage from "@/components/Notes/NotesManagerPage"'
       )
-      expect(optionModule).toContain("<NotesManagerPage />")
+      expect(optionModule).toContain('<NotesManagerPage sourceNoteId={new URLSearchParams(search).get("source_ref_id")} />')
       expect(optionModule).not.toMatch(/components\/Notes\/(?!NotesManagerPage)/)
     }
   })

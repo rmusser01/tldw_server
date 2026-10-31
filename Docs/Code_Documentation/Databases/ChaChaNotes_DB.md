@@ -138,6 +138,15 @@ The database uses a schema version to manage evolution.
 *   Initialization applies the base schema (V4) and then migrations to V5 (flashcards/decks/reviews), V6 (flashcard `model_type`/`extra`), and V7 (flashcard `reverse`).
 *   A legacy repair path adds missing `entity_id` to `sync_log` if detected before reapplying schema.
 
+PostgreSQL cold initialization and upgrades wait up to 30 seconds to acquire the
+schema-bootstrap advisory lock. This coordination budget does not increase the
+five-second DDL lock timeout or the 30-second migration statement timeout, and
+an operator's shorter statement timeout still applies during acquisition. A
+completed current schema is checked on each open without replaying migrations.
+Failed acquisition or migration cleanup discards the uncertain connection rather
+than returning it to the pool. Exhausting a budget still fails initialization;
+large upgrades should run offline rather than rely on unbounded startup retries.
+
 ### Client ID
 The `client_id` provided during `CharactersRAGDB` initialization is crucial for the `sync_log`. Every modification (create, update, delete) logged in `sync_log` (and written to the entity tables) is stamped with this `client_id`. This allows synchronization systems to identify the origin of changes and helps in conflict resolution strategies.
 

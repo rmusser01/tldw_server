@@ -122,7 +122,7 @@ async def test_selected_note_scope_returns_selected_note_when_query_is_natural_l
     matched_documents = [
         document
         for document in result.documents
-        if str(_document_metadata(document).get("source") or _document_source(document)) == "notes_db"
+        if str(_document_metadata(document).get("source") or _document_source(document)) == "notes"
         and str(_document_id(document)).replace("note_", "") == str(note_id)
         and SCOPED_INCLUDED_PHRASE
         in str(document.get("content") if isinstance(document, dict) else document.content)

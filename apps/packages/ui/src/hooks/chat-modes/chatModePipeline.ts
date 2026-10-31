@@ -1,11 +1,27 @@
+import type { BaseMessage } from "@/types/messages"
+import {
+  appendSelectedUser,
+  finalizeHistorySelection,
+  prepareHistoryContext,
+  nativeHistoryMessagePayload
+} from "@/services/chat-history-selection"
+import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
+import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
 import { startTransition } from "react"
 import { generateID } from "@/db/dexie/helpers"
 import { getModelNicknameByID } from "@/db/dexie/nickname"
-import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
+import {
+  isReasoningEnded, isReasoningStarted, isReasoningOnlyResponse,
+  MISSING_FINAL_ANSWER_MESSAGE
+} from "@/libs/reasoning"
 import { pageAssistModel } from "@/models"
 import type { ActorSettings } from "@/types/actor"
 import type { ChatDocuments } from "@/models/ChatTypes"
-import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
+import type {
+  HistorySendTurn,
+  SaveMessageData,
+  SaveMessageErrorData
+} from "@/types/chat-modes"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
 import { applyMcpModuleDisclosureFromToolCalls } from "@/utils/mcp-disclosure"
 import {
@@ -50,12 +66,14 @@ import type { MessageMetadataExtra } from "@/store/option"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { KnownServicePromptId } from "@/services/tldw/domains/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
+  historyTurn?: HistorySendTurn
   selectedModel: string
   useOCR: boolean
   toolChoice?: ToolChoice
@@ -71,6 +89,7 @@ export type ChatModeParamsBase = {
   // shared abort controller identified by `signal`. Used so a finishing turn
   // does not clobber a newer in-flight turn's streaming flag / controller.
   // When omitted, callers get the previous unconditional reset behavior.
+  ownsAbortController?: (signal: AbortSignal) => boolean
   releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
   // Scope leases use a derived signal. When that signal aborts without a user
   // cancellation, discard the entire turn so no old-scope output is saved.
@@ -118,7 +137,7 @@ export type ChatModeContext<TParams extends ChatModeParamsBase> = TParams & {
 }
 
 export type ChatModePrompt = {
-  chatHistory: ChatHistory
+  chatHistory: Array<BaseMessage | ChatHistory[number]>
   humanMessage?: any
   sources?: unknown[]
   promptId?: string
@@ -163,7 +182,10 @@ export type ChatModeDefinition<TParams extends ChatModeParamsBase> = {
   preflight?: (
     ctx: ChatModeContext<TParams>
   ) => Promise<ChatModePreflightResult | null>
-  updateHistory?: (ctx: ChatModeContext<TParams>, fullText: string) => ChatHistory
+  updateHistory?: (
+    ctx: ChatModeContext<TParams>,
+    fullText: string
+  ) => ChatHistory
   isContinue?: boolean
   extractGenerationInfo?: (output: unknown) => unknown
 }
@@ -215,16 +237,31 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   } = params
   const selectedModelSelection =
     parseProviderQualifiedModelSelection(rawSelectedModel)
-  const selectedModel =
-    selectedModelSelection.modelId || rawSelectedModel
+  const selectedModel = selectedModelSelection.modelId || rawSelectedModel
   const modelIdOverride = rawModelIdOverride
     ? String(rawModelIdOverride).trim()
     : undefined
 
+  const failedTurnError = decodeChatErrorPayload(regenerateFromMessage?.message || "")
+  const diagnosticUser = isRegenerate && regenerateFromMessage
+    ? getLocalRagDiagnosticUser(messages, regenerateFromMessage) : undefined
+  const retryFailedTurn = Boolean(isRegenerate && (failedTurnError || diagnosticUser))
+  // A local capability refusal can prove no request was dispatched. Keep the
+  // local failed-user identity while avoiding server reuse of an older turn.
+  const serverRetryRequired = retryFailedTurn && !diagnosticUser && failedTurnError?.serverRetryRequired !== false
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
-    !isRegenerate ? userMessageId ?? generateID() : undefined
+    !isRegenerate
+      ? userMessageId ?? generateID()
+      : retryFailedTurn
+        ? userMessageId ?? diagnosticUser?.id ?? regenerateFromMessage?.parentMessageId ?? getLastUserMessageId(messages) ?? undefined
+        : undefined
   const createdAt = Date.now()
+  const historyTurn = params.historyTurn
+  if (historyTurn) {
+    historyTurn.assistantId = resolvedAssistantMessageId
+    historyTurn.createdAt = createdAt
+  }
   let generateMessageId = resolvedAssistantMessageId
   const modelInfo = await getModelNicknameByID(selectedModel)
 
@@ -238,8 +275,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   const resolvedAssistantParentMessageId =
     assistantParentMessageId ??
     (isRegenerate
-      ? regenerateFromMessage?.parentMessageId ?? fallbackParentMessageId
-      : resolvedUserMessageId ?? null)
+      ? (regenerateFromMessage?.parentMessageId ?? fallbackParentMessageId)
+      : (resolvedUserMessageId ?? null))
   const regenerateVariants =
     isRegenerate && regenerateFromMessage
       ? normalizeMessageVariants(regenerateFromMessage)
@@ -261,7 +298,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const context: ChatModeContext<TParams> = {
     ...params,
-    selectedModel,
+    selectedModel: rawSelectedModel,
     modelIdOverride,
     message,
     image,
@@ -280,6 +317,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     regenerateVariants
   }
 
+  let modelClient: Awaited<ReturnType<typeof pageAssistModel>> | undefined
   let fullText = ""
   let contentToSave = ""
   let timetaken = 0
@@ -293,10 +331,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     messagesOrUpdater: Message[] | ((prev: Message[]) => Message[])
   ) => {
     startTransition(() => {
+      if (historyTurn && !historyTurn.canUpdateView()) return
       setMessages(messagesOrUpdater)
     })
   }
   const setHistorySafely = (nextHistory: ChatHistory) => {
+    if (historyTurn && !historyTurn.canUpdateView()) return
     if (typeof setHistory === "function") {
       setHistory(nextHistory)
       return
@@ -308,9 +348,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     }
     if (!didLogPipelineSetHistoryMissing) {
       didLogPipelineSetHistoryMissing = true
-      console.error("[chat] runChatPipeline could not resolve setHistory setter", {
-        setHistoryType: typeof setHistory
-      })
+      console.error(
+        "[chat] runChatPipeline could not resolve setHistory setter",
+        {
+          setHistoryType: typeof setHistory
+        }
+      )
     }
   }
 
@@ -343,9 +386,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       }
     }
 
-    const activeVariant = normalized.variants[
-      normalized.activeVariantIndex
-    ] as MessageVariant | undefined
+    const activeVariant = normalized.variants[normalized.activeVariantIndex] as
+      | MessageVariant
+      | undefined
     const withNormalizedVariants: Message = {
       ...messageEntry,
       variants: normalized.variants as MessageVariant[],
@@ -387,7 +430,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               message: pendingStreamingText,
               reasoning_time_taken: pendingReasoningTime
             })
-          : msg
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
   }
@@ -468,7 +513,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     if (!mode.buildAssistantMessage || !mode.buildUserMessage) {
       throw new Error(`Chat mode "${mode.id}" is missing message builders.`)
     }
-    setMessagesWithTransition((prev) => {
+    setMessagesWithTransition((previous) => {
+      const prev = historyTurn ? messages : previous
       const assistantStub = mode.buildAssistantMessage!(context)
       if (!isRegenerate) {
         const userMessageEntry = applyMetadataExtra(
@@ -478,8 +524,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         const existingUserIndex = resolvedUserMessageId
           ? prev.findIndex(
               (messageEntry) =>
-                messageEntry.id === resolvedUserMessageId &&
-                !messageEntry.isBot
+                messageEntry.id === resolvedUserMessageId && !messageEntry.isBot
             )
           : -1
         if (existingUserIndex >= 0) {
@@ -511,10 +556,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         )
         if (lastIndex >= 0) {
           const stub = next[lastIndex]
-          const variants = [
-            ...regenerateVariants,
-            buildMessageVariant(stub)
-          ]
+          const variants = [...regenerateVariants, buildMessageVariant(stub)]
           next[lastIndex] = normalizeImageVariantsForMessage({
             ...stub,
             variants,
@@ -538,11 +580,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         ? mode.updateHistory(context, fullText)
         : preflight.skipHistoryAppend
           ? history
-        : ([
-            ...history,
-            { role: "user", content: message, image },
-            { role: "assistant", content: fullText }
-          ] as ChatHistory)
+          : ([
+              ...history,
+              { role: "user", content: message, image },
+              { role: "assistant", content: fullText }
+            ] as ChatHistory)
       const preflightGenerationInfoForSave = (() => {
         if (!isImageGenerationTurn) {
           return preflight.generationInfo
@@ -582,7 +624,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   reasoning_time_taken: timetaken
                 })
               )
-            : msg
+            : msg.id === resolvedUserMessageId && isLocalRagDiagnosticInfo(preflightGenerationInfoForSave)
+              ? { ...msg, generationInfo: preflightGenerationInfoForSave }
+              : msg
         )
       )
       setHistorySafely(nextHistory)
@@ -603,6 +647,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -632,6 +677,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       return chatSubmitSubmitted()
     }
 
+    // Rewrite builders also read visible messages. Keep the context identity
+    // used by preflight retrieval caches, while projecting only prompt rows.
+    context.messages = excludeLocalRagDiagnostics(context.messages)
     const promptData = await mode.preparePrompt(context)
     if (params.dynamicUIRequest?.renderer === "openui") {
       promptData.chatHistory = [
@@ -657,33 +705,120 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     promptId = promptData.promptId
     const sources = promptData.sources ?? []
     const humanMessage = promptData.humanMessage
+    const outgoingMessages = humanMessage
+      ? [...promptData.chatHistory, humanMessage]
+      : [...promptData.chatHistory]
 
-    const modelClient = await pageAssistModel({
-      model: selectedModel,
+    modelClient = await pageAssistModel({
+      model: rawSelectedModel,
       toolChoice,
       conversationId,
+      ...(historyTurn ? { clientManagedHistory: true, saveToDb: false } : {}),
       researchContext: context.researchContext,
+      clientMessageId: resolvedUserMessageId,
+      retryFailedTurn: serverRetryRequired,
+      // A local refusal is a UI Retry even when no server request was sent.
+      // Inspect prepared content so explicit OCR does not force discovery.
+      refreshImageCapability: retryFailedTurn && outgoingMessages.some(
+        (entry) => Array.isArray(entry.content) &&
+          entry.content.some((part) => part?.type === "image_url")
+      ),
+      regenerateFromMessageId: isRegenerate && !retryFailedTurn
+        ? regenerateFromMessage?.serverMessageId
+        : undefined,
       requestScope: params.servicePromptSnapshot?.requestScope
     })
 
-    let generationInfo: unknown = undefined
-    const chunks = await modelClient.stream(
-      humanMessage
-        ? [...promptData.chatHistory, humanMessage]
-        : [...promptData.chatHistory],
-      {
-        signal,
-        callbacks: [
-          {
-            handleLLMEnd(output: unknown): void {
-              const extractor =
-                mode.extractGenerationInfo ?? defaultExtractGenerationInfo
-              generationInfo = extractor(output)
-            }
-          }
-        ]
+    if (signal.aborted || params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted) {
+      const error = new Error("Request cancelled")
+      error.name = "AbortError"
+      throw error
+    }
+
+    const finalMessages = humanMessage
+      ? [...promptData.chatHistory, humanMessage]
+      : [...promptData.chatHistory]
+    let preparedRequest: ChatCompletionRequest | undefined
+    if (historyTurn) {
+      if (isRegenerate || mode.isContinue)
+        throw new Error("unsupported_history_action")
+      const wire = modelClient.prepareClientManagedRequest(finalMessages as any)
+      const input = {
+        id: resolvedUserMessageId!,
+        history_id: historyTurn.capture.view.conversation_id,
+        role: "user",
+        name: "You",
+        content: message,
+        createdAt,
+        images: image ? [image] : [],
+        ...(params.userMetadataExtra
+          ? { metadataExtra: params.userMetadataExtra }
+          : {}),
+        ...(documents?.length ? { documents } : {})
       }
-    )
+      if (historyTurn.owner.kind === "native") {
+        nativeHistoryMessagePayload(input)
+        if (wire.tools?.length)
+          throw new Error("unsupported_history_native_tool_result")
+        if (sources.length || params.dynamicUIRequest)
+          throw new Error("unsupported_history_native_result_metadata")
+      }
+      const prepared = prepareHistoryContext(wire, () =>
+        historyTurn.validateLease()
+      )
+      const view = historyTurn.currentView()
+      if (!view) throw new Error("stale_selection")
+      const selection = finalizeHistorySelection(
+        historyTurn.owner,
+        historyTurn.capture,
+        prepared,
+        view
+      )
+      if (!historyTurn.validateLease() || signal.aborted)
+        throw new Error("request_config_scope_changed")
+      historyTurn.selection = selection
+      historyTurn.input = input
+      await historyTurn.beforeDispatch?.()
+      if (!historyTurn.validateLease() || signal.aborted)
+        throw new Error("request_config_scope_changed")
+      // Revalidate the view after the durable pending-intent write, immediately before dispatch.
+      finalizeHistorySelection(
+        historyTurn.owner,
+        historyTurn.capture,
+        prepared,
+        historyTurn.currentView()!
+      )
+      historyTurn.dispatched = true
+      // A response received after display navigation is still the original operation's result.
+      historyTurn.admission = await appendSelectedUser(
+        historyTurn.owner,
+        selection,
+        input,
+        {
+          signal,
+          validate_lease: () => historyTurn.validateLease()
+        }
+      )
+      await historyTurn.afterAdmission?.()
+      if (!historyTurn.validateLease() || signal.aborted)
+        throw new Error("request_config_scope_changed")
+      preparedRequest = prepared.payload as ChatCompletionRequest
+    }
+
+    let generationInfo: unknown = undefined
+    const chunks = await modelClient.stream(finalMessages as BaseMessage[], {
+      signal,
+      ...(preparedRequest ? { preparedRequest } : {}),
+      callbacks: [
+        {
+          handleLLMEnd(output: unknown): void {
+            const extractor =
+              mode.extractGenerationInfo ?? defaultExtractGenerationInfo
+            generationInfo = extractor(output)
+          }
+        }
+      ]
+    })
 
     let count = 0
     let reasoningStartTime: Date | null = null
@@ -701,8 +836,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           : null
       if (
         typeof interruptionEvent?.event === "string" &&
-        interruptionEvent.event.toLowerCase() ===
-          "stream_transport_interrupted"
+        interruptionEvent.event.toLowerCase() === "stream_transport_interrupted"
       ) {
         streamTransportInterrupted = true
         const detail =
@@ -737,7 +871,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         timetaken = reasoningTime
       }
 
-      if (count === 0) {
+      if (
+        count === 0 &&
+        (!historyTurn || historyTurn.canUpdateView()) &&
+        (!params.ownsAbortController || params.ownsAbortController(signal))
+      ) {
         setIsProcessing(true)
       }
 
@@ -749,12 +887,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     // partial as a complete answer). Route through the interrupted path, or
     // discard entirely if nothing was streamed before the abort.
     if (signal.aborted) {
+      if (historyTurn)
+        throw new Error("Request cancelled after history admission")
       cancelStreamingUpdate()
       signal.removeEventListener("abort", abortCancelStreamingUpdate)
       const abortedBeforeAnyContent =
-        count === 0 &&
-        fullText.trim().length === 0 &&
-        !isImageGenerationTurn
+        count === 0 && fullText.trim().length === 0 && !isImageGenerationTurn
       if (abortedBeforeAnyContent) {
         if (isRegenerate) {
           // Regenerate cancelled before any token arrived: discard the empty
@@ -780,12 +918,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     if (
       !signal.aborted &&
       count === 0 &&
+      !extractToolCalls(generationInfo)?.length &&
       fullText.trim().length === 0 &&
       !isImageGenerationTurn
     ) {
       throw new Error(
-        streamTransportInterruptionReason ||
-          EMPTY_RESPONSE_ERROR_MESSAGE
+        streamTransportInterruptionReason || EMPTY_RESPONSE_ERROR_MESSAGE
       )
     }
 
@@ -800,10 +938,19 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ) {
       throw new Error(EMPTY_RESPONSE_ERROR_MESSAGE)
     }
+    if (
+      isReasoningOnlyResponse(fullText) &&
+      (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
+      !isImageGenerationTurn
+    ) {
+      throw new Error(MISSING_FINAL_ANSWER_MESSAGE)
+    }
     applyMcpModuleDisclosureFromToolCalls(toolCalls)
     const finalGenerationInfo = streamTransportInterrupted
       ? {
-          ...(generationInfo && typeof generationInfo === "object" && !Array.isArray(generationInfo)
+          ...(generationInfo &&
+          typeof generationInfo === "object" &&
+          !Array.isArray(generationInfo)
             ? generationInfo
             : {}),
           interrupted: true,
@@ -827,6 +974,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ? normalizeImageVariantsForMessage(
               updateActiveVariant(msg, {
                 message: fullText,
+                serverMessageId: modelClient.serverMessageId,
                 sources,
                 generationInfo: finalGenerationInfo,
                 toolCalls,
@@ -836,7 +984,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   : {})
               })
             )
-          : msg
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
 
@@ -847,6 +997,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     // and mirror it to the server. This mirrors character chat's handling of the
     // same `stream_transport_interrupted` sentinel.
     if (streamTransportInterrupted) {
+      if (historyTurn)
+        throw new Error(
+          streamTransportInterruptionReason || "Stream transport interrupted"
+        )
       const interruptionReason =
         streamTransportInterruptionReason ||
         "Stream transport interrupted; partial response saved."
@@ -867,6 +1021,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
+        userServerMessageId: modelClient?.userServerMessageId,
+        assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -901,6 +1058,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     )
 
     await saveMessageOnSuccess({
+      historyTurn,
       historyId,
       setHistoryId,
       isRegenerate,
@@ -915,6 +1073,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       modelId: resolvedModelId,
       userModelId,
       userMessageId: resolvedUserMessageId,
+      retryFailedTurn,
+      userServerMessageId: modelClient?.userServerMessageId,
       assistantMessageId: resolvedAssistantMessageId,
       userParentMessageId: userParentMessageId ?? null,
       assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -926,6 +1086,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       reasoning_time_taken: timetaken,
       saveToDb: Boolean(modelClient.saveToDb),
       conversationId: modelClient.conversationId,
+      assistantServerMessageId: modelClient.serverMessageId,
       imageEventSyncPolicy,
       scopeSignal: params.servicePromptSnapshot?.scopeSignal,
       scopeInvalidatedSignal:
@@ -946,6 +1107,32 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   } catch (e) {
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
+    if (historyTurn) {
+      if (historyTurn.dispatched) {
+        await historyTurn.recover(
+          {
+            content: fullText,
+            assistantId: resolvedAssistantMessageId,
+            createdAt
+          },
+          e
+        )
+        // Pending/unknown responses are inspected in scoped recovery, never ordinary retry controls.
+        setMessagesWithTransition((prev) =>
+          prev.filter(
+            (row) =>
+              row.id !== resolvedAssistantMessageId &&
+              (historyTurn.admission || row.id !== resolvedUserMessageId)
+          )
+        )
+      } else {
+        await historyTurn.cancelPreparation?.()
+        setMessagesWithTransition(messages)
+      }
+      return chatSubmitFailed(
+        e instanceof Error ? e.message : "History send failed"
+      )
+    }
     if (isRequestConfigScopeChangedError(e)) {
       setMessages(messages)
       setHistorySafely(history)
@@ -995,6 +1182,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ? normalizeImageVariantsForMessage(
               updateActiveVariant(msg, {
                 message: assistantContent,
+                ...(modelClient?.serverMessageId ? { serverMessageId: modelClient.serverMessageId } : {}),
                 generationInfo: {
                   ...(msg.generationInfo || {}),
                   interrupted: true,
@@ -1003,7 +1191,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 }
               })
             )
-          : msg
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
 
@@ -1026,9 +1216,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
+        userServerMessageId: modelClient?.userServerMessageId,
+        assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
-        assistantParentMessageId: assistantParentMessageId ?? null,
+        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
         documents,
         isContinue: mode.isContinue,
         prompt_content: promptContent,

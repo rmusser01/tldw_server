@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useStoreMessageOption } from "@/store/option"
+import { useActorStore } from "@/store/actor"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
 import type { RolePlayState } from "../role-play-state"
 import { RolePlaySetupDrawer } from "../RolePlaySetupDrawer"
@@ -234,7 +236,7 @@ const renderDrawer = (
   overrides: Partial<React.ComponentProps<typeof RolePlaySetupDrawer>> = {}
 ) => {
   const returnFocusRef = React.createRef<HTMLButtonElement>()
-  render(
+  const view = render(
     <>
       <button ref={returnFocusRef} type="button">
         Setup trigger
@@ -252,11 +254,12 @@ const renderDrawer = (
       />
     </>
   )
-  return { returnFocusRef }
+  return { returnFocusRef, ...view }
 }
 
 describe("RolePlaySetupDrawer", () => {
   beforeEach(() => {
+    useStoreMessageOption.setState({ serverChatId: "server-1", historyId: "history-1" })
     actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockResolvedValue(
       activeScene()
     )
@@ -687,4 +690,159 @@ describe("RolePlaySetupDrawer", () => {
       })
     )
   })
+  it("persists a scene only after accepted replacement and against its new destination", async () => {
+    let release!: (accepted: boolean) => void
+    const pending = new Promise<boolean>(resolve => { release = resolve })
+    const onApply = vi.fn(() => {
+      useStoreMessageOption.setState({ serverChatId: null, historyId: null })
+      return pending
+    })
+    renderDrawer({ onApply })
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    expect(actorSettingsMocks.saveActorSettingsForChat).not.toHaveBeenCalled()
+    await act(async () => { release(true); await pending })
+    expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledExactlyOnceWith({ historyId: null, serverChatId: null, settings: activeScene() })
+  })
+
+  it("does not persist or display a scene after identity application is cancelled", async () => {
+    const onClose = vi.fn()
+    renderDrawer({ onApply: async () => false, onClose })
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await act(async () => { await Promise.resolve() })
+    expect(actorSettingsMocks.saveActorSettingsForChat).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it.each(["target", "unmount"])("suppresses held scene presentation after %s changes", async change => {
+    let release!: (saved: boolean) => void
+    const pending = new Promise<boolean>(resolve => { release = resolve })
+    actorSettingsMocks.saveActorSettingsForChat.mockReturnValueOnce(pending)
+    const onClose = vi.fn()
+    const view = renderDrawer({ onApply: async () => true, onClose })
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalled())
+    const before = useActorStore.getState()
+    if (change === "unmount") view.unmount()
+    else useStoreMessageOption.setState({ serverChatId: "replacement", historyId: "other-history" })
+    await act(async () => { release(true); await pending })
+    expect(useActorStore.getState()).toBe(before)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("keeps the scene draft and reports partial failure without rolling back the accepted identity", async () => {
+    actorSettingsMocks.saveActorSettingsForChat.mockResolvedValueOnce(false)
+    const onApply = vi.fn(async () => true)
+    const onClose = vi.fn()
+    renderDrawer({ onApply, onClose })
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await screen.findByText(/Identity and behavior were applied, but scene settings could not be saved/)
+    expect(onApply).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not publish a held scene after the drawer closes and reopens", async () => {
+    let release!: (saved: boolean) => void
+    const pending = new Promise<boolean>(resolve => { release = resolve })
+    actorSettingsMocks.saveActorSettingsForChat.mockReturnValueOnce(pending)
+    const onClose = vi.fn()
+    const props = { beforeState, historyId: "history-1", serverChatId: "server-1", onClose, onApply: async () => true }
+    const view = render(<RolePlaySetupDrawer {...props} open />)
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalled())
+    view.rerender(<RolePlaySetupDrawer {...props} open={false} />)
+    view.rerender(<RolePlaySetupDrawer {...props} open />)
+    const before = useActorStore.getState()
+    await act(async () => { release(true); await pending })
+    expect(useActorStore.getState()).toBe(before)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("respects an explicit owner action change while the accepted scene destination stays empty", async () => {
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null })
+    let actionRevision = 0
+    let release!: (saved: boolean) => void
+    const pending = new Promise<boolean>(resolve => { release = resolve })
+    actorSettingsMocks.saveActorSettingsForChat.mockReturnValueOnce(pending)
+    const onClose = vi.fn()
+    renderDrawer({ historyId: null, serverChatId: null, onApply: async () => true, onClose,
+      captureApplyGuard: () => { const captured = actionRevision; return () => captured === actionRevision }
+    })
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalled())
+    actionRevision++
+    const before = useActorStore.getState()
+    await act(async () => { release(true); await pending })
+    expect(useActorStore.getState()).toBe(before)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("accepted detachment retains the edited scene through failed save and retry", async () => {
+    useStoreMessageOption.setState({ serverChatId: "server-1", historyId: "history-1" })
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockReset()
+      .mockResolvedValueOnce(activeScene()).mockResolvedValue(createDefaultActorSettings())
+    let release!: () => void
+    actorSettingsMocks.saveActorSettingsForChat.mockReset()
+      .mockImplementationOnce(() => new Promise<boolean>(resolve => { release = () => resolve(false) }))
+      .mockResolvedValue(true)
+    const onApply = vi.fn(async () => {
+      useStoreMessageOption.setState({ serverChatId: null, historyId: null })
+      return true
+    })
+    const onClose = vi.fn()
+    const props = { open: true, beforeState, historyId: "history-1" as string | null, serverChatId: "server-1" as string | null, onClose, onApply }
+    const view = render(<RolePlaySetupDrawer {...props} />)
+    await screen.findByText(/1 detail/)
+    fireEvent.change(screen.getByLabelText("Scene notes"), { target: { value: "Keep my edited scene after detachment" } })
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledTimes(1))
+    view.rerender(<RolePlaySetupDrawer {...props} historyId={null} serverChatId={null} />)
+    await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 30)) })
+    await screen.findByText(/Identity and behavior were applied, but scene settings could not be saved/)
+    expect(screen.getByLabelText("Scene notes")).toHaveValue("Keep my edited scene after detachment")
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenLastCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({ notes: "Keep my edited scene after detachment" })
+    }))
+    view.unmount()
+  })
+
+  it.each(["replacement", "reopen"])("loads the new scene normally after %s during an own-detach save", async change => {
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockReset()
+      .mockResolvedValueOnce(activeScene())
+      .mockResolvedValue({ ...createDefaultActorSettings(), notes: "New context scene" })
+    let release!: (saved: boolean) => void
+    const pending = new Promise<boolean>(resolve => { release = resolve })
+    actorSettingsMocks.saveActorSettingsForChat.mockReturnValueOnce(pending)
+    const onApply = async () => { useStoreMessageOption.setState({ serverChatId: null, historyId: null }); return true }
+    const props = { beforeState, onApply, onClose: vi.fn() }
+    const view = render(<RolePlaySetupDrawer {...props} open historyId="history-1" serverChatId="server-1" />)
+    await screen.findByText(/1 detail/)
+    fireEvent.change(screen.getByLabelText("Scene notes"), { target: { value: "Pending old scene" } })
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await waitFor(() => expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalled())
+    view.rerender(<RolePlaySetupDrawer {...props} open historyId={null} serverChatId={null} />)
+    if (change === "replacement") {
+      useStoreMessageOption.setState({ historyId: "other-history", serverChatId: "other-server" })
+      view.rerender(<RolePlaySetupDrawer {...props} open historyId="other-history" serverChatId="other-server" />)
+    } else {
+      view.rerender(<RolePlaySetupDrawer {...props} open={false} historyId={null} serverChatId={null} />)
+      view.rerender(<RolePlaySetupDrawer {...props} open historyId={null} serverChatId={null} />)
+    }
+    await waitFor(() => expect(screen.getByLabelText("Scene notes")).toHaveValue("New context scene"))
+    expect(actorSettingsMocks.getActorSettingsForChatWithCharacterFallback).toHaveBeenCalledTimes(2)
+    await act(async () => { release(false); await pending })
+    expect(screen.getByLabelText("Scene notes")).toHaveValue("New context scene")
+    expect(props.onClose).not.toHaveBeenCalled()
+  })
+
 })

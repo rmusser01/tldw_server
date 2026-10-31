@@ -90,6 +90,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError, WorkspaceArtifactExportStateError
+from tldw_Server_API.app.core.feature_flags import is_persona_enabled
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
     get_research_workspace_output_job_status,
@@ -99,6 +100,12 @@ from tldw_Server_API.app.core.Sandbox.store import get_store as get_sandbox_stor
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Sharing.workspace_deletion_hook import on_workspace_deleted
 from tldw_Server_API.app.core.Workspaces.activity_index import WorkspaceActivityIndexService
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
+    WorkspacePersonaProfileCache,
+    get_workspace_persona_profile,
+    parse_workspace_assistant_defaults,
+    resolve_effective_workspace_assistant_default,
+)
 from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
 from tldw_Server_API.app.core.Workspaces.file_inventory_ignore import build_inventory_ignore_policy
 from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
@@ -175,26 +182,8 @@ def _parse_workspace_assistant_defaults(
     *,
     workspace_id: str | None = None,
 ) -> tuple[WorkspaceAssistantDefaults | None, bool]:
-    """Parse stored Workspace Assistant Defaults without leaking invalid storage drift."""
-    if raw is None:
-        return None, False
-    try:
-        return WorkspaceAssistantDefaults.model_validate(raw), False
-    except ValueError as exc:
-        payload_keys = sorted(raw.keys()) if isinstance(raw, dict) else None
-        logger.warning(
-            "Ignoring invalid stored workspace assistant defaults "
-            "for workspace_id={workspace_id}: error={error}; "
-            "payload_type={payload_type}; payload_keys={payload_keys}",
-            workspace_id=workspace_id or "<unknown>",
-            error=str(exc),
-            payload_type=type(raw).__name__,
-            payload_keys=payload_keys,
-        )
-        return None, True
-
-
-WorkspacePersonaProfileCache = dict[tuple[str, str, bool], dict[str, Any] | None]
+    """Keep the endpoint parsing adapter backed by the shared value rules."""
+    return parse_workspace_assistant_defaults(raw, workspace_id=workspace_id)
 
 
 def _get_workspace_persona_profile(
@@ -205,25 +194,20 @@ def _get_workspace_persona_profile(
     include_deleted: bool,
     cache: WorkspacePersonaProfileCache | None = None,
 ) -> dict[str, Any] | None:
-    """Return a persona profile with optional request-scoped lookup caching."""
-    cache_key = (user_id, assistant_id, include_deleted)
-    if cache is not None and cache_key in cache:
-        return cache[cache_key]
-
+    """Map shared profile lookup errors at the management HTTP boundary."""
     try:
-        profile = db.get_persona_profile(
-            assistant_id,
+        return get_workspace_persona_profile(
+            db=db,
+            assistant_id=assistant_id,
             user_id=user_id,
             include_deleted=include_deleted,
+            cache=cache,
         )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(
             exc,
             default_detail="Failed to resolve workspace assistant default",
         ) from exc
-    if cache is not None:
-        cache[cache_key] = profile
-    return profile
 
 
 def _effective_workspace_assistant_default(
@@ -233,70 +217,25 @@ def _effective_workspace_assistant_default(
     user_id: str,
     invalid_stored_default: bool = False,
     persona_profile_cache: WorkspacePersonaProfileCache | None = None,
+    assistant_defaults_explicit_none: bool = False,
 ) -> WorkspaceEffectiveAssistantDefault:
-    """Resolve a Workspace assistant default into a permission-safe client projection."""
-    if invalid_stored_default:
-        return WorkspaceEffectiveAssistantDefault(
-            status="unavailable",
-            source="workspace",
-            degraded_reason="invalid_default",
+    """Adapt existing endpoint callers to shared resolution and HTTP error mapping."""
+    try:
+        return resolve_effective_workspace_assistant_default(
+            db,
+            workspace={
+                "assistant_defaults_json": stored,
+                "_assistant_defaults_invalid": invalid_stored_default,
+                "assistant_defaults_explicit_none": assistant_defaults_explicit_none,
+            },
+            user_id=user_id,
+            persona_profile_cache=persona_profile_cache,
         )
-    if stored is None:
-        return WorkspaceEffectiveAssistantDefault(status="none", source="none")
-
-    if stored.assistant_kind != "persona":
-        return WorkspaceEffectiveAssistantDefault(
-            status="unavailable",
-            source="workspace",
-            degraded_reason="unsupported_assistant_kind",
-        )
-
-    profile = _get_workspace_persona_profile(
-        db=db,
-        assistant_id=stored.assistant_id,
-        user_id=user_id,
-        include_deleted=False,
-        cache=persona_profile_cache,
-    )
-    if profile is not None:
-        if not bool(profile.get("is_active", True)):
-            return WorkspaceEffectiveAssistantDefault(
-                status="unavailable",
-                source="workspace",
-                assistant_kind="persona",
-                assistant_id=stored.assistant_id,
-                persona_memory_mode=stored.persona_memory_mode,
-                degraded_reason="persona_unavailable",
-            )
-        return WorkspaceEffectiveAssistantDefault(
-            status="available",
-            source="workspace",
-            assistant_kind="persona",
-            assistant_id=stored.assistant_id,
-            label=str(profile.get("name") or stored.assistant_id),
-            persona_memory_mode=stored.persona_memory_mode,
-        )
-
-    deleted_profile = _get_workspace_persona_profile(
-        db=db,
-        assistant_id=stored.assistant_id,
-        user_id=user_id,
-        include_deleted=True,
-        cache=persona_profile_cache,
-    )
-    degraded_reason = (
-        "persona_deleted"
-        if deleted_profile is not None
-        else "permission_denied"
-    )
-    return WorkspaceEffectiveAssistantDefault(
-        status="unavailable",
-        source="workspace",
-        assistant_kind="persona",
-        assistant_id=stored.assistant_id,
-        persona_memory_mode=stored.persona_memory_mode,
-        degraded_reason=degraded_reason,
-    )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to resolve workspace assistant default",
+        ) from exc
 
 
 def _validate_workspace_assistant_default_reference(
@@ -310,6 +249,11 @@ def _validate_workspace_assistant_default_reference(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="assistant_defaults.assistant_kind is not supported",
+        )
+    if not is_persona_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Persona module is disabled",
         )
     profile = _get_workspace_persona_profile(
         db=db,
@@ -351,12 +295,14 @@ def _ws_to_response(
         audio_voice=ws.get("audio_voice"),
         audio_speed=ws.get("audio_speed"),
         assistant_defaults=assistant_defaults,
+        assistant_defaults_explicit_none=ws.get("assistant_defaults_explicit_none", False),
         effective_assistant_default=_effective_workspace_assistant_default(
             db=db,
             stored=assistant_defaults,
             user_id=_user_id_for_workspace_scope(current_user),
-            invalid_stored_default=invalid_stored_default,
+            invalid_stored_default=invalid_stored_default or bool(ws.get("_assistant_defaults_invalid")),
             persona_profile_cache=persona_profile_cache,
+            assistant_defaults_explicit_none=ws.get("assistant_defaults_explicit_none", False),
         ),
         created_at=str(ws.get("created_at", "")),
         last_modified=str(ws.get("last_modified", "")),

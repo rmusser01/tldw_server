@@ -87,7 +87,7 @@ def test_sync_sse_helper_bounds_transport_exception_and_log_detail() -> None:
 
     _assert_bounded_stream_error(chunks, sentinel)
     assert sentinel not in "".join(logs)
-    assert "RuntimeError" in "".join(logs)
+    assert "error_type=runtimeerror" in "".join(logs)
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_async_sse_helper_bounds_transport_exception_and_log_detail() -> N
 
     _assert_bounded_stream_error(chunks, sentinel)
     assert sentinel not in "".join(logs)
-    assert "RuntimeError" in "".join(logs)
+    assert "error_type=runtimeerror" in "".join(logs)
 
 
 @pytest.mark.asyncio
@@ -263,7 +263,8 @@ async def test_real_openai_401_and_403_refresh_certificates_are_isolated(monkeyp
     assert sentinels[403] not in rendered
 
 
-def test_google_stream_emits_done_once(monkeypatch):
+@pytest.mark.parametrize("done_line", [b"data: [DONE]", b"data: [done]", b"data:[DONE]"])
+def test_google_stream_emits_done_once(monkeypatch, done_line):
     class _Client:
         def __enter__(self):
             return self
@@ -293,7 +294,7 @@ def test_google_stream_emits_done_once(monkeypatch):
                     return iter(
                         [
                             f"data: {json.dumps(first_chunk)}".encode(),
-                            b"data: [DONE]",
+                            done_line,
                         ]
                     )
 
@@ -318,7 +319,9 @@ def test_google_stream_emits_done_once(monkeypatch):
     )
     chunks = list(gen)
 
-    done_count = sum(1 for c in chunks if c.strip().lower() == "data: [done]")
+    from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
+
+    done_count = sum(1 for c in chunks if is_done_line(c))
     assert done_count == 1, f"Expected exactly one [DONE], got {done_count}. Chunks: {chunks}"
 
 

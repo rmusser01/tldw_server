@@ -177,6 +177,20 @@ def test_service_prompt_catalog_returns_exact_metadata_without_prompt_bodies(
             "affected_workflows": [{"id": "writing.agent", "label": "Writing Playground AI Agent"}],
         },
         {
+            "id": "writing.continuation.predict",
+            "label": "Writing continuation: Predict",
+            "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "writing.continuation", "label": "Writing Playground continuation"}],
+        },
+        {
+            "id": "writing.continuation.fill",
+            "label": "Writing continuation: Fill",
+            "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed.",
+            "parts": [{"key": "system", "label": "System instructions", "mode": "literal", "required_variables": []}],
+            "affected_workflows": [{"id": "writing.continuation", "label": "Writing Playground continuation"}],
+        },
+        {
             "id": "study.assistant.explain",
             "label": "Study explanation",
             "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed.",
@@ -580,6 +594,26 @@ def test_writing_agent_prompt_save_reset_and_mode_isolation(api_context: SimpleN
     other_path = f"/api/v1/service-prompts/writing.agent.{other_mode}"
     other_defaults = api_context.client.get(other_path).json()["effective_parts"]
     custom = {"system": "Advise in French {literally}."}
+    saved = api_context.client.put(path, json={"parts": custom, "expected_revision": None})
+    assert saved.status_code == 200
+    assert api_context.client.get(path).json()["effective_parts"] == custom
+    assert api_context.client.get(other_path).json()["effective_parts"] == other_defaults
+    reset = api_context.client.delete(path, params={"expected_revision": saved.json()["revision"]})
+    assert reset.status_code == 200
+    assert reset.json()["effective_parts"] == defaults
+
+
+@pytest.mark.parametrize("mode", ["predict", "fill"])
+def test_writing_continuation_prompt_save_reset_and_mode_isolation(
+    api_context: SimpleNamespace, mode: str
+) -> None:
+    """Continuation overrides stay literal and remain isolated by mode."""
+    path = f"/api/v1/service-prompts/writing.continuation.{mode}"
+    defaults = api_context.client.get(path).json()["default_parts"]
+    other_mode = "fill" if mode == "predict" else "predict"
+    other_path = f"/api/v1/service-prompts/writing.continuation.{other_mode}"
+    other_defaults = api_context.client.get(other_path).json()["effective_parts"]
+    custom = {"system": "Continue around {literal} braces."}
     saved = api_context.client.put(path, json={"parts": custom, "expected_revision": None})
     assert saved.status_code == 200
     assert api_context.client.get(path).json()["effective_parts"] == custom
