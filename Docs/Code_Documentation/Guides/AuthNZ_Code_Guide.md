@@ -17,7 +17,7 @@ See also: `tldw_Server_API/app/core/AuthNZ/README.md` and `Docs/Code_Documentati
 - Sessions + blacklist: `tldw_Server_API/app/core/AuthNZ/session_manager.py`, `tldw_Server_API/app/core/AuthNZ/token_blacklist.py`
 - API keys + Virtual keys: `tldw_Server_API/app/core/AuthNZ/api_key_manager.py`, `tldw_Server_API/app/core/AuthNZ/virtual_keys.py`
 - RBAC/orgs/teams/permissions: `tldw_Server_API/app/core/AuthNZ/permissions.py`, `tldw_Server_API/app/core/AuthNZ/rbac.py`, `tldw_Server_API/app/core/AuthNZ/orgs_teams.py`, `tldw_Server_API/app/core/AuthNZ/privilege_catalog.py`
-- Guardrails/middleware: `tldw_Server_API/app/core/AuthNZ/rate_limiter.py`, `tldw_Server_API/app/core/AuthNZ/llm_budget_middleware.py`, `tldw_Server_API/app/core/AuthNZ/llm_budget_guard.py`, `tldw_Server_API/app/core/AuthNZ/csrf_protection.py`, `tldw_Server_API/app/core/AuthNZ/security_headers.py`, `tldw_Server_API/app/core/AuthNZ/usage_logging_middleware.py`
+- Guardrails/middleware: `tldw_Server_API/app/core/AuthNZ/rate_limiter.py`, `tldw_Server_API/app/core/Usage/llm_budget_middleware.py`, `tldw_Server_API/app/core/Usage/llm_budget_guard.py`, `tldw_Server_API/app/core/AuthNZ/csrf_protection.py`, `tldw_Server_API/app/core/AuthNZ/security_headers.py`, `tldw_Server_API/app/core/AuthNZ/usage_logging_middleware.py`
 - Auth flows/support: `tldw_Server_API/app/core/AuthNZ/password_service.py`, `tldw_Server_API/app/core/AuthNZ/mfa_service.py`, `tldw_Server_API/app/core/AuthNZ/email_service.py`
 - Endpoint DI (use these): `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py`
 - Auth endpoints: `tldw_Server_API/app/api/v1/endpoints/auth.py`
@@ -91,7 +91,7 @@ JWT virtual keys support additional constraints via claims (enforced with `auth_
 - Virtual API Keys (DB-backed)
   - Created/stored via `api_key_manager.py` in `api_keys` (may be flagged `is_virtual`).
   - Authenticate with `X-API-KEY` (or Bearer); validated by `APIKeyManager.validate_api_key`.
-  - Budgets/allowlists enforced by `llm_budget_middleware.py`/`llm_budget_guard.py` (day/month token/usd, allowed endpoints/providers/models, IP allowlists, optional per-key rate_limit).
+  - Budgets/allowlists enforced by `core/Usage/llm_budget_middleware.py`/`core/Usage/llm_budget_guard.py` (day/month token/usd, allowed endpoints/providers/models, IP allowlists, optional per-key rate_limit).
   - Rotate/revoke; only HMAC-SHA256 key hashes stored (no plaintext).
   - Best for longer-lived integrations/service accounts.
 
@@ -208,7 +208,7 @@ Key calls you’ll see in endpoints/services:
 - Keys support: expiry, usage counts, IP allowlists, rate limits, audit log, and optional LLM usage budgets and allowlists.
 - `auth_deps.get_current_user` can authenticate via `X-API-KEY` when no Bearer token is present.
 - Virtual keys: use `POST /api/v1/auth/virtual-key` or programmatically via `JWTService.create_virtual_access_token(...)`.
-  - Virtual keys are enforced via scoped claims (e.g., `scope`, allowed endpoints/methods/paths) with helpers in `auth_deps.TokenScopeGuard` and budget checks in `llm_budget_guard.py`.
+  - Virtual keys are enforced via scoped claims (e.g., `scope`, allowed endpoints/methods/paths) with helpers in `auth_deps.TokenScopeGuard` and budget checks in `core/Usage/llm_budget_guard.py`.
 
 Example: create and validate an API key
 ```python
@@ -328,14 +328,14 @@ When adding a new FastAPI endpoint that needs AuthNZ and guardrails:
 
 - General limiter: `rate_limiter.py` implements a token bucket over the AuthNZ `rate_limits` tables; DI provides `get_rate_limiter_dep`.
 - Governance facade: `AuthGovernor` (`auth_governor.py`) is the canonical entry point for AuthNZ guardrails. It wraps the shared `RateLimiter` and virtual-key budget helpers so core flows no longer talk to those primitives directly:
-  - `check_llm_budget_for_api_key(principal, api_key_id)` decorates `is_key_over_budget(...)` with `AuthPrincipal` metadata and is used by `llm_budget_guard` and `llm_budget_middleware`.
+  - `check_llm_budget_for_api_key(principal, api_key_id)` decorates `is_key_over_budget(...)` with `AuthPrincipal` metadata and is used by `core/Usage/llm_budget_guard` and `llm_budget_middleware`.
   - `check_lockout(identifier, attempt_type="login", rate_limiter=...)` and `record_auth_failure(identifier, attempt_type, rate_limiter=...)` mediate login lockout and suspicious-activity tracking and are used by the `/auth/login` endpoint.
   - `check_rate_limit(identifier, endpoint, limit=None, window_minutes=None, rate_limiter=...)` remains available for compatibility/testing and direct limiter call sites where explicitly used.
 - Endpoint helpers:
   - `check_rate_limit`: local fallback limit, 120/min (`AUTH_DEPS_FALLBACK_RATE_LIMIT`), applied only when RG ingress did not govern the request. Skipped only for a request that already resolved an authenticated single-user principal, or in test mode — not simply because `AUTH_MODE=single_user` (an anonymous single-user-mode request, e.g. `/auth/login`, is still floored). Off when `RG_ENABLED=false`.
   - `check_auth_rate_limit`: local fallback limit, 30/min (`AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`), same skip condition, but it stays on when `RG_ENABLED=false`: it is the auth brute-force floor (ADR-056).
   - Route abuse protection should come from RG ingress policies and endpoint-local RG checks.
-- LLM budgets: `llm_budget_middleware.py` and `llm_budget_guard.py` enforce endpoint/provider/model quotas when configured, always via `AuthGovernor.check_llm_budget_for_api_key`. Settings are `LLM_BUDGET_ENFORCE` (on/off) and `LLM_BUDGET_ENDPOINTS` (paths). Virtual key features are gated by `VIRTUAL_KEYS_ENABLED` (defaults true).
+- LLM budgets: `core/Usage/llm_budget_middleware.py` and `core/Usage/llm_budget_guard.py` enforce endpoint/provider/model quotas when configured, always via `AuthGovernor.check_llm_budget_for_api_key`. Settings are `LLM_BUDGET_ENFORCE` (on/off) and `LLM_BUDGET_ENDPOINTS` (paths). Virtual key features are gated by `VIRTUAL_KEYS_ENABLED` (defaults true).
 
 References:
 - `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py#get_rate_limiter_dep`

@@ -62,7 +62,7 @@ Rules. A (importer, target) pair is ratcheted when it
   * imports the router assembly from anywhere but ASSEMBLERS (main and the router
     registry) ("router assembly"), so the exempt assembly cannot launder endpoints either;
   * is a sibling ban ("sibling ban"): core.LLM_Calls -> core.Chat and -> core.AuthNZ;
-    core.AuthNZ -> core.Chat and -> core.TTS (TASK-13950.17).
+    core.AuthNZ -> core.LLM_Calls, -> core.Chat and -> core.TTS (TASK-13950.17).
 tests/lint/test_core_to_api_import_boundary.py is a view of the core -> api pairs.
 
 Baseline: layering_baseline.txt, one ``<importer> -> <target>: <statements>`` line per
@@ -153,6 +153,7 @@ SIBLING_BANS = frozenset(
     {
         ("core.LLM_Calls", "core.Chat"),
         ("core.LLM_Calls", "core.AuthNZ"),
+        ("core.AuthNZ", "core.LLM_Calls"),
         ("core.AuthNZ", "core.Chat"),
         ("core.AuthNZ", "core.TTS"),
     }
@@ -965,6 +966,7 @@ def test_authnz_imports_no_llm_calls_chat_or_tts_but_provider_credentials_may(tm
     """TASK-13950.17: provider credentials left AuthNZ, so AuthNZ needs none of the LLM stack."""
     files = {
         "core/AuthNZ/x.py": f"""
+            from {APP}.core.LLM_Calls import b
             from {APP}.core.Chat import a
             from {APP}.core.Provider_Credentials import c
             def f():
@@ -976,6 +978,7 @@ def test_authnz_imports_no_llm_calls_chat_or_tts_but_provider_credentials_may(tm
     root = _seed(tmp_path / "app", files)
 
     assert {pair: rule(*pair) for pair in measure(root)} == {
+        ("core.AuthNZ", "core.LLM_Calls"): "sibling ban",
         ("core.AuthNZ", "core.Chat"): "sibling ban",
         ("core.AuthNZ", "core.TTS"): "sibling ban",
     }

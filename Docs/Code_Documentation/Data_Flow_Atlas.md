@@ -715,7 +715,7 @@ flowchart LR
 
 **Key storage/provider touchpoints:** Chat/session state persists in the per-user ChaChaNotes database when configured. RAG context is assembled from Media DB and vector-store reads but remains separable from generation. Provider resolution can use config, BYOK/user provider secrets, model routing, and adapter registry entries for OpenAI-compatible, commercial, and local providers.
 
-**Where to look in code:** chat endpoints under `app/api/v1/endpoints/`, `app/core/Chat/`, `app/core/LLM_Calls/adapter_registry.py`, `app/core/LLM_Calls/providers/`, `app/core/LLM_Calls/routing/`, `app/core/AuthNZ/byok_helpers.py`, and `app/core/DB_Management/ChaChaNotes_DB.py`.
+**Where to look in code:** chat endpoints under `app/api/v1/endpoints/`, `app/core/Chat/`, `app/core/LLM_Calls/adapter_registry.py`, `app/core/LLM_Calls/providers/`, `app/core/LLM_Calls/routing/`, `app/core/Provider_Credentials/byok_helpers.py`, and `app/core/DB_Management/ChaChaNotes_DB.py`.
 
 ### Jobs And Scheduler
 

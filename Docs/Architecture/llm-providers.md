@@ -17,7 +17,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Tokenizers | `LLM_Calls/tokenizer_resolver.py` | provider-native token counting (Anthropic/Google/Cohere/Bedrock HTTP), strict mode |
 | Routing | `LLM_Calls/routing/` | `model=auto` resolution, rules router, LLM-router prompt/choice |
 | Coordination | `app/core/Chat/chat_service.py` | `perform_chat_api_call[_async]` — provider/model normalization, key merging, base-URL override policy, adapter dispatch |
-| BYOK | `app/core/AuthNZ/byok_runtime.py`, `byok_helpers.py` | credential resolution, base-URL allowlists |
+| BYOK | `app/core/Provider_Credentials/byok_runtime.py`, `byok_helpers.py` | credential resolution, base-URL allowlists |
 | Admin overrides | `app/services/admin_llm_providers_service.py` + admin routes | provider overrides CRUD + provider test + health |
 | Local control plane | `app/core/Local_LLM/` | llama.cpp supervisor, process runner, profile store, inventory, acquisition |
 | Discovery routes | `app/api/v1/endpoints/llm_providers.py` | `/llm/health`, providers, models metadata |
