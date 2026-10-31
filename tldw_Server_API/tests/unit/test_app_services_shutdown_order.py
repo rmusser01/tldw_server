@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.services import (
     shutdown_cleanup_timed_segments as timed,
 )
@@ -78,7 +78,7 @@ async def test_final_cleanup_closes_the_container_services_in_adr_021_order(monk
         ("_shutdown_telemetry_services", "telemetry"),
     ):
         monkeypatch.setattr(timed, helper, _step(label, events))
-    monkeypatch.setattr(ChaCha_Notes_DB_Deps, "shutdown_chacha_resources", _step("chacha", events))
+    monkeypatch.setattr(app_services(), "chacha_runtime", _Service("chacha", events))
 
     handles = await timed.shutdown_cleanup_timed_segments(
         app=SimpleNamespace(state=SimpleNamespace()),

@@ -61,7 +61,8 @@ Rules. A (importer, target) pair is ratcheted when it
     api/v1/utils or a core/service module;
   * imports the router assembly from anywhere but ASSEMBLERS (main and the router
     registry) ("router assembly"), so the exempt assembly cannot launder endpoints either;
-  * is a sibling ban ("sibling ban"): core.LLM_Calls -> core.Chat and -> core.AuthNZ.
+  * is a sibling ban ("sibling ban"): core.LLM_Calls -> core.Chat and -> core.AuthNZ;
+    core.AuthNZ -> core.Chat and -> core.TTS (TASK-13950.17).
 tests/lint/test_core_to_api_import_boundary.py is a view of the core -> api pairs.
 
 Baseline: layering_baseline.txt, one ``<importer> -> <target>: <statements>`` line per
@@ -148,7 +149,14 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("api", ("api", "api.*")),
     ("main", ("main", "app")),
 )
-SIBLING_BANS = frozenset({("core.LLM_Calls", "core.Chat"), ("core.LLM_Calls", "core.AuthNZ")})
+SIBLING_BANS = frozenset(
+    {
+        ("core.LLM_Calls", "core.Chat"),
+        ("core.LLM_Calls", "core.AuthNZ"),
+        ("core.AuthNZ", "core.Chat"),
+        ("core.AuthNZ", "core.TTS"),
+    }
+)
 FOUNDATION_ONLY_IMPORTERS = frozenset({"core.Metrics"})  # platform, but pinned like foundation (TASK-13950.12)
 ROUTER_ASSEMBLY = frozenset({"api.v1.router_groups", "api.v1.router_registry", "api.v2.router"})
 ASSEMBLERS = frozenset({"main", "api.v1.router_registry"})  # the only importers of ROUTER_ASSEMBLY
@@ -158,7 +166,11 @@ FIXES = {
     "endpoint -> endpoint": _SHARE,
     "api -> endpoint": f"Endpoint modules are not a library. {_SHARE}",
     "router assembly": f"Only main and api/v1/router_registry import the router assembly. {_SHARE}",
-    "sibling ban": "core.LLM_Calls must not depend on core.Chat or core.AuthNZ: have the caller pass it in.",
+    "sibling ban": (
+        "core.LLM_Calls must not depend on core.Chat or core.AuthNZ, and core.AuthNZ must not depend on the LLM "
+        "stack (provider credentials live in core.Provider_Credentials, LLM budgets in core.Usage): have the "
+        "caller pass it in."
+    ),
 }
 
 Pair = tuple[str, str]
@@ -947,6 +959,26 @@ def main(argv: list[str] | None = None) -> int:
         f"largest package SCC: {package_scc_sizes()}"
     )
     return 0
+
+
+def test_authnz_imports_no_llm_calls_chat_or_tts_but_provider_credentials_may(tmp_path: Path) -> None:
+    """TASK-13950.17: provider credentials left AuthNZ, so AuthNZ needs none of the LLM stack."""
+    files = {
+        "core/AuthNZ/x.py": f"""
+            from {APP}.core.Chat import a
+            from {APP}.core.Provider_Credentials import c
+            def f():
+                from {APP}.core.TTS import d
+        """,
+        "core/Provider_Credentials/y.py": f"from {APP}.core.LLM_Calls import e\nfrom {APP}.core.AuthNZ import f\n",
+        "core/LLM_Calls/z.py": f"from {APP}.core.Provider_Credentials import g\n",
+    }
+    root = _seed(tmp_path / "app", files)
+
+    assert {pair: rule(*pair) for pair in measure(root)} == {
+        ("core.AuthNZ", "core.Chat"): "sibling ban",
+        ("core.AuthNZ", "core.TTS"): "sibling ban",
+    }
 
 
 if __name__ == "__main__":

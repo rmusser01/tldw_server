@@ -22,13 +22,13 @@ from typing import Any, Callable, Literal
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     StructuredOutputParseError,
     parse_structured_output,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 
 from .query_classifier import QueryClassification
 from .runtime_provider_call import (

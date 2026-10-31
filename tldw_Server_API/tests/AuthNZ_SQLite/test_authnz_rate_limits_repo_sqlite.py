@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.repos.rate_limits_repo import (
     AuthnzRateLimitsRepo,
@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
 
 @pytest_asyncio.fixture
-async def sqlite_rate_limits_repo(tmp_path, monkeypatch) -> AuthnzRateLimitsRepo:
+async def sqlite_rate_limits_repo(tmp_path, monkeypatch, fresh_services) -> AuthnzRateLimitsRepo:
     """Provide an AuthnzRateLimitsRepo wired to a fresh SQLite AuthNZ database."""
     """AuthnzRateLimitsRepo lockout + rate_limits helpers should work on SQLite."""
     db_path = tmp_path / "users.db"
@@ -23,7 +23,6 @@ async def sqlite_rate_limits_repo(tmp_path, monkeypatch) -> AuthnzRateLimitsRepo
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

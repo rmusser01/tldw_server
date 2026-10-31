@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 async def _make_repo(tmp_path, monkeypatch) -> McpHubRepo:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -25,7 +25,6 @@ async def _make_repo(tmp_path, monkeypatch) -> McpHubRepo:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -231,7 +230,7 @@ async def _seed_research_capability_mappings(
 @pytest.mark.asyncio
 async def test_dry_run_governance_pack_uses_live_capability_mappings(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -302,7 +301,7 @@ async def test_dry_run_governance_pack_uses_live_capability_mappings(
 @pytest.mark.asyncio
 async def test_dry_run_governance_pack_warns_when_profile_requirement_not_guaranteed(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -356,7 +355,7 @@ async def test_dry_run_governance_pack_warns_when_profile_requirement_not_guaran
 @pytest.mark.asyncio
 async def test_import_governance_pack_materializes_immutable_base_objects_with_provenance(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -437,7 +436,7 @@ async def test_import_governance_pack_materializes_immutable_base_objects_with_p
 @pytest.mark.asyncio
 async def test_governance_pack_repo_tracks_active_install_state_and_upgrade_lineage(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     repo = await _make_repo(tmp_path, monkeypatch)
 
@@ -506,7 +505,7 @@ async def test_governance_pack_repo_tracks_active_install_state_and_upgrade_line
 @pytest.mark.asyncio
 async def test_governance_pack_repo_tracks_source_provenance_and_candidate_storage(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     repo = await _make_repo(tmp_path, monkeypatch)
 
@@ -637,7 +636,7 @@ async def test_governance_pack_repo_tracks_source_provenance_and_candidate_stora
 @pytest.mark.asyncio
 async def test_governance_pack_source_candidate_dry_run_and_import_persists_provenance(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     import shutil
 
@@ -709,7 +708,7 @@ async def test_governance_pack_source_candidate_dry_run_and_import_persists_prov
 @pytest.mark.asyncio
 async def test_git_source_candidate_and_import_persist_signer_provenance(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -811,7 +810,7 @@ async def test_git_source_candidate_and_import_persist_signer_provenance(
 @pytest.mark.asyncio
 async def test_prepared_source_candidate_revalidates_actor_and_trust_policy(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     import shutil
 
@@ -875,7 +874,7 @@ async def test_prepared_source_candidate_revalidates_actor_and_trust_policy(
 @pytest.mark.asyncio
 async def test_git_governance_pack_update_check_detects_newer_version_and_prepares_upgrade_candidate(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -937,7 +936,7 @@ async def test_git_governance_pack_update_check_detects_newer_version_and_prepar
 @pytest.mark.asyncio
 async def test_git_governance_pack_update_check_preserves_tag_ref_kind(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -985,7 +984,7 @@ async def test_git_governance_pack_update_check_preserves_tag_ref_kind(
 @pytest.mark.asyncio
 async def test_git_governance_pack_update_check_reports_same_version_source_drift(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -1028,7 +1027,7 @@ async def test_git_governance_pack_update_check_reports_same_version_source_drif
 @pytest.mark.asyncio
 async def test_git_governance_pack_update_checks_reject_mismatched_pack_id_and_stale_candidates(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -1084,7 +1083,7 @@ async def test_git_governance_pack_update_checks_reject_mismatched_pack_id_and_s
 @pytest.mark.asyncio
 async def test_git_governance_pack_update_check_warns_on_trusted_signer_rotation(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -1177,7 +1176,7 @@ async def test_git_governance_pack_update_check_warns_on_trusted_signer_rotation
 @pytest.mark.asyncio
 async def test_git_governance_pack_update_check_warns_when_previous_signer_unknown(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -1260,7 +1259,7 @@ async def test_git_governance_pack_update_check_warns_when_previous_signer_unkno
 @pytest.mark.asyncio
 async def test_git_governance_pack_update_checks_block_revoked_signer_candidates(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -1355,7 +1354,7 @@ async def test_git_governance_pack_update_checks_block_revoked_signer_candidates
 @pytest.mark.asyncio
 async def test_import_governance_pack_rejects_duplicate_scope_identity(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1389,7 +1388,7 @@ async def test_import_governance_pack_rejects_duplicate_scope_identity(
 @pytest.mark.asyncio
 async def test_imported_governance_pack_denied_capabilities_narrow_runtime_policy(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1465,7 +1464,7 @@ async def test_imported_governance_pack_denied_capabilities_narrow_runtime_polic
 @pytest.mark.asyncio
 async def test_import_governance_pack_rolls_back_partial_objects_on_failure(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1506,7 +1505,7 @@ async def test_import_governance_pack_rolls_back_partial_objects_on_failure(
 @pytest.mark.asyncio
 async def test_dry_run_upgrade_accepts_newer_same_pack_and_reports_fingerprints(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1549,7 +1548,7 @@ async def test_dry_run_upgrade_accepts_newer_same_pack_and_reports_fingerprints(
 @pytest.mark.asyncio
 async def test_dry_run_upgrade_rejects_equal_version_and_cross_scope_target(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1593,7 +1592,7 @@ async def test_dry_run_upgrade_rejects_equal_version_and_cross_scope_target(
 @pytest.mark.asyncio
 async def test_dry_run_upgrade_blocks_removed_profile_with_local_assignment_dependency(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1655,7 +1654,7 @@ async def test_dry_run_upgrade_blocks_removed_profile_with_local_assignment_depe
 @pytest.mark.asyncio
 async def test_dry_run_upgrade_blocks_semantic_profile_change_with_local_assignment_dependency(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1715,7 +1714,7 @@ async def test_dry_run_upgrade_blocks_semantic_profile_change_with_local_assignm
 @pytest.mark.asyncio
 async def test_dry_run_upgrade_reports_workspace_rebind_for_modified_assignment(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1769,7 +1768,7 @@ async def test_dry_run_upgrade_reports_workspace_rebind_for_modified_assignment(
 @pytest.mark.asyncio
 async def test_execute_upgrade_rebinds_dependents_and_marks_pack_lineage(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1904,7 +1903,7 @@ async def test_execute_upgrade_rebinds_dependents_and_marks_pack_lineage(
 @pytest.mark.asyncio
 async def test_execute_upgrade_rejects_stale_plan_fingerprints(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
@@ -1965,7 +1964,7 @@ async def test_execute_upgrade_rejects_stale_plan_fingerprints(
 @pytest.mark.asyncio
 async def test_execute_upgrade_rolls_back_when_staging_insert_fails(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
@@ -2027,7 +2026,7 @@ async def test_execute_upgrade_rolls_back_when_staging_insert_fails(
 @pytest.mark.asyncio
 async def test_execute_upgrade_in_transaction_stale_source_keeps_domain_error(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     """Domain errors raised inside the upgrade transaction must not be sanitized away."""
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (

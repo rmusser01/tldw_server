@@ -10,8 +10,8 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio
-async def test_byok_oauth_state_repo_sqlite_roundtrip(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_byok_oauth_state_repo_sqlite_roundtrip(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import (
         AuthnzByokOAuthStateRepo,
@@ -24,7 +24,6 @@ async def test_byok_oauth_state_repo_sqlite_roundtrip(tmp_path, monkeypatch) -> 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -127,8 +126,8 @@ async def test_byok_oauth_state_repo_sqlite_roundtrip(tmp_path, monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_byok_oauth_state_repo_enforces_outstanding_cap_sqlite(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_byok_oauth_state_repo_enforces_outstanding_cap_sqlite(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import (
         AuthnzByokOAuthStateRepo,
@@ -141,7 +140,6 @@ async def test_byok_oauth_state_repo_enforces_outstanding_cap_sqlite(tmp_path, m
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))

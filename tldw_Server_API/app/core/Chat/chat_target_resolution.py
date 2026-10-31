@@ -8,15 +8,6 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    get_llm_provider_override,
-    get_override_default_model,
-    validate_provider_override,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    configured_provider_model_from_snapshot,
-)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_and_model
 from tldw_Server_API.app.core.config import load_comprehensive_config
@@ -26,6 +17,15 @@ from tldw_Server_API.app.core.config_llm_providers import (
 )
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.gateway import _split_inline_provider_model
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    get_llm_provider_override,
+    get_override_default_model,
+    validate_provider_override,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    configured_provider_model_from_snapshot,
+)
 
 
 @dataclass(frozen=True)

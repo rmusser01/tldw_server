@@ -4,10 +4,9 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
-from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
 from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
@@ -19,7 +18,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest_asyncio.fixture
-async def single_user_client(tmp_path, monkeypatch):
+async def single_user_client(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_single_user.db"
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -27,8 +26,6 @@ async def single_user_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFER_HEAVY_STARTUP", "true")
     monkeypatch.setenv("TEST_MODE", "true")
 
-    await reset_db_pool()
-    await reset_session_manager()
     reset_settings()
     await reset_registration_service()
     await shutdown_audit_service()
@@ -58,8 +55,6 @@ async def single_user_client(tmp_path, monkeypatch):
     with TestClient(app) as client:
         yield client, password, settings.SINGLE_USER_API_KEY
 
-    await reset_db_pool()
-    await reset_session_manager()
     reset_settings()
     await reset_registration_service()
     await shutdown_audit_service()

@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     dumps_envelope,
     encrypt_byok_payload,
 )
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.Chat import chat_target_resolution
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_state import (
@@ -561,6 +562,9 @@ async def recipient_security_harness(
         "get_chacha_db_for_user_id",
         get_recipient_db,
     )
+    # Core callers (the clone worker) open DBs through the provider; close that route too.
+    monkeypatch.setattr(chacha_db_provider, "get_chacha_db_for_owner", get_owner_db)
+    monkeypatch.setattr(chacha_db_provider, "get_chacha_db_for_user_id", get_recipient_db)
     monkeypatch.setattr(DB_Deps, "managed_media_db_for_owner", get_owner_media)
     monkeypatch.setattr(
         DB_Deps,

@@ -56,19 +56,6 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_project import (
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import ExecutePromptSimpleRequest
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCredentialRuntime,
-    configured_provider_model_from_snapshot,
-    mark_provider_credential_used,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     parse_stored_prompt_definition,
@@ -98,6 +85,19 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_renderer import (
     SingleTextRecipeRenderResult,
     render_single_text_recipe_template,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    configured_provider_model_from_snapshot,
+    mark_provider_credential_used,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 

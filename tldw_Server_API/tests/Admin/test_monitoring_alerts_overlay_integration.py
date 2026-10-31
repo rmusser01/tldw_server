@@ -14,15 +14,14 @@ def _setup_env(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actions(tmp_path) -> None:
+async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actions(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
 
     from tldw_Server_API.app.api.v1.endpoints import monitoring as monitoring_endpoints
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.admin_monitoring_repo import (
         AuthnzAdminMonitoringRepo,
     )
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB import TopicAlert, TopicMonitoringDB
     from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
@@ -36,9 +35,7 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
     app = reload_app_main().app
 
     try:
-        await reset_db_pool()
         reset_settings()
-        await reset_session_manager()
         monitoring_endpoints._TOPIC_MONITORING_DB = None
 
         headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}

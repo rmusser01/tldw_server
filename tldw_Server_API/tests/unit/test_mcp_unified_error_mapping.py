@@ -1,10 +1,9 @@
 """Error mapping tests for MCP unified HTTP endpoints."""
 from __future__ import annotations
 
-from typing import Any
-
 import base64
 import json
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -156,10 +155,11 @@ def _principal() -> AuthPrincipal:
 
 @pytest.mark.asyncio
 async def test_list_tools_sanitizes_generic_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: _ErroringMcpServer())
+    server = _ErroringMcpServer()
 
     with pytest.raises(HTTPException) as excinfo:
         await mcp.list_tools(
+            server=server,
             http_request=_request(),
             module=None,
             catalog=None,
@@ -175,10 +175,11 @@ async def test_list_tools_sanitizes_generic_mcp_error(monkeypatch: pytest.Monkey
 
 @pytest.mark.asyncio
 async def test_execute_tool_sanitizes_generic_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: _ErroringMcpServer())
+    server = _ErroringMcpServer()
 
     with pytest.raises(HTTPException) as excinfo:
         await mcp.execute_tool(
+            server=server,
             request=mcp.ToolExecutionRequest(tool_name="demo_tool", arguments={}),
             http_request=_request(),
             auth=_auth(),
@@ -191,10 +192,10 @@ async def test_execute_tool_sanitizes_generic_mcp_error(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_list_modules_sanitizes_generic_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: _ErroringMcpServer())
+    server = _ErroringMcpServer()
 
     with pytest.raises(HTTPException) as excinfo:
-        await mcp.list_modules(http_request=_request(), auth=_auth(), _guard=None)
+        await mcp.list_modules(server=server, http_request=_request(), auth=_auth(), _guard=None)
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to list MCP modules"
@@ -202,10 +203,10 @@ async def test_list_modules_sanitizes_generic_mcp_error(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_get_modules_health_sanitizes_generic_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: _ErroringMcpServer())
+    server = _ErroringMcpServer()
 
     with pytest.raises(HTTPException) as excinfo:
-        await mcp.get_modules_health(http_request=_request(), principal=_principal(), _guard=None)
+        await mcp.get_modules_health(server=server, http_request=_request(), principal=_principal(), _guard=None)
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to get MCP module health"
@@ -213,10 +214,10 @@ async def test_get_modules_health_sanitizes_generic_mcp_error(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_list_resources_sanitizes_generic_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: _ErroringMcpServer())
+    server = _ErroringMcpServer()
 
     with pytest.raises(HTTPException) as excinfo:
-        await mcp.list_resources(http_request=_request(), auth=_auth(), _guard=None)
+        await mcp.list_resources(server=server, http_request=_request(), auth=_auth(), _guard=None)
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to list MCP resources"
@@ -224,10 +225,10 @@ async def test_list_resources_sanitizes_generic_mcp_error(monkeypatch: pytest.Mo
 
 @pytest.mark.asyncio
 async def test_list_prompts_sanitizes_generic_mcp_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: _ErroringMcpServer())
+    server = _ErroringMcpServer()
 
     with pytest.raises(HTTPException) as excinfo:
-        await mcp.list_prompts(http_request=_request(), auth=_auth(), _guard=None)
+        await mcp.list_prompts(server=server, http_request=_request(), auth=_auth(), _guard=None)
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to list MCP prompts"
@@ -235,10 +236,10 @@ async def test_list_prompts_sanitizes_generic_mcp_error(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_health_check_sanitizes_nonhealthy_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: _StatusMcpServer())
+    server = _StatusMcpServer()
 
     with pytest.raises(HTTPException) as excinfo:
-        await mcp.health_check(_guard=None)
+        await mcp.health_check(server=server, _guard=None)
 
     assert excinfo.value.status_code == 503
     assert excinfo.value.detail == "MCP server is not healthy"
@@ -248,7 +249,6 @@ async def test_health_check_sanitizes_nonhealthy_status(monkeypatch: pytest.Monk
 async def test_request_sanitizes_safe_config_parse_log(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _SuccessfulMcpServer()
     logger = _LoggerStub()
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: server)
     monkeypatch.setattr(mcp, "logger", logger)
 
     def _raise_leaky_parse_error(_value: str) -> bytes:
@@ -258,6 +258,7 @@ async def test_request_sanitizes_safe_config_parse_log(monkeypatch: pytest.Monke
 
     with pytest.raises(HTTPException) as excinfo:
         await mcp.mcp_request(
+            server=server,
             http_request=_json_request({"jsonrpc": "2.0", "method": "tools/list", "id": "req-1"}),
             response=mcp.Response(),
             client_id=None,
@@ -279,7 +280,6 @@ async def test_request_sanitizes_safe_config_parse_log(monkeypatch: pytest.Monke
 async def test_batch_request_sanitizes_safe_config_parse_log(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _SuccessfulMcpServer()
     logger = _LoggerStub()
-    monkeypatch.setattr(mcp, "get_mcp_server", lambda: server)
     monkeypatch.setattr(mcp, "logger", logger)
 
     def _raise_leaky_parse_error(_value: str) -> bytes:
@@ -289,6 +289,7 @@ async def test_batch_request_sanitizes_safe_config_parse_log(monkeypatch: pytest
 
     with pytest.raises(HTTPException) as excinfo:
         await mcp.mcp_request_batch(
+            server=server,
             http_request=_json_request([{"jsonrpc": "2.0", "method": "tools/list", "id": "req-1"}]),
             response=mcp.Response(),
             client_id=None,

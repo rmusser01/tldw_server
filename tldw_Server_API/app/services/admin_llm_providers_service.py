@@ -15,23 +15,31 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     LLMProviderTestRequest,
     LLMProviderTestResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
+    canonical_builtin_llm_provider_name,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     load_server_config_snapshot,
     validate_base_url_override,
     validate_credential_fields,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     ServerFallbackCredentials,
     resolve_byok_credentials,
     resolve_static_server_fallback_from_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
     provider_validation_public_error,
     test_provider_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     LLMProviderOverridesRefreshError,
     ProviderOverrideCallSnapshot,
     capture_provider_override_call_snapshot,
@@ -41,13 +49,13 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_override_server_fallback,  # noqa: F401 - compatibility patch seam
     refresh_llm_provider_overrides,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.llm_provider_overrides_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.llm_provider_overrides_repo import (
     AuthnzLLMProviderOverridesRepo,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     build_secret_payload,
     decrypt_byok_payload,
     dumps_envelope,
@@ -55,14 +63,6 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
-    canonical_builtin_llm_provider_name,
-)
-from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 
 
 async def _refresh_overrides_or_503(*, force: bool = False) -> None:

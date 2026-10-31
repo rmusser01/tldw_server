@@ -34,7 +34,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
 from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
@@ -126,6 +125,8 @@ from tldw_Server_API.app.core.Chat.streaming_pipeline import (
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
+    HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
+    STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
     await_stream_operation_bounded,
     cancel_stream_tasks_bounded,
     create_streaming_response_with_timeout,
@@ -138,12 +139,6 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
     trusted_local_stream_error_frame,
-)
-from tldw_Server_API.app.core.Chat.streaming_utils import (
-    HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
-)
-from tldw_Server_API.app.core.Chat.streaming_utils import (
-    STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
 from tldw_Server_API.app.core.Chat.tool_execution_service import (
@@ -177,6 +172,7 @@ from tldw_Server_API.app.core.LLM_Calls.gateway import (  # noqa: F401 - re-expo
     resolve_provider_and_model,
     resolve_provider_api_key,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 
 # isort: split
 from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by build_call_params_from_request and the known-models helpers
@@ -1507,7 +1503,7 @@ def resolve_model_context_window(provider: str, model: str) -> Any:
     if not normalized_provider or not normalized_model:
         return None
     try:
-        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
             get_llm_provider_override,
         )
 

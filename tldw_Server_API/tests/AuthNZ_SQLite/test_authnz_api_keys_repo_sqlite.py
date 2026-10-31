@@ -6,10 +6,10 @@ import pytest
 
 
 @pytest.fixture
-async def sqlite_test_environment(tmp_path, monkeypatch):
+async def sqlite_test_environment(tmp_path, monkeypatch, fresh_services):
     """Bind these SQLite-specific repository tests to an actual SQLite pool."""
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -17,13 +17,11 @@ async def sqlite_test_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET_KEY", "sqlite-api-keys-test-secret-32-chars-minimum")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
     try:
         yield
     finally:
-        await reset_db_pool()
         reset_settings()
 
 

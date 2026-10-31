@@ -14,7 +14,7 @@ def _b64_key(byte_char: bytes) -> str:
 
 
 async def _build_service(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
@@ -25,7 +25,6 @@ async def _build_service(tmp_path, monkeypatch):
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -36,7 +35,7 @@ async def _build_service(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_external_servers_reports_no_auth_template_status(tmp_path, monkeypatch) -> None:
+async def test_list_external_servers_reports_no_auth_template_status(tmp_path, monkeypatch, fresh_services) -> None:
     svc, _repo = await _build_service(tmp_path, monkeypatch)
 
     await svc.create_external_server(
@@ -59,7 +58,7 @@ async def test_list_external_servers_reports_no_auth_template_status(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_list_external_servers_reports_missing_required_slot_secret_status(tmp_path, monkeypatch) -> None:
+async def test_list_external_servers_reports_missing_required_slot_secret_status(tmp_path, monkeypatch, fresh_services) -> None:
     svc, repo = await _build_service(tmp_path, monkeypatch)
 
     await svc.create_external_server(
@@ -111,7 +110,7 @@ async def test_list_external_servers_reports_missing_required_slot_secret_status
 
 
 @pytest.mark.asyncio
-async def test_update_external_server_rejects_transport_mismatched_template_mapping(tmp_path, monkeypatch) -> None:
+async def test_update_external_server_rejects_transport_mismatched_template_mapping(tmp_path, monkeypatch, fresh_services) -> None:
     svc, repo = await _build_service(tmp_path, monkeypatch)
 
     await svc.create_external_server(

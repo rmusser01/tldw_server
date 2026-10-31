@@ -71,7 +71,7 @@ def _file_backed_chacha_override(
 
 
 @pytest.mark.asyncio
-async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path):
+async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path, fresh_services):
     # Multi-user mode to ensure JWTs are treated as Bearer tokens.
     old_env = _set_env_vars(
         {
@@ -83,11 +83,10 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path)
 
     # Reset AuthNZ singletons
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
     await reset_api_key_manager()
     fastapi_app = None
     chacha_deps = None
@@ -184,12 +183,11 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path)
             cleanup_chacha()
         _restore_env_vars(old_env)
         reset_settings()
-        await reset_db_pool()
         await reset_api_key_manager()
 
 
 @pytest.mark.asyncio
-async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_path):
+async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_path, fresh_services):
     # Multi-user mode to validate API key flow
     old_env = _set_env_vars(
         {
@@ -201,11 +199,10 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
 
     # Reset and ensure tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
     await reset_api_key_manager()
     fastapi_app = None
     chacha_deps = None
@@ -294,5 +291,4 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
             cleanup_chacha()
         _restore_env_vars(old_env)
         reset_settings()
-        await reset_db_pool()
         await reset_api_key_manager()

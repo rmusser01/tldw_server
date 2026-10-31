@@ -97,7 +97,7 @@ class _PrincipalInjectorMiddleware(BaseHTTPMiddleware):
 
 
 @pytest.mark.asyncio
-async def test_middleware_logs_usage(tmp_path, monkeypatch):
+async def test_middleware_logs_usage(tmp_path, monkeypatch, fresh_services):
     # Configure single-user + enable usage logging
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "middleware-test-key")
@@ -107,12 +107,8 @@ async def test_middleware_logs_usage(tmp_path, monkeypatch):
 
     # Reset settings/db/session
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": "middleware-test-key"}
     app_local = _build_usage_test_app()
@@ -130,7 +126,7 @@ async def test_middleware_logs_usage(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_middleware_excludes_prefix(tmp_path, monkeypatch):
+async def test_middleware_excludes_prefix(tmp_path, monkeypatch, fresh_services):
     # Configure single-user + enable usage logging + exclude health prefix
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "middleware-test-key")
@@ -142,12 +138,8 @@ async def test_middleware_excludes_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr(ulm.UsageLoggingMiddleware, "_is_excluded", lambda self, p: p.startswith("/api/v1/health"))
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": "middleware-test-key"}
     app_local = _build_usage_test_app()
@@ -178,18 +170,16 @@ async def test_usage_logging_prefers_auth_principal_ids(
     auth_mode,
     principal_kind,
     principal_user_id,
-    principal_key_id,
+    principal_key_id, fresh_services
 ):
     monkeypatch.setenv("AUTH_MODE", auth_mode)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / f'usage_{auth_mode}.db'}")
     monkeypatch.setenv("USAGE_LOG_ENABLED", "true")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.usage_logging_middleware import UsageLoggingMiddleware
 
     reset_settings()
-    await reset_db_pool()
 
     app_local = FastAPI()
 

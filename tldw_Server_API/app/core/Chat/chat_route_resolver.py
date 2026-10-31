@@ -9,11 +9,6 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    apply_llm_provider_overrides_to_listing,
-    get_override_model_priority,
-)
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_and_model,
@@ -33,6 +28,11 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    apply_llm_provider_overrides_to_listing,
+    get_override_model_priority,
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 

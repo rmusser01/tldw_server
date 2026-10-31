@@ -19,17 +19,13 @@ def _setup_env(monkeypatch, *, user_db_base: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path):
+async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path, fresh_services):
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services import admin_users_service
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     async def _fake_list_users(
         principal,

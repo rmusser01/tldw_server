@@ -4,9 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
 from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+from tldw_Server_API.app.core.Utils.app_services import app_services
+from tldw_Server_API.app.main import app
 
 client = TestClient(app)
 
@@ -40,7 +40,7 @@ def _build_ws_test_server() -> MCPServer:
 def test_mcp_ws_attaches_workspace_query_params_to_context(monkeypatch):
     server = _build_ws_test_server()
     protocol = server.protocol
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with client.websocket_connect(
         "/api/v1/mcp/ws?client_id=workspace-probe"
@@ -68,7 +68,7 @@ def test_mcp_ws_attaches_workspace_query_params_to_context(monkeypatch):
 def test_mcp_ws_initialize_cannot_override_connection_workspace_context(monkeypatch):
     server = _build_ws_test_server()
     protocol = server.protocol
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with client.websocket_connect(
         "/api/v1/mcp/ws?client_id=workspace-probe"
@@ -99,7 +99,7 @@ def test_mcp_ws_initialize_cannot_override_connection_workspace_context(monkeypa
 def test_mcp_ws_reconnect_with_same_context_succeeds(monkeypatch):
     server = _build_ws_test_server()
     protocol = server.protocol
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     ws_url = (
         "/api/v1/mcp/ws?client_id=workspace-probe"
@@ -120,7 +120,7 @@ def test_mcp_ws_reconnect_with_same_context_succeeds(monkeypatch):
 
 def test_mcp_ws_rejects_workspace_id_mismatch_for_same_session(monkeypatch):
     server = _build_ws_test_server()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with client.websocket_connect(
         "/api/v1/mcp/ws?client_id=workspace-probe"
@@ -145,7 +145,7 @@ def test_mcp_ws_rejects_workspace_id_mismatch_for_same_session(monkeypatch):
 
 def test_mcp_ws_rejects_cwd_mismatch_for_same_session(monkeypatch):
     server = _build_ws_test_server()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with client.websocket_connect(
         "/api/v1/mcp/ws?client_id=workspace-probe"

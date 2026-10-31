@@ -23,7 +23,7 @@ from typing import Any, Optional, cast
 import numpy as np
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     reject_provider_call_credentials,
 )
 

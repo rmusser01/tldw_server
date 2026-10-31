@@ -52,12 +52,10 @@ def _seed_runtime_alert(alerts_db_path: str) -> int:
 
 
 @pytest.mark.asyncio
-async def test_admin_monitoring_rules_and_actions(tmp_path) -> None:
+async def test_admin_monitoring_rules_and_actions(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
 
     from tldw_Server_API.app.api.v1.endpoints import monitoring as monitoring_endpoints
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     os.environ["MONITORING_ALERTS_DB"] = str(tmp_path / "monitoring_alerts.db")
@@ -65,9 +63,7 @@ async def test_admin_monitoring_rules_and_actions(tmp_path) -> None:
     alert_identity = f"alert:{alert_id}"
     noncanonical_alert_identity = f"alert:{str(alert_id).zfill(len(str(alert_id)) + 2)}"
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     monitoring_endpoints._TOPIC_MONITORING_DB = None
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}

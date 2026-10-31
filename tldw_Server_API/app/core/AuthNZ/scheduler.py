@@ -18,7 +18,6 @@ from tldw_Server_API.app.core.AuthNZ.alerting import get_security_alert_dispatch
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.monitoring_repo import AuthnzMonitoringRepo
-from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 
@@ -26,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Metrics import set_gauge
+from tldw_Server_API.app.core.Provider_Credentials.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
 
 _AUTHNZ_SCHEDULER_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
