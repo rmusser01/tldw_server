@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.byok_rotation import rotate_byok_secrets
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
@@ -31,7 +31,7 @@ def _b64_key(byte_char: bytes) -> str:
 
 
 @pytest.mark.asyncio
-async def test_byok_rotation_reencrypts_sqlite(tmp_path, monkeypatch):
+async def test_byok_rotation_reencrypts_sqlite(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "users.db"
     old_key = _b64_key(b"a")
     new_key = _b64_key(b"b")
@@ -41,7 +41,6 @@ async def test_byok_rotation_reencrypts_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", old_key)
 
     reset_settings()
-    await reset_db_pool()
     await reset_users_db()
 
     pool = await get_db_pool()
@@ -94,7 +93,7 @@ async def test_byok_rotation_reencrypts_sqlite(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.concurrent
-async def test_byok_rotation_serializes_with_live_openai_refresh_sqlite(tmp_path, monkeypatch):
+async def test_byok_rotation_serializes_with_live_openai_refresh_sqlite(tmp_path, monkeypatch, fresh_services):
     """Rotation re-reads the refresh winner instead of restoring its stale snapshot."""
     db_path = tmp_path / "users.db"
     old_key = _b64_key(b"a")
@@ -111,7 +110,6 @@ async def test_byok_rotation_serializes_with_live_openai_refresh_sqlite(tmp_path
     monkeypatch.setenv("OPENAI_OAUTH_TOKEN_URL", "https://oauth.example.com/token")
 
     reset_settings()
-    await reset_db_pool()
     await reset_users_db()
 
     pool = await get_db_pool()

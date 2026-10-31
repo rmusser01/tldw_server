@@ -9,7 +9,7 @@ from tldw_Server_API.app.api.v1.endpoints import privileges as privileges_endpoi
 from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.PrivilegeMaps.introspection import DependencyMetadata, RouteMetadata
 from tldw_Server_API.app.core.PrivilegeMaps.service import PrivilegeMapService
 from tldw_Server_API.app.core.PrivilegeMaps.snapshots import PrivilegeSnapshotStore, get_privilege_snapshot_store
@@ -167,12 +167,12 @@ class FakePrivilegeMapService(PrivilegeMapService):
 
 
 @pytest.fixture()
-def privilege_test_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def privilege_test_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh_services):
     fake_service = FakePrivilegeMapService()
     db_path = tmp_path / "privilege_snapshots.db"
     monkeypatch.setenv("DATABASE_URL", db_path.as_uri())
     monkeypatch.setenv("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "0")
-    asyncio.run(reset_db_pool())
+    reset_settings()
     snapshot_store = PrivilegeSnapshotStore()
 
     async def seed_snapshots():
@@ -287,7 +287,6 @@ def privilege_test_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         yield client
 
     asyncio.run(snapshot_store.clear())
-    asyncio.run(reset_db_pool())
     fastapi_app.dependency_overrides.clear()
 
 

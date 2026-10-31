@@ -117,14 +117,11 @@ from tldw_Server_API.app.api.v1.schemas.chat_knowledge_schemas import (
     KnowledgeSaveResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    API_KEYS as SCHEMAS_API_KEYS,
-    DEFAULT_LLM_PROVIDER,
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
     RagContext,
-    get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
 )
 from tldw_Server_API.app.api.v1.schemas.chat_validators import (
     validate_character_id,
@@ -231,6 +228,9 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_result_contains_error,
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
+)
+from tldw_Server_API.app.core.config_llm_providers import (
+    get_api_keys,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -361,7 +361,11 @@ from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _shared_env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context, with_llm_call_context
@@ -422,11 +426,6 @@ def _request_has_endpoint_override(request_data: Any) -> bool:
 # ---------------------------------------------------------------------------
 # Constants & helpers
 # ---------------------------------------------------------------------------
-# Backward-compatibility for tests that patch API_KEYS directly (in schemas module).
-# This map is for test overrides/transitional compatibility; prefer get_api_keys()
-# / resolve_provider_api_key for new code paths.
-API_KEYS = SCHEMAS_API_KEYS
-
 router = APIRouter()
 conversations_alias_router = APIRouter()
 
@@ -2868,7 +2867,6 @@ def _get_default_provider() -> str:
     return get_default_provider(
         config_resolver=_config_default_llm_provider,
         test_mode_resolver=_shared_is_test_mode,
-        fallback_provider=DEFAULT_LLM_PROVIDER,
     )
 
 
@@ -3749,7 +3747,7 @@ async def create_chat_completion(
             provider_debug,
         ) = resolve_provider_and_model(
             request_data=request_data,
-            metrics_default_provider=DEFAULT_LLM_PROVIDER,
+            metrics_default_provider=get_default_provider(),
             normalize_default_provider=_get_default_provider(),
             routing_decision=routing_decision,
         )

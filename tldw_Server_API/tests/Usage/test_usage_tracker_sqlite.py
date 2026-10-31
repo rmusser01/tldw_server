@@ -99,7 +99,7 @@ async def _ensure_llm_cache_columns(pool):
 
 
 @pytest.mark.asyncio
-async def test_usage_tracker_inserts_sqlite(monkeypatch):
+async def test_usage_tracker_inserts_sqlite(monkeypatch, fresh_services):
     # Force SQLite single-user temp DB
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
@@ -107,12 +107,9 @@ async def test_usage_tracker_inserts_sqlite(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -147,7 +144,7 @@ async def test_usage_tracker_inserts_sqlite(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch):
+async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch, fresh_services):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
     monkeypatch.setenv(
@@ -169,14 +166,12 @@ async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
     reset_settings()
     reset_pricing_catalog()
-    await reset_db_pool()
-    await reset_session_manager()
+    reset_settings()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -256,7 +251,7 @@ async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_log_llm_usage_estimate_source_distinguishes_missing_usage_from_provider_usage(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fresh_services
 ) -> None:
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
@@ -264,12 +259,9 @@ async def test_log_llm_usage_estimate_source_distinguishes_missing_usage_from_pr
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -514,7 +506,7 @@ async def test_tokens_ledger_op_id_ignores_client_request_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
+async def test_log_llm_usage_persists_router_enrichment(monkeypatch, fresh_services):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
     monkeypatch.setenv("PII_REDACT_LOGS", "false")
@@ -523,12 +515,9 @@ async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -582,7 +571,7 @@ async def test_log_llm_usage_derives_token_name_from_key(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     request: pytest.FixtureRequest,
-    backend_name: str,
+    backend_name: str, fresh_services
 ) -> None:
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
@@ -596,12 +585,9 @@ async def test_log_llm_usage_derives_token_name_from_key(
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 
@@ -663,6 +649,4 @@ async def test_log_llm_usage_derives_token_name_from_key(
             assert row[0] == "DerivedName"
 
     finally:
-        await reset_session_manager()
-        await reset_db_pool()
         reset_settings()

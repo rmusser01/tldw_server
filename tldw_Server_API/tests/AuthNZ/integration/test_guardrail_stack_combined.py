@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 
 
 @pytest.mark.asyncio
-async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path):
+async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path, fresh_services):
     os.environ["AUTH_MODE"] = "multi_user"
     os.environ["JWT_SECRET_KEY"] = "test-secret-key-guardrail-stack-1234567890"
     db_path = tmp_path / "users.db"
@@ -24,12 +24,11 @@ async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path):
     os.environ["VIRTUAL_KEYS_ENABLED"] = "true"
     os.environ["LLM_BUDGET_ENFORCE"] = "true"
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -118,5 +117,4 @@ async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path):
             await pool.close()
         except Exception:
             _ = None
-        await reset_db_pool()
         reset_settings()

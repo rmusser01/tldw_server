@@ -8,8 +8,6 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
 from tldw_Server_API.app.services.registration_service import reset_registration_service
@@ -29,8 +27,6 @@ def _set_fixture_password_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _reset_auth_runtime() -> None:
-    await reset_db_pool()
-    await reset_session_manager()
     reset_settings()
     await reset_registration_service()
     await shutdown_audit_service()
@@ -48,7 +44,7 @@ def _admin_e2e_headers(
 
 
 @pytest_asyncio.fixture
-async def client_without_e2e_support(tmp_path, monkeypatch):
+async def client_without_e2e_support(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / 'authnz_no_e2e.db'
     monkeypatch.setenv('AUTH_MODE', 'multi_user')
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
@@ -70,7 +66,7 @@ async def client_without_e2e_support(tmp_path, monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def e2e_client(tmp_path, monkeypatch):
+async def e2e_client(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / 'authnz_with_e2e.db'
     jobs_db_path = tmp_path / 'jobs_with_e2e.db'
     monitoring_db_path = tmp_path / 'monitoring_with_e2e.db'
@@ -102,7 +98,7 @@ async def e2e_client(tmp_path, monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def e2e_client_without_support_key(tmp_path, monkeypatch):
+async def e2e_client_without_support_key(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / 'authnz_with_e2e_missing_support_key.db'
     jobs_db_path = tmp_path / 'jobs_with_e2e_missing_support_key.db'
     monitoring_db_path = tmp_path / 'monitoring_with_e2e_missing_support_key.db'
@@ -134,7 +130,7 @@ async def e2e_client_without_support_key(tmp_path, monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def single_user_e2e_client(tmp_path, monkeypatch):
+async def single_user_e2e_client(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / 'authnz_single_user_e2e.db'
     jobs_db_path = tmp_path / 'jobs_single_user_e2e.db'
     monitoring_db_path = tmp_path / 'monitoring_single_user_e2e.db'
@@ -168,7 +164,7 @@ async def single_user_e2e_client(tmp_path, monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def e2e_client_without_fixture_passwords(tmp_path, monkeypatch):
+async def e2e_client_without_fixture_passwords(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / 'authnz_with_missing_fixture_passwords.db'
     jobs_db_path = tmp_path / 'jobs_with_missing_fixture_passwords.db'
     monitoring_db_path = tmp_path / 'monitoring_with_missing_fixture_passwords.db'
@@ -204,7 +200,7 @@ async def e2e_client_without_fixture_passwords(tmp_path, monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def e2e_client_with_unsafe_backup_path(tmp_path, monkeypatch):
+async def e2e_client_with_unsafe_backup_path(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / 'authnz_with_unsafe_backup_path.db'
     jobs_db_path = tmp_path / 'jobs_with_unsafe_backup_path.db'
     monitoring_db_path = tmp_path / 'monitoring_with_unsafe_backup_path.db'

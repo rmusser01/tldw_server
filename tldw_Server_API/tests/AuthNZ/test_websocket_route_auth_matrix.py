@@ -185,11 +185,11 @@ def _seed_watchlists_runs(user_id: int) -> None:
 
 
 def _reset_auth_singletons() -> None:
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.Utils.app_services import app_services
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
 
 @pytest.fixture(scope="module")

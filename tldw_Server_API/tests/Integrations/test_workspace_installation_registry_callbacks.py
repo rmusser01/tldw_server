@@ -115,7 +115,7 @@ class _FakeUserSecretRepo:
 
 
 async def _make_registry_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos import get_workspace_provider_installations_repo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -125,7 +125,6 @@ async def _make_registry_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -148,7 +147,7 @@ def _extract_state_from_auth_url(auth_url: str) -> str:
 
 
 @pytest.fixture()
-async def slack_oauth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, _FakeOAuthStateRepo, _FakeUserSecretRepo, Any]:
+async def slack_oauth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh_services) -> tuple[TestClient, _FakeOAuthStateRepo, _FakeUserSecretRepo, Any]:
     state_repo = _FakeOAuthStateRepo()
     user_repo = _FakeUserSecretRepo()
     registry_repo = await _make_registry_repo(tmp_path, monkeypatch)
@@ -233,7 +232,7 @@ async def slack_oauth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.fixture()
-async def discord_oauth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, _FakeOAuthStateRepo, _FakeUserSecretRepo, Any]:
+async def discord_oauth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh_services) -> tuple[TestClient, _FakeOAuthStateRepo, _FakeUserSecretRepo, Any]:
     state_repo = _FakeOAuthStateRepo()
     user_repo = _FakeUserSecretRepo()
     registry_repo = await _make_registry_repo(tmp_path, monkeypatch)

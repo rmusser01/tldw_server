@@ -7,10 +7,10 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_authnz_usage_repo_prune_sqlite(tmp_path, monkeypatch):
+async def test_authnz_usage_repo_prune_sqlite(tmp_path, monkeypatch, fresh_services):
     """AuthnzUsageRepo pruning helpers should work on SQLite."""
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 
@@ -19,7 +19,6 @@ async def test_authnz_usage_repo_prune_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

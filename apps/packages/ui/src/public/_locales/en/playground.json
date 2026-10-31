@@ -3407,20 +3407,44 @@
   "historySelection_review": {
     "message": "Review conversation history"
   },
+  "historySelection_includedCount": {
+    "message": "{{included}} of {{total}} messages included"
+  },
+  "historySelection_includedPosition": {
+    "message": "AI sees this as message {{position}}"
+  },
+  "historySelection_startFresh": {
+    "message": "Start fresh"
+  },
+  "historySelection_coverage": {
+    "message": "AI sees {{seen}} of {{total}} messages"
+  },
+  "historySelection_restoreAll": {
+    "message": "Restore all"
+  },
+  "historySelection_hiddenEarlier": {
+    "message": "Earlier messages, hidden from the AI"
+  },
+  "historySelection_hiddenMore": {
+    "message": "and {{count}} earlier messages"
+  },
+  "historySelection_roleUser": {
+    "message": "You"
+  },
+  "historySelection_roleAssistant": {
+    "message": "Assistant"
+  },
   "historySelection_empty": {
     "message": "Use no prior messages"
   },
   "historySelection_expand": {
     "message": "Expand in full page"
   },
-  "historySelection_counts": {
-    "message": "Complete source / included path"
-  },
   "historySelection_instructions": {
-    "message": "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages."
+    "message": "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them."
   },
   "historySelection_source": {
-    "message": "Complete source messages"
+    "message": "All messages in this chat"
   },
   "historySelection_imageOnly": {
     "message": "Image or attachment only"
@@ -3432,10 +3456,7 @@
     "message": "Include"
   },
   "historySelection_omitted": {
-    "message": "Omitted alternative"
-  },
-  "historySelection_position": {
-    "message": "Path position"
+    "message": "Hidden from the AI"
   },
   "historySelection_up": {
     "message": "Move earlier"
@@ -3453,7 +3474,7 @@
     "message": "Through last included message"
   },
   "historySelection_confirmEffect": {
-    "message": "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives."
+    "message": "Confirming saves this choice for the chat. Nothing is deleted: messages you leave out are only hidden from the AI."
   },
   "historySelection_confirm": {
     "message": "Confirm selected history"
@@ -3471,16 +3492,25 @@
     "message": "This saved chat uses unsupported context. Your original input is kept here; copy it and review the saved setup or start a compatible chat. It will not be sent again automatically."
   },
   "historySelection_recoveryTitle": {
-    "message": "Turn needs review"
+    "message": "No reply to this message"
+  },
+  "historySelection_recoveryUnsavedReplyTitle": {
+    "message": "Reply not saved"
+  },
+  "historySelection_recoveryUnconfirmedTitle": {
+    "message": "Reply not confirmed"
+  },
+  "historySelection_switchModel": {
+    "message": "Switch model"
   },
   "historySelection_recoveryMessage": {
-    "message": "The original send outcome is retained separately from history. It will not be sent again automatically."
+    "message": "Your message is kept. Nothing is sent again unless you choose to retry."
   },
   "historySelection_nativeRecoveryMessage": {
-    "message": "The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically."
+    "message": "The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically."
   },
   "historySelection_inspectRecovery": {
-    "message": "Inspect original input and result"
+    "message": "Show what was sent and received"
   },
   "historySelection_copyRecovery": {
     "message": "Copy recovered text"
@@ -3492,19 +3522,19 @@
     "message": "Could not load retained send outcomes. Refresh history to try again."
   },
   "historySelection_recoveryState_dispatching": {
-    "message": "Send outcome pending or unknown"
+    "message": "Not yet known whether your message was sent"
   },
   "historySelection_recoveryState_unknown": {
-    "message": "User admission outcome unknown"
+    "message": "Not known whether your message was saved"
   },
   "historySelection_recoveryState_accepted_unsent": {
-    "message": "User input accepted; response not saved"
+    "message": "Your message was saved, but no reply was"
   },
   "historySelection_recoveryState_generated_unsaved": {
-    "message": "Generated response needs review"
+    "message": "A reply arrived but wasn't saved"
   },
   "historySelection_recoveryState_accepted_response_unknown": {
-    "message": "User input accepted; response outcome unknown"
+    "message": "Your message was saved. Not known whether a reply was saved"
   },
   "historySelection_forkLoadError": {
     "message": "Could not load retained fork outcomes."
@@ -4395,7 +4425,7 @@
     "message": "Could not open the saved reply. Your current view and saved reply are retained."
   },
   "historySelection_retainedOutcomes": {
-    "message": "Retained outcomes"
+    "message": "Earlier messages to review"
   },
   "historySelection_savedRegeneratedReplyTitle": {
     "message": "New reply saved"

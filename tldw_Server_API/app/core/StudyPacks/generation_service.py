@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import get_default_scheduler_settings
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -182,7 +182,7 @@ def _resolve_generation_provider_and_model(
     if not resolved_provider:
         resolved_provider = normalize_provider(os.getenv("DEFAULT_LLM_PROVIDER"))
     if not resolved_provider:
-        resolved_provider = normalize_provider(DEFAULT_LLM_PROVIDER or "openai") or "openai"
+        resolved_provider = normalize_provider(get_default_provider() or "openai") or "openai"
 
     resolved_model = _clean_text(model) or None
     if resolved_model is None:

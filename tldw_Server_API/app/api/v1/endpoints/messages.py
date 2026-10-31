@@ -22,7 +22,6 @@ from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
     AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
 )
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.core.Chat.anthropic_messages import (
     anthropic_messages_to_openai,
     anthropic_tool_choice_to_openai,
@@ -47,6 +46,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     normalize_provider_stream_error,
 )
 from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
@@ -954,7 +954,7 @@ def _get_default_provider() -> str:
         return env_val
     if is_test_mode():
         return "local-llm"
-    return DEFAULT_LLM_PROVIDER
+    return get_default_provider()
 
 
 def _resolve_messages_base_url(provider: str, app_config: dict[str, Any] | None) -> str:
@@ -1032,7 +1032,7 @@ def _resolve_provider_and_model_for_request(request_data: Any) -> tuple[str, str
     """Resolve the execution provider/model pair from the request payload."""
     _, _, selected_provider, selected_model, _debug = resolve_provider_and_model(
         request_data=request_data,
-        metrics_default_provider=DEFAULT_LLM_PROVIDER,
+        metrics_default_provider=get_default_provider(),
         normalize_default_provider=_get_default_provider(),
     )
     provider = selected_provider

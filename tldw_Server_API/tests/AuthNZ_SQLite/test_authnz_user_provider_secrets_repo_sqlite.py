@@ -119,10 +119,10 @@ async def test_legacy_nullable_owner_fails_active_read_and_cas_sqlite(
 
 
 @pytest.mark.asyncio
-async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
+async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch, fresh_services) -> None:
     from pathlib import Path
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
         AuthnzUserProviderSecretsRepo,
@@ -141,7 +141,6 @@ async def test_user_provider_secrets_repo_sqlite(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))

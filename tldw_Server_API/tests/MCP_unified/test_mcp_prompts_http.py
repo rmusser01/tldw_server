@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 pytestmark = pytest.mark.unit
 
@@ -31,7 +32,7 @@ class _CaptureServer:
 
 def test_get_mcp_prompts_maps_cursor_to_protocol_request(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _CaptureServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
     app = FastAPI()
     app.include_router(mcp_unified_endpoint.router, prefix="/api/v1")
     app.dependency_overrides[mcp_unified_endpoint.enforce_http_security] = lambda: None
@@ -55,7 +56,7 @@ def test_get_mcp_prompts_maps_cursor_to_protocol_request(monkeypatch: pytest.Mon
 
 def test_get_mcp_prompts_preserves_empty_cursor_query(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _CaptureServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
     app = FastAPI()
     app.include_router(mcp_unified_endpoint.router, prefix="/api/v1")
     app.dependency_overrides[mcp_unified_endpoint.enforce_http_security] = lambda: None

@@ -313,6 +313,8 @@ export type HistoryTurnRecovery = {
   interruption_reason?: string;
   /** Friendly failure guidance only; raw provider diagnostics are excluded. */
   failure_reason?: string;
+  /** The recovery the failure points to, e.g. choosing another model (CC-02). */
+  failure_action?: "open-model-selector";
   /** The reply was already written to the owner; only the view must follow it. */
   settled_message_id?: string;
   /** Display identity of the model that wrote the reply. */

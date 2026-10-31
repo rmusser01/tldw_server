@@ -105,14 +105,14 @@ def test_failure_rolls_back_character_and_receipt_then_can_retry(
 
 def test_production_db_factory_seeds_before_return(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The canonical factory exposes usable expressions for each isolated owner."""
-    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 
-    monkeypatch.setattr(deps, "_get_chacha_db_path_for_user", lambda owner: tmp_path / str(owner) / "characters.db")
+    monkeypatch.setattr(chacha_db_provider, "_get_chacha_db_path_for_user", lambda owner: tmp_path / str(owner) / "characters.db")
     monkeypatch.setattr(
         DatabasePaths, "get_user_visual_identities_dir", staticmethod(lambda owner: tmp_path / str(owner) / "visuals")
     )
     for owner in (42, 43):
-        database = deps._create_and_prepare_db(owner, str(owner))
+        database = chacha_db_provider.create_and_prepare_chacha_db(owner, str(owner))
         try:
             character = database.get_character_card_by_name("pixel-migu")
             assert character is not None
@@ -217,15 +217,15 @@ def test_replay_preserves_deleted_expression_pack(db: CharactersRAGDB) -> None:
 
 def test_production_factory_preserves_preexisting_deleted_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A preexisting tombstone reserves its name without preventing startup."""
-    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 
     db_path = tmp_path / "existing.db"
     database = CharactersRAGDB(db_path, client_id="42")
     existing_id = database.add_character_card({"name": "pixel-migu", "description": "Deleted user content"})
     database.soft_delete_character_card(existing_id, expected_version=1)
     database.close_connection()
-    monkeypatch.setattr(deps, "_get_chacha_db_path_for_user", lambda owner: db_path)
-    database = deps._create_and_prepare_db(42, "42")
+    monkeypatch.setattr(chacha_db_provider, "_get_chacha_db_path_for_user", lambda owner: db_path)
+    database = chacha_db_provider.create_and_prepare_chacha_db(42, "42")
     try:
         tombstone = database.get_character_card_by_id(existing_id, include_deleted=True)
         assert tombstone["deleted"] == 1
@@ -251,7 +251,7 @@ def test_production_factory_closes_connection_after_seed_error(tmp_path: Path, m
     """Seed-domain failures close the unpublished database connection."""
     import sqlite3
 
-    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
     from tldw_Server_API.app.core.Visual_Identities import builtin_pixel_migu
 
     connections: list[sqlite3.Connection] = []
@@ -266,10 +266,10 @@ def test_production_factory_closes_connection_after_seed_error(tmp_path: Path, m
         """Model a bundled asset-integrity failure in the seed service."""
         raise BuiltinCharacterSeedError("pixel_migu_asset_hash_mismatch")
 
-    monkeypatch.setattr(deps, "_get_chacha_db_path_for_user", lambda owner: tmp_path / "failed.db")
-    monkeypatch.setattr(deps, "CharactersRAGDB", create_database)
+    monkeypatch.setattr(chacha_db_provider, "_get_chacha_db_path_for_user", lambda owner: tmp_path / "failed.db")
+    monkeypatch.setattr(chacha_db_provider, "CharactersRAGDB", create_database)
     monkeypatch.setattr(builtin_pixel_migu, "ensure_pixel_migu_character", fail_seed)
     with pytest.raises(BuiltinCharacterSeedError, match="pixel_migu_asset_hash_mismatch"):
-        deps._create_and_prepare_db(42, "42")
+        chacha_db_provider.create_and_prepare_chacha_db(42, "42")
     with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
         connections[0].execute("SELECT 1")

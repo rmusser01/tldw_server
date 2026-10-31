@@ -168,7 +168,7 @@ async def _shutdown_chacha_resources(
     guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+        from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
             shutdown_chacha_resources,
         )
 

@@ -44,7 +44,6 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     StreamingStatusResponse,
     StreamingTestResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER, get_api_keys
 from tldw_Server_API.app.core.Audio.error_payloads import _maybe_debug_details
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC, _get_failopen_cap_minutes
 from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
@@ -89,6 +88,7 @@ from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_default_transcription_model_setting,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_api_keys, get_default_provider
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -2244,7 +2244,7 @@ async def websocket_audio_chat_stream(
         emit_stt_session_start_total(provider=stt_metrics_provider)
         stt_session_started = True
 
-        llm_provider = (llm_cfg.get("provider") or llm_cfg.get("api_provider") or DEFAULT_LLM_PROVIDER).lower()
+        llm_provider = (llm_cfg.get("provider") or llm_cfg.get("api_provider") or get_default_provider()).lower()
         llm_model = llm_cfg.get("model") or os.getenv("AUDIO_CHAT_DEFAULT_LLM_MODEL") or "gpt-3.5-turbo"
         llm_temperature = llm_cfg.get("temperature")
         llm_max_tokens = llm_cfg.get("max_tokens")

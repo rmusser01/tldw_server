@@ -59,10 +59,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -120,7 +118,7 @@ async def _create_user_and_key(*, username: str, email: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_chat_tokens.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     api_key = await _create_user_and_key(username="chat-cap-user", email="chat-cap-user@example.com")
@@ -224,7 +222,7 @@ async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backen
 
 
 @pytest.mark.asyncio
-async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_embeddings_tokens.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     api_key = await _create_user_and_key(username="emb-cap-user", email="emb-cap-user@example.com")

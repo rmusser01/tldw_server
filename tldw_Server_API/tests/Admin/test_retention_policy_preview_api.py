@@ -60,16 +60,12 @@ async def _seed_audit_log_preview_data() -> int:
 
 
 @pytest.mark.asyncio
-async def test_retention_preview_returns_authoritative_counts_and_signature(tmp_path) -> None:
+async def test_retention_preview_returns_authoritative_counts_and_signature(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 
@@ -94,16 +90,12 @@ async def test_retention_preview_returns_authoritative_counts_and_signature(tmp_
 
 
 @pytest.mark.asyncio
-async def test_retention_preview_returns_unknown_policy_and_invalid_range(tmp_path) -> None:
+async def test_retention_preview_returns_unknown_policy_and_invalid_range(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 
@@ -124,16 +116,12 @@ async def test_retention_preview_returns_unknown_policy_and_invalid_range(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_retention_update_requires_valid_preview_signature(tmp_path) -> None:
+async def test_retention_update_requires_valid_preview_signature(tmp_path, fresh_services) -> None:
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 

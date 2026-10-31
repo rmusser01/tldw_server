@@ -7,7 +7,7 @@ from starlette.types import Scope
 
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
@@ -102,10 +102,9 @@ async def _create_api_key(user_id: int) -> str:
 
 
 @pytest.mark.asyncio
-async def test_claims_include_overlapping_role_permissions_sqlite(tmp_path, monkeypatch):
+async def test_claims_include_overlapping_role_permissions_sqlite(tmp_path, monkeypatch, fresh_services):
     _base_env(tmp_path, monkeypatch)
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -135,10 +134,9 @@ async def test_claims_include_overlapping_role_permissions_sqlite(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_claims_reflect_user_allow_deny_overrides_sqlite(tmp_path, monkeypatch):
+async def test_claims_reflect_user_allow_deny_overrides_sqlite(tmp_path, monkeypatch, fresh_services):
     _base_env(tmp_path, monkeypatch)
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

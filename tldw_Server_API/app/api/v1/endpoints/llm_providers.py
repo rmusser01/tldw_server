@@ -14,12 +14,12 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.adapter_registry as llm_adapter_registry
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
+from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config_llm_providers import (
     ALL_SUPPORTED_PROVIDER_NAMES_LIST,
     get_api_keys,
 )
-from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_config_option_names,
     custom_openai_provider_name,
@@ -31,9 +31,11 @@ from tldw_Server_API.app.core.exceptions import (
     NetworkError,
     RetryExhaustedError,
 )
-from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy, fetch as _http_fetch
+from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
+from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import get_allowed_fields
 from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
     get_model_extra_body_compat,
     get_provider_extra_body_compat,
@@ -62,13 +64,21 @@ from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     ModelDiscoveryResult,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     configured_endpoint_probe_enabled as _configured_endpoint_probe_enabled,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     provider_readiness as _provider_readiness,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.metadata import merge_routing_metadata
 from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tokenizer_metadata,
+)
+from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
 )
 from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
@@ -2657,6 +2667,30 @@ async def get_llm_providers(include_deprecated: bool = False):
         ) from e
 
 
+# Optional sampling settings the chat UI offers that only some providers accept.
+_OPTIONAL_SAMPLING_FIELDS = ("top_k", "min_p")
+
+
+def _optional_sampling_fields(provider: Any) -> list[str]:
+    """Return the optional sampling fields a provider accepts (#3283).
+
+    The chat UI sends Top K and Min P only when these are listed, because a
+    provider's adapter rejects request fields it does not support
+    (``capability_registry.validate_payload``).
+
+    Args:
+        provider: The provider key of a catalog entry.
+
+    Returns:
+        The supported fields among ``top_k`` and ``min_p``, in that order.
+    """
+    if not isinstance(provider, str) or not provider.strip():
+        return []
+    # Catalog names ("llama", "tabby") differ from the registry keys.
+    allowed = get_allowed_fields(_normalize_catalog_provider_for_chat(provider))
+    return [field for field in _OPTIONAL_SAMPLING_FIELDS if field in allowed]
+
+
 @router.get("/llm/models/metadata",
     summary="Get model metadata across providers",
     description=(
@@ -2709,6 +2743,7 @@ async def get_models_metadata(
                 entry['provider_is_configured'] = provider_is_configured
                 entry['is_configured'] = provider_is_configured
                 entry['catalog_only'] = not provider_is_configured
+                entry['sampling_fields'] = _optional_sampling_fields(entry.get('provider'))
                 if isinstance(provider_enabled, bool):
                     entry['provider_enabled'] = provider_enabled
                 for key in (
@@ -2732,6 +2767,7 @@ async def get_models_metadata(
             _llamacpp_supervisor_from_request(request),
         )
         for entry in managed_entries:
+            entry.setdefault('sampling_fields', _optional_sampling_fields(entry.get('provider')))
             if not _model_matches_filters(
                 entry,
                 type_filters=type_filters,

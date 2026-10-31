@@ -7,13 +7,14 @@ import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import workflows
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_RUNS_CONTROL, WORKFLOWS_RUNS_READ
 from tldw_Server_API.app.core.AuthNZ.repos import rbac_admin_repo
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import create_user
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
     single_user_cookie_client as single_user_cookie_client,
 )
@@ -40,7 +41,7 @@ def workflow_accounts(private_workflow_paths, single_user_cookie_client, tmp_pat
     client, _api_key = single_user_cookie_client
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     async def seed_accounts():
         accounts = {}

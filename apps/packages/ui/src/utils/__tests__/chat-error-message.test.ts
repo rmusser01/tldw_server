@@ -1,7 +1,9 @@
 import i18n from "i18next"
 import { beforeAll, describe, expect, it } from "vitest"
 
+import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
 import {
+  buildAssistantErrorContent,
   buildFriendlyErrorMessage,
   decodeChatErrorPayload,
   encodeChatErrorPayload,
@@ -133,4 +135,87 @@ describe("chat error message recovery actions", () => {
       .toBe("Something went wrong while talking to your tldw server.")
   })
 
+})
+
+describe("provider failures name the model (CC-N2)", () => {
+  beforeAll(async () => { await i18n.init({ lng: "en", resources: {} }) })
+
+  const providerDown = () =>
+    new Error("Stream completion failed", {
+      cause: {
+        status: 502,
+        details: {
+          detail: {
+            error_code: "provider_unavailable",
+            message: "The chat service provider is currently unavailable."
+          }
+        }
+      }
+    })
+
+  it("says which model didn't answer and offers Switch model", () => {
+    expect(
+      decodeChatErrorPayload(
+        buildFriendlyErrorMessage(providerDown(), { modelLabel: "gemma3:1b (Ollama)" })
+      )
+    ).toMatchObject({
+      summary: "Couldn't reach gemma3:1b (Ollama).",
+      hint: "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models.",
+      recoveryAction: "open-model-selector",
+      recoveryLabel: "Switch model"
+    })
+  })
+
+  it("doesn't claim the server is fine for a bare gateway error, which may be a proxy", () => {
+    const bare = new Error("Stream completion failed", { cause: { status: 502 } })
+    expect(
+      decodeChatErrorPayload(buildFriendlyErrorMessage(bare, { modelLabel: "gemma3:1b (Ollama)" }))
+    ).toMatchObject({
+      summary: "Couldn't reach gemma3:1b (Ollama).",
+      hint: "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models.",
+      recoveryAction: "open-model-selector"
+    })
+  })
+
+  it("names the provider generically when the model is unknown", () => {
+    expect(decodeChatErrorPayload(buildFriendlyErrorMessage(providerDown()))?.summary).toBe(
+      "Couldn't reach this model's provider."
+    )
+  })
+
+  it("passes the model label through buildAssistantErrorContent", () => {
+    expect(
+      decodeChatErrorPayload(
+        buildAssistantErrorContent("", providerDown(), { modelLabel: "mock-gpt-4o (Custom OpenAI API)" })
+      )?.summary
+    ).toBe("Couldn't reach mock-gpt-4o (Custom OpenAI API).")
+  })
+
+  it("keeps a server 503 for missing credentials out of the provider wording", () => {
+    const error = new Error("Stream completion failed", {
+      cause: { status: 503, detail: { error_code: "missing_provider_credentials" } }
+    })
+    expect(decodeChatErrorPayload(buildFriendlyErrorMessage(error))?.summary).not.toMatch(/Couldn't reach/)
+  })
+})
+
+describe("a reply that never starts names the model and the wait (CM-06)", () => {
+  beforeAll(async () => { await i18n.init({ lng: "en", resources: {} }) })
+
+  it("says which model didn't respond, and after how long", () => {
+    expect(
+      decodeChatErrorPayload(
+        buildFriendlyErrorMessage(new ChatStreamTimeoutError("startup", 30_000), {
+          modelLabel: "mock-gpt-4o (Custom OpenAI API)"
+        })
+      )?.summary
+    ).toBe("No response from mock-gpt-4o (Custom OpenAI API) after 30 seconds.")
+  })
+
+  it("keeps the general wording without a model", () => {
+    expect(
+      decodeChatErrorPayload(buildFriendlyErrorMessage(new ChatStreamTimeoutError("startup", 30_000)))
+        ?.summary
+    ).toBe("The model did not start responding in time.")
+  })
 })

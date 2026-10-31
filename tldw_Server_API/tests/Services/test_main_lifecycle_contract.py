@@ -869,8 +869,6 @@ def test_lifespan_startup_delegates_core_initialization(
     async def _fake_initialize_startup_core_components(**kwargs):
         recorded_calls.append(kwargs)
         return startup_core_initialization.StartupCoreInitializationHandles(
-            db_pool="db-pool",
-            session_manager="session-manager",
             heavy_startup_handles="heavy-handles",
         )
 
@@ -1132,7 +1130,6 @@ def test_lifespan_startup_delegates_auth_runtime(
 
     async def _fake_initialize_auth_runtime_services(**kwargs):
         recorded_calls.append(kwargs)
-        return SimpleNamespace(db_pool=None, session_manager=None)
 
     monkeypatch.setattr(
         startup_auth_runtime,

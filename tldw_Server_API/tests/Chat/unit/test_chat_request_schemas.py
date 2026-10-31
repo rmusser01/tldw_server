@@ -376,3 +376,27 @@ def test_function_definition_type_array():
     with pytest.raises(ValidationError) as exc_info:
         FunctionDefinition(name="invalid_union", parameters=invalid_union_params)
     assert "Invalid JSON Schema type" in str(exc_info.value)
+
+
+def test_api_keys_maps_are_gone():
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+
+    assert not hasattr(chat_request_schemas, "API_KEYS")
+    assert not hasattr(chat_endpoint, "API_KEYS")
+
+
+_MOVED = ("DEFAULT_LLM_PROVIDER", "get_api_keys", "get_default_provider", "load_and_log_configs",
+          "is_test_mode", "_config", "_get_setting", "_config_default_llm_provider")
+
+
+def test_chat_request_schemas_has_no_config_names():
+    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+    assert [name for name in _MOVED if hasattr(chat_request_schemas, name)] == []
+
+
+def test_api_provider_description_names_no_provider():
+    assert ChatCompletionRequest.model_fields["api_provider"].description == (
+        "[Extension] The target LLM provider (e.g., 'openai', 'anthropic'). "
+        "If omitted, defaults to the server's configured default provider."
+    )
