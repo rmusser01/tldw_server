@@ -230,7 +230,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     sanitized_provider_stream_exception,
 )
 from tldw_Server_API.app.core.config_llm_providers import (
-    get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
+    get_api_keys,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,

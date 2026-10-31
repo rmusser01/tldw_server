@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.osce import OsceStationAuthoringResponse
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
@@ -20,6 +19,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     verify_generated_artifact_against_sources,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError, QuizMalformedOutputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry

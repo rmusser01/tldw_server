@@ -872,7 +872,7 @@ def _is_char_chat_test_mode() -> bool:
 
 
 def _get_default_provider() -> str:
-    """Resolve default provider: config, then env, then test fallback, then schema default."""
+    """Resolve default provider: config, then env, then test fallback, then get_default_provider()."""
     cfg_default = _config_default_llm_provider()
     if cfg_default:
         return cfg_default

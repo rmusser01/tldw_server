@@ -11,7 +11,6 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceCitation,
     OsceCitationSourceType,
@@ -24,6 +23,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import (
     OsceCitationError,
     OsceGenerationError,
