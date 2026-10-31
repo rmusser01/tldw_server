@@ -561,7 +561,8 @@ class AuthnzUsageRepo:
         Insert a single row into ``llm_usage_log``.
 
         This centralizes dialect handling so callers (e.g., usage_tracker)
-        do not embed backend-specific SQL. A row with a ``credential_source`` on a schema without that column is written without it.
+        do not embed backend-specific SQL. A row with a ``credential_source`` on a
+        schema without that column is written without it.
         """
 
         async def _insert_full(with_source: bool) -> None:
