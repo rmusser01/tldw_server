@@ -18,9 +18,9 @@ from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_setting
 @pytest.fixture(autouse=True)
 def _allow_slow_chacha_test_db_init(monkeypatch):
     """Give Windows CI enough time for fresh ChaChaNotes schema migrations."""
-    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 
-    monkeypatch.setattr(chacha_deps, "_CHACHA_WATCHDOG_SECS", 10.0)
+    monkeypatch.setattr(get_chacha_runtime(), "watchdog_secs", 10.0)
 
 
 @pytest.mark.integration

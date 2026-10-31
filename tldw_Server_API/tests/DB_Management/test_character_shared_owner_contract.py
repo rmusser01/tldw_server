@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chats
 from tldw_Server_API.app.api.v1.endpoints import characters_endpoint as characters
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
@@ -36,9 +37,9 @@ def owners(request, tmp_path):
 
 def _seed_defaults(owners):
     """Run the actual dependency maintenance bootstrap for both owners."""
-    first = deps._ensure_default_character(owners.first)
+    first = chacha_db_provider.ensure_default_character(owners.first)
     owners.first.close_connection()
-    second = deps._ensure_default_character(owners.second)
+    second = chacha_db_provider.ensure_default_character(owners.second)
     owners.second.close_connection()
     assert first is not None and second is not None
     return first, second
@@ -84,7 +85,7 @@ def test_default_bootstrap_returns_the_current_owners_character(owners):
     card = owners.second.get_character_card_by_id(second)
     assert card["name"] == deps.DEFAULT_CHARACTER_NAME
     assert card["client_id"] == "2"
-    assert deps._ensure_default_character(owners.second) == second
+    assert chacha_db_provider.ensure_default_character(owners.second) == second
 
 
 def test_visible_bootstrap_default_can_create_a_character_chat(owners, monkeypatch):
@@ -363,27 +364,23 @@ async def test_real_cold_dependency_bootstrap_list_and_factory_share_owner(reque
     from concurrent.futures import ThreadPoolExecutor
 
     import httpx
-    from cachetools import LRUCache
 
     from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as db_module
     from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
     from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.main import app as main_app
 
     backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config")) if use_postgres else None
     monkeypatch.setattr(db_module, "get_content_backend", lambda _config: backend)
     monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda user: tmp_path / str(user)))
     monkeypatch.setattr(deps.DatabasePaths, "get_chacha_db_path", staticmethod(lambda user: tmp_path / str(user) / "ChaChaNotes.db"))
-    cache = LRUCache(maxsize=4)
-    monkeypatch.setattr(deps, "_chacha_db_instances", cache)
-    monkeypatch.setattr(deps, "_chacha_db_init_events", {})
-    monkeypatch.setattr(deps, "_chacha_db_init_errors", {})
-    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", ChaChaRuntimeManager())
-    monkeypatch.setattr(deps, "_CHACHA_SHUTTING_DOWN", False)
-    monkeypatch.setattr(deps, "_chacha_default_char_tasks", set())
+    runtime = ChaChaRuntimeManager(max_cached=4)
+    cache = runtime._instances
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
     monkeypatch.delitem(main_app.dependency_overrides, deps.get_chacha_db_for_user, raising=False)
     executor = ThreadPoolExecutor(max_workers=2)
-    monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+    monkeypatch.setattr(runtime, "executor", lambda: executor)
     monkeypatch.setattr(chats, "get_character_rate_limiter", lambda: CharacterRateLimiter(enabled=False, max_chats_per_user=100))
     monkeypatch.setattr(chats, "_active_chat_sync_service", lambda *_args: None)
     principal = {"id": 1}
@@ -402,8 +399,8 @@ async def test_real_cold_dependency_bootstrap_list_and_factory_share_owner(reque
                 principal["id"] = user
                 cold = await client.get("/api/v1/characters/")
                 assert cold.status_code == 200, cold.text
-                if deps._chacha_default_char_tasks:
-                    await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+                if runtime._tasks:
+                    await asyncio.gather(*tuple(runtime._tasks))
                 listed = await client.get("/api/v1/characters/")
                 assert listed.status_code == 200, listed.text
                 default = next(card for card in listed.json() if card["name"] == deps.DEFAULT_CHARACTER_NAME)
@@ -418,8 +415,8 @@ async def test_real_cold_dependency_bootstrap_list_and_factory_share_owner(reque
             if use_postgres:
                 assert defaults[0] != defaults[1]
     finally:
-        if deps._chacha_default_char_tasks:
-            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+        if runtime._tasks:
+            await asyncio.gather(*tuple(runtime._tasks))
         executor.shutdown(wait=True)
         for db in tuple(cache.values()):
             db.close_all_connections()

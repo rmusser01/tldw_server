@@ -451,16 +451,12 @@ def _restore_user_db_env_and_chacha_cache():
     except Exception:
         _ = None
 
-    # Drain ChaCha background tasks/futures before closing DB handles to avoid
-    # races where sqlite connections are closed during active executor queries.
+    # Close the ChaCha runtime (drains background tasks/futures before closing DB
+    # handles) and empty its slot, so the next test gets a fresh runtime.
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-            reset_chacha_shutdown_state,
-            shutdown_chacha_resources,
-        )
+        from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
 
-        _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
-        reset_chacha_shutdown_state()
+        _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
     except Exception:
         _ = None
 
@@ -804,10 +800,8 @@ def pytest_sessionfinish(session, exitstatus):  # pragma: no cover - diagnostics
         except Exception:
             _ = None
         try:
-            from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-                shutdown_chacha_resources,
-            )
-            _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
+            from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
+            _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
         except Exception:
             _ = None
         try:
@@ -1218,13 +1212,9 @@ def _reset_workflow_scheduler():
     # Ensure ChaCha executor threads are not reported as lingering non-daemon
     # workers by the per-test scheduler reset diagnostics.
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-            reset_chacha_shutdown_state,
-            shutdown_chacha_resources,
-        )
+        from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
 
-        _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
-        reset_chacha_shutdown_state()
+        _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
     except Exception:
         _ = None
 

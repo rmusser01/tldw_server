@@ -1,6 +1,5 @@
 {
   "api/v1/API_Deps/Audit_DB_Deps.py": {"globals": 2, "reason": null},
-  "api/v1/API_Deps/ChaCha_Notes_DB_Deps.py": {"globals": 3, "reason": null},
   "api/v1/API_Deps/Prompts_DB_Deps.py": {"globals": 3, "reason": null},
   "api/v1/API_Deps/Workflows_DB_Deps.py": {"globals": 2, "reason": null},
   "api/v1/API_Deps/kanban_deps.py": {"globals": 3, "reason": null},
