@@ -1625,6 +1625,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       // its immutable operation can be removed. Known UUID updates already
       // have that independent identity; migration never recreates snapshots.
       if (
+        !migrationSuppressed &&
         !(
           canonicalUpdateBound &&
           canonicalWikilinkNoteId(String(saved.id)) === canonicalNoteId
@@ -1655,7 +1656,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           );
       }
       const binding = draftBindingRef.current;
-      await checkpointQuickNotesOfflineDraft(
+      const checkpointed = await checkpointQuickNotesOfflineDraft(
         authorityScope,
         pending.entry.key,
         pending.entry.pendingWrite!.key,
@@ -1663,6 +1664,23 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         saved,
       );
       if (!isCurrent()) return;
+      // Migrated Workspaces keep the accepted identity in the owned draft, not a deleted snapshot.
+      if (
+        migrationSuppressed &&
+        !canonicalUpdateBound &&
+        (!isQuickNotesRetainedDraft(checkpointed ?? undefined) ||
+          checkpointed?.key !== pending.entry.key ||
+          checkpointed.noteId !== String(saved.id) ||
+          checkpointed.baseVersion !== saved.version ||
+          checkpointed.metadata?.quickNotesAcceptedKey !==
+            pending.entry.pendingWrite!.key ||
+          checkpointed.metadata?.quickNotesAuthorityId !== authorityId ||
+          checkpointed.metadata?.quickNotesWorkspaceId !== workspaceId ||
+          checkpointed.metadata?.quickNotesWorkspaceTag !== draftWorkspaceTag)
+      )
+        throw new Error(
+          "Could not retain the accepted note checkpoint. Retry the same save.",
+        );
       pendingSaveRef.current = null;
       const acknowledgedDraft = useWorkspaceStore.getState().currentNote;
       if (!acknowledgedDraft.isDirty) showSavedIndicatorTemporarily();
