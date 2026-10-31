@@ -87,8 +87,9 @@ const hasReasoningProgress = (chunk: unknown): boolean => {
   )
 }
 
+// The native Chat display withholds typed reasoning; only answer text is visible.
 const hasVisibleAssistantProgress = (chunk: unknown): boolean =>
-  extractTokenFromChunk(chunk).length > 0 || hasReasoningProgress(chunk)
+  extractTokenFromChunk(chunk).length > 0;
 
 const readErrorMessage = (error: unknown, fallback = "Aborted"): string => {
   const seen = new Set<unknown>()
@@ -228,7 +229,8 @@ const buildRequestMessages = (
   messages: ChatMessage[],
   options: TldwChatOptions
 ): ChatMessage[] => {
-  const sanitizedMessages = sanitizeMessages(messages, Boolean(options.regenerateFromMessageId))
+  const savedReplyAction = Boolean(options.regenerateFromMessageId || options.continueFromMessageId)
+  const sanitizedMessages = sanitizeMessages(messages, savedReplyAction)
   const systemPrompt = normalizeSystemPrompt(options.systemPrompt)
   let withSystemPrompt: ChatMessage[]
   if (systemPrompt) {
@@ -248,12 +250,14 @@ const buildRequestMessages = (
     withSystemPrompt = sanitizedMessages
   }
 
-  if (options.regenerateFromMessageId) {
-    // Saved regeneration uses canonical server history. Sending the local
+  if (savedReplyAction) {
+    // Saved regeneration and continuation use canonical server history. Sending the local
     // prefix again would turn response variants into new persisted turns.
     const originalUser = withSystemPrompt.at(-1)
     if (originalUser?.role !== "user") {
-      throw new Error("Reload the saved user turn before regenerating its reply.")
+      throw new Error(options.continueFromMessageId
+        ? "Reload the saved user turn before continuing its reply."
+        : "Reload the saved user turn before regenerating its reply.")
     }
     withSystemPrompt = [...withSystemPrompt.filter(message => message.role === "system"), originalUser]
   }
@@ -300,6 +304,8 @@ export const prepareChatCompletionRequest = (
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
+        topk: options.topK,
+        minp: options.minP,
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {
@@ -308,10 +314,12 @@ export const prepareChatCompletionRequest = (
             }
           : {}),
         save_to_db: options.saveToDb,
-        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
+        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ||
+          options.continueFromMessageId ? { metadata: {
           ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
           ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
-          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
+          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {}),
+          ...(options.continueFromMessageId ? { tldw_continue_from_message_id: options.continueFromMessageId } : {})
         } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
@@ -343,6 +351,9 @@ export interface TldwChatOptions {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  /** Sent only when the provider accepts it; see ChatTldw (#3283). */
+  topK?: number
+  minP?: number
   stream?: boolean
   systemPrompt?: string
   reasoningEffort?: "low" | "medium" | "high"
@@ -352,6 +363,8 @@ export interface TldwChatOptions {
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
+  /** Native Continue (CM-01): extend this saved reply as a new server-settled alternative. */
+  continueFromMessageId?: string
   conversationId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
@@ -463,6 +476,8 @@ export class TldwChatService {
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
+        topk: options.topK,
+        minp: options.minP,
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {

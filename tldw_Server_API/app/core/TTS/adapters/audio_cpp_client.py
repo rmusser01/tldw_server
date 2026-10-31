@@ -1,20 +1,36 @@
-"""HTTP client for audiocpp_server."""
+"""HTTP client for audiocpp_server.
+
+Every request goes through ``core.http_client.afetch``: one attempt, no redirects, and the
+egress policy checked on the address the connection uses. A loopback ``base_url`` (the
+default, and the managed sidecar) is admitted by a ``ConfiguredEndpointScope`` for its exact
+origin. A remote one (``allow_remote_base_url``) gets the default egress policy, so a private
+address is refused unless the operator's egress settings allow it, or unless the operator sets
+``allow_private_network``: then the remote origin gets the same exact-origin scope, which admits
+private and LAN addresses there but never cloud metadata or link-local ones.
+"""
 
 from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch, create_async_client
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
 from ..tts_exceptions import (
+    TTSConfigurationError,
     TTSGenerationError,
     TTSNetworkError,
     TTSProviderError,
     TTSTimeoutError,
+    TTSValidationError,
 )
-from .audio_cpp_config import PROVIDER_KEY, validate_base_url
+from .audio_cpp_config import PROVIDER_KEY, _is_loopback_host, validate_base_url
 
 
 def is_healthy_response(payload: Any) -> bool:
@@ -44,6 +60,7 @@ class AudioCppClient:
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 300.0,
         allow_remote_base_url: bool = False,
+        allow_private_network: bool = False,
     ) -> None:
         """Use an injected client or own a proxy-independent HTTP client."""
         self.base_url = validate_base_url(
@@ -51,7 +68,20 @@ class AudioCppClient:
             allow_remote_base_url=allow_remote_base_url,
         )
         self.timeout = timeout
-        self._http_client = http_client or httpx.AsyncClient(timeout=timeout, trust_env=False)
+        # allow_private_network is operator provider config only, never request input.
+        parsed = urlparse(self.base_url)
+        self._endpoint_scope: ConfiguredEndpointScope | None = None
+        if allow_private_network or _is_loopback_host(parsed.hostname):
+            # The scoped egress path refuses userinfo. An unscoped remote base_url keeps it
+            # (sent as Basic auth, e.g. to a reverse proxy).
+            if parsed.username is not None or parsed.password is not None:
+                raise TTSValidationError(
+                    "audio.cpp credentials in base_url are not supported for loopback or private-network endpoints",
+                    provider=PROVIDER_KEY,
+                    error_code="invalid_base_url",
+                )
+            self._endpoint_scope = ConfiguredEndpointScope.from_url(self.base_url)
+        self._http_client = http_client or create_async_client(timeout=timeout, trust_env=False)
         self._owns_client = http_client is None
 
     async def close(self) -> None:
@@ -66,24 +96,35 @@ class AudioCppClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
-            response = await self._http_client.request(
-                method,
-                self._url(path),
+            response: httpx.Response = await afetch(
+                method=method,
+                url=self._url(path),
+                client=self._http_client,
                 timeout=self.timeout,
+                allow_redirects=False,
+                retry=RetryPolicy(attempts=1),
+                configured_endpoint=self._endpoint_scope,
                 **kwargs,
             )
-        except httpx.TimeoutException as exc:
-            raise TTSTimeoutError(
-                "Timeout waiting for audio.cpp server",
+        except EgressPolicyError as exc:
+            raise TTSConfigurationError(
+                "audio.cpp base_url refused by the egress policy",
                 provider=PROVIDER_KEY,
-                error_code="TIMEOUT",
+                error_code="EGRESS_DENIED",
+                details={"reason_code": exc.reason_code},
             ) from exc
-        except httpx.RequestError as exc:
+        except NetworkError as exc:
+            if exc.classification == "timeout":
+                raise TTSTimeoutError(
+                    "Timeout waiting for audio.cpp server",
+                    provider=PROVIDER_KEY,
+                    error_code="TIMEOUT",
+                ) from exc
             raise TTSNetworkError(
                 "Network error communicating with audio.cpp server",
                 provider=PROVIDER_KEY,
                 error_code="NETWORK_ERROR",
-                details={"error_type": type(exc).__name__},
+                details={"error_type": str(exc)},
             ) from exc
         return response
 

@@ -64,7 +64,7 @@ def test_postgres_v88_live_receipts_are_forced_rls(
             ).rows
         }
 
-        assert int(version) == 88
+        assert int(version) == 89  # nosec B101 - The composed current schema includes dictionary ownership.
         assert relation == {"relrowsecurity": True, "relforcerowsecurity": True}
         assert {"owner_user_id", "dataset_id", "key_digest", "request_fingerprint"} <= columns
         assert "idx_note_semantic_operation_receipts_expiry" in indexes

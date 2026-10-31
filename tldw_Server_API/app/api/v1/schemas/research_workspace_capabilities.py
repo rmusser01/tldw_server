@@ -1,40 +1,19 @@
-from __future__ import annotations
+"""Compatible API exports of core-owned Research Workspace capability schemas."""
 
-from datetime import datetime
-from typing import Literal
+from tldw_Server_API.app.core.Research_Workspace.research_workspace_capabilities import (
+    ResearchWorkspaceCapabilitiesResponse,
+    ResearchWorkspaceCapability,
+    ResearchWorkspaceCapabilityId,
+    ResearchWorkspaceCapabilityMode,
+    ResearchWorkspaceCapabilityStatus,
+    ResearchWorkspaceOverallStatus,
+)
 
-from pydantic import BaseModel, Field
-
-ResearchWorkspaceCapabilityId = Literal[
-    "source_browse",
-    "chat",
-    "artifact_text_generation",
-    "slides_generation",
-    "audio_summary",
-    "video_overview_generation",
-    "image_generation",
-    "infographic_generation",
-    "export_download",
-    "sync_share",
+__all__ = [
+    "ResearchWorkspaceCapabilitiesResponse",
+    "ResearchWorkspaceCapability",
+    "ResearchWorkspaceCapabilityId",
+    "ResearchWorkspaceCapabilityMode",
+    "ResearchWorkspaceCapabilityStatus",
+    "ResearchWorkspaceOverallStatus",
 ]
-ResearchWorkspaceCapabilityStatus = Literal["ready", "degraded", "unavailable", "unknown"]
-ResearchWorkspaceCapabilityMode = Literal["allow", "warn", "block"]
-ResearchWorkspaceOverallStatus = Literal["ready", "degraded", "unavailable", "unknown"]
-
-
-class ResearchWorkspaceCapability(BaseModel):
-    """User-safe readiness for one Research Workspace action boundary."""
-
-    status: ResearchWorkspaceCapabilityStatus
-    mode: ResearchWorkspaceCapabilityMode
-    dependencies: list[str] = Field(default_factory=list)
-    reason_code: str | None = None
-
-
-class ResearchWorkspaceCapabilitiesResponse(BaseModel):
-    """Capability contract consumed by the Research Workspace frontend."""
-
-    status: ResearchWorkspaceOverallStatus
-    ttl_seconds: int = 30
-    capabilities: dict[ResearchWorkspaceCapabilityId, ResearchWorkspaceCapability]
-    timestamp: datetime

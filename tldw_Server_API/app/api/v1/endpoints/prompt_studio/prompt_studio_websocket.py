@@ -21,7 +21,7 @@ from datetime import datetime
 from threading import RLock
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, WebSocketException
 from loguru import logger
 
 # Create router
@@ -65,16 +65,12 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     managed_prompt_studio_db,
     require_project_access,
 )
-from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _authenticate_ws
+from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _acp_ws_subprotocol, _authenticate_ws
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import (
     PromptStudioJobsAdapter,
 )
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster import (
     prompt_studio_connection_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import sse_data
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
@@ -489,36 +485,20 @@ async def _accept_prompt_studio_websocket_if_needed(websocket: WebSocket) -> Non
     except _STREAM_ACTIVITY_EXCEPTIONS:
         already_accepted = False
     if hasattr(websocket, "accept") and not already_accepted:
-        await websocket.accept()
+        await websocket.accept(subprotocol=_acp_ws_subprotocol(websocket))
 
 
-async def _allow_prompt_studio_cookie_websocket(
-    websocket: WebSocket,
-    *,
-    token: str | None = None,
-    api_key: str | None = None,
-) -> str | None:
-    identity = await resolve_single_user_cookie_websocket(websocket)
-    if identity is not None:
-        return str(identity.user_id)
-    close_code = cookie_websocket_rejection_code(websocket)
-    if close_code is not None:
-        await websocket.close(code=close_code)
+async def _allow_prompt_studio_cookie_websocket(websocket: WebSocket) -> str | None:
+    """Return the caller's user id, or close the socket and return None.
+
+    Prompt Studio authenticates like ACP (``_authenticate_ws``: the core resolver, then the
+    deprecated query and x-api-key subprotocol channels), with read scope for API keys.
+    """
+    try:
+        return str(await _authenticate_ws(websocket, required_scope="read"))
+    except WebSocketException as exc:
+        await websocket.close(code=exc.code)
         return None
-    effective_api_key = api_key
-    if not effective_api_key:
-        headers = getattr(websocket, "headers", {})
-        effective_api_key = headers.get("x-api-key") or headers.get("X-API-KEY")
-    user_id = await _authenticate_ws(
-        websocket,
-        token=token,
-        api_key=effective_api_key,
-        required_scope="read",
-    )
-    if user_id is not None:
-        return str(user_id)
-    await websocket.close(code=4401)
-    return None
 
 
 def _prompt_studio_websocket_user_context(
@@ -554,8 +534,6 @@ async def _authorize_prompt_studio_project(
 @router.websocket("")
 async def websocket_endpoint_base(
     websocket: WebSocket,
-    token: str | None = Query(None),
-    api_key: str | None = Query(None),
     project_id: int | None = Query(None),
 ):
     """
@@ -564,11 +542,7 @@ async def websocket_endpoint_base(
     Args:
         websocket: WebSocket connection
     """
-    user_id = await _allow_prompt_studio_cookie_websocket(
-        websocket,
-        token=token,
-        api_key=api_key,
-    )
+    user_id = await _allow_prompt_studio_cookie_websocket(websocket)
     if user_id is None:
         return
     user_context = _prompt_studio_websocket_user_context(websocket, user_id)
@@ -650,8 +624,6 @@ async def websocket_endpoint_base(
 async def websocket_endpoint(
     websocket: WebSocket,
     project_id: int,
-    token: str | None = Query(None),
-    api_key: str | None = Query(None),
 ):
     """
     WebSocket endpoint for real-time updates on a project.
@@ -660,11 +632,7 @@ async def websocket_endpoint(
         websocket: WebSocket connection
         project_id: Project ID to subscribe to
     """
-    user_id = await _allow_prompt_studio_cookie_websocket(
-        websocket,
-        token=token,
-        api_key=api_key,
-    )
+    user_id = await _allow_prompt_studio_cookie_websocket(websocket)
     if user_id is None:
         return
     user_context = _prompt_studio_websocket_user_context(websocket, user_id)

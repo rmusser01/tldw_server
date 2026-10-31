@@ -15,6 +15,7 @@ import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff
 import { useMilestoneStore } from "@/store/milestones"
 import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import { useChatActions } from "@/hooks/chat/useChatActions"
+import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 import { useStoreChatModelSettings } from "@/store/model"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
@@ -23,11 +24,15 @@ import { freshChatDraftAddress } from "@/utils/chat-draft-address"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence"
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
 const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, verificationState: "ready" as "pending" | "ready" | "error", retryVerification: vi.fn(), models: vi.fn(async () => [{ model: "tldw:gpt-4o-mini", provider: "openai", is_configured: true, provider_is_configured: true }]), get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+const SourceFlowActionsContext = React.createContext<ReturnType<typeof useSourceFlowActions> | null>(null)
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
 
 // These cases keep the Form, submit hook, action router, session restore, RAG
@@ -37,10 +42,16 @@ const sourceFlow = vi.hoisted(() => ({
   request: vi.fn(),
   stream: vi.fn(),
   getFullChatData: vi.fn(),
+  setAssistant: vi.fn(async () => undefined),
   snapshot: null as ServicePromptSnapshot | null,
   restore: null as null | (() => Promise<unknown>),
   sessionReady: false,
-  config: { serverUrl: "https://handoff.test", authMode: "single-user" as const, apiKey: "synthetic-handoff" }
+  userId: 1,
+  config: { serverUrl: "https://handoff.test", authMode: "multi-user" as const,
+    authSource: "manual" as const, accessToken: "header.eyJzdWIiOiIxIn0.signature" }
+}))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: sourceFlow.userId }) }
 }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => sourceFlow.request(...args) }))
 vi.mock("@/services/service-prompts", async () => ({
@@ -60,12 +71,22 @@ vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
 vi.mock("@/hooks/chat/actor-scene-source", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/chat/actor-scene-source")>()
   return { ...actual, captureActorSceneSend: (controller: any, commandIsCurrent = () => true) => {
-    if (!sourceFlow.enabled || controller !== null) return actual.captureActorSceneSend(controller, commandIsCurrent)
-    // Standalone SDK source tests retain a private Scene without claiming H1 readiness.
+    if (!sourceFlow.enabled) return actual.captureActorSceneSend(controller, commandIsCurrent)
+    const standaloneComposer = () => {
+      if (controller === null) return true
+      const state = controller.getCurrent()
+      return state.status === "idle" && !state.owner && !state.view && !state.capture
+    }
+    if (!standaloneComposer()) return actual.captureActorSceneSend(controller, commandIsCurrent)
+    // Legacy SDK actions/session stay outside the child composer provider (not native acceptance).
     const entry = sourceFlow.snapshot
     if (!entry) return null
     const key = chatDraftOwnerKey(entry.requestScope)
-    const account = { requestScope: entry.requestScope, isCurrent: () => sourceFlow.snapshot === entry &&
+    const composerIsCurrent = () => standaloneComposer() && (controller === null ||
+      (controller.draftAccount?.isCurrent() && controller.draftAccount.requestScope &&
+        chatDraftOwnerKey(controller.draftAccount.requestScope) === key))
+    if (!composerIsCurrent()) return null
+    const account = { requestScope: entry.requestScope, isCurrent: () => composerIsCurrent() && sourceFlow.snapshot === entry &&
       !entry.scopeSignal.aborted && !entry.scopeInvalidatedSignal.aborted &&
       chatDraftOwnerKey(sourceFlow.snapshot.requestScope) === key }
     const session = usePlaygroundSessionStore.getState()
@@ -355,9 +376,14 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("~/hooks/useMessageOption", () => ({
   useMessageOption: () => {
+    const sourceActions = React.useContext(SourceFlowActionsContext)
+    const staticOptions = useStaticMessageOptions()
     // The fixture is selected before mount and reset only after cleanup.
-    const useOptions = sourceFlow.enabled ? useSourceFlowActions : useStaticMessageOptions
-    return useOptions()
+    if (sourceFlow.enabled) {
+      if (!sourceActions) throw new Error("Missing source-flow actions")
+      return sourceActions
+    }
+    return staticOptions
   }
 }))
 
@@ -494,8 +520,9 @@ vi.mock("@/hooks/useChatMoodBadgePreference", () => ({
   useChatMoodBadgePreference: () => [false, vi.fn()]
 }))
 
-vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, vi.fn()]
+vi.mock("@/hooks/useSelectedAssistant", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/useSelectedAssistant")>(),
+  useSelectedAssistant: () => [null, sourceFlow.setAssistant, { isLoading: false }]
 }))
 
 vi.mock("@/hooks/useVoiceChatSettings", () => ({
@@ -636,6 +663,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
     getConfig: async () => sourceFlow.config,
+    ensureConfigForRequest: async () => sourceFlow.config,
+    getChat: async (id: string) => ({ id, title: "Cedar saved chat", scope_type: "global",
+      assistant_kind: null, assistant_id: null, character_id: null, persona_memory_mode: null }),
+    listChatMessages: async () => cedarRows.map((row, index) => ({
+      ...row, created_at: new Date(row.createdAt).toISOString(),
+      parent_message_id: index ? cedarRows[index - 1].id : null
+    })),
     ragSearch: (query: string, options: unknown) => chatRagMethods.ragSearch.call({ normalizeRagQuery: (value: string) => value } as unknown as TldwApiClientCore, query, options),
     createResearchRun: vi.fn(async () => ({})),
     updateChat: vi.fn(async () => ({}))
@@ -889,6 +923,11 @@ vi.mock("../hooks", async () => {
         restorePromptAssistAttempt: vi.fn(),
         beginPromptAssistReset: vi.fn(() => 1),
         markPromptAssistAttemptSaved: vi.fn(),
+        captureDraftOwnership: () => ({
+          isCurrent: () => true,
+          isOwnerCurrent: () => true,
+          normalizeMessage: () => true
+        }),
         typing: false,
         setMessageValue: (value: string) =>
           form.setFieldValue("message", value),
@@ -1156,6 +1195,9 @@ void sourceFlowI18n.init({ lng: "en", resources: {}, initImmediate: false })
 
 function useSourceFlowActions() {
   const state = useStoreMessageOption((value) => value)
+  const notification = React.useMemo(() => ({ error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn(), open: vi.fn(), destroy: vi.fn() }), [])
+  const noMirror = React.useCallback(async () => null, [])
+  useServerChatLoader({ ensureServerChatHistoryId: noMirror, notification, t: sourceFlowI18n.t })
   const [abortController, setAbortController] = React.useState<AbortController | null>(null)
   const actions = useChatActions({
     ...state,
@@ -1188,9 +1230,14 @@ function useStaticMessageOptions() {
 
 function SourceFlowHarness() {
   const session = usePlaygroundSessionPersistence()
+  const sourceActions = useSourceFlowActions()
   sourceFlow.restore = session.restoreSession
   sourceFlow.sessionReady = session.sessionScopeReady
-  return <PlaygroundForm droppedFiles={[]} />
+  return (
+    <SourceFlowActionsContext.Provider value={sourceActions}>
+      <HistorySelectionProvider><PlaygroundForm droppedFiles={[]} /></HistorySelectionProvider>
+    </SourceFlowActionsContext.Provider>
+  )
 }
 
 const defer = <T,>() => {
@@ -1247,26 +1294,32 @@ afterEach(() => { cleanup(); queryClient.clear() })
 const render = (ui: React.ReactElement) => renderComponent(ui, {
   wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 })
+const renderForm = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}><HistorySelectionProvider>{children}</HistorySelectionProvider></QueryClientProvider>
+})
 
 describe("Home source handoff through the real Chat and RAG send boundary", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     sourceFlow.enabled = true
     sourceFlow.sessionReady = false
     sourceFlow.restore = null
     sourceFlow.config.serverUrl = "https://handoff.test"
-    sourceFlow.config.apiKey = "synthetic-handoff"
+    sourceFlow.config.accessToken = "header.eyJzdWIiOiIxIn0.signature"
+    sourceFlow.userId = 1
     localStorage.clear()
     sessionStorage.clear()
     useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
     useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false, fileRetrievalEnabled: false })
     usePlaygroundSessionStore.getState().clearSession()
-    const scopeKey = buildChatSurfaceScopeKeyFromConfig(sourceFlow.config)
+    const requestScope = await resolveServicePromptScope()
+    const scopeKey = requestScope.scopeKey!
+    cedarData.historyInfo.server_scope_key = serverChatMirrorOwnerKey({ requestScope })
     usePlaygroundSessionStore.getState().saveSession({
       scopeKey, historyId: "cedar-local", serverChatId: "cedar-server", chatMode: "normal", ragMediaIds: null
     })
     const controller = new AbortController()
     sourceFlow.snapshot = {
-      scopeKey, requestScope: { config: sourceFlow.config, userId: 1 },
+      scopeKey, requestScope,
       scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal,
       capability: "supported", release: vi.fn(),
       definitions: Object.fromEntries(["chat.rag.answer", "chat.rag.question_rewrite"].map((id) => [id, {
@@ -1317,6 +1370,8 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await act(async () => { await sourceFlow.restore!() })
   }
   const send = async () => {
+    if (useStoreMessageOption.getState().serverChatId)
+      await waitFor(() => expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true))
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
   }
@@ -1337,6 +1392,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
   it("preserves raw input and original messages when the private Scene read fails", async () => {
     render(<SourceFlowHarness />)
     await restore()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
     await consume()
     const input = screen.getByTestId("composer-textarea") as HTMLTextAreaElement
     const originalInput = input.value
@@ -1413,7 +1469,10 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
 
   it.each(["account", "server"])("rejects source activation from a cold session owned by another %s", async changed => {
     await rehydrateColdSession(await persistSourceSession())
-    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    if (changed === "account") {
+      sourceFlow.userId = 2
+      sourceFlow.config.accessToken = "header.eyJzdWIiOiIyIn0.signature"
+    }
     else sourceFlow.config.serverUrl = "https://other-handoff.test"
     render(<SourceFlowHarness />)
     await restore()
@@ -1554,6 +1613,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     })
     render(<SourceFlowHarness />)
     await restore()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
     await consume()
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(sourceFlow.request).toHaveBeenCalledTimes(1))
@@ -1636,7 +1696,10 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     render(<SourceFlowHarness />)
     await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
     await consume()
-    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    if (changed === "account") {
+      sourceFlow.userId = 2
+      sourceFlow.config.accessToken = "header.eyJzdWIiOiIyIn0.signature"
+    }
     sourceFlow.getFullChatData.mockResolvedValue({ ...cedarData, historyInfo: { ...cedarData.historyInfo, id: "other-local", server_chat_id: "other-server" } })
     await act(async () => usePlaygroundSessionStore.getState().saveSession({ scopeKey: buildChatSurfaceScopeKeyFromConfig(sourceFlow.config), historyId: "other-local", serverChatId: "other-server", chatMode: "rag", ragMediaIds: [7] }))
     await restore()
@@ -1887,7 +1950,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("ignores legacy unowned shared handoffs instead of assigning them to the current tab", async () => {
     handoff.scope = null
     handoff.get.mockResolvedValue({ mediaId: "42", content: "Private legacy source" })
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
@@ -1897,7 +1960,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("does not let an unrelated mounted Character tab consume a shared media payload or replace its draft", async () => {
     const user = userEvent.setup()
     messageOptionState.value.serverChatId = "testbot-chat"
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "PRIVATE TESTBOT DRAFT")
     handoff.clear.mockClear()
     let pending = { ownerScope: "server-a:alice", mediaId: "1", title: "Media source", content: "All source lines", mode: "normal" } as unknown
@@ -1916,7 +1979,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("leaves an explicitly addressed source untouched in an unrelated mounted Character tab", async () => {
     const user = userEvent.setup()
     messageOptionState.value.serverChatId = "testbot-chat"
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "ALICE-CHARACTER-DRAFT-742")
     const source = { ...rowanPayload, content: Array.from({ length: 13 }, (_, i) => 'Source line ' + i).join('\n') }
     const token = await mediaHandoff.createMediaChatHandoff(source)
@@ -1930,11 +1993,11 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("cannot replay a consumed token after the composer remounts", async () => {
     const token = await openMediaHandoff(rowanPayload)
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await waitFor(() => expect(handoff.search).toBe(""))
     view.unmount()
     handoff.search = new URL(mediaHandoff.buildMediaChatHandoffRoute(token), "http://localhost").search
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await userEvent.setup().type(screen.getByTestId("composer-textarea"), "NEW PRIVATE DRAFT")
     expect(screen.getByTestId("composer-textarea")).toHaveValue("NEW PRIVATE DRAFT")
     expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toBeNull()
@@ -1944,7 +2007,7 @@ describe("PlaygroundForm OpenUI mode", () => {
     handoff.scope = null
     handoff.draftReady = false
     const token = await openMediaHandoff(rowanPayload)
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     handoff.scope = "server-a:alice"
     view.rerender(<PlaygroundForm droppedFiles={[]} />)
@@ -1959,7 +2022,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it.each(["insert", "replace", "cancel"])("preserves a destination draft until the user chooses %s", async action => {
     const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "MY EXISTING DRAFT")
     let token!: string
     await act(async () => { token = await openMediaHandoff(rowanPayload) })
@@ -1974,7 +2037,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it.each(["Insert media source", "Replace current draft"])("does not consume or apply a delayed %s after the destination unmounts", async action => {
     const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "PRIVATE DESTINATION DRAFT")
     let token!: string
     await act(async () => { token = await openMediaHandoff(rowanPayload) })
@@ -1996,7 +2059,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("does not expose or consume a source addressed to a different account", async () => {
     const token = await openMediaHandoff({ ...rowanPayload, ownerScope: "server-a:bob" })
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:bob")).not.toBeNull()
@@ -2006,7 +2069,7 @@ describe("PlaygroundForm OpenUI mode", () => {
     let resolve!: (value: unknown) => void
     onSubmitMock.mockImplementation(() => new Promise(done => { resolve = done }) as never)
     const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "Hello")
     await user.click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(resolve).toBeTypeOf("function"))
@@ -2043,7 +2106,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("sends the next prompt with OpenUI request overrides", async () => {
     const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
 
     const openUIButton = screen.getByRole("button", { name: /OpenUI/i })
     expect(openUIButton).toBeInTheDocument()

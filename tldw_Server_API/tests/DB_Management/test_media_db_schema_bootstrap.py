@@ -219,14 +219,10 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
         _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
         _ensure_postgres_email_schema=lambda value: calls.append(("email_schema", value)),
+        _ensure_postgres_rls=lambda value: calls.append(("policies", value)),
         _sync_postgres_sequences=lambda value: pytest.fail("routine bootstrap must not rewind RLS-scoped sequences"),
     )
 
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_policies",
-        lambda value, connection: calls.append(("policies", value, connection)),
-    )
     monkeypatch.setattr(
         postgres_helpers_module,
         "ensure_postgres_document_workspace_schema",
@@ -238,6 +234,11 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         postgres_helpers_module,
         "ensure_postgres_sync_log_contract",
         lambda value, connection: calls.append(("sync_contract", value, connection)),
+    )
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_keyword_identity",
+        lambda value, connection: calls.append(("keyword_identity", value, connection)),
     )
     postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
 
@@ -256,7 +257,8 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("source_hash", conn),
         ("claims_extensions", conn),
         ("email_schema", conn),
-        ("policies", db, conn),
+        ("policies", conn),
+        ("keyword_identity", db, conn),
     ]
 
 
@@ -870,6 +872,47 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
         ('"custom_schema"."media_id_seq"', 7),
         conn,
     )
+
+
+@pytest.mark.unit
+def test_sync_postgres_sequences_raises_a_failing_table() -> None:
+    """Media keeps raising a table's error; only ChaCha skips it (TASK-13901)."""
+    from tldw_Server_API.app.core.DB_Management.media_db.schema import (
+        postgres_sequence_maintenance as postgres_sequence_maintenance_module,
+    )
+
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
+    queries: list[str] = []
+
+    class FakeBackend:
+        @staticmethod
+        def escape_identifier(value: str) -> str:
+            return f'"{value}"'
+
+        def execute(
+            self,
+            query: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            connection: object,
+        ) -> SimpleNamespace:
+            queries.append(query.strip())
+            if len(queries) == 1:
+                return SimpleNamespace(
+                    rows=[
+                        {"sequence_schema": "public", "sequence_name": f"{table}_id_seq", "table_name": table, "column_name": "id"}
+                        for table in ("keywords", "media")
+                    ]
+                )
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 1, "is_called": False}])
+            if query.startswith("SELECT COALESCE(MAX"):
+                raise BackendDatabaseError("PostgreSQL query execution failed")
+            return SimpleNamespace()
+
+    with pytest.raises(BackendDatabaseError):
+        postgres_sequence_maintenance_module.sync_postgres_sequences(SimpleNamespace(backend=FakeBackend()), conn)
+    assert not any("media_id_seq" in query for query in queries)
 
 
 @pytest.mark.unit
@@ -1606,6 +1649,8 @@ def test_ensure_sqlite_document_workspace_schema_migrates_old_tables_idempotentl
                 updated_at TEXT NOT NULL,
                 deleted INTEGER NOT NULL DEFAULT 0
             );
+            INSERT INTO document_annotations (id, media_id, user_id, location, text, created_at, updated_at)
+            VALUES ('ann_old_1', 1, '1', 'p1', 'a', 't', 't'), ('ann_old_2', 1, '1', 'p2', 'b', 't', 't');
             """
         )
 
@@ -1619,6 +1664,14 @@ def test_ensure_sqlite_document_workspace_schema_migrates_old_tables_idempotentl
         assert progress_columns.count("percentage") == 1
         assert annotation_columns.count("chapter_title") == 1
         assert annotation_columns.count("percentage") == 1
+        assert annotation_columns.count("client_id") == 1
+
+        # Existing rows keep a NULL client_id; the unique index still admits them.
+        unique_indexes = {
+            row["name"] for row in conn.execute("PRAGMA index_list(document_annotations)") if row["unique"]
+        }
+        assert "idx_annotations_client_id" in unique_indexes
+        assert [row["client_id"] for row in conn.execute("SELECT client_id FROM document_annotations")] == [None, None]
     finally:
         conn.close()
 
@@ -1649,6 +1702,12 @@ def test_ensure_postgres_document_workspace_schema_executes_expected_ddl() -> No
     assert "alter table document_reading_progress add column if not exists percentage double precision" in joined
     assert "alter table document_annotations add column if not exists chapter_title text" in joined
     assert "alter table document_annotations add column if not exists percentage double precision" in joined
+    add_client_id = "alter table document_annotations add column if not exists client_id text"
+    client_id_index = (
+        "create unique index if not exists idx_annotations_client_id "
+        "on document_annotations(user_id, media_id, client_id)"
+    )
+    assert joined.index(add_client_id) < joined.index(client_id_index)
 
 
 @pytest.mark.unit

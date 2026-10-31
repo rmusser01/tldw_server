@@ -9,15 +9,16 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.exceptions import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
+    ChatModelNotAvailableError,
     ChatProviderError,
     ChatRateLimitError,
+    raise_detached_error,
 )
-from tldw_Server_API.app.core.exceptions import raise_detached_error
 
 # Transport-exception classification now lives in core/Utils/http_status_extraction.py
 # so TTS, Local_LLM and Embeddings can use it without depending on LLM_Calls.
@@ -271,11 +272,15 @@ def privacy_safe_chat_error(provider: str, exc: Exception) -> ChatAPIError:
 
     resolved_provider = str(getattr(exc, "provider", None) or provider or "unknown")
     status_code = get_http_status_from_exception(exc)
+    if isinstance(exc, ChatModelNotAvailableError):
+        return exc  # built from the request's provider and model, never upstream text
     if isinstance(exc, ChatAuthenticationError) or status_code in {401, 403}:
         safe: ChatAPIError = ChatAuthenticationError(
             provider=resolved_provider,
             message="Provider authentication failed.",
         )
+        if getattr(exc, "credential_refresh_retry_safe", None) is True:
+            safe.credential_refresh_retry_safe = True
     elif isinstance(exc, ChatRateLimitError) or status_code == 429:
         safe = ChatRateLimitError(
             provider=resolved_provider,
@@ -290,6 +295,7 @@ def privacy_safe_chat_error(provider: str, exc: Exception) -> ChatAPIError:
         safe = ChatConfigurationError(
             provider=resolved_provider,
             message="Provider configuration is unavailable.",
+            error_code=getattr(exc, "error_code", "provider_configuration_invalid"),
         )
     elif isinstance(exc, ChatProviderError) or (
         status_code is not None and status_code >= 500
@@ -365,3 +371,20 @@ def raise_chat_error_from_http(
             upstream=exc,
         )
     )
+
+
+def exception_summary(exc: BaseException) -> dict[str, Any]:
+    """Summarize exception metadata without rendering the exception message."""
+    summary: dict[str, Any] = {"type": type(exc).__name__}
+    for attr in ("status_code", "status", "provider"):
+        value = getattr(exc, attr, None)
+        if value is not None:
+            summary[attr] = value
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status_code = getattr(response, "status_code", None)
+        if status_code is None:
+            status_code = getattr(response, "status", None)
+        if status_code is not None:
+            summary["response_status_code"] = status_code
+    return summary

@@ -102,10 +102,16 @@ const providerSelectionFromState = (
   const data = state?.step_data?.providers;
   const provider = data?.default_provider;
   const model = data?.default_model;
+  const baseUrl = data?.default_base_url;
   const credentialConfigured =
     data?.default_provider_credential_configured === true;
   if (typeof provider === "string" && typeof model === "string") {
-    return { provider, model, credential_configured: credentialConfigured };
+    return {
+      provider,
+      model,
+      base_url: typeof baseUrl === "string" ? baseUrl : undefined,
+      credential_configured: credentialConfigured,
+    };
   }
   const firstChatProvider = state?.first_chat?.provider;
   const firstChatModel = state?.first_chat?.model;
@@ -383,6 +389,7 @@ export function UnifiedSetupWizard({
             acknowledged: true,
             default_provider: selection.provider,
             default_model: selection.model,
+            default_base_url: selection.base_url ?? null,
             default_provider_credential_configured: Boolean(
               selection.credential_configured,
             ),

@@ -312,15 +312,23 @@ async def test_aiohttp_adapter_arequest_passes_through(monkeypatch):
     assert hc._SENSITIVE_HTTP_LOG_CONTEXT.get() is False
 
 
-def test_async_stream_adapter_signatures_remain_unscoped():
+def test_async_stream_adapter_signatures_take_a_configured_endpoint_scope():
+    """Both stream helpers and their adapter methods take configured_endpoint: astream_sse for the
+    MCP SSE transport's private opt-in (TASK-13950.11 group A), astream_bytes for loopback LLM
+    providers (group D)."""
     import inspect
 
     from tldw_Server_API.app.core import http_client as hc
 
-    assert "configured_endpoint" not in inspect.signature(hc.astream_bytes).parameters
-    assert "configured_endpoint" not in inspect.signature(hc.astream_sse).parameters
-    assert "configured_endpoint" not in inspect.signature(hc.HttpxAdapter.stream_bytes).parameters
-    assert "configured_endpoint" not in inspect.signature(hc.HttpxAdapter.stream_sse).parameters
+    for fn in (
+        hc.astream_bytes,
+        hc.HttpxAdapter.stream_bytes,
+        hc.AiohttpAdapter.stream_bytes,
+        hc.astream_sse,
+        hc.HttpxAdapter.stream_sse,
+        hc.AiohttpAdapter.stream_sse,
+    ):
+        assert "configured_endpoint" in inspect.signature(fn).parameters, fn.__qualname__
     assert "sensitive_observability" in inspect.signature(hc.astream_sse).parameters
     assert "sensitive_observability" in inspect.signature(hc.HttpxAdapter.stream_sse).parameters
     assert "sensitive_observability" in inspect.signature(hc.AiohttpAdapter.stream_sse).parameters

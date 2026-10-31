@@ -111,7 +111,8 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
   const maxEdges = Math.min(radius === 2 ? 800 : 1200, maxNodes * 4)
 
   React.useEffect(() => {
-    rootRef.current?.focus()
+    // preventScroll: focusing the region must not scroll the page (NO-01).
+    rootRef.current?.focus({ preventScroll: true })
   }, [])
   React.useEffect(() => {
     setMaxNodesInput((current) => Math.min(current, maxNodeCap))

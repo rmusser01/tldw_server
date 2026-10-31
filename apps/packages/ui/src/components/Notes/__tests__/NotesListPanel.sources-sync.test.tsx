@@ -79,12 +79,12 @@ describe("NotesListPanel Sources folder sync entry", () => {
     expect(props.onSyncFolder).toHaveBeenCalledTimes(1)
   })
 
-  it("disables Sync folder in trash view with a Notes-view tooltip", async () => {
+  it("hides Sync folder, Import and Export in trash view (NL-15)", () => {
     renderPanel({ listMode: "trash" })
 
-    const button = screen.getByRole("button", { name: "Sync folder" })
-    expect(button).toBeDisabled()
-    expectTooltipCopy(button, "Switch to Notes view to sync folders")
+    expect(screen.queryByRole("button", { name: "Sync folder" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Import" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Export" })).not.toBeInTheDocument()
   })
 
   it("disables Sync folder while offline with a connection tooltip", async () => {

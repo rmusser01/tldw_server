@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   cookieSessionApproval: null as boolean | null,
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async () => null),
-  storageSet: vi.fn(async () => undefined),
+  storageSet: vi.fn(async (_key: string, _value: unknown) => undefined),
   storageValue: null as unknown,
   storageWatchers: new Set<
     (change: { oldValue?: unknown; newValue?: unknown }) => void
@@ -490,7 +490,7 @@ describe("TldwModelsService caching", () => {
         apiKey: namespace === "key" ? "other-key" : undefined
       }
       mocks.storageValue = {
-        version: 5,
+        version: 6,
         timestamp: Date.now(),
         scope: `http://localhost:3000|multi-user|${namespace}|none|manual|${derivePromptAssistAuthorizationRevision(otherCredentials)}`,
         models: [{ id: "other-model", name: "Other Model", provider: "llama", type: "chat" }]
@@ -550,7 +550,7 @@ describe("TldwModelsService caching", () => {
       authSource: "cookie-session"
     })
     mocks.storageValue = {
-      version: 5,
+      version: 6,
       timestamp: Date.now() - age,
       scope: "http://localhost:3000|single-user|cookie|none",
       models: [{ id: "expired-cookie-model", name: "Old Model", provider: "llama", type: "chat" }]
@@ -610,7 +610,7 @@ describe("TldwModelsService caching", () => {
       authSource: "cookie-session"
     })
     mocks.storageValue = {
-      version: 5,
+      version: 6,
       timestamp: Date.now(),
       scope: "http://localhost:3000|single-user|cookie|none",
       models: [{ id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }]
@@ -713,7 +713,7 @@ describe("TldwModelsService caching", () => {
     await expect(new TldwModelsService().getCachedChatModels()).resolves.toEqual([expect.objectContaining({ id: "key-model" })])
   })
 
-  it.each(["AbortError", "TypeError"])("retains cookie models on a catalog %s only after live authentication", async (name) => {
+  it.each(["AbortError", "TypeError"])("withholds cached cookie models on a catalog %s even after live authentication", async (name) => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
     vi.stubEnv("NEXT_PUBLIC_API_URL", "")
     mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
@@ -725,12 +725,12 @@ describe("TldwModelsService caching", () => {
     mocks.getCurrentUserProfile.mockRejectedValueOnce(transient)
     await expect(service.getModels()).resolves.toEqual([])
     mocks.getModels.mockRejectedValueOnce(transient)
-    await expect(service.getModels()).resolves.toEqual([expect.objectContaining({ id: "cookie-model" })])
+    await expect(service.getModels()).resolves.toEqual([])
     expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(3)
     expect(mocks.storageSet).not.toHaveBeenCalled()
   })
 
-  it.each(["AbortError", "TypeError"])("withholds stale fresh cookie capabilities after a catalog %s without discarding authenticated memory", async (name) => {
+  it.each(["AbortError", "TypeError"])("withholds cached cookie capabilities after fresh and ordinary catalog %s failures", async (name) => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
     vi.stubEnv("NEXT_PUBLIC_API_URL", "")
     mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
@@ -741,7 +741,7 @@ describe("TldwModelsService caching", () => {
     const transient = Object.assign(new Error("Request interrupted"), { name })
     mocks.getModels.mockRejectedValue(transient)
     await expect(service.getModels(true, { requireFresh: true })).resolves.toEqual([])
-    await expect(service.getModels()).resolves.toEqual([expect.objectContaining({ id: "cookie-model" })])
+    await expect(service.getModels()).resolves.toEqual([])
     expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(3)
     expect(mocks.storageSet).not.toHaveBeenCalled()
   })
@@ -855,15 +855,14 @@ describe("TldwModelsService caching", () => {
     expect(mocks.getModels).toHaveBeenCalledTimes(1)
   })
 
-  it("refreshes capability data without waiting for cooldown or clearing durable records on failure", async () => {
+  it("refreshes capability data without waiting for cooldown and clears durable records on failure", async () => {
     const { TldwModelsService } = await importService()
     const service = new TldwModelsService()
     mocks.getModels.mockResolvedValue([{ id: "model-a", name: "Model A", provider: "llama", vision: false }])
     await service.getModels(true)
-    const durable = structuredClone(mocks.storageValue)
     mocks.getModels.mockRejectedValue(new Error("Discovery unavailable"))
     expect(await service.getModels(true, { requireFresh: true })).toEqual([])
-    expect(mocks.storageValue).toEqual(durable)
+    expect(mocks.storageValue).toEqual(expect.objectContaining({ models: null, timestamp: 0 }))
     mocks.getModels.mockResolvedValue([{ id: "model-a", name: "Model A", provider: "llama", vision: true }])
     expect((await service.getModels(true, { requireFresh: true }))[0].capabilities).toContain("vision")
   })
@@ -947,6 +946,178 @@ describe("TldwModelsService caching", () => {
     expect(await read).toEqual([])
     await clear
   })
+
+  it.each(["Error", "AbortError", "TypeError"])(
+    "does not return expired models when catalog discovery fails with %s",
+    async (name) => {
+      const now = Date.now()
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now)
+      mocks.getModels
+        .mockResolvedValueOnce([
+          { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+        ])
+        .mockRejectedValueOnce(Object.assign(new Error("Catalog unavailable"), { name }))
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      await service.getModels()
+      clock.mockReturnValue(now + 16 * 60 * 1000)
+
+      await expect(service.getModels()).resolves.toEqual([])
+      expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it("does not return a still-fresh catalog when a forced refresh fails", async () => {
+    mocks.getModels
+      .mockResolvedValueOnce([
+        { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+      ])
+      .mockRejectedValueOnce(new Error("Catalog unavailable"))
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+
+    await expect(service.getModels(true)).resolves.toEqual([])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([false, true])(
+    "keeps the catalog when a read is aborted, since an abort is not a server failure (requireFresh: %s)",
+    async (requireFresh) => {
+      mocks.getModels.mockResolvedValueOnce([
+        { id: "current-model", name: "Current Model", provider: "openai", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      await service.getModels()
+      mocks.getModels.mockRejectedValue(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }))
+
+      await expect(service.getModels(true, { requireFresh })).resolves.toEqual([])
+      expect((await service.getCachedChatModels()).map((model) => model.id)).toEqual(["current-model"])
+      const reloaded = new TldwModelsService()
+      expect((await reloaded.getCachedChatModels()).map((model) => model.id)).toEqual(["current-model"])
+    }
+  )
+
+  it.each([
+    ["Error", false], ["TypeError", false],
+    ["Error", true], ["TypeError", true]
+  ] as const)(
+    "does not resurrect a failed forced catalog after %s through memory or reload (requireFresh: %s)",
+    async (name, requireFresh) => {
+      mocks.getModels.mockResolvedValueOnce([
+        { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      await service.getModels()
+      mocks.getModels.mockRejectedValue(Object.assign(new Error("Catalog unavailable"), { name }))
+
+      await expect(service.getModels(true, { requireFresh })).resolves.toEqual([])
+      await expect(service.getCachedChatModels()).resolves.toEqual([])
+      await expect(service.getModels()).resolves.toEqual([])
+      expect(mocks.storageValue).toEqual(expect.objectContaining({ models: null, timestamp: 0 }))
+      const reloaded = new TldwModelsService()
+      await expect(reloaded.getCachedChatModels()).resolves.toEqual([])
+      await expect(reloaded.getModels()).resolves.toEqual([])
+    }
+  )
+
+  it.each([false, true])(
+    "does not let an older catalog failure invalidate a newer in-flight read (scope changed: %s)",
+    async (changeScope) => {
+      const old = deferred<Error>()
+      const fresh = deferred<Array<{ id: string; name: string; provider: string; type: string }>>()
+      mocks.getModels
+        .mockImplementationOnce(async () => { throw await old.promise })
+        .mockReturnValueOnce(fresh.promise)
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      const oldRead = service.getModels(true)
+      await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+      if (changeScope) {
+        mocks.getConfig.mockResolvedValue({
+          serverUrl: "http://new-server:8000", authMode: "single-user", apiKey: "new-key"
+        })
+      }
+      const freshRead = service.getModels(true, { requireFresh: true })
+      await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(2))
+      const joinedRead = service.getModels(true, { requireFresh: true })
+      // Reject only after the newer read has taken ownership of the generation.
+      old.resolve(new Error("Older discovery failed"))
+      await expect(oldRead).resolves.toEqual([])
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+      fresh.resolve([{ id: "current-model", name: "Current Model", provider: "openai", type: "chat" }])
+      await expect(freshRead).resolves.toEqual([expect.objectContaining({ id: "current-model" })])
+      await expect(joinedRead).resolves.toEqual([expect.objectContaining({ id: "current-model" })])
+      await expect(service.getCachedChatModels()).resolves.toEqual([expect.objectContaining({ id: "current-model" })])
+      await expect(new TldwModelsService().getCachedChatModels()).resolves.toEqual([expect.objectContaining({ id: "current-model" })])
+      expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it("refetches model availability at the five-minute cache boundary", async () => {
+    const now = Date.now()
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now)
+    mocks.getModels
+      .mockResolvedValueOnce([
+        { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+      ])
+      .mockResolvedValueOnce([
+        { id: "current-model", name: "Current Model", provider: "openai", type: "chat" }
+      ])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+    clock.mockReturnValue(now + 5 * 60 * 1000 - 1)
+    expect((await service.getModels()).map((model) => model.id)).toEqual(["retired-model"])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    clock.mockReturnValue(now + 5 * 60 * 1000)
+
+    expect((await service.getModels()).map((model) => model.id)).toEqual(["current-model"])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    [5 * 60 * 1000 - 1, ["current-model"]],
+    [5 * 60 * 1000, []],
+    [16 * 60 * 1000, []]
+  ])("bounds offline cached chat availability by age %s", async (age, expected) => {
+    const now = Date.now()
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now)
+    mocks.getModels.mockResolvedValue([
+      { id: "current-model", name: "Current Model", provider: "openai", type: "chat" }
+    ])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+    clock.mockReturnValue(now + Number(age))
+
+    expect((await service.getCachedChatModels()).map((model) => model.id)).toEqual(expected)
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["getModels", "getCachedChatModels"] as const)(
+    "rejects version-5 pre-inventory catalog records through %s",
+    async (method) => {
+      mocks.storageValue = {
+        version: 5,
+        timestamp: Date.now(),
+        scope: "http://127.0.0.1:8000|single-user|key|none",
+        models: [{ id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }]
+      }
+      mocks.getModels.mockResolvedValue([
+        { id: "current-model", name: "Current Model", provider: "openai", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+
+      expect((await service[method]()).map((model) => model.id)).toEqual(
+        method === "getModels" ? ["current-model"] : []
+      )
+      expect(mocks.getModels).toHaveBeenCalledTimes(method === "getModels" ? 1 : 0)
+    }
+  )
 
   it("ignores legacy cache entries without schema version and refetches models", async () => {
     mocks.storageGet.mockResolvedValue({
@@ -1443,7 +1614,7 @@ describe("TldwModelsService caching", () => {
     const tombstoneStarted = deferred<void>()
     const releaseTombstone = deferred<void>()
     mocks.storageValue = {
-      version: 5,
+      version: 6,
       timestamp: Date.now(),
       scope: cacheScope("http://127.0.0.1:8000"),
       models: [
@@ -1533,7 +1704,7 @@ describe("TldwModelsService caching", () => {
 
   it("applies a startup tombstone without hydrating stale models", async () => {
     mocks.storageValue = {
-      version: 5,
+      version: 6,
       models: null,
       timestamp: 0,
       scope: null,
@@ -1762,7 +1933,7 @@ describe("TldwModelsService caching", () => {
 
   it("returns cached chat models without fetching provider metadata again", async () => {
     mocks.storageGet.mockResolvedValue({
-      version: 5,
+      version: 6,
       timestamp: Date.now(),
       scope: cacheScope("http://127.0.0.1:8000"),
       models: [

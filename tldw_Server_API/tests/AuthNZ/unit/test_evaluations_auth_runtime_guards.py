@@ -108,6 +108,8 @@ async def test_get_eval_request_user_testing_bypass_requires_explicit_pytest_run
     monkeypatch.setenv("TESTING", "true")
     monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("TEST_MODE", "false")
+    monkeypatch.setenv("TLDW_TEST_MODE", "false")
     reset_settings()
 
     with pytest.raises(HTTPException) as exc:

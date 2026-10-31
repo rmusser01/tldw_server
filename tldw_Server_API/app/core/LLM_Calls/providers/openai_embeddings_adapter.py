@@ -127,7 +127,7 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
                     resp.raise_for_status()
                 return resp.json()
             except Exception as exc:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import (
+                from tldw_Server_API.app.core.exceptions import (
                     ChatAuthenticationError,
                     ChatProviderError,
                 )
@@ -171,7 +171,7 @@ class OpenAIEmbeddingsAdapter(EmbeddingsProvider):
                     dimensions=dimensions,
                 )
         except Exception as exc:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
+            from tldw_Server_API.app.core.exceptions import (
                 ChatAuthenticationError,
                 ChatProviderError,
             )

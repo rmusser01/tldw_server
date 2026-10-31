@@ -297,7 +297,11 @@ vi.mock('@/hooks/useLayoutEffectsOwner', () => ({
   useLayoutEffectsOwner: () => false,
 }));
 
-vi.mock('@/hooks/useFeatureFlags', () => ({
+vi.mock('@/hooks/useFeatureFlags', async (importOriginal) => ({
+  // Spread the real module so shared help/empty-state components that read
+  // other flags (for example COMPARE_MODE) keep working; every flag reads off.
+  ...(await importOriginal<typeof import('@/hooks/useFeatureFlags')>()),
+  useFeatureFlag: () => [false, () => undefined, true],
   useChatSidebar: () => [featureFlagState.showChatSidebar],
 }));
 
@@ -335,11 +339,13 @@ vi.mock('@/components/Common/ChatSidebar', () => ({
     return (
       <aside
         data-testid="chat-sidebar"
+        className={props.className as string | undefined}
         data-history-controller={useHistorySelectionContext() ? 'present' : 'absent'}
       >
         <button onClick={() => (props.onConversationSelected as (() => void) | undefined)?.()}>
           Select saved conversation
         </button>
+        <button onClick={() => (props.onToggleCollapse as (() => void) | undefined)?.()}>Collapse sidebar</button>
         <QuickChatHelperButton />
       </aside>
     );
@@ -599,6 +605,19 @@ describe('WebLayout /chat scroll contract', () => {
     expect(capabilityProbe.paletteProps?.onToggleSidebar).toBeTypeOf('function');
     fireEvent.keyDown(document, { key: 'h', ctrlKey: true, shiftKey: true });
     expect(screen.queryByRole('dialog', { name: 'Quick Chat Helper probe' })).not.toBeInTheDocument();
+  });
+
+  it('uses a single named mobile sidebar frame and keeps its collapse action available', async () => {
+    capabilityProbe.actualDrawer = true;
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    render(<OptionLayout><div>Chat content</div></OptionLayout>);
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    const dialog = await screen.findByRole('dialog', { name: 'Chats' });
+    expect(within(dialog).getByRole('button', { name: 'Collapse sidebar' })).toBeVisible();
+    expect(within(dialog).queryByRole('button', { name: 'Close', exact: true })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Collapse sidebar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull());
   });
 
   it('demand-mounts the helper in a cold real mobile Drawer without opening the sidebar', async () => {
@@ -1167,6 +1186,70 @@ describe('WebLayout /chat scroll contract', () => {
     expect(screen.getByTestId('drawer')).toBeInTheDocument();
     expect(screen.getByTestId('header')).toHaveAttribute('aria-label', 'Collapse sidebar');
     expect(chatSidebarMockState.props).toHaveLength(0);
+  });
+
+  it.each([false, true])(
+    'keeps the root shell when the first-run gate wrapper changes (initially gated: %s)',
+    (initiallyGated) => {
+      featureFlagState.showChatSidebar = true;
+      mediaQueryState.isMobile = false;
+      function FirstRunGate({ children }: { children: React.ReactNode }) {
+        return <>{children}</>;
+      }
+      const tree = (gated: boolean) => {
+        routerState.location.pathname = gated ? '/' : '/setup';
+        const layout = (
+          <OptionLayout hideHeader={!gated} hideSidebar={!gated}>
+            <div>{gated ? 'Companion Home' : 'Setup complete'}</div>
+          </OptionLayout>
+        );
+        return gated ? <FirstRunGate>{layout}</FirstRunGate> : layout;
+      };
+      const view = render(tree(initiallyGated));
+      expect(screen.getByRole('main')).toBeInTheDocument();
+
+      view.rerender(tree(!initiallyGated));
+
+      expect(screen.getByRole('main')).toContainElement(
+        screen.getByText(initiallyGated ? 'Setup complete' : 'Companion Home'),
+      );
+      if (initiallyGated) {
+        expect(screen.queryByTestId('header')).toBeNull();
+        expect(screen.queryByTestId('chat-sidebar')).toBeNull();
+      } else {
+        expect(screen.getByTestId('header')).toBeInTheDocument();
+        expect(screen.getByTestId('chat-sidebar')).toBeInTheDocument();
+      }
+    },
+  );
+
+  it('keeps one shell for a genuinely nested WebLayout and releases its hiding request', () => {
+    routerState.location.pathname = '/';
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = false;
+    const tree = (hideShell: boolean) => (
+      <OptionLayout>
+        <OptionLayout hideHeader={hideShell} hideSidebar={hideShell}>
+          <div>Nested route content</div>
+        </OptionLayout>
+      </OptionLayout>
+    );
+    const view = render(tree(false));
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getAllByTestId('header')).toHaveLength(1);
+    expect(screen.getAllByTestId('chat-sidebar')).toHaveLength(1);
+
+    view.rerender(tree(true));
+    expect(screen.getByRole('main')).toContainElement(
+      screen.getByText('Nested route content'),
+    );
+    expect(screen.queryByTestId('header')).toBeNull();
+    expect(screen.queryByTestId('chat-sidebar')).toBeNull();
+
+    view.rerender(tree(false));
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getAllByTestId('header')).toHaveLength(1);
+    expect(screen.getAllByTestId('chat-sidebar')).toHaveLength(1);
   });
 
   it('mounts the shared tutorial runner in the web shell so page tour controls can render overlays', async () => {

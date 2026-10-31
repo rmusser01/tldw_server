@@ -119,6 +119,7 @@ import {
   serializeQuickIngestBatches,
   serializeQuickIngestSessions,
   type PersistedQuickIngestBatch,
+  type PersistedSessionState,
 } from "@/entries/background-session-store";
 
 type BackgroundDiagnostics = {
@@ -807,23 +808,27 @@ export default defineBackground({
 
     // Serialize the actual storage writes so that the many rapid, fire-and-forget
     // persist calls below cannot land out of order (an older Map snapshot
-    // clobbering a newer one). The snapshot is taken synchronously at call time;
-    // the writer coalesces overlapping writes so only the latest snapshot wins.
+    // clobbering a newer one). WP-19: the writer takes a snapshot BUILDER, so
+    // the Maps are only serialized when a write drains — a burst of status
+    // ticks inside one drain window serializes exactly once — and each drain
+    // diffs per-funnel shards so unchanged funnels cost zero bytes.
+    const buildSessionStateSnapshot = (): PersistedSessionState => ({
+      ingestSessions: serializeIngestSessions(ingestSessions),
+      pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
+      quickIngestSessions:
+        serializeQuickIngestSessions(quickIngestModalSessions),
+      quickIngestBatches:
+        serializeQuickIngestBatches(quickIngestBatchRecords),
+    });
     const writeSessionStateSerialized = createSerializedSessionStateWriter(
       getSessionStorageArea(),
+      buildSessionStateSnapshot,
       (error) => logBackgroundError("persist session state", error),
     );
 
     const persistSessionState = (): void => {
       try {
-        writeSessionStateSerialized({
-          ingestSessions: serializeIngestSessions(ingestSessions),
-          pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
-          quickIngestSessions:
-            serializeQuickIngestSessions(quickIngestModalSessions),
-          quickIngestBatches:
-            serializeQuickIngestBatches(quickIngestBatchRecords),
-        });
+        writeSessionStateSerialized();
       } catch (error) {
         logBackgroundError("persist session state", error);
       }
@@ -1617,19 +1622,19 @@ export default defineBackground({
         if (Array.isArray(files) && files.length > 0) {
           for (const item of files) {
             const result = appendUploadFile(item, item.fieldName || "files");
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         } else if (file?.data !== undefined && file?.data !== null) {
           const trimmedFieldName =
             typeof fileFieldName === "string" ? fileFieldName.trim() : "";
           if (trimmedFieldName) {
             const result = appendUploadFile(file, trimmedFieldName);
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           } else {
             const result = appendUploadFile(file, "files", {
               appendLegacyFileAlias: true,
             });
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         }
         const headers: Record<string, string> = { ...requestHeaders };
@@ -4914,9 +4919,15 @@ export default defineBackground({
             }
             assertStreamCurrent();
             requestAbort.signal.throwIfAborted();
+            // CM-03: forward a final unterminated line, and tell the page when
+            // the body ended without [DONE] so a cut-off reply is not complete.
+            const tail = buffer.trim();
+            const tailData = tail.startsWith("data:") ? tail.slice(5).trim() : tail;
+            if (tailData && tailData !== "[DONE]" && /^(data:|\{|\[)/.test(tail))
+              safePost({ event: "data", data: tailData });
             closed = true;
             if (idleTimer) clearTimeout(idleTimer);
-            safePost({ event: "done" });
+            safePost({ event: "done", ...(tailData === "[DONE]" ? {} : { incomplete: true }) });
           } catch (caught: any) {
             let e = caught;
             if (streamEpoch !== connectionAuthorityEpoch) {

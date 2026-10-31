@@ -94,28 +94,6 @@ try:
         ):
             monkeypatch.setenv(endpoint_alias, mock_endpoint)
 
-        # Patch schema-level API_KEYS so provider is considered configured
-        try:
-            import tldw_Server_API.app.api.v1.schemas.chat_request_schemas as chat_schemas
-            monkeypatch.setitem(
-                chat_schemas.API_KEYS,
-                "openai",
-                os.environ["OPENAI_API_KEY"],
-            )
-            # Sync endpoint copy if present
-            try:
-                from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-                monkeypatch.setattr(
-                    chat_endpoint,
-                    "API_KEYS",
-                    chat_schemas.API_KEYS,
-                    raising=False,
-                )
-            except Exception:
-                _ = None
-        except Exception:
-            _ = None
-
         # Optionally patch config to surface base URL for adapters that read it
         try:
             from tldw_Server_API.app.core.config import load_and_log_configs as _llc

@@ -1,73 +1,58 @@
-const tags = ["think", "reason", "reasoning", "thought"]
-export function parseReasoning(text: string): {
-  type: "reasoning" | "text"
-  content: string
-  reasoning_running?: boolean
-}[] {
-  try {
-    const result: {
-      type: "reasoning" | "text"
-      content: string
-      reasoning_running?: boolean
-    }[] = []
-    const tagPattern = new RegExp(`<(${tags.join("|")})>`, "i")
-    const closeTagPattern = new RegExp(`</(${tags.join("|")})>`, "i")
+const tags = ["think", "reason", "reasoning", "thought"];
+type ReasoningPart = {
+  type: "reasoning" | "text";
+  content: string;
+  reasoning_running?: boolean;
+};
 
-    let currentIndex = 0
-    let isReasoning = false
+function splitReasoning(text: string): ReasoningPart[] {
+  const result: ReasoningPart[] = [];
+  const tagPattern = new RegExp(`<(/?)(${tags.join("|")})>`, "gi");
+  const closingTagPattern = new RegExp(`</(${tags.join("|")})>`, "gi");
+  let currentIndex = 0;
+  let depth = 0;
 
-    while (currentIndex < text.length) {
-      const openTagMatch = text.slice(currentIndex).match(tagPattern)
-      const closeTagMatch = text.slice(currentIndex).match(closeTagPattern)
-
-      if (!isReasoning && openTagMatch) {
-        const beforeText = text.slice(
-          currentIndex,
-          currentIndex + openTagMatch.index
-        )
-        if (beforeText.trim()) {
-          result.push({ type: "text", content: beforeText.trim() })
-        }
-
-        isReasoning = true
-        currentIndex += openTagMatch.index! + openTagMatch[0].length
-        continue
+  for (const match of text.matchAll(tagPattern)) {
+    if (!match[1]) {
+      if (depth === 0) {
+        const content = text
+          .slice(currentIndex, match.index)
+          .replace(closingTagPattern, "");
+        if (content) result.push({ type: "text", content });
+        currentIndex = match.index! + match[0].length;
       }
-
-      if (isReasoning && closeTagMatch) {
-        const reasoningContent = text.slice(
-          currentIndex,
-          currentIndex + closeTagMatch.index
-        )
-        if (reasoningContent.trim()) {
-          result.push({ type: "reasoning", content: reasoningContent.trim() })
-        }
-
-        isReasoning = false
-        currentIndex += closeTagMatch.index! + closeTagMatch[0].length
-        continue
-      }
-
-      if (currentIndex < text.length) {
-        const remainingText = text.slice(currentIndex)
-        result.push({
-          type: isReasoning ? "reasoning" : "text",
-          content: remainingText.trim(),
-          reasoning_running: isReasoning
-        })
-        break
+      depth += 1;
+    } else if (depth > 0) {
+      depth -= 1;
+      if (depth === 0) {
+        const content = text.slice(currentIndex, match.index);
+        if (content) result.push({ type: "reasoning", content });
+        currentIndex = match.index! + match[0].length;
       }
     }
+  }
 
-    return result
+  if (currentIndex < text.length) {
+    result.push({
+      type: depth > 0 ? "reasoning" : "text",
+      content:
+        depth > 0
+          ? text.slice(currentIndex)
+          : text.slice(currentIndex).replace(closingTagPattern, ""),
+      reasoning_running: depth > 0,
+    });
+  }
+  return result;
+}
+
+export function parseReasoning(text: string): ReasoningPart[] {
+  try {
+    return splitReasoning(text)
+      .map((part) => ({ ...part, content: part.content.trim() }))
+      .filter((part) => part.content || part.reasoning_running !== undefined);
   } catch (e) {
-    console.error(`Error parsing reasoning: ${e}`)
-    return [
-      {
-        type: "text",
-        content: text
-      }
-    ]
+    console.error(`Error parsing reasoning: ${e}`);
+    return [{ type: "text", content: text }];
   }
 }
 
@@ -82,12 +67,13 @@ export function isReasoningEnded(text: string): boolean {
 }
 
 export function removeReasoning(text: string): string {
-  const tagPattern = new RegExp(
-    `<(${tags.join("|")})>.*?</(${tags.join("|")})>`,
-    "gis"
-  )
-  return text.replace(tagPattern, "").trim()
+  return splitReasoning(text)
+    .filter((part) => part.type === "text")
+    .map((part) => part.content)
+    .join("")
+    .trim();
 }
+
 export function mergeReasoningContent(
   originalText: string,
   reasoning: string
@@ -100,17 +86,17 @@ export function mergeReasoningContent(
 }
 
 export function replaceThinkTagToEM(text: string): string {
-  const tagPattern = new RegExp(
-    `<(${tags.join("|")})>.*?</(${tags.join("|")})>`,
-    "gis"
-  )
-  const emStyle = "font-style: italic; font-size: 0.9em; margin-bottom: 1em;"
-  return text
-    .replace(tagPattern, (match) => {
-      return `<em style="${emStyle}">${match.replace(/<(\/)?(${tags.join("|")})>/gi, "")}</em>\n\n`
-    })
+  const tagPattern = new RegExp(`<\\/?(${tags.join("|")})>`, "gi");
+  const emStyle = "font-style: italic; font-size: 0.9em; margin-bottom: 1em;";
+  return splitReasoning(text)
+    .map((part) =>
+      part.type === "reasoning"
+        ? `<em style="${emStyle}">${part.content.replace(tagPattern, "")}</em>\n\n`
+        : part.content,
+    )
+    .join("")
     .replaceAll("<think>", "")
-    .replaceAll("</think>", "")
+    .replaceAll("</think>", "");
 }
 
 export const MISSING_FINAL_ANSWER_MESSAGE =
@@ -118,7 +104,11 @@ export const MISSING_FINAL_ANSWER_MESSAGE =
 
 /** A settled reasoning trace without any user-facing answer text. */
 export function isReasoningOnlyResponse(text: string): boolean {
-  const parts = parseReasoning(text)
-  return isReasoningStarted(text) &&
-    !parts.some(part => part.type === "text" && part.content.trim().length > 0)
+  const parts = parseReasoning(text);
+  return (
+    (isReasoningStarted(text) || isReasoningEnded(text)) &&
+    !parts.some(
+      (part) => part.type === "text" && part.content.trim().length > 0,
+    )
+  );
 }

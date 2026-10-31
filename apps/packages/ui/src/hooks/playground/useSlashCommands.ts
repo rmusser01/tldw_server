@@ -2,6 +2,30 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 
+/**
+ * A parsed composer submission. Resolving one never runs a command: the
+ * composer resolves the draft on every keystroke (raw request preview,
+ * role-play checks), so commands run only through `executeSlashCommand`
+ * when the user actually submits.
+ */
+export type SlashSubmissionIntent = {
+  handled: boolean
+  message: string
+  imageBackendOverride: string | undefined
+  isImageCommand: boolean
+  invalidImageCommand: boolean
+  imageCommandMissingProvider: boolean
+  /** The command a submitted `/command` draft asks to run, if any. */
+  slashCommand?: SlashCommandItem
+}
+
+/** Run the command a submitted draft resolved to. Call only on submit. */
+export const executeSlashCommand = (
+  intent: { slashCommand?: SlashCommandItem } | null | undefined
+) => {
+  intent?.slashCommand?.action?.()
+}
+
 export type UseSlashCommandsParams = {
   chatMode: string
   setChatMode: (mode: string) => void
@@ -201,24 +225,26 @@ export function useSlashCommands({
     [imageBackendDefaultTrimmed]
   )
 
-  const applySlashCommand = React.useCallback(
-    (text: string) => {
+  const parseSlashCommand = React.useCallback(
+    (
+      text: string
+    ): { handled: boolean; message: string; command?: SlashCommandItem } => {
       const parsed = parseSlashInput(text)
       if (!parsed) {
         return { handled: false, message: text }
       }
       const command = slashCommandLookup.get(parsed.command)
-      if (!command) {
+      if (!command?.action) {
         return { handled: false, message: text }
       }
-      command.action()
-      return { handled: true, message: parsed.remainder }
+      return { handled: true, message: parsed.remainder, command }
     },
     [parseSlashInput, slashCommandLookup]
   )
 
+  // Pure: parses the draft without running the command (see SlashSubmissionIntent).
   const resolveSubmissionIntent = React.useCallback(
-    (rawMessage: string) => {
+    (rawMessage: string): SlashSubmissionIntent => {
       const imageCommand = parseImageSlashCommand(rawMessage)
       if (imageCommand) {
         return {
@@ -230,17 +256,18 @@ export function useSlashCommands({
           imageCommandMissingProvider: Boolean(imageCommand.missingProvider)
         }
       }
-      const slashResult = applySlashCommand(rawMessage)
+      const slashResult = parseSlashCommand(rawMessage)
       return {
         handled: slashResult.handled,
         message: slashResult.handled ? slashResult.message : rawMessage,
         imageBackendOverride: undefined,
         isImageCommand: false,
         invalidImageCommand: false,
-        imageCommandMissingProvider: false
+        imageCommandMissingProvider: false,
+        ...(slashResult.command ? { slashCommand: slashResult.command } : {})
       }
     },
-    [applySlashCommand, parseImageSlashCommand]
+    [parseSlashCommand, parseImageSlashCommand]
   )
 
   const activeImageCommand = React.useMemo(
@@ -274,7 +301,7 @@ export function useSlashCommands({
     filteredSlashCommands,
     parseSlashInput,
     parseImageSlashCommand,
-    applySlashCommand,
+    parseSlashCommand,
     resolveSubmissionIntent,
     activeImageCommand,
     handleSlashCommandSelect

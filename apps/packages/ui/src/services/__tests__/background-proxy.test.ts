@@ -2009,6 +2009,20 @@ describe("background proxy fallback safety", () => {
     expect(body.get("target_voice")).toBeInstanceOf(Blob)
   })
 
+  it("uploads one large file when the canonical multipart field is explicit", async () => {
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgUpload } = await importProxy()
+    const bytes = new Uint8Array(5820016)
+    await bgUpload({
+      path: "/api/v1/media/process-pdfs", method: "POST", preferDirect: true,
+      fileFieldName: "files", file: { name: "scan.pdf", type: "application/pdf", data: bytes }
+    })
+    const body = mocks.tldwRequest.mock.calls[0][0].body as FormData
+    expect(body.getAll("files")).toHaveLength(1)
+    expect((body.get("files") as Blob).size).toBe(bytes.byteLength)
+    expect(body.has("file")).toBe(false)
+  })
+
   it("appends single direct-fallback uploads to files and the legacy file alias", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: true,
@@ -4261,6 +4275,98 @@ describe("background proxy fallback safety", () => {
       '{"choices":[{"delta":{"content":"D"}}]}',
       '{"choices":[{"delta":{"content":"E"}}]}'
     ])
+  })
+
+  const CUT_OFF_EVENT = '"event":"stream_transport_interrupted"'
+
+  it.each([
+    ["ends without [DONE]", { event: "done", incomplete: true }, true, true],
+    ["ends with [DONE]", { event: "done" }, true, false],
+    ["ends without [DONE] for a caller that does not expect it", { event: "done", incomplete: true }, false, false]
+  ])("CM-03: a port stream that %s reports a cut-off reply only when [DONE] is expected", async (_label, doneMessage, expectDoneSentinel, reportsCutOff) => {
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    const onMessageListeners = new Set<(msg: any) => void>()
+    const port = {
+      onMessage: {
+        addListener: (listener: (msg: any) => void) => onMessageListeners.add(listener),
+        removeListener: (listener: (msg: any) => void) => onMessageListeners.delete(listener)
+      },
+      onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
+      postMessage: vi.fn(() => {
+        onMessageListeners.forEach((listener) =>
+          listener({ event: "data", data: '{"choices":[{"delta":{"content":"Half an answer"}}]}' })
+        )
+        onMessageListeners.forEach((listener) => listener(doneMessage))
+      }),
+      disconnect: vi.fn()
+    }
+    mocks.connect.mockReturnValue(port as any)
+    vi.stubGlobal("requestAnimationFrame", ((cb: FrameRequestCallback) => {
+      cb(0)
+      return 1
+    }) as any)
+
+    const { bgStream } = await importProxy()
+    const chunks: string[] = []
+    try {
+      for await (const chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { stream: true, messages: [] },
+        expectDoneSentinel
+      })) {
+        chunks.push(chunk)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(chunks[0]).toBe('{"choices":[{"delta":{"content":"Half an answer"}}]}')
+    expect(chunks.some((chunk) => chunk.includes(CUT_OFF_EVENT))).toBe(reportsCutOff)
+  })
+
+  it.each([
+    ["without [DONE]", 'data: {"choices":[{"delta":{"content":"Half"}}]}\n\n', true],
+    ["with [DONE]", 'data: {"choices":[{"delta":{"content":"Whole"}}]}\n\ndata: [DONE]\n\n', false],
+    ["with a final [DONE] and no newline", 'data: {"choices":[{"delta":{"content":"Whole"}}]}\n\ndata: [DONE]', false]
+  ])("CM-03: a direct stream body that ends %s is reported as cut off only without [DONE]", async (_label, body, reportsCutOff) => {
+    mocks.sendMessage.mockResolvedValue({ ok: false })
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") {
+        return {
+          serverUrl: "http://127.0.0.1:8000",
+          authMode: "single-user",
+          apiKey: "test-key-not-placeholder",
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: "http://127.0.0.1:8000"
+        }
+      }
+      return null
+    })
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
+    ) as any)
+
+    const { bgStream } = await importProxy()
+    const chunks: string[] = []
+    try {
+      for await (const chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { stream: true, messages: [] },
+        expectDoneSentinel: true
+      })) {
+        chunks.push(chunk)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(chunks[0]).toContain('"choices"')
+    expect(chunks.some((chunk) => chunk.includes(CUT_OFF_EVENT))).toBe(reportsCutOff)
   })
 })
 

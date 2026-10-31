@@ -399,6 +399,20 @@ const isCompleteSessionRecord = (
   )
 }
 
+export const resolveManualSessionCredential = (
+  config: TldwConfig | null | undefined,
+  record: unknown
+): string | null => {
+  if (
+    config?.authMode !== "single-user" ||
+    config.credentialSource !== "manual" ||
+    config.apiKeyPersistence !== "session"
+  ) return null
+  const origin = normalizeServerOrigin(config.serverUrl)
+  if (!origin || origin !== config.apiKeyServerOrigin) return null
+  return isCompleteSessionRecord(record, origin) ? nonEmptySecret(record.apiKey) : null
+}
+
 export const resolveManualCredential = async (
   config: TldwConfig | null | undefined,
   stores: { session: CredentialStorage }
@@ -419,9 +433,7 @@ export const resolveManualCredential = async (
   const record = await stores.session
     .get<ManualSessionCredential>(MANUAL_SESSION_KEY)
     .catch(() => null)
-  return isCompleteSessionRecord(record, origin)
-    ? nonEmptySecret(record.apiKey)
-    : null
+  return resolveManualSessionCredential(config, record)
 }
 
 export const resolveEffectiveTldwConfig = async (

@@ -921,6 +921,33 @@ def test_adapter_state_migration_seed_failure_rolls_back_ddl_and_marker(
     ).rows[0]["count"] == 0
 
 
+@pytest.mark.parametrize(
+    "failure_step", ["_ensure_device_lifecycle_columns", "_ensure_key_record_user_id_index"]
+)
+def test_sqlite_bootstrap_failure_rolls_back_base_schema(
+    failure_step: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(
+        DatabaseConfig(
+            backend_type=BackendType.SQLITE,
+            sqlite_path=str(tmp_path / "atomic-sync-bootstrap.db"),
+        )
+    )
+
+    def fail_after_base_schema(self: SyncDatabase, *, connection: Any) -> None:
+        """Fail after real bootstrap DDL to test rollback of the whole catalog."""
+        assert self.backend.table_exists("sync_devices", connection=connection)  # nosec B101 - pytest regression precondition.
+        raise SyncStoreError("injected bootstrap failure")
+
+    monkeypatch.setattr(SyncDatabase, failure_step, fail_after_base_schema)
+    with pytest.raises(SyncStoreError, match="injected bootstrap failure"):
+        SyncDatabase(backend=backend)
+
+    assert backend.execute("SELECT name FROM sqlite_master WHERE type = 'table'").rows == []  # nosec B101 - pytest rollback assertion.
+
+
 def test_adapter_state_migration_serializes_concurrent_sqlite_initializers(
     tmp_path: Path,
 ) -> None:
@@ -6168,15 +6195,19 @@ def test_insert_envelope_rejects_direct_core_whole_object_base_metadata_bypass(
             )
         )
 
-    with pytest.raises(SyncStoreError):
-        sync_store.insert_envelope(
-            _envelope(
-                client_envelope_id="env-tombstone-no-base",
-                operation="tombstone",
-                deleted=True,
-                payload_hash="sha256:tombstone",
-            )
+    # Owner decision Q7 (D7 note, 2026-10-19): a notes.note or chat.conversation
+    # tombstone may come without a base. It names an object the dataset never
+    # held; the head check and the materializer decide what it does. Provenance
+    # keeps the rule (test_sync_v2_satisfied_tombstone_objects.py).
+    accepted = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="env-tombstone-no-base",
+            operation="tombstone",
+            deleted=True,
+            payload_hash="sha256:tombstone",
         )
+    )
+    assert accepted.operation == "tombstone"
 
 
 def test_insert_envelope_rejects_direct_core_chat_message_identity_and_hash_bypass(

@@ -7,7 +7,16 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
+from tldw_Server_API.app.core.Character_Chat import roleplay_resume_contract, roleplay_resume_prompt
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
+    RoleplayResumeConflictError,
+    RoleplayResumeHistory,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import (
+    format_roleplay_resume_messages,
+    prepare_roleplay_resume,
+)
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
@@ -51,7 +60,9 @@ def fence(db, cid):
 
 
 def append(db, cid, request):
-    return db.append_idempotent_user_message(cid, request, owner_client_id="alice")
+    return db.append_idempotent_user_message(
+        cid, request, owner_client_id="alice", build_messages=format_roleplay_resume_messages
+    )
 
 
 def test_unchanged_append_and_identical_replay_return_original_receipt(resume_db):
@@ -160,7 +171,9 @@ def test_retired_owner_cannot_append_or_replay(resume_db):
     append(db, cid, request)
     for mid in ("chosen-user", "new-user"):
         with pytest.raises(NotFoundError):
-            db.append_idempotent_user_message(cid, {**request, "message_id": mid}, owner_client_id="bob")
+            db.append_idempotent_user_message(
+                cid, {**request, "message_id": mid}, owner_client_id="bob", build_messages=format_roleplay_resume_messages
+            )
     assert db.count_messages_for_conversation(cid) == 3
 
 
@@ -402,7 +415,7 @@ def test_prepare_generation_uses_frozen_prompt_exact_branch_and_saved_model(resu
         "list_persona_memory_entries",
     ):
         monkeypatch.setattr(db, name, forbidden)
-    prepared = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     assert prepared["fence"] == request["expected"]
     assert prepared["effective_completion"] == state["effective_completion"]
     assert prepared["effective_completion"]["provider"] == "local-llm"
@@ -465,7 +478,7 @@ def test_prepare_generation_refuses_every_original_fence_drift(resume_db, mutati
             conn.execute("DELETE FROM conversation_behavior_snapshots WHERE conversation_id = ?", (cid,))
     before = (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"])
     with pytest.raises(RoleplayResumeConflictError):
-        db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+        prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     assert (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"]) == before
     assert db.get_message_by_id("chosen-assistant") is None
 
@@ -576,7 +589,7 @@ def test_prepare_generation_requires_original_input_authority(resume_db, corrupt
                 (json.dumps(authority), "chosen-user"),
             )
     with pytest.raises(RoleplayResumeConflictError):
-        db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+        prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     assert db.get_message_by_id("chosen-assistant") is None
 
 
@@ -677,7 +690,7 @@ def test_saved_lore_memory_scene_and_examples_do_not_load_changed_sources(resume
     ):
         monkeypatch.setattr(db, name, forbidden)
     monkeypatch.setattr(WorldBookService, "__init__", forbidden)
-    prepared = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     text = str(prepared["messages"])
     for saved in (
         "harbor bell rings twice",
@@ -724,7 +737,8 @@ def test_acknowledged_literal_input_is_identical_in_admission_and_generation(res
         cid,
         {"message_id": "literal-input", "content": content, "expected": fence(db, cid)},
     )
-    prepared = db.prepare_roleplay_resume_generation(
+    prepared = prepare_roleplay_resume(
+        db,
         cid,
         {
             "version": 1,
@@ -741,7 +755,7 @@ def test_acknowledged_literal_input_is_identical_in_admission_and_generation(res
 def test_resume_commit_saves_one_exact_reply_and_replays_original_receipt(resume_db):
     db, cid = resume_db
     request = completion_request(db, cid)
-    prepared = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     content = "Original generated answer.\n  Keep spaces.  "
     result = db.commit_roleplay_resume_generation(cid, prepared, content, owner_client_id="alice")
     assert result["saved"] is True
@@ -751,7 +765,7 @@ def test_resume_commit_saves_one_exact_reply_and_replays_original_receipt(resume
     assert db.count_messages_for_conversation(cid) == 4
     db.update_message("chosen-assistant", {"content": "Later edited answer"}, 1)
     assert db.commit_roleplay_resume_generation(cid, prepared, content, owner_client_id="alice") == result
-    replay = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    replay = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     assert replay["completed"] == result
     assert db.count_messages_for_conversation(cid) == 4
 
@@ -774,7 +788,7 @@ def test_changes_during_generation_refuse_assistant_commit_without_a_branch(resu
 
     db, cid = resume_db
     request = completion_request(db, cid)
-    prepared = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     if mutation == "ancestor-edit":
         db.update_message("ancestor", {"content": "Another writer"}, 1)
     elif mutation == "ancestor-delete":
@@ -894,7 +908,8 @@ def test_materialized_note_controls_do_not_coerce_suppression(resume_db, key, va
     }
     if accepted:
         receipt = append(db, cid, request)
-        prepared = db.prepare_roleplay_resume_generation(
+        prepared = prepare_roleplay_resume(
+            db,
             cid,
             {
                 "version": 1,
@@ -932,7 +947,7 @@ def test_original_completion_request_rejects_stored_numeric_coercion(resume_db, 
 
     db, cid = resume_db
     request = completion_request(db, cid)
-    prepared = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     db.commit_roleplay_resume_generation(cid, prepared, "Original reply", owner_client_id="alice")
     with db.transaction() as conn:
         raw = conn.execute(
@@ -952,7 +967,7 @@ def test_original_completion_request_rejects_stored_numeric_coercion(resume_db, 
             (json.dumps(authority), "chosen-assistant"),
         )
     with pytest.raises(RoleplayResumeConflictError, match="idempotency_conflict"):
-        db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+        prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     assert db.count_messages_for_conversation(cid) == 4
 
 
@@ -1164,11 +1179,9 @@ def test_unrepresentable_provider_behavior_refuses_before_input(resume_db, provi
 
     db, _ = resume_db
     if model is None:
-        from tldw_Server_API.app.core.Chat.chat_service import (
-            known_models_for_provider_cached,
-        )
+        from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
-        model = known_models_for_provider_cached(provider)[0]
+        model = list_provider_models(provider)[0]
     card = db.add_character_card({"name": "Provider Control Ava"})
     cid = create_character_conversation(
         db,
@@ -1205,9 +1218,7 @@ def test_unrepresentable_provider_behavior_refuses_before_input(resume_db, provi
 )
 def test_vendor_history_tool_mapping_is_admitted_only_when_representable(resume_db, provider, legacy, accepted):
     from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
-    from tldw_Server_API.app.core.Chat.chat_service import (
-        known_models_for_provider_cached,
-    )
+    from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
     db, _ = resume_db
     card = db.add_character_card({"name": "Tool Vendor Ava"})
@@ -1238,7 +1249,7 @@ def test_vendor_history_tool_mapping_is_admitted_only_when_representable(resume_
         db,
         conversation_data={"character_id": card, "title": "Vendor tool history"},
         provider=provider,
-        model=known_models_for_provider_cached(provider)[0],
+        model=list_provider_models(provider)[0],
         initial_messages=[
             {"id": "tool-question", "sender": "user", "content": "Search the archive."},
             {
@@ -1270,7 +1281,8 @@ def test_vendor_history_tool_mapping_is_admitted_only_when_representable(resume_
     }
     if accepted:
         receipt = append(db, cid, request)
-        prepared = db.prepare_roleplay_resume_generation(
+        prepared = prepare_roleplay_resume(
+            db,
             cid,
             {
                 "version": 1,
@@ -1400,9 +1412,7 @@ def test_character_creation_metadata_failure_rolls_back_initial_messages(resume_
 @pytest.mark.parametrize("damage", [None, "blank-name", "scalar-arguments", "image-result"])
 def test_anthropic_tool_history_must_retain_its_actual_provider_shape(resume_db, damage):
     from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
-    from tldw_Server_API.app.core.Chat.chat_service import (
-        known_models_for_provider_cached,
-    )
+    from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
     db, _ = resume_db
     card = db.add_character_card({"name": "Anthropic Shape Ava"})
@@ -1429,7 +1439,7 @@ def test_anthropic_tool_history_must_retain_its_actual_provider_shape(resume_db,
         db,
         conversation_data={"character_id": card, "title": "Anthropic shape"},
         provider="anthropic",
-        model=known_models_for_provider_cached("anthropic")[0],
+        model=list_provider_models("anthropic")[0],
         initial_messages=[
             {
                 "id": "shape-question",
@@ -1542,7 +1552,8 @@ async def test_actual_empty_tool_result_is_retained_as_empty_text(resume_db):
             "expected": fence(db, cid),
         },
     )
-    prepared = db.prepare_roleplay_resume_generation(
+    prepared = prepare_roleplay_resume(
+        db,
         cid,
         {
             "version": 1,
@@ -1700,9 +1711,6 @@ async def test_actual_saved_placeholder_is_checked_before_h1_input_admission(res
 
 @pytest.mark.parametrize("byte_limit", [3, 4])
 def test_resume_history_byte_gate_precedes_full_payload_read(resume_db, monkeypatch, byte_limit):
-    from tldw_Server_API.app.core.Character_Chat import roleplay_resume_prompt
-    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
-
     db, original_cid = resume_db
     cid = create_character_conversation(
         db,
@@ -1717,7 +1725,7 @@ def test_resume_history_byte_gate_precedes_full_payload_read(resume_db, monkeypa
     assert db.get_message_metadata("budget-prior") is None
     before = deepcopy(db.get_roleplay_resume_state(cid))
     request = {"message_id": "budget-input", "content": "Continue", "expected": fence(db, cid)}
-    monkeypatch.setattr(roleplay_resume_prompt, "MAX_ROLEPLAY_PROMPT_BYTES", byte_limit)
+    monkeypatch.setattr(roleplay_resume_contract, "MAX_ROLEPLAY_PROMPT_BYTES", byte_limit)
     full_reads = []
     original_read = db.message_store._read_history_snapshot
 
@@ -1737,3 +1745,56 @@ def test_resume_history_byte_gate_precedes_full_payload_read(resume_db, monkeypa
     assert db.get_message_by_id("budget-input") is None
     assert db.count_messages_for_conversation(cid) == 1
     assert db.get_roleplay_resume_state(cid) == before
+
+
+def test_prepare_returns_rows_and_the_character_chat_wrapper_formats(resume_db):
+    db, cid = resume_db
+    request = completion_request(db, cid)
+    rows = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    assert set(rows) == {"conversation_id", "input_message_id", "input_message_version", "assistant_message_id",
+                         "fence", "effective_completion", "history_authority", "state", "history"}
+    assert isinstance(rows["history"], RoleplayResumeHistory) and rows["history"].authority == rows["history_authority"]
+    prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
+    assert set(prepared) == {"conversation_id", "input_message_id", "input_message_version", "assistant_message_id",
+                             "fence", "effective_completion", "messages", "history_authority", "context"}
+
+
+def test_append_runs_the_injected_builder_before_inserting(resume_db):
+    db, cid = resume_db
+    before = deepcopy(db.get_roleplay_resume_state(cid))
+    def refuse(state, history, proposed_input):
+        assert (proposed_input, isinstance(history, RoleplayResumeHistory)) == ("Continue", True)
+        raise RoleplayResumeConflictError("resume_context_too_large")
+    with pytest.raises(RoleplayResumeConflictError) as caught:
+        db.append_idempotent_user_message(
+            cid, {"message_id": "refused-input", "content": "Continue", "expected": fence(db, cid)},
+            owner_client_id="alice", build_messages=refuse,
+        )
+    assert caught.value.code == "resume_context_too_large"
+    assert db.get_message_by_id("refused-input") is None
+    assert db.get_roleplay_resume_state(cid) == before
+
+
+def test_append_without_a_builder_is_a_type_error(resume_db):
+    db, cid = resume_db
+    with pytest.raises(TypeError, match="build_messages"):
+        db.append_idempotent_user_message(
+            cid, {"message_id": "no-builder", "content": "Continue", "expected": fence(db, cid)}, owner_client_id="alice"
+        )
+
+
+def test_formatting_history_selection_errors_become_resume_context_unsupported(resume_db, monkeypatch):
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+    db, cid = resume_db
+    def legacy(*_args, **_kwargs):
+        raise HistorySelectionError("legacy_review_required")
+    monkeypatch.setattr(chat_service, "_format_selected_history_messages", legacy)
+    with pytest.raises(RoleplayResumeConflictError) as caught:
+        format_roleplay_resume_messages(db.get_roleplay_resume_state(cid, owner_client_id="alice"),
+                                        RoleplayResumeHistory(snapshot=None, content=[], authority={}))
+    assert caught.value.code == "resume_context_unsupported"
+
+
+def test_the_prompt_byte_limit_is_one_constant():
+    assert roleplay_resume_prompt.MAX_ROLEPLAY_PROMPT_BYTES == roleplay_resume_contract.MAX_ROLEPLAY_PROMPT_BYTES == 32 * 1024 * 1024

@@ -11,6 +11,8 @@ Note: Secrets should be set via environment or `.env`. `config.txt` is supported
 
 ## Core Server
 - `tldw_production`: Enable production guards (`true|false`). Masks API key in logs and enforces DB/secret checks.
+  - The runtime is also production-like when `TLDW_PRODUCTION` is truthy, or when `ENVIRONMENT`, `APP_ENV`, `DEPLOYMENT_ENV`, `FASTAPI_ENV`, `TLDW_ENV` or `ENV` is `prod`, `production` or `live` (any case). Every production guard reads this one detector (`core/testing.runtime_environment()`).
+  - A production-like runtime refuses to start while a test seam is set: `TEST_MODE`, `TESTING`, `TLDW_TEST_MODE`, `TLDW_ALLOW_TEST_FALLBACK_KEYS`, `SINGLE_USER_TEST_API_KEY`, `E2E_TEST_BASE_URL`, `MINIMAL_TEST_APP`, `JWT_SECRET_TEST_KEY`, `ENABLE_ADMIN_E2E_TEST_MODE`, `EVALUATIONS_TEST_DB_PATH`, `JOBS_TEST_NOW_EPOCH` or any `RG_TEST_*`.
 - `ENABLE_OPENAPI`: Show OpenAPI/Swagger UI when `true`. Defaults to hidden in production unless explicitly enabled.
 - `ALLOWED_ORIGINS`: Optional browser-origin allowlist. Comma-separated or JSON array.
   - Local self-hosting already permits common `localhost` and `127.0.0.1` browser origins by default.
@@ -346,7 +348,8 @@ The Resource Governor (RG) is the **primary enforcement path** for all rate limi
 - `RG_POLICY_RELOAD_ENABLED`: Enable hot-reload of policy changes (`true|false`). Default `true`.
 - `RG_POLICY_RELOAD_INTERVAL_SEC`: Policy reload check interval in seconds. Default `10`.
 - `RG_ROUTE_MAP_AUDIT`: When `true` (the default), the startup audit logs routes not covered by the RG route map.
-- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fallback_memory`.
+- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fallback_memory`. Once a Redis command and a PING right after it both fail, RG stops calling Redis for `RG_REDIS_UNREACHABLE_COOLDOWN_SEC` and answers by this fail mode, so the fail mode lasts up to about 15 s after Redis returns (the cooldown after the last failed probe, plus one 5 s timeout); under `fail_closed`, a user refused in that time keeps a `Retry-After` of up to 60 s, so 429s can last about 75 s after Redis recovers (ADR-081).
+- `RG_REDIS_UNREACHABLE_COOLDOWN_SEC`: Seconds the RG Redis backend stops calling a Redis it could not reach before it probes again. Default `10`; `0` turns the cooldown off, so every Redis call waits its own 5 s timeout while Redis does not answer. Below `10`, probes can overlap on a Redis that does not answer. An unset, negative or non-numeric value uses the default. Read when each governor is built (at startup, or on a limiter's first use). RG's Redis client waits at most 5 s to connect and for each reply; `socket_timeout` and `socket_connect_timeout` options in `REDIS_URL` override that (ADR-081).
 
 ### Client Identity
 - `RG_TRUSTED_PROXIES`: Comma-separated trusted-proxy host/CIDR list. This is opt-in: forwarding is used only when the physical peer is a valid IP in this list.
@@ -472,7 +475,7 @@ Config file support (optional):
 - `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS`: Process-local capacity reserved for asynchronous cleanup tasks (default `32`). This is not additional request throughput.
 - `CHAT_STREAM_SETTLEMENT_MAX_TASKS`: Process-local cap for detached writes that save a partial reply after a stream ended early (default `256`). When it is reached, further partial replies are not saved.
 
-All five values must be integers from `1` through `256`; `0` does not disable a cap, and invalid or out-of-range values fall back to the listed default. They are read at process startup, so changes require a restart. The caps apply independently to each application process and replica.
+All six values must be integers from `1` through `256`; `0` does not disable a cap, and invalid or out-of-range values fall back to the listed default. They are read at process startup, so changes require a restart. The caps apply independently to each application process and replica.
 
 ### Tokenizer (Chat Dictionaries & World Books)
 - `TOKEN_ESTIMATOR_MODE`: `whitespace` (default) or `char_approx`
@@ -702,7 +705,7 @@ Operator notes:
   - `OTEL_SERVICE_NAME`: Logical service name (default `tldw_server`).
   - `OTEL_SERVICE_VERSION`: Service version string (default `1.0.0`).
   - `OTEL_SERVICE_NAMESPACE`: Namespace grouping (default `production`).
-  - `DEPLOYMENT_ENV`: Deployment environment label (default `development`).
+  - `DEPLOYMENT_ENV`: Deployment environment label (default `development`). `prod`, `production` or `live` also turns on the production guards (see `tldw_production`).
 
 - Exporters and enablement
   - `ENABLE_METRICS`: Enable metrics pipeline (`true|false`, default `true`).
@@ -735,7 +738,7 @@ Notes
 | `OTEL_SERVICE_NAME`             | `tldw_server`       | Logical service name |
 | `OTEL_SERVICE_VERSION`          | `1.0.0`             | Freeform version string |
 | `OTEL_SERVICE_NAMESPACE`        | `production`        | Logical namespace/group |
-| `DEPLOYMENT_ENV`                | `development`       | Environment label |
+| `DEPLOYMENT_ENV`                | `development`       | Environment label; `production` also enables production guards |
 | `ENABLE_METRICS`                | `true`              | Enable metrics pipeline |
 | `ENABLE_TRACING`                | `true`              | Enable tracing pipeline |
 | `ENABLE_OTEL_LOGGING`           | `false`             | Enable OTEL logging integration |

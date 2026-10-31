@@ -13,13 +13,14 @@ and yield OpenAI-compatible SSE lines for streaming.
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
 from typing import Any, NoReturn
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import ChatAPIError
 
 
 def raise_if_in_band_provider_error(
@@ -30,13 +31,13 @@ def raise_if_in_band_provider_error(
 ) -> None:
     """Reject structured HTTP-200 and SSE error envelopes safely."""
 
-    from tldw_Server_API.app.core.Chat.streaming_utils import (
-        normalize_provider_stream_error,
-    )
     from tldw_Server_API.app.core.exceptions import raise_detached_error
     from tldw_Server_API.app.core.LLM_Calls.error_utils import (
         build_sanitized_chat_error,
         log_provider_failure,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+        normalize_provider_stream_error,
     )
 
     normalized = normalize_provider_stream_error(value)
@@ -87,7 +88,41 @@ class ChatProvider(ABC):
             bind_provider_call_credentials,
         )
 
-        return bind_provider_call_credentials(self.name, request, consume=True)
+        bound, credentials = bind_provider_call_credentials(self.name, request, consume=True)
+        self._validate_model_inventory(bound, getattr(credentials, "auth_source", None) == "oauth")
+        return bound, credentials
+
+    def _validate_model_inventory(self, request: dict[str, Any], refreshable_oauth: bool = False) -> None:
+        """Cover direct adapter callers as well as the ordinary Chat dispatcher."""
+        from tldw_Server_API.app.core.LLM_Calls.gateway import (
+            _call_policy_after_model_discovery,
+            _validate_provider_model_selection,
+        )
+        from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import has_model_listing
+
+        if not has_model_listing(self.name):
+            return  # local, or a cloud provider with no listing: the provider itself rejects a bad model
+        if self.name in {"cohere", "moonshot"}:
+            from importlib import import_module
+
+            config = request.get("app_config")
+            if not config and request.get("credentials_resolved") is not True:
+                module = import_module(f"tldw_Server_API.app.core.LLM_Calls.providers.{self.name}_adapter")
+                config = module.load_and_log_configs() or {}
+            request["app_config"] = config if isinstance(config, dict) else {}
+            section = request["app_config"].get(f"{self.name}_api")
+            if section is None and self.name == "cohere":
+                section = request["app_config"].get("API", {}).get("cohere", {})
+                request["app_config"] = {**request["app_config"], "cohere_api": section}
+            section = section or {}
+            request["api_key"] = request.get("api_key") or section.get("api_key")
+            if request.get("model") is None or (self.name == "cohere" and not request.get("model")):
+                request["model"] = section.get("model")
+        elif request.get("app_config") is None:
+            request["app_config"] = {}
+        started_at = time.monotonic()
+        _validate_provider_model_selection(self.name, request, refreshable_oauth=refreshable_oauth)
+        _call_policy_after_model_discovery(self.name, request, started_at)
 
     def _raise_sanitized_provider_failure(
         self,

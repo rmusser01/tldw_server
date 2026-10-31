@@ -90,8 +90,8 @@ afterEach(() => {
 })
 
 it.each([
-  { message: "FIRST IDEA\nSECOND LINE", image: "" },
-  { message: "", image: "data:image/png;base64,synthetic-image" }
+  { message: "FIRST IDEA\nSECOND LINE", image: "", imageFilename: "" },
+  { message: "", image: "data:image/png;base64,synthetic-image", imageFilename: "" }
 ])("retains exact fresh input after real settings/client/Core/owner Save: %j", async values => {
   const set = vi.spyOn(Storage.prototype, "set")
   mount()

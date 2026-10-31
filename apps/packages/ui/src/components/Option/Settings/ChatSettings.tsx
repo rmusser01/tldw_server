@@ -1,9 +1,12 @@
+import { MessageViewSelect } from "@/components/Common/Playground/MessageViewSelect"
 import { useCallback, useMemo, useRef, type ChangeEvent } from "react"
 import { Input, Select, Switch, Tooltip } from "antd"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
 import {
   DEFAULT_CHAT_SETTINGS,
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY,
   type ChatRichTextColorOption,
   type ChatRichTextFontOption,
   type ChatRichTextMode,
@@ -15,12 +18,14 @@ import { useChatSettings } from "@/hooks/useChatSettings"
 import { useSetting } from "@/hooks/useSetting"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { toBase64 } from "@/libs/to-base64"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import {
   CHAT_BACKGROUND_IMAGE_MAX_BASE64_LENGTH,
   CHAT_BACKGROUND_IMAGE_MAX_SIZE_MB,
   CHAT_BACKGROUND_IMAGE_SETTING,
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
   CHAT_MESSAGE_OPACITY_SETTING,
+  CHAT_MESSAGE_VIEW_SETTING,
   CHAT_WINDOW_OPACITY_SETTING
 } from "@/services/settings/ui-settings"
 import { RotateCcw, Upload } from "lucide-react"
@@ -41,6 +46,7 @@ import { ComposerStyleSettings } from "@/components/Chat/composer/settings/Compo
 const SELECT_CLASSNAME = "w-[200px]"
 const OPACITY_RANGE_CLASSNAME = "w-40 accent-primary"
 export const ChatSettings = () => {
+  const [messageView, setMessageView] = useSetting(CHAT_MESSAGE_VIEW_SETTING)
   const { t } = useTranslation("settings")
   const notification = useAntdNotification()
   const [chatBackgroundImage, setChatBackgroundImage] = useSetting(
@@ -59,6 +65,13 @@ export const ChatSettings = () => {
     "quickChatStrictDocsOnly",
     true
   )
+  const [sidepanelStickyChatInput, setSidepanelStickyChatInput] =
+    useStorage<boolean>(
+      SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+      SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+    )
+  // The web app shares this screen but has no side panel.
+  const hasSidepanel = isExtensionRuntime()
   const [quickChatDocsNamespace, setQuickChatDocsNamespace] = useStorage<string>(
     "quickChatDocsIndexNamespace",
     QUICK_CHAT_DEFAULT_PROJECT_DOCS_NAMESPACE
@@ -777,6 +790,29 @@ export const ChatSettings = () => {
           />
         }
       />
+      {hasSidepanel && (
+        <SettingRow
+          label={t(
+            "generalSettings.settings.sidepanelStickyChatInput.label",
+            "Keep the side panel chat input visible while scrolling"
+          )}
+          {...getResetProps(
+            sidepanelStickyChatInput,
+            SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+            setSidepanelStickyChatInput
+          )}
+          control={
+            <Switch
+              checked={sidepanelStickyChatInput}
+              onChange={setSidepanelStickyChatInput}
+              aria-label={t(
+                "generalSettings.settings.sidepanelStickyChatInput.label",
+                "Keep the side panel chat input visible while scrolling"
+              )}
+            />
+          }
+        />
+      )}
       <SettingRow
         label={t("generalSettings.settings.menuDensity.label", "Menu density")}
         {...getResetProps(
@@ -1334,6 +1370,13 @@ export const ChatSettings = () => {
         </p>
         <div className="border-b border-border mt-3" />
       </div>
+
+      <SettingRow
+        label={t("playground:messageViews.label", "Message view")}
+        description={t("playground:messageViews.preferenceHelp", "Choose a reading layout for this device.")}
+        {...getResetProps(messageView, CHAT_MESSAGE_VIEW_SETTING.defaultValue, setMessageView)}
+        control={<MessageViewSelect value={messageView} onChange={setMessageView} />}
+      />
 
       <SettingRow
         label={t(

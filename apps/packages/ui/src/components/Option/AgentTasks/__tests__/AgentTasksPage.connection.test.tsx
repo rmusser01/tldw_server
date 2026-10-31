@@ -608,7 +608,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    renderAgentTasksPage()
+    renderAgentTasksPageWithRouteProbe()
 
     const projectButton = await screen.findByText("Research Project")
     fireEvent.click(projectButton)
@@ -628,6 +628,15 @@ describe("AgentTasksPage connection and payload normalization", () => {
     expect(screen.getByRole("button", { name: /open diagnostics/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open artifacts/i })).toBeInTheDocument()
     expect(screen.getByText("Needs citations")).toBeInTheDocument()
+    for (const [label, suffix] of [
+      ["Open session", ""],
+      ["Open diagnostics", "&view=diagnostics"],
+      ["Open artifacts", "&view=artifacts"],
+      ["Open audit", "&view=audit"]
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name: label, exact: true }))
+      await waitFor(() => expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(`/acp-playground?session=sess-1${suffix}`))
+    }
   })
 
   it("uses the route workspace filter to show only linked canonical workspace projects and tasks", async () => {
@@ -932,7 +941,10 @@ describe("AgentTasksPage connection and payload normalization", () => {
     )
   })
 
-  it("surfaces workspace setup gaps when the selected canonical workspace has no linked ACP execution project", async () => {
+  it.each([
+    ["Open Research Workspace", "/research"],
+    ["Open ACP Playground", "/acp-playground"]
+  ])("surfaces workspace setup gaps and routes %s through the active router", async (label, target) => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === "http://127.0.0.1:8000/openapi.json") {
@@ -965,7 +977,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    const { container } = renderAgentTasksPage(
+    const { container } = renderAgentTasksPageWithRouteProbe(
       "/agent-tasks?workspace=workspace-missing"
     )
 
@@ -988,6 +1000,8 @@ describe("AgentTasksPage connection and payload normalization", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open research workspace/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: label, exact: true }))
+    await waitFor(() => expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(target))
   })
 
   it("does not report missing workspace setup when project loading failed", async () => {
@@ -1115,4 +1129,33 @@ describe("AgentTasksPage connection and payload normalization", () => {
     expect(screen.queryByText("Workspace setup needs attention")).toBeNull()
     expect(screen.queryByText("ACP execution workspace link is conflict")).toBeNull()
   })
+
+  it("lets a triaged task retry through the existing dispatch endpoint", async () => {
+    const fallbackFetch = global.fetch
+    const dispatch = deferred<Response>()
+    let retried = false
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === `${API_BASE}/projects/7/tasks`) {
+        return { ok: true, json: async () => [{ id: 11, project_id: 7, title: "Failed README task", status: retried ? "complete" : "triage", agent_type: "opencode", review_count: 0, max_review_attempts: 3 }] }
+      }
+      if (url === `${API_BASE}/tasks/11/run` && init?.method === "POST") {
+        retried = true
+        return dispatch.promise
+      }
+      return fallbackFetch(input, init)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    renderAgentTasksPage()
+    fireEvent.click(await screen.findByText("Research Project"))
+    fireEvent.click(await screen.findByRole("button", { name: "Retry", exact: true }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/tasks/11/run`, expect.objectContaining({ method: "POST", body: "{}" })))
+    expect(screen.getByRole("button", { name: "Running...", exact: true })).toBeDisabled()
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/tasks/11/run") && init?.method === "POST")).toHaveLength(1)
+    dispatch.resolve({ ok: true, status: 200, json: async () => ({ status: "complete" }) } as Response)
+    await screen.findByText("complete", { exact: true })
+    expect(screen.queryByRole("button", { name: "Retry", exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Run", exact: true })).not.toBeInTheDocument()
+  })
+
 })

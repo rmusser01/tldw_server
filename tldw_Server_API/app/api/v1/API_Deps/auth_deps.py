@@ -73,6 +73,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     User as User,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+    _looks_like_jwt,
     authenticate_api_key_user,
     get_request_user,
     get_single_user_instance,
@@ -214,21 +215,12 @@ def _public_user_dict(user: Mapping[str, Any]) -> dict[str, Any]:
     return safe
 
 
-def _looks_like_jwt(token: Optional[str]) -> bool:
-    if not isinstance(token, str):
-        return False
-    return token.count(".") == 2
-
-
 async def _authenticate_api_key_from_request(request: Request, api_key: str) -> dict[str, Any]:
     test_mode = _is_test_mode()
     if test_mode:
         # SECURITY: Warn loudly about TEST_MODE and block in production unless explicitly allowed
         allow_test_in_prod = _env_flag_enabled("ALLOW_TEST_MODE_IN_PRODUCTION")
-        environment = os.getenv("ENVIRONMENT", "").strip().lower()
-        prod_flag = _env_flag_enabled("tldw_production")
-        is_production = environment in {"production", "prod"} or prod_flag
-        if is_production:
+        if _is_production_like_env():
             if not allow_test_in_prod:
                 logger.critical(
                     "TEST_MODE is enabled in production environment! "
@@ -1635,6 +1627,19 @@ async def require_expected_user(
     )
 
 
+async def require_expected_user_if_present(
+    request: Request,
+    expected_user_id: str | None = Header(
+        default=None,
+        alias="X-TLDW-Expected-User-ID",
+        description="Authenticated user ID observed when the request scope was loaded.",
+    ),
+) -> None:
+    """Assert an explicitly captured account without changing legacy auth seams."""
+    if expected_user_id is not None:
+        await require_expected_user(expected_user_id, await get_auth_principal(request))
+
+
 def require_permissions(
     *permissions: str,
     detail: Any | None = None,
@@ -2578,7 +2583,15 @@ def require_token_scope(
                     principal = ctx.principal
             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
                 principal = None
-            if principal is None and credentials:
+            if principal is None and (
+                credentials
+                or (
+                    request.headers.get("Authorization") is None
+                    and request.headers.get("X-API-KEY") is None
+                    and getattr(request, "cookies", None)
+                    and request.cookies.get(get_settings().SINGLE_USER_SESSION_COOKIE_NAME)
+                )
+            ):
                 try:
                     resolver = get_auth_principal
                     try:

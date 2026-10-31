@@ -62,6 +62,9 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
 )
 from tldw_Server_API.app.core.RAG.exceptions import RAGConfigurationError
 from tldw_Server_API.app.core.testing import (
+    is_production_like_env as _shared_is_production_like_env,
+)
+from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
 )
 from tldw_Server_API.app.core.testing import (
@@ -993,7 +996,7 @@ except ImportError:
 RewriteCache = _RewriteCache
 
 try:
-    from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt as _load_prompt
+    from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt as _load_prompt
 except ImportError:
     _load_prompt = None
 
@@ -2670,7 +2673,7 @@ async def unified_rag_pipeline(
         timings = {"total": 0.0}
         # Consistent contract: return UnifiedRAGResponse for all outcomes
         try:
-            from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+            from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
 
             return UnifiedRAGResponse(
                 documents=[],
@@ -3816,7 +3819,7 @@ async def unified_rag_pipeline(
         try:
             import os as _os
 
-            _prod_env = _shared_is_truthy(_os.getenv("tldw_production", "false"))
+            _prod_env = _shared_is_production_like_env()
             _strict_env = _shared_is_truthy(_os.getenv("RAG_GUARDRAILS_STRICT", "false"))
             if _prod_env or _strict_env:
                 if not enable_numeric_fidelity:
@@ -9148,7 +9151,7 @@ async def unified_rag_pipeline(
 
     # Convert to Pydantic response
     try:
-        from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+        from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
 
         doc_dicts = [_serialize_result_document(d) for d in (result.documents or [])]
         return UnifiedRAGResponse(

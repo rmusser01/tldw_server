@@ -106,9 +106,17 @@ const baseDeps = (overrides: Partial<UsePlaygroundSubmitDeps> = {}) => ({
   restorePromptAssistAttempt: vi.fn(),
   beginPromptAssistReset: vi.fn(() => 1),
   markPromptAssistAttemptSaved: vi.fn(),
+  // Payload fixture only; draft ownership is covered with the real composer hook.
+  captureDraftOwnership: () => ({
+    isCurrent: () => true,
+    isOwnerCurrent: () => true,
+    normalizeMessage: () => true
+  }),
+  captureHistorySelection: () => () => true,
   isSending: false,
   isConnectionReady: true,
   webSearch: false,
+  chatMode: "normal",
   compareModeActive: false,
   compareSelectedModels: [],
   selectedModel: "openai:gpt-4o-mini",
@@ -250,6 +258,45 @@ describe("Playground document processing submit", () => {
       view.unmount()
     }
     expect(deps.sendMessage).toHaveBeenCalledOnce()
+  })
+
+  it("keeps the new preparation locked when the retired scene read finishes", async () => {
+    const oldScene = deferred<ActorSceneResult>()
+    const newScene = deferred<ActorSceneResult>()
+    getActorSceneForChat.mockReturnValueOnce(oldScene.promise).mockReturnValueOnce(newScene.promise)
+    const deps = baseDeps({ uploadedFiles: [] })
+    const view = renderHook(() => {
+      const form = useSimpleForm({ initialValues: { message: "OLD HELD INPUT", image: "" } })
+      return { form, submit: usePlaygroundSubmit({ ...deps, form }) }
+    })
+    const release = (scene: typeof oldScene, index: number) => scene.resolve({
+      target: getActorSceneForChat.mock.calls[index][0].target!,
+      settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false,
+    })
+    try {
+      act(() => { view.result.current.submit.submitForm() })
+      await waitFor(() => expect(getActorSceneForChat).toHaveBeenCalledTimes(1))
+      act(() => {
+        useStoreMessageOption.getState().startNewChatDraft()
+        view.result.current.form.setFieldValue("message", "NEW HELD INPUT")
+      })
+      act(() => { view.result.current.submit.submitForm() })
+      await waitFor(() => expect(getActorSceneForChat).toHaveBeenCalledTimes(2))
+      await act(async () => { release(oldScene, 0); await oldScene.promise })
+      act(() => { view.result.current.submit.submitForm() })
+      expect(getActorSceneForChat).toHaveBeenCalledTimes(2)
+      expect(deps.sendMessage).not.toHaveBeenCalled()
+      await act(async () => { release(newScene, 1); await newScene.promise })
+      await waitFor(() => expect(deps.sendMessage).toHaveBeenCalledOnce())
+      expect(deps.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ message: "NEW HELD INPUT" }))
+    } finally {
+      await act(async () => {
+        if (getActorSceneForChat.mock.calls[0]) release(oldScene, 0)
+        if (getActorSceneForChat.mock.calls[1]) release(newScene, 1)
+        await Promise.resolve()
+      })
+      view.unmount()
+    }
   })
 
   it("captures the original scene before document preparation and forwards private ownership separately", async () => {

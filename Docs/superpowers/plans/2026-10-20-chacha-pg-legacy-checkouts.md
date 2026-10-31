@@ -9,7 +9,7 @@
 > - **Important 1 (Decision 1).** Decision 1 is restated with the September note's words and the measured costs: Blocker 1, and a checkout held through the LLM call. On that evidence the plan now recommends per-worker operations at each job owner, the note's own proposal. The non-SDK runners are covered in C3.
 > - **Important 2 (persona).** The measured numbers are in F12 and Decision 2. B4 adds the per-call wrap, a `chacha_operation(...)` around each `asyncio.to_thread` callable, as recommended. It costs about 0.8 ms per call.
 > - **Important 3.** C2 adds one PostgreSQL `WorkerSDK` test per ChaCha-touching worker family (F11), and C1 covers notes-graph.
-> - **Important 4.** The ADR is "ADR-NNN" until C4 Step 1 numbers it with a paged scan, taking max(dev, open PRs) + 1. The sibling plan `plan_fu_rg_redis_error.md` numbers its ADR the same way. The two execute serially, so whichever goes second takes the next number.
+> - **Important 4.** The ADR is "ADR-080" until C4 Step 1 numbers it with a paged scan, taking max(dev, open PRs) + 1. The sibling plan `plan_fu_rg_redis_error.md` numbers its ADR the same way. The two execute serially, so whichever goes second takes the next number.
 > - **Important 5.** `_LegacyCheckout.__del__` is lock-free: it puts `(backend, conn)` on a module-level `queue.SimpleQueue`, which `_open_new_connection` and `close_connection` drain. A2 has a test for it, and it is Review Focus 2.
 > - **Minor 1-7** are folded in at A3 (impact), B6/C4 (RED on top of earlier PRs), C4 Step 4 (stage before the docs tests), the Global Constraints (pre-existing ruff findings; the voice test's F811 is fixed), A4 Step 1, D2 Step 4 (six and six), A2 (the closed-connection branch is tested) and D1 (the guard's stated limit).
 
@@ -88,7 +88,7 @@
   - the Chat_Macros run, whose branches write concurrently, is not wrapped; each of its ChaCha calls owns its own operation instead;
   - the notes-graph cleanup becomes operation-aware;
   - the chatbooks core Jobs worker, the chatbooks cleanup loop, the ingestion-sources worker, the Workflows chatbooks adapter and the chatbook notification each run in an operation;
-  - ADR-NNN records the rule.
+  - ADR-080 records the rule.
 - **PR D** (`test/chacha-pg-test-app-middleware`, tests only): installs `ChaChaOperationMiddleware` in the 30 PostgreSQL ChaCha test apps that lack it, guards that, makes `pg_restricted_backend`'s teardown fail fast on a leaked session, and closes TASK-13861.
 
 **Tech Stack:** Python 3.12.13, pytest 9.1.1, pytest-asyncio 1.4.0, pytest-timeout 2.4.0, psycopg 3.3.6, psycopg-pool 3.3.2, anyio 4.14.2, FastAPI 0.142.1, Starlette 1.6.0, PostgreSQL 18 (Docker container `tldw_postgres_test`), backlog-py.
@@ -161,7 +161,7 @@ The prototype's tracked changes are kept at `<scratchpad>/fu4_prototype_r4.diff`
 
 ### ADR assessment
 
-**ADR required: yes.** PR C adds `Docs/ADR/NNN-chacha-postgres-checkouts-owned-by-entry-points.md`, where C4 Step 1 assigns NNN.
+**ADR required: yes.** PR C adds `Docs/ADR/080-chacha-postgres-checkouts-owned-by-entry-points.md`, where C4 Step 1 assigns NNN.
 - **Why.** The plan sets a durable rule for worker ownership and persistence: every non-HTTP entry point that touches ChaCha owns its PostgreSQL checkouts. That means a WebSocket step, a persona call, a job owner, a cancel action or a background pass. `Docs/ADR/README.md` requires an ADR for "worker ownership" and "persistence" rules. The review also found that per-worker operations "would still merit an ADR".
 - **No ADR governs ChaCha connection handling today.** `grep -rn "chacha_operation\|threading.local" Docs/ADR/` finds only an unrelated ACP inventory line.
 - **Related ADRs.**
@@ -169,16 +169,16 @@ The prototype's tracked changes are kept at `<scratchpad>/fu4_prototype_r4.diff`
   - ADR-021 (services lifecycle) is unaffected. Content-backend shutdown keeps closing the pool (`shutdown_post_runtime_cleanup.py:96-101`).
   - ADR-006 (Bandit on touched scope; it supersedes ADR-005) and ADR-059 (backlog-py) apply to every PR.
   - ADR-004 (the owner's Change summary on AI-authored PRs) applies to every PR.
-- **Number.** It is written ADR-NNN in every step, body and note until C4 Step 1 assigns it. That step takes max(dev, open PRs) + 1 from the paged scan, whatever the scan prints, and replaces NNN everywhere it appears in PR C.
+- **Number.** It is written ADR-080 in every step, body and note until C4 Step 1 assigns it. That step takes max(dev, open PRs) + 1 from the paged scan, whatever the scan prints, and replaces NNN everywhere it appears in PR C.
   - The sibling plan `plan_fu_rg_redis_error.md` is open as #3288 and holds ADR-078 (the re-review's paged scan). If it is still open or merged when C4 runs, this ADR gets 079 or later. The two plans execute serially.
   - #3288 also appends a row after the last row of `Docs/ADR/README.md`. Whichever PR merges second rebases and keeps both rows, in number order (C4 Step 2).
-  - PR A's backlog note says "ADR-NNN, numbered in PR C". Backlog notes are append-only, so that note stays as written; C4's note records the number.
+  - PR A's backlog note says "ADR-080, numbered in PR C". Backlog notes are append-only, so that note stays as written; C4's note records the number.
 - PRs A, B and D need no ADR of their own:
   - A is a bug fix inside `ChaChaNotes_DB.py`;
   - B applies the September note's per-step WebSocket rule;
   - D changes only tests.
 
-  ADR-NNN records the whole decision, including A's `close_all_connections()` rule and B's WebSocket steps.
+  ADR-080 records the whole decision, including A's `close_all_connections()` rule and B's WebSocket steps.
 
 ## Findings (what the investigation measured)
 
@@ -479,13 +479,13 @@ Per-worker comes out better on the measured costs. It is weaker only for workers
 ## Decisions for the owner
 
 1. **Where Jobs own their PostgreSQL ChaCha checkouts.**
-   - **Recommended: per worker, at each job owner and cancel action that runs its ChaCha work one call at a time (PR C), recorded in ADR-NNN.**
+   - **Recommended: per worker, at each job owner and cancel action that runs its ChaCha work one call at a time (PR C), recorded in ADR-080.**
      - This is the September note's proposal.
      - It leaves notes-graph's per-step cleanup alone: 0 checkouts held through the provider call.
      - It leaves the Chat_Macros run unwrapped and gives each of its ChaCha calls its own operation, because the run's branches write concurrently (F13).
      - It covers the five runners that do not use `WorkerSDK`.
      - Each family has a PostgreSQL test.
-   - **Cost:** a worker that nobody wraps keeps the legacy path, with the thread-exit fix and the GC backstop. ADR-NNN makes wrapping part of adding a worker that touches ChaCha, and forbids sharing one operation across concurrent ChaCha transactions.
+   - **Cost:** a worker that nobody wraps keeps the legacy path, with the thread-exit fix and the GC backstop. ADR-080 makes wrapping part of adding a worker that touches ChaCha, and forbids sharing one operation across concurrent ChaCha transactions.
    - **Alternative: v1's central `WorkerSDK` wrap,** around every handler and cancel check, plus C1 and C3.
      - It also covers unknown `WorkerSDK` workers.
      - **It shares one connection across everything a job does concurrently.** The Chat_Macros run's branches then lose writes silently: the re-review's replay lost 7 of 50 runs, and C2's test ends `('running', [])` (F13). This holds for any per-job or per-owner operation around a job that fans out, so the central wrap would need option (b), transactions serialized per `ConnectionState`, first.
@@ -526,20 +526,20 @@ The owner's `## Change summary` (ADR-004) is needed on each of the four PRs. It 
      - `run_chatbooks_adapter` is reached that way: through `engine.continue_run`, which `workflows.py:3497`, `:4228`, `:4350` and `:4566` start with `asyncio.create_task` inside a request.
      - On dev that step already fails: the adapter returns `{'error': 'chatbooks_error'}`, because any ChaCha use resolves the closed operation.
      - C3 wraps it with `@owns_chacha_checkouts(independent=True)`, which always opens a new operation. Its test `[workflows-chatbooks-after-its-request]` fails on dev and on revision 2 (`ClosedChaChaOperationError`), and passes with C3.
-     - No other wrapped owner is reachable from a detached task (F11). A new one that is uses `independent=True` (ADR-NNN).
+     - No other wrapped owner is reachable from a detached task (F11). A new one that is uses `independent=True` (ADR-080).
 4. **What the GC backstop still covers.** These checkouts come back only when the cyclic GC runs:
    - a cached handle evicted by the LRU or the health check, if an unknown non-HTTP caller used it outside an operation;
    - per-call handles in code nobody has found.
 
-   The known sites are fixed in B and C. A new background entry point that opens a handle outside an operation reintroduces the leak; ADR-NNN's rule and the family tests are the defence.
-5. **`close_all_connections()` on an explicit backend that is really the shared one.** `DB_Manager.create_chacha_database(backend=…)` passes the shared backend explicitly, so the handle does not know it is shared. There are 0 callers in `app/`. ADR-NNN records this.
+   The known sites are fixed in B and C. A new background entry point that opens a handle outside an operation reintroduces the leak; ADR-080's rule and the family tests are the defence.
+5. **`close_all_connections()` on an explicit backend that is really the shared one.** `DB_Manager.create_chacha_database(backend=…)` passes the shared backend explicitly, so the handle does not know it is shared. There are 0 callers in `app/`. ADR-080 records this.
 6. **Non-tenant `client_id`s on PostgreSQL (seen in code, not measured).** The MCP modules and the persona WebSocket pass descriptive `client_id`s, but `_tenant_client_id` (`ChaCha_Notes_DB_Deps.py:791-817`) treats the `client_id` as the RLS tenant key. This is out of scope here.
 7. **Joining versus independent operations.**
    - `live_conversation.py` and `exemplar_runtime.py` use `chacha_operation()`, which joins an HTTP request's operation when one is open and owns the call otherwise.
    - `persona.py`, the WebSocket steps and the skill lookup in `context_integration.py` use `independent=True`. The skill lookup never joins, so no caller's checkout spans a forked skill's LLM call.
    - `owns_chacha_checkouts` joins a caller's operation by default, so a job owner called from an HTTP route shares the request's checkouts. `owns_chacha_checkouts(independent=True)` does not.
 8. **Concurrent transactions inside one operation (F13).**
-   - The guard against F13 is a rule, not code: ADR-NNN, Global Constraints, and Chat_Macros' per-call operations.
+   - The guard against F13 is a rule, not code: ADR-080, Global Constraints, and Chat_Macros' per-call operations.
    - A future fan-out of `db.transaction()` blocks on one handle inside one operation would lose writes silently, so C4 files option (b) as a follow-up.
    - The RAG fan-outs read concurrently inside a request's transaction. They see another branch's uncommitted writes on the same connection, which is harmless today because none of them writes.
 
@@ -1332,7 +1332,7 @@ PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task edit TASK-13861 \
   --append-notes "PR A (fix/chacha-pg-legacy-checkouts). close_all_connections() on PostgreSQL: (1) it closed the shared content pool. Every handle built without a backend uses the one cached content backend, so one MCP tool call (flashcards.decks.list through FlashcardsModule.execute_tool) left every later ChaCha access failing with 'Connection pool is closed' until restart. Callers: MCP flashcards x13, notes x10, quizzes x14, characters x2, slides x2, skills x1, persona_visuals x1, chats x2, rpg x1; Persona/memory_integration x3; persona.py /stream x1; Notes_Library x2; close_all_chacha_db_instances. Fix: on the shared backend only this thread's checkout is returned; content-backend shutdown owns the pool (ADR-020). (2) On a caller's pool the checkout was returned through putconn and the pool closed at once, so psycopg_pool discarded the queued reset and left the connection open INTRANS. Fix: close this thread's checkout (discard_connection) before closing the pool." \
   --append-notes "PR A legacy-checkout guard: a thread-exit fix plus a GC-timed backstop. A legacy thread-local checkout was lost when its thread exited (plain thread, AnyIO worker, asyncio default executor). A guard stored next to the checkout queues it on a queue.SimpleQueue when the thread-local slot is dropped, and the next ChaCha checkout or close_connection() in the process returns it; a caller already blocked in getconn does not benefit. Thread exit is deterministic (CPython clears a dead thread's locals at once; the tests use no gc.collect()). A dropped handle is cyclic garbage, so its guard runs only when the cyclic GC does: in a server-sized heap that can take arbitrarily long (review probe 4). It is a backstop; PR C makes the known per-call sites own their checkouts. The finalizer never calls the pool (a collection can run on a thread holding psycopg_pool's task-queue lock); every explicit return disarms it first." \
   --append-notes "PR A locking reads: get_workspace(for_update=True) and get_persona_profile(for_update=True) read the legacy thread-local tx_depth, so inside an operation (every production HTTP request) they raised 'locking reads require a transaction connection' even inside db.transaction(). On PostgreSQL every non-Character workspace chat creation, POST /chats/workspace-startup and persona admission returned 400, as did chat creation in a workspace under a chat quota. Found when PR D's middleware went into test_conversation_quota_count_backends.py's app. Fix: read self._connection_state().tx_depth." \
-  --append-notes "PR A RED/GREEN on e521605198: test_chacha_postgres_close_all_connections.py dev 2 failed, fix 2 passed. test_chacha_postgres_legacy_checkouts.py dev 5 failed 1 passed, fix 6 passed (v1's lock-taking guard fails the finalizer test). test_chacha_postgres_locking_reads_in_operation.py dev 2 failed, fix 2 passed. Operation-scope pins with the guard: 109 passed. Sweep of the 108 files that call close_all_connections over PostgreSQL ChaCha: [result] (dev baseline: [result]). Bandit: B101 only in the new tests; none in the product files. The ADR for the whole series (ADR-NNN, numbered in PR C) records the close_all_connections rule." \
+  --append-notes "PR A RED/GREEN on e521605198: test_chacha_postgres_close_all_connections.py dev 2 failed, fix 2 passed. test_chacha_postgres_legacy_checkouts.py dev 5 failed 1 passed, fix 6 passed (v1's lock-taking guard fails the finalizer test). test_chacha_postgres_locking_reads_in_operation.py dev 2 failed, fix 2 passed. Operation-scope pins with the guard: 109 passed. Sweep of the 108 files that call close_all_connections over PostgreSQL ChaCha: [result] (dev baseline: [result]). Bandit: B101 only in the new tests; none in the product files. The ADR for the whole series (ADR-080, numbered in PR C) records the close_all_connections rule." \
   --ac "CharactersRAGDB.close_all_connections() never closes the shared PostgreSQL content pool" \
   --check-ac 3 --check-ac 5
 ```
@@ -1352,7 +1352,7 @@ EOF
 )"
 git diff --check origin/dev...HEAD && echo "no trailing whitespace"
 ```
-The plan copy keeps "ADR-NNN". PR C's Task C4 replaces it there too.
+The plan copy keeps "ADR-080". PR C's Task C4 replaces it there too.
 
 - [ ] **Step 5: Independent review**
 
@@ -2619,7 +2619,7 @@ This PR implements Decision 1's recommendation. If the owner chose the central `
 - keep C1 and C3;
 - replace C2's decorators with v1's Task B4: an independent `chacha_operation` beside `llm_call_root` at `worker_sdk.py:720`, `:934` and `:957`;
 - implement option (b) first, transactions serialized per `ConnectionState`. Without it, C2's macro-run test fails under the central wrap, as it did on revision 2 (`('running', [])`);
-- rewrite ADR-NNN's Decision and Alternatives to match.
+- rewrite ADR-080's Decision and Alternatives to match.
 
 PR C stands alone: with only its product files on dev `2cae53929f`, its three new test files give `12 passed`. Cut it after PR B merges anyway, so that its sweep runs on top of A and B.
 
@@ -3757,20 +3757,20 @@ EOF
 )"
 ```
 
-### Task C4: ADR-NNN, docs, sweep, the option (b) follow-up, notes, and open PR C
+### Task C4: ADR-080, docs, sweep, the option (b) follow-up, notes, and open PR C
 
 **Files:**
-- Create: `Docs/ADR/NNN-chacha-postgres-checkouts-owned-by-entry-points.md`
+- Create: `Docs/ADR/080-chacha-postgres-checkouts-owned-by-entry-points.md`
 - Modify:
   - `Docs/ADR/README.md`: an index row after the last ADR row;
   - `Docs/Code_Documentation/Databases/ChaChaNotes_DB.md`: the "Thread Safety" section (`:193-197`);
-  - `Docs/superpowers/plans/2026-10-20-chacha-pg-legacy-checkouts.md`: replace ADR-NNN.
+  - `Docs/superpowers/plans/2026-10-20-chacha-pg-legacy-checkouts.md`: replace ADR-080.
 - Modify (generated): `Docs/Published/ADR/…` and `Docs/Published/Code_Documentation/Databases/ChaChaNotes_DB.md`.
 - Backlog: `TASK-13861`, and one new follow-up task (option (b)).
 
 **Interfaces:**
 - Consumes: Tasks C1-C3, and the owner's answers to Decisions 1 and 2.
-- Produces: PR C into `dev`, with ADR-NNN numbered.
+- Produces: PR C into `dev`, with ADR-080 numbered.
 
 - [ ] **Step 1: Number the ADR**
 
@@ -3791,14 +3791,14 @@ How the number gets everywhere:
 - The ADR, the index row and the guide are written below with the literal `NNN`, and Step 3 replaces it in those files and in the plan copy.
 - The notes and the commit message expand `$ADR` themselves.
 - The PR body is piped through `sed`.
-- PR A's backlog note keeps "ADR-NNN, numbered in PR C". Backlog notes are append-only, so it stays as written; Step 7's note records the number.
+- PR A's backlog note keeps "ADR-080, numbered in PR C". Backlog notes are append-only, so it stays as written; Step 7's note records the number.
 
-- [ ] **Step 2: Write ADR-NNN** (Status `Accepted` only after the owner adopts Decision 1; otherwise `Proposed`)
+- [ ] **Step 2: Write ADR-080** (Status `Accepted` only after the owner adopts Decision 1; otherwise `Proposed`)
 
 Create `Docs/ADR/$ADR-chacha-postgres-checkouts-owned-by-entry-points.md` (the file name uses the number; the content below still says NNN until Step 3):
 
 ```markdown
-# ADR-NNN: Every non-HTTP entry point owns its PostgreSQL ChaCha checkouts
+# ADR-080: Every non-HTTP entry point owns its PostgreSQL ChaCha checkouts
 
 **Status:** Accepted
 **Date:** 2026-10-20
@@ -3862,7 +3862,7 @@ Edit the ADR to match the owner's answers:
 Add the index row to `Docs/ADR/README.md` after the last ADR row:
 
 ```markdown
-| [ADR-NNN](NNN-chacha-postgres-checkouts-owned-by-entry-points.md) | Accepted | On PostgreSQL each non-HTTP unit of work (a WebSocket step or persona call, a job owner or cancel action, a background pass) owns its ChaCha checkouts through `chacha_operation` or `@owns_chacha_checkouts`, not centrally in `WorkerSDK`; ChaCha transactions never run concurrently inside one operation; the thread-local fallback is returned on thread exit, a dropped handle only at cyclic GC, and `close_all_connections()` never closes the shared content pool. |
+| [ADR-080](080-chacha-postgres-checkouts-owned-by-entry-points.md) | Accepted | On PostgreSQL each non-HTTP unit of work (a WebSocket step or persona call, a job owner or cancel action, a background pass) owns its ChaCha checkouts through `chacha_operation` or `@owns_chacha_checkouts`, not centrally in `WorkerSDK`; ChaCha transactions never run concurrently inside one operation; the thread-local fallback is returned on thread exit, a dropped handle only at cyclic GC, and `close_all_connections()` never closes the shared content pool. |
 ```
 #3288 (the sibling plan's ADR-078) also appends a row after the last row. Whichever of the two PRs merges second rebases and keeps both rows, in number order.
 
@@ -3871,19 +3871,19 @@ Add the index row to `Docs/ADR/README.md` after the last ADR row:
 In `Docs/Code_Documentation/Databases/ChaChaNotes_DB.md`, append this bullet to the end of the "Thread Safety" section, after the WAL bullet at `:197`:
 
 ```markdown
-*   **PostgreSQL:** a pooled connection is owned by a `chacha_operation` (`DB_Management/chacha/operation_scope.py`). `ChaChaOperationMiddleware` opens one per HTTP request; outside HTTP each unit of work opens its own: a WebSocket step or persona call, a job owner or cancel action (`@owns_chacha_checkouts`), or a background pass. All the threads of one operation share one connection, so never run ChaCha transactions concurrently inside it: code that fans out gives each call its own `chacha_operation(independent=True)`. Outside an operation a handle falls back to one checkout per thread. It goes back to the pool at the next ChaCha call after the thread exits, but a dropped handle's only when the cyclic GC collects it, so new background entry points must own their work ([ADR-NNN](../../ADR/NNN-chacha-postgres-checkouts-owned-by-entry-points.md)). `close_all_connections()` never closes the shared content pool.
+*   **PostgreSQL:** a pooled connection is owned by a `chacha_operation` (`DB_Management/chacha/operation_scope.py`). `ChaChaOperationMiddleware` opens one per HTTP request; outside HTTP each unit of work opens its own: a WebSocket step or persona call, a job owner or cancel action (`@owns_chacha_checkouts`), or a background pass. All the threads of one operation share one connection, so never run ChaCha transactions concurrently inside it: code that fans out gives each call its own `chacha_operation(independent=True)`. Outside an operation a handle falls back to one checkout per thread. It goes back to the pool at the next ChaCha call after the thread exits, but a dropped handle's only when the cyclic GC collects it, so new background entry points must own their work ([ADR-080](../../ADR/080-chacha-postgres-checkouts-owned-by-entry-points.md)). `close_all_connections()` never closes the shared content pool.
 ```
 
 Then replace `NNN` everywhere it was written, including the plan copy committed in PR A:
 
 ```bash
-sed -i '' -e "s/ADR-NNN/ADR-$ADR/g" -e "s/NNN-chacha-postgres/$ADR-chacha-postgres/g" \
+sed -i '' -e "s/ADR-080/ADR-$ADR/g" -e "s/080-chacha-postgres/$ADR-chacha-postgres/g" \
   "Docs/ADR/$ADR-chacha-postgres-checkouts-owned-by-entry-points.md" Docs/ADR/README.md \
   Docs/Code_Documentation/Databases/ChaChaNotes_DB.md \
   Docs/superpowers/plans/2026-10-20-chacha-pg-legacy-checkouts.md
 grep -n "NNN" "Docs/ADR/$ADR-chacha-postgres-checkouts-owned-by-entry-points.md" Docs/ADR/README.md \
   Docs/Code_Documentation/Databases/ChaChaNotes_DB.md
-grep -c "ADR-NNN" Docs/superpowers/plans/2026-10-20-chacha-pg-legacy-checkouts.md
+grep -c "ADR-080" Docs/superpowers/plans/2026-10-20-chacha-pg-legacy-checkouts.md
 ls Docs/Code_Documentation/Databases/../../ADR/$ADR-chacha-postgres-checkouts-owned-by-entry-points.md
 ```
 Expected:
@@ -3995,7 +3995,7 @@ Then the notes. Fill the bracketed results from Steps 4 and 5:
 PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task edit TASK-13861 \
   --append-notes "PR C (fix/chacha-pg-background-operations): Jobs own their checkouts per worker, at each job owner and cancel action, through a new @owns_chacha_checkouts (12 modules, 13 functions; plus 3 runners in C3), not centrally in WorkerSDK. Jobs audit (plan F11): of the 14 ChaCha-reaching worker modules, only the notes-graph suggestions job closes and then reuses its handle inside a job (its cleanup now returns early while an operation is open, and the job owner is left unwrapped: 0 checkouts held during the provider call, 1 if wrapped), and only the Chat_Macros run runs ChaCha transactions concurrently (its branches; it is left unwrapped and each repository call, the macro loader, the executor build, the post-back and the failure-path write own an independent operation, because one shared operation lost every branch row and the final status). Non-WorkerSDK runners: the chatbooks core Jobs worker (one operation per job), the chatbooks cleanup loop (one per user pass), the ingestion-sources worker, the Workflows chatbooks adapter (independent: a request's detached task can run it after the request) and NotificationsService.deliver_chatbook (one per call). MCP chats_module and rpg_module already close on the thread that used the handle. HTTP routes audited for concurrent managed transactions on one handle: none found (F13); option (b) filed as TASK-<P>." \
   --append-notes "PR C RED/GREEN (RED on unchanged dev 2cae53929f; the two re-review tests also against revision 2's PR C): notes-graph job through WorkerSDK.run on PostgreSQL: plain 1 passed (pin), inside an operation 1 failed ('The ChaCha operation has finished') -> 2 passed. Worker families through WorkerSDK.run: 4 failed (['asyncio_0'] x3; in the macro run the event-loop thread held a checkout during every branch) -> 4 passed; the macro-run test failed against revision 2 with ('running', []), and fails with the executor-build and post-back operations removed. Per-call handles with garbage collection disabled: 6 failed (['MainThread'] x5; the Workflows step after its request returned chatbooks_error, and ClosedChaChaOperationError against revision 2) -> 6 passed; the Workflows cases run the adapter the engine resolves (registry.get_adapter), so a decorator placed above @registry.register fails them. Sweep of the 117 files that import PR C's modules: [result] (dev baseline: [result]). Docs tests after refresh and staging: [result]. Test-quality triage: OK." \
-  --append-notes "ADR: required and added, Docs/ADR/$ADR-chacha-postgres-checkouts-owned-by-entry-points.md (worker ownership and persistence rule; ADR-$ADR, numbered by a paged scan of dev and open PRs; PR A's note says ADR-NNN and stays as written, notes being append-only). Governing: ADR-020 (shared content backend), ADR-006 (Bandit), ADR-059 (backlog-py), ADR-004 (owner's Change summary)." \
+  --append-notes "ADR: required and added, Docs/ADR/$ADR-chacha-postgres-checkouts-owned-by-entry-points.md (worker ownership and persistence rule; ADR-$ADR, numbered by a paged scan of dev and open PRs; PR A's note says ADR-080 and stays as written, notes being append-only). Governing: ADR-020 (shared content backend), ADR-006 (Bandit), ADR-059 (backlog-py), ADR-004 (owner's Change summary)." \
   --append-notes "AC1: /chat/stream exercised on PostgreSQL first (PR B), and every production caller that reaches the legacy path is listed with evidence and fix in the plan's Findings F2 and F11. AC2: every listed caller now runs inside chacha_operation or returns its checkout on the thread that took it; each has a PostgreSQL test that fails on dev. Accepted bound: code nobody has wrapped falls back to the thread-exit return (at the next ChaCha call) and, for dropped handles, the GC-timed backstop (ADR-$ADR)." \
   --check-ac 1
 ```
@@ -4034,13 +4034,13 @@ This heredoc is unquoted so that `$ADR` expands; it contains no backticks.
 Run `/superpowers:requesting-code-review` in a clean subagent with the branch diff, ADR-$ADR and this plan's PR C section, and address its findings. Then:
 ```bash
 git push -u origin fix/chacha-pg-background-operations
-gh pr create --base dev --title "fix: Jobs and background passes own their PostgreSQL ChaCha checkouts; ADR-$ADR (TASK-13861, 3 of 4)" --body "$(sed "s/ADR-NNN/ADR-$ADR/g" <<'EOF'
+gh pr create --base dev --title "fix: Jobs and background passes own their PostgreSQL ChaCha checkouts; ADR-$ADR (TASK-13861, 3 of 4)" --body "$(sed "s/ADR-080/ADR-$ADR/g" <<'EOF'
 ## Summary
 - A new `@owns_chacha_checkouts` runs each ChaCha-touching Jobs owner and cancel action in a `chacha_operation` (12 modules, 13 functions), per worker as the September design note proposed, not centrally in `WorkerSDK`. Before, each executor thread a job used kept its checkout (`['asyncio_0']` after the job).
 - The Chat_Macros run is not wrapped: its branches write concurrently, and one shared operation would give them one connection and one transaction depth, which rolled back every branch row and the final status. Each of its ChaCha calls owns an independent operation instead.
 - The notes-graph suggestions job, which returns its checkout after every step, is left unwrapped, and its cleanup now leaves an operation's checkout to the operation. Inside an operation every such job failed with "The ChaCha operation has finished".
 - The chatbooks core Jobs worker, the chatbooks cleanup loop, the ingestion-sources worker, the Workflows chatbooks adapter and the chatbook notification opened a handle per call and never closed it; its checkout came back only at cyclic GC. Each now runs in an operation; the Workflows adapter always opens its own, because a request's detached task can run it after the request.
-- ADR-NNN records the rule for every non-HTTP entry point, including "no concurrent ChaCha transactions inside one operation"; the ChaCha DB guide and Docs/Published are updated. A guard for that rule is TASK-<P>.
+- ADR-080 records the rule for every non-HTTP entry point, including "no concurrent ChaCha transactions inside one operation"; the ChaCha DB guide and Docs/Published are updated. A guard for that rule is TASK-<P>.
 
 ## Change summary
 <!-- The owner writes this section (ADR-004). -->

@@ -22,6 +22,7 @@ import {
   getLastChatCompletionDebugSnapshot
 } from "@/services/tldw/TldwChat"
 import type { ChatMessage } from "@/services/tldw/TldwApiClient"
+import { setChatRequestDebugEnabled } from "@/services/tldw/chat-request-debug"
 
 const makeDefaultResponse = () =>
   new Response(
@@ -37,6 +38,7 @@ const makeDefaultResponse = () =>
 describe("TldwChatService message sanitization", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setChatRequestDebugEnabled(true)
     vi.useRealTimers()
     mocks.createChatCompletion.mockResolvedValue(makeDefaultResponse())
     mocks.streamChatCompletion.mockImplementation(async function* () {

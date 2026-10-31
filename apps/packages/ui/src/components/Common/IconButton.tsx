@@ -1,6 +1,6 @@
 import React from "react"
 
-type IconButtonProps = {
+type IconButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   ariaLabel: string
   hasPopup?: boolean | "menu" | "listbox" | "tree" | "grid" | "dialog"
   ariaExpanded?: boolean
@@ -27,21 +27,23 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
       title,
       disabled,
       type = "button",
-      onClick
+      onClick,
+      ...buttonProps
     },
     ref
   ) => {
     const baseClasses =
-      "inline-flex items-center justify-center rounded-md min-w-[44px] min-h-[44px] transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)]"
+      "inline-flex items-center justify-center rounded-md min-w-[44px] min-h-[44px] transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
     return (
       <button
+        {...buttonProps}
         ref={ref}
         type={type}
         className={[baseClasses, className].filter(Boolean).join(" ")}
         aria-label={ariaLabel}
-        aria-haspopup={hasPopup as any}
-        aria-expanded={ariaExpanded}
-        aria-controls={ariaControls}
+        aria-haspopup={hasPopup ?? buttonProps["aria-haspopup"]}
+        aria-expanded={ariaExpanded ?? buttonProps["aria-expanded"]}
+        aria-controls={ariaControls ?? buttonProps["aria-controls"]}
         data-testid={dataTestId}
         title={title ?? ariaLabel}
         disabled={disabled}

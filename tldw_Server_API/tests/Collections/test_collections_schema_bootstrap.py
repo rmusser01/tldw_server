@@ -85,6 +85,10 @@ def test_schema_memo_verifier_accepts_sqlite_mapping_rows(
         "_seed_watchlists_output_templates",
         lambda self: None,
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.Collections_DB.ensure_tag_identity",
+        lambda *_args: None,
+    )
     schema_once.reset("collections")
     try:
         CollectionsDatabase.from_backend(user_id="1", backend=backend)

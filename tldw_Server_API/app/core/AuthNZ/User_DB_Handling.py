@@ -47,7 +47,13 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import (
+    env_flag_enabled,
+    is_explicit_pytest_runtime,
+    is_test_mode,
+    is_truthy,
+)
+from tldw_Server_API.app.core.testing import is_production_like_env as _is_production_like_env
 from tldw_Server_API.app.core.Utils.fastapi_routes import served_route_for_scope
 
 _USER_DB_NONCRITICAL_EXCEPTIONS = (
@@ -322,7 +328,7 @@ def _is_test_context() -> bool:
             return True
     except _USER_DB_NONCRITICAL_EXCEPTIONS:
         pass
-    if os.getenv("PYTEST_CURRENT_TEST") is not None:
+    if is_explicit_pytest_runtime():
         return True
     return is_test_mode() or env_flag_enabled("TESTING")
 
@@ -335,7 +341,7 @@ def _is_strict_test_bypass_context() -> bool:
     `TESTING=1` environment leakage does not enable auth bypasses in non-test
     deployments.
     """
-    if os.getenv("PYTEST_CURRENT_TEST") is not None:
+    if is_explicit_pytest_runtime():
         return True
     if is_test_mode():
         return True
@@ -347,31 +353,11 @@ def _is_strict_test_bypass_context() -> bool:
     return False
 
 
-def _is_production_like_env() -> bool:
-    """
-    Detect production-like runtime from common deployment environment variables.
-
-    This intentionally checks multiple keys because not all deployments set
-    `tldw_production`.
-    """
-    if is_truthy(os.getenv("tldw_production", "").strip().lower()):
-        return True
-
-    production_values = {"production", "prod", "live"}
-    for key in (
-        "ENVIRONMENT",
-        "APP_ENV",
-        "DEPLOYMENT_ENV",
-        "FASTAPI_ENV",
-        "TLDW_ENV",
-    ):
-        value = os.getenv(key, "").strip().lower()
-        if value in production_values:
-            return True
-    return False
-
-
 def _looks_like_jwt(token: Optional[str]) -> bool:
+    """Whether ``token`` has a JWT's three dot-separated segments; a bearer that does not is an API key.
+
+    The one definition (TASK-13950.7): auth_principal_resolver and API_Deps.auth_deps import it.
+    """
     if not isinstance(token, str):
         return False
     return token.count(".") == 2
@@ -1596,7 +1582,7 @@ async def get_request_user(
             or env_flag_enabled("TESTING")
         ) and not getattr(get_request_user, "_warned_testflags_prod", False):
             logger.warning(
-                "TEST flags detected while tldw_production=true; "
+                "TEST flags detected in a production-like runtime; "
                 "test-only auth bypasses are disabled."
             )
             get_request_user._warned_testflags_prod = True

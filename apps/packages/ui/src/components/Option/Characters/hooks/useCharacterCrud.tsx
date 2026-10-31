@@ -229,15 +229,17 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       if (!editId) {
         throw new Error("No character selected for editing")
       }
+      const selectedWorldBookIds =
+        editWorldBooksInitializedRef.current &&
+        typeof values?.world_book_ids !== "undefined"
+          ? normalizeWorldBookIds(values.world_book_ids)
+          : null
       const updatedCharacter = await tldwClient.updateCharacter(
         editId,
         buildCharacterPayload(values),
         editVersion ?? undefined
       )
-      if (typeof values?.world_book_ids !== "undefined") {
-        const selectedWorldBookIds = normalizeWorldBookIds(
-          values?.world_book_ids
-        )
+      if (selectedWorldBookIds !== null) {
         const editCharacterId = Number(editId)
         if (Number.isFinite(editCharacterId) && editCharacterId > 0) {
           await syncWorldBookSelection(
@@ -718,7 +720,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
 
         notification.info({
           message: t("settings:manageCharacters.notification.deletedWithUndo", {
-            defaultValue: "Character '{{name}}' deleted",
+            defaultValue: "Character {{name}} moved to Trash",
             name
           }),
           description: (

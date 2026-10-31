@@ -3,6 +3,7 @@ import {
   createStartupTemplateBundle,
   describeStartupTemplatePrompt,
   inferStartupTemplatePromptSource,
+  isStartupTemplateOwnedBy,
   parseStartupTemplateBundles,
   removeStartupTemplateBundle,
   resolveStartupTemplatePrompt,
@@ -34,12 +35,17 @@ import {
   type AssistantSelection,
 } from "@/types/assistant-selection";
 import type { Character } from "@/types/character";
+import { isPromptOwnedBy } from "@/services/prompt-local-owner";
 
 // ---------------------------------------------------------------------------
 // Deps interface
 // ---------------------------------------------------------------------------
 
 export interface UsePromptTemplatesDeps {
+  /** Production supplies the resolved account; standalone local consumers stay local. */
+  promptOwnerId?: string | null;
+  promptOwnerReady?: boolean;
+  promptOwnerBoundaryKey?: string;
   /** Startup templates raw string from storage */
   startupTemplatesRaw: string
   setStartupTemplatesRaw: (value: string) => void
@@ -113,6 +119,9 @@ export type SaveRolePlaySetupInput = {
 
 export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   const {
+    promptOwnerId = null,
+    promptOwnerReady = true,
+    promptOwnerBoundaryKey = "local",
     startupTemplatesRaw,
     setStartupTemplatesRaw,
     promptLibrary,
@@ -138,6 +147,46 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     t,
   } = deps;
 
+  const scopeKey = JSON.stringify([promptOwnerBoundaryKey, promptOwnerId, promptOwnerReady]);
+  const scopeRef = React.useRef({ key: scopeKey, revision: 0, retired: false, mounted: true });
+  if (scopeRef.current.key !== scopeKey) {
+    scopeRef.current.key = scopeKey;
+    scopeRef.current.revision++;
+    scopeRef.current.retired = false;
+  }
+  const [, refreshBoundary] = React.useState(0);
+  React.useEffect(() => {
+    const scope = scopeRef.current;
+    scope.mounted = true;
+    const retire = () => {
+      scope.revision++;
+      scope.retired = true;
+      previewRef.current = null;
+      setPreviewEntry(null);
+      setStartupTemplateDraftName("");
+      refreshBoundary(value => value + 1);
+    };
+    const configChanged = (event: Event) => {
+      if ((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged !== false) retire();
+    };
+    window.addEventListener("tldw:auth-principal-changed", retire);
+    window.addEventListener("tldw:config-updated", configChanged);
+    return () => {
+      scope.mounted = false;
+      scope.revision++;
+      window.removeEventListener("tldw:auth-principal-changed", retire);
+      window.removeEventListener("tldw:config-updated", configChanged);
+    };
+  }, []);
+  const captureStartupTemplateGuard = React.useCallback(() => {
+    const revision = scopeRef.current.revision;
+    return () => scopeRef.current.mounted && !scopeRef.current.retired && scopeRef.current.revision === revision;
+  }, []);
+  const canUseTemplate = React.useCallback((template: StartupTemplateBundle) =>
+    isStartupTemplateOwnedBy(template, promptOwnerId) &&
+    (template.ownerId == null || (promptOwnerReady && !scopeRef.current.retired)),
+    [promptOwnerId, promptOwnerReady]);
+
   const [startupTemplateDraftName, setStartupTemplateDraftName] =
     React.useState("");
   const previewMountedRef = React.useRef(true)
@@ -155,6 +204,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     React.useState<typeof previewRef.current>(null)
   const setStartupTemplatePreview = React.useCallback(
     (template: StartupTemplateBundle | null) => {
+      if (template && !canUseTemplate(template)) return
+      const ownerRevision = scopeRef.current.revision
       const id = {}
       const source = template ? captureStartupTemplateSource?.() : undefined
       const entry = template
@@ -163,7 +214,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
             lease: {
               id,
               isCurrent: () =>
-                previewMountedRef.current && previewRef.current?.lease.id === id,
+                previewMountedRef.current && previewRef.current?.lease.id === id && scopeRef.current.revision === ownerRevision && scopeRef.current.mounted && !scopeRef.current.retired && canUseTemplate(template!),
               sourceIsCurrent: source?.isCurrent ?? (() => true),
               continuationIsCurrent:
                 source?.continuationIsCurrent ?? (() => true),
@@ -175,7 +226,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       previewRef.current = entry
       setPreviewEntry(entry)
     },
-    [captureStartupTemplateSource]
+    [captureStartupTemplateSource, canUseTemplate]
   )
   const startupTemplatePreview = previewEntry?.template ?? null
   const startupTemplatePreviewLease = previewEntry?.lease ?? null
@@ -192,10 +243,12 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     [currentPresetKey],
   );
 
-  const startupTemplates = React.useMemo(
+  const allStartupTemplates = React.useMemo(
     () => parseStartupTemplateBundles(startupTemplatesRaw),
     [startupTemplatesRaw],
   );
+  const startupTemplates = allStartupTemplates.filter(canUseTemplate);
+
 
   const selectedSystemPromptRecord = React.useMemo<Prompt | null>(() => {
     if (!selectedSystemPrompt) return null;
@@ -232,9 +285,11 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   );
 
   const handleSaveStartupTemplate = React.useCallback(() => {
+    if (!promptOwnerReady || scopeRef.current.retired) return false;
+    if (selectedSystemPrompt && (!selectedSystemPromptRecord || !isPromptOwnedBy(selectedSystemPromptRecord, promptOwnerId))) return false;
     const trimmedSystemPrompt = String(systemPrompt || "").trim();
     const promptSource = inferStartupTemplatePromptSource(
-      selectedSystemPromptRecord,
+      promptOwnerId != null ? selectedSystemPromptRecord : null,
       trimmedSystemPrompt.length > 0,
     );
     const templateName = sanitizeStartupTemplateName(
@@ -242,14 +297,15 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       startupTemplateNameFallback,
     );
     const nextTemplate = createStartupTemplateBundle({
+      ownerId: promptOwnerId,
       name: templateName,
       selectedModel,
       systemPrompt: trimmedSystemPrompt,
-      selectedSystemPromptId: selectedSystemPrompt || null,
-      promptStudioPromptId:
-        selectedSystemPromptRecord?.studioPromptId ??
-        selectedSystemPromptRecord?.serverId ??
-        null,
+      // A known shared local selection is a literal copy, not an ambiguous legacy link.
+      selectedSystemPromptId: promptOwnerId != null ? selectedSystemPrompt || null : null,
+      promptStudioPromptId: promptOwnerId != null
+        ? selectedSystemPromptRecord?.studioPromptId ?? selectedSystemPromptRecord?.serverId ?? null
+        : null,
       promptTitle: selectedSystemPromptRecord?.title || null,
       promptSource,
       presetKey: currentPresetKey,
@@ -257,7 +313,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       ragPinnedResults,
     });
     const nextTemplates = upsertStartupTemplateBundle(
-      startupTemplates,
+      allStartupTemplates,
       nextTemplate,
     );
     persistStartupTemplates(nextTemplates);
@@ -279,13 +335,16 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     setModeAnnouncement,
     startupTemplateDraftName,
     startupTemplateNameFallback,
-    startupTemplates,
+    allStartupTemplates,
+    promptOwnerId,
+    promptOwnerReady,
     systemPrompt,
     t,
   ]);
 
   const handleSaveRolePlaySetup = React.useCallback(
     (input: SaveRolePlaySetupInput) => {
+      if (!promptOwnerReady || scopeRef.current.retired) return false
       const rolePlaySystemPrompt =
         input.rolePlay.behavior?.systemPrompt.trim() ?? ""
       const promptSource = input.rolePlay.behavior ? "system-template" : "none"
@@ -305,6 +364,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
             } as Character)
           : null
       const nextTemplate = createStartupTemplateBundle({
+        ownerId: promptOwnerId,
         name: templateName,
         source: "role-play-setup",
         selectedModel,
@@ -319,11 +379,11 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         rolePlay: input.rolePlay
       })
       const nextTemplates = upsertStartupTemplateBundle(
-        startupTemplates,
-        nextTemplate
-      )
-      persistStartupTemplates(nextTemplates)
-      setStartupTemplateDraftName(templateName)
+        allStartupTemplates,
+        nextTemplate,
+      );
+      persistStartupTemplates(nextTemplates);
+      setStartupTemplateDraftName(templateName);
       setModeAnnouncement(
         t(
           "playground:composer.rolePlaySetupSavedNotice",
@@ -331,18 +391,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         )
       )
     },
-    [
-      currentPresetKey,
-      persistStartupTemplates,
-      ragPinnedResults,
-      selectedCharacter,
-      selectedModel,
-      setModeAnnouncement,
-      startupTemplateNameFallback,
-      startupTemplates,
-      t
-    ]
-  )
+    [currentPresetKey, persistStartupTemplates, ragPinnedResults, selectedCharacter, selectedModel, setModeAnnouncement, startupTemplateNameFallback, allStartupTemplates, promptOwnerId, promptOwnerReady, t],
+  );
 
   const handleOpenStartupTemplatePreview = React.useCallback(
     (templateId: string) => {
@@ -358,6 +408,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       original: StartupTemplateBundle,
       originalSettingsOperation?: ModelSettingsOperation
     ) => {
+      if (!canUseTemplate(original) || scopeRef.current.retired) return async () => false
+      const ownerRevision = scopeRef.current.revision
       const template = JSON.parse(
         JSON.stringify(original)
       ) as StartupTemplateBundle
@@ -409,6 +461,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       let retired = false
       const operationIsCurrent = () =>
         !retired &&
+        scopeRef.current.mounted && scopeRef.current.revision === ownerRevision && canUseTemplate(template) &&
         settingsOperation.isCurrent() &&
         previewMountedRef.current &&
         source?.continuationIsCurrent?.() !== false &&
@@ -436,7 +489,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         : characterToAssistantSelection(template.character)
       const promptResolution = resolveStartupTemplatePrompt(
         template,
-        promptLibrary
+        promptLibrary.filter(prompt => isPromptOwnedBy(prompt, promptOwnerId))
       )
       const resolvedPromptContent = template.rolePlay
         ? template.rolePlay.behavior?.systemPrompt ?? ""
@@ -553,6 +606,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     [
       captureStartupTemplateSource,
       composerModels,
+      canUseTemplate,
+      promptOwnerId,
       compareModeActive,
       promptLibrary,
       selectedModel,
@@ -607,8 +662,9 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
 
   const handleDeleteStartupTemplate = React.useCallback(
     (templateId: string) => {
+      if (!promptOwnerReady || scopeRef.current.retired || !startupTemplates.some(template => template.id === templateId)) return;
       const nextTemplates = removeStartupTemplateBundle(
-        startupTemplates,
+        allStartupTemplates,
         templateId,
       );
       persistStartupTemplates(nextTemplates);
@@ -627,24 +683,24 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       setModeAnnouncement,
       startupTemplatePreview?.id,
       setStartupTemplatePreview,
+      allStartupTemplates,
       startupTemplates,
+      promptOwnerReady,
       t,
     ],
   );
 
   const handleRenameStartupTemplate = React.useCallback(
     (templateId: string, nextName: string) => {
-      const existing = startupTemplates.find(
-        (entry) => entry.id === templateId,
-      );
-      if (!existing) return;
+      const existing = startupTemplates.find((entry) => entry.id === templateId);
+      if (!existing || !promptOwnerReady || scopeRef.current.retired) return;
       const renamed = {
         ...existing,
         name: sanitizeStartupTemplateName(nextName, existing.name),
         updatedAt: Date.now(),
       };
       persistStartupTemplates(
-        upsertStartupTemplateBundle(startupTemplates, renamed),
+        upsertStartupTemplateBundle(allStartupTemplates, renamed),
       );
       if (startupTemplatePreview?.id === templateId) {
         setStartupTemplatePreview(renamed);
@@ -661,7 +717,9 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       setModeAnnouncement,
       startupTemplatePreview?.id,
       setStartupTemplatePreview,
+      allStartupTemplates,
       startupTemplates,
+      promptOwnerReady,
       t,
     ],
   );
@@ -724,6 +782,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     selectedSystemPromptRecord,
     // Handlers
     applyStartupTemplateBundle,
+    captureStartupTemplateGuard,
     handleSaveStartupTemplate,
     handleSaveRolePlaySetup,
     handleOpenStartupTemplatePreview,

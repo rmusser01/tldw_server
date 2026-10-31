@@ -311,6 +311,15 @@
   "currentChatModelSettings": {
     "message": "Current Chat Model Settings"
   },
+  "modelSettings_samplingNotSupported": {
+    "message": "Not supported by {{provider}}"
+  },
+  "modelSettings_samplingThisProvider": {
+    "message": "this provider"
+  },
+  "modelSettings_samplingSupportUnknown": {
+    "message": "Not sent: the server doesn't list whether this model accepts it"
+  },
   "modelSettings_label": {
     "message": "Model Settings"
   },
@@ -697,6 +706,21 @@
   },
   "error_friendlyGenericHint": {
     "message": "Try again in a moment, or open Health & diagnostics to inspect server health."
+  },
+  "error_providerUnavailableSummary": {
+    "message": "Couldn't reach {{model}}."
+  },
+  "error_providerUnavailableSummaryGeneric": {
+    "message": "Couldn't reach this model's provider."
+  },
+  "error_providerUnavailableHint": {
+    "message": "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+  },
+  "error_gatewayUnavailableHint": {
+    "message": "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models."
+  },
+  "error_switchModel": {
+    "message": "Switch model"
   },
   "error_showDetails": {
     "message": "Show technical details"
@@ -2062,5 +2086,140 @@
   "modelSelect": {
     "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
     "retrySave": "Retry saving model"
+  },
+  "table_label": {
+    "message": "Table"
+  },
+  "table_labelWithColumns": {
+    "message": "Table: {{columns}}"
+  },
+  "help_tutorialList": {
+    "message": "Tutorial list"
+  },
+  "help_shortcutList": {
+    "message": "Shortcut list"
+  },
+  "commandPalette_toggleChatWithPage": {
+    "message": "Toggle chat with current page"
+  },
+  "commandPalette_toggleChatWithPageDesc": {
+    "message": "Answer using the page open in this browser tab"
+  },
+  "chatSidebar_state_inProgress": {
+    "message": "In progress"
+  },
+  "chatSidebar_state_resolved": {
+    "message": "Resolved"
+  },
+  "chatSidebar_state_backlog": {
+    "message": "Backlog"
+  },
+  "chatSidebar_state_nonViable": {
+    "message": "Not viable"
+  },
+  "chatSidebar_groups_today": {
+    "message": "Today"
+  },
+  "chatSidebar_groups_thisWeek": {
+    "message": "This week"
+  },
+  "chatSidebar_groups_older": {
+    "message": "Older"
+  },
+  "chatSidebar_movedToTrash": {
+    "message": "Moved to Trash"
+  },
+  "chatSidebar_undoTrash": {
+    "message": "Undo"
+  },
+  "chatSidebar_viewTrash": {
+    "message": "View Trash"
+  },
+  "chatSidebar_permanentlyDeleted": {
+    "message": "Chat permanently deleted."
+  },
+  "chatSidebar_noSearchMatches": {
+    "message": "No chats match “{{query}}”"
+  },
+  "chatSidebar_clearSearch": {
+    "message": "Clear search"
+  },
+  "shortcuts_toggleChatWithPage": {
+    "message": "Toggle chat with current page"
+  },
+  "continueMessage_settings": {
+    "message": "Conversation settings could not be verified, so the reply was not continued. Reload this saved chat or try again; your original exchange and draft are kept."
+  },
+  "continueMessage_context": {
+    "message": "The server could not continue this reply because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept."
+  },
+  "continueMessage_changed": {
+    "message": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the chat before continuing the reply."
+  },
+  "continueMessage_scope": {
+    "message": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat."
+  },
+  "continueMessage_unsupported": {
+    "message": "This reply can't be continued here. Your original exchange and draft are kept. To keep going, use New Branch on this reply or send a follow-up message."
+  },
+  "continueMessage_failed": {
+    "message": "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
+  },
+  "modelSelect_saveFailed": {
+    "message": "This model is selected for this tab. Your preference could not be saved."
+  },
+  "modelSelect_retrySave": {
+    "message": "Retry saving model"
+  },
+  "modelSelect_change": {
+    "message": "Change model"
+  },
+  "modelSelect_choose": {
+    "message": "Choose model"
+  },
+  "modelSelect_group_default": {
+    "message": "Default"
+  },
+  "modelSelect_group_local": {
+    "message": "Local"
+  },
+  "modelSelect_readiness_notChecked": {
+    "message": "Not checked"
+  },
+  "modelSelect_readiness_working": {
+    "message": "Working"
+  },
+  "modelSelect_readiness_unreachable": {
+    "message": "Unreachable"
+  },
+  "copyCode": {
+    "message": "Copy code"
+  },
+  "codeCopied": {
+    "message": "Copied"
+  },
+  "table_scrollForMore": {
+    "message": "Scroll for more columns →"
+  },
+  "artifactsActions": {
+    "message": "Artifact actions"
+  },
+  "regenerateMessage_settings": {
+    "message": "Conversation settings could not be verified. No new reply was requested. Reload this saved chat or try again; your original exchange and draft are kept."
+  },
+  "regenerateMessage_context": {
+    "message": "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept."
+  },
+  "regenerateMessage_changed": {
+    "message": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the intended chat before regenerating again."
+  },
+  "regenerateMessage_scope": {
+    "message": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat."
+  },
+  "regenerateMessage_unsupported": {
+    "message": "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat."
+  },
+  "regenerateMessage_failed": {
+    "message": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
   }
 }

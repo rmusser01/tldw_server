@@ -17,6 +17,7 @@ import type { ChatScope } from "@/types/chat-scope"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption, extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
+import { readChunkFinishReason } from "@/utils/output-limit-reply"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
@@ -26,6 +27,7 @@ import {
   beginServerChatWrite,
   type ServerChatWriteOutcome
 } from "@/store/server-chat-save-status"
+import { CHAT_REQUEST_SAMPLING_FALLBACKS } from "./chat-sampling-defaults"
 
 export interface ChatTldwOptions {
   model: string
@@ -46,6 +48,9 @@ export interface ChatTldwOptions {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  /** Top-K and Min-P, set only when the model's provider accepts them (#3283). */
+  topK?: number
+  minP?: number
   systemPrompt?: string
   streaming?: boolean
   reasoningEffort?: "low" | "medium" | "high"
@@ -78,6 +83,8 @@ export class ChatTldw {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  topK?: number
+  minP?: number
   systemPrompt?: string
   streaming: boolean
   reasoningEffort?: "low" | "medium" | "high"
@@ -88,6 +95,8 @@ export class ChatTldw {
   conversationId?: string
   serverMessageId?: string
   userServerMessageId?: string
+  /** The last stream's `finish_reason` ("length" when the output limit cut it off, CM-03). */
+  finishReason?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -106,11 +115,17 @@ export class ChatTldw {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
     this.model = String(options.model || "").replace(/^tldw:/, "")
     this.routing = options.routing
-    this.temperature = options.temperature ?? 0.7
+    this.temperature =
+      options.temperature ?? CHAT_REQUEST_SAMPLING_FALLBACKS.temperature
     this.maxTokens = options.maxTokens
-    this.topP = options.topP ?? 1
-    this.frequencyPenalty = options.frequencyPenalty ?? 0
-    this.presencePenalty = options.presencePenalty ?? 0
+    this.topP = options.topP ?? CHAT_REQUEST_SAMPLING_FALLBACKS.topP
+    this.frequencyPenalty =
+      options.frequencyPenalty ??
+      CHAT_REQUEST_SAMPLING_FALLBACKS.frequencyPenalty
+    this.presencePenalty =
+      options.presencePenalty ?? CHAT_REQUEST_SAMPLING_FALLBACKS.presencePenalty
+    this.topK = options.topK
+    this.minP = options.minP
     this.systemPrompt = options.systemPrompt
     this.streaming = options.streaming ?? false
     this.reasoningEffort = options.reasoningEffort
@@ -163,6 +178,7 @@ export class ChatTldw {
     const { signal, callbacks } = options || {}
     this.serverMessageId = undefined
     this.userServerMessageId = undefined
+    this.finishReason = undefined
 
     const tldwMessages = options?.preparedRequest
       ? []
@@ -239,6 +255,9 @@ export class ChatTldw {
         interruptionChunk = chunk as Record<string, unknown>
       }
 
+      const finishReason = readChunkFinishReason(chunk)
+      if (finishReason) this.finishReason = finishReason
+
       const deltas =
         chunk?.choices?.[0]?.delta?.tool_calls ??
         chunk?.choices?.[0]?.tool_calls ??
@@ -265,6 +284,8 @@ export class ChatTldw {
         topP: this.topP,
         frequencyPenalty: this.frequencyPenalty,
         presencePenalty: this.presencePenalty,
+        topK: this.topK,
+        minP: this.minP,
         systemPrompt: this.systemPrompt,
         stream: true,
         reasoningEffort: this.reasoningEffort,
@@ -395,6 +416,8 @@ export class ChatTldw {
       topP: this.topP,
       frequencyPenalty: this.frequencyPenalty,
       presencePenalty: this.presencePenalty,
+      topK: this.topK,
+      minP: this.minP,
       systemPrompt: this.systemPrompt,
       reasoningEffort: this.reasoningEffort,
       toolChoice: this.toolChoice,
@@ -423,6 +446,8 @@ export class ChatTldw {
       topP: this.topP,
       frequencyPenalty: this.frequencyPenalty,
       presencePenalty: this.presencePenalty,
+      topK: this.topK,
+      minP: this.minP,
       systemPrompt: this.systemPrompt,
       stream: false,
       reasoningEffort: this.reasoningEffort,

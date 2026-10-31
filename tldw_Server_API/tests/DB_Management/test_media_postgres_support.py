@@ -867,9 +867,9 @@ def test_soft_delete_keyword_postgres_uses_backend_helpers() -> None:
 
             return self._rows
 
-    db._fetchone_with_connection = MagicMock(  # type: ignore[attr-defined]
+    db._fetchall_with_connection = MagicMock(  # type: ignore[attr-defined]
         side_effect=[
-            {"id": 7, "uuid": "kw-uuid", "version": 2},
+            [{"id": 7, "uuid": "kw-uuid", "keyword": "Science", "deleted": False, "version": 2}],
         ]
     )
     db._execute_with_connection = MagicMock(  # type: ignore[attr-defined]
@@ -884,7 +884,9 @@ def test_soft_delete_keyword_postgres_uses_backend_helpers() -> None:
 
     assert db.soft_delete_keyword("Science") is True
 
-    db._fetchone_with_connection.assert_called_once()  # type: ignore[attr-defined]
+    db._fetchall_with_connection.assert_called_once()  # type: ignore[attr-defined]
+    lookup = db._fetchall_with_connection.call_args.args[1]
+    assert "LOWER(keyword) IN" in lookup and "deleted = FALSE" in lookup
     update_call = db._execute_with_connection.call_args_list[0]  # type: ignore[attr-defined]
     assert "UPDATE Keywords" in update_call.args[1]
     db._delete_fts_keyword.assert_called_once_with(conn, 7)  # type: ignore[attr-defined]

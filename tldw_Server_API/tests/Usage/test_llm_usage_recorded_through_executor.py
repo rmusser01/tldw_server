@@ -9,6 +9,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.Usage import llm_accounting
@@ -87,7 +88,7 @@ async def test_a_job_root_records_the_job_owner(monkeypatch: pytest.MonkeyPatch,
     pool = await _fresh_pool(monkeypatch, tmp_path)
     registry = ChatProviderRegistry(include_defaults=False)
     registry.register_adapter("exec-fake", _ExecProvider)
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
 
     fields = await resolved_request_fields_async("exec-fake", api_key="k", app_config={}, model="exec-model")
     with llm_call_root("42"):

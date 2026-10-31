@@ -31,7 +31,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import hold_tts_engine, parse_bool, run_tts_blocking_call
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 from .base import (
     AudioFormat,
     ProviderStatus,
@@ -78,7 +78,9 @@ class NeuTTSAdapter(TTSAdapter):
             logger.info(
                 f"NeuTTS: loading backbone={self.backbone_repo} codec={self.codec_repo}"
             )
-            self._engine = await run_tts_blocking_call(self._load_engine)
+            load_lock = tts_model_load_lock(self.provider_key, f"{self.backbone_repo}:{self.codec_repo}")
+            async with hold_tts_engine(load_lock) as run:
+                self._engine = await run(self._load_engine)
             try:
                 from ..tts_resource_manager import get_resource_manager
                 resource_manager = await get_resource_manager()

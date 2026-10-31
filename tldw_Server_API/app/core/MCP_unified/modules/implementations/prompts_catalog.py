@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from ....Context_Integrity.prompt_loader import load_prompt
 from ....DB_Management.Prompts_DB import DatabaseError, PromptsDatabase
 from ....DB_Management.prompts_db_helpers import parse_stored_prompt_definition
 from ....exception_types import PromptCatalogError
@@ -29,7 +30,6 @@ from ....Prompt_Management.structured_prompts import (
 from ....Prompt_Management.structured_prompts.single_text_renderer import (
     SingleTextRecipeRenderResult,
 )
-from ....Utils.prompt_loader import load_prompt
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids
 from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 

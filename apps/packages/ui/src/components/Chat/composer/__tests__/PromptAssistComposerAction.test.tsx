@@ -1,3 +1,4 @@
+import type { Prompt } from "@/db/dexie/types"
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import * as serverOnline from "@/hooks/useServerOnline"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
@@ -102,9 +103,13 @@ vi.mock("@/services/prompts-api", async (importOriginal) => {
 
 vi.mock("@/db/dexie/helpers", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/db/dexie/helpers")>()
+  const { isPromptOwnedBy } = await import("@/services/prompt-local-owner")
   return {
     ...original,
     getAllPrompts: (...args: unknown[]) => mocks.getAllPrompts(...args),
+    getSharedLocalPrompts: async (deleted = false) =>
+      (await mocks.getAllPrompts()).filter((prompt: Prompt) =>
+        prompt.ownerId == null && isPromptOwnedBy(prompt, null) && !!prompt.deletedAt === deleted),
     updatePrompt: (...args: unknown[]) => mocks.updatePrompt(...args),
     markPromptSyncError: (...args: unknown[]) =>
       mocks.markPromptSyncError(...args)

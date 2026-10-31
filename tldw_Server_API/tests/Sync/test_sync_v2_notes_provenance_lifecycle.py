@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
@@ -1139,6 +1140,7 @@ def test_capabilities_http_response_exposes_provenance_schema(env):
 
     service, _ = env
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoint.router, prefix="/api/v1/sync/v2")
     app.dependency_overrides[endpoint.get_request_user] = lambda: SimpleNamespace(id="alice")
     app.dependency_overrides[endpoint.get_sync_v2_service] = lambda: service

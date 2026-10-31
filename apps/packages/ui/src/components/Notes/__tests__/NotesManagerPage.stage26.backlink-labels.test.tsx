@@ -9,6 +9,7 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { Playground } from "@/components/Option/Playground/Playground"
 import { selectedAssistantStorage } from "@/utils/selected-assistant-storage"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 
 const {
   mockBgRequest,
@@ -150,17 +151,25 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => {
   const state = useStoreMessageOption()
+  const { settings } = useChatSettingsRecord({ historyId: state.historyId, serverChatId: state.serverChatId })
+  const selection = chatAuthority.selection
+  const canonicalId = state.serverChatAssistantKind === "character" ? state.serverChatCharacterId : state.serverChatAssistantId
+  const canonicalAssistant = selection?.kind === state.serverChatAssistantKind && String(selection.id) === String(canonicalId) ? selection : null
   return {
-    ...state, selectedAssistant: chatAuthority.selection,
+    ...state, selectedAssistant: selection,
     effectiveAssistantState: resolveEffectiveAssistantState({
       tracked: {
         assistantKind: state.serverChatAssistantKind,
         assistantId: state.serverChatAssistantId,
-        characterId: state.serverChatCharacterId
+        characterId: state.serverChatCharacterId,
+        displayName: canonicalAssistant?.name,
+        avatarUrl: canonicalAssistant?.avatar_url,
+        systemPromptSnapshot: canonicalAssistant?.system_prompt
       },
-      draftSelection: chatAuthority.selection
+      settings,
+      draftSelection: selection
     }),
-    selectedCharacter: chatAuthority.selection?.kind === "character" ? { id: chatAuthority.selection.id, name: chatAuthority.selection.name } : null,
+    selectedCharacter: selection?.kind === "character" ? { id: selection.id, name: selection.name } : null,
     setSelectedAssistant: chatAuthority.setSelection, setSelectedCharacter: vi.fn(), onSubmit: vi.fn(), regenerateLastMessage: vi.fn()
   }
 } }))
@@ -445,7 +454,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByText(/open linked conversation/i))
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/chat")
+      expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=conv-same-tab")
     })
     expect(openSpy).not.toHaveBeenCalled()
     openSpy.mockRestore()
@@ -460,7 +469,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
     fireEvent.click(await screen.findByText(/open linked conversation/i))
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=cedar"))
     expect(atNavigation[0]).toMatchObject({ chat: "cedar", selection: { kind: "character", id: "4", metadata: { selectionMode: "tracked" } } })
     // H1 publishes identity/messages first; metadata admission remains pending at navigation.
     expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", serverChatCharacterId: 4, serverChatVersion: 3, serverChatMetaLoaded: false, temporaryChat: false })
@@ -529,8 +538,8 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     await waitFor(() => expect(mockListChatMessages).toHaveBeenCalled())
     act(() => {
       if (change === "stream") useStoreMessageOption.setState({ streaming: true })
-      if (change === "new-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "user", isBot: false, name: "You", message: "Keep this thought" }] })
-      if (change === "image-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "assistant", isBot: true, name: "Assistant", message: "", images: ["data:image/png;base64,YQ=="] }] })
+      if (change === "new-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "user", isBot: false, name: "You", message: "Keep this thought" , sources: [] }] })
+      if (change === "image-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "assistant", isBot: true, name: "Assistant", message: "", images: ["data:image/png;base64,YQ=="] , sources: [] }] })
       if (change === "account") chatAuthority.controller.abort()
       if (change === "restore") usePlaygroundSessionStore.getState().cancelPendingRestore()
       if (change === "selection") usePlaygroundSessionStore.getState().markSourceSelectionIntent()
@@ -548,16 +557,16 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     mockListChatMessages.mockResolvedValue([{ id: "server-user", role: "user", content: "Question" }, { id: "server-answer", role: "assistant", content: "Answer" }])
     const error = '__tldw_error__:{"summary":"Provider failed","hint":"Try again","detail":"Stream completion failed"}'
     useStoreMessageOption.setState({ historyId: "local-normal", serverChatId: "normal-saved", messages: [
-      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" },
-      { id: "local-error", isBot: !kind.startsWith("user-"), role: kind.startsWith("user-") ? "user" : "assistant", name: "Assistant", images: kind.includes("image") ? ["data:image/png;base64,YQ=="] : undefined, message: kind.endsWith("image-only") ? "" : kind === "assistant-draft" ? "Unfinished reply" : kind === "malformed-error" ? "__tldw_error__:{broken" : error },
-      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" }
+      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" , sources: [] },
+      { id: "local-error", isBot: !kind.startsWith("user-"), role: kind.startsWith("user-") ? "user" : "assistant", name: "Assistant", images: kind.includes("image") ? ["data:image/png;base64,YQ=="] : undefined, message: kind.endsWith("image-only") ? "" : kind === "assistant-draft" ? "Unfinished reply" : kind === "malformed-error" ? "__tldw_error__:{broken" : error , sources: [] },
+      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" , sources: [] }
     ], streaming: false, isProcessing: false })
     renderPage()
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
     fireEvent.click(await screen.findByText(/open linked conversation/i))
     if (kind === "display-error") {
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=normal-saved"))
       expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "server-user" }, { serverMessageId: "server-answer" }])
     } else {
       expect(mockNavigate).not.toHaveBeenCalled()
@@ -576,9 +585,9 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
     fireEvent.click(await screen.findByText(/open linked conversation/i))
     await waitFor(() => expect(mockListChatMessages).toHaveBeenCalled())
-    act(() => useStoreMessageOption.setState({ messages: [{ id: "restored-error", role: "assistant", isBot: true, name: "Assistant", message: '__tldw_error__:{"summary":"Provider failed","hint":"Try again"}' }] }))
+    act(() => useStoreMessageOption.setState({ messages: [{ id: "restored-error", role: "assistant", isBot: true, name: "Assistant", message: '__tldw_error__:{"summary":"Provider failed","hint":"Try again"}' , sources: [] }] }))
     await act(async () => { release([{ id: "saved-answer", role: "assistant", content: "Recovered answer" }]); await Promise.resolve(); await Promise.resolve() })
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=normal-saved"))
     expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "saved-answer", message: "Recovered answer" }])
   })
 
@@ -591,9 +600,9 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     ])
     chatAuthority.selection = null
     useStoreMessageOption.setState({ historyId: "local-normal", serverChatId: "normal-saved", serverChatCharacterId: null, serverChatMetaLoaded: true, messages: [
-      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" },
-      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" },
-      ...(withDraft ? [{ id: "unsent", isBot: false, name: "You", message: "Question" }] : [])
+      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" , sources: [] },
+      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" , sources: [] },
+      ...(withDraft ? [{ id: "unsent", isBot: false, name: "You", message: "Question" , sources: [] }] : [])
     ], history: [], streaming: false, isProcessing: false })
     renderPage()
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
@@ -604,7 +613,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       expect(mockNavigate).not.toHaveBeenCalled()
       expect(mockListChatMessages).not.toHaveBeenCalled()
     } else {
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=normal-saved"))
       expect(useStoreMessageOption.getState().serverChatId).toBe("normal-saved")
       expect(chatAuthority.selection).toBeNull()
     }
@@ -647,7 +656,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     try {
       fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
       fireEvent.click(await screen.findByText(/open linked conversation/i))
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=cedar"))
       expect(settings).toHaveBeenCalledOnce()
       expect(confirm).toHaveBeenCalledOnce()
       expect(useStoreMessageOption.getState()).toMatchObject({ temporaryChat: false, serverChatId: "cedar", messages: [{ serverMessageId: "saved-a", message: "Destination answer" }] })

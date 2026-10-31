@@ -2,9 +2,12 @@
 
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 import trafilatura
 from loguru import logger
+from lxml import etree
+from lxml import html as lxml_html
 
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 from tldw_Server_API.app.core.Web_Scraping.extraction.metrics import emit_global_counter as log_counter
@@ -46,16 +49,46 @@ def _strip_boilerplate_sections(text: str) -> str:
     return "\n".join(collapsed)
 
 
+def _arxiv_abstract(page_html: str, url: str) -> str | None:
+    """Select publisher abstract text only for canonical arXiv abstract pages."""
+    try:
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or parsed.hostname != "arxiv.org"
+            or not re.fullmatch(
+                r"/abs/(?:[0-9]{4}\.[0-9]{4,5}|[a-zA-Z][a-zA-Z0-9.-]*/[0-9]{7})(?:v[0-9]+)?", parsed.path
+            )
+        ):
+            return None
+        document = lxml_html.fromstring(page_html)
+    except (ValueError, etree.ParserError):
+        return None
+
+    for content in document.xpath('//meta[@name="citation_abstract"]/@content'):
+        if content.strip():
+            return content.strip()
+    for block in document.xpath('//blockquote[contains(concat(" ", normalize-space(@class), " "), " abstract ")]'):
+        for label in block.xpath('.//*[contains(concat(" ", normalize-space(@class), " "), " descriptor ")]'):
+            label.drop_tree()
+        content = block.text_content().strip()
+        if content:
+            return content
+    return None
+
+
 def extract_with_trafilatura(html: str, url: str) -> dict[str, Any]:
     """Extract article metadata and body from raw HTML for the direct pipeline."""
     logger.info("Extracting article data from HTML")
-    downloaded = trafilatura.extract(
-        html,
-        include_comments=False,
-        include_tables=False,
-        include_images=False,
-    )
-    downloaded = _strip_boilerplate_sections(downloaded)
+    downloaded = _arxiv_abstract(html, url)
+    if downloaded is None:
+        downloaded = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=False,
+            include_images=False,
+        )
+        downloaded = _strip_boilerplate_sections(downloaded)
     metadata = trafilatura.extract_metadata(html)
 
     result: dict[str, Any] = {

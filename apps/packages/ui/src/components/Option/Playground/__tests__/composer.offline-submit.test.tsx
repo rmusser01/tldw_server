@@ -26,6 +26,8 @@ const makeForm = () => {
 const makeWebDeps = (ready: boolean, busy: boolean, imageCommand = false) => {
   const test = makeForm()
   const deps: UsePlaygroundSubmitDeps = {
+    captureDraftOwnership: () => ({ isCurrent: () => true, isOwnerCurrent: () => true, isImageCurrent: () => true, normalizeMessage: () => true }),
+    captureHistorySelection: () => () => true,
     form: test.form, beginPromptAssistReset: vi.fn(() => 1), restorePromptAssistAttempt: vi.fn(), markPromptAssistAttemptSaved: vi.fn(),
     isSending: busy, isConnectionReady: ready, draftReady: true, webSearch: false, compareModeActive: false, compareSelectedModels: [], selectedModel: "gpt-test",
     fileRetrievalEnabled: false, ragPinnedResults: [], selectedDocuments: [{ id: "keep-tab" }], uploadedFiles: [], currentContextSnapshot: {},
@@ -124,7 +126,8 @@ const helperSource = ts.transpileModule(`const {
   submitDispatch, beginPromptAssistReset, textAreaFocus, markPromptAssistAttemptSaved, clearDraft, clearSelectedDocuments, setContextFiles,
   setKnowledgeMentionActive, restorePromptAssistAttempt, knowledgeMentionRevision, clearSubmittedDocuments, captureCompletionGuard,
   currentDocumentSelectionKeyRef, greetingHistorySelection, isSavedRoleplayConversation, captureChatDispatchSource, captureActorSceneSend,
-  nativeCharacterPreflightMessage, chatMode, webSearch, selectedSystemPrompt, toolChoice, pageContextActive
+  nativeCharacterPreflightMessage, chatMode, webSearch, selectedSystemPrompt, toolChoice, pageContextActive,
+  captureDraftOwnership, contextRevisionRef, contextKeyFor, useStoreMessageOption
 } = scope;
 ${directHelper.getText(ast)}
 return sendCurrentFormMessage;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
@@ -136,7 +139,7 @@ it.each([false, true])("actual compact context preparation does not clear or sen
   const test = makeWebDeps(true, false)
   const dispatcher = renderHook(() => useComposerSubmit({ sendMessage: test.deps.sendMessage }))
   const scope = {
-    ...test.deps, notification: test.deps.notificationApi, contextFiles: [], history: [], availableChatModelIds: new Set(["gpt-test"]),
+    ...test.deps, useStoreMessageOption, contextRevisionRef: { current: { revision: 0 } }, contextKeyFor: () => "unchanged", notification: test.deps.notificationApi, contextFiles: [], history: [], availableChatModelIds: new Set(["gpt-test"]),
     connectionReadyRef: { current: true }, connectionGenerationRef: { current: 0 }, sidepanelDocumentPreparationRef: { current: null },
     stopListening: vi.fn(async () => {}), ensureEmbeddingModelAvailable: vi.fn(async () => true),
     conversationContextComposition: { composeForSend: vi.fn(() => waiting) }, submitDispatch: dispatcher.result.current.dispatch,
@@ -233,6 +236,8 @@ it("actual Compact saved Roleplay preparation uses literal input without reading
   )
   const scope = {
     ...test.deps,
+    useStoreMessageOption,
+    contextRevisionRef: { current: { revision: 0 } }, contextKeyFor: () => "unchanged",
     notification: test.deps.notificationApi,
     selectedDocuments: [],
     contextFiles: [],

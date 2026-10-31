@@ -318,6 +318,7 @@ def test_collections_database_refreshes_shared_backend_after_cache_rotation(monk
     monkeypatch.setattr(collections_db, "load_comprehensive_config", lambda: _make_config("pw1", "prefer"))
     monkeypatch.setattr(collections_db, "get_content_backend", lambda _cfg: holder["backend"])
     monkeypatch.setattr(collections_db.CollectionsDatabase, "ensure_schema", lambda self: None)
+    monkeypatch.setattr(collections_db, "ensure_tag_identity", lambda *_args: None)
     monkeypatch.setattr(
         collections_db.CollectionsDatabase,
         "_seed_watchlists_output_templates",
@@ -725,6 +726,7 @@ def test_collections_database_reruns_bootstrap_when_shared_backend_target_change
         "ensure_schema",
         lambda self: schema_calls.append(self._backend.label),
     )
+    monkeypatch.setattr(collections_db, "ensure_tag_identity", lambda *_args: None)
     monkeypatch.setattr(
         collections_db.CollectionsDatabase,
         "_seed_watchlists_output_templates",
@@ -836,6 +838,7 @@ def test_watchlists_database_reruns_bootstrap_when_pg_host_changes_with_same_db_
         "ensure_schema",
         lambda self: schema_calls.append(self._backend_target_key(self._backend) or "<none>"),
     )
+    monkeypatch.setattr(watchlists_db, "ensure_tag_identity", lambda *_args: None)
     monkeypatch.setattr(watchlists_db.WatchlistsDatabase, "_schema_init_keys", set())
 
     db = watchlists_db.WatchlistsDatabase(user_id="1")

@@ -31,17 +31,17 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
+    is_production_like_env,
     is_test_mode,
     is_truthy,
 )
+from tldw_Server_API.app.core.Utils.provider_identity import canonical_provider_name
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.config_sections import ConfigSections
-    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 _CONFIG_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -2922,9 +2922,10 @@ def usage_quotas_enabled() -> bool:
     return _as_bool(v, False)
 
 
-def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
+def get_llamacpp_handler_settings() -> dict[str, Any] | None:
     """
-    Build a LlamaCppConfig from environment variables or [LlamaCpp] section in config.txt.
+    Return the LlamaCppConfig keyword arguments from environment variables or the
+    [LlamaCpp] section in config.txt, or None when the handler is disabled.
 
     Env overrides (precedence over config.txt):
         LLAMACPP_ENABLED
@@ -2942,12 +2943,6 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
         LLAMACPP_ALLOWED_PATHS  (comma separated)
         LLAMACPP_LOG_OUTPUT_FILE
     """
-    try:
-        from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config unavailable (import failed): {exc}")
-        return None
-
     try:
         cp = load_comprehensive_config()
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
@@ -2971,7 +2966,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if not enabled:
         return None
 
-    kwargs: dict[str, object] = {"enabled": True}
+    kwargs: dict[str, Any] = {"enabled": True}
 
     exe = _get("executable_path", "LLAMACPP_EXECUTABLE_PATH")
     models_dir = _get("models_dir", "LLAMACPP_MODELS_DIR")
@@ -3023,11 +3018,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if log_output_file:
         kwargs["log_output_file"] = Path(str(log_output_file))
 
-    try:
-        return LlamaCppConfig(**kwargs)
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config invalid; disabling handler: {exc}")
-        return None
+    return kwargs
 
 
 _GOVERNANCE_ROLLOUT_MODES = {"off", "shadow", "enforce"}
@@ -3451,20 +3442,9 @@ def should_allow_cors_credentials() -> bool:
     return value
 
 
-@lru_cache(maxsize=1)
 def is_production_environment() -> bool:
     """Return True when runtime environment should use production safety guards."""
-    if is_truthy(os.getenv("tldw_production")):
-        return True
-
-    for env_key in ("ENV", "APP_ENV", "TLDW_ENV", "ENVIRONMENT"):
-        raw_value = os.getenv(env_key)
-        if raw_value is None:
-            continue
-        normalized = str(raw_value).strip().lower()
-        if normalized in {"prod", "production"}:
-            return True
-    return False
+    return is_production_like_env()
 
 
 def _resolve_disable_cors_value_and_source() -> tuple[bool, str]:
@@ -5999,7 +5979,6 @@ def refresh_config_cache() -> None:
     _route_toggle_policy.cache_clear()
     should_disable_cors.cache_clear()
     should_allow_cors_credentials.cache_clear()
-    is_production_environment.cache_clear()
 
 
 def clear_config_cache() -> None:

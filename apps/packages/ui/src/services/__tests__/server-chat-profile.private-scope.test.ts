@@ -18,7 +18,10 @@ describe("saved Chat profile request authority", () => {
     vi.clearAllMocks(); current = config(); client = new TldwApiClient()
     vi.spyOn(tldwClient, "initialize").mockResolvedValue(undefined)
     vi.spyOn(client, "ensureConfigForRequest").mockImplementation(async () => current)
-    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     boundary.get.mockImplementation(async key => key === "tldwConfig" ? current : null)
     boundary.fetch.mockImplementation(async () => new Response(JSON.stringify({ id: 4, name: current.accessToken === config().accessToken ? "Alice Cedar" : "Bob Cedar" }), { status: 200, headers: { "Content-Type": "application/json" } }))
     vi.stubGlobal("fetch", boundary.fetch)

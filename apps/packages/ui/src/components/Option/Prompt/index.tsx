@@ -1,3 +1,6 @@
+import { PromptStudioStoreProvider } from "@/store/prompt-studio"
+import { usePromptInventory } from "@/hooks/usePromptInventory"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Skeleton,
@@ -31,10 +34,7 @@ import type { PromptListQueryState, PromptRowVM, PromptSavedView } from "./promp
 import React, { Suspense, useMemo, useRef, useState, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import {
-  getAllPrompts,
-  getDeletedPrompts
-} from "@/db/dexie/helpers"
+import { getAllPrompts } from "@/db/dexie/helpers"
 // getAllCopilotPrompts, upsertCopilotPrompts moved to usePromptInteractions hook
 import { tagColors } from "@/utils/color"
 // isFireFoxPrivateMode moved to usePromptUtilities hook
@@ -224,6 +224,16 @@ const readPromptGalleryDensity = (): PromptGalleryDensity => {
 }
 
 export const PromptBody = () => {
+  const authority = usePromptLocalAuthority()
+  if (!authority.ready && !authority.localOnlyReady) return null
+  return (
+    <PromptStudioStoreProvider key={authority.ready ? authority.ownerId ?? "local" : "resolving"}>
+      <PromptBodyForOwner ownerId={authority.ownerId} draftScopeKey={authority.ownerId ?? `local:${authority.boundaryKey}`} />
+    </PromptStudioStoreProvider>
+  )
+}
+
+const PromptBodyForOwner = ({ ownerId, draftScopeKey }: { ownerId: string | null; draftScopeKey: string }) => {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const { t } = useTranslation(["settings", "common", "option"])
@@ -303,17 +313,10 @@ export const PromptBody = () => {
 
   const debouncedSearchText = useDebounce(searchText, 300)
   const normalizedSearchText = debouncedSearchText.trim()
-  const shouldUseServerSearch = isOnline && normalizedSearchText.length > 0
 
-  const { data, status } = useQuery({
-    queryKey: ["fetchAllPrompts"],
-    queryFn: getAllPrompts
-  })
+  const { data, status } = usePromptInventory("fetchAllPrompts")
 
-  const { data: trashData, status: trashStatus } = useQuery({
-    queryKey: ["fetchDeletedPrompts"],
-    queryFn: getDeletedPrompts
-  })
+  const { data: trashData, status: trashStatus } = usePromptInventory("fetchDeletedPrompts", { deleted: true })
 
   const { data: promptCapabilities } = useQuery({
     queryKey: ["promptCapabilities", promptBackendKey],
@@ -355,12 +358,14 @@ export const PromptBody = () => {
   // --- Hooks ---
 
   const sync = usePromptSync({
+    expectedOwnerId: ownerId,
     queryClient,
     isOnline,
     t
   })
 
   const editor = usePromptEditor({
+    expectedOwnerId: ownerId,
     queryClient,
     isOnline,
     t,
@@ -389,6 +394,7 @@ export const PromptBody = () => {
   })
 
   const importExport = usePromptImportExport({
+    expectedOwnerId: ownerId,
     queryClient,
     data,
     isOnline,
@@ -431,6 +437,7 @@ export const PromptBody = () => {
   }, [editor.emptyTrashMutation, editor.isEmptyingTrash, emptyTrashConfirmText])
 
   const interactions = usePromptInteractions({
+    expectedOwnerId: ownerId,
     queryClient,
     isOnline,
     initialSegment,
@@ -700,8 +707,8 @@ export const PromptBody = () => {
         }
         try {
           const refreshedPrompts = await queryClient.fetchQuery({
-            queryKey: ["fetchAllPrompts"],
-            queryFn: getAllPrompts
+            queryKey: ["fetchAllPrompts", ownerId, "resolved"],
+            queryFn: () => getAllPrompts(ownerId)
           })
           const importedPrompt = (Array.isArray(refreshedPrompts)
             ? refreshedPrompts
@@ -774,7 +781,7 @@ export const PromptBody = () => {
         defaultValue: "The requested prompt could not be found. It may have been deleted."
       })
     })
-  }, [searchParams, data, status, setSearchParams, isOnline, queryClient, t, editor])
+  }, [searchParams, data, status, setSearchParams, isOnline, queryClient, t, editor, ownerId])
 
   const promptLoadFailed = status === "error"
   const copilotLoadFailed = isOnline && copilotStatus === "error"
@@ -825,9 +832,7 @@ export const PromptBody = () => {
 
   const filteredDataHook = usePromptFilteredData({
     data,
-    isOnline,
     normalizedSearchText,
-    shouldUseServerSearch,
     projectFilter,
     typeFilter,
     syncFilter,
@@ -848,30 +853,14 @@ export const PromptBody = () => {
     t
   })
   const {
-    serverSearchStatus,
     allTags,
     pendingSyncCount,
     localSyncBatchPlan,
     sidebarCounts,
     sortedFilteredData,
     customPromptRows,
-    tableTotal,
-    hiddenServerResultsOnPage,
-    useServerSearchResults
+    tableTotal
   } = filteredDataHook
-
-  useEffect(() => {
-    if (!shouldUseServerSearch || serverSearchStatus !== "error") return
-    notification.warning({
-      message: t("managePrompts.searchServerFallback", {
-        defaultValue: "Server search unavailable"
-      }),
-      description: t("managePrompts.searchServerFallbackDesc", {
-        defaultValue:
-          "Falling back to local search results for this query."
-      })
-    })
-  }, [serverSearchStatus, shouldUseServerSearch, t])
 
   const filteredTrashData = useMemo(() => {
     if (!Array.isArray(trashData)) return []
@@ -894,9 +883,7 @@ export const PromptBody = () => {
     savedView
   }
 
-  const customPromptsLoading =
-    status === "pending" ||
-    (shouldUseServerSearch && serverSearchStatus === "pending")
+  const customPromptsLoading = status === "pending"
 
   React.useEffect(() => {
     // Only clear selection for items that are no longer visible
@@ -1908,22 +1895,6 @@ export const PromptBody = () => {
 
         {customPromptsLoading && <Skeleton paragraph={{ rows: 8 }} />}
 
-        {useServerSearchResults && hiddenServerResultsOnPage > 0 && (
-          <Alert
-            variant="info"
-            className="mb-3"
-            title={t("managePrompts.search.localSubset", {
-              defaultValue: "Showing synced local matches only"
-            })}
-          >
-            {t("managePrompts.search.localSubsetDesc", {
-              defaultValue:
-                "{{count}} result(s) from this page are not saved locally yet.",
-              count: hiddenServerResultsOnPage
-            })}
-          </Alert>
-        )}
-
         {status === "success" && Array.isArray(data) && data.length === 0 && (
           <>
             <FeatureEmptyState
@@ -2605,6 +2576,8 @@ export const PromptBody = () => {
   const renderPromptDrawer = () => (
     <Suspense fallback={deferredPromptSurfaceFallback}>
       <PromptDrawer
+        key={JSON.stringify([draftScopeKey, editor.drawerMode, editor.drawerInitialValues?.id ?? "new"])}
+        draftScopeKey={draftScopeKey}
         open={editor.drawerOpen}
         onClose={() => {
           editor.setDrawerOpen(false)
@@ -2622,6 +2595,8 @@ export const PromptBody = () => {
   const renderPromptFullPageEditor = () => (
     <Suspense fallback={deferredPromptSurfaceFallback}>
       <PromptFullPageEditor
+        key={JSON.stringify([draftScopeKey, editor.fullEditorMode, editor.fullEditorInitialValues?.id ?? "new"])}
+        draftScopeKey={draftScopeKey}
         open={editor.fullEditorOpen}
         onClose={editor.closeFullEditor}
         mode={editor.fullEditorMode}

@@ -779,7 +779,7 @@ export const createDirectRuntime = (
   initialConfig?: DirectConfigSnapshot,
   onDispatch?: () => void
 ) => {
-  let originalConfig: TldwConfig | undefined
+  let originalConfig: TldwConfig | undefined = initialConfig ? { ...initialConfig } : undefined
   let hasInitialConfig = typeof initialConfig !== "undefined"
   const account = new AbortController()
   const releaseAccount = watchChatAccountChanges(invalidated => {
@@ -1509,7 +1509,25 @@ export interface BgStreamInit<
   onDispatch?: () => void
   sanitizeRagProviderStreamError?: boolean
   servicePromptConfig?: ServicePromptTargetConfig
+  /**
+   * The response always ends with `data: [DONE]` (tldw chat completions). When
+   * it ends without one after some data arrived, the connection dropped
+   * mid-reply: the stream then yields a `stream_transport_interrupted` event
+   * instead of ending as if the reply were complete (CM-03).
+   */
+  expectDoneSentinel?: boolean
 }
+
+/** Detail of the event yielded when an expected `[DONE]` never arrived. */
+export const STREAM_ENDED_WITHOUT_DONE_DETAIL =
+  "The connection closed before the reply finished."
+
+const streamEndedWithoutDoneEvent = () =>
+  JSON.stringify({
+    event: "stream_transport_interrupted",
+    detail: STREAM_ENDED_WITHOUT_DONE_DETAIL,
+    partial_response_saved: true
+  })
 
 const deriveStreamIdleTimeout = (cfg: any, path: string, override?: number) => {
   if (override && override > 0) return override
@@ -1593,7 +1611,7 @@ async function* bgStreamDirectUnsafe<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, onDispatch, servicePromptConfig }: BgStreamInit<P, M>,
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, onDispatch, servicePromptConfig, expectDoneSentinel = false }: BgStreamInit<P, M>,
   accountSignal: AbortSignal
 ): AsyncGenerator<string> {
   accountSignal.throwIfAborted()
@@ -1829,6 +1847,7 @@ async function* bgStreamDirectUnsafe<
     reader = resp.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ""
+    let yieldedData = false
     resetIdle()
     while (true) {
       const { done, value } = await reader.read()
@@ -1850,8 +1869,10 @@ async function* bgStreamDirectUnsafe<
             if (idleTimer) clearTimeout(idleTimer)
             return
           }
+          yieldedData = true
           yield data
         } else if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          yieldedData = true
           yield trimmed
         }
       }
@@ -1862,15 +1883,18 @@ async function* bgStreamDirectUnsafe<
       controller.signal.throwIfAborted()
       if (tail.startsWith("data:")) {
         const data = tail.slice(5).trim()
-        if (data !== "[DONE]") {
-          yield data
-        }
+        if (data === "[DONE]") return
+        yieldedData = true
+        yield data
       } else if (tail.startsWith("{") || tail.startsWith("[")) {
+        yieldedData = true
         yield tail
       }
     }
     accountSignal.throwIfAborted()
     controller.signal.throwIfAborted()
+    // CM-03: the body ended without [DONE]; the reply was cut off.
+    if (expectDoneSentinel && yieldedData) yield streamEndedWithoutDoneEvent()
   } catch (e: any) {
     accountSignal.throwIfAborted()
     if (idleError) {
@@ -1932,7 +1956,8 @@ export async function* bgStream<
     onOpen,
     onDispatch,
     sanitizeRagProviderStreamError = false,
-    servicePromptConfig
+    servicePromptConfig,
+    expectDoneSentinel = false
   }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const hasHttpStatus = (value: unknown): boolean =>
@@ -1996,7 +2021,8 @@ export async function* bgStream<
       onOpen: notifyOpen,
       onDispatch: notifyDispatch,
       sanitizeRagProviderStreamError,
-      servicePromptConfig
+      servicePromptConfig,
+      expectDoneSentinel
     })
     return
   }
@@ -2038,7 +2064,8 @@ export async function* bgStream<
         onOpen: notifyOpen,
         onDispatch: notifyDispatch,
         sanitizeRagProviderStreamError,
-        servicePromptConfig
+        servicePromptConfig,
+        expectDoneSentinel
       })
       return
     }
@@ -2049,6 +2076,7 @@ export async function* bgStream<
   }
   const queue: string[] = []
   let done = false
+  let endedWithoutDone = false
   let error: any = null
   let firstDataReceived = false
   let streamOpened = false
@@ -2082,6 +2110,8 @@ export async function* bgStream<
       }
       queue.push(msg.data as string)
     } else if (msg?.event === 'done') {
+      // The background reader reached the end of the body without [DONE].
+      endedWithoutDone = msg?.incomplete === true
       done = true
     } else if (msg?.event === 'error') {
       const streamError = sanitizeRagProviderStreamError
@@ -2214,7 +2244,8 @@ export async function* bgStream<
           onOpen: notifyOpen,
         onDispatch: notifyDispatch,
           sanitizeRagProviderStreamError,
-          servicePromptConfig
+          servicePromptConfig,
+          expectDoneSentinel
         })
         return
       }
@@ -2242,7 +2273,8 @@ export async function* bgStream<
           onOpen: notifyOpen,
         onDispatch: notifyDispatch,
           sanitizeRagProviderStreamError,
-          servicePromptConfig
+          servicePromptConfig,
+          expectDoneSentinel
         })
         return
       }
@@ -2289,6 +2321,9 @@ export async function* bgStream<
       return
     }
     if (error) throw error
+    // CM-03: the response body ended without [DONE] after some data arrived.
+    if (expectDoneSentinel && endedWithoutDone && firstDataReceived && !abortSignal?.aborted)
+      yield streamEndedWithoutDoneEvent()
   } finally {
     clearTimeout(connectionTimer)
     try { port.onMessage.removeListener(onMessage); } catch {}

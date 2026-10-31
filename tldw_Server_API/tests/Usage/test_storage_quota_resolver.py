@@ -1,10 +1,12 @@
 """Per-user storage quota comes from the spec 2 resolver, not users.storage_quota_mb (spec 2 §5)."""
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from tldw_Server_API.app.core import config as config_module
-from tldw_Server_API.app.core.Storage import generated_file_helpers
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError
+from tldw_Server_API.app.core.Storage import generated_file_helpers
 from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.services import storage_quota_service as sqs
 
@@ -18,6 +20,17 @@ class _Pool:
     def __init__(self) -> None:
         """Seed one user."""
         self.rows = {7: {"storage_used_mb": 100.0, "storage_quota_mb": 5120}}
+        self.transaction_connection = object()
+        self.transaction_active = False
+
+    @asynccontextmanager
+    async def transaction(self):
+        """Keep the quota deletion on its caller-owned connection."""
+        self.transaction_active = True
+        try:
+            yield self.transaction_connection
+        finally:
+            self.transaction_active = False
 
     async def fetchone(self, _sql: str, user_id: int):
         """Return the users row."""
@@ -144,8 +157,15 @@ async def test_combined_user_denial_reports_user_projection(service) -> None:
 async def test_user_quota_status_is_read_only_and_has_quota_means_set(service) -> None:
     """user_quota_status reports has_quota only when a value is set, and leaves the usage cache untouched."""
     assert await service.user_quota_status(7) == {
-        "quota_mb": None, "used_mb": 100.0, "remaining_mb": None, "usage_pct": 0.0, "has_quota": False,
-        "legacy_used_mb": 100.0, "native_used_mb": 0.0,
+        "quota_mb": None,
+        "used_mb": 100.0,
+        "remaining_mb": None,
+        "usage_pct": 0.0,
+        "has_quota": False,
+        "legacy_used_mb": 100.0,
+        "native_used_mb": 0.0,
+        "at_soft_limit": False,
+        "at_hard_limit": False,
     }
     service.limits[7] = 400
     status = await service.user_quota_status(7)
@@ -172,8 +192,40 @@ async def test_set_user_quota_writes_deletes_and_invalidates(service, monkeypatc
 
         async def delete_override(self, **kw) -> None:
             """Record a delete."""
+            assert (
+                kw["db_conn"] is service.db_pool.transaction_connection and service.db_pool.transaction_active
+            )  # nosec B101 - unit regression assertion.
+            version_calls.append(("delete", kw["user_id"]))
             calls.append(("delete", kw["user_id"], kw["key"]))
 
+    version_calls: list[tuple[str, int]] = []
+    floor = object()
+
+    class _VersionGateway:
+        """Record the profile-version boundary; SQL is covered by gateway tests."""
+
+        def __init__(self, backend: str) -> None:
+            """Require the fixture's SQLite backend."""
+            assert backend == "sqlite"  # nosec B101 - unit regression assertion.
+
+        async def capture_floor(self, conn, *, user_id: int):
+            """Capture before deleting on the same connection."""
+            assert (
+                conn is service.db_pool.transaction_connection and service.db_pool.transaction_active
+            )  # nosec B101 - unit regression assertion.
+            version_calls.append(("capture", user_id))
+            return floor
+
+        async def final_touch(self, conn, *, user_id: int, version_floor):
+            """Retain the captured floor for the final touch."""
+            assert (
+                conn is service.db_pool.transaction_connection
+                and version_floor is floor
+                and service.db_pool.transaction_active
+            )  # nosec B101 - unit regression assertion.
+            version_calls.append(("touch", user_id))
+
+    monkeypatch.setattr(sqs, "VersionedUserWriteGateway", _VersionGateway)
     invalidated: list[int] = []
     monkeypatch.setattr(sqs, "UserProfileOverridesRepo", _Repo)
     monkeypatch.setattr(quota_resolver, "invalidate_user", invalidated.append)
@@ -184,5 +236,6 @@ async def test_set_user_quota_writes_deletes_and_invalidates(service, monkeypatc
     service.limits.pop(7)
     out = await service.set_user_quota(7, None)
     assert calls[-1] == ("delete", 7, sqs.STORAGE_QUOTA_KEY) and out["storage_quota_mb"] is None
+    assert version_calls == [("capture", 7), ("delete", 7), ("touch", 7)]  # nosec B101 - unit regression assertion.
     with pytest.raises(ValueError):
         await service.set_user_quota(7, -1)

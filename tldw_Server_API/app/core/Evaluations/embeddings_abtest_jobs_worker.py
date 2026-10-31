@@ -30,7 +30,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import (
+from tldw_Server_API.app.core.Evaluations.embeddings_abtest_schemas import (
     ABTestChunking,
     EmbeddingsABTestConfig,
 )
@@ -265,7 +265,10 @@ async def run_embeddings_abtest_jobs_worker(stop_event: asyncio.Event | None = N
             sdk.stop()
         watcher = asyncio.create_task(_watch_stop())
     try:
-        await sdk.run(handler=handle_abtest_job)
+        await sdk.run(
+            handler=handle_abtest_job,
+            job_types=(ABTEST_JOBS_JOB_TYPE, ABTEST_JOBS_CLEANUP_TYPE),
+        )
     finally:
         if watcher is not None:
             with contextlib.suppress(Exception):

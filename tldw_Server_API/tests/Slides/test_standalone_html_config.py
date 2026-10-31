@@ -10,6 +10,11 @@ from urllib.parse import urlsplit
 import pytest
 
 import tldw_Server_API.app.core.Slides.standalone_html_config as config_mod
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import (
+    PromptAssetUnavailableError,
+    load_prompt,
+    load_prompt_strict,
+)
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     ALLOWED_TARGETS_JSON_MAX_BYTES,
     ALLOWED_TARGETS_MAX_ENTRIES,
@@ -19,11 +24,6 @@ from tldw_Server_API.app.core.Slides.standalone_html_config import (
     StandaloneHtmlConfigError,
     StandaloneHtmlGenerationAvailability,
     load_standalone_html_config,
-)
-from tldw_Server_API.app.core.Utils.prompt_loader import (
-    PromptAssetUnavailableError,
-    load_prompt,
-    load_prompt_strict,
 )
 
 pytestmark = pytest.mark.unit

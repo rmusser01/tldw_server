@@ -118,10 +118,14 @@ type LoadFiltersOptions = {
 
 export function useModerationReviewQueue() {
   const [filters, setFilters] = React.useState<ModerationReviewFilters>(DEFAULT_FILTERS)
-  const [items, setItems] = React.useState<ModerationReviewItem[]>([])
+  const [page, setPage] = React.useState<{
+    items: ModerationReviewItem[]
+    total: number | null
+    loadedFilters: ModerationReviewFilters
+  }>({ items: [], total: null, loadedFilters: DEFAULT_FILTERS })
+  const { items, total, loadedFilters } = page
   const [selectedItemId, setSelectedItemId] = React.useState<string | null>(null)
   const [selectedItem, setSelectedItem] = React.useState<ModerationReviewItem | null>(null)
-  const [total, setTotal] = React.useState<number | null>(null)
   const [nextCursor, setNextCursor] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [detailLoading, setDetailLoading] = React.useState(false)
@@ -165,9 +169,12 @@ export function useModerationReviewQueue() {
             ...sorted
           ], activeFilters.sort)
         : sorted
-      setItems(nextItems)
+      setPage({
+        items: nextItems,
+        total: typeof response.total === "number" ? response.total : nextItems.length,
+        loadedFilters: activeFilters
+      })
       setSelectedIds((current) => new Set([...current].filter((itemId) => nextItems.some((item) => item.id === itemId))))
-      setTotal(typeof response.total === "number" ? response.total : nextItems.length)
       setNextCursor(response.next_cursor || null)
       const fallbackItem = options.selectedItemFallback || null
       const hasFallbackSelection = Boolean(
@@ -195,10 +202,9 @@ export function useModerationReviewQueue() {
       }
     } catch (requestError) {
       setError(requestError)
-      setItems([])
+      setPage((current) => ({ ...current, items: [], total: null }))
       setSelectedItem(null)
       setSelectedItemId(null)
-      setTotal(null)
       setNextCursor(null)
     } finally {
       setLoading(false)
@@ -352,14 +358,22 @@ export function useModerationReviewQueue() {
             .filter((entry) => entry.ok && entry.item)
             .map((entry) => [entry.item_id, entry.item as ModerationReviewItem])
         )
-        setItems((current) =>
-          current
-            .map((item) => itemUpdates.get(item.id) || item)
-            .filter((item) => filterMatchesActiveStatus(item, filters))
-        )
+        setPage((current) => {
+          const removedIds = new Set(current.items.filter((item) => {
+            const updated = itemUpdates.get(item.id)
+            return updated && !filterMatchesActiveStatus(updated, current.loadedFilters)
+          }).map((item) => item.id))
+          return {
+            ...current,
+            items: current.items
+              .map((item) => itemUpdates.get(item.id) || item)
+              .filter((item) => !removedIds.has(item.id)),
+            total: current.total === null ? null : Math.max(0, current.total - removedIds.size)
+          }
+        })
         if (selectedItemId && itemUpdates.has(selectedItemId)) {
           const updated = itemUpdates.get(selectedItemId) || null
-          setSelectedItem(updated && filterMatchesActiveStatus(updated, filters) ? updated : null)
+          setSelectedItem(updated && filterMatchesActiveStatus(updated, loadedFilters) ? updated : null)
         }
         const failedIds = new Set(response.results.filter((entry) => !entry.ok).map((entry) => entry.item_id))
         setSelectedIds(failedIds)
@@ -369,7 +383,7 @@ export function useModerationReviewQueue() {
         setBulkDeciding(null)
       }
     },
-    [filters, selectedItemId, selectedItemIds]
+    [loadedFilters, selectedItemId, selectedItemIds]
   )
 
   const saveFilterPreset = React.useCallback(
@@ -416,6 +430,7 @@ export function useModerationReviewQueue() {
 
   return {
     filters,
+    loadedFilters,
     updateFilter,
     items,
     selectedItemId,

@@ -168,6 +168,19 @@ def provide_content_jobs_worker_specs(
             ),
         ),
         stop_event_worker_spec(
+            name="audio_studio_jobs_task",
+            worker_service=_run_audio_studio_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: should_start_inprocess_worker(
+                "AUDIO_STUDIO_JOBS_WORKER_ENABLED",
+                "audio-studio",
+                sidecar_mode=context.sidecar_mode,
+                test_mode=context.test_mode,
+                route_enabled=context.route_enabled,
+            ),
+        ),
+        stop_event_worker_spec(
             name="presentation_render_jobs_task",
             worker_service=_run_presentation_render_jobs_worker_service,
             category="jobs",

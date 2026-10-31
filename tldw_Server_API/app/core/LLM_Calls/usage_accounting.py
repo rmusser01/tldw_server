@@ -20,15 +20,18 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_cost_envelope import estimate_segment_tokens
 from tldw_Server_API.app.core.Usage.llm_accounting import submit_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import (
+    USER_KEY_SOURCE,
     accounted_call,
+    call_credential_source,
     current_llm_call_context,
     current_llm_user_id,
     in_accounted_call,
 )
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import usage_with_service_tier
+from tldw_Server_API.app.core.Utils.tokenizer import estimate_segment_tokens
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"
@@ -41,9 +44,10 @@ class _CallPlan:
     user_id: int
     operation: str
     endpoint: str
+    credential_source: str | None = None
 
 
-def _plan_call() -> _CallPlan | None:
+def _plan_call(credential_source: str | None = None) -> _CallPlan | None:
     """The recording plan for a call starting now, or None when nothing is recorded."""
     try:
         if in_accounted_call():
@@ -54,7 +58,10 @@ def _plan_call() -> _CallPlan | None:
         user_id = current_llm_user_id()
         if user_id is None:
             return None
-        return _CallPlan(user_id=int(user_id), operation=context.operation, endpoint=context.endpoint)
+        return _CallPlan(
+            user_id=int(user_id), operation=context.operation, endpoint=context.endpoint,
+            credential_source=credential_source,
+        )
     except Exception as error:  # noqa: BLE001 - accounting must never break an LLM call
         logger.bind(exception_type=type(error).__name__).debug("LLM usage accounting plan failed")
         return None
@@ -135,31 +142,38 @@ class _StreamUsage:
                     data = json.loads(payload)
                 except ValueError:
                     continue
-                if not isinstance(data, dict):
-                    continue
-                usage = data.get("usage")
-                event = data.get("type")
-                if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
-                    message = data.get("message")
-                    usage = message.get("usage") if isinstance(message, dict) else None
-                if isinstance(usage, dict):
-                    usage = {key: value for key, value in usage.items() if value is not None}  # null never erases a count
-                    if usage:
-                        self.usage = {**(self.usage or {}), **usage} if event == "message_delta" else usage
-                for choice in data.get("choices") or []:
-                    delta = choice.get("delta") if isinstance(choice, dict) else None
-                    if not isinstance(delta, dict):
-                        continue
-                    for text_field in (delta.get("content"), delta.get("reasoning_content")):
-                        if isinstance(text_field, str):
-                            self.chars += len(text_field)
-                    tool_calls = delta.get("tool_calls")
-                    for tool_call in tool_calls if isinstance(tool_calls, list) else []:
-                        function = tool_call.get("function") if isinstance(tool_call, dict) else None
-                        arguments = function.get("arguments") if isinstance(function, dict) else None
-                        if isinstance(arguments, str):
-                            self.chars += len(arguments)
+                self.feed_event(data)
         except Exception:  # noqa: BLE001 - a malformed chunk must never fail a stream
+            return
+
+    def feed_event(self, data: Any) -> None:
+        """Read one parsed SSE payload; never raises. The chat stream handler calls it with the payloads it parses."""
+        try:
+            if not isinstance(data, dict):
+                return
+            usage = usage_with_service_tier(data)  # an OpenAI chunk names its service tier beside the usage
+            event = data.get("type")
+            if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
+                message = data.get("message")
+                usage = message.get("usage") if isinstance(message, dict) else None
+            if isinstance(usage, dict):
+                usage = {key: value for key, value in usage.items() if value is not None}  # null never erases a count
+                if usage:
+                    self.usage = {**(self.usage or {}), **usage} if event == "message_delta" else usage
+            for choice in data.get("choices") or []:
+                delta = choice.get("delta") if isinstance(choice, dict) else None
+                if not isinstance(delta, dict):
+                    continue
+                for text_field in (delta.get("content"), delta.get("reasoning_content")):
+                    if isinstance(text_field, str):
+                        self.chars += len(text_field)
+                tool_calls = delta.get("tool_calls")
+                for tool_call in tool_calls if isinstance(tool_calls, list) else []:
+                    function = tool_call.get("function") if isinstance(tool_call, dict) else None
+                    arguments = function.get("arguments") if isinstance(function, dict) else None
+                    if isinstance(arguments, str):
+                        self.chars += len(arguments)
+        except Exception:  # noqa: BLE001 - a malformed payload must never fail a stream
             return
 
 
@@ -198,6 +212,7 @@ def _submit_record(
                 usage_metadata=usage,
                 estimated=True if usage is None else None,
                 estimate_source=estimate_source,
+                credential_source=plan.credential_source,
             )
 
         submit_accounting(_write)
@@ -208,7 +223,7 @@ def _submit_record(
 def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any, started: float) -> None:
     """Record a non-streaming call from its usage block, or an estimate; never raises."""
     try:
-        usage = response.get("usage") if isinstance(response, dict) else None
+        usage = usage_with_service_tier(response)
         if isinstance(usage, dict) and usage:
             prompt_tokens, completion_tokens = _usage_tokens(usage)
             if (prompt_tokens, completion_tokens) != (0, 0):
@@ -336,14 +351,15 @@ def _wrap_chat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def chat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        user_id = user_to_check()
+        source = call_credential_source(request)
+        user_id = user_to_check(source)
         if user_id is not None:
             check_user_sync(user_id)
-        plan = _plan_call()
+        plan = _plan_call(source)
         if plan is None:
-            if user_id is None:
+            if user_id is None and source != USER_KEY_SOURCE:
                 return fn(self, request, *args, **kwargs)
-            with accounted_call():  # checked here, so a nested provider method is not checked again
+            with accounted_call():  # checked here or on the user's own key: a nested method is not checked again
                 return fn(self, request, *args, **kwargs)
         started = time.monotonic()
         with accounted_call():
@@ -359,14 +375,15 @@ def _wrap_achat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     async def achat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        user_id = user_to_check()
+        source = call_credential_source(request)
+        user_id = user_to_check(source)
         if user_id is not None:
             await check_user_async(user_id)
-        plan = _plan_call()
+        plan = _plan_call(source)
         if plan is None:
-            if user_id is None:
+            if user_id is None and source != USER_KEY_SOURCE:
                 return await fn(self, request, *args, **kwargs)
-            with accounted_call():  # checked here, so a nested provider method is not checked again
+            with accounted_call():  # checked here or on the user's own key: a nested method is not checked again
                 return await fn(self, request, *args, **kwargs)
         started = time.monotonic()
         with accounted_call():
@@ -386,9 +403,10 @@ def _wrap_stream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def stream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        user_id = user_to_check()
+        source = call_credential_source(request)
+        user_id = user_to_check(source)
         unchecked = user_id is not None and not check_user_sync(user_id)
-        plan = _plan_call()
+        plan = _plan_call(source)
         if plan is None and not unchecked:
             return fn(self, request, *args, **kwargs)
         started = time.monotonic()
@@ -410,8 +428,9 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def astream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        user_id = user_to_check()
-        plan = _plan_call()
+        source = call_credential_source(request)
+        user_id = user_to_check(source)
+        plan = _plan_call(source)
         if plan is None and user_id is None:
             return fn(self, request, *args, **kwargs)
         started = time.monotonic()
@@ -444,21 +463,28 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
     return astream
 
 
-def record_direct_response(provider: str, request: dict[str, Any], response: Any, started: float) -> None:
+def record_direct_response(
+    provider: str, request: dict[str, Any], response: Any, started: float, *, credential_source: str | None = None
+) -> None:
     """Record a successful provider call made without an adapter (the Messages API native path); never raises."""
-    plan = _plan_call()
+    plan = _plan_call(credential_source)
     if plan is not None:
         _record_response(SimpleNamespace(name=provider), plan, request, response, started)
 
 
 def accounted_direct_stream(
-    provider: str, request: dict[str, Any], stream: AsyncIterator[Any], started: float
+    provider: str,
+    request: dict[str, Any],
+    stream: AsyncIterator[Any],
+    started: float,
+    *,
+    credential_source: str | None = None,
 ) -> AsyncIterator[Any]:
     """Return ``stream`` wrapped to record once when it ends, or unchanged when nothing is recorded.
 
     For a provider stream made without an adapter. Each item must hold whole SSE events.
     """
-    plan = _plan_call()
+    plan = _plan_call(credential_source)
     if plan is None:
         return stream
     return _accounted_async_stream(SimpleNamespace(name=provider), plan, request, stream, started)

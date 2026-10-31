@@ -1203,10 +1203,10 @@ class SemanticGraphProjector:
             str(getattr(binding_or_status.generation, "id", "")) != generation_id
         ):
             raise SemanticProjectionError("notes_semantic_conversion_generation_stale")
-        source_ids, target_ids = await asyncio.gather(
-            self._visible_ids(generation_id, source_note_id),
-            self._visible_ids(generation_id, target_note_id),
-        )
+        # One after the other: each lookup opens a ChaCha transaction, and inside a request's
+        # operation two at once would share one connection state, which ChaCha refuses (ADR-080).
+        source_ids = await self._visible_ids(generation_id, source_note_id)
+        target_ids = await self._visible_ids(generation_id, target_note_id)
         current_pair = await self._load_chunks(
             generation_id,
             (*source_ids, *target_ids),

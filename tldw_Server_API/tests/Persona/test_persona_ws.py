@@ -822,44 +822,43 @@ def test_persona_stream_rejects_missing_credentials(monkeypatch):
             pass
 
 
+@pytest.mark.parametrize(("key_scope", "allowed"), [(["read", "write:preview"], True), (["write:preview"], False)])
 @pytest.mark.asyncio
-async def test_persona_resolve_api_key_enforces_read_scope_and_sets_context(monkeypatch):
-    class _FakeWS:
-        headers = {}
-        query_params = {}
-        client = ("127.0.0.1", 9000)
+async def test_persona_resolve_api_key_enforces_read_scope_and_sets_context(monkeypatch, key_scope, allowed):
+    """The core resolver checks the connect scope ("read"); persona keeps the key's scopes for per-tool checks."""
+    from unittest.mock import AsyncMock
 
-        def __init__(self):
-            self.state = SimpleNamespace()
+    from starlette.websockets import WebSocket
 
-    calls: dict[str, str] = {}
+    from tldw_Server_API.app.core.AuthNZ import websocket_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
-    class _FakeApiKeyManager:
-        async def validate_api_key(self, api_key, required_scope=None, ip_address=None):
-            calls["required_scope"] = str(required_scope or "")
-            calls["ip_address"] = str(ip_address or "")
-            assert api_key == "test-key"
-            return {"user_id": 7, "scope": ["read", "write:preview"]}
+    seen: list[tuple[str | None, tuple[str, int] | None]] = []
 
-    async def _fake_get_api_key_manager():
-        return _FakeApiKeyManager()
+    async def _http_verifier(request):
+        seen.append((request.headers.get("x-api-key"), request.client and tuple(request.client)))
+        request.state._api_key_scope = key_scope
+        return AuthPrincipal(kind="api_key", user_id=7, api_key_id=3, token_type="api_key")
 
-    monkeypatch.setattr(persona_ep, "get_api_key_manager", _fake_get_api_key_manager)
-    monkeypatch.setattr(persona_ep, "resolve_client_ip", lambda ws, settings=None: "127.0.0.1")
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", _http_verifier)
+    scope = {
+        "type": "websocket",
+        "path": "/api/v1/persona/stream",
+        "headers": [(b"x-api-key", b"test-key")],
+        "query_string": b"",
+        "client": ("127.0.0.1", 9000),
+    }
+    ws = WebSocket(scope, receive=AsyncMock(), send=AsyncMock())
 
-    ws = _FakeWS()
-    user_id, supplied, ok = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(
-        ws,
-        token=None,
-        api_key="test-key",
-    )
-    assert user_id == "7"
-    assert supplied is True
-    assert ok is True
-    assert calls.get("required_scope") == "read"
-    assert calls.get("ip_address") == "127.0.0.1"
-    assert getattr(ws.state, "persona_auth_method", "") == "api_key"
-    assert set(getattr(ws.state, "persona_api_key_scopes", [])) == {"read", "write:preview"}
+    result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
+
+    assert seen == [("test-key", ("127.0.0.1", 9000))]  # the peer reaches the HTTP verifier's IP checks
+    if not allowed:
+        assert result == (None, True, False)
+        return
+    assert result == ("7", True, True)
+    assert ws.state.persona_auth_method == "api_key"
+    assert set(ws.state.persona_api_key_scopes) == {"read", "write:preview"}
 
 
 def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
@@ -912,6 +911,81 @@ def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
             assert deny_result.get("ok") is False
             assert deny_result.get("reason_code") == "API_KEY_SCOPE_MISSING"
             assert "write:preview" in str(deny_result.get("error"))
+
+    assert fake_server.calls == []
+
+
+def test_a_read_only_key_stays_denied_write_tools_while_revalidation_is_in_flight(monkeypatch):
+    """The watchdog re-verifies the caller in its own task while a plan's tools run. Until that
+    verdict is in, the last verified scopes must stand: clearing them first would read as "not a
+    scoped key" and let a read-only key through a write-scoped tool (TASK-13950.7 review)."""
+    import threading
+
+    from tldw_Server_API.app.core.AuthNZ import websocket_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+            self.calls = []
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            self.calls.append(request)
+            return SimpleNamespace(error=None, result={"ok": True})
+
+    armed, in_flight, release = threading.Event(), threading.Event(), threading.Event()
+
+    async def _http_verifier(request):  # a read-only scoped key; held once armed
+        if armed.is_set():
+            in_flight.set()
+            while not release.is_set():
+                await asyncio.sleep(0.005)
+        request.state._api_key_scope = "read"
+        return AuthPrincipal(kind="api_key", user_id=1, api_key_id=3, token_type="api_key")
+
+    send_json = persona_ep.WebSocketStream.send_json
+
+    async def _send_json(self, payload):
+        if payload.get("event") == "tool_call":  # the step is about to be scope-checked
+            armed.set()
+            deadline = time.monotonic() + 5
+            while not in_flight.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.005)
+        await send_json(self, payload)
+
+    fake_server = _FakeServer()
+    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID)
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", _http_verifier)
+    monkeypatch.setattr(persona_ep.WebSocketStream, "send_json", _send_json)
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.01)
+
+    try:
+        with TestClient(fastapi_app) as c:
+            with c.websocket_connect("/api/v1/persona/stream", headers={"X-API-KEY": "read-only-key"}) as ws:
+                _ = json.loads(ws.receive_text())
+                session_id = "sess_scope_during_revalidation"
+                ws.send_text(json.dumps({"type": "user_message", "session_id": session_id, "text": "https://example.com"}))
+                plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "confirm_plan",
+                            "session_id": session_id,
+                            "plan_id": plan["plan_id"],
+                            "approved_steps": [int(plan["steps"][0]["idx"])],
+                        }
+                    )
+                )
+                result = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+                assert in_flight.is_set(), "the watchdog's revalidation must be in flight at the scope check"
+                assert result.get("reason_code") == "API_KEY_SCOPE_MISSING", result
+                release.set()
+    finally:
+        release.set()
 
     assert fake_server.calls == []
 
@@ -1011,7 +1085,7 @@ async def test_persona_stream_start_failure_executes_stream_stop(monkeypatch):
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
     monkeypatch.setattr(persona_ep, "WebSocketStream", _FailingStream)
 
-    await persona_ep.persona_stream(_FakeWebSocket(), token=None, api_key=None)
+    await persona_ep.persona_stream(_FakeWebSocket())
 
     assert lifecycle["stop_calls"] == 1
 
@@ -1060,7 +1134,7 @@ async def test_persona_stream_disconnect_executes_stream_stop(monkeypatch):
     monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda *args, **kwargs: None)
     monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.0)
 
-    await persona_ep.persona_stream(_FakeWebSocket(), token=None, api_key=None)
+    await persona_ep.persona_stream(_FakeWebSocket())
 
     assert lifecycle["stop_calls"] == 1
 
@@ -5874,3 +5948,74 @@ def test_persona_revised_voice_snapshots_do_not_replay_partial_text(monkeypatch,
     ]
     warnings = [event for event in events if event.get("reason_code") == "VOICE_MANUAL_MODE_REQUIRED"]
     assert bool(warnings) is auto_commit
+
+
+def test_a_confirm_plan_rule_save_survives_a_turn_saving_preferences_meanwhile(monkeypatch, tmp_path):
+    """A turn's read-then-save of the session preferences must not overwrite rules saved in between (TASK-13896).
+
+    The read and the save are separate worker calls. The turn's save is held until a confirm_plan
+    carrying session_policy_rules has had its chance to read and save; the rules must survive.
+    """
+
+    class _FakeServer:
+        initialized = True
+
+        async def initialize(self):
+            return None
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            return SimpleNamespace(error=None, result={"ok": True})
+
+    db_path = tmp_path / "persona_prefs.db"
+    seed = CharactersRAGDB(str(db_path), client_id="persona-prefs-seed")
+    seed.create_persona_profile({"id": "research_assistant", "user_id": "1", "name": "Research Assistant",
+                                 "mode": "session_scoped", "system_prompt": "Helper", "is_active": True})
+    seed.create_persona_session({"id": "sess_prefs", "persona_id": "research_assistant", "user_id": "1",
+                                 "mode": "session_scoped", "status": "active"})
+    seed.close_connection()
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: CharactersRAGDB(str(db_path), client_id="1"))
+
+    real_persist = persona_ep._persist_persona_session_preferences
+    armed, turn_save_waiting, rules_saved = threading.Event(), threading.Event(), threading.Event()
+
+    def persist(db, **kwargs):
+        patch = kwargs.get("patch_preferences") or {}
+        if armed.is_set() and "use_memory_context" in patch:  # the turn's save
+            turn_save_waiting.set()
+            rules_saved.wait(3)  # held until the confirm has saved, or cannot (it waits for this save)
+        result = real_persist(db, **kwargs)
+        if set(patch) == {"session_policy_rules"}:  # the confirm_plan's save
+            rules_saved.set()
+        return result
+
+    monkeypatch.setattr(persona_ep, "_persist_persona_session_preferences", persist)
+    seen: set[str] = set()
+
+    def both_done(event):
+        seen.add(str(event.get("event")))
+        return {"tool_plan", "tool_result"} <= seen
+
+    with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "user_message", "session_id": "sess_prefs", "text": "https://example.com"})
+        plan = _recv_until(ws, lambda e: e.get("event") == "tool_plan", timeout=20)
+        armed.set()
+        ws.send_json({"type": "user_message", "session_id": "sess_prefs", "text": "https://example.org",
+                      "use_companion_context": False})  # a change, so the turn's save writes
+        assert turn_save_waiting.wait(20)
+        rules = [{"rule_kind": "mcp_tool", "rule_name": plan["steps"][0]["tool"], "allowed": True,
+                  "require_confirmation": False}]
+        ws.send_json({"type": "confirm_plan", "session_id": "sess_prefs", "plan_id": plan["plan_id"],
+                      "approved_steps": [plan["steps"][0]["idx"]], "session_policy_rules": rules})
+        _recv_until(ws, both_done, timeout=30)  # the confirmed step ran, and the second turn planned
+
+    reader = CharactersRAGDB(str(db_path), client_id="persona-prefs-reader")
+    try:
+        saved = reader.get_persona_session("sess_prefs", user_id="1")["preferences"]
+    finally:
+        reader.close_connection()
+    assert (saved.get("session_policy_rules"), saved.get("use_companion_context")) == (
+        persona_ep.normalize_policy_rules(rules),
+        False,
+    ), saved

@@ -1,3 +1,4 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import type { ForkResultV1 } from "@/types/history-selection"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
@@ -27,6 +28,7 @@ type CompareBlock = {
 }
 
 type PlaygroundCompareClusterProps = {
+  messageView?: ChatMessageView
   block: CompareBlock
   blockIndex: number
   messages: any[]
@@ -169,6 +171,7 @@ const PerModelMiniComposer: React.FC<{
 }
 
 export const PlaygroundCompareCluster = ({
+  messageView,
   block,
   blockIndex,
   messages,
@@ -418,6 +421,7 @@ export const PlaygroundCompareCluster = ({
   return (
     <div className="w-full max-w-5xl md:px-4 mb-4 space-y-2">
       <PlaygroundMessage
+        messageView={messageView}
         isBot={userMessage.isBot}
         message={userMessage.message}
         name={userMessage.name}
@@ -509,10 +513,10 @@ export const PlaygroundCompareCluster = ({
         onSwipePrev={() => handleVariantSwipe(userMessage.id, "prev")}
         onSwipeNext={() => handleVariantSwipe(userMessage.id, "next")}
         messageSteeringMode={messageSteeringMode}
-        onMessageSteeringModeChange={setMessageSteeringMode}
+        onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
         messageSteeringForceNarrate={messageSteeringForceNarrate}
-        onMessageSteeringForceNarrateChange={setMessageSteeringForceNarrate}
-        onClearMessageSteering={clearMessageSteering}
+        onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
+        onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
       />
       <div className="ml-10 space-y-2 border-l border-dashed border-border pl-4">
         <div className="mb-1 flex items-center justify-between text-[11px] text-text-muted">
@@ -968,6 +972,7 @@ export const PlaygroundCompareCluster = ({
                 </div>
               ) : null}
               <PlaygroundMessage
+        messageView={messageView}
                 isBot={message.isBot}
                 message={message.message}
                 name={message.name}
@@ -1073,10 +1078,10 @@ export const PlaygroundCompareCluster = ({
                 onSwipePrev={() => handleVariantSwipe(message.id, "prev")}
                 onSwipeNext={() => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
-                onMessageSteeringModeChange={setMessageSteeringMode}
+                onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}
-                onMessageSteeringForceNarrateChange={setMessageSteeringForceNarrate}
-                onClearMessageSteering={clearMessageSteering}
+                onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
+                onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
               />
 
               {threadPreviewItems.length > 1 ? (

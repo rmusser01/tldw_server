@@ -3537,6 +3537,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
@@ -4923,6 +4928,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user_if_present",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "llm_routing_deps.get_request_routing_decision_store",
           "module": "tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps",
           "type": "dependency"
@@ -5836,6 +5846,11 @@
         },
         {
           "id": "auth_deps.get_db_transaction",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
         },
@@ -8199,6 +8214,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user_if_present",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "llm_routing_deps.get_request_routing_decision_store",
           "module": "tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps",
           "type": "dependency"
@@ -10079,6 +10099,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "workflows._get_db",
           "module": "tldw_Server_API.app.api.v1.endpoints.workflows",
           "type": "dependency"
@@ -10153,6 +10178,11 @@
         },
         {
           "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
         },

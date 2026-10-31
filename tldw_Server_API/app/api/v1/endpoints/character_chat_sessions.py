@@ -256,6 +256,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     await_bounded_owned_operation,
     invoke_owned_stream_close,
     invoke_stream_close_bounded,
+    is_empty_choices_usage_chunk,
     normalize_provider_stream_error,
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
@@ -1253,7 +1254,7 @@ async def _resolve_auto_character_chat_routing_decision(
     """Resolve `model='auto'` into a canonical provider/model pair for character chat."""
     provider_overrides = get_llm_provider_overrides_snapshot()
     provider_listing = apply_llm_provider_overrides_to_listing(
-        get_configured_providers(),
+        await asyncio.to_thread(get_configured_providers),
         overrides=provider_overrides,
     )
     default_provider = str(
@@ -3019,6 +3020,16 @@ def _merge_character_memory_by_id(
     return merged
 
 
+def _incoming_settings_timestamp_wins(
+    server_updated_at_epoch: float | None,
+    incoming_updated_at_epoch: float | None,
+) -> bool:
+    """Reuse top-level settings LWW, including intentional untimestamped patches."""
+    if incoming_updated_at_epoch is not None and server_updated_at_epoch is not None:
+        return incoming_updated_at_epoch > server_updated_at_epoch
+    return True
+
+
 def _merge_conversation_settings(
     server_settings_raw: Any,
     incoming_settings_raw: Any,
@@ -3039,13 +3050,9 @@ def _merge_conversation_settings(
     server_has_updated_at = isinstance(server_settings.get("updatedAt"), str) and server_updated_at_epoch is not None
     incoming_has_updated_at = isinstance(incoming_settings.get("updatedAt"), str) and incoming_updated_at_epoch is not None
 
-    if incoming_has_updated_at and server_has_updated_at:
-        incoming_wins = incoming_updated_at_epoch > server_updated_at_epoch
-    elif incoming_has_updated_at:
-        incoming_wins = True
-    else:
-        # Untimestamped writes are treated as direct patch updates.
-        incoming_wins = True
+    incoming_wins = _incoming_settings_timestamp_wins(
+        server_updated_at_epoch, incoming_updated_at_epoch,
+    )
 
     if incoming_wins:
         merged = {**server_settings, **incoming_settings}
@@ -6247,6 +6254,154 @@ def _extract_directive_conflicts(text: str) -> list[dict[str, str]]:
     return conflicts
 
 
+def _saved_native_lore_preview(
+    chat_id: str,
+    body: CharacterChatCompletionPrepRequest,
+    db: CharactersRAGDB,
+    owner_id: str,
+) -> dict[str, Any]:
+    """Preview only faithful saved lore; never turn a refused native read into live context."""
+    from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
+    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import transform_frozen_user_content
+    from tldw_Server_API.app.core.Character_Chat.modules.character_utils import map_sender_to_role
+    from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+        WorldBookPromptContext,
+        build_frozen_world_book_prompt_context,
+    )
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+    from tldw_Server_API.app.core.Chat.history_selection import (
+        HistorySelectionError,
+        resolve_history_selection,
+        snapshot_to_wire,
+    )
+
+    try:
+        if (
+            body.offset
+            or not body.include_character_context
+            or body.prompt_preset is not None
+            or body.continue_as_user
+            or body.impersonate_user
+            or body.force_narrate
+            or body.message_steering_prompts is not None
+        ):
+            raise HistorySelectionError("unsupported_history_context_preview_controls")
+        with db.transaction() as conn:
+            snapshot = db.get_conversation_history_snapshot(
+                chat_id,
+                owner_client_id=owner_id,
+                conn=conn,
+                lock_for_update=True,
+            )
+            state = db.get_roleplay_resume_state(chat_id, owner_client_id=owner_id, conn=conn)
+            _verify_chat_ownership(state["conversation"], owner_id, chat_id)
+            if snapshot.interpretation_status.get("kind") != "parent_graph_v1":
+                raise HistorySelectionError("unsupported_history_context_preview_interpretation")
+            parents = {row["parent_id"] for row in snapshot.nodes if row["parent_id"] is not None}
+            leaves = [row["id"] for row in snapshot.nodes if row["id"] not in parents]
+            if snapshot.nodes and len(leaves) != 1:
+                raise HistorySelectionError("unsupported_history_context_preview_partial_history")
+            tail = leaves[0] if leaves else None
+            view = {
+                "owner_key": snapshot.owner_key,
+                "conversation_id": chat_id,
+                "interpretation": {"kind": "parent_graph_v1"},
+                "selection_revision": 1,
+                "cursor": {"kind": "after_message", "message_id": tail} if tail else {"kind": "empty"},
+            }
+            resolved = resolve_history_selection(snapshot_to_wire(snapshot), view, "send", "")
+            if resolved["status"] != "ready":
+                raise HistorySelectionError(resolved["code"])
+            if len(resolved["rows"]) != len(snapshot.nodes) or len(snapshot.nodes) > body.limit:
+                raise HistorySelectionError("unsupported_history_context_preview_partial_history")
+            character, character_id, context = project_history_context(
+                state,
+                character_override=str(body.directed_character_id) if body.directed_character_id else None,
+            )
+            plan = context.get("history_world_book_plan")
+            if character is None or character_id is None:
+                raise HistorySelectionError("unsupported_history_context_preview_character")
+            selected = db.get_conversation_history_selected_content(
+                chat_id,
+                [row["id"] for row in resolved["rows"]],
+                snapshot=snapshot,
+                owner_client_id=owner_id,
+                conn=conn,
+            )
+        nodes = {row["id"]: row for row in snapshot.nodes}
+        messages = []
+        for item in selected:
+            extra = item.get("extra_metadata") or {}
+            role = extra.get("sender_role") or map_sender_to_role(nodes[item["id"]]["role"], character.get("name"))
+            if (
+                item["images"]
+                or item.get("tool_calls") is not None
+                or role not in {"user", "assistant", "system"}
+                or any(extra.get(key) is not None for key in ("function_call", "tool_call_id"))
+                or extra.get("content_placeholder_reason") in {"tool_calls", "function_call"}
+            ):
+                raise HistorySelectionError("unsupported_history_context_preview_media_or_tools")
+            text = item["message"]
+            if text:
+                text = replace_placeholders(text, character.get("name", "Char"), "User")
+            messages.append({"role": role, "content": text})
+        if body.append_user_message:
+            current = {"role": "user", "content": body.append_user_message}
+            dictionary_plan = context.get("history_dictionary_plan")
+            if dictionary_plan is not None:
+                if any(
+                    entry["enabled"] and (entry["probability"] != 1.0 or any(entry["timed_effects"].values()))
+                    for step in dictionary_plan["passes"]
+                    for entry in step["entries"]
+                ):
+                    raise HistorySelectionError("unsupported_history_context_preview_nondeterministic_dictionary")
+                try:
+                    current["content"] = transform_frozen_user_content([current], dictionary_plan)[0]
+                except InputError as exc:
+                    raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
+            messages.append(current)
+        lore = build_frozen_world_book_prompt_context(messages, plan) if plan is not None else WorldBookPromptContext()
+    except HistorySelectionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "unsupported_history_capability"
+                if exc.code.startswith("unsupported_")
+                else "stale_selection",
+                "code": exc.code,
+            },
+        ) from exc
+    text = lore.text
+    bounded = _truncate_to_budget(text, _TOKEN_BUDGET_LOREBOOK) if text else ""
+    estimated = _estimate_tokens(text)
+    effective = _estimate_tokens(bounded)
+    return {
+        "chat_id": chat_id,
+        "character_id": character_id,
+        "character_name": character.get("name"),
+        "sections": [
+            {
+                "name": "lorebook",
+                "content": bounded,
+                "tokens_estimated": estimated,
+                "tokens_effective": effective,
+                "budget": _TOKEN_BUDGET_LOREBOOK,
+                "truncated": bounded != text,
+                "diagnostics": list(lore.legacy_diagnostics),
+            }
+        ],
+        "total_supplemental_tokens": estimated,
+        "total_supplemental_effective_tokens": effective,
+        "supplemental_budget": _TOKEN_BUDGET_LOREBOOK,
+        "budget_status": "caution" if bounded != text else "ok",
+        "message_tokens_estimated": sum(_estimate_tokens(message["content"]) for message in messages),
+        "message_count": len(messages),
+        "warnings": ["Saved native lore only; other prompt sections are not included."],
+        "conflicts": None,
+        "examples": [],
+    }
+
+
 @router.post(
     "/{chat_id}/prompt-preview",
     response_model=PromptPreviewResponse,
@@ -6273,6 +6428,9 @@ async def prompt_assembly_preview(
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
         require_current_persona(db, owner_id=str(current_user.id), conversation=conversation)
+        if body.saved_native_lore:
+            return _saved_native_lore_preview(chat_id, body, db, str(current_user.id))
+
 
         user_name = conversation.get("user_name", "User")
         include_ctx = bool(body.include_character_context)
@@ -6601,6 +6759,9 @@ async def _complete_roleplay_resume(
     from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
         RoleplayResumeConflictError,
     )
+    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import (
+        prepare_roleplay_resume,
+    )
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import (
         ProviderCallPolicy,
     )
@@ -6608,7 +6769,8 @@ async def _complete_roleplay_resume(
     contract = body.tldw_roleplay_resume_v1.model_dump(mode="json")
     try:
         prepared = await run_in_threadpool(
-            db.prepare_roleplay_resume_generation,
+            prepare_roleplay_resume,
+            db,
             chat_id,
             contract,
             owner_client_id=str(current_user.id),
@@ -7578,6 +7740,10 @@ async def character_chat_completion(
                         await stream.done()
                         return False
 
+                    if is_empty_choices_usage_chunk(line):
+                        # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                        return True
+
                     if _character_stream_line_has_semantic_output(line):
                         stream_success_state["successful"] = True
 
@@ -7691,6 +7857,9 @@ async def character_chat_completion(
                             done_sent = True
                             yield sse_done()
                             break
+                        if is_empty_choices_usage_chunk(line):
+                            # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                            continue
                         if _character_stream_line_has_semantic_output(line):
                             stream_success_state["successful"] = True
                         yield ensure_sse_line(line)
@@ -8320,13 +8489,23 @@ async def update_chat_settings(
             if snapshot_valid:
                 reject_resumable_behavior_credentials(incoming_settings)
             if snapshot_valid and _BEHAVIOR_SETTING_KEYS.intersection(incoming_settings):
+                materialization_keys = set(incoming_settings)
+                if not _incoming_settings_timestamp_wins(
+                    _parse_iso_timestamp(existing_settings.get("updatedAt")),
+                    _parse_iso_timestamp(incoming_settings.get("updatedAt")),
+                ):
+                    # A discarded assignment cannot refresh frozen catalog content.
+                    # Previously absent fields still survive the existing merge.
+                    materialization_keys.difference_update(
+                        {"chat_dictionary_id", "chat_dictionary_ids", "conversationContext"}.intersection(existing_settings)
+                    )
                 materialized = materialize_roleplay_behavior_settings(
                     conn,
                     conversation=conversation,
                     resume_state=resume_state,
                     merged_settings=merged_settings,
                     owner_user_id=str(current_user.id),
-                    changed_keys=set(incoming_settings),
+                    changed_keys=materialization_keys,
                 )
                 if materialized is not None:
                     merged_settings["roleplayBehaviorV1"] = materialized
@@ -8494,13 +8673,30 @@ async def delete_chat_session(
 
                 # Rows Sync never saw (the chat predates the profile, or a message was saved
                 # by a path that publishes nothing) are deleted directly, as without a
-                # profile. They were never in the log, so there is nothing to retract there
-                # (#3181). Published rows are tombstoned as before: every message first,
-                # then the chat.
+                # profile (#3181), and then published by id, so a device that kept a copy
+                # outside Sync deletes it too (Q8). Published rows are tombstoned as before.
+                # Either way every message goes first, then the chat.
                 message_versions = {
                     str(message["id"]): message.get("version", 1) for message in child_messages if message.get("id")
                 }
                 chat_object = ("chat.conversation", chat_id)
+                owner = str(current_user.id)
+
+                def message_tombstone_payload(message_id: str) -> dict[str, object]:
+                    return {
+                        "id": message_id,
+                        "deleted": True,
+                        "conversation_id": chat_id,
+                        "client_id": owner,
+                        "owner_user_id": owner,
+                    }
+
+                chat_tombstone_payload: dict[str, object] = {
+                    "id": chat_id,
+                    "deleted": True,
+                    "client_id": owner,
+                    "owner_user_id": owner,
+                }
 
                 def delete_messages_directly(unpublished: Sequence[tuple[str, str]]) -> None:
                     # The chat is in the list when it is unpublished too. It goes last, below.
@@ -8520,27 +8716,33 @@ async def delete_chat_session(
                 published = await run_in_threadpool(
                     delete_unenrolled_server_origin_objects,
                     sync_service,
-                    user_id=str(current_user.id),
+                    user_id=owner,
                     objects=[*(("chat.message", message_id) for message_id in message_versions), chat_object],
                     delete=delete_messages_directly,
+                    # The chat is not deleted by this call, so only its messages are published here.
+                    tombstones=[
+                        AppliedServerOriginObject(
+                            domain="chat.message",
+                            operation="tombstone",
+                            object_id=message_id,
+                            parent_id=chat_id,
+                            payload=message_tombstone_payload(message_id),
+                        )
+                        for message_id in message_versions
+                    ],
+                    source="server_api",
                 )
                 for domain, message_id in published:
                     if domain != "chat.message":
                         continue
                     capture_server_origin_mutation(
                         sync_service,
-                        user_id=str(current_user.id),
+                        user_id=owner,
                         domain="chat.message",
                         operation="tombstone",
                         object_id=message_id,
                         parent_id=chat_id,
-                        payload={
-                            "id": message_id,
-                            "deleted": True,
-                            "conversation_id": chat_id,
-                            "client_id": str(current_user.id),
-                            "owner_user_id": str(current_user.id),
-                        },
+                        payload=message_tombstone_payload(message_id),
                         source="server_api",
                     )
                 chat_is_published = chat_object in published
@@ -8551,24 +8753,28 @@ async def delete_chat_session(
                         await run_in_threadpool(
                             delete_unenrolled_server_origin_objects,
                             sync_service,
-                            user_id=str(current_user.id),
+                            user_id=owner,
                             objects=[chat_object],
                             delete=delete_chat_directly,
+                            tombstones=[
+                                AppliedServerOriginObject(
+                                    domain="chat.conversation",
+                                    operation="tombstone",
+                                    object_id=chat_id,
+                                    payload=chat_tombstone_payload,
+                                )
+                            ],
+                            source="server_api",
                         )
                     )
                 if chat_is_published:
                     capture_server_origin_mutation(
                         sync_service,
-                        user_id=str(current_user.id),
+                        user_id=owner,
                         domain="chat.conversation",
                         operation="tombstone",
                         object_id=chat_id,
-                        payload={
-                            "id": chat_id,
-                            "deleted": True,
-                            "client_id": str(current_user.id),
-                            "owner_user_id": str(current_user.id),
-                        },
+                        payload=chat_tombstone_payload,
                         source="server_api",
                     )
             except (ConflictError, CharactersRAGDBError):

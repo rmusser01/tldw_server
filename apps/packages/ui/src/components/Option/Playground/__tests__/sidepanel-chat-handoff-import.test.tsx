@@ -240,9 +240,16 @@ const baseSubmitDeps = (overrides: Record<string, unknown> = {}) => ({
   restorePromptAssistAttempt: vi.fn(),
   beginPromptAssistReset: vi.fn(() => 1),
   markPromptAssistAttemptSaved: vi.fn(),
+  captureDraftOwnership: () => ({
+    isCurrent: () => true,
+    isOwnerCurrent: () => true,
+    normalizeMessage: () => true
+  }),
+  captureHistorySelection: () => () => true,
   isSending: false,
   isConnectionReady: true,
   webSearch: false,
+  chatMode: "normal",
   compareModeActive: false,
   compareSelectedModels: [],
   selectedModel: "openai:gpt-4o-mini",

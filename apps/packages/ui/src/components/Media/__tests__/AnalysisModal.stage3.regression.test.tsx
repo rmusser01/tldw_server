@@ -20,7 +20,14 @@ const state = vi.hoisted(() => ({
   selectedModel: undefined as string | undefined
 }))
 
-vi.mock("react-i18next", () => ({
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'owned-analysis',
+  quickIngestAuthority: { capture: () => ({ authorityRevision: 1,
+    requestScope: { config: { serverUrl: 'http://owned-server', authMode: 'multi-user', expectedUserId: 'alice' } },
+    signal: new AbortController().signal, assertCurrent: () => {} }) }
+}))
+
+vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (
       key: string,
@@ -734,4 +741,40 @@ describe('AnalysisModal stage 3 regression coverage', () => {
       screen.queryByText('Saved analysis · version 4'),
     ).not.toBeInTheDocument()
   })
+  it('B09 never persists an interrupted partial stream when fallback also fails', async () => {
+    mocks.bgStream.mockImplementation(async function* () { yield streamChunk('Incomplete prefix'); throw new Error('Stream interrupted') });
+    mocks.bgRequest.mockRejectedValue(new Error('Fallback unavailable'));
+    const onGenerated = vi.fn();
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" onAnalysisGenerated={onGenerated} />);
+    const button = screen.getByRole('button', { name: 'Generate Analysis' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalled());
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.method === 'POST' && request.path.endsWith('/versions'))).toEqual([]);
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/chat/completions', body: expect.objectContaining({ stream: false }), abortSignal: expect.any(AbortSignal) }));
+    expect(onGenerated).not.toHaveBeenCalled();
+  });
+
+  it('B09 cancellation aborts a fallback request before it can save a version', async () => {
+    mocks.bgStream.mockImplementation(() => ({ [Symbol.asyncIterator]: () => ({ next: async () => { throw new Error('Stream unavailable') } }) }));
+    let request: { abortSignal?: AbortSignal } | undefined;
+    let release!: (value: unknown) => void;
+    mocks.bgRequest.mockImplementation((init: { path: string; abortSignal?: AbortSignal }) => {
+      request = init;
+      return new Promise(resolve => { release = resolve });
+    });
+    const onGenerated = vi.fn();
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" onAnalysisGenerated={onGenerated} />);
+    const button = screen.getByRole('button', { name: 'Generate Analysis' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(request).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel generation' }));
+    release({ choices: [{ message: { content: 'Late fallback' } }] });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(request?.abortSignal?.aborted).toBe(true);
+    expect(onGenerated).not.toHaveBeenCalled();
+    expect(mocks.bgRequest.mock.calls.some(([init]) => init.path.endsWith('/versions'))).toBe(false);
+  });
+
 })

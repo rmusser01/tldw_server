@@ -1063,3 +1063,92 @@ def test_persona_profiles_are_user_scoped(persona_db: CharactersRAGDB):
         assert sessions.json() == []
 
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def persona_setup_scope_client(persona_db):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+
+    app = FastAPI()
+    app.include_router(persona_ep.router, prefix="/api/v1/persona")
+    app.dependency_overrides[get_request_user] = lambda: User(
+        id=84, username="persona-owner-84", email=None, is_active=True
+    )
+    app.dependency_overrides[get_auth_principal] = lambda: SimpleNamespace(user_id=84)
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: persona_db
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/persona/profiles",
+            json={"name": "Owned setup", "mode": "persistent_scoped"},
+        )
+        # Pytest behavior checks use assertions; application guards remain enabled.
+        assert created.status_code == 201, created.text  # nosec B101
+        yield client, persona_db, created.json()["id"]
+
+
+@pytest.mark.parametrize("suffix,method", [("", "PATCH"), ("/voice-commands", "GET"), ("/connections", "GET")])
+@pytest.mark.parametrize("expected_owner", ["42", "84", None])
+def test_persona_setup_expected_user_bounds_finish_requests(
+    persona_setup_scope_client, monkeypatch, suffix, method, expected_owner
+):
+    client, db, persona_id = persona_setup_scope_client
+    before = db.get_persona_profile(persona_id, user_id="84")
+    read_profile = db.get_persona_profile
+    handler_reads = []
+
+    def record_profile_read(*args, **kwargs):
+        handler_reads.append(True)
+        return read_profile(*args, **kwargs)
+
+    monkeypatch.setattr(db, "get_persona_profile", record_profile_read)
+    headers = {} if expected_owner is None else {"X-TLDW-Expected-User-ID": expected_owner}
+    kwargs = {"headers": headers}
+    path = f"/api/v1/persona/profiles/{persona_id}{suffix}"
+    if method == "PATCH":
+        path += f"?expected_version={before['version']}"
+        kwargs["json"] = {"name": "Accepted owned setup"}
+    response = client.request(method, path, **kwargs)
+    if expected_owner == "42":
+        # Pytest behavior checks use assertions; application guards remain enabled.
+        assert response.status_code == 412, response.text  # nosec B101
+        assert response.json()["detail"]["code"] == "request_config_scope_changed"  # nosec B101
+        assert response.headers["cache-control"] == "no-store"  # nosec B101
+        assert handler_reads == []  # nosec B101
+        assert read_profile(persona_id, user_id="84") == before  # nosec B101
+    else:
+        assert response.status_code == 200, response.text  # nosec B101
+        assert handler_reads  # nosec B101
+        current = read_profile(persona_id, user_id="84")
+        assert current["mode"] == "persistent_scoped"  # nosec B101
+        if method == "PATCH":
+            assert response.json()["name"] == "Accepted owned setup"  # nosec B101
+            assert current["version"] == before["version"] + 1  # nosec B101
+        else:
+            assert current == before  # nosec B101
+
+
+@pytest.mark.parametrize("expected_owner", [None, "84"])
+def test_persona_setup_expected_user_preserves_real_profile_cas(persona_setup_scope_client, expected_owner):
+    client, db, persona_id = persona_setup_scope_client
+    original = db.get_persona_profile(persona_id, user_id="84")
+    headers = {} if expected_owner is None else {"X-TLDW-Expected-User-ID": expected_owner}
+    path = f"/api/v1/persona/profiles/{persona_id}"
+    first = client.patch(
+        path + f"?expected_version={original['version']}", headers=headers, json={"name": "First owned edit"}
+    )
+    # Pytest behavior checks use assertions; application guards remain enabled.
+    assert first.status_code == 200, first.text  # nosec B101
+    accepted = db.get_persona_profile(persona_id, user_id="84")
+    stale = client.patch(
+        path + f"?expected_version={original['version']}", headers=headers, json={"name": "Stale completion"}
+    )
+    assert stale.status_code == 409, stale.text  # nosec B101
+    assert db.get_persona_profile(persona_id, user_id="84") == accepted  # nosec B101
+    retry = client.patch(
+        path + f"?expected_version={accepted['version']}", headers=headers, json={"name": "Current owned completion"}
+    )
+    assert retry.status_code == 200, retry.text  # nosec B101
+    assert retry.json()["version"] == accepted["version"] + 1  # nosec B101
+    assert retry.json()["name"] == "Current owned completion"  # nosec B101

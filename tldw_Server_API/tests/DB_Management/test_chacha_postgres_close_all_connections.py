@@ -38,11 +38,9 @@ def test_close_all_connections_closes_its_checkout_before_closing_the_callers_po
     pg_database_config, tmp_path, monkeypatch
 ):
     """A checkout handed to the pool's reset worker must not outlive the pool unreset and open."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
     from psycopg_pool import pool as psycopg_pool_module
 
-    backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    if not backend.get_pool()._use_psycopg_pool:
-        pytest.skip("the fallback pool rolls a returned checkout back synchronously")
     db = CharactersRAGDB(tmp_path / "own.db", client_id="1", backend=backend)
     db.execute_query("SELECT count(*) AS n FROM character_cards")
     raw = db._local.conn

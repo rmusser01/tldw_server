@@ -446,6 +446,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
   CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_MESSAGE_VIEW_SETTING: "chatMessageView",
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
   resolveOpacityAlpha: (value: unknown, fallback = 35) =>
     typeof value === "number" && Number.isFinite(value)
@@ -511,6 +512,7 @@ vi.mock("@/store/artifacts", () => ({
 
 vi.mock("@/hooks/useSetting", () => ({
   useSetting: (setting: string) => {
+    if (setting === "chatMessageView") return ["transcript", vi.fn()]
     if (setting === "chatWindowOpacity") return [35]
     if (setting === "chatMessageOpacity") return [60]
     if (setting === "chatCharacterImageOpacity") return [100]
@@ -810,9 +812,9 @@ describe("Playground coordinator integration", () => {
     await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
     useStoreMessageOption.setState({ ...useStoreMessageOption.getInitialState(), selectedModel: "test-model", temporaryChat: false,
       serverChatId: "alice-character", serverChatMetaLoaded: true, serverChatCharacterId: 4, serverChatAssistantKind: "character",
-      messages: [{ id: "alice-private", isBot: true, message: "Alice private answer", sources: [] }]
+      messages: [{ id: "alice-private", isBot: true, name: undefined, message: "Alice private answer", sources: [] }]
     }, true)
-    useMessageOptionMock.mockImplementation(() => ({ ...messageOptionState.value, ...useStoreMessageOption(), selectedAssistant: null }))
+    useMessageOptionMock.mockImplementation(() => ({ ...messageOptionState.value, ...useStoreMessageOption(state => state), selectedAssistant: null }))
     const view = render(<><Playground /><OrdinarySend /></>)
     try {
       act(() => {
@@ -1530,6 +1532,36 @@ describe("Playground coordinator integration", () => {
       localStorage.clear();
     }
   });
+  it.each([[0, false], [70, false], [0, true], [70, true]] as const)("B02 history selection retires the saved route before a %sms navigation (ordinary=%s)", async (delay, ordinary) => {
+    realLoader.enabled = realLoader.webStorage = realLoader.route = realLoader.additionalLoader = true
+    routeCommitDelay = delay
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    localStorage.clear()
+    await setOwnedAssistant({ kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
+    tldwClientState.getChat.mockImplementation(async (id: string) => id === "ordinary" ? { id, title: "Ordinary saved chat", source: "webui-chat", scope_type: "global" } : { id, title: id === "cedar" ? "Cedar chat" : "Robot chat", character_id: id === "cedar" ? 4 : 5, assistant_kind: "character", assistant_id: id === "cedar" ? "4" : "5", source: "webui-character-chat", scope_type: "global" })
+    for (const id of ["cedar", "ordinary", "robot"]) {
+      setFixtureTranscript(id, [{ id: `${id}-answer`, role: "assistant", content: id === "cedar" ? "Cedar answer" : id === "ordinary" ? "Ordinary answer" : "BEEP BOOP", version: 1 }])
+    }
+    tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({ id: Number(id), name: Number(id) === 4 ? "Cedar" : "Robot" }))
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=4&chatId=cedar")
+    const view = render(<><Playground /><SavedChatSelection ordinary={ordinary} /></>)
+    const expected = ordinary ? "Ordinary answer" : "BEEP BOOP"
+    try {
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Cedar answer"]))
+      fireEvent.click(screen.getByRole("button", { name: ordinary ? "Open saved ordinary chat" : "Open saved Robot" }))
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual([expected]))
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)) })
+      expect(useStoreMessageOption.getState().serverChatId).toBe(ordinary ? "ordinary" : "robot")
+      expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual([expected])
+      expect(window.location.href).not.toContain("chatId=cedar")
+      expect(screen.getByTestId("playground-form")).toHaveAttribute("data-character-workflow", String(!ordinary))
+      act(() => navigateRoute("/chat?mode=character&characterId=4&chatId=cedar"))
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Cedar answer"]))
+      expect(useStoreMessageOption.getState().serverChatId).toBe("cedar")
+    } finally { view.unmount(); localStorage.clear() }
+  })
+
   it.each(["history", "cold"])("uses canonical ordinary workflow after %s load despite a persisted Character preference", async entry => {
     realLoader.enabled = realLoader.webStorage = true
     useMessageOptionMock.mockImplementation(useRealServerConversation)
@@ -1838,7 +1870,12 @@ describe("Playground coordinator integration", () => {
     try {
       await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
       await waitFor(async () => expect(await getOwnedAssistant()).toMatchObject({ id: "5", name: "Robot" }))
-      fireEvent.click(screen.getByRole("button", { name: action }))
+      if (action === "Temporary chat (on this device)") {
+        fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+        fireEvent.click(await screen.findByRole("menuitem", { name: action }))
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: action }))
+      }
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)) })
       expect(window.location.pathname + window.location.search).toBe("/chat")
       expect(useStoreMessageOption.getState().serverChatId).toBeNull()

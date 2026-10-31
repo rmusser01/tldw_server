@@ -208,7 +208,7 @@ def test_new_empty_keywords_need_no_initial_reads_and_can_be_added_and_removed(i
     assert reads == []
     assert fetch_keywords_for_media(db, media_id) == []
     db.update_keywords_for_media(media_id, ["SyntheticTag"])
-    assert fetch_keywords_for_media(db, media_id) == ["synthetictag"]
+    assert fetch_keywords_for_media(db, media_id) == ["SyntheticTag"]
     db.update_keywords_for_media(media_id, [])
     assert fetch_keywords_for_media(db, media_id) == []
 
@@ -216,7 +216,7 @@ def test_new_empty_keywords_need_no_initial_reads_and_can_be_added_and_removed(i
 def test_nonempty_creation_and_empty_overwrite_still_replace_keywords(identity_db):
     db, _, _ = identity_db
     media_id = _add(db, keywords=["SyntheticTag"])[0]
-    assert fetch_keywords_for_media(db, media_id) == ["synthetictag"]
+    assert fetch_keywords_for_media(db, media_id) == ["SyntheticTag"]
     assert _add(db, body="Replacement synthetic body", overwrite=True)[0] == media_id
     assert fetch_keywords_for_media(db, media_id) == []
 

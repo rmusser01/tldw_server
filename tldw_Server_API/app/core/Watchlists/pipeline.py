@@ -814,11 +814,16 @@ async def run_watchlist_job(
                             )
                         if status == "ingested":
                             try:
-                                target_watchlist_id = getattr(job, "watchlist_id", None)
-                                if target_watchlist_id is None:
-                                    source_watchlist_ids = db.list_source_watchlist_ids(int(_src.id))
-                                    target_watchlist_id = source_watchlist_ids[0] if source_watchlist_ids else None
-                                if target_watchlist_id is not None:
+                                if override_ids:
+                                    # Source refreshes use their memberships, not the system job's imported scope.
+                                    target_watchlist_ids = db.list_source_watchlist_ids(int(_src.id))
+                                else:
+                                    target_watchlist_id = getattr(job, "watchlist_id", None)
+                                    if target_watchlist_id is None:
+                                        source_watchlist_ids = db.list_source_watchlist_ids(int(_src.id))
+                                        target_watchlist_id = source_watchlist_ids[0] if source_watchlist_ids else None
+                                    target_watchlist_ids = [target_watchlist_id] if target_watchlist_id is not None else []
+                                for target_watchlist_id in target_watchlist_ids:
                                     evaluate_content_alert_rules_for_item(
                                         db,
                                         watchlist_id=int(target_watchlist_id),
@@ -968,7 +973,7 @@ async def run_watchlist_job(
                     if status // 100 != 2:
                         # error path — track consecutive errors and apply backoff
                         source_status = f"error:{status}"
-                        source_error = f"HTTP {status}"
+                        source_error = res.get("error") or f"HTTP {status}"
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                             prev_errors = int(getattr(src, "consec_errors", 0) or 0)
                             new_errors = prev_errors + 1
@@ -987,10 +992,7 @@ async def run_watchlist_job(
                                 logger.warning(f"watchlists.health: auto-disabled source {src.id} after {new_errors} consecutive errors")
                         continue
 
-                    # 200 OK — reset error tracking
-                    if res.get("etag") is not None or res.get("last_modified") is not None:
-                        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
-                            db.update_source_scrape_meta(int(src.id), etag=res.get("etag"), last_modified=res.get("last_modified"), consec_not_modified=0, consec_errors=0)
+                    processing_failure_count = 0
                     # Accumulate history counters for run stats when applicable
                     try:
                         if isinstance(res.get("pages_fetched"), int):
@@ -1121,7 +1123,21 @@ async def run_watchlist_job(
                                 "content": it.get("summary") or "",
                                 "author": None,
                             }
-                        if not article:
+                        if not article or (
+                            not test_mode
+                            and (not isinstance(article.get("content"), str) or not article["content"].strip())
+                        ):
+                            processing_failure_count += 1
+                            _record_scraped(
+                                status="error",
+                                url=link,
+                                title=it.get("title"),
+                                summary=it.get("summary"),
+                                content=None,
+                                media_id=None,
+                                media_uuid=None,
+                                published_at=it.get("published"),
+                            )
                             continue
                         ingested_media_id: int | None = None
                         ingested_media_uuid: str | None = None
@@ -1226,6 +1242,7 @@ async def run_watchlist_job(
                                 published_at=it.get("published"),
                             )
                         else:
+                            processing_failure_count += 1
                             _record_scraped(
                                 status="error",
                                 url=article.get("url") or link,
@@ -1238,12 +1255,24 @@ async def run_watchlist_job(
                             )
                             continue
 
-                        # Update last_scraped_at/status for source
-                        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
-                            db.update_source_scrape_meta(int(src.id), last_scraped_at=_utcnow_iso(), status="ok", consec_errors=0)
-
                         # Apply retention policy if configured
                         _apply_feed_retention(collections_db, collections_origin, src)
+
+                    if processing_failure_count:
+                        source_status = "error:processing"
+                        source_error = f"{processing_failure_count} article(s) failed extraction or persistence"
+                    if not _run_is_cancelled(db, run.id):
+                        # A failed item must remain fetchable on the next real retry.
+                        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
+                            db.update_source_scrape_meta(
+                                int(src.id),
+                                last_scraped_at=_utcnow_iso(),
+                                status=source_status,
+                                etag=res.get("etag") if not processing_failure_count else None,
+                                last_modified=res.get("last_modified") if not processing_failure_count else None,
+                                consec_not_modified=0,
+                                consec_errors=(int(getattr(src, "consec_errors", 0) or 0) + 1 if processing_failure_count else 0),
+                            )
 
                 elif src_type in {"site", "forum"}:
                     # Determine discovery preferences
@@ -1316,6 +1345,7 @@ async def run_watchlist_job(
 
                     items_found += len(urls_to_fetch)
                     extraction_failure_count = 0
+                    persistence_failure_count = 0
                     extraction_success_count = 0
                     for page_url in urls_to_fetch:
                         if _run_is_cancelled(db, run.id):
@@ -1361,7 +1391,10 @@ async def run_watchlist_job(
                             article["content"] = article.get("content") or prefetch.get("content") or prefetch.get("summary") or ""
                             if prefetch.get("author") and not article.get("author"):
                                 article["author"] = prefetch.get("author")
-                        if not article:
+                        if not article or (
+                            not test_mode
+                            and (not isinstance(article.get("content"), str) or not article["content"].strip())
+                        ):
                             extraction_failure_count += 1
                             _record_scraped(
                                 status="error",
@@ -1543,6 +1576,7 @@ async def run_watchlist_job(
                                 published_at=(prefetch.get("published") or prefetch.get("published_raw")) if prefetch else None,
                             )
                         else:
+                            persistence_failure_count += 1
                             _record_scraped(
                                 status="error",
                                 url=article.get("url") or page_url,
@@ -1563,8 +1597,16 @@ async def run_watchlist_job(
                         else:
                             source_status = "error:extraction"
                             source_error = f"No article content extracted from {extraction_failure_count} URL(s)"
+                    if persistence_failure_count:
+                        source_status = "error:processing"
+                        source_error = f"{extraction_failure_count} extraction and {persistence_failure_count} persistence failure(s)"
                     with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
-                        db.update_source_scrape_meta(int(src.id), last_scraped_at=_utcnow_iso(), status="ok", consec_errors=0)
+                        db.update_source_scrape_meta(
+                            int(src.id),
+                            last_scraped_at=_utcnow_iso(),
+                            status=source_status,
+                            consec_errors=(int(getattr(src, "consec_errors", 0) or 0) + 1 if extraction_failure_count or persistence_failure_count else 0),
+                        )
                     # Apply retention policy if configured
                     _apply_feed_retention(collections_db, collections_origin, src)
                 else:
@@ -1664,12 +1706,21 @@ async def run_watchlist_job(
             db.set_job_history(job_id=job_id, last_run_at=_utcnow_iso(), next_run_at=_compute_next_run(job.schedule_expr, job.schedule_timezone))
             return {"run_id": run.id, "status": "cancelled", **stats}
 
-        db.update_run(run.id, status="succeeded", finished_at=_utcnow_iso(), stats_json=json.dumps(stats))
+        run_status = "failed" if source_errors else "succeeded"
+        db.update_run(
+            run.id,
+            status=run_status,
+            finished_at=_utcnow_iso(),
+            stats_json=json.dumps(stats),
+            error_msg=(f"{source_errors} source(s) failed; inspect source statuses" if source_errors else None),
+        )
         collection_succeeded = True
 
         # Update job history
         next_run = _compute_next_run(job.schedule_expr, job.schedule_timezone)
         db.set_job_history(job_id=job_id, last_run_at=_utcnow_iso(), next_run_at=next_run)
+        if source_errors:
+            return {"run_id": run.id, "status": "failed", **stats}
         try:
             if isinstance(job_output_prefs, dict):
                 _maybe_promote_feed_schedule(db=db, job=job, job_output_prefs=job_output_prefs)

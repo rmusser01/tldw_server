@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -709,6 +710,7 @@ vi.mock("antd", async (original) => {
         <Dropdown {...props} />
       ),
     Input: InputComponent,
+    Segmented: actual.Segmented,
     InputNumber: ({ value, onChange, disabled, ...rest }: any) => (
       <input
         type="number"
@@ -1127,7 +1129,7 @@ vi.mock("@/hooks/useDraftPersistence", async original => {
   const actual = await original<typeof import("@/hooks/useDraftPersistence")>()
   return { ...actual, useDraftPersistence: (...args: Parameters<typeof actual.useDraftPersistence>) => nativeSetupFixture.realDrafts
     ? actual.useDraftPersistence(...args)
-    : { draftSaved: false, draftReady: true, retainDraft: nativeSetupFixture.retain } }
+    : { draftSaved: false, draftReady: true, retainDraft: nativeSetupFixture.retain, flushDraft: vi.fn() } }
 })
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
@@ -1224,6 +1226,8 @@ vi.mock("../ComposerToolbar", async importOriginal => {
   const actual = await importOriginal<typeof import("../ComposerToolbar")>()
   const StubToolbar = ({
     modelSelectButton,
+    serverChatId,
+    onRolePlayTriggerCapture,
     researchLaunchButton,
     toolsButton,
     sendControl,
@@ -1233,6 +1237,8 @@ vi.mock("../ComposerToolbar", async importOriginal => {
     onOpenModelSettings
   }: {
     onOpenModelSettings?: () => void
+    serverChatId?: string | null
+    onRolePlayTriggerCapture?: (element: HTMLButtonElement) => void
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
@@ -1247,7 +1253,13 @@ vi.mock("../ComposerToolbar", async importOriginal => {
       {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
-      {sendControl}
+      <div data-testid="composer-inline-send-control">{sendControl}</div>
+      <div onClickCapture={(event) => {
+        const button = event.currentTarget.querySelector("button")
+        if (button) onRolePlayTriggerCapture?.(button)
+      }}>
+        <BuddyManagementButton target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null} onConversationSettings={rolePlayActions?.onOpenRolePlaySetup} />
+      </div>
       <button type="button" onClick={rolePlayActions?.onOpenRolePlaySetup}>Open role-play setup</button>
       <button
         type="button"
@@ -1937,6 +1949,7 @@ beforeEach(async () => {
   saveActorSettingsMock
     .mockReset()
     .mockImplementation(nativeSetupFixture.actualSceneWriter!)
+  nativeSetupFixture.realDrawer = false
   viewportState.mobile = false
   viewportState.mode = "pro"
   viewportState.realToolbar = false
@@ -5374,18 +5387,17 @@ describe("PlaygroundForm role-play starter", () => {
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} mobileCockpitModeActive />)
     expect(screen.queryByRole("button", { name: /(?:Hide|Show) composer options/ })).not.toBeInTheDocument()
-    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    const trigger = screen.getByTestId("composer-options-toggle")
+    await waitFor(() => expect(trigger).toBeEnabled())
     expect(trigger).toBeVisible()
     expect(screen.getByRole("button", { name: /Select model|deepseek-chat/i })).toBeVisible()
     expect(screen.getByTestId("composer-inline-send-control")).toBeVisible()
     await user.click(trigger)
-    const customization = screen.getByRole("region", { name: "Customize chat" })
+    const customization = screen.getByRole("region", { name: "Composer tools" })
     expect(customization).toBeVisible()
     const buddy = within(customization).getByRole("button", { name: "Buddy & Persona", hidden: true })
-    expect(buddy).not.toBeVisible()
-    expect(within(screen.getByRole("group", { name: "Character & your role" })).getByRole("button", { name: "Role-play setup" })).toBeVisible()
-    await user.click(within(customization).getByText("Advanced customization", { selector: "summary" }))
     expect(buddy).toBeVisible()
+    expect(within(screen.getByRole("region", { name: "Prompts & people" })).getByRole("button", { name: "Role-play setup" })).toBeVisible()
   })
 
   it("allows Customize Escape while the real embedded Search & Context section remains open", async () => {
@@ -5393,7 +5405,8 @@ describe("PlaygroundForm role-play starter", () => {
     viewportState.realToolbar = true
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)
-    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    const trigger = screen.getByTestId("composer-options-toggle")
+    await waitFor(() => expect(trigger).toBeEnabled())
     await user.click(trigger)
     await user.click(screen.getByRole("button", { name: "Search & Context" }))
     const search = screen.getByRole("button", { name: "Close Search & Context" })
@@ -5409,7 +5422,8 @@ describe("PlaygroundForm role-play starter", () => {
     viewportState.realToolbar = true
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)
-    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    const trigger = screen.getByTestId("composer-options-toggle")
+    await waitFor(() => expect(trigger).toBeEnabled())
     expect(trigger).toHaveAttribute("aria-expanded", "false")
     act(() => window.dispatchEvent(new CustomEvent("tldw:open-assistant-select", { detail: { tab: "character" } })))
     const tab = await screen.findByRole("tab", { name: "Characters" })
@@ -7338,6 +7352,48 @@ describe("PlaygroundForm role-play starter", () => {
     await act(async () => { release(); await pending })
   })
 
+  it.each(["principal", "authority", "equivalent"] as const)("fences the actual Drawer scene continuation at the %s boundary", async (boundary) => {
+    const f = prepareQualifiedSceneSource("fresh")
+    Object.assign(f.source, { serverChatAssistantKind: null, serverChatAssistantId: null, serverChatCharacterId: null })
+    sceneBucket.records.set(`actorSettings:owned:${f.target.key}`, {
+      value: { ...createDefaultActorSettings(), isEnabled: true, notes: "Prior account scene" },
+      updatedAt: 1730000000000
+    })
+    nativeSetupFixture.realDrawer = true
+    let finishScene!: () => void
+    const pending = new Promise<boolean>(resolve => { finishScene = () => resolve(true) })
+    saveActorSettingsMock.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+      const drawer = await screen.findByRole("dialog", { name: "Role-play setup" })
+      await waitFor(() => expect(within(drawer).getByRole("textbox", { name: "Scene notes" })).toHaveValue("Prior account scene"))
+      await user.clear(within(drawer).getByRole("textbox", { name: "Scene notes" }))
+      await user.type(within(drawer).getByRole("textbox", { name: "Scene notes" }), "Original account scene")
+      await waitFor(() => expect(within(drawer).getByRole("button", { name: "Apply" })).not.toBeDisabled())
+      await user.click(within(drawer).getByRole("button", { name: "Apply" }))
+      await waitFor(() => expect(saveActorSettingsMock.mock.calls, JSON.stringify({ errors: nativeSetupFixture.error.mock.calls, text: drawer.textContent })).toHaveLength(1))
+      const successor = { ...createDefaultActorSettings(), notes: "Successor account scene" }
+      act(() => {
+        useActorStore.setState({ settings: successor, preview: "Successor account preview", tokenCount: 77 })
+        window.dispatchEvent(boundary === "principal" ? new Event("tldw:auth-principal-changed") : new CustomEvent("tldw:config-updated", { detail: { authorityChanged: boundary === "authority" } }))
+      })
+      await act(async () => { finishScene(); await pending })
+      if (boundary === "equivalent") {
+        expect(useActorStore.getState().settings?.notes).toBe("Original account scene")
+        expect(useActorStore.getState().preview).toContain("Original account scene")
+      } else {
+        expect(useActorStore.getState()).toMatchObject({ settings: successor, preview: "Successor account preview", tokenCount: 77 })
+      }
+    } finally {
+      view.unmount()
+      finishScene()
+      await pending
+      useActorStore.getState().reset()
+    }
+  })
+
   it("clears identity with one awaited canonical selection write", async () => {
     const user = userEvent.setup()
     selectedAssistantMock.initialSelection = { kind: "character", id: "ada", name: "Ada Lovelace" }
@@ -7379,7 +7435,7 @@ describe("PlaygroundForm role-play starter", () => {
     }
 
     expect(() => render(<PlaygroundForm droppedFiles={[]} />)).not.toThrow()
-    expect(document.querySelector("#composer-options-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-toolbar")).toBeInTheDocument()
   })
 
   it("opens character selection from the starter and returns focus after selecting the default assistant", async () => {
@@ -7422,6 +7478,42 @@ describe("PlaygroundForm role-play starter", () => {
         screen.getByRole("button", { name: /helpful ai assistant/i })
       )
     })
+  })
+
+  it.each(["loading", "recovery"])("B02 retains the real composer draft through character %s", async (phase) => {
+    const user = userEvent.setup()
+    const onAction = vi.fn()
+    onSubmitMock.mockResolvedValueOnce({ status: "submitted" } as never)
+    const { source } = prepareNativeSource()
+    source.selectedModel = "deepseek-chat"
+    Object.assign(source, { serverChatAssistantKind: null, serverChatAssistantId: null, serverChatCharacterId: null })
+    selectedCharacterState.value = { id: "ada", name: "Ada Lovelace" }
+    const blocker = { active: true, title: "Wait for the selected character. Your draft is retained.", actionLabel: phase === "loading" ? "Loading character" : "Retry character", disabled: phase === "loading", onAction }
+    const form = (blocked: typeof blocker | null) => <PlaygroundForm droppedFiles={[]} characterChatSendBlocker={blocked} />
+    const { rerender } = render(form(blocker))
+    const composer = screen.getByTestId("composer-textarea")
+    await user.type(composer, "Keep this B02 question.")
+    fireEvent.submit(composer.closest("form")!)
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(composer).toHaveValue("Keep this B02 question.")
+    const button = within(screen.getByTestId("composer-inline-send-control")).getByRole("button", { name: blocker.actionLabel })
+    if (phase === "loading") expect(button).toBeDisabled()
+    else {
+      onAction.mockClear()
+      await user.click(button)
+      expect(onAction).toHaveBeenCalledTimes(1)
+    }
+    rerender(form(null))
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(composer).toHaveValue("Keep this B02 question.")
+    const send = within(screen.getByTestId("composer-inline-send-control")).getByRole("button", { name: "Send message", exact: true }) as HTMLButtonElement
+    const recoveredForm = (screen.getByTestId("composer-textarea") as HTMLTextAreaElement).form!
+    expect(send).toBeEnabled()
+    expect(send.type).toBe("submit")
+    expect(send.form).toBe(recoveredForm)
+    expect(recoveredForm.checkValidity()).toBe(true)
+    await user.click(send)
+    await waitFor(() => expect(onSubmitMock.mock.calls, JSON.stringify({ errors: nativeSetupFixture.error.mock.calls })).toHaveLength(1))
   })
 
   it("turns blocked character chat composer SEND into setup without dropping the draft", async () => {
@@ -7682,3 +7774,24 @@ it.each(["tracked_character", "overlay", "fresh_character"])(
     }
   }
 )
+
+
+it("names only the server connection when selected-model readiness is unknown", () => {
+  render(<PlaygroundForm droppedFiles={[]} />)
+
+  const selector = screen.getByTestId("model-selector")
+  expect(selector).toHaveTextContent("Server connected")
+  expect(selector).not.toHaveTextContent("Healthy")
+  expect(within(selector).getByText("Server connected")).toHaveAttribute(
+    "title",
+    "Status"
+  )
+})
+
+it("keeps offline connection guidance with a selected model", () => {
+  playgroundFormConnectionState.phase = "disconnected"
+  playgroundFormConnectionState.isConnected = false
+  render(<PlaygroundForm droppedFiles={[]} />)
+
+  expect(screen.getByTestId("model-selector")).toHaveTextContent("Offline")
+})

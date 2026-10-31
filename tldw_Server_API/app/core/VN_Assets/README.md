@@ -38,7 +38,7 @@ VN_Assets manages visual novel asset packs, asset-slot state, generated asset jo
 ## How It Connects
 
 - `app/api/v1/endpoints/vn_assets.py` exposes asset-pack, generation, manifest, and portability routes.
-- `app/api/v1/schemas/vn_asset_schemas.py` defines request and response models.
+- `app/core/VN_Assets/vn_asset_schemas.py` defines the request and response models; `app/api/v1/schemas/vn_asset_schemas.py` re-exports them.
 - `app/core/DB_Management/VNAssetPacks_DB.py` stores asset-pack state.
 - `app/services/vn_asset_jobs_worker.py` runs queued asset generation work.
 - `app/core/VN_Play/` and `app/core/VN_Scripts/` use VN asset readiness and manifests for runtime setup.

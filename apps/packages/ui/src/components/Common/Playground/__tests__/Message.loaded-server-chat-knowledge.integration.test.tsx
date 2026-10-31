@@ -371,6 +371,25 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
     messageApiMock.error.mockClear()
   })
 
+  it.each(["stopped", "interrupted"])("B02 shows %s canonical partial status on a reloaded selected reply", async (status) => {
+    const capture = loadedServerChatCapture()
+    capture.selected_content.find(row => row.id === ASSISTANT_ID)!.extra_metadata = { generation_status: status }
+    chatState.messages = formatSelectedHistory(capture).messages
+    renderChat()
+
+    const assistant = messageCard("assistant")
+    const savedStatus = within(assistant).getByRole("status", { name: status === "stopped" ? "Stopped" : "Interrupted" })
+    expect(savedStatus).toHaveTextContent(status === "stopped" ? "Stopped" : "Interrupted")
+    expect(savedStatus).toHaveTextContent(status === "stopped"
+      ? "This reply was stopped. The saved content is kept."
+      : "This reply ended early. The saved content is kept.")
+    await waitFor(() => expect(assistant).toHaveTextContent(ANSWER))
+    for (const name of ["Retry same model", "Continue from partial", "Use another provider"]) {
+      expect(within(assistant).queryByRole("button", { name })).not.toBeInTheDocument()
+    }
+    expect(assistant).toHaveAttribute("data-server-message-id", ASSISTANT_ID)
+  })
+
   it("offers Save to Notes on the assistant reply and saves it against its server message", async () => {
     renderChat()
     const assistant = messageCard("assistant")

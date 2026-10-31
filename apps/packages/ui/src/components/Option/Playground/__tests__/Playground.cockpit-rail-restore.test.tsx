@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { COCKPIT_LEFT_RESTORE_WRAPPER_CLASS } from "@/components/Layouts/chat-rail-positioning";
@@ -41,6 +41,35 @@ const renderShell = ({
 };
 
 describe("Playground cockpit rail restore tabs", () => {
+  it("closes the active mobile panel without changing saved rail visibility and restores tab focus", () => {
+    const onLeftRailVisibleChange = vi.fn();
+    const onRightRailVisibleChange = vi.fn();
+    renderShell({
+      leftRailVisible: true,
+      rightRailVisible: true,
+      onLeftRailVisibleChange,
+      onRightRailVisibleChange,
+    });
+    const contextButton = screen.getByRole("button", { name: "Context",
+      exact: true,
+    });
+    const runtimeButton = screen.getByRole("button", { name: "Runtime",
+      exact: true,
+    });
+    fireEvent.click(runtimeButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Runtime panel" }),
+    );
+    expect(
+      screen.getByTestId("playground-cockpit-mobile-rails"),
+    ).toHaveAttribute("data-mobile-panel", "none");
+    expect(runtimeButton).toHaveFocus();
+    expect(onLeftRailVisibleChange).not.toHaveBeenCalled();
+    expect(onRightRailVisibleChange).not.toHaveBeenCalled();
+    fireEvent.click(contextButton);
+    expect(screen.getByRole("region", { name: "Context" })).toBeVisible();
+  });
+
   it("keeps restore controls mounted across rail visibility changes", () => {
     const { rerender } = render(
       <PlaygroundCockpitShell
@@ -149,7 +178,7 @@ describe("Playground cockpit rail restore tabs", () => {
     const runtimeRestore = screen.getByTestId(
       "playground-cockpit-right-rail-restore",
     );
-    expect(runtimeRestore).toHaveTextContent("Chat settings");
+    expect(runtimeRestore).toHaveTextContent("Runtime");
     expect(runtimeRestore.parentElement).toHaveClass(
       "absolute",
       "right-0",
@@ -181,7 +210,7 @@ describe("Playground cockpit rail restore tabs", () => {
     );
 
     expect(contextRestore).toHaveTextContent("Context");
-    expect(runtimeRestore).toHaveTextContent("Chat settings");
+    expect(runtimeRestore).toHaveTextContent("Runtime");
     expect(
       screen.queryByTestId("playground-collapsed-composition-summary"),
     ).not.toBeInTheDocument();
@@ -210,11 +239,9 @@ describe("Playground cockpit rail restore tabs", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
 
-    const contextButton = within(mobileRails).getByRole("button", {
-      name: "Context",
+    const contextButton = screen.getByRole("button", { name: "Context",
     });
-    const runtimeButton = within(mobileRails).getByRole("button", {
-      name: "Chat settings",
+    const runtimeButton = screen.getByRole("button", { name: "Runtime",
     });
     const contextPanel = document.getElementById(
       contextButton.getAttribute("aria-controls") ?? "",

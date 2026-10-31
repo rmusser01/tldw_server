@@ -40,7 +40,7 @@ import {
   getRouteCommandPaletteLabel
 } from "@/routes/route-metadata"
 import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
-import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
+import { CLAIMS_REVIEW_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
@@ -310,6 +310,14 @@ export function CommandPalette({
           keywords: ["knowledge", "qa", "rag", "search"],
         },
         {
+          id: "nav-claims-review",
+          label: getRouteCommandPaletteLabel(CLAIMS_REVIEW_PATH),
+          icon: <BookText className="size-4" />,
+          ...buildRouteCommand(CLAIMS_REVIEW_PATH),
+          category: "navigation" as const,
+          keywords: ["claims", "review", "decisions", "audit"],
+        },
+        {
           id: "nav-media",
           label: t("common:commandPalette.goToMedia", "Go to Media"),
           icon: <BookText className="size-4" />,
@@ -432,22 +440,40 @@ export function CommandPalette({
         ? ([
             {
               id: "action-toggle-rag",
-              label: t(
-                "common:commandPalette.toggleKnowledgeSearch",
-                "Toggle Search & Context"
+              // In the side panel this mode chats with the current page; use the
+              // help sheet's and Send menu's term there (XS-08).
+              label: isSidepanel
+                ? t(
+                    "common:commandPalette.toggleChatWithPage",
+                    "Toggle chat with current page"
+                  )
+                : t(
+                    "common:commandPalette.toggleKnowledgeSearch",
+                    "Toggle Search & Context"
+                  ),
+              description: isSidepanel
+                ? t(
+                    "common:commandPalette.toggleChatWithPageDesc",
+                    "Answer using the page open in this browser tab"
+                  )
+                : t(
+                    "common:commandPalette.toggleKnowledgeSearchDesc",
+                    "Search your knowledge base and context"
+                  ),
+              icon: isSidepanel ? (
+                <Globe className="size-4" />
+              ) : (
+                <Search className="size-4" />
               ),
-              description: t(
-                "common:commandPalette.toggleKnowledgeSearchDesc",
-                "Search your knowledge base and context"
-              ),
-              icon: <Search className="size-4" />,
               shortcut: toCommandShortcut(configuredShortcuts.toggleChatMode),
               action: () => {
                 onToggleRag()
                 setOpen(false)
               },
               category: "action",
-              keywords: ["search", "knowledge", "retrieve", "rag"],
+              keywords: isSidepanel
+                ? ["page", "website", "tab", "context", "rag"]
+                : ["search", "knowledge", "retrieve", "rag"],
             }
           ] as CommandItem[])
         : []),

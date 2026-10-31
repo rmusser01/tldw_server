@@ -54,6 +54,7 @@ vi.mock("react-i18next", async () => {
   }
 })
 import { HistorySelectionReview } from "../HistorySelectionReview"
+import { resolveParentPath } from "@/utils/history-selection"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 const nodes = Array.from({ length: 20300 }, (_, i) => ({
   id: `m${i}`,
@@ -92,7 +93,7 @@ describe("history review", () => {
       name: /Include.*Message 0/
     })
     fireEvent.click(checkbox)
-    expect(screen.getByText("Omitted alternative")).toBeTruthy()
+    expect(screen.getByText("Hidden from the AI")).toBeTruthy()
     fireEvent.click(
       screen.getByRole("button", { name: "Before first included message" })
     )
@@ -250,13 +251,13 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
     dismissRecovery: vi.fn(async () => true)
   } as unknown as HistorySelectionController
   render(<HistorySelectionReview selection={selection} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
   expect(screen.getByText("Message not added")).toBeVisible()
   expect(
     screen.getByText(/Your original input is kept here/)
   ).toBeVisible()
-  expect(screen.queryByText(/unknown|Turn needs review/i)).toBeNull()
-  fireEvent.click(screen.getByText("Inspect original input and result"))
+  expect(screen.queryByText(/unknown|not (yet )?known|No reply to this message|Reply not saved|Reply not confirmed/i)).toBeNull()
+  fireEvent.click(screen.getByText("Show what was sent and received"))
   expect(screen.getByText("original refused question")).toBeVisible()
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" })) })
   expect(copy).toHaveBeenCalledWith("  original refused question  ")
@@ -272,7 +273,8 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
 const recoveryController = (
   persistence: "server" | "client" | undefined,
   state: "accepted_unsent" | "generated_unsaved",
-  resultText = ""
+  resultText = "",
+  turnExtras: Record<string, unknown> = {}
 ) => {
   const origin = {
     owner_key: "original-owner",
@@ -308,6 +310,7 @@ const recoveryController = (
           input_text: "original accepted question",
           input_images: [],
           result_text: resultText,
+          ...turnExtras,
           admission: {
             version: 1,
             owner_key: origin.owner_key,
@@ -323,6 +326,129 @@ const recoveryController = (
   } as unknown as HistorySelectionController
 }
 
+describe("CC-02: a send that got no reply explains itself", () => {
+  const providerFailure =
+    "Couldn't reach gemma3:1b (Ollama). Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+
+  it("names the problem, then the cause, and offers Switch model", async () => {
+    const selection = recoveryController("client", "accepted_unsent", "", {
+      failure_reason: providerFailure,
+      failure_action: "open-model-selector"
+    })
+    const onSwitchModel = vi.fn()
+    render(<HistorySelectionReview selection={selection} onSwitchModel={onSwitchModel} />)
+    fireEvent.click(screen.getByText("Earlier messages to review (1)"))
+
+    expect(screen.getByText("No reply to this message")).toBeVisible()
+    expect(screen.getByRole("alert")).toHaveTextContent(providerFailure)
+    expect(screen.getByText("Your message was saved, but no reply was")).toBeVisible()
+    expect(
+      screen.getByText("Your message is kept. Nothing is sent again unless you choose to retry.")
+    ).toBeVisible()
+    expect(screen.queryByText(/Turn needs review|User input accepted/)).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch model" }))
+    expect(onSwitchModel).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers Switch model only when the failure is about the model, using the shared picker event by default", () => {
+    const withoutAction = recoveryController("client", "accepted_unsent", "", {
+      failure_reason: "Your message is too large. Use a smaller image or shorten your message, then try again."
+    })
+    const { unmount } = render(<HistorySelectionReview selection={withoutAction} onSwitchModel={vi.fn()} />)
+    fireEvent.click(screen.getByText("Earlier messages to review (1)"))
+    expect(screen.getByText("No reply to this message")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull()
+    unmount()
+
+    const withAction = recoveryController("client", "accepted_unsent", "", {
+      failure_reason: providerFailure,
+      failure_action: "open-model-selector"
+    })
+    const opened = vi.fn()
+    window.addEventListener("tldw:open-model-selector", opened)
+    try {
+      render(<HistorySelectionReview selection={withAction} />)
+      fireEvent.click(screen.getByText("Earlier messages to review (1)"))
+      fireEvent.click(screen.getByRole("button", { name: "Switch model" }))
+      expect(opened).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener("tldw:open-model-selector", opened)
+    }
+  })
+
+  it("calls a reply that arrived but was not saved what it is", () => {
+    render(
+      <HistorySelectionReview
+        selection={recoveryController("client", "generated_unsaved", "partial text")}
+      />
+    )
+    fireEvent.click(screen.getByText("Earlier messages to review (1)"))
+    expect(screen.getByText("Reply not saved")).toBeVisible()
+    expect(screen.getByText("A reply arrived but wasn't saved")).toBeVisible()
+  })
+})
+
+it("accepted unanswered user recovery reviews reapplied prompt before retrying its saved question", async () => {
+  const selection = recoveryController("client", "accepted_unsent")
+  const entry = selection.recoveries[0]
+  const question = {
+    id: entry.turn.input_id, revision: "r1", role: "user",
+    parent_id: null, settled: true
+  }
+  Object.assign(selection, {
+    owner: { kind: "local", owner_key: entry.turn.owner_key, conversation_id: entry.turn.conversation_id },
+    view: { ...entry.turn.origin_view, cursor: { kind: "after_message", message_id: question.id } },
+    bookmarkScope: { profile_id: "original-profile", client_session_id: "reopened-client" },
+    fence: () => () => true,
+    capture: { status: "captured", rows: [question], snapshot: { nodes: [question] } }
+  })
+  const retry = vi.fn(async () => ({ status: "submitted" as const }))
+  const context = { model: "qwen", systemPrompts: ["Answer like a pirate."], isCurrent: () => true }
+  // The extra props model the missing mounted consumer contract without replacing the component.
+  render(<HistorySelectionReview selection={selection} {...{
+    onRetryRecovery: retry,
+    getRetryContext: async () => context
+  }} />)
+  expect(screen.queryByRole("button", { name: "Retry saved question" })).toBeNull()
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  expect(await screen.findByText(/Review or reapply the original System\/Prompt settings/)).toBeVisible()
+  expect(screen.getByText("qwen")).toBeVisible()
+  expect(screen.getByText("Answer like a pirate.")).toBeVisible()
+  expect(retry).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
+  expect(retry).toHaveBeenCalledWith(entry, { contextReviewed: true, context })
+  expect(selection.dismissRecovery).not.toHaveBeenCalled()
+})
+
+it("an old no-prompt recovery requires explicit current-context confirmation and stays inspectable on refusal", async () => {
+  const selection = recoveryController("client", "accepted_unsent")
+  Object.assign(selection, { fence: () => () => true })
+  const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
+  const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: "retry_context_changed" }))
+  render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  expect(await screen.findByText("No System/Prompt instruction is currently applied.")).toBeVisible()
+  expect(retry).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("the original recovery is retained for inspection")
+  expect(selection.dismissRecovery).not.toHaveBeenCalled()
+  expect(screen.getByRole("button", { name: "Copy recovered text" })).toBeVisible()
+})
+
+it.each(["server", "partial", "missing-admission"])("does not offer manual Retry for %s even with a connected callback", refusal => {
+  const selection = recoveryController("client", "accepted_unsent")
+  if (refusal === "server") Object.assign(selection.recoveries[0].turn, { persistence: "server" })
+  else if (refusal === "partial") selection.recoveries[0].turn.result_text = "retained output"
+  else selection.recoveries[0].turn.admission = undefined
+  render(<HistorySelectionReview selection={selection} getRetryContext={async () => ({ model: "qwen", systemPrompts: [], isCurrent: () => true })} onRetryRecovery={vi.fn()} />)
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+  expect(screen.queryByRole("button", { name: "Review retry" })).toBeNull()
+  expect(screen.getByRole("button", { name: "Copy recovered text" })).toBeVisible()
+})
+
 it.each(["accepted_unsent", "generated_unsaved"] as const)(
   "native %s recovery keeps known admission and uncertain response visible",
   (state) => {
@@ -332,15 +458,15 @@ it.each(["accepted_unsent", "generated_unsaved"] as const)(
       state === "generated_unsaved" ? "unacknowledged generated text" : ""
     )
     render(<HistorySelectionReview selection={selection} />)
-    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
     expect(
-      screen.getByText("User input accepted; response outcome unknown")
+      screen.getByText("Your message was saved. Not known whether a reply was saved")
     ).toBeVisible()
     expect(
-      screen.queryByText("User input accepted; response not saved")
+      screen.queryByText("Your message was saved, but no reply was")
     ).toBeNull()
-    expect(screen.queryByText("User admission outcome unknown")).toBeNull()
-    fireEvent.click(screen.getByText("Inspect original input and result"))
+    expect(screen.queryByText("Not known whether your message was saved")).toBeNull()
+    fireEvent.click(screen.getByText("Show what was sent and received"))
     expect(screen.getByText("original accepted question")).toBeVisible()
     if (state === "generated_unsaved")
       expect(screen.getByText("unacknowledged generated text")).toBeVisible()
@@ -363,12 +489,12 @@ it.each([undefined, "client"] as const)(
         selection={recoveryController(persistence, "accepted_unsent")}
       />
     )
-    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
     expect(
-      screen.getByText("User input accepted; response not saved")
+      screen.getByText("Your message was saved, but no reply was")
     ).toBeVisible()
     expect(
-      screen.queryByText("User input accepted; response outcome unknown")
+      screen.queryByText("Your message was saved. Not known whether a reply was saved")
     ).toBeNull()
   }
 )
@@ -383,10 +509,10 @@ it("client-managed generated text retains its existing review label", () => {
       )}
     />
   )
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
-  expect(screen.getByText("Generated response needs review")).toBeVisible()
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+  expect(screen.getByText("A reply arrived but wasn't saved")).toBeVisible()
   expect(
-    screen.queryByText("User input accepted; response outcome unknown")
+    screen.queryByText("Your message was saved. Not known whether a reply was saved")
   ).toBeNull()
 })
 it("retains unresolved fork separately from sends with candidate inspection and deliberate-new-action control", () => {
@@ -411,6 +537,144 @@ it.each(['dispatching', 'unknown', 'partial'] as const)('scopes %s copy guarante
 })
 
 
+// CC-04 (owner decision 2026-10-27, superseding TASK-13550 criterion 2): there
+// is no one-click "Use no prior messages" above the chat. Starting fresh is a
+// choice inside the review, and a partial choice says so with "Restore all".
+const linkedNode = (id: string, role: "user" | "assistant", parent_id: string | null) => ({
+  id, revision: `r-${id}`, role, parent_id, settled: true, preview: `**${role}** text ${id}`
+})
+const twoExchanges = [
+  linkedNode("u1", "user", null),
+  linkedNode("a1", "assistant", "u1"),
+  linkedNode("u2", "user", "a1"),
+  linkedNode("a2", "assistant", "u2")
+]
+const readySelection = (
+  sourceNodes: ReturnType<typeof linkedNode>[],
+  cursor: { kind: "empty" } | { kind: "after_message"; message_id: string }
+) => {
+  const view = {
+    view_session_id: "view", owner_key: "owner", conversation_id: "chat",
+    interpretation: { kind: "parent_graph_v1" }, cursor, selection_revision: 1
+  }
+  return {
+    ...controller(),
+    status: "ready",
+    view,
+    capture: {
+      status: "captured", view, purpose: "send", storage_context_digest: "storage",
+      rows: resolveParentPath(sourceNodes as never, cursor as never),
+      selected_content: [],
+      snapshot: {
+        version: 1, owner_key: "owner", conversation_id: "chat",
+        fences: { conversation: "1", history: "1", settings: "1" },
+        nodes: sourceNodes, source_digest: "source", storage_context_digest: "storage",
+        interpretation_status: { kind: "parent_graph_v1" }
+      }
+    }
+  } as unknown as HistorySelectionController
+}
+
+describe("choosing what the AI sees (CC-04)", () => {
+  afterEach(() => {
+    useStoreMessageOption.setState({ isProcessing: false, streaming: false, isLoading: false })
+  })
+
+  it("shows no history controls for a single exchange", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges.slice(0, 2), { kind: "after_message", message_id: "a1" })} />)
+    expect(screen.queryByRole("button", { name: "Review conversation history" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Use no prior messages" })).toBeNull()
+  })
+
+  it("offers the review for two exchanges, without a one-click way to hide them", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "after_message", message_id: "a2" })} />)
+    expect(screen.getByRole("button", { name: "Review conversation history" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Use no prior messages" })).toBeNull()
+    expect(screen.queryByText(/AI sees/)).toBeNull()
+  })
+
+  it("lists the review in plain words: You and Assistant, no markdown, no path jargon", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "after_message", message_id: "a2" })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review conversation history" }))
+    expect(screen.getByText("4 of 4 messages included")).toBeInTheDocument()
+    expect(screen.getAllByText(/^You · user text u\d$/)).toHaveLength(2)
+    expect(screen.getAllByText(/^Assistant · assistant text a\d$/)).toHaveLength(2)
+    expect(screen.queryByText(/Path position|saved interpretation|Complete source/)).toBeNull()
+  })
+
+  it("Start fresh hides earlier messages, then moves focus to Restore all", () => {
+    const full = readySelection(twoExchanges, { kind: "after_message", message_id: "a2" })
+    const { rerender } = render(<HistorySelectionReview selection={full} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review conversation history" }))
+    fireEvent.click(screen.getByRole("button", { name: "Start fresh" }))
+    expect(full.choose).toHaveBeenCalledWith({ kind: "empty" })
+
+    rerender(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "empty" })} />)
+    expect(screen.getByRole("button", { name: "Restore all" })).toHaveFocus()
+  })
+
+  it("Restore all returns to the branch Start fresh left, not the newest one", () => {
+    // Branch 1 (u2 → a2) is selected; an edited branch 2 (u2b → a2b) is newer.
+    const branched = [
+      ...twoExchanges,
+      linkedNode("u2b", "user", "a1"),
+      linkedNode("a2b", "assistant", "u2b")
+    ]
+    const onBranchOne = readySelection(branched, { kind: "after_message", message_id: "a2" })
+    const { rerender } = render(<HistorySelectionReview selection={onBranchOne} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review conversation history" }))
+    fireEvent.click(screen.getByRole("button", { name: "Start fresh" }))
+
+    const fresh = readySelection(branched, { kind: "empty" })
+    rerender(<HistorySelectionReview selection={fresh} />)
+    const hidden = screen.getByRole("list", { name: "Earlier messages, hidden from the AI" })
+    expect(within(hidden).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "You · user text u1",
+      "Assistant · assistant text a1",
+      "You · user text u2",
+      "Assistant · assistant text a2"
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }))
+    expect(fresh.choose).toHaveBeenCalledWith({ kind: "after_message", message_id: "a2" })
+  })
+
+  it("says how much the AI sees, shows what it doesn't, and restores it all", () => {
+    const empty = readySelection(twoExchanges, { kind: "empty" })
+    render(<HistorySelectionReview selection={empty} />)
+    expect(screen.getByText("AI sees 0 of 4 messages")).toBeInTheDocument()
+    const hidden = screen.getByRole("list", { name: "Earlier messages, hidden from the AI" })
+    expect(within(hidden).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "You · user text u1",
+      "Assistant · assistant text a1",
+      "You · user text u2",
+      "Assistant · assistant text a2"
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }))
+    expect(empty.choose).toHaveBeenCalledWith({ kind: "after_message", message_id: "a2" })
+  })
+
+  it("counts a partial choice without listing what the transcript already omits", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "after_message", message_id: "a1" })} />)
+    expect(screen.getByText("AI sees 2 of 4 messages")).toBeInTheDocument()
+    expect(screen.queryByRole("list", { name: "Earlier messages, hidden from the AI" })).toBeNull()
+  })
+
+  it("caps the hidden list for a long chat", () => {
+    const long = Array.from({ length: 2000 }, (_, index) =>
+      linkedNode(`n${index}`, index % 2 ? "assistant" : "user", index ? `n${index - 1}` : null))
+    render(<HistorySelectionReview selection={readySelection(long, { kind: "empty" })} />)
+    const hidden = screen.getByRole("list", { name: "Earlier messages, hidden from the AI" })
+    expect(within(hidden).getAllByRole("listitem").length).toBeLessThanOrEqual(4)
+    expect(screen.getByText("and 1,997 earlier messages")).toBeInTheDocument()
+  })
+
+  it("keeps Restore all unavailable while a reply is being sent", () => {
+    useStoreMessageOption.setState({ isProcessing: true })
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "empty" })} />)
+    expect(screen.getByRole("button", { name: "Restore all" })).toBeDisabled()
+  })
+})
+
 describe("available history-path actions (TASK-13550)", () => {
   it("hides both history choices for a ready empty source", () => {
     const selection = {
@@ -427,21 +691,6 @@ describe("available history-path actions (TASK-13550)", () => {
     ).toBeNull()
   })
 
-  it("retains the empty-path action for a ready nonempty source", () => {
-    const selection = {
-      ...controller(),
-      status: "ready",
-      capture: { snapshot: { nodes: [nodes[0]], source_digest: "one" } }
-    } as unknown as HistorySelectionController
-    render(<HistorySelectionReview selection={selection} />)
-    expect(
-      screen.getByRole("button", { name: "Review conversation history" })
-    ).toBeInTheDocument()
-    fireEvent.click(
-      screen.getByRole("button", { name: "Use no prior messages" })
-    )
-    expect(selection.choose).toHaveBeenCalledWith({ kind: "empty" })
-  })
 
   it("retains expansion and recovery when there is no history to omit", () => {
     const selection = {
@@ -940,7 +1189,7 @@ describe("bounded retained outcomes", () => {
     ]
     const selection = selectionWith(original)
     render(<HistorySelectionReview selection={selection} />)
-    const summary = screen.getByText(/Retained outcomes.*5/)
+    const summary = screen.getByText(/Earlier messages to review.*5/)
     const copies = screen.getAllByRole("button", {
       name: "Copy recovered text"
     })
@@ -967,10 +1216,10 @@ describe("bounded retained outcomes", () => {
   it("preserves an explicit expansion during same-owner refresh, but closes after leaving and returning", async () => {
     const selection = selectionWith([receipt("r1")])
     const mounted = render(<HistorySelectionReview selection={selection} />)
-    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
     await waitFor(() =>
       expect(
-        screen.getByText(/Retained outcomes \(1\)/).closest("details")
+        screen.getByText(/Earlier messages to review \(1\)/).closest("details")
       ).toHaveAttribute("open")
     )
     mounted.rerender(
@@ -982,7 +1231,7 @@ describe("bounded retained outcomes", () => {
       />
     )
     expect(
-      screen.getByText(/Retained outcomes \(2\)/).closest("details")
+      screen.getByText(/Earlier messages to review \(2\)/).closest("details")
     ).toHaveAttribute("open")
     mounted.rerender(
       <HistorySelectionReview
@@ -997,10 +1246,10 @@ describe("bounded retained outcomes", () => {
         }}
       />
     )
-    expect(screen.queryByText(/Retained outcomes/)).toBeNull()
+    expect(screen.queryByText(/Earlier messages to review/)).toBeNull()
     mounted.rerender(<HistorySelectionReview selection={selection} />)
     expect(
-      screen.getByText(/Retained outcomes \(1\)/).closest("details")
+      screen.getByText(/Earlier messages to review \(1\)/).closest("details")
     ).not.toHaveAttribute("open")
   })
   it("keeps distinct operations with identical text and sorts their actions by recency without changing the journal", async () => {
@@ -1011,7 +1260,7 @@ describe("bounded retained outcomes", () => {
     const entries = [first, second],
       selection = selectionWith(entries)
     render(<HistorySelectionReview selection={selection} />)
-    const summary = screen.getByText(/Retained outcomes \(2\)/)
+    const summary = screen.getByText(/Earlier messages to review \(2\)/)
     fireEvent.click(summary)
     const cards = [
       ...summary
@@ -1055,7 +1304,7 @@ describe("bounded retained outcomes", () => {
       openRecoveryResult: vi.fn(async () => true)
     }
     render(<HistorySelectionReview selection={selection} />)
-    const summary = screen.getByText(/Retained outcomes \(2\)/)
+    const summary = screen.getByText(/Earlier messages to review \(2\)/)
     expect(
       screen.getByRole("button", { name: "Open saved reply" })
     ).not.toBeVisible()
@@ -1066,7 +1315,7 @@ describe("bounded retained outcomes", () => {
       .closest('[role="status"]')!
     fireEvent.click(
       within(partialCard as HTMLElement).getByText(
-        "Inspect original input and result"
+        "Show what was sent and received"
       )
     )
     expect(screen.getByText("Retained partial reply")).toBeVisible()
@@ -1090,7 +1339,7 @@ describe("bounded retained outcomes", () => {
         hideRecovery={(entry) => entry.turn.operation_id === "r2"}
       />
     )
-    const summary = screen.getByText(/Retained outcomes.*4/)
+    const summary = screen.getByText(/Earlier messages to review.*4/)
     screen
       .getAllByRole("button", { name: "Copy recovered text" })
       .forEach((button) => expect(button).not.toBeVisible())
@@ -1779,8 +2028,8 @@ it("explains explicit saved-history review before continuing an uncertain native
   const selection = recoveryController("server", "accepted_unsent")
   const originalView = selection.view
   render(<HistorySelectionReview selection={selection} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
-  expect(screen.getByText("The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.")).toBeVisible()
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+  expect(screen.getByText("The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.")).toBeVisible()
   expect(screen.getByRole("button", { name: "Review conversation history", exact: true })).toBeVisible()
   expect(selection.view).toBe(originalView)
   expect(selection.choose).not.toHaveBeenCalled()
@@ -1865,8 +2114,75 @@ it("warns about latest unknown retry while retaining an earlier unsaved reply", 
   const selection = roleplaySelection(false)
   selection.recoveries[0].turn.state = "unknown"
   render(<HistorySelectionReview selection={selection} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
   expect(screen.getByText("Reply save unconfirmed")).toBeVisible()
   expect(screen.getByText(/including while an earlier request is still running/)).toBeVisible()
   expect(screen.getByRole('button', { name: 'Copy recovered text' })).toBeEnabled()
+})
+it.each(["history_retry_input_changed", "request_config_scope_changed", "provider detail with dummy-private-marker"])("Retry failure details expose only a known refusal (%s)", async reason => {
+  const selection = recoveryController("client", "accepted_unsent")
+  Object.assign(selection, { fence: () => () => true })
+  const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
+  const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: reason }))
+  render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  await screen.findByText("No System/Prompt instruction is currently applied.")
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
+  await screen.findByRole("alert")
+  expect(selection.dismissRecovery).not.toHaveBeenCalled()
+  if (reason.startsWith("provider")) {
+    expect(screen.queryByText(reason)).toBeNull()
+    expect(screen.queryByText("Retry details")).toBeNull()
+    return
+  }
+  fireEvent.click(screen.getByText("Retry details"))
+  expect(screen.getByText(reason)).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  await screen.findByText("No System/Prompt instruction is currently applied.")
+  expect(screen.queryByText(reason)).toBeNull()
+})
+
+
+it.each([true, false])("offers local import consent only for a live resumable candidate: %s", canBindUnavailable => {
+  const onBind = vi.fn()
+  const selection = { ...controller(), owner: { kind: "unavailable", code: "unbound_local_history" }, status: "unsupported_history_capability", error: "unbound_local_history", capture: null, view: null, canBindUnavailable } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} onBind={onBind} />)
+  if (canBindUnavailable) {
+    expect(onBind).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Use this local conversation" }))
+    expect(onBind).toHaveBeenCalledTimes(1)
+  } else {
+    expect(screen.queryByRole("button", { name: "Use this local conversation" })).toBeNull()
+    expect(onBind).not.toHaveBeenCalled()
+  }
+})
+
+it("hides Connect for a retired native binding candidate", () => {
+  const onBind = vi.fn()
+  const selection = { ...controller(), owner: { kind: "unavailable", code: "unbound_server_mirror" }, status: "unsupported_history_capability", error: "unbound_server_mirror", capture: null, view: null, canBindUnavailable: false } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} onBind={onBind} />)
+  expect(screen.queryByRole("button", { name: "Connect this conversation" })).toBeNull()
+  expect(onBind).not.toHaveBeenCalled()
+})
+
+
+it.each([false, true])("B02 reviews a saved question before explicit retry (stale=%s)", async stale => {
+  let current = true
+  const review = {id: "saved-user", revision: "r1", text: "My unanswered question", model: "llamacpp:qwen", isCurrent: () => current}
+  const selected = {...controller(), status: "ready", owner: {kind: "native"}, settingsQualified: true,
+    capture: {status: "captured", rows: [{id: "saved-user", revision: "r1", role: "user"}], snapshot: {nodes: [{id: "saved-user", revision: "r1", role: "user"}]}},
+    view: {cursor: {kind: "after_message", message_id: "saved-user"}}} as unknown as HistorySelectionController
+  const retry = vi.fn(async () => ({status: "submitted" as const}))
+  const getReview = vi.fn(async () => review)
+  render(<HistorySelectionReview selection={selected} getSavedQuestionReview={getReview} onRetrySavedQuestion={retry} />)
+  fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+  expect(await screen.findByText("My unanswered question")).toBeVisible()
+  expect(screen.getByText("llamacpp:qwen")).toBeVisible()
+  expect(retry).not.toHaveBeenCalled()
+  current = !stale
+  fireEvent.click(screen.getByRole("button", {name: "Retry saved question"}))
+  if (stale) expect(await screen.findByRole("alert")).toHaveTextContent("Review the saved question again")
+  else { await vi.waitFor(() => expect(retry).toHaveBeenCalledWith(review)) }
+  expect(retry).toHaveBeenCalledTimes(stale ? 0 : 1)
 })

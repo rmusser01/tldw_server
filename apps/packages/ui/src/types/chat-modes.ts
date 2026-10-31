@@ -25,6 +25,28 @@ export type NativeHistoryEditResend = {
 export type NativeHistoryRegenerate = NativeHistoryEditResend & {
   input_message_id: string
   input_message_revision: string
+  /**
+   * Native Continue (CM-01) reuses the same saved admission as Regenerate, but
+   * the server keeps the reply in context and saves it plus its continuation.
+   */
+  action?: "continue"
+}
+
+/** A local selected input branches without changing its original transcript. */
+export type HistoryEditAndSendBoundary = {
+  targetId: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
+
+export type HistoryRegenerateBoundary = {
+  answerId: string
+  questionId: string
+  questionRevision: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
 }
 
 /** One operation owns its adapter and immutable pending intent across display navigation. */
@@ -47,6 +69,8 @@ export interface HistorySendTurn {
   retryAdmission?: HistoryAdmissionReferenceV1
   historyBranch?: boolean
   historyEdit?: HistoryEditTargetV1
+  existingSelection?: boolean
+  stageSettlementPayload?: (message: StoredMessage) => Promise<void>
   selection?: HistorySelectionV1
   input?: StoredMessage
   resultId?: string
@@ -54,7 +78,12 @@ export interface HistorySendTurn {
   createdAt?: number
   dispatched?: boolean
   /** The model that writes the reply, recorded with a retained reply. */
-  replyModel?: { name: string; id?: string }
+  replyModel?: {
+    name: string
+    id?: string
+    /** "model (Provider)", for messages about this reply (CC-N2). */
+    label?: string
+  }
   /**
    * How the reply ended when it should stay in the transcript instead of in
    * review (CS-04): see HistoryTurnRecovery.outcome.

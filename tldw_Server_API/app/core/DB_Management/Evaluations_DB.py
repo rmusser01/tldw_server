@@ -20,13 +20,13 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import (
     ConfidenceSummary,
     RecommendationSlot,
     RecipeRunRecord,
     ReviewState,
 )
-from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus
 from tldw_Server_API.app.core.config import load_comprehensive_config
 
 # Backend abstraction (optional) for PostgreSQL support
@@ -2062,15 +2062,48 @@ class EvaluationsDatabase:
             conn.commit()
             return cursor.rowcount > 0
 
-    def update_run_progress(self, run_id: str, progress: dict[str, Any]) -> bool:
-        """Update run progress"""
+    def record_webhook_failure(self, run_id: str, eval_id: str) -> bool:
+        """Append a sanitized delivery warning without rewriting the terminal outcome."""
+        warning = (
+            "Webhook delivery failed. Evaluation results are unchanged. "
+            "Check the webhook URL and receiver before starting a new run."
+        )
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE evaluation_runs
-                SET progress = ?
-                WHERE id = ?
-            """, (json.dumps(progress), run_id))
+                SET error_message = CASE
+                    WHEN error_message IS NULL OR error_message = '' THEN ?
+                    ELSE error_message || ?
+                END
+                WHERE id = ? AND eval_id = ?
+                  AND status IN ('completed', 'failed', 'cancelled')
+                  AND (error_message IS NULL OR error_message NOT LIKE ?)
+            """, (warning, "\n" + warning, run_id, eval_id, "%" + warning + "%"))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_run_progress(
+        self, run_id: str, progress: dict[str, Any], *,
+        results: Optional[dict[str, Any]] = None,
+        usage: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """Update progress, atomically retaining completed batches for an active run."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if results is not None:
+                cursor.execute("""
+                    UPDATE evaluation_runs
+                    SET progress = ?, results = ?, usage = ?
+                    WHERE id = ? AND status = 'running'
+                """, (json.dumps(progress), json.dumps(results),
+                      json.dumps(usage) if usage else None, run_id))
+            else:
+                cursor.execute("""
+                    UPDATE evaluation_runs
+                    SET progress = ?
+                    WHERE id = ?
+                """, (json.dumps(progress), run_id))
             conn.commit()
             return cursor.rowcount > 0
 

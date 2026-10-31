@@ -169,6 +169,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
   CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_MESSAGE_VIEW_SETTING: "chatMessageView",
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
   resolveOpacityAlpha: (value: unknown, fallback = 35) =>
     typeof value === "number" && Number.isFinite(value)
@@ -205,6 +206,7 @@ vi.mock("@/store/artifacts", () => ({
 
 vi.mock("@/hooks/useSetting", () => ({
   useSetting: (setting: string) => {
+    if (setting === "chatMessageView") return ["transcript", vi.fn()]
     if (setting === "chatWindowOpacity") return [35];
     if (setting === "chatMessageOpacity") return [60];
     if (setting === "chatCharacterImageOpacity") return [100];

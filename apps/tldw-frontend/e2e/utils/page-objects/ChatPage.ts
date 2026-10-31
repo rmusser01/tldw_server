@@ -211,7 +211,7 @@ export class ChatPage {
     // A Next.js development-tools portal is present on healthy pages too.
     await this.page
       .getByRole("button", { name: /start chatting/i })
-      .or(this.page.getByPlaceholder(/type a message/i))
+      .or(this.page.getByTestId("chat-input"))
       .or(this.messageList)
       .filter({ visible: true })
       .first()
@@ -230,8 +230,8 @@ export class ChatPage {
     input = this.page.getByTestId("chat-input")
     if ((await input.count()) > 0) return input
 
-    // Try placeholder-based selector (actual: "Type a message... (/ commands, @ mentions)")
-    return this.page.getByPlaceholder(/Type a message/i)
+    // Older surfaces can lack the shared input test id.
+    return this.page.getByPlaceholder(/(?:Type|Write) a message/i)
   }
 
   /**
@@ -264,18 +264,11 @@ export class ChatPage {
   }
 
   async openConversationControls(): Promise<void> {
-    const casual = this.page.getByTestId("composer-casual-advanced-chip")
-    const pro = this.page.getByTestId("composer-options-toggle")
-    await expect(casual.or(pro).filter({ visible: true }).first()).toBeVisible()
-    if (await casual.isVisible()) {
-      await expect(casual).toBeEnabled()
-      if ((await casual.getAttribute("aria-expanded")) !== "true") await casual.click()
-      await expect(this.page.getByTestId("composer-casual-advanced-controls-row")).toBeVisible()
-      return
-    }
-    await expect(pro).toBeVisible()
-    if ((await pro.getAttribute("aria-expanded")) !== "true") await pro.click()
-    await expect(pro).toHaveAttribute("aria-expanded", "true")
+    const tools = this.page.getByTestId("composer-options-toggle")
+    await expect(tools).toBeVisible()
+    await expect(tools).toBeEnabled()
+    if ((await tools.getAttribute("aria-expanded")) !== "true") await tools.click()
+    await expect(tools).toHaveAttribute("aria-expanded", "true")
   }
 
   async selectCharacter(name: string): Promise<void> {

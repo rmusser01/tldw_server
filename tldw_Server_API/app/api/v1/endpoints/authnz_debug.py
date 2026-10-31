@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.key_resolution import resolve_api_key_by_hash
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.virtual_keys import (
@@ -84,11 +85,7 @@ async def _resolve_api_key_id(request: Request, x_api_key: str | None) -> dict[s
     if key_id:
         return {"api_key_id": int(key_id), "user_id": user_id}
 
-    api_key = x_api_key
-    if not api_key:
-        auth = request.headers.get("authorization") or request.headers.get("Authorization")
-        if isinstance(auth, str) and auth.lower().startswith("bearer "):
-            api_key = auth.split(" ", 1)[1].strip()
+    api_key = x_api_key or bearer_credential(request.headers.get("Authorization"))
 
     if not api_key:
         return {"api_key_id": None, "user_id": None}

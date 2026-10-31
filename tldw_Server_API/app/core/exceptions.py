@@ -13,7 +13,6 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 from .exception_types import (  # noqa: F401 - centralized compatibility exports.
     PersonaArtworkValidationError,
     PromptCatalogError,
@@ -833,7 +832,17 @@ class _ParseDeadlineExceeded(Exception):
     pass
 
 
-class AudioQuotaStoreUnavailable(AuthNZDatabaseError):
+# AuthNZ's base errors live here so foundation code can subclass them, and
+# core/AuthNZ/exceptions.py re-exports them (TASK-13950.12).
+class UserRegistrationException(Exception):
+    """Base exception for user registration system"""
+
+
+class DatabaseError(UserRegistrationException):
+    """Base database exception"""
+
+
+class AudioQuotaStoreUnavailable(DatabaseError):
     """Raised when canonical audio daily-minute quota storage is unavailable."""
 
 
@@ -876,6 +885,9 @@ class PersonaBuddyValidationError(BadRequestError):
 class ChatAPIError(Exception):
     """Base exception for chat API call errors."""
 
+    # Set only on a provider 401 that a refreshed credential may safely retry (no generation output sent).
+    credential_refresh_retry_safe: bool = False
+
     def __init__(
         self,
         message: str = "An error occurred during the chat API call.",
@@ -908,6 +920,7 @@ class ChatConfigurationError(ChatAPIError):
         {
             "provider_configuration_invalid",
             "missing_provider_credentials",
+            "provider_model_inventory_unavailable",
         }
     )
 
@@ -930,6 +943,28 @@ class ChatBadRequestError(ChatAPIError):
         provider: str | None = None,
     ) -> None:
         super().__init__(message, status_code=400, provider=provider)
+
+
+class ChatModelNotAvailableError(ChatBadRequestError):
+    """The selected model is not in the provider's current model list.
+
+    The message is built here from the request's own provider and model, never from upstream text, so it is
+    safe to show the client.
+    """
+
+    error_code = "model_not_available"
+
+    @staticmethod
+    def message_for(provider: str, model: object) -> str:
+        """Name the model and provider, and say how to pick the right provider."""
+        return (
+            f"Model '{model}' is not available for provider '{provider}'. "
+            "Set api_provider to the model's provider, or use '<provider>/<model>'."
+        )
+
+    def __init__(self, provider: str, model: object) -> None:
+        self.model = model
+        super().__init__(message=self.message_for(provider, model), provider=provider)
 
 
 class ChatRateLimitError(ChatAPIError):
@@ -1750,6 +1785,10 @@ class UnknownBackupDatasetError(AdminDataOpsError):
     """Raised when a backup request references an unknown dataset."""
 
 
+class UnsupportedBackupBackendError(AdminDataOpsError):
+    """Requested dataset scope has no compatible backup/restore implementation."""
+
+
 class InvalidBackupUserIdError(AdminDataOpsError):
     """Raised when a backup request references an invalid user id."""
 
@@ -2116,3 +2155,19 @@ class LLMQuotaExceededError(HTTPException):
         self.current = current
         self.limit = limit
         self.retry_after = int(retry_after)
+
+
+class LLMPolicyRefusal(HTTPException):
+    """A gateway pre-call policy hook refused an LLM call: always HTTP 400 (TASK-13950.13).
+
+    An ``HTTPException``, like ``LLMQuotaExceededError`` and for the same reason: endpoints report
+    a ``ChatAPIError`` as a provider failure, and most let an ``HTTPException`` through unchanged.
+    ``detail`` is client-safe text the hook author writes. It never echoes the request, the system
+    prompt or retrieved context.
+    """
+
+    retryable = False  # job workers read these, as for LLMQuotaExceededError
+    failure_code = "llm_policy_refused"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=400, detail=detail)

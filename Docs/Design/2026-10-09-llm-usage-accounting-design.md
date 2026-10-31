@@ -9,7 +9,7 @@
 
 1. **A general LLM cost quota replaces the evaluation-only cost caps.** The new keys are `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd`. They cover every LLM path, evaluations included. The dead evaluation cost caps are deleted.
 2. **Embeddings do not count against the LLM quotas.** One document ingest must not use up a chat budget. If an embeddings quota is needed later, it gets its own key.
-3. **BYOK calls are gated too, for now.** This matches `/chat/completions` today. Most providers don't mark BYOK credentials on the request, so exempting them needs new plumbing. That is a follow-up.
+3. **BYOK calls are gated too, for now.** This matches `/chat/completions` today. Most providers don't mark BYOK credentials on the request, so exempting them needs new plumbing. That is a follow-up. *Superseded on 2026-10-26 by ADR-083: a call on the user's own key is recorded but neither counted nor checked.*
 
 ## Owner decisions (2026-10-12)
 
@@ -219,7 +219,8 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 | `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. |
 | Evaluation runs (`POST /evaluations/{eval_id}/runs`) | Always. The run is a task the request starts, so it is admitted with the request; checked at the call, a refused sample would be scored 0.0 and the run would complete. |
 | Benchmark runs (`/evaluations/benchmarks/{name}/run`, `/benchmarks/{name}/run`) | Always. Checked only at the call, every item would be refused and counted as failed, and the run would still complete. |
-| `/media/ingest-web-content`, `/media/process-web-scraping` and `POST /watchlists/outputs` | When the request asks for summaries: analysis with a provider named (for the `url_level` and `recursive_scraping` crawls, analysis alone, since they summarize with a default provider), `summarize_checkbox`, or `summarize`. Checked only at the call, a refusal discarded the pages or items the request had already fetched. |
+| `/media/ingest-web-content` | When `perform_analysis` is on, for every scrape method, with or without a provider. Without one it makes no summary call, but it may extract with an LLM, and checked only at the call a refusal discarded the pages already fetched. |
+| `/media/process-web-scraping` and `POST /watchlists/outputs` | When the request asks for summaries: `summarize_checkbox`, or `summarize`. Checked only at the call, a refusal discarded the pages or items the request had already fetched. |
 | The six `/media/process-*` endpoints and `/media/add` | When `perform_analysis` is set and an `api_name` is given. |
 
 Simple search (`/rag/simple`) no longer generates an answer it then discarded, so it makes no LLM call and needs no check.
@@ -501,3 +502,7 @@ Revision of 2026-10-20, TASK-13864:
 - **A media ingest job that asks for analysis is checked once, when it starts,** and then runs `prechecked`, as an admitted request does; the admission ends with the job. Refused, it stores the item without analysis and records `analysis_error.code = "llm_quota_exceeded"` in its result, instead of failing the item; a reused transcript still records `video_lite.summary_error`. Other jobs are still checked at the call (§4b).
 - **The two web scraping endpoints and `POST /watchlists/outputs` join the §4a table.**
 - **Scraping queue jobs run as the request that submitted them.** The web scraping service starts its queue workers lazily, inside a request, and they ran every later job in that request's context. Each job now runs in a copy of its submitter's context, so its LLM calls are recorded and checked for that user and no request's admission reaches another's jobs (§1).
+
+Revision of 2026-10-23, TASK-13881:
+
+- **`POST /claims/verify/fva` runs,** and a refusal at its verify or adjudication call answers the 402. Its `user_id` query parameter counts only for a platform admin. The request then runs in that user's content scope, so its calls are checked and recorded for that user (§1). Anyone else's `user_id` is ignored.

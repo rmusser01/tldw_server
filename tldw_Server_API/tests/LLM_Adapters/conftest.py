@@ -25,6 +25,27 @@ import pytest
 
 from tldw_Server_API.tests._plugins.authnz_fixtures import authnz_schema_ready_sync  # noqa: F401
 from tldw_Server_API.tests.helpers.app_main_state import restore_app_main, set_app_main, snapshot_app_main
+from tldw_Server_API.tests.helpers.offline_network import block_live_network
+
+
+@pytest.fixture
+def no_live_network():
+    """Block every non-loopback DNS lookup and connect; fail the test if any was attempted."""
+    with block_live_network() as attempts:
+        yield attempts
+    assert attempts == [], f"live network attempted: {attempts}"
+
+
+@pytest.fixture
+def loopback_custom_openai_endpoints(monkeypatch):
+    """Point both configured custom OpenAI slots at a loopback origin.
+
+    config.txt defaults both slots to https://api.openai.com/v1, and the adapters read the
+    server-owned endpoint, not the request's base_url. The egress check still runs, against
+    127.0.0.1; nothing listens on port 9 and the tests stub the transport.
+    """
+    for key in ("CUSTOM_OPENAI_API_IP", "CUSTOM_OPENAI2_API_IP"):
+        monkeypatch.setenv(key, "http://127.0.0.1:9/v1")
 
 _DISABLED_ROUTE_KEYS_FOR_ADAPTER_TESTS = [
     "media",
@@ -101,6 +122,16 @@ def _resolve_app_for_fallback_client():
     _install_app_main_stub()
     from tldw_Server_API.app.main import app as fastapi_app
     return fastapi_app
+
+
+@pytest.fixture(autouse=True)
+def _isolate_inventory_from_adapter_payload_units(monkeypatch, request):
+    """Payload units mock generation; inventory enforcement has separate boundary tests."""
+    if request.node.path.parent.name != "unit":
+        return
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
+
+    monkeypatch.setattr(ChatProvider, "_validate_model_inventory", lambda _self, _request, *_args: None)
 
 
 @pytest.fixture(autouse=True)

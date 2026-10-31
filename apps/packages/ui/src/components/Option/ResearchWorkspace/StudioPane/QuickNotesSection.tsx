@@ -40,6 +40,7 @@ import {
   Download
 } from "lucide-react"
 import {
+  flushWorkspacePersistence,
   hasResearchWorkspaceMigrationTombstone,
   useWorkspaceStore,
 } from "@/store/workspace";
@@ -324,7 +325,6 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Store actions
   const updateNoteTitle = useWorkspaceStore((s) => s.updateNoteTitle)
-  const updateNoteContent = useWorkspaceStore((s) => s.updateNoteContent)
   const updateNoteKeywords = useWorkspaceStore((s) => s.updateNoteKeywords)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const clearCurrentNote = useWorkspaceStore((s) => s.clearCurrentNote)
@@ -333,6 +333,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Local state
   const [isSaving, setIsSaving] = useState(false)
+  const conflictCleanupRef = useRef<(() => void) | null>(null)
   const saveControllerRef = useRef<AbortController | null>(null)
   const readControllerRef = useRef<AbortController | null>(null)
   const pendingSaveRef = useRef<{
@@ -657,6 +658,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       clearSavedIndicatorTimer()
       saveControllerRef.current?.abort()
       readControllerRef.current?.abort()
+      conflictCleanupRef.current?.()
     }
   }, [clearSavedIndicatorTimer])
 
@@ -1023,8 +1025,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     ],
   );
 
-  const handleReloadLatestAfterConflict = useCallback(async () => {
+  const handleReloadLatestAfterConflict = useCallback(async (isCurrent: () => boolean, release: () => void) => {
+    if (!isCurrent()) return
     const expected = useWorkspaceStore.getState();
+    const intent = beginCurrentNoteRead(expected);
+    release()
+    messageApi.destroy("workspace-note-version-conflict")
     if (!expected.currentNote.id) return;
     const localDraft = {
       title: expected.currentNote.title.trim(),
@@ -1084,6 +1090,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             ),
           );
         },
+        intent,
       );
     } catch (error) {
       messageApi.error(
@@ -1097,6 +1104,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     hideSavedIndicator,
     messageApi,
     readCurrentNoteDetails,
+    beginCurrentNoteRead,
     serializeNoteForEditor,
     setCurrentNote,
     t,
@@ -1131,6 +1139,9 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       return;
     }
 
+    conflictCleanupRef.current?.()
+    conflictCleanupRef.current = null
+    let retainForConflict = false
     const controller = new AbortController()
     saveControllerRef.current = controller
     let acknowledged = false;
@@ -1171,6 +1182,13 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     const stopWatchingOwner = watchChatAccountChanges((invalidated) => {
       if (invalidated) { controller.abort(); pendingSaveRef.current = null }
     })
+    const cleanup = () => {
+      stopWatchingNote()
+      stopWatchingOwner()
+      controller.abort()
+      scope?.release()
+      if (conflictCleanupRef.current === cleanup) conflictCleanupRef.current = null
+    }
     setIsSaving(true)
     try {
       scope = await loadServicePromptSnapshot([], { signal: controller.signal })
@@ -1608,6 +1626,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )
       ) {
         const persistence = useWorkspaceStore.persist.getOptions();
+        // The accepted-identity write above was only BUFFERED by the coalescing
+        // persist writer; this verification must observe it (read-your-writes),
+        // so drain before reading. This gate still fails when the write cannot
+        // land (quota) — the drain swallows quota errors, leaving storage
+        // without the binding this check requires.
+        await flushWorkspacePersistence();
         const persistedWorkspace = await persistence.storage?.getItem(
           persistence.name,
         );
@@ -1681,22 +1705,15 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         messageApi.error(t("playground:studio.sourceHistoryUnavailable", NOTES_PROVENANCE_UNAVAILABLE_MESSAGE))
       } else if (isDefinitiveWriteRejection(error) && (error?.message?.includes("version") || error?.status === 409)) {
         pendingSaveRef.current = null
-        if (draft.id && scope && !String(error?.message).includes("encryption_unsupported")) {
-          try {
-            const remote = await bgRequest<NoteListItem>({ ...requestScopeFields(scope.requestScope), abortSignal: scope.scopeSignal, path: `/api/v1/notes/${encodeURIComponent(String(draft.id))}` as AllowedPath, method: "GET" })
-            if (!isCurrent()) return
-            const latest = useWorkspaceStore.getState().currentNote
-            setCurrentNote({
-              ...latest,
-              ...knowledgeNoteHead(remote),
-              isDirty: true,
-            });
-          } catch { /* Keep the original draft and require another explicit retry. */ }
-        }
+        retainForConflict = true
+        conflictCleanupRef.current = cleanup
         messageApi.open({
           type: "error",
           key: "workspace-note-version-conflict",
           duration: 8,
+          onClose: () => {
+            if (conflictCleanupRef.current === cleanup) cleanup()
+          },
           content: (
             <div className="flex items-center gap-2">
               <span>
@@ -1710,8 +1727,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
                   size="small"
                   type="link"
                   onClick={() => {
-                    messageApi.destroy("workspace-note-version-conflict")
-                    void handleReloadLatestAfterConflict()
+                    void handleReloadLatestAfterConflict(isCurrent, cleanup)
                   }}
                 >
                   {t("common:reload", "Reload latest")}
@@ -1728,9 +1744,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         );
       }
     } finally {
-      stopWatchingNote()
-      stopWatchingOwner()
-      scope?.release()
+      if (!retainForConflict) cleanup()
       if (saveControllerRef.current === controller) {
         saveControllerRef.current = null
         setIsSaving(false)
@@ -2147,12 +2161,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             value={stripKnowledgeNoteProvenance(currentNote.content)}
             onChange={(e) => {
               hideSavedIndicator()
-              updateNoteContent(
-                retainKnowledgeNoteProvenance(
-                  e.target.value,
-                  currentNote
-                )
-              )
+              setCurrentNote({
+                ...currentNote,
+                ...knowledgeNoteHead(currentNote),
+                content: e.target.value,
+                isDirty: true
+              })
             }}
             aria-label={t("playground:studio.noteContentLabel", "Note content")}
             placeholder={t(

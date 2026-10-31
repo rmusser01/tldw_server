@@ -17,7 +17,7 @@ import common from "@/assets/locale/en/common.json";
 import { ChatSidebar } from "../../ChatSidebar";
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
 import * as settings from "@/services/settings/ui-settings";
-import { getSetting } from "@/services/settings/registry";
+import { getSetting, __clearSettingCachesForTests } from "@/services/settings/registry";
 
 type Change = { newValue: unknown; oldValue: unknown };
 const io = vi.hoisted(() => ({
@@ -180,6 +180,10 @@ const preferenceWrites = () =>
 
 describe("history-first sidebar navigation", () => {
   beforeEach(() => {
+    // This suite seeds the in-memory storage mock directly (no setSetting, and
+    // jsdom has no storage.onChanged), so the registry's module-level value
+    // cache must be dropped or reads serve the previous test's settings.
+    __clearSettingCachesForTests();
     io.values.clear();
     io.reads.clear();
     io.writes.mockClear();
@@ -207,6 +211,27 @@ describe("history-first sidebar navigation", () => {
       },
     });
   });
+
+  // AX-15 (#3124): the rail and panel toggles only flipped their labels.
+  it.each([
+    [false, "true", "Collapse sidebar"],
+    [true, "false", "Expand sidebar"],
+  ] as const)(
+    "exposes whether the sidebar is expanded (collapsed=%s)",
+    (collapsed, expanded, name) => {
+      renderSidebar({ collapsed });
+
+      const toggle = screen.getByTestId("chat-sidebar-toggle");
+      expect(toggle).toHaveAccessibleName(name);
+      expect(toggle).toHaveAttribute("aria-expanded", expanded);
+      // The toggle names the sidebar it opens and closes.
+      const controlled = toggle.getAttribute("aria-controls");
+      expect(controlled).toBeTruthy();
+      expect(document.getElementById(String(controlled))).toBe(
+        screen.getByTestId("chat-sidebar"),
+      );
+    },
+  );
 
   it("names the global Server total while searching both sources", async () => {
     io.historyTotal = 60;
@@ -605,7 +630,7 @@ describe("history-first sidebar navigation", () => {
     expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).toBeNull();
   });
 
-  it("keeps all custom shortcuts in their saved order below history in one scroller", async () => {
+  it("keeps all custom shortcuts below history in one scroller with search fixed above", async () => {
     io.values.set("tldw:sidebar:shortcutSelection", [
       "quick-ingest",
       "kanban-playground",
@@ -622,7 +647,8 @@ describe("history-first sidebar navigation", () => {
       "chat-sidebar-shortcut-kanban-playground",
       "chat-sidebar-shortcut-chat",
     ]);
-    const scroller = findInput().closest(".overflow-y-auto");
+    const scroller = recentToggle().closest(".overflow-y-auto");
+    expect(scroller).not.toContainElement(findInput());
     expect(scroller).toContainElement(recentToggle());
     expect(scroller).toContainElement(shortcuts[0]);
     expect(scroller).not.toContainElement(

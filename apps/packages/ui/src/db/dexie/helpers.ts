@@ -1,4 +1,6 @@
 import type { HistoryOperationOptions, LocalHistoryOwnerV1 } from "./history-selection"
+import { isPromptOwnedBy, resolvePromptOwnerId } from "@/services/prompt-local-owner"
+import type { CapturedPromptOwnerScope } from "@/services/prompt-local-owner"
 import { ensureLocalProfileId } from "./history-selection"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { isLocalHistoryOwnerKey } from "@/utils/history-selection"
@@ -398,7 +400,12 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
       id: node.id, history_id: capture.view.conversation_id,
       role: node.role, name: typeof metadata.sender_name === "string" ? metadata.sender_name : node.role === "user" ? "You" : "Assistant",
       content: selected.message, images: [...selected.images], createdAt: 0,
-      parent_message_id: node.parent_id, metadataExtra: { ...metadata }
+      parent_message_id: node.parent_id, metadataExtra: { ...metadata },
+      // Canonical partial status must survive reload into either chat surface.
+      generationInfo: serverOwned && node.role === "assistant" &&
+        (metadata.generation_status === "stopped" || metadata.generation_status === "interrupted")
+        ? { ...local.generationInfo, interrupted: true, stopped: metadata.generation_status === "stopped" }
+        : local.generationInfo
     }
   })
   const ids = capture.rows.map(row => row.id)
@@ -585,13 +592,27 @@ export const deleteChatForEdit = async (history_id: string, index: number) => {
 }
 
 // Prompt Functions
-export const getAllPrompts = async () => {
+export const getSharedLocalPrompts = async (deleted = false) => {
+  try {
+    return await new PageAssistDatabase().getSharedLocalPrompts(deleted)
+  } catch (error) {
+    try {
+      return (await getAllPromptsFB()).filter(prompt => prompt.ownerId == null && isPromptOwnedBy(prompt, null) && !!prompt.deletedAt === deleted)
+    } catch {
+      if (!isDatabaseClosedError(error)) console.error("Failed to load shared local prompts:", error)
+      return []
+    }
+  }
+}
+
+export const getAllPrompts = async (expectedOwnerId?: string | null) => {
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
   try {
     const db = new PageAssistDatabase()
-    return await db.getAllPrompts()
+    return await db.getAllPrompts(ownerId)
   } catch (e) {
     try {
-      return await getAllPromptsFB()
+      return (await getAllPromptsFB()).filter(prompt => isPromptOwnedBy(prompt, ownerId))
     } catch {
       if (!isDatabaseClosedError(e)) {
         console.error("Failed to load prompts from Dexie and fallback storage:", e)
@@ -624,7 +645,8 @@ export const savePrompt = async ({
   keywords,
   favorite = false,
   serverLibraryId,
-  serverLibraryUuid
+  serverLibraryUuid,
+  expectedOwnerId
 }: {
   title: string
   name?: string
@@ -649,8 +671,10 @@ export const savePrompt = async ({
   favorite?: boolean
   serverLibraryId?: number
   serverLibraryUuid?: string
+  expectedOwnerId?: string | null
 }) => {
   const db = new PageAssistDatabase()
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
   const id = generateID()
   const createdAt = Date.now()
   const promptName = name || title
@@ -663,6 +687,7 @@ export const savePrompt = async ({
     ""
 
   const prompt = {
+    ownerId,
     id,
     title: promptName,
     name: promptName,
@@ -696,7 +721,7 @@ export const savePrompt = async ({
       ? { serverLibraryId: serverLibraryId ?? null, serverLibraryUuid }
       : {})
   }
-  await db.addPrompt(prompt)
+  await db.addPrompt(prompt, ownerId)
   await savePromptFB(prompt)
   return prompt
 }
@@ -709,6 +734,14 @@ export const deletePromptById = async (id: string) => {
   return id
 }
 
+/** Do not overwrite a distinct fallback record that happens to share an ID. */
+const hasMatchingPromptMirror = async (prompt: Prompt | undefined, ownerId: string | null) => {
+  if (!prompt || !isPromptOwnedBy(prompt, ownerId)) return false
+  const mirror = await getPromptByIdFB(prompt.id)
+  return !!mirror && isPromptOwnedBy(mirror, ownerId) &&
+    (mirror.ownerId ?? null) === (prompt.ownerId ?? null)
+}
+
 export const permanentlyDeletePrompt = async (
   id: string,
   persistenceScope?: string | null
@@ -716,26 +749,35 @@ export const permanentlyDeletePrompt = async (
   const scope = persistenceScope === undefined
     ? (await resolveRecipePersistenceOwnerView())?.ownerId ?? null
     : persistenceScope
-  // Hard delete: removes from both Dexie and Firefox storage
+  // Hard delete only matching ownership in each store.
+  const ownerId = await resolvePromptOwnerId()
   const db = new PageAssistDatabase()
-  await db.permanentlyDeletePrompt(id)
-  await deletePromptByIdFB(id)
+  const prompt = await db.getPromptById(id, ownerId)
+  const mirrorMatches = await hasMatchingPromptMirror(prompt, ownerId)
+  await db.permanentlyDeletePrompt(id, ownerId)
+  if (mirrorMatches) await deletePromptByIdFB(id)
   if (scope) await clearRecipePersistenceScoped(id, scope)
   return id
 }
 
 export const restorePromptSnapshot = async (snapshot: Prompt) => {
   const restored = structuredClone(snapshot)
+  const ownerId = await resolvePromptOwnerId()
   const db = new PageAssistDatabase()
-  await db.restorePromptSnapshot(restored)
-  await restorePromptSnapshotFB(restored)
+  const prompt = await db.getPromptById(restored.id, ownerId)
+  const mirrorMatches = await hasMatchingPromptMirror(prompt, ownerId)
+  await db.restorePromptSnapshot(restored, ownerId)
+  if (mirrorMatches) await restorePromptSnapshotFB(restored)
   return restored.id
 }
 
 export const markPromptSyncError = async (id: string) => {
+  const ownerId = await resolvePromptOwnerId()
   const db = new PageAssistDatabase()
-  await db.updatePromptSyncStatus(id, { syncStatus: "error" })
-  await updatePromptFB({ id, syncStatus: "error" })
+  const prompt = await db.getPromptById(id, ownerId)
+  const mirrorMatches = await hasMatchingPromptMirror(prompt, ownerId)
+  await db.updatePromptSyncStatus(id, { syncStatus: "error" }, ownerId)
+  if (mirrorMatches) await updatePromptFB({ id, syncStatus: "error" })
   return id
 }
 
@@ -746,10 +788,10 @@ export const restorePrompt = async (id: string) => {
   return id
 }
 
-export const getDeletedPrompts = async () => {
+export const getDeletedPrompts = async (expectedOwnerId?: string | null) => {
   try {
     const db = new PageAssistDatabase()
-    return await db.getDeletedPrompts()
+    return await db.getDeletedPrompts(expectedOwnerId)
   } catch (e) {
     if (isDatabaseClosedError(e)) {
       // Firefox storage doesn't support soft delete tracking
@@ -760,26 +802,32 @@ export const getDeletedPrompts = async () => {
 }
 
 export const emptyTrash = async () => {
+  const ownerId = await resolvePromptOwnerId()
   const db = new PageAssistDatabase()
-  const deletedPrompts = await db.getDeletedPrompts()
-  // Also remove from Firefox storage
+  const deletedPrompts = await db.getDeletedPrompts(ownerId)
+  const mirrorIds: string[] = []
   for (const prompt of deletedPrompts) {
-    await deletePromptByIdFB(prompt.id)
+    if (await hasMatchingPromptMirror(prompt, ownerId)) mirrorIds.push(prompt.id)
   }
-  return await db.emptyTrash()
+  // Revalidate the initiating owner before either store is changed.
+  const count = await db.emptyTrash(ownerId)
+  for (const id of mirrorIds) await deletePromptByIdFB(id)
+  return count
 }
 
 export const autoCleanupTrash = async (maxAgeDays: number = 30) => {
+  const ownerId = await resolvePromptOwnerId()
   const db = new PageAssistDatabase()
-  // Get prompts that will be deleted
   const cutoff = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000)
-  const deletedPrompts = await db.getDeletedPrompts()
+  const deletedPrompts = await db.getDeletedPrompts(ownerId)
   const expiredPrompts = deletedPrompts.filter(p => p.deletedAt && p.deletedAt < cutoff)
-  // Remove from Firefox storage
+  const mirrorIds: string[] = []
   for (const prompt of expiredPrompts) {
-    await deletePromptByIdFB(prompt.id)
+    if (await hasMatchingPromptMirror(prompt, ownerId)) mirrorIds.push(prompt.id)
   }
-  return await db.autoCleanupTrash(maxAgeDays)
+  const count = await db.autoCleanupTrash(maxAgeDays, ownerId)
+  for (const id of mirrorIds) await deletePromptByIdFB(id)
+  return count
 }
 
 export const updatePrompt = async ({
@@ -806,7 +854,8 @@ export const updatePrompt = async ({
   keywords,
   favorite,
   usageCount,
-  lastUsedAt
+  lastUsedAt,
+  expectedOwnerId
 }: {
   id: string
   title?: string
@@ -832,7 +881,9 @@ export const updatePrompt = async ({
   favorite?: boolean
   usageCount?: number
   lastUsedAt?: number | null
+  expectedOwnerId?: string | null
 }) => {
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
   const db = new PageAssistDatabase()
   const resolvedKeywords = keywords ?? tags
   const resolvedContent =
@@ -867,11 +918,10 @@ export const updatePrompt = async ({
     serverParentVersionId
   }
 
-  await db.updatePrompt(id, payload)
-  await updatePromptFB({
-    id,
-    ...payload
-  })
+  const prompt = await db.getPromptById(id, ownerId)
+  const mirrorMatches = await hasMatchingPromptMirror(prompt, ownerId)
+  await db.updatePrompt(id, payload, ownerId)
+  if (mirrorMatches) await updatePromptFB({ id, ...payload })
   return id
 }
 
@@ -881,14 +931,16 @@ export const incrementPromptUsage = async (id: string) => {
   return db.incrementPromptUsage(id)
 }
 
-export const getPromptById = async (id: string) => {
+export const getPromptById = async (id: string, expectedOwnerId?: string | null) => {
+  if (!id || id.trim() === "") return null
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
   try {
-    if (!id || id.trim() === "") return null
     const db = new PageAssistDatabase()
-    return await db.getPromptById(id)
+    return await db.getPromptById(id, ownerId)
   } catch (e) {
     if (isDatabaseClosedError(e)) {
-      return await getPromptByIdFB(id)
+      const prompt = await getPromptByIdFB(id)
+      return prompt && isPromptOwnedBy(prompt, ownerId) ? prompt : undefined
     }
     return null
   }
@@ -912,8 +964,10 @@ export type ServerLibraryPromptCopySource = {
  * system text becomes a system prompt, otherwise a quick prompt.
  */
 export const upsertServerLibraryPromptCopy = async (
-  source: ServerLibraryPromptCopySource
+  source: ServerLibraryPromptCopySource,
+  expectedOwnerId?: string | null
 ): Promise<Prompt> => {
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
   const systemPrompt = source.system_prompt?.trim()
     ? source.system_prompt
     : undefined
@@ -932,16 +986,17 @@ export const upsertServerLibraryPromptCopy = async (
   }
 
   const existing = source.uuid
-    ? (await getAllPrompts()).find(
+    ? (await getAllPrompts(ownerId)).find(
         (prompt) => prompt.serverLibraryUuid === source.uuid
       )
     : undefined
   if (existing) {
-    await updatePrompt({ id: existing.id, ...fields })
-    return (await getPromptById(existing.id)) ?? { ...existing, ...fields }
+    await updatePrompt({ id: existing.id, ...fields, expectedOwnerId: ownerId })
+    return (await getPromptById(existing.id, ownerId)) ?? { ...existing, ...fields }
   }
 
   return await savePrompt({
+    expectedOwnerId: ownerId,
     ...fields,
     serverLibraryId: source.id,
     serverLibraryUuid: source.uuid
@@ -1019,9 +1074,9 @@ export const importChatHistory = async (
   await db.importChatHistoryV2(data, { mergeData: true })
 }
 
-export const exportPrompts = async () => {
+export const exportPrompts = async (expectedOwnerId?: string | null) => {
   const db = new PageAssistDatabase()
-  return await db.getAllPrompts()
+  return await db.getAllPrompts(expectedOwnerId)
 }
 
 export const exportOAIConfigs = async () => {
@@ -1246,6 +1301,8 @@ export const importPromptsV2 = async (
   options: {
     replaceExisting?: boolean
     mergeData?: boolean
+    expectedOwnerId?: string | null
+    ownerScope?: CapturedPromptOwnerScope
   } = {}
 ) => {
   const chatDb = new PageAssistDatabase()

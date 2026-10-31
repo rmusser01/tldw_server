@@ -4,6 +4,7 @@ import React from "react"
 import { act, render, renderHook, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Switch, Tooltip } from "antd"
+import { SidepanelPersistenceSwitch } from "@/components/Sidepanel/Chat/SidepanelPersistenceSwitch"
 import ts from "typescript"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import english from "@/assets/locale/en/playground.json"
@@ -122,8 +123,9 @@ const useCompactMode = new Function(
   "usePersistenceMode",
   "Switch",
   "Tooltip",
+  "SidepanelPersistenceSwitch",
   code
-)(React, translate, usePersistenceMode, Switch, Tooltip) as (
+)(React, translate, usePersistenceMode, Switch, Tooltip, SidepanelPersistenceSwitch) as (
   props: ModeProps,
   notification: { warning: ReturnType<typeof vi.fn> }
 ) => {

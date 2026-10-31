@@ -163,7 +163,7 @@ describe("real adapter → loader → mirror → formatter reload", () => {
       if (change === "history") useStoreMessageOption.getState().setHistoryId("replacement", { preserveServerChatId: true })
       if (change === "stream") useStoreMessageOption.setState({ streaming: true })
       if (change === "account") state.controller.abort()
-      useStoreMessageOption.setState({ messages: [{ id: "replacement", name: "You", isBot: false, role: "user", message: "Current work" }], history: [{ role: "user", content: "Current work" }] })
+      useStoreMessageOption.setState({ messages: [{ id: "replacement", name: "You", isBot: false, role: "user", message: "Current work" , sources: [] }], history: [{ role: "user", content: "Current work" }] })
     })
     await act(async () => { finish(); await pending; await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(useStoreMessageOption.getState().messages.map(message => message.message)).toEqual(["Current work"])

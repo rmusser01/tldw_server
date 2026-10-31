@@ -20,6 +20,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, I
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
 if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
+        RoleplayResumeHistory,
+        RoleplayResumeMessageBuilder,
+    )
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -37,6 +41,7 @@ _MATERIALIZED_VALUE_KEYS = frozenset(
     {
         "assistant_overlay",
         "base_snapshot",
+        "dictionaries",
         "behavior_controls",
         "effective_completion",
         "greeting",
@@ -458,6 +463,7 @@ class ConversationResumeStore:
         request: dict[str, Any],
         *,
         owner_client_id: str,
+        build_messages: RoleplayResumeMessageBuilder,
         validate_message_count: Callable[[int], object] | None = None,
         conn: Any | None = None,
     ) -> dict[str, Any]:
@@ -532,12 +538,8 @@ class ConversationResumeStore:
                 except (KeyError, TypeError, json.JSONDecodeError, ValidationError) as exc:
                     raise RoleplayResumeConflictError("idempotency_conflict") from exc
             require_roleplay_resume_fence(state, body["expected"])
-            self._roleplay_resume_messages(
-                state,
-                owner_client_id=owner_client_id,
-                conn=active,
-                proposed_input=body["content"],
-            )
+            history = self._roleplay_resume_history(state, owner_client_id=owner_client_id, conn=active)
+            build_messages(state, history, body["content"])
             if validate_message_count is not None:
                 validate_message_count(state["message_count"] + 1)
             mid = self._db.add_message(
@@ -583,24 +585,18 @@ class ConversationResumeStore:
             )
             return receipt
 
-    def _roleplay_resume_messages(
+    def _roleplay_resume_history(
         self,
         state: dict[str, Any],
         *,
         owner_client_id: str,
         conn: Any,
-        proposed_input: str | None = None,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, str]]:
-        """Capture complete ancestry and saved resources under the owner transaction."""
+    ) -> RoleplayResumeHistory:
+        """Capture complete ancestry rows under the owner transaction; formatting lives in Character_Chat."""
         from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
-            RoleplayResumeConflictError,
-        )
-        from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import (
             MAX_ROLEPLAY_PROMPT_BYTES,
-            build_roleplay_resume_messages,
-        )
-        from tldw_Server_API.app.core.Chat.chat_service import (
-            _format_selected_history_messages,
+            RoleplayResumeConflictError,
+            RoleplayResumeHistory,
         )
         from tldw_Server_API.app.core.Chat.history_selection import (
             HistorySelectionError,
@@ -646,22 +642,10 @@ class ConversationResumeStore:
                 or int(fresh.fences.history) != state["history_version"]
             ):
                 raise RoleplayResumeConflictError("history_fence_changed")
-            # The projector's empty-history pass validates saved behavior before admission.
-            context, _ = build_roleplay_resume_messages(state, [])
-            history = _format_selected_history_messages(
-                snapshot,
-                content,
-                context["card"],
-                user_name=context["user_name"],
-                replace_user_placeholders=False,
-            )
-            if proposed_input is not None:
-                history.append({"role": "user", "content": proposed_input})
-            context, messages = build_roleplay_resume_messages(state, history)
-            return (
-                context,
-                messages,
-                {
+            return RoleplayResumeHistory(
+                snapshot=snapshot,
+                content=content,
+                authority={
                     "source_digest": fresh.source_digest,
                     "storage_context_digest": fresh.storage_context_digest,
                 },
@@ -951,9 +935,7 @@ class ConversationResumeStore:
                     raise RoleplayResumeConflictError("resume_input_changed")
             except (KeyError, TypeError, json.JSONDecodeError, ValidationError) as exc:
                 raise RoleplayResumeConflictError("resume_input_changed") from exc
-            context, messages, history_authority = self._roleplay_resume_messages(
-                state, owner_client_id=owner_client_id, conn=active
-            )
+            history = self._roleplay_resume_history(state, owner_client_id=owner_client_id, conn=active)
             return {
                 "conversation_id": conversation_id,
                 "input_message_id": body["input_message_id"],
@@ -961,9 +943,9 @@ class ConversationResumeStore:
                 "assistant_message_id": body["assistant_message_id"],
                 "fence": roleplay_resume_fence(state),
                 "effective_completion": state["effective_completion"],
-                "messages": messages,
-                "history_authority": history_authority,
-                "context": context,
+                "history_authority": history.authority,
+                "state": state,
+                "history": history,
             }
 
     def get_roleplay_resume_state(
@@ -1125,6 +1107,9 @@ class ConversationResumeStore:
                 "behavior_snapshot": snapshot,
                 "settings": settings,
                 "materialized_settings": materialized_settings,
+                "dictionary_catalog_owner": (
+                    self._db.owner_user_id if self._db.backend_type == BackendType.POSTGRESQL else None
+                ),
                 "settings_version": record.get("settings_version"),
                 "history_version": int(record["history_version"]),
                 "message_count": int(record.get("message_count") or 0),

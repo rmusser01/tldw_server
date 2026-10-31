@@ -9,6 +9,10 @@
 #      reach loopback passes. Defensible for first-run setup, but it
 #      is not identity, so it is listed rather than hidden.
 #   3. Not yet fixed.
+#   4. WebSocket routes ("WS <path>"). They authenticate inside
+#      the handler, which a dependency walk cannot see, so each is a
+#      reviewed entry; tests/AuthNZ/test_websocket_route_auth_matrix.py
+#      proves every one rejects missing and revoked credentials.
 #
 # The list must match the tree exactly: entries may be removed when a
 # route gains auth, and adding one is a reviewable diff.
@@ -29,6 +33,8 @@ GET /api/v1/config/jobs
 GET /api/v1/config/providers
 GET /api/v1/config/quickstart
 GET /api/v1/config/tokenizer
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: provider-specific shared secret (X-Goog-Channel-Token / clientState), not identity auth.
+GET /api/v1/connectors/providers/{provider}/webhook
 # TASK-13399: visible once the ratchet mounted flag-gated routers. OAuth redirect callback (code/state are the credential); matches /api/v1/auth/federation/{provider_slug}/callback above.
 GET /api/v1/discord/oauth/callback
 GET /api/v1/embeddings/health
@@ -161,8 +167,6 @@ GET /favicon.ico
 GET /health
 GET /setup
 GET,HEAD /internal/ready
-# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: provider-specific shared secret (X-Goog-Channel-Token / clientState), not identity auth.
-GET,POST /api/v1/connectors/providers/{provider}/webhook
 HEAD /health
 POST /api/v1/acp/triggers/webhook/{trigger_id}
 POST /api/v1/auth/forgot-password
@@ -175,6 +179,8 @@ POST /api/v1/auth/register
 POST /api/v1/auth/resend-verification
 POST /api/v1/auth/reset-password
 POST /api/v1/config/validate-provider
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: provider-specific shared secret (X-Goog-Channel-Token / clientState), not identity auth.
+POST /api/v1/connectors/providers/{provider}/webhook
 # TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Discord Ed25519 request signature, verified in-handler, not identity auth.
 POST /api/v1/discord/interactions
 # TASK-13399: visible once the ratchet mounted flag-gated routers. Invite-token gated (the token is the credential); matches /api/v1/auth/register above.
@@ -215,3 +221,22 @@ POST /api/v1/slack/events
 # TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Telegram secret token header, not identity auth.
 POST /api/v1/telegram/webhook
 POST /api/v1/websub/callback/{user_id}/{callback_token}
+# TASK-13950.7: WebSocket routes, kind 4 above.
+WS /api/v1/acp/multiplex
+WS /api/v1/acp/sessions/{session_id}/ssh
+WS /api/v1/acp/sessions/{session_id}/stream
+WS /api/v1/audio/chat/stream
+WS /api/v1/audio/realtime
+WS /api/v1/audio/stream/transcribe
+WS /api/v1/audio/stream/tts
+WS /api/v1/audio/stream/tts/realtime
+WS /api/v1/mcp/ws
+WS /api/v1/meetings/sessions/{session_id}/stream
+WS /api/v1/persona/stream
+WS /api/v1/prompt-studio/ws
+WS /api/v1/prompt-studio/ws/{project_id}
+WS /api/v1/sandbox/runs/{run_id}/stream
+WS /api/v1/voice/assistant
+WS /api/v1/watchlists/runs/{run_id}/stream
+WS /api/v1/workflows/ws
+WS /v1/realtime

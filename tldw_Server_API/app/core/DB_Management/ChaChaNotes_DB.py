@@ -108,9 +108,6 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  #
     build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
 )
-from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (  # noqa: E402
-    advance_postgres_serial,
-)
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,
@@ -156,15 +153,15 @@ from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (  # noqa: E402
 from tldw_Server_API.app.core.Flashcards.source_review import (  # noqa: E402
     build_source_review_launch_metadata,
 )
-from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload  # noqa: E402
-from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.models import validate_notes_note_upsert_payload  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.notes_link import (  # noqa: E402
     NOTES_LINK_LABEL_MAX_CHARS,
     NOTES_LINK_WEIGHT_MAX,
     NotesLinkValidationError,
     validate_notes_link_object_id,
     validate_notes_link_properties,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (  # noqa: E402
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
     notes_moodboard_note_object_hash,
@@ -176,13 +173,13 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (  
     placement_object_id,
     studio_result_hash,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     canonical_json_bytes as canonical_moodboard_studio_json_bytes,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     legacy_source_diagnostic as moodboard_studio_legacy_source_diagnostic,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import (  # noqa: E402
     canonical_json_bytes,
     notes_task_object_hash,
     parse_notes_task_v1,
@@ -830,11 +827,18 @@ class BackendManagedTransaction:
         self._wrapper: BackendConnectionWrapper | None = None
         self._managed = False
         self._depth = 0
+        self._claimed = False
 
     def __enter__(self):
         self._state = self._db._connection_state()
         self._use = self._state.use() if isinstance(self._state, ConnectionState) else contextlib.nullcontext()
         self._use.__enter__()
+        try:
+            # An operation's threads share this state: one transaction at a time (TASK-13899).
+            self._claimed = isinstance(self._state, ConnectionState) and self._state.enter_transaction()
+        except BaseException:
+            self._use.__exit__(*sys.exc_info())
+            raise
         self._depth = getattr(self._state, "tx_depth", 0)
         try:
             self._raw_conn = self._db._get_thread_connection()
@@ -852,6 +856,8 @@ class BackendManagedTransaction:
             return self._wrapper
         except BaseException:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._use.__exit__(*sys.exc_info())
             raise
 
@@ -890,6 +896,8 @@ class BackendManagedTransaction:
                         )
         finally:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._wrapper = None
             self._raw_conn = None
             cleanup_error = sys.exc_info()
@@ -974,6 +982,12 @@ class CharactersRAGDB:
             self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
         ) -> bool: ...
 
+        def tombstone_unsynced_conversation_from_sync(
+            self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
+        ) -> str: ...
+
+        def unsynced_conversation_is_foreign(self, *, conversation_id: str, sync_client_id: str) -> bool: ...
+
         def update_conversation(
             self, conversation_id: str, update_data: dict[str, Any], expected_version: int
         ) -> bool | None: ...
@@ -1020,6 +1034,10 @@ class CharactersRAGDB:
             object_revision: int,
             object_hash: str,
         ) -> str: ...
+
+        def unsynced_message_is_foreign(
+            self, *, stable_message_id: str, sync_client_id: str, object_hash: str
+        ) -> bool: ...
 
         def get_message_by_id(
             self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
@@ -1139,7 +1157,9 @@ class CharactersRAGDB:
 
         def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
 
-        def count_notes_matching_keywords(self, search_term: str | None, keyword_tokens: list[str]) -> int: ...
+        def count_notes_matching_keywords(
+            self, search_term: str | None, keyword_tokens: list[str], match: str = "all"
+        ) -> int: ...
 
         def get_conversation_by_id(
             self, conversation_id: str, include_deleted: bool = False
@@ -1252,6 +1272,7 @@ class CharactersRAGDB:
             keyword_tokens: list[str],
             limit: int = 10,
             offset: int = 0,
+            match: str = "all",
         ) -> list[dict[str, Any]]: ...
 
         def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
@@ -1285,6 +1306,16 @@ class CharactersRAGDB:
             semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
+        def tombstone_unsynced_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> str: ...
+
         def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
 
         def unlink_conversation_from_keyword(self, conversation_id: str, keyword_id: int) -> bool: ...
@@ -1317,7 +1348,7 @@ class CharactersRAGDB:
         ) -> bool: ...
 
     _CURRENT_SCHEMA_VERSION = 84  # Notes semantic index lifecycle
-    _POSTGRES_SCHEMA_VERSION = 88
+    _POSTGRES_SCHEMA_VERSION = 89
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -11322,7 +11353,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Migrate organization resources to stable, unique UUIDv4 identities."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V54 to V55 for DB: {self.db_path_str}...")
         try:
-            from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+            from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
 
             if "note_folders" not in self._sqlite_table_names(conn):
                 self._ensure_note_folder_schema_sqlite(conn)
@@ -11412,7 +11443,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _migrate_from_v54_to_v55_postgres(self, conn: Any) -> None:
         """Backfill stable organization identities inside the caller's transaction."""
-        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+        from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
 
         self._ensure_note_folder_sync_suppression_schema_postgres(conn)
         table_indexes = (
@@ -19268,6 +19299,49 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 78:
             raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
 
+    def _verify_dictionary_schema_postgres(self, conn: Any) -> None:
+        """Validate registered shared catalog ownership without request DDL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import verify_postgres_dictionary_schema
+
+        verify_postgres_dictionary_schema(
+            self.backend, getattr(conn, "_connection", conn),
+            self._normalize_postgres_catalog_expression,
+        )
+
+    def _bridge_legacy_dictionary_v86_postgres(self, conn: Any) -> None:
+        """Complete semantic86 for the verified PR-only dictionary86 layout."""
+        semantic_tables = (
+            "note_semantic_index_configs", "note_semantic_generations", "note_semantic_note_state",
+            "note_semantic_chunks", "note_semantic_work", "note_semantic_obsolete_vectors",
+            "note_semantic_operation_receipts",
+        )
+        if any(self.backend.table_exists(table, connection=conn) for table in semantic_tables):
+            self._ensure_note_semantic_schema_postgres(conn)
+            return
+        self._verify_dictionary_schema_postgres(conn)
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V85_TO_V86_POSTGRES, conn, expected_version=86,
+        )
+
+    def _migrate_from_v88_to_v89_postgres(self, conn: Any) -> None:
+        """Quarantine unowned legacy dictionaries before publishing forced RLS."""
+        if self._get_schema_version_postgres(conn) != 88:
+            raise SchemaError("Dictionary PostgreSQL owner migration requires schema version 88.")
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_dictionary_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import (
+            postgres_dictionary_schema_statements,
+        )
+
+        for statement in (*postgres_dictionary_schema_statements(), *build_dictionary_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self._verify_dictionary_schema_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 88",
+            (89, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 89:
+            raise SchemaError("Dictionary PostgreSQL owner migration failed version verification.")
+
     def _migrate_from_v81_to_v82_postgres(self, conn: Any) -> None:
         """Install permanent local receipts with forced owner RLS before the version bump."""
         from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
@@ -26983,6 +27057,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_note_task_schema_postgres(conn, runtime=True)
         self._verify_notes_moodboard_studio_schema_postgres(conn)
         self._ensure_note_semantic_schema_postgres(conn)
+        if current_version >= 89:
+            self._verify_dictionary_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -27020,6 +27096,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise SchemaError(  # noqa: TRY003
                     f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
                 )
+            if current_version == 86 and target_version >= 89:
+                self._bridge_legacy_dictionary_v86_postgres(conn)
+
             # H1 previously published v68 for history projections, while dev
             # published v68 for owner-scoped character names. Inspect the actual
             # catalog under the migration lock before replaying the missing step.
@@ -27055,7 +27134,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -27110,6 +27189,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 88 and current_version < 88:
                     self._migrate_from_v87_to_v88_postgres(conn)
                     current_version = 88
+                if target_version >= 89 and current_version < 89:
+                    self._migrate_from_v88_to_v89_postgres(conn)
+                    current_version = 89
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -27590,7 +27672,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v84_to_v85_postgres(conn)
                 self._runtime_schema_version = 85
                 current_version = 85
-
             if target_version >= 86 and current_version < 86:
                 self._migrate_from_v85_to_v86_postgres(conn)
                 self._runtime_schema_version = 86
@@ -27603,6 +27684,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v87_to_v88_postgres(conn)
                 self._runtime_schema_version = 88
                 current_version = 88
+            if target_version >= 89 and current_version < 89:
+                self._migrate_from_v88_to_v89_postgres(conn)
+                self._runtime_schema_version = 89
+                current_version = 89
 
             self._ensure_note_semantic_schema_postgres(conn)
 
@@ -28140,43 +28225,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _sync_postgres_sequences(self, conn) -> None:
-        """Advance managed PostgreSQL serials without reusing allocated IDs."""
+        """Advance ChaCha-owned serials without reusing tenant-hidden allocations."""
+        from tldw_Server_API.app.core.DB_Management.backends.postgres_sequence_maintenance import (
+            sync_owned_postgres_sequences,
+        )
 
-        backend = self.backend
-
-        for table_name, column_name in self._POSTGRES_SEQUENCE_TABLES:
-            try:
-                # Skip tables that may not exist yet at this schema version
-                try:
-                    if not backend.table_exists(table_name, connection=conn):
-                        continue
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    continue
-                sequence_rows = backend.execute(
-                    "SELECT ns.nspname AS sequence_schema, seq.relname AS sequence_name "
-                    "FROM pg_class seq JOIN pg_namespace ns ON ns.oid = seq.relnamespace "
-                    "WHERE seq.oid = pg_get_serial_sequence(%s, %s)::regclass",
-                    (table_name, column_name),
-                    connection=conn,
-                ).rows
-                if not sequence_rows:
-                    continue
-                sequence = sequence_rows[0]
-                advance_postgres_serial(
-                    backend,
-                    conn,
-                    table_name=table_name,
-                    column_name=column_name,
-                    sequence_schema=sequence["sequence_schema"],
-                    sequence_name=sequence["sequence_name"],
-                )
-            except BackendDatabaseError as exc:  # noqa: BLE001
-                logger.warning(
-                    "Failed to synchronize PostgreSQL sequence for {}.{}: {}",
-                    table_name,
-                    column_name,
-                    exc,
-                )
+        sync_owned_postgres_sequences(
+            self, conn, self._POSTGRES_SEQUENCE_TABLES, continue_on_error=True
+        )
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:
@@ -35125,6 +35181,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             version_value = 1
             deleted_value = 0
 
+        unique_match_sql = self._unique_text_match_sql(table_name, unique_col_name)
         table_name = self._map_table_for_backend(table_name)
         insert_cols_sql = ', '.join(cols_str_list_insert)
         insert_placeholders_sql = ', '.join(placeholders_str_list_insert)
@@ -35143,7 +35200,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 # Check if a soft-deleted item exists and undelete it
                 undelete_cursor = conn.execute(
-                    f"SELECT id, version FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 1{owner_clause}",  # nosec B608
+                    f"SELECT id, version FROM {table_name} WHERE {unique_match_sql} AND deleted = 1{owner_clause}",  # nosec B608
                     (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
@@ -35179,7 +35236,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 item_id_insert = cursor_insert.lastrowid if hasattr(cursor_insert, 'lastrowid') else None
                 if item_id_insert is None and self.backend_type == BackendType.POSTGRESQL:
                     sel = conn.execute(
-                        f"SELECT id FROM {table_name} WHERE {unique_col_name} = ?{owner_clause}",  # nosec B608
+                        f"SELECT id FROM {table_name} WHERE {unique_match_sql}{owner_clause}",  # nosec B608
                         (main_col_value,) + owner_params
                     )
                     row = sel.fetchone()
@@ -35241,9 +35298,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Raises:
             CharactersRAGDBError: For database errors.
         """
+        unique_match_sql = self._unique_text_match_sql(table_name, unique_col_name)
         table_name = self._map_table_for_backend(table_name)
         owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
-        query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0{owner_clause}"  # nosec B608
+        query = f"SELECT * FROM {table_name} WHERE {unique_match_sql} AND deleted = 0{owner_clause}"  # nosec B608
         try:
             cursor = self.execute_query(query, (value,) + owner_params)
             row = cursor.fetchone()
@@ -35251,6 +35309,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching {table_name} by {unique_col_name} '{value}': {e}")
             raise
+
+    def _unique_text_match_sql(self, table_name: str, column: str) -> str:
+        """Return the equality predicate for a unique text column.
+
+        Keywords and keyword collections are case-insensitive (TASK-13950.5). SQLite
+        gets that from the columns' ``COLLATE NOCASE``; PostgreSQL strips NOCASE and
+        indexes ``LOWER(keyword)``/``LOWER(name)`` instead, so it compares ``LOWER`` too.
+        """
+        if table_name in {"keywords", "keyword_collections"} and self.backend_type == BackendType.POSTGRESQL:
+            return f"LOWER({column}) = LOWER(?)"
+        return f"{column} = ?"
 
     def _case_insensitive_order_expression(self, column: str, direction: str | None = None) -> str:
         column_clean = (column or '').strip()
@@ -38786,7 +38855,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         # FTS filter
@@ -38879,7 +38948,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         fts_filter = ""
@@ -39721,11 +39790,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if scope_tag:
                     tag_owner_filter, tag_owner_params = self._flashcard_owner_filter("kw")
                     keyword_table = self._map_table_for_backend("keywords")
+                    tag_match_sql = self._unique_text_match_sql("keywords", "kw.keyword")
                     matching_tag = conn.execute(
                         f"""
                         SELECT 1 FROM flashcard_keywords fk
                         JOIN {keyword_table} kw ON kw.id = fk.keyword_id
-                        WHERE fk.card_id = ? AND kw.keyword = ?{tag_owner_filter}
+                        WHERE fk.card_id = ? AND {tag_match_sql}{tag_owner_filter}
                         """,  # nosec B608 -- keyword table comes from the backend mapping
                         (card_id, scope_tag, *tag_owner_params),
                     ).fetchone()
@@ -40513,7 +40583,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _flashcard_owned_keyword_id(self, conn: Any, text: str) -> int:
         """Resolve an owner-local PostgreSQL tag without changing generic keyword APIs."""
-        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+        from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
 
         now = self._get_current_utc_timestamp_iso()
         conn.execute(
@@ -43615,13 +43685,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def import_osce_quiz_entry_atomic(
         self,
-        entry: OsceQuizExportV2 | Mapping[str, Any],
+        entry: OsceQuizExportV2,
     ) -> dict[str, Any]:
-        """Validate, rekey, downgrade, and atomically persist one portable OSCE entry."""
-        from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+        """Rekey, downgrade, and atomically persist one portable OSCE entry the caller validated."""
         from tldw_Server_API.app.services.osce_practice import materialize_station_content
 
-        validated = OsceQuizExportV2.model_validate(entry)
+        validated = entry
         stations: list[dict[str, object]] = [
             {
                 "content": materialize_station_content(station.content),
@@ -47384,6 +47453,8 @@ for _conversation_store_method in (
     "add_conversation",
     "upsert_conversation_from_sync",
     "tombstone_conversation_from_sync",
+    "tombstone_unsynced_conversation_from_sync",
+    "unsynced_conversation_is_foreign",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -47475,10 +47546,13 @@ for _message_store_method in (
     "append_selected_history_input",
     "append_selected_history_inputs",
     "reuse_selected_history_admission",
+    "validate_history_admission",
     "settle_history_admission",
+    "settle_selected_existing_input",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "tombstone_unsynced_message_from_sync",
+    "unsynced_message_is_foreign",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",
@@ -47550,6 +47624,7 @@ for _note_store_method in (
     "get_note_counts_for_keywords",
     "upsert_note_from_sync",
     "tombstone_note_from_sync",
+    "tombstone_unsynced_note_from_sync",
 ):
     setattr(
         CharactersRAGDB,

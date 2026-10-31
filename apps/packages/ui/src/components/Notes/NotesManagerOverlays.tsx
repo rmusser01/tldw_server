@@ -4,6 +4,7 @@ import { Button, Checkbox, Input, Modal, Select, Typography } from "antd"
 import type { TFunction } from "i18next"
 
 import KeywordPickerModal from "@/components/Notes/KeywordPickerModal"
+import { renderTabWrappedDialog } from "@/components/Common/dialog-tab-wrap"
 
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 
@@ -162,6 +163,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
     <>
       <Modal
         open={kw.keywordSuggestionOptions.length > 0}
+        modalRender={renderTabWrappedDialog}
         onCancel={kw.closeKeywordSuggestionModal}
         onOk={kw.applySelectedSuggestedKeywords}
         okText={t("option:notesSearch.assistKeywordsApplySelectedAction", {
@@ -180,9 +182,11 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           <Typography.Text
             type="secondary"
             className="block text-xs text-text-muted"
+            data-testid="notes-assist-keyword-source"
           >
-            {t("option:notesSearch.assistKeywordsReviewHelp", {
-              defaultValue: "Select which suggested tags to add to this note.",
+            {t("option:notesSearch.assistKeywordsSource", {
+              defaultValue:
+                "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add.",
             })}
           </Typography.Text>
           <div className="flex items-center gap-2">
@@ -258,6 +262,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={kw.keywordManagerOpen}
+        modalRender={renderTabWrappedDialog}
         onCancel={kw.closeKeywordManager}
         title={t("option:notesSearch.keywordManagerTitle", {
           defaultValue: "Manage tags",
@@ -376,6 +381,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={kw.keywordRenameDraft != null}
+        modalRender={renderTabWrappedDialog}
         onCancel={() => kw.setKeywordRenameDraft(null)}
         onOk={() => {
           void kw.submitKeywordRename()
@@ -419,6 +425,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={kw.keywordMergeDraft != null}
+        modalRender={renderTabWrappedDialog}
         onCancel={() => kw.setKeywordMergeDraft(null)}
         onOk={() => {
           void kw.submitKeywordMerge()
@@ -494,6 +501,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={imp.importModalOpen}
+        modalRender={renderTabWrappedDialog}
         onCancel={imp.closeImportModal}
         onOk={() => {
           void imp.confirmImport()
@@ -601,6 +609,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={shortcutHelpOpen}
+        modalRender={renderTabWrappedDialog}
         focusable={{ focusTriggerAfterClose: !tourHandoff }}
         onCancel={() => setShortcutHelpOpen(false)}
         footer={null}
@@ -618,10 +627,24 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
               <div><strong>Ctrl/Cmd + S</strong>: {t("option:notesSearch.shortcutSaveDescription", { defaultValue: "Save the current note." })}</div>
               <div><strong>Alt + N</strong>: {t("option:notesSearch.shortcutNewNoteDescription", { defaultValue: "Create a new note." })}</div>
               <div><strong>Alt + Shift + D</strong>: {t("option:notesSearch.shortcutDuplicateDescription", { defaultValue: "Duplicate the current note into a new draft." })}</div>
-              <div><strong>Ctrl/Cmd + K</strong>: {t("option:notesSearch.shortcutFocusSearchDescription", { defaultValue: "Focus the search input." })}</div>
+              <div><strong>/</strong>: {t("option:notesSearch.shortcutFocusSearchDescription", { defaultValue: "Focus the search input." })}</div>
+              <div><strong>Ctrl/Cmd + K</strong>: {t("option:notesSearch.shortcutCommandPaletteDescription", { defaultValue: "Open the command palette." })}</div>
               <div><strong>Ctrl/Cmd + Shift + E/S/P</strong>: {t("option:notesSearch.shortcutEditorModesDescription", { defaultValue: "Switch editor mode (Edit / Split / Preview)." })}</div>
               <div><strong>?</strong>: {t("option:notesSearch.shortcutOpenHelpDescription", { defaultValue: "Open keyboard shortcut help." })}</div>
               <div><strong>Esc</strong>: {t("option:notesSearch.shortcutCloseDialogDescription", { defaultValue: "Close the current dialog." })}</div>
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
+              {t("option:notesSearch.shortcutGroupList", { defaultValue: "Notes list" })}
+            </div>
+            <div className="space-y-1">
+              <div><strong>↑ / ↓</strong>: {t("option:notesSearch.shortcutListMoveDescription", { defaultValue: "Move between notes in the list." })}</div>
+              <div><strong>Enter</strong>: {t("option:notesSearch.shortcutListOpenDescription", { defaultValue: "Open the focused note." })}</div>
+              <div><strong>X or Space</strong>: {t("option:notesSearch.shortcutListSelectDescription", { defaultValue: "Select or clear the focused note." })}</div>
+              <div><strong>P</strong>: {t("option:notesSearch.shortcutListPinDescription", { defaultValue: "Pin or unpin the focused note." })}</div>
+              <div><strong>Alt + ↑ / ↓</strong>: {t("option:notesSearch.shortcutListAdjacentDescription", { defaultValue: "Open the previous or next note." })}</div>
+              <div><strong>Esc (in the editor)</strong>: {t("option:notesSearch.shortcutListReturnDescription", { defaultValue: "Return to the notes list." })}</div>
             </div>
           </div>
           <div>

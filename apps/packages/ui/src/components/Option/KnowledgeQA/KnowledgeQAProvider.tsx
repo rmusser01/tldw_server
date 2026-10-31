@@ -2575,7 +2575,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({ type: "ADD_MESSAGE", payload: userMessage })
         }
 
-        const { options } = buildRagSearchRequest({
+        const { options, timeoutMs } = buildRagSearchRequest({
           ...effectiveSettings,
           query: trimmedQuery,
           enable_web_fallback: effectiveSettings.enable_web_fallback,
@@ -2686,6 +2686,7 @@ function OwnedKnowledgeQAProvider({
               ) => AsyncGenerator<any, void, unknown>
             }).ragSearchStream(trimmedQuery, {
               ...options,
+              timeoutMs,
               signal: abortController.signal,
             })) {
               if (isStaleSearchRequest()) {
@@ -2806,6 +2807,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
           const response = await tldwClient.ragSearch(trimmedQuery, {
             ...options,
+            timeoutMs,
             signal: abortController.signal,
           })
           if (isStaleSearchRequest()) {

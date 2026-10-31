@@ -8,6 +8,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useComparisonTranscribe } from "@/hooks/useComparisonTranscribe"
 
+const { resolveScopeMock } = vi.hoisted(() => ({ resolveScopeMock: vi.fn() }))
+vi.mock("@/services/service-prompts", () => ({ resolveServicePromptScope: resolveScopeMock }))
+const scopeOptions = { signal: expect.any(AbortSignal), requestScope: expect.objectContaining({userId:"unit-owner"}) }
 const mockTranscribe = vi.mocked(tldwClient.transcribeAudio)
 
 function makeBlob(content = "audio"): Blob {
@@ -17,10 +20,77 @@ function makeBlob(content = "audio"): Blob {
 describe("useComparisonTranscribe", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resolveScopeMock.mockReset().mockResolvedValue({config:{serverUrl:"http://unit-server",authMode:"multi-user"},userId:"unit-owner"})
+  })
+
+  it("B05 invalid audio keeps the source row failed with actionable file recovery", async () => {
+    mockTranscribe.mockRejectedValueOnce(Object.assign(new Error("Upload failed: 400"), {status:400,details:{detail:{status:"invalid_audio"}}}))
+    const {result}=renderHook(()=>useComparisonTranscribe(()=>true))
+    await act(async()=>{await result.current.transcribeAll(makeBlob("corrupt bytes"),["parakeet"],{})})
+    expect(result.current.results[0]).toMatchObject({status:"error",text:"",errorCategory:"invalid_audio",error:"Audio file cannot be read",errorRecovery:"Choose a valid audio recording, then transcribe again."})
+    expect(mockTranscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it("B05 source handoff retains the uploaded filename in result provenance", async () => {
+    mockTranscribe.mockResolvedValueOnce({text:"Original provider text"})
+    const {result}=renderHook(()=>useComparisonTranscribe(()=>true))
+    const file=new File(["unit audio"],"New Recording 6.m4a",{type:"audio/mp4"})
+    await act(async()=>{await result.current.transcribeAll(file,["parakeet"],{})})
+    expect(result.current.results[0].metadata?.audioSourceLabel).toBe(file.name)
+    expect(result.current.results[0].text).toBe("Original provider text")
+  })
+
+  it("B05 no speech response has an empty transcript and zero words", async () => {
+    mockTranscribe.mockResolvedValueOnce({ text: "[No speech detected]", duration: 3 })
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
+    await act(async () => {
+      await result.current.transcribeAll(makeBlob(), ["parakeet"], {})
+    })
+    expect(result.current.results[0]).toMatchObject({ status: "done", text: "", wordCount: 0 })
+    expect(mockTranscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it("B05 retry activity remains busy until a single Retry settles", async () => {
+    mockTranscribe.mockRejectedValueOnce(new Error("unit provider failure"))
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
+    const blob = makeBlob()
+    await act(async () => { await result.current.transcribeAll(blob, ["parakeet"], {}) })
+    let finish!: (value: { text: string }) => void
+    mockTranscribe.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    let retry!: Promise<void>
+    await act(async () => { retry = result.current.retryModel(blob, "parakeet", {}) })
+    const busyDuringRetry = result.current.isRunning
+    await act(async () => { finish({ text: "Recovered transcript" }); await retry })
+    expect(busyDuringRetry).toBe(true)
+    expect(result.current.isRunning).toBe(false)
+    expect(result.current.results[0].text).toBe("Recovered transcript")
+  })
+
+  it("B05 retry activity stays busy when another Retry is still pending", async () => {
+    mockTranscribe.mockRejectedValueOnce(new Error("first unit failure"))
+      .mockRejectedValueOnce(new Error("second unit failure"))
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
+    const blob = makeBlob()
+    await act(async () => { await result.current.transcribeAll(blob, ["one", "two"], {}) })
+    let finishOne!: (value: { text: string }) => void
+    let finishTwo!: (value: { text: string }) => void
+    mockTranscribe.mockImplementationOnce(() => new Promise(resolve => { finishOne = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { finishTwo = resolve }))
+    let first!: Promise<void>, second!: Promise<void>
+    await act(async () => {
+      first = result.current.retryModel(blob, "one", {})
+      second = result.current.retryModel(blob, "two", {})
+    })
+    const busy = [result.current.isRunning]
+    await act(async () => { finishOne({ text: "First recovered" }); await first })
+    busy.push(result.current.isRunning)
+    await act(async () => { finishTwo({ text: "Second recovered" }); await second })
+    busy.push(result.current.isRunning)
+    expect(busy).toEqual([true, true, false])
   })
 
   it("returns empty initial state", () => {
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
     expect(result.current.results).toEqual([])
     expect(result.current.isRunning).toBe(false)
     expect(typeof result.current.transcribeAll).toBe("function")
@@ -33,7 +103,7 @@ describe("useComparisonTranscribe", () => {
       .mockResolvedValueOnce({ text: "hello from whisper" })
       .mockResolvedValueOnce({ text: "hello from nemo" })
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
     const blob = makeBlob()
 
     await act(async () => {
@@ -55,14 +125,14 @@ describe("useComparisonTranscribe", () => {
     expect(result.current.isRunning).toBe(false)
 
     expect(mockTranscribe).toHaveBeenCalledTimes(2)
-    expect(mockTranscribe).toHaveBeenCalledWith(blob, { model: "whisper-1" })
-    expect(mockTranscribe).toHaveBeenCalledWith(blob, { model: "nemo" })
+    expect(mockTranscribe).toHaveBeenCalledWith(blob, { ...scopeOptions, model: "whisper-1" })
+    expect(mockTranscribe).toHaveBeenCalledWith(blob, { ...scopeOptions, model: "nemo" })
   })
 
   it("passes sttOptions through to transcribeAudio", async () => {
     mockTranscribe.mockResolvedValue({ text: "ok" })
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
     const opts = { language: "en", temperature: 0.2 }
 
     await act(async () => {
@@ -70,6 +140,7 @@ describe("useComparisonTranscribe", () => {
     })
 
     expect(mockTranscribe).toHaveBeenCalledWith(expect.any(Blob), {
+      ...scopeOptions,
       model: "m1",
       language: "en",
       temperature: 0.2
@@ -85,7 +156,7 @@ describe("useComparisonTranscribe", () => {
       words: [{ word: "hello" }, { word: "world" }]
     })
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
     const blob = makeBlob("audio-content")
 
     await act(async () => {
@@ -127,7 +198,7 @@ describe("useComparisonTranscribe", () => {
       .mockResolvedValueOnce({ text: "success" })
       .mockRejectedValueOnce(new Error("model not found: sk_secret_inline"))
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
     await act(async () => {
       await result.current.transcribeAll(makeBlob(), ["good", "bad"], {})
@@ -154,7 +225,7 @@ describe("useComparisonTranscribe", () => {
       })
     )
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
     await act(async () => {
       await result.current.transcribeAll(makeBlob(), ["whisper-1"], {})
@@ -173,7 +244,7 @@ describe("useComparisonTranscribe", () => {
       )
       .mockResolvedValueOnce({ text: "rerun succeeded" })
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
     const blob = makeBlob()
 
     await act(async () => {
@@ -199,7 +270,7 @@ describe("useComparisonTranscribe", () => {
       // For initial second model
       .mockResolvedValueOnce({ text: "other" })
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
     const blob = makeBlob()
 
     // Initial run: first fails, second succeeds
@@ -228,13 +299,14 @@ describe("useComparisonTranscribe", () => {
     expect(result.current.results[1].text).toBe("other") // unchanged
 
     expect(mockTranscribe).toHaveBeenLastCalledWith(blob, {
+      ...scopeOptions,
       model: "m1",
       language: "de"
     })
   })
 
   it("retryModel is a no-op for unknown model", async () => {
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
     await act(async () => {
       await result.current.retryModel(makeBlob(), "nonexistent", {})
@@ -247,7 +319,7 @@ describe("useComparisonTranscribe", () => {
   it("duplicates rows and skips disabled rows during repeat runs", async () => {
     mockTranscribe.mockResolvedValueOnce({ text: "first result" })
 
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
     const blob = makeBlob()
 
     await act(async () => {
@@ -276,6 +348,7 @@ describe("useComparisonTranscribe", () => {
 
     expect(mockTranscribe).toHaveBeenCalledTimes(1)
     expect(mockTranscribe).toHaveBeenCalledWith(blob, {
+      ...scopeOptions,
       model: "m1",
       language: "de"
     })
@@ -286,7 +359,7 @@ describe("useComparisonTranscribe", () => {
 
   it("clears results", async () => {
     mockTranscribe.mockResolvedValue({ text: "hi" })
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
     await act(async () => {
       await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -304,7 +377,7 @@ describe("useComparisonTranscribe", () => {
   describe("response text extraction", () => {
     it("handles plain string response", async () => {
       mockTranscribe.mockResolvedValueOnce("plain text")
-      const { result } = renderHook(() => useComparisonTranscribe())
+      const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
       await act(async () => {
         await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -315,7 +388,7 @@ describe("useComparisonTranscribe", () => {
 
     it("handles {text} response", async () => {
       mockTranscribe.mockResolvedValueOnce({ text: "from text field" })
-      const { result } = renderHook(() => useComparisonTranscribe())
+      const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
       await act(async () => {
         await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -326,7 +399,7 @@ describe("useComparisonTranscribe", () => {
 
     it("handles {transcript} response", async () => {
       mockTranscribe.mockResolvedValueOnce({ transcript: "from transcript" })
-      const { result } = renderHook(() => useComparisonTranscribe())
+      const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
       await act(async () => {
         await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -339,7 +412,7 @@ describe("useComparisonTranscribe", () => {
       mockTranscribe.mockResolvedValueOnce({
         segments: [{ text: "seg one" }, { text: "seg two" }]
       })
-      const { result } = renderHook(() => useComparisonTranscribe())
+      const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
       await act(async () => {
         await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -350,7 +423,7 @@ describe("useComparisonTranscribe", () => {
 
     it("falls back to empty string for unrecognized response", async () => {
       mockTranscribe.mockResolvedValueOnce({ foo: "bar" })
-      const { result } = renderHook(() => useComparisonTranscribe())
+      const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
       await act(async () => {
         await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -362,7 +435,7 @@ describe("useComparisonTranscribe", () => {
 
   it("computes word count correctly", async () => {
     mockTranscribe.mockResolvedValueOnce({ text: "  one  two   three  " })
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
     await act(async () => {
       await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -373,7 +446,7 @@ describe("useComparisonTranscribe", () => {
 
   it("word count is 0 for empty text", async () => {
     mockTranscribe.mockResolvedValueOnce({ text: "" })
-    const { result } = renderHook(() => useComparisonTranscribe())
+    const { result } = renderHook(() => useComparisonTranscribe(() => true))
 
     await act(async () => {
       await result.current.transcribeAll(makeBlob(), ["m1"], {})
@@ -381,4 +454,49 @@ describe("useComparisonTranscribe", () => {
 
     expect(result.current.results[0].wordCount).toBe(0)
   })
+  it("B05 clear aborts the upload and late work cannot retire a newer comparison", async () => {
+    let oldResolve!: (value: {text: string}) => void;
+    let newResolve!: (value: {text: string}) => void;
+    mockTranscribe.mockImplementationOnce(() => new Promise(resolve => { oldResolve=resolve; }))
+      .mockImplementationOnce(() => new Promise(resolve => { newResolve=resolve; }));
+    const hook=renderHook(() => useComparisonTranscribe(() => true));
+    let oldRun!: Promise<void>, newRun!: Promise<void>;
+    await act(async () => { oldRun=hook.result.current.transcribeAll(makeBlob(), ["old"], {}); });
+    const signal=mockTranscribe.mock.calls[0][1]?.signal;
+    act(() => { hook.result.current.clearResults(); });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { newRun=hook.result.current.transcribeAll(makeBlob(), ["new"], {}); });
+    await act(async () => { oldResolve({text:"Obsolete private transcript"}); await oldRun; });
+    expect(hook.result.current.isRunning).toBe(true);
+    expect(hook.result.current.results.map(r => r.model)).toEqual(["new"]);
+    await act(async () => { newResolve({text:"Current transcript"}); await newRun; });
+    expect(hook.result.current.results[0].text).toBe("Current transcript");
+    hook.unmount();
+  })
+
+  it("B05 unmount aborts a pending transcription", async () => {
+    let finish!: (value: {text: string}) => void;
+    mockTranscribe.mockImplementationOnce(() => new Promise(resolve => { finish=resolve; }));
+    const hook=renderHook(() => useComparisonTranscribe(() => true));
+    let pending!: Promise<void>;
+    await act(async () => { pending=hook.result.current.transcribeAll(makeBlob(), ["old"], {}); });
+    const signal=mockTranscribe.mock.calls[0][1]?.signal;
+    hook.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { finish({text:"late"}); await pending; });
+  })
+
+  it("B05 lease stops the previous audio before React cleanup when scope returns a new account", async () => {
+    let release!: (scope: unknown) => void;
+    resolveScopeMock.mockImplementationOnce(() => new Promise(resolve => {release=resolve;}));
+    let active=true;
+    const hook=renderHook(() => useComparisonTranscribe(() => active));
+    let pending!: Promise<void>;
+    await act(async () => { pending=hook.result.current.transcribeAll(makeBlob("Alice private audio"), ["parakeet"], {}); });
+    active=false; // Synchronous account invalidation, deliberately before any effect cleanup.
+    await act(async () => { release({config:{serverUrl:"http://unit-server",authMode:"multi-user"},userId:"bob"}); await pending; });
+    expect(mockTranscribe).not.toHaveBeenCalled();
+    hook.unmount();
+  })
+
 })

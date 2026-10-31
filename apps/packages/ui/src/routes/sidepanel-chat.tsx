@@ -9,6 +9,7 @@ import { resolveOptionsHref } from "@/utils/browser-runtime"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns"
 import { SidepanelSendGateContext, type SidepanelSendGate } from "@/hooks/chat/sidepanel-send-gate"
 import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
@@ -27,6 +28,7 @@ import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
 import { useMigration } from "@/hooks/useMigration"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import { useComposerDockHeight } from "@/hooks/useComposerDockHeight"
 import {
   useChatShortcuts,
@@ -37,6 +39,7 @@ import {
 import { useConnectionActions } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import { usePageChatModeToggle } from "@/components/Sidepanel/Chat/page-chat-mode"
 import { useTTS } from "@/hooks/useTTS"
 import { copilotResumeLastChat } from "@/services/app"
 import {
@@ -56,7 +59,7 @@ import {
 } from '@/services/settings/ui-settings';
 import { useSetting } from '@/hooks/useSetting';
 import { useStorage } from '@plasmohq/storage/hook';
-import { ChevronDown, ExternalLink } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import React, { lazy, Suspense } from 'react';
 import { Drawer } from 'antd';
 import { ChatErrorBoundary } from '@/components/Common/Playground/ChatErrorBoundary';
@@ -67,6 +70,12 @@ import { SidepanelHeaderSimple } from '~/components/Sidepanel/Chat/SidepanelHead
 import { ConnectionBanner } from '~/components/Sidepanel/Chat/ConnectionBanner';
 import { ServerChatFreshnessNotice } from '~/components/Sidepanel/Chat/ServerChatFreshnessNotice';
 import {
+  SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY,
+  readProSidebarCollapsed,
+  writeProSidebarCollapsed,
+} from '~/components/Sidepanel/Chat/sidepanel-sidebar-layout';
+import { sidepanelScrollToLatestBottom } from '~/components/Sidepanel/Chat/sidepanel-scroll-latest';
+import {
   readTabConversationTitle,
   renameTabConversation,
 } from '~/components/Sidepanel/Chat/tab-conversation-actions';
@@ -74,7 +83,10 @@ import { useMessage } from '~/hooks/useMessage';
 import { useSelectedCharacter } from '@/hooks/useSelectedCharacter';
 import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
 import { useSidepanelChatTabsStore } from '@/store/sidepanel-chat-tabs';
-import { DEFAULT_CHAT_SETTINGS } from '@/types/chat-settings';
+import {
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+} from '@/types/chat-settings';
 import type { Character } from '@/types/character';
 import type {
   ChatModelSettingsSnapshot,
@@ -625,6 +637,10 @@ const SidepanelChatContent = ({
     setTemporaryChat,
     sidepanelTemporaryChat,
     stopStreamingRequest,
+    getRecoveryRetryContext,
+    retryRecoveredHistoryTurn,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     temporaryChat,
     clearChat,
     queuedMessages,
@@ -646,6 +662,11 @@ const SidepanelChatContent = ({
     webSearch,
     setWebSearch
   } = useMessage()
+  const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
+    selection: historySelection,
+    messages,
+    setMessages
+  })
   const [selectedCharacter] =
     useSelectedCharacter<Character | null>(null)
   const [selectedAssistant] = useSelectedAssistant(null)
@@ -694,23 +715,28 @@ const SidepanelChatContent = ({
   }, [isRestoringChat, checkShownTab])
   sendGate.current = freshness.beforeSend
   captureListener.current = freshness.noteCapture
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 100)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 100, { pinOnContentResize: true })
   const uiMode = useUiModeStore((state) => state.mode)
   const [isNarrow, setIsNarrow] = React.useState(
     () =>
-      typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 400px)').matches)
+      typeof window !== 'undefined' &&
+      Boolean(window.matchMedia?.(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY).matches)
   );
   const isDockedSidebar = uiMode === 'pro' && !isNarrow;
-  const [sidebarVisibility, publishSidebarVisibility] = React.useState({
-    open: isDockedSidebar,
+  const [sidebarVisibility, publishSidebarVisibility] = React.useState(() => ({
+    open: isDockedSidebar && !readProSidebarCollapsed(),
     revision: 0,
-  });
+  }));
   const sidebarOpen = sidebarVisibility.open;
   const sidebarPresented = React.useRef(false);
   const sidebarOpening = React.useRef({
     revision: 0,
-    open: isDockedSidebar,
+    open: sidebarVisibility.open,
     initiator: null as HTMLElement | null,
   });
   const sidebarReturnFocus = React.useRef<null | {
@@ -755,6 +781,7 @@ const SidepanelChatContent = ({
       }
       opening.revision = revision;
       opening.open = next;
+      if (isDockedSidebar) writeProSidebarCollapsed(!next);
       publishSidebarVisibility({ open: next, revision });
     },
     [owner, isDockedSidebar]
@@ -768,7 +795,9 @@ const SidepanelChatContent = ({
     []
   );
   React.useEffect(() => {
-    setSidebarOpen(isDockedSidebar);
+    setSidebarOpen(
+      isDockedSidebar && (sidebarOpening.current.open || !readProSidebarCollapsed())
+    );
   }, [isDockedSidebar, setSidebarOpen]);
 
   const { checkOnce } = useConnectionActions();
@@ -844,7 +873,10 @@ const SidepanelChatContent = ({
     if (!sidebarOpen) returnSidebarFocus();
   }, [sidebarOpen, returnSidebarFocus]);
 
-  const [stickyChatInput] = useStorage('stickyChatInput', DEFAULT_CHAT_SETTINGS.stickyChatInput);
+  const [stickyChatInput] = useStorage(
+    SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+    SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+  );
   const [userDisplayName] = useStorage('chatUserDisplayName', '');
 
   const composerPadding = composerHeight
@@ -854,13 +886,10 @@ const SidepanelChatContent = ({
     () => messages.reduce((count, item) => count + (item?.isBot ? 0 : 1), 0),
     [messages]
   )
-  const scrollToLatestBottom = React.useMemo(() => {
-    if (!stickyChatInput) return "8rem"
-    const baseOffset = composerHeight
-      ? composerHeight + 24
-      : DEFAULT_COMPOSER_HEIGHT
-    return `${Math.max(baseOffset, 128)}px`
-  }, [composerHeight, stickyChatInput])
+  const scrollToLatestBottom = sidepanelScrollToLatestBottom(
+    composerHeight,
+    DEFAULT_COMPOSER_HEIGHT
+  )
 
   const clearNoteCapture = React.useCallback(() => {
     const capture = noteCaptureRef.current
@@ -1317,9 +1346,7 @@ const SidepanelChatContent = ({
     input.select();
   }, [isDockedSidebar]);
 
-  const toggleChatMode = () => {
-    setChatMode(chatMode === "rag" ? "normal" : "rag")
-  }
+  const toggleChatMode = usePageChatModeToggle(chatMode, setChatMode)
 
   const toggleWebSearchMode = () => {
     setWebSearch(!webSearch)
@@ -1464,7 +1491,7 @@ const SidepanelChatContent = ({
 
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return
-    const media = window.matchMedia("(max-width: 400px)")
+    const media = window.matchMedia(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY)
     const update = () => setIsNarrow(media.matches)
     update()
     media.addEventListener("change", update)
@@ -3110,7 +3137,13 @@ const SidepanelChatContent = ({
                 "--composer-padding": composerPadding,
                 paddingBottom: stickyChatInput
                   ? "calc(var(--composer-padding) + env(safe-area-inset-bottom, 0px))"
-                  : "0px"
+                  : "0px",
+                // The pinned composer overlays the transcript (XS-09). Scrolling a
+                // message control into view, by keyboard focus or script, must
+                // stop above it so the control is not hidden (WCAG 2.4.11).
+                scrollPaddingBottom: stickyChatInput
+                  ? "calc(var(--composer-padding) + env(safe-area-inset-bottom, 0px))"
+                  : undefined
               } as React.CSSProperties
             }
           >
@@ -3275,7 +3308,7 @@ const SidepanelChatContent = ({
                 </div>
               ) : null}
               <div className={historySelection.status === "idle" || freshnessNotice ? undefined : "pt-12"}>
-                <HistorySelectionReview selection={historySelection} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={expandSelectedHistory} onBind={() => void historySelection.bindUnavailableConversation()} />
               </div>
               <SidePanelBody
                 scrollParentRef={containerRef}
@@ -3287,7 +3320,10 @@ const SidepanelChatContent = ({
               </>
             )}
             {!isRestoringChat && !stickyChatInput && (
-              <div className="w-full min-w-0 pt-4 pb-6">
+              <div
+                ref={composerDockRef}
+                data-testid="sidepanel-composer-dock"
+                className="w-full min-w-0 pt-4 pb-6">
                 <SidepanelForm
                   key={activeTabId || "sidepanel-chat"}
                   dropedFile={dropedFile}
@@ -3304,24 +3340,20 @@ const SidepanelChatContent = ({
             )}
           </div>
 
-          {!isAutoScrollToBottom && (
-            <div
-              className="fixed z-20 left-0 right-0 flex justify-center"
+          {!isAutoScrollToBottom && messages.length > 0 && (
+            <ScrollToLatestButton
+              onClick={() => autoScrollToBottom()}
+              replyInProgress={streaming}
+              hasUnseenMessages={hasUnseenMessages}
+              className="fixed z-20 right-4"
               style={{ bottom: scrollToLatestBottom }}
-            >
-              <button
-                onClick={() => autoScrollToBottom()}
-                aria-label={t("playground:composer.scrollToLatest", "Scroll to latest messages")}
-                title={t("playground:composer.scrollToLatest", "Scroll to latest messages") as string}
-                data-testid="chat-scroll-latest"
-                className="bg-surface shadow border border-border p-1.5 rounded-full pointer-events-auto hover:bg-surface2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warn">
-                <ChevronDown className="size-4 text-text-muted" aria-hidden="true" />
-              </button>
-            </div>
+              data-testid="chat-scroll-latest"
+            />
           )}
           {!isRestoringChat && stickyChatInput && (
             <div
               ref={composerDockRef}
+              data-testid="sidepanel-composer-dock"
               className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >

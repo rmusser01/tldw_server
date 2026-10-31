@@ -14,7 +14,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.exceptions import AdapterError, LLMQuotaExceededError
 from tldw_Server_API.app.core.Metrics import start_async_span as _start_span
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
@@ -209,7 +209,7 @@ async def run_log_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
       - level: str (debug|info|warning|error) default info
     Output: { "logged": true, "message": ... }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
     msg_t = str(config.get("message", ""))
     level = str(config.get("level", "info")).lower()
     # Pre-pass replacements for common templates like {{ inputs.name || '' }} and {{ inputs.name }}
@@ -272,7 +272,7 @@ async def run_branch_adapter(config: dict[str, Any], context: dict[str, Any]) ->
       - false_next: str (step id)
     Output: { "__next__": step_id, "branch": "true"|"false" }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
     cond_t = str(config.get("condition", "")).strip()
     rendered = (_tmpl(cond_t, context) or cond_t).strip().lower()
     is_true = _is_truthy(rendered)
@@ -319,7 +319,7 @@ async def run_map_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     if isinstance(items_cfg, list):
         items = items_cfg
     else:
-        from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+        from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
         raw = _tmpl(str(items_cfg or ""), context) or str(items_cfg or "")
         try:
             import json as _json
@@ -358,22 +358,23 @@ async def run_map_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     preview = preview[:77] + "…"
             except _FLOW_NONCRITICAL_EXCEPTIONS:
                 preview = ""
+            adapter = get_adapter(sub_type)
+            if adapter is None:
+                return {"error": f"unsupported_substep:{sub_type}"}
+            started = False
             try:
                 async with _start_span("workflows.map.item", attributes={
                     "index": int(idx),
                     "sub_type": sub_type,
                     "item_preview": preview,
                 }):
-                    adapter = get_adapter(sub_type)
-                    if adapter is not None:
-                        return await adapter(sub_cfg, sub_ctx)
-                    return {"error": f"unsupported_substep:{sub_type}"}
-            except _FLOW_NONCRITICAL_EXCEPTIONS:
-                # If tracing fails, still attempt the sub-step
-                adapter = get_adapter(sub_type)
-                if adapter is not None:
+                    started = True
                     return await adapter(sub_cfg, sub_ctx)
-                return {"error": f"unsupported_substep:{sub_type}"}
+            except _FLOW_NONCRITICAL_EXCEPTIONS:
+                if started:
+                    raise  # the sub-step's own error: running it again would repeat its side effects (TASK-13886)
+            # The span failed to open: still run the sub-step, untraced
+            return await adapter(sub_cfg, sub_ctx)
 
     results = await _run_cancelling_siblings([_run_one(i, it) for i, it in enumerate(items)])
     return {"results": results, "count": len(results)}

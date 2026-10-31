@@ -11,7 +11,6 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import {
   AlertCircle,
-  ChevronDown,
   FileText,
   Send,
   MessageSquarePlus,
@@ -32,7 +31,6 @@ import type { InputRef } from "antd"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   DEGRADED_STATE_LABEL,
-  READY_STATE_LABEL,
   getDesignSystemState
 } from "@/design-system"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -59,6 +57,7 @@ import {
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useModelSelector } from "@/hooks/playground"
 import { useConnectionStore } from "@/store/connection"
@@ -1386,8 +1385,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
 
   // Smart scroll for chat messages
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 120)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 120)
 
   // Stage 3 (WP-04): windowed transcript rendering. Copies the proven
   // Sidepanel/Chat/body.tsx useVirtualizer wiring (overscan 3,
@@ -3117,10 +3120,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         getDesignSystemState("degraded")?.label ?? DEGRADED_STATE_LABEL
       )
     }
-    return t(
-      "playground:composer.providerStatusReady",
-      getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
-    )
+    return t("playground:composer.serverStatusConnected", "Server connected")
   }, [connectionUxState, isConnectionReady, t])
   const connectionStatusWarning =
     !isConnectionReady || connectionUxState === "connected_degraded"
@@ -3567,24 +3567,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
         {/* Horizontally scrollable source tags */}
         {!isAutoScrollToBottom && hasMessages && (
-          <div className="pointer-events-none absolute bottom-24 left-0 right-0 flex justify-center">
-            <button
-              onClick={() => autoScrollToBottom()}
-              aria-label={t(
-                "playground:composer.scrollToLatest",
-                "Scroll to latest messages"
-              )}
-              title={
-                t(
-                  "playground:composer.scrollToLatest",
-                  "Scroll to latest messages"
-                ) as string
-              }
-              className="pointer-events-auto rounded-full border border-border bg-surface p-2 text-text-subtle shadow-card transition-colors hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <ChevronDown className="size-4 text-text-subtle" aria-hidden="true" />
-            </button>
-          </div>
+          <ScrollToLatestButton
+            onClick={() => autoScrollToBottom()}
+            replyInProgress={streaming}
+            hasUnseenMessages={hasUnseenMessages}
+            className="absolute bottom-24 right-4"
+          />
         )}
       </div>
 

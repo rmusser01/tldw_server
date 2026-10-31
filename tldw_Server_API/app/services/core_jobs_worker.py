@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     coerce_chatbook_export_version,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -87,6 +88,8 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
         if stop_event and stop_event.is_set():
             logger.info("Stopping Core Jobs worker on shutdown signal")
             return
+        job_scope = contextlib.ExitStack()  # closed after every iteration, however it ends
+        job = None
         try:
             lease_seconds = int(os.getenv("JOBS_LEASE_SECONDS", "60") or "60")
             renew_interval = int(os.getenv("JOBS_LEASE_RENEW_SECONDS", "30") or "30")
@@ -102,6 +105,8 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                 continue
             lease_id = job.get("lease_id")
             # Build a per-user service
+            # This job owns the ChaCha checkouts it takes, on whichever thread.
+            job_scope.enter_context(chacha_operation(independent=True))
             try:
                 db = _build_chacha_db_for_user(str(owner))
             except (TypeError, ValueError) as e:
@@ -507,6 +512,15 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
             except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
                 logger.debug("metrics increment failed for worker_loop_error")
             await asyncio.sleep(poll_sleep)
+        finally:
+            try:
+                job_scope.close()
+            except Exception as exc:  # noqa: BLE001 - nothing restarts this worker; log and take the next job
+                logger.warning(
+                    "Core Jobs worker: ChaCha operation cleanup failed for job {} ({})",
+                    (job or {}).get("id"),
+                    type(exc).__name__,
+                )
 
 
 if __name__ == "__main__":

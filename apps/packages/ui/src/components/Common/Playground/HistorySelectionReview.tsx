@@ -6,12 +6,31 @@ import { focusComposer } from "@/hooks/useComposerFocus"
 import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
+import { openModelSelector } from "@/components/Option/Playground/playground-cockpit-actions"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
+import { canRetryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import type { HistoryCursorV1 } from "@/types/history-selection"
+import {
+  chronologicalHistoryNodes,
+  hasReviewableHistory,
+  partialHistoryCoverage,
+  plainHistoryPreview
+} from "./history-review-presentation"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import React from "react"
 import { useTranslation } from "react-i18next"
+
+// Never expose arbitrary provider/transport exception text in recovery details.
+const retryRefusalCodes = new Set([
+  "retry_context_changed", "retry_prompt_unavailable", "retry_context_review_required",
+  "history_retry_in_progress", "history_recovery_not_retryable", "history_selection_not_ready",
+  "request_config_scope_changed", "owner_conversation_mismatch", "history_selection_changed",
+  "history_recovery_changed", "invalid_history_retry", "history_retry_input_changed",
+  "history_recovery_retry_not_submitted", "history_recovery_retry_failed"
+])
 
 const forkCopy = {
   prepared: [
@@ -41,23 +60,55 @@ const forkCopy = {
 } as const
 
 /** Complete-manifest review; virtualization affects presentation, never consent. */
+/** A hidden list longer than this shows only its latest messages (CC-04). */
+const HIDDEN_PREVIEW_LIMIT = 4
+const HIDDEN_PREVIEW_SHOWN = 3
+
 export function HistorySelectionReview({
   selection,
   onExpand,
   onBind,
-  hideRecovery
+  hideRecovery,
+  getRetryContext,
+  onRetryRecovery,
+  getSavedQuestionReview,
+  onRetrySavedQuestion,
+  onSwitchModel = () => openModelSelector()
 }: {
   selection: HistorySelectionController
+  /**
+   * Open the model picker, offered when a send failed because of its model
+   * (CC-02). Defaults to the shared model-selector event, which the full page
+   * and the side panel both answer.
+   */
+  onSwitchModel?: () => void
   onExpand?: () => void
   onBind?: () => void
   /** Leave out retained turns the transcript already shows or still handles (CS-04). */
   hideRecovery?: (
     entry: NonNullable<HistorySelectionController["recoveries"]>[number]
   ) => boolean
+  getSavedQuestionReview?: () => Promise<import("@/services/history-turn-retry").SavedQuestionReview>
+  onRetrySavedQuestion?: (review: import("@/services/history-turn-retry").SavedQuestionReview) => Promise<ChatSubmitResult>
+  getRetryContext?: () => Promise<HistoryRecoveryRetryContext>
+  onRetryRecovery?: (
+    entry: NonNullable<HistorySelectionController["recoveries"]>[number],
+    review: { contextReviewed: boolean; context: HistoryRecoveryRetryContext }
+  ) => Promise<ChatSubmitResult>
 }) {
   const { t } = useTranslation("playground")
   const text = (key: string, fallback: string) =>
     t(`historySelection.${key}`, fallback)
+  // Fill {{name}} placeholders here, so counts read the same whatever t() does.
+  const fill = (template: string, values: Record<string, string | number>) =>
+    template.replace(/\{\{(\w+)\}\}/g, (match, name: string) =>
+      name in values ? String(values[name]) : match)
+  const roleLabel = (role: string) =>
+    role === "user"
+      ? text("roleUser", "You")
+      : role === "assistant"
+        ? text("roleAssistant", "Assistant")
+        : role
   const savedSetup = useStoreMessageOption(
     (state) => state.serverChatRoleplaySetup
   )
@@ -363,11 +414,27 @@ export function HistorySelectionReview({
       setOpenRecoveryError(null)
     }
   })
+  const [savedQuestionReview, setSavedQuestionReview] = React.useState<import("@/services/history-turn-retry").SavedQuestionReview | null>(null)
+  const [savedQuestionBusy, setSavedQuestionBusy] = React.useState(false)
+  const [savedQuestionError, setSavedQuestionError] = React.useState(false)
   const [expanded, setExpanded] = React.useState(false)
   const [included, setIncluded] = React.useState<string[]>([])
   const [cursor, setCursor] = React.useState<HistoryCursorV1>({ kind: "empty" })
   const [focusedId, setFocusedId] = React.useState<string | null>(null)
+  const [failedKeep, setFailedKeep] = React.useState<string | null>(null)
+  const [retryReview, setRetryReview] = React.useState<{ operation: string; context: HistoryRecoveryRetryContext } | null>(null)
+  const [failedRetry, setFailedRetry] = React.useState<string | null>(null)
+  const [retryRefusal, setRetryRefusal] = React.useState<string | null>(null)
   const trigger = React.useRef<HTMLButtonElement>(null)
+  // "Start fresh" moves focus to "Restore all", which is its undo (CC-04):
+  // it returns to the choice Start fresh replaced, on the same branch.
+  const restoreAction = React.useRef<HTMLButtonElement>(null)
+  const coverageBlock = React.useRef<HTMLDivElement>(null)
+  const focusRestoreAfterChoice = React.useRef(false)
+  const [startFreshFrom, setStartFreshFrom] = React.useState<{
+    owner: string | null
+    cursor: HistoryCursorV1
+  } | null>(null)
   const scroller = React.useRef<HTMLDivElement>(null)
   const errorRegion = React.useRef<HTMLDivElement>(null)
   const identity = React.useId()
@@ -409,7 +476,12 @@ export function HistorySelectionReview({
   })
   const olderRecoveries = recoveries.filter((entry) => entry !== currentRecovery)
 
-  const nodes = selection.capture?.snapshot.nodes || []
+  const sourceNodes = selection.capture?.snapshot.nodes
+  // Owner order, but a reply never comes before its question (CC-04).
+  const nodes = React.useMemo(
+    () => chronologicalHistoryNodes(sourceNodes || []),
+    [sourceNodes]
+  )
   const rowId = (id: string) => `${identity}-${encodeURIComponent(id)}`
   const virtualizer = useVirtualizer({
     count: nodes.length,
@@ -423,6 +495,33 @@ export function HistorySelectionReview({
     selection.status === "pending" || selection.status === "pending_unknown"
   const stale =
     selection.status === "stale_selection" || selection.status === "error"
+  // How much of the conversation the AI sees, when it isn't all of it (CC-04).
+  const restorePreference =
+    startFreshFrom?.owner === reviewOwner ? startFreshFrom.cursor : null
+  const coverage = React.useMemo(
+    () =>
+      selection.status === "ready"
+        ? partialHistoryCoverage(selection.capture, selection.view, restorePreference)
+        : null,
+    [selection.status, selection.capture, selection.view, restorePreference]
+  )
+  // The review is offered once there is something to choose between, or
+  // something it must explain (CC-04): not for a single exchange.
+  const reviewAvailable =
+    nodes.length > 0 &&
+    (expanded ||
+      selection.status === "legacy_review_required" ||
+      stale ||
+      Boolean(coverage) ||
+      recoveries.length > 0 ||
+      hasReviewableHistory(nodes))
+  React.useEffect(() => {
+    if (!coverage || !focusRestoreAfterChoice.current) return
+    focusRestoreAfterChoice.current = false
+    // A disabled "Restore all" (a send in progress) can't take focus.
+    if (restoreAction.current && !restoreAction.current.disabled) restoreAction.current.focus()
+    else coverageBlock.current?.focus()
+  }, [coverage])
   React.useEffect(() => {
     if (previousReviewOwner.current === reviewOwner) return
     previousReviewOwner.current = reviewOwner
@@ -432,7 +531,16 @@ export function HistorySelectionReview({
     setIncluded([])
     setCursor({ kind: "empty" })
     setFocusedId(null)
+    setFailedKeep(null)
+    setStartFreshFrom(null)
   }, [reviewOwner])
+  React.useEffect(() => {
+    setRetryReview(null)
+    setSavedQuestionReview(null)
+    setSavedQuestionError(false)
+    setFailedRetry(null)
+    setRetryRefusal(null)
+  }, [reviewOwner, selection.view?.view_session_id, selection.view?.selection_revision])
   React.useEffect(() => {
     if (stale && expanded && !selection.freshnessConflict)
       errorRegion.current?.focus()
@@ -659,31 +767,48 @@ export function HistorySelectionReview({
         </>
       ) : (
         <>
+          {/* The problem, then its cause, then what is kept (CC-02). */}
           <p className="font-medium">
-            {text("recoveryTitle", "Turn needs review")}
+            {entry.turn.state === "generated_unsaved"
+              ? text("recoveryUnsavedReplyTitle", "Reply not saved")
+              : entry.turn.persistence === "server" && entry.turn.admission
+                ? text("recoveryUnconfirmedTitle", "Reply not confirmed")
+                : text("recoveryTitle", "No reply to this message")}
+          </p>
+          {entry.turn.failure_reason && <p role="alert">{entry.turn.failure_reason}</p>}
+          <p>
+            {entry.turn.persistence === "server" && entry.turn.admission
+              ? text(
+                  "recoveryState.accepted_response_unknown",
+                  "Your message was saved. Not known whether a reply was saved"
+                )
+              : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
           </p>
           <p>
             {text(
               entry.turn.persistence === 'server' ? 'nativeRecoveryMessage' : 'recoveryMessage',
               entry.turn.persistence === 'server'
-                ? 'The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.'
-                : 'The original send outcome is retained separately from history. It will not be sent again automatically.'
+                ? 'The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.'
+                : 'Your message is kept. Nothing is sent again unless you choose to retry.'
             )}
           </p>
-          <p>
-            {entry.turn.persistence === "server" && entry.turn.admission
-              ? text(
-                  "recoveryState.accepted_response_unknown",
-                  "User input accepted; response outcome unknown"
-                )
-              : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
-          </p>
+          {entry.turn.failure_action === "open-model-selector" && (
+            <Button
+              variant="text"
+              disabled={sendInProgress}
+              onClick={() => {
+                if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
+                  onSwitchModel()
+              }}>
+              {text("switchModel", "Switch model")}
+            </Button>
+          )}
         </>
       )}
       {entry.turn.recovery_storage === "memory" && <p role="alert">{text("recoveryStorageFull", "Local storage could not keep all recovered text. Some text is retained in this window only; copy it before closing or reloading.")}</p>}
       <details>
         <summary>
-          {text("inspectRecovery", "Inspect original input and result")}
+          {text("inspectRecovery", "Show what was sent and received")}
         </summary>
         <pre className="whitespace-pre-wrap break-words">
           {entry.turn.input_text}
@@ -716,6 +841,92 @@ export function HistorySelectionReview({
             </a>
           ))}
       </details>
+      {entry.turn.outcome === "complete" && entry.turn.existing_selection && !entry.turn.settled_message_id && (
+        <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending}
+          loading={openingRecovery === entry.turn.operation_id}
+          onClick={async () => {
+            if (!mounted.current || !renderedSource.isCurrent() || !renderedSelectionIsCurrent()) return
+            const current = () => mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent()
+            setOpeningRecovery(entry.turn.operation_id)
+            setFailedKeep(null)
+            try {
+              const result = await keepHistoryTurnRecovery(selection, entry)
+              if (current() && result.status === "skipped") setFailedKeep(entry.turn.operation_id)
+            } catch {
+              if (current()) setFailedKeep(entry.turn.operation_id)
+            } finally {
+              if (mounted.current) setOpeningRecovery(value => value === entry.turn.operation_id ? null : value)
+            }
+          }}>
+          {text("keepRecovery", "Keep recovered reply")}
+        </Button>
+      )}
+      {failedKeep === entry.turn.operation_id && (
+        <p role="alert">{text("keepRecoveryFailed", "Could not keep this reply. The original recovery is retained for review.")}</p>
+      )}
+      {onRetryRecovery && getRetryContext && canRetryHistoryTurnRecovery(entry) && (
+        <>
+          <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={async () => {
+            const fence = selection.fence()
+                  const isCurrent = () => mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent() && fence()
+            setFailedRetry(null)
+            setRetryRefusal(null)
+            try {
+              const context = await getRetryContext()
+              if (isCurrent() && context.isCurrent())
+                setRetryReview({ operation: entry.turn.operation_id, context })
+            } catch {
+              if (isCurrent()) setFailedRetry(entry.turn.operation_id)
+            }
+          }}>
+            {text("reviewRetry", "Review retry")}
+          </Button>
+          {retryReview?.operation === entry.turn.operation_id && (
+            <section aria-label={text("reviewRetry", "Review retry")} className="my-2 rounded border p-3">
+              <p>{text("retryPromptReview", "This recovery cannot restore the original prompt settings. Review or reapply the original System/Prompt settings using the chat controls, then review this retry again. Retry uses the model and instructions shown below.")}</p>
+              <p>{text("retrySavedQuestion", "Saved question")}</p>
+              <pre className="whitespace-pre-wrap break-words">{entry.turn.input_text}</pre>
+              <p>{text("retryCurrentModel", "Current model")}</p>
+              <p>{retryReview.context.model}</p>
+              <p>{text("retryCurrentPrompt", "Current System/Prompt instructions")}</p>
+              {retryReview.context.systemPrompts.length
+                ? retryReview.context.systemPrompts.map((prompt, index) => <pre key={index} className="whitespace-pre-wrap break-words">{prompt}</pre>)
+                : <p>{text("retryNoPrompt", "No System/Prompt instruction is currently applied.")}</p>}
+              <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={async () => {
+                setRetrying(entry.turn.operation_id)
+                setFailedRetry(null)
+                setRetryRefusal(null)
+                try {
+                  const result = await onRetryRecovery(entry, { contextReviewed: true, context: retryReview.context })
+                  if (result.status !== "submitted") {
+                    setFailedRetry(entry.turn.operation_id)
+                    setRetryRefusal(result.status === "failed" && retryRefusalCodes.has(result.errorMessage || "") ? result.errorMessage! : null)
+                  }
+                  setRetryReview(null)
+                } catch {
+                  setFailedRetry(entry.turn.operation_id)
+                } finally {
+                  setRetrying(null)
+                }
+              }}>
+                {text("retrySavedQuestionAction", "Retry saved question")}
+              </Button>
+              <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={() => setRetryReview(null)}>
+                {text("cancel", "Cancel review")}
+              </Button>
+            </section>
+          )}
+        </>
+      )}
+      {failedRetry === entry.turn.operation_id && (
+        <div>
+          <p role="alert">{text("retryRecoveryFailed", "Could not retry this question. Review the current chat and prompt settings; the original recovery is retained for inspection.")}</p>
+          {retryRefusal && <details className="text-sm text-text-muted">
+            <summary>{text("retryDetails", "Retry details")}</summary>
+            <p>{retryRefusal}</p>
+          </details>}
+        </div>
+      )}
       <Button
         disabled={retrying !== null || recoveryAction?.pending || openingRecovery !== null}
         loading={recoveryAction?.pending && recoveryAction.action === "copy" && recoveryAction.operationId === entry.turn.operation_id}
@@ -764,6 +975,36 @@ export function HistorySelectionReview({
         <p className="mb-2 text-sm text-text-muted">{text("savedRoleplaySetup", "Saved roleplay setup")}: {savedSetup.name}
           {savedSetup.provider && savedSetup.model ? ` · ${savedSetup.provider} / ${savedSetup.model}` : ""}.
           {" "}{text("savedRoleplaySetupHelp", "This conversation keeps its saved character and settings.")}</p>
+      )}
+      {getSavedQuestionReview && onRetrySavedQuestion && selection.status === "ready" &&
+        selection.owner?.kind === "native" && selection.settingsQualified &&
+        selection.capture?.status === "captured" && selection.capture.rows.at(-1)?.role === "user" && (
+        <div className="mb-3 rounded border p-3">
+          <Button disabled={savedQuestionBusy} onClick={async () => {
+            setSavedQuestionBusy(true)
+            setSavedQuestionError(false)
+            try { setSavedQuestionReview(await getSavedQuestionReview()) }
+            catch { setSavedQuestionError(true) }
+            finally { setSavedQuestionBusy(false) }
+          }}>{text("reviewSavedQuestion", "Review saved question")}</Button>
+          {savedQuestionReview && <div role="group" aria-label={text("savedQuestionReview", "Saved question review")}>
+            <p>{text("savedQuestionExplanation", "Answer this saved question using the selected model and saved character context. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")}</p>
+            <pre className="whitespace-pre-wrap break-words">{savedQuestionReview.text}</pre>
+            <p>{savedQuestionReview.model}</p>
+            <Button disabled={savedQuestionBusy} onClick={async () => {
+              if (!savedQuestionReview.isCurrent()) { setSavedQuestionError(true); return }
+              setSavedQuestionBusy(true)
+              setSavedQuestionError(false)
+              try {
+                const result = await onRetrySavedQuestion(savedQuestionReview)
+                if (result.status !== "submitted") setSavedQuestionError(true)
+                else setSavedQuestionReview(null)
+              } catch { setSavedQuestionError(true) }
+              finally { setSavedQuestionBusy(false) }
+            }}>{text("retrySavedQuestion", "Retry saved question")}</Button>
+          </div>}
+          {savedQuestionError && <p role="alert">{text("savedQuestionRefused", "Could not retry. Review the saved question again after checking the model, connection and conversation.")}</p>}
+        </div>
       )}
       {selection.forkOperationsError && (
         <p role="alert">
@@ -935,7 +1176,7 @@ export function HistorySelectionReview({
         <RecoveryCallout
           state="unavailable"
           title={text("unavailable", "Selected history unavailable")}
-          message={text(
+          message={selection.error === "unbound_local_history" ? text("localBindingMessage", "This imported local conversation has no trusted owner. Use it on this browser to connect it to this browser profile, then review its history before continuing.") : text(
             "unavailableMessage",
             "You can still read this conversation. A supported, verified history owner is required to continue from a selection."
           )}
@@ -945,9 +1186,9 @@ export function HistorySelectionReview({
               : undefined
           }
           primaryAction={
-            selection.error === "unbound_server_mirror" && onBind
+            (selection.error === "unbound_server_mirror" || selection.error === "unbound_local_history") && selection.canBindUnavailable && onBind
               ? {
-                  label: text("bind", "Connect this conversation"),
+                  label: selection.error === "unbound_local_history" ? text("bindLocal", "Use this local conversation") : text("bind", "Connect this conversation"),
                   onClick: onBind
                 }
               : undefined
@@ -972,10 +1213,69 @@ export function HistorySelectionReview({
               })
           }}>
           <summary className="cursor-pointer py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-            {`${text("retainedOutcomes", "Retained outcomes")} (${olderRecoveries.length})`}
+            {`${text("retainedOutcomes", "Earlier messages to review")} (${olderRecoveries.length})`}
           </summary>
           {olderRecoveries.map(renderRecovery)}
         </details>
+      )}
+      {coverage && (!sendInProgress || coverage.seen === 0) && (
+        <div ref={coverageBlock} tabIndex={-1} className="mb-2 rounded border border-border p-2 text-sm focus:outline-none">
+          <div className="flex flex-wrap items-center gap-2">
+            <p role="status">
+              {fill(text("coverage", "AI sees {{seen}} of {{total}} messages"), {
+                seen: coverage.seen,
+                total: coverage.total
+              })}
+            </p>
+            <Button
+              ref={restoreAction}
+              variant="text"
+              size="sm"
+              disabled={
+                sendInProgress ||
+                pending ||
+                retrying !== null ||
+                openingRecovery !== null ||
+                Boolean(recoveryAction?.pending)
+              }
+              onClick={() => {
+                if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
+                  void selection.choose(coverage.restore)
+              }}>
+              {text("restoreAll", "Restore all")}
+            </Button>
+          </div>
+          {coverage.seen === 0 && (
+            <>
+              {coverage.hidden.length > HIDDEN_PREVIEW_LIMIT && (
+                <p className="mt-1 text-xs text-text-muted">
+                  {fill(text("hiddenMore", "and {{count}} earlier messages"), {
+                    count: (coverage.hidden.length - HIDDEN_PREVIEW_SHOWN).toLocaleString()
+                  })}
+                </p>
+              )}
+              {/* Shown for reference only: the AI doesn't see these (ADR-049
+                  keeps them out of the transcript and its actions). */}
+              <ul
+                aria-label={text("hiddenEarlier", "Earlier messages, hidden from the AI")}
+                className="mt-1 space-y-0.5 text-xs text-text-muted">
+                {(coverage.hidden.length > HIDDEN_PREVIEW_LIMIT
+                  ? coverage.hidden.slice(-HIDDEN_PREVIEW_SHOWN)
+                  : coverage.hidden
+                ).map((node) => (
+                  <li key={node.id} className="truncate">
+                    {`${roleLabel(node.role)} · ${
+                      plainHistoryPreview(node.preview) ||
+                      (node.assets?.length
+                        ? text("imageOnly", "Image or attachment only")
+                        : text("emptyMessage", "Empty message"))
+                    }`}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
         {selection.status === "ready" && selection.owner?.kind === "native" &&
@@ -994,21 +1294,13 @@ export function HistorySelectionReview({
             {text("refresh", "Refresh history")}
           </Button>
         )}
-        {nodes.length > 0 && (
+        {reviewAvailable && (
           <Button
             ref={trigger}
             variant="text"
             onClick={beginReview}
             disabled={pending}>
             {text("review", "Review conversation history")}
-          </Button>
-        )}
-        {selection.status === "ready" && nodes.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void selection.choose({ kind: "empty" })}>
-            {text("empty", "Use no prior messages")}
           </Button>
         )}
         {onExpand && (
@@ -1023,21 +1315,44 @@ export function HistorySelectionReview({
             {text("review", "Review conversation history")}
           </h3>
           <p className="text-sm text-text-muted">
-            {text("counts", "Complete source / included path")}: {nodes.length}{" "}
-            / {included.length}
+            {fill(text("includedCount", "{{included}} of {{total}} messages included"), {
+              included: included.length,
+              total: nodes.length
+            })}
           </p>
           <p className="my-2 text-sm text-text-muted">
             {text(
               "instructions",
-              "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages."
+              "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them."
             )}
           </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              // Hides every earlier message from the AI now; "Restore all" undoes it.
+              const previous = selection.view?.cursor
+              if (previous) setStartFreshFrom({ owner: reviewOwner, cursor: previous })
+              focusRestoreAfterChoice.current = true
+              setExpanded(false)
+              void Promise.resolve(selection.choose({ kind: "empty" })).then(
+                (chosen) => {
+                  if (chosen === false) focusRestoreAfterChoice.current = false
+                },
+                () => {
+                  focusRestoreAfterChoice.current = false
+                }
+              )
+            }}>
+            {text("startFresh", "Start fresh")}
+          </Button>
           <div
             ref={scroller}
             className="max-h-[30rem] overflow-auto"
             style={{ height: Math.min(480, nodes.length * 132) }}
             role="list"
-            aria-label={text("source", "Complete source messages")}>
+            aria-label={text("source", "All messages in this chat")}>
             <div
               style={{
                 height: virtualizer.getTotalSize(),
@@ -1047,7 +1362,7 @@ export function HistorySelectionReview({
                 const node = nodes[item.index]
                 const position = included.indexOf(node.id)
                 const preview =
-                  node.preview ||
+                  plainHistoryPreview(node.preview) ||
                   (node.assets?.length
                     ? text("imageOnly", "Image or attachment only")
                     : text("emptyMessage", "Empty message"))
@@ -1061,7 +1376,7 @@ export function HistorySelectionReview({
                     aria-posinset={item.index + 1}
                     tabIndex={focusedId === node.id ? 0 : -1}
                     onFocus={() => setFocusedId(node.id)}
-                    className="absolute left-0 top-0 w-full border-b border-border p-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+                    className="absolute left-0 top-0 w-full overflow-hidden border-b border-border p-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
                     style={{
                       transform: `translateY(${item.start}px)`,
                       minHeight: item.size
@@ -1080,17 +1395,19 @@ export function HistorySelectionReview({
                         checked={position >= 0}
                         disabled={pending}
                         onChange={() => changeIncluded(node.id)}
-                        aria-label={`${text("include", "Include")} ${node.role}: ${preview}`}
+                        aria-label={`${text("include", "Include")} ${roleLabel(node.role)}: ${preview}`}
                       />
-                      <span>
-                        <strong>{node.role}</strong> · {preview}
+                      <span className="line-clamp-2">
+                        {`${roleLabel(node.role)} · ${preview}`}
                       </span>
                     </label>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <span className="text-text-muted">
                         {position < 0
-                          ? text("omitted", "Omitted alternative")
-                          : `${text("position", "Path position")} ${position + 1}`}
+                          ? text("omitted", "Hidden from the AI")
+                          : fill(text("includedPosition", "AI sees this as message {{position}}"), {
+                              position: position + 1
+                            })}
                       </span>
                       {position >= 0 && (
                         <>
@@ -1162,7 +1479,7 @@ export function HistorySelectionReview({
           <p className="my-2 text-sm text-text-muted">
             {text(
               "confirmEffect",
-              "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives."
+              "Confirming saves this choice for the chat. Nothing is deleted: messages you leave out are only hidden from the AI."
             )}
           </p>
           <div className="flex flex-wrap gap-2">

@@ -51,7 +51,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     """
     from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     def _render_str(val: Any) -> Any:
         if isinstance(val, str):
@@ -247,7 +247,7 @@ async def run_llm_with_tools_adapter(config: dict[str, Any], context: dict[str, 
       - system_message: str
     Output: { "text": str, "tool_results": list, "iterations": int }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -351,7 +351,7 @@ async def run_llm_compare_adapter(config: dict[str, Any], context: dict[str, Any
       - responses: list[dict] - Responses from each provider
       - comparison: dict - Comparison metadata
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -445,7 +445,7 @@ async def run_llm_critique_adapter(config: dict[str, Any], context: dict[str, An
       - model: str
     Output: { "critique": str, "revised": str, "criteria": list }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

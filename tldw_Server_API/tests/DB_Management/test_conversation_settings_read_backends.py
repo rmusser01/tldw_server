@@ -9,8 +9,11 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chats
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    BackendType, CharactersRAGDB, CharactersRAGDBError,
+    BackendType,
+    CharactersRAGDB,
+    CharactersRAGDBError,
 )
 
 pytestmark = pytest.mark.integration
@@ -69,6 +72,7 @@ def test_corrupt_settings_are_read_failures_not_known_absence(settings_db, store
 
 def _settings_response(db, conversation_id):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(chats.router, prefix="/api/v1/chats")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[chats.get_request_user] = lambda: SimpleNamespace(id=2)
@@ -128,6 +132,7 @@ def test_actual_chat_settings_route_returns_persisted_public_settings(settings_d
     conversation_id = _conversation(settings_db)
     assert settings_db.upsert_conversation_settings(conversation_id, {"temperature": 0.2, "greetingScope": "chat"})
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(chats.router, prefix="/api/v1/chats")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: settings_db
     app.dependency_overrides[chats.get_request_user] = lambda: SimpleNamespace(id=2)

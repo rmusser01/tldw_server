@@ -659,7 +659,7 @@ async def test_document_sync_stream_uses_bounded_next_and_reserved_close_when_ex
 ):
     """Disconnect drains direct next/close workers without the loop executor."""
     from tldw_Server_API.app.api.v1.endpoints import chat_documents as chat_docs
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 
     lifecycle = []
     default_entered = threading.Event()
@@ -776,6 +776,57 @@ async def test_document_sync_stream_uses_bounded_next_and_reserved_close_when_ex
     assert cleanup_pool.active_count == 0
     assert lifecycle.count("mark_used") == 1
     assert lifecycle.count("close_start") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_mode", ["classic", "unified"])
+async def test_document_stream_does_not_send_an_unrequested_usage_chunk(monkeypatch, stream_mode):
+    """OpenAI's usage chunk (empty choices) is dropped: this request cannot ask for it (TASK-13951)."""
+    from tldw_Server_API.app.api.v1.endpoints import chat_documents as chat_docs
+
+    lifecycle = []
+    persisted = []
+    content = 'data: {"choices":[{"index":0,"delta":{"content":"Doc"}}],"usage":null}'
+    usage_chunk = 'data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1,"total_tokens":10}}'
+    # Not OpenAI's usage chunk, so each one passes as before.
+    others = ["data: plain text", 'data: {"choices": [], "usage"', 'data: {"choices":[],"usage":null}']
+
+    class StreamingService:
+        def __init__(self, _db):
+            return None
+
+        def generate_document(self, **_kwargs):
+            return iter([f"{line}\n\n" for line in (content, usage_chunk, *others, "data: [DONE]")])
+
+        def record_streamed_document(self, **kwargs):
+            persisted.append(kwargs["content"])
+
+    _install_direct_document_runtime(monkeypatch, lifecycle)
+    if stream_mode == "unified":
+        monkeypatch.setenv("STREAMS_UNIFIED", "1")
+    else:
+        monkeypatch.delenv("STREAMS_UNIFIED", raising=False)
+
+    response = await chat_docs.generate_document(
+        request=GenerateDocumentRequest(
+            **_make_payload(provider="ollama", model="model-a", api_key=None, stream=True)
+        ),
+        http_request=_direct_request(),
+        db=object(),
+        service_cls=StreamingService,
+        principal=AuthPrincipal(kind="user", user_id=1),
+    )
+    wire = "".join(
+        [
+            chunk.decode() if isinstance(chunk, (bytes, bytearray)) else str(chunk)
+            async for chunk in response.body_iterator
+        ]
+    )
+
+    assert '"prompt_tokens":9' not in wire
+    assert [line for line in (content, *others) if line not in wire] == []
+    (document,) = persisted
+    assert '"prompt_tokens":9' not in document
 
 
 @pytest.mark.asyncio

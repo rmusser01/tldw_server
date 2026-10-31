@@ -587,10 +587,15 @@ async def add_role_to_user(
 ) -> dict:
     try:
         await _enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
+        is_postgres = await _get_is_postgres_backend_fn()()
+        if await rbac_admin_repo.get_role(db, is_postgres=is_postgres, role_id=role_id) is None:
+            raise HTTPException(status_code=404, detail="Role not found")
         await rbac_admin_repo.add_user_role(
-            db, is_postgres=await _get_is_postgres_backend_fn()(), user_id=user_id, role_id=role_id
+            db, is_postgres=is_postgres, user_id=user_id, role_id=role_id
         )
         return {"message": "Role added to user"}
+    except HTTPException:
+        raise
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to add role to user")
         raise HTTPException(status_code=500, detail="Failed to add role to user") from e

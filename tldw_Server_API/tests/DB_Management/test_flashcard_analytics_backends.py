@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as database_module
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
@@ -75,6 +76,7 @@ def test_saved_card_analytics_http_and_following_reads(analytics_db, populated):
         _seed_review(db, card, "2026-09-16T00:45:00Z", rating=1, answer_time_ms=4000, was_lapse=True)
         _seed_review(db, card, "2026-09-15T00:30:00Z")
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     with TestClient(app) as client:

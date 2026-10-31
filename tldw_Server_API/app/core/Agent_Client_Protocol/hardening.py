@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import ParseResult, urlparse
 
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
 
 def _truthy(raw: str | None) -> bool:
     """Return True when a config/env string uses a recognized truthy value."""
@@ -208,14 +210,33 @@ def validate_mcp_http_url(
         raise ValueError(f"{label} must use http or https")
     if not parsed.hostname:
         raise ValueError(f"{label} must include a hostname")
-    allow_private = (
-        _truthy(os.getenv("ACP_ALLOW_PRIVATE_MCP_HTTP"))
-        if allow_private_network is None
-        else allow_private_network
-    )
-    if not allow_private and _is_blocked_host(parsed.hostname):
+    if not _private_mcp_http_allowed(allow_private_network) and _is_blocked_host(parsed.hostname):
         raise ValueError(f"{label} targets a local, private, or otherwise unsafe host")
     return str(url)
+
+
+def _private_mcp_http_allowed(allow_private_network: bool | None) -> bool:
+    """Resolve the private-network opt-in: the explicit flag, else ACP_ALLOW_PRIVATE_MCP_HTTP."""
+    if allow_private_network is None:
+        return _truthy(os.getenv("ACP_ALLOW_PRIVATE_MCP_HTTP"))
+    return allow_private_network
+
+
+def mcp_http_egress_scope(
+    url: str,
+    *,
+    allow_private_network: bool | None = None,
+) -> ConfiguredEndpointScope | None:
+    """Egress scope for an MCP HTTP request through ``core.http_client``.
+
+    Without the private-network opt-in this is None and the default egress policy
+    applies, which refuses private and reserved addresses. With it, the scope admits
+    exactly this URL's origin on loopback or private addresses, never cloud metadata
+    or link-local ones, and refuses a redirect to any other origin.
+    """
+    if not _private_mcp_http_allowed(allow_private_network):
+        return None
+    return ConfiguredEndpointScope.from_url(url)
 
 
 def validate_sse_post_url(

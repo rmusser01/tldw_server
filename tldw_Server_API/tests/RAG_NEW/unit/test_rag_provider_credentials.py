@@ -259,7 +259,7 @@ async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adap
     streaming: bool,
 ) -> None:
     """Knowledge QA keeps each configured server key/model pair request-owned."""
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     request_label: ContextVar[str] = ContextVar("rag_acceptance_request_label")
     snapshots = {
@@ -392,7 +392,7 @@ async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adap
     monkeypatch.setattr(rag_endpoint, "_resolve_kanban_db_path", lambda *_args: "kanban.db")
     monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
     monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", acceptance_pipeline)
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: Registry())
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: Registry())
 
     async def invoke(label: str) -> Any:
         token = request_label.set(label)

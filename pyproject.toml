@@ -47,6 +47,8 @@ dependencies = [
   "argon2-cffi>=23.0.0",
   "asyncpg",
   "psycopg[binary]>=3.1",
+  # The PostgreSQL backend's only pool: it resets tenant session state on check-in.
+  "psycopg-pool>=3.3",
   "cachetools>=5.0.0",
   "click>=8.0.0",
   "click-completion>=0.5.2",
@@ -457,7 +459,7 @@ backend_vllm = [
 # Database backends
 db_postgres = [
   "psycopg[binary]>=3.1",
-  "psycopg-pool>=3.1",
+  "psycopg-pool>=3.3",
   "psycopg2-binary>=2.9.9"
 ]
 
@@ -580,8 +582,10 @@ filterwarnings = [
 markers = [
     "asyncio: mark test as async",
     "unit: marks tests as unit tests",
+    "ambient_llm_provider_override_store: the test sees the import-time (unloaded, unhealthy) LLM provider override store, not the root conftest's healthy empty one",
     "packaging: marks tests that build distribution artifacts and shell out",
     "integration: marks tests as integration tests",
+    "provider_inventory: runs the live provider model check (TASK-13460) instead of the offline test default",
     "postgres: marks tests that require PostgreSQL",
     "e2e: marks end-to-end UI tests",
     "external_api: marks tests that require external API access",
@@ -861,6 +865,7 @@ exclude = []
 "tldw_Server_API/app/api/v1/schemas/evaluation_schemas_unified.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/schemas/flashcards.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py" = ["BLE001"]
+"tldw_Server_API/app/core/RAG/rag_schemas_unified.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/schemas/websearch_schemas.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/utils/datetime_utils.py" = ["BLE001"]
 "tldw_Server_API/app/core/Agent_Client_Protocol/adapters/mcp_runners.py" = ["BLE001"]
@@ -952,6 +957,7 @@ exclude = []
 "tldw_Server_API/app/core/Character_Chat/modules/character_templates.py" = ["BLE001"]
 "tldw_Server_API/app/core/Character_Chat/modules/character_utils.py" = ["BLE001"]
 "tldw_Server_API/app/core/Character_Chat/modules/character_validation.py" = ["BLE001"]
+"tldw_Server_API/app/core/Chat/anthropic_messages.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_characters.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_helpers.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_history.py" = ["BLE001"]
@@ -1003,12 +1009,12 @@ exclude = []
 "tldw_Server_API/app/core/DB_Management/content_migrate.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/db_migration.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/db_path_utils.py" = ["BLE001"]
-"tldw_Server_API/app/core/DB_Management/kanban_vector_search.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/api.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/repositories/document_versions_repository.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/repositories/keywords_repository.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/runtime/defaults.py" = ["BLE001"]
+"tldw_Server_API/app/core/DB_Management/media_db/runtime/safe_metadata_write_ops.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/runtime/visual_document_ops.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/migrations.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/migrations_v5_unified_evaluations.py" = ["BLE001"]
@@ -1087,9 +1093,9 @@ exclude = []
 "tldw_Server_API/app/core/Jobs/metrics.py" = ["BLE001"]
 "tldw_Server_API/app/core/Jobs/pg_util.py" = ["BLE001"]
 "tldw_Server_API/app/core/Jobs/worker_sdk.py" = ["BLE001"]
+"tldw_Server_API/app/core/Kanban/vector_search.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/adapter_registry.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/adapter_utils.py" = ["BLE001"]
-"tldw_Server_API/app/core/LLM_Calls/anthropic_messages.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/capability_registry.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/chat_calls.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/embeddings_adapter_registry.py" = ["BLE001"]
@@ -1307,7 +1313,6 @@ exclude = []
 "tldw_Server_API/app/core/Utils/chunked_image_processor.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/cpu_bound_handler.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/executor_registry.py" = ["BLE001"]
-"tldw_Server_API/app/core/Utils/metadata_utils.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/pydantic_compat.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/tokenizer.py" = ["BLE001"]
 "tldw_Server_API/app/core/VoiceAssistant/intent_parser.py" = ["BLE001"]

@@ -22,6 +22,12 @@ import path from "node:path"
 import ts from "typescript"
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import * as historyController from "@/hooks/chat/useHistorySelection"
+import * as historyService from "@/services/chat-history-selection"
+import * as historyRecoveryStorage from "@/db/dexie/history-selection"
+import { resolveHistorySelection } from "@/utils/history-selection"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
+import { resetHistoryTurnRegistry } from "@/services/history-turn-keep"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import LegacySidepanelChat from "../../../../../tldw-frontend/extension/routes/sidepanel-chat"
@@ -38,6 +44,7 @@ import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address"
 import { decodeSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
+import { PRO_SIDEBAR_COLLAPSED_STORAGE_KEY } from "@/components/Sidepanel/Chat/sidepanel-sidebar-layout"
 
 const io = vi.hoisted(() => ({
   noop: () => {},
@@ -51,6 +58,8 @@ const io = vi.hoisted(() => ({
   captureNative: false,
   useComposer: false,
   useRecovery: false,
+  stickyChatInput: undefined as boolean | undefined,
+  sidepanelStickyChatInput: undefined as boolean | undefined,
   write: vi.fn(),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
@@ -70,7 +79,9 @@ const io = vi.hoisted(() => ({
   scope: vi.fn(),
   server: vi.fn(),
   submit: vi.fn(),
-  notifyError: vi.fn()
+  notifyError: vi.fn(),
+  capture: vi.fn(),
+  settle: vi.fn()
 }))
 // Keep real Drawer/content and expose retained motion callbacks for boundary controls.
 vi.mock("antd", async original => {
@@ -236,8 +247,13 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [100] }))
 const storageWrite = vi.hoisted(() => async () => {})
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: unknown, fallback: unknown) => [
-    fallback,
+  useStorage: (key: unknown, fallback: unknown) => [
+    key === "stickyChatInput" && io.stickyChatInput !== undefined
+      ? io.stickyChatInput
+      : key === "sidepanelStickyChatInput" &&
+          io.sidepanelStickyChatInput !== undefined
+        ? io.sidepanelStickyChatInput
+        : fallback,
     storageWrite,
     { isLoading: false }
   ]
@@ -477,6 +493,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => {},
     listChatMessages: (...args: unknown[]) => io.server(...args),
+    captureHistorySelection: (...args: unknown[]) => io.capture(...args),
+    addChatMessage: (...args: unknown[]) => io.settle(...args),
     ensureConfigForRequest: async () => ({
       serverUrl: "http://chat.test",
       authMode: "multi-user"
@@ -513,6 +531,101 @@ const snapshot = (text = "ALICE TRANSCRIPT"): SidepanelChatSnapshot => ({
   serverChatExternalRef: null,
   queuedMessages: [],
   modelSettings: { systemPrompt: "ALICE PRIVATE PROMPT" }
+})
+
+it("mounted shared Sidepanel keeps a stale completed Regenerate through the guarded service", async () => {
+  io.user = "alice"
+  io.data.clear()
+  io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
+  io.read.mockImplementation(async key => io.data.get(key))
+  io.scope.mockImplementation(async () => ({
+    requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" },
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: io.noop
+  }))
+  useSidepanelChatTabsStore.getState().clear()
+  resetHistoryTurnRegistry()
+  const scope = { profile_id: "sidepanel-profile", client_session_id: "sidepanel-client" }
+  const view = {
+    view_session_id: "retained-sidepanel", owner_key: "server-owner", conversation_id: "sidepanel-server",
+    interpretation: { kind: "legacy_linear_v1" as const, projection_id: "reviewed" },
+    cursor: { kind: "after_message" as const, message_id: "question" }, selection_revision: 3
+  }
+  const source = {
+    version: 1 as const, owner_key: view.owner_key, conversation_id: view.conversation_id,
+    fences: { conversation: "3", history: "3", settings: "1" },
+    nodes: [{ id: "question", revision: "q1", role: "user" as const, parent_id: null,
+      legacy_projection_id: "reviewed", settled: true }],
+    source_digest: "sidepanel-source", storage_context_digest: "sidepanel-storage",
+    interpretation_status: { kind: "legacy_linear_v1" as const, projection_id: "reviewed", ordered_path_ids: ["question"] }
+  }
+  const selected = resolveHistorySelection(source, view, "send", "original-prepared")
+  if (selected.status !== "ready") throw new Error("invalid_sidepanel_recovery_fixture")
+  const assistant = {
+    id: "sidepanel-alternative", history_id: view.conversation_id, role: "assistant" as const,
+    name: "Original model", content: "Complete Sidepanel alternative", createdAt: 7,
+    images: [], parent_message_id: "question"
+  }
+  const entry: HistoryTurnRecoveryEntry = { scope, turn: {
+    operation_id: "sidepanel-regenerate", origin_view: view,
+    selection_digest: selected.selection.selection_digest,
+    request_context_digest: selected.selection.request_context_digest,
+    owner_key: view.owner_key, conversation_id: view.conversation_id,
+    input_id: "question", assistant_id: assistant.id, created_at: 7,
+    input_text: "Original question", input_images: [], result_text: assistant.content,
+    state: "generated_unsaved", outcome: "complete",
+    existing_selection: selected.selection, settlement_payload: assistant
+  } }
+  const state = {
+    status: "stale_selection" as const, settingsQualified: true, view, bookmarkScope: scope,
+    owner: { kind: "native" as const, conversation_id: view.conversation_id, owner_key: view.owner_key,
+      request_scope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" as const }, userId: "alice" },
+      validate_lease: () => true }
+  }
+  // This fixture isolates Sidepanel's controller consumption. Capability
+  // parsing, owner binding and Keep's fences still use production services.
+  const controller = {
+    ...state, capture: null, error: "stale_projection", recoveries: [entry],
+    getCurrent: () => state, fence: () => () => true, getReference: () => null,
+    activate: io.noop, reset: io.noop, beginLoad: io.noop,
+    getSignal: () => new AbortController().signal,
+    loadConversation: async () => false, prepareExpansionPath: async () => null,
+    choose: async () => false, refreshRecovery: async () => {}, dismissRecovery: async () => {}
+  } as unknown as historyController.HistorySelectionController
+  const selection = vi.spyOn(historyController, "useHistorySelection").mockReturnValue(controller)
+  const load = vi.spyOn(historyRecoveryStorage, "loadHistoryTurnRecoveries").mockResolvedValue([entry])
+  const dismiss = vi.spyOn(historyRecoveryStorage, "dismissHistoryTurnRecovery").mockResolvedValue()
+  io.capture.mockReset().mockImplementation(async (_id, request) => ({
+    status: "legacy_review_required", code: "legacy_review_required",
+    acknowledged_capability: "tldw_history_existing_input_v1",
+    snapshot: { ...source, interpretation_status: { kind: "legacy_review_required" } },
+    view: request.view
+  }))
+  io.settle.mockReset().mockResolvedValue({ id: assistant.id })
+  const actualHistory = await vi.importActual<typeof import("@/services/chat-history-selection")>("@/services/chat-history-selection")
+  const capture = vi.spyOn(historyService, "captureHistorySnapshot").mockImplementation(actualHistory.captureHistorySnapshot)
+  const mounted = render(<SidepanelChat />)
+  try {
+    await waitFor(() => expect(io.settle).toHaveBeenCalledOnce())
+    expect(io.capture.mock.calls[0][1]).toMatchObject({
+      required_capability: "tldw_history_existing_input_v1",
+      view: { cursor: { kind: "empty" }, interpretation: { kind: "parent_graph_v1" } }
+    })
+    expect(io.settle.mock.calls[0]).toMatchObject([
+      view.conversation_id,
+      { id: assistant.id, content: assistant.content, parent_message_id: "question",
+        role: "assistant", tldw_history_existing_input_v1: selected.selection },
+      { requestScope: state.owner.request_scope }
+    ])
+    await waitFor(() => expect(dismiss).toHaveBeenCalledOnce())
+  } finally {
+    mounted.unmount()
+    selection.mockRestore()
+    load.mockRestore()
+    dismiss.mockRestore()
+    capture.mockRestore()
+  }
 })
 const tabsState = (user = "alice") => ({
   version: 2,
@@ -560,7 +673,7 @@ const installSidebarViewport = (initialNarrow: boolean) => {
     get matches() {
       return narrow
     },
-    media: "(max-width: 400px)",
+    media: "(max-width: 639px)",
     onchange: null,
     addEventListener: (_type: string, listener: () => void) =>
       listeners.add(listener),
@@ -575,6 +688,39 @@ const installSidebarViewport = (initialNarrow: boolean) => {
     setNarrow: (value: boolean) =>
       act(() => {
         narrow = value
+        listeners.forEach((listener) => listener())
+      })
+  }
+}
+
+// Evaluates width media queries the way a browser does, so a test states the
+// panel width instead of which query the route happens to use.
+const installSidebarViewportWidth = (initialWidth: number) => {
+  let width = initialWidth
+  const listeners = new Set<() => void>()
+  const matches = (query: string) => {
+    const max = /max-width:\s*(\d+)px/.exec(query)
+    const min = /min-width:\s*(\d+)px/.exec(query)
+    return (!max || width <= Number(max[1])) && (!min || width >= Number(min[1]))
+  }
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    get matches() {
+      return matches(query)
+    },
+    media: query,
+    onchange: null,
+    addEventListener: (_type: string, listener: () => void) =>
+      listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) =>
+      listeners.delete(listener),
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => true
+  }))
+  return {
+    setWidth: (value: number) =>
+      act(() => {
+        width = value
         listeners.forEach((listener) => listener())
       })
   }
@@ -725,6 +871,7 @@ describe.each([
 ] as const)("%s sidepanel snapshot ownership", (_name, Route) => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    localStorage.removeItem(PRO_SIDEBAR_COLLAPSED_STORAGE_KEY)
     vi.spyOn(window, "open").mockReset().mockImplementation(() => ({}) as Window)
     io.user = "alice"
     io.uiMode = "pro"
@@ -734,6 +881,8 @@ describe.each([
     io.captureNative = false
     io.useComposer = false
     io.useRecovery = false
+    io.stickyChatInput = undefined
+    io.sidepanelStickyChatInput = undefined
     io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
     io.physicalTabId = 7
     sessionStorage.clear()
@@ -1256,6 +1405,119 @@ describe.each([
     page.rerender(<Route />)
     expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
     expect(screen.getByText("alice first")).toBeVisible()
+  })
+
+  it("docks the Pro chat list only when the panel is at least 640px wide (XS-04)", async () => {
+    const viewport = installSidebarViewportWidth(520)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    // A 288px dock would crush a 520px panel, so the list stays closed and
+    // opens as an overlay on demand.
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "overlay")
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    await waitFor(() => expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument())
+    viewport.setWidth(800)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("keeps the composer pinned below the messages by default (XS-09)", async () => {
+    io.useComposer = true
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    // The composer must not scroll away with the transcript.
+    expect(screen.getByTestId("chat-messages")).not.toContainElement(composer)
+  })
+
+  it("keeps the composer pinned when the full-page sticky input setting is off (XS-09)", async () => {
+    // Settings > Chat shows the full-page switch Off by default; that must not
+    // unpin the side panel, which has its own setting.
+    io.useComposer = true
+    io.stickyChatInput = false
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    expect(screen.getByTestId("chat-messages")).not.toContainElement(composer)
+  })
+
+  it("lets the composer scroll with the messages when the side panel setting is off (XS-09)", async () => {
+    io.useComposer = true
+    io.stickyChatInput = true
+    io.sidepanelStickyChatInput = false
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    expect(screen.getByTestId("chat-messages")).toContainElement(composer)
+  })
+
+  it("hides 'Scroll to latest' while the chat is empty (XS-09)", async () => {
+    render(<Route />)
+    await waitFor(() => expect(screen.getByTestId("chat-messages")).toBeInTheDocument())
+    await act(async () => {})
+    expect(screen.queryByTestId("chat-scroll-latest")).not.toBeInTheDocument()
+  })
+
+  it("offers 'Scroll to latest' once the chat has messages (XS-09)", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.getByTestId("chat-scroll-latest")).toBeInTheDocument()
+  })
+
+  it("keeps 'Scroll to latest' above an unpinned composer (XS-09)", async () => {
+    io.useComposer = true
+    io.sidepanelStickyChatInput = false
+    const measure = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const height = this.dataset.testid === "sidepanel-composer-dock" ? 300 : 0
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON: () => ({}) } as DOMRect
+      })
+    try {
+      io.data.set(storedKey("alice"), tabsState())
+      render(<Route />)
+      await screen.findByText("alice first")
+      await screen.findByRole("textbox", { name: "Composer draft" })
+      // The pill sits 24px above the measured composer, not at a fixed 8rem.
+      await waitFor(() =>
+        expect(screen.getByTestId("chat-scroll-latest").parentElement).toHaveStyle({ bottom: "324px" })
+      )
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
+  it("remembers a collapsed Pro chat list when the panel reopens (XS-04)", async () => {
+    installSidebarViewportWidth(800)
+    io.data.set(storedKey("alice"), tabsState())
+    const first = render(<Route />)
+    await screen.findByText("alice first")
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    first.unmount()
+
+    const second = render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    second.unmount()
+
+    render(<Route />)
+    await screen.findByText("alice first")
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
   })
 
   if (_name === "shared")
@@ -2421,9 +2683,10 @@ describe.each([
     io.local.mockResolvedValue({ historyInfo: { id: "owned", title: "Owned review", server_scope_key: ownerKey("alice") },
       messages: [{ id: "row", role: "user", content: "OWNED REVIEW TEXT" }] })
     render(<Route />)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBeNull())
     fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
     await screen.findByText("OWNED REVIEW TEXT")
-    fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Expand in full page" }))
     await waitFor(() => expect(window.open).toHaveBeenCalled())
     const route = String(vi.mocked(window.open).mock.calls.at(-1)![0])
     expect(parseHistorySelectionHandoff(route)).toMatchObject({ owner_kind: "local", conversation_id: "owned" })
@@ -2836,7 +3099,9 @@ describe.each([
   it("retains the active tab on same-owner rotation and a failed focus recheck", async () => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one"))
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await screen.findByText("alice inactive")
     io.scope.mockRejectedValueOnce(new Error("offline"))
     act(() => {
       window.dispatchEvent(
@@ -2919,6 +3184,7 @@ describe.each([
       ]
     })
     render(<Route />)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBeNull())
     fireEvent.click(
       await screen.findByRole("button", { name: "Open cached history" })
     )

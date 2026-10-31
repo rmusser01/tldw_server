@@ -30,6 +30,7 @@ _BASELINE_ROLES: Sequence[RoleDef] = (
 _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
     ("media.read", "Read media", "media"),
     ("media.create", "Create media", "media"),
+    ("media.update", "Update media", "media"),
     ("media.delete", "Delete media", "media"),
     ("sql.read", "Run read-only SQL retrieval", "sql"),
     ("sql.target:media_db", "Allow SQL retrieval against media_db target", "sql"),
@@ -93,6 +94,7 @@ def _build_role_grants(
             for p in (
                 "media.read",
                 "media.create",
+                "media.update",
                 "sql.read",
                 "sql.target:media_db",
                 "notes.graph.suggest",

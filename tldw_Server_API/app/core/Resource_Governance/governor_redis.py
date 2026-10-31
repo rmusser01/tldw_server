@@ -33,7 +33,9 @@ from .policy_eval import (
 from .tenant import hash_entity
 
 try:
-    from redis.exceptions import RedisError
+    from redis.exceptions import BusyLoadingError, RedisError
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
 except ImportError:  # pragma: no cover - redis is an optional deployment dependency
     _REDIS_ERRORS: tuple[type[Exception], ...] = ()
 else:
@@ -65,6 +67,85 @@ except _RG_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - metrics optional
 
 class _FallbackToMemory(Exception):
     """Signal that Redis operations failed and fallback_memory should be used."""
+
+
+# RG's Redis client waits at most this long to connect, and for each reply (TASK-13882). It is
+# redis-py 8's default, set here so older releases the redis>=4.5.0 pin allows wait no longer.
+# socket_timeout and socket_connect_timeout options in REDIS_URL override it.
+_REDIS_SOCKET_TIMEOUT_S = 5.0
+# How long RG stops sending commands to a Redis it could not reach (TASK-13882), unless
+# RG_REDIS_UNREACHABLE_COOLDOWN_SEC says otherwise (0 turns the cooldown off). At least twice the
+# socket timeout, so a probe and its confirming PING finish before the next probe starts.
+# ponytail: one cooldown per governor's client; share one per Redis URL if each governor's first wait matters.
+_REDIS_UNREACHABLE_COOLDOWN_S = 10.0
+
+
+def _redis_unreachable_cooldown_s() -> float:
+    """``RG_REDIS_UNREACHABLE_COOLDOWN_SEC``, or the default when it is unset or not a number of seconds >= 0."""
+    raw = (os.getenv("RG_REDIS_UNREACHABLE_COOLDOWN_SEC") or "").strip()
+    if not raw:
+        return _REDIS_UNREACHABLE_COOLDOWN_S
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = -1.0
+    if not math.isfinite(seconds) or seconds < 0:
+        logger.warning("RG_REDIS_UNREACHABLE_COOLDOWN_SEC={!r} is not a number of seconds >= 0; using {}", raw, _REDIS_UNREACHABLE_COOLDOWN_S)
+        return _REDIS_UNREACHABLE_COOLDOWN_S
+    return seconds
+
+
+def _stop_calling_redis_while_unreachable(client: Any, cooldown_s: float) -> Any:
+    """Make ``client`` fail fast for ``cooldown_s`` once Redis cannot be reached (TASK-13882).
+
+    A black-holed Redis makes each command wait the socket timeout, and a governed request sends
+    several commands while Redis is down. A command that fails to reach Redis (refused, reset or
+    timed out) starts the cooldown only if a PING right after it fails too. redis-py drops the
+    failed connection and its pool hands the most recently released one out first, so the PING
+    normally takes that connection and reconnects; a connection Redis closed while idle, or one
+    stall, does not stop RG. Within the cooldown a command raises redis ConnectionError at once,
+    which RG answers by its fail mode as it does a refused connection. After it, one command goes
+    to Redis while the rest keep failing fast; any answer from Redis, an error reply included,
+    ends the cooldown. That includes LOADING from a restarting Redis, which redis-py raises as
+    BusyLoadingError, a ConnectionError: it never starts the cooldown.
+    """
+    run = client.execute_command
+    blocked_until = 0.0
+
+    async def _unreachable() -> bool:
+        try:
+            await run("PING")
+        except BusyLoadingError:
+            return False  # LOADING: Redis answered
+        except (RedisConnectionError, RedisTimeoutError):
+            return True
+        except RedisError:
+            return False  # an error reply: Redis answered
+        return False
+
+    async def execute_command(*args: Any, **options: Any) -> Any:
+        nonlocal blocked_until
+        now = time.monotonic()
+        if now < blocked_until:
+            raise RedisConnectionError("Redis was unreachable; the Resource Governor retries it after a cooldown")
+        if blocked_until:
+            blocked_until = now + cooldown_s  # this command probes; the rest fail fast meanwhile
+        try:
+            result = await run(*args, **options)
+        except BusyLoadingError:
+            blocked_until = 0.0  # LOADING: Redis answered while it loads its data
+            raise
+        except (RedisConnectionError, RedisTimeoutError):
+            blocked_until = time.monotonic() + cooldown_s if await _unreachable() else 0.0
+            raise
+        except RedisError:
+            blocked_until = 0.0  # Redis answered (NOSCRIPT, READONLY, OOM): it is reachable
+            raise
+        blocked_until = 0.0
+        return result
+
+    client.execute_command = execute_command
+    return client
 
 
 def _rate_window(policy: dict[str, Any], category: str) -> tuple[int, int]:
@@ -155,6 +236,7 @@ class RedisResourceGovernor(ResourceGovernor):
         self._client_lock = asyncio.Lock()
         self._concurrency_lock = asyncio.Lock()
         self._fail_mode = rg_redis_fail_mode()
+        self._unreachable_cooldown_s = _redis_unreachable_cooldown_s()
         self._local_handles: dict[str, dict[str, Any]] = {}
         self._tokens_lua_sha: str | None = None
         self._multi_lua_sha: str | None = None
@@ -432,7 +514,14 @@ class RedisResourceGovernor(ResourceGovernor):
             return self._client
         async with self._client_lock:
             if self._client is None:
-                self._client = await create_async_redis_client(context="resource_governor", fallback_to_fake=True)
+                client = await create_async_redis_client(
+                    context="resource_governor",
+                    fallback_to_fake=True,
+                    redis_kwargs={"socket_connect_timeout": _REDIS_SOCKET_TIMEOUT_S, "socket_timeout": _REDIS_SOCKET_TIMEOUT_S},
+                )
+                if self._unreachable_cooldown_s > 0 and not getattr(client, "_tldw_is_stub", False):
+                    _stop_calling_redis_while_unreachable(client, self._unreachable_cooldown_s)
+                self._client = client
         return self._client
 
     async def _scan_keys(self, pattern: str, *, count: int = 1000) -> list[Any]:
@@ -1618,6 +1707,8 @@ class RedisResourceGovernor(ResourceGovernor):
         fallback_to_memory = False
         denial_retry_after = 0
         used_lua = False
+        # The script's members, kept to populate added_members on success and to remove on failure
+        tmp_members: list[tuple[str, str, str, str, list[str]]] = []  # (category, sc, ev, key, members)
 
         # Attempt real-Redis multi-key Lua script when available (disabled when forcing stub rate)
         try:
@@ -1627,8 +1718,6 @@ class RedisResourceGovernor(ResourceGovernor):
                 argv: list[Any] = []
                 # ARGV[1]=now, ARGV[2]=kcount; rest per-key quads
                 now_f = float(now)
-                # We'll build a temporary structure to also populate added_members on success
-                tmp_members: list[tuple[str, str, str, str, list[str]]] = []  # (category, sc, ev, key, members)
                 for category, cfg in req.categories.items():
                     units = int(cfg.get("units") or 0)
                     if units <= 0:
@@ -1670,6 +1759,11 @@ class RedisResourceGovernor(ResourceGovernor):
             used_lua = False
             self._last_used_multi_lua = False
             self._multi_lua_sha = None
+            # A script that ran but lost its reply charged these members: take them out, or the
+            # Python path below counts them and charges the request again (TASK-13892).
+            for _category, _sc, _ev, win_key, members in tmp_members:
+                with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+                    await client.zrem(win_key, *members)
         if not used_lua:
             if await self._is_stub_client():
                 # Pre-check across all scopes/categories
@@ -1923,6 +2017,11 @@ class RedisResourceGovernor(ResourceGovernor):
                         # Redis answered the probe but not the script (NOSCRIPT after a restart, OOM,
                         # READONLY): load it again next time, and count leases in the Python path below.
                         self._concurrency_lua_sha = None
+                        # A script that ran but lost its reply left this reserve's leases in Redis:
+                        # take them out, or the count below includes them (TASK-13892).
+                        for (sc, ev), members in planned.items():
+                            with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+                                await client.zrem(self._keys.lease(policy_id, category, sc, ev), *members)
 
                 if not used_concurrency_lua:
                     active_by_scope: dict[tuple[str, str], int] = {}

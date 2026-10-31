@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import copy
 import json
-import os
 import re
 import sqlite3
 import time
@@ -51,7 +50,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
     append_sqlite_media_visibility,
 )
+from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 from .hyde import (
     _embedding_model_from_config,
@@ -754,12 +755,7 @@ class BaseRetriever(ABC):
         self.config = config or RetrievalConfig()
         self._db_adapter = db_adapter
         self.db_path = self._validate_path(db_path) if db_path else None
-        # Determine production mode from env var used across the project
-        try:
-            prod_val = str(os.getenv("tldw_production", "false")).strip().lower()
-            self._production_mode = prod_val in {"true", "1", "yes", "on", "y"}
-        except (AttributeError, TypeError, ValueError):
-            self._production_mode = False
+        self._production_mode = is_production_like_env()
         # In production, prefer adapters over any raw SQL fallbacks
         if self._production_mode and self._db_adapter is None:
             logger.warning(
@@ -3292,7 +3288,9 @@ class KanbanDBRetriever(BaseRetriever):
         self.kanban_db = kanban_db
         self.user_id = self._resolve_user_id(user_id)
         if self.kanban_db is None and self.db_path is not None:
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
 
     @staticmethod
@@ -3304,7 +3302,9 @@ class KanbanDBRetriever(BaseRetriever):
         if self.kanban_db is None:
             if self.db_path is None:
                 raise MissingDatabasePathError()
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
         return self.kanban_db
 

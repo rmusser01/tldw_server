@@ -44,6 +44,11 @@ import type {
 } from '../TldwApiClient'
 import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
 import { trackServerChatWrite } from '@/store/server-chat-save-status'
+import {
+  chatModelOutcomeTarget,
+  trackChatModelRequestOutcome,
+  trackChatModelStreamOutcome
+} from '../chat-model-outcome'
 import { isDefinitiveNativeBranchRejection, isDefinitiveNativeEditRejection } from "@/utils/history-selection"
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
@@ -473,7 +478,8 @@ export const chatRagMethods = {
       metadata: options?.debugMetadata
     })
     const scopeFields = requestScopeFields(options?.requestScope)
-    for await (const line of bgStream({
+    // Feeds the model chip's readiness (CC-01).
+    for await (const line of trackChatModelStreamOutcome(chatModelOutcomeTarget(request), bgStream({
       path: `/api/v1/chat/completions${options?.scope ? buildQuery(toChatScopeParams(options.scope)) : ""}`,
       method: 'POST',
       headers: {
@@ -484,15 +490,17 @@ export const chatRagMethods = {
       abortSignal: options?.signal,
       onDispatch: options?.onDispatch,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
+      // The server always ends a completion with [DONE]; without it the reply was cut off (CM-03).
+      expectDoneSentinel: true,
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
-    })) {
+    }))) {
       try {
         const parsed = JSON.parse(line)
         yield parsed
       } catch (e) {
-        if (request.tldw_history_selection_v1 && line.trim() && line.trim() !== "[DONE]" && !line.trim().startsWith(":"))
+        if ((request.tldw_history_selection_v1 || request.tldw_history_server_existing_input_v1) && line.trim() && line.trim() !== "[DONE]" && !line.trim().startsWith(":"))
           throw new Error("unparseable_native_completion_stream")
         // Ignore empty/whitespace-only lines and SSE comments (": ...")
         const trimmed = line.trim()
@@ -851,7 +859,8 @@ export const chatRagMethods = {
     return trackServerChatWrite(
       cid,
       async () => {
-        const result = await bgRequest<Record<string, unknown>>({
+        // Feeds the model chip's readiness (CC-01).
+        const result = await trackChatModelRequestOutcome(chatModelOutcomeTarget(body), () => bgRequest<Record<string, unknown>>({
           ...fields,
           path: `/api/v1/chats/${encodeURIComponent(cid)}/complete-v2`,
           method: "POST",
@@ -859,7 +868,7 @@ export const chatRagMethods = {
           body,
           abortSignal: options?.signal,
           onDispatch: options?.onDispatch
-        })
+        }))
         return protectedResume
           ? parseRoleplayResumeCompletionReceipt(
               cid,
@@ -1652,7 +1661,8 @@ export const chatRagMethods = {
       mode: "stream",
       body
     })
-    for await (const line of bgStream({
+    // Feeds the model chip's readiness (CC-01).
+    for await (const line of trackChatModelStreamOutcome(chatModelOutcomeTarget(body), bgStream({
       path: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
       method: "POST",
       headers: { "Content-Type": "application/json", ...scopeFields.headers },
@@ -1663,7 +1673,7 @@ export const chatRagMethods = {
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
-    })) {
+    }))) {
       if (!line) continue
       try {
         const parsed = JSON.parse(line)

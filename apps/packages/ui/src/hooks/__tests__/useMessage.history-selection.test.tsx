@@ -13,6 +13,11 @@ import type { Message as StoredMessage } from "@/db/dexie/types"
 import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { useSidepanelChatFreshness } from "@/routes/sidepanel-chat-freshness"
+import { tldwModels } from "@/services/tldw/TldwModels"
+import type { HistorySelectedContentV1, HistoryViewSelectionV1 } from "@/types/history-selection"
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 
 const mocks = vi.hoisted(() => {
   const setMessages = vi.fn()
@@ -348,7 +353,7 @@ vi.mock("@/hooks/useAntdNotification", () => ({
 }))
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
-  useChatSettingsRecord: () => ({ settings: null })
+  useChatSettingsRecord: () => ({ settings: h1.greetingSettings })
 }))
 
 vi.mock("@/hooks/chat/effective-assistant-state", () => ({
@@ -519,7 +524,8 @@ const h1 = vi.hoisted(() => ({
   persona: false,
   supportsMultimodal: false,
   create: vi.fn(),
-  live: vi.fn(() => {
+  greetingSettings: {} as Record<string, unknown>,
+  live: vi.fn<(...args: unknown[]) => Promise<Record<string, unknown>>>(async () => {
     throw new Error("live card deleted")
   }),
   auth: new AbortController(),
@@ -529,6 +535,7 @@ const h1 = vi.hoisted(() => ({
   wire: vi.fn(),
   recover: vi.fn(),
   dismiss: vi.fn(),
+  lookupRecoveries: vi.fn(),
   beforeModel: vi.fn(),
   read: vi.fn(),
   write: vi.fn()
@@ -537,11 +544,15 @@ vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
   useHistorySelectionContext: () => h1.controller
 }))
-vi.mock("@/db/dexie/history-selection", async (original) => ({
-  ...(await original<any>()),
-  saveHistoryTurnRecovery: h1.recover,
-  dismissHistoryTurnRecovery: h1.dismiss
-}))
+vi.mock("@/db/dexie/history-selection", async (original) => {
+  const actual = await original<any>()
+  return {
+    ...actual,
+    loadHistoryTurnRecoveries: (...args: unknown[]) => h1.lookupRecoveries(...args) ?? actual.loadHistoryTurnRecoveries(...args),
+    saveHistoryTurnRecovery: h1.recover,
+    dismissHistoryTurnRecovery: h1.dismiss
+  }
+})
 let nativeChatId = "tracked-chat-1"
 const createdNativeChat = (body: { id?: string; character_id?: number | string }) => {
   if (!body.id) throw new Error("fixture requires the reserved client chat ID")
@@ -553,7 +564,7 @@ const createdNativeChat = (body: { id?: string; character_id?: number | string }
   return { id: body.id }
 }
 
-const captureFor = (view: any) => {
+const captureFor = (view: any, questionImages: string[] = []) => {
   const nodes = [
     {
       id: "u-old",
@@ -604,7 +615,7 @@ const captureFor = (view: any) => {
       id: row.id,
       revision: row.revision,
       message: row.id === "u-old" ? "old question" : "same answer",
-      images: []
+      images: row.id === "u-old" ? questionImages : []
     })),
     view,
     purpose: "send",
@@ -723,6 +734,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   h1.recover.mockReset()
   h1.dismiss.mockReset()
+  h1.lookupRecoveries.mockReset()
   const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
   memory.historySelections.rows.clear()
   await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
@@ -766,6 +778,8 @@ beforeEach(async () => {
   mocks.useRealPageAssist = false
   mocks.storeState.detachedHistoryResponse = null
   mocks.storeState.replyTarget = null
+  h1.greetingSettings = {}
+  h1.live.mockReset().mockRejectedValue(new Error("live card deleted"))
   h1.auth = new AbortController()
   h1.cookieConfig = null
   const strictAdmission = {
@@ -790,6 +804,7 @@ beforeEach(async () => {
 
   h1.native = false
   h1.persona = false
+  h1.supportsMultimodal = false
   h1.beforeModel.mockReset()
   h1.supportsMultimodal = false
   mocks.chatBaseState.historyId = "history-1"
@@ -1078,6 +1093,126 @@ it.each(["current", "model", "tool", "settings"])(
       dispatch.mockRestore()
       settings.mockRestore()
     }
+  }
+)
+it.each(["unchanged", "Prompt edit", "Prompt whitespace"])("mounted Sidepanel accepted unanswered recovery binds reviewed Pirate instructions (%s)", async contextCase => {
+  const helpers = await import("@/db/dexie/helpers")
+  const promptImplementation = vi.mocked(helpers.getPromptById).getMockImplementation()!
+  const recoveryImplementation = h1.lookupRecoveries.getMockImplementation()!
+  try {
+  vi.mocked(helpers.getPromptById).mockResolvedValue({ id: "pirate", system_prompt: contextCase === "Prompt whitespace" ? "  Answer like a pirate.\n " : "Answer like a pirate." } as never)
+  mocks.chatBaseState.selectedSystemPrompt = "pirate"
+  mocks.storeState.selectedModel = "qwen"
+  mocks.storeState.messages = [{ id: "u-old", isBot: false, message: "old question", images: [], sources: [] }]
+  const current = h1.controller.getCurrent()
+  current.view = { ...current.view, cursor: { kind: "after_message", message_id: "u-old" } }
+  current.settingsQualified = true
+  current.owner.validate_lease = () => !h1.auth.signal.aborted
+  const capture = (view: HistoryViewSelectionV1) => {
+    const result = captureFor(view)
+    result.snapshot.nodes = result.snapshot.nodes.filter(row => row.id === "u-old")
+    result.rows = view.cursor.kind === "before_message" ? [] : result.snapshot.nodes
+    result.selected_content = result.rows.map(row => ({ id: row.id, revision: row.revision, message: "old question", images: [] }))
+    return result
+  }
+  current.capture = capture(current.view)
+  let mutatePrompt = false
+  h1.capture.mockImplementation(async (_id, request) => {
+    if (mutatePrompt) {
+      mutatePrompt = false
+      vi.mocked(helpers.getPromptById).mockResolvedValue({ id: "pirate", system_prompt: "Unreviewed instructions" } as never)
+    }
+    return {...capture(request.view), ...(request.accepted_input_admission ? {
+      validated_admission: {admission: request.accepted_input_admission, input_revision: "r1"}
+    } : {})}
+  })
+  h1.controller.fence = () => { const revision = current.view.selection_revision; return () => current.view.selection_revision === revision && !h1.auth.signal.aborted }
+  h1.controller.choose = vi.fn(async cursor => { current.view = { ...current.view, cursor, selection_revision: current.view.selection_revision + 1 }; current.capture = capture(current.view); return true })
+  const entry = { scope: { profile_id: "profile", client_session_id: "old-client" }, turn: {
+    operation_id: "failed-normal", origin_view: structuredClone(current.view), owner_key: "native-key", conversation_id: "tracked-chat-1",
+    selection_digest: "accepted-selection", request_context_digest: "old-pirate-request", input_id: "u-old", assistant_id: "never-saved",
+    created_at: 1, input_text: "old question", input_images: [], result_text: "", state: "accepted_unsent",
+    admission: { version: 1, owner_key: "native-key", conversation_id: "tracked-chat-1", input_message_id: "u-old", input_message_revision: "r1", selection_digest: "accepted-selection" }
+  } } as HistoryTurnRecoveryEntry
+  h1.lookupRecoveries.mockResolvedValue([entry])
+  const { result } = renderHook(() => useMessage())
+  render(<HistorySelectionReview selection={{ ...h1.controller, ...current, recoveries: [entry] }} getRetryContext={result.current.getRecoveryRetryContext} onRetryRecovery={result.current.retryRecoveredHistoryTurn} />)
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  expect(await screen.findByText("Answer like a pirate.")).toBeVisible()
+  expect(h1.wire).not.toHaveBeenCalled()
+  mutatePrompt = contextCase === "Prompt edit"
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry saved question" })) })
+  if (contextCase === "Prompt edit") {
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(h1.dismiss.mock.calls.map(call => call[2])).not.toContain(entry.turn.operation_id)
+    expect(screen.getByRole("alert")).toHaveTextContent("Review the current chat and prompt settings; the original recovery is retained")
+    expect(current.view.cursor).toEqual({ kind: "after_message", message_id: "u-old" })
+    return
+  }
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0]).toMatchObject({ model: "qwen", save_to_db: false })
+  expect(h1.wire.mock.calls[0][0].messages).toEqual([{ role: "system", content: "Answer like a pirate." }, { role: "user", content: "old question" }])
+  expect(h1.append).toHaveBeenCalledOnce()
+  expect(h1.append.mock.calls[0][1]).toMatchObject({ role: "assistant", parent_message_id: "u-old", tldw_history_admission_v1: entry.turn.admission })
+  expect(h1.dismiss).toHaveBeenCalledWith(entry.scope, expect.objectContaining({ conversation_id: "tracked-chat-1" }), "failed-normal", "completed")
+  } finally {
+    vi.mocked(helpers.getPromptById).mockImplementation(promptImplementation)
+    h1.lookupRecoveries.mockImplementation(recoveryImplementation)
+  }
+})
+
+it.each(["", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE/wH+J6m3XQAAAABJRU5ErkJggg=="])(
+  "sidepanel Regenerate preserves the selected question and original image %s through protected completion",
+  async questionImage => {
+  const original = [
+    { id: "u-old", isBot: false, name: "You", message: "old question", images: questionImage ? [questionImage] : [], sources: [], parentMessageId: null },
+    { id: "a1", isBot: true, name: "Assistant", message: "same answer", images: [], sources: [], parentMessageId: "u-old" }
+  ]
+  mocks.storeState.messages = original
+  h1.supportsMultimodal = Boolean(questionImage)
+  mocks.chatBaseState.history = [
+    { role: "user", content: "old question", ...(questionImage ? { image: questionImage } : {}) },
+    { role: "assistant", content: "same answer" }
+  ]
+  h1.controller.getCurrent().capture = captureFor(h1.controller.getCurrent().view, questionImage ? [questionImage] : [])
+  h1.capture.mockImplementation(async (_id, request) => ({
+    ...captureFor(request.view, questionImage ? [questionImage] : []),
+    ...(request.required_capability === "tldw_history_existing_input_v1"
+      ? { acknowledged_capability: "tldw_history_existing_input_v1" } : {})
+  }))
+  h1.read.mockResolvedValue({ id: "u-old", conversation_id: nativeChatId, sender: "user", parent_message_id: null,
+    content: "old question", has_image: Boolean(questionImage), version: 1 })
+  const origin = h1.controller.getCurrent().view
+  h1.wire.mockImplementation(async function* () {
+    yield { tldw_history_admission_v1: { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId,
+      input_message_id: "u-old", input_message_revision: "1", selection_digest: "original-input",
+      originating_selection_revision: 0, messages: [] } }
+    yield { choices: [{ delta: { content: "Alternative answer" } }] }
+    yield { tldw_message_id: "alternative-answer", tldw_conversation_id: nativeChatId }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.regenerateLastMessage() })
+  expect(h1.capture).toHaveBeenCalledWith("tracked-chat-1", expect.objectContaining({
+    view: expect.objectContaining({ cursor: { kind: "after_message", message_id: "a1" } })
+  }), expect.objectContaining({ includeNativeCompletion: true }))
+  const providerRows = h1.wire.mock.calls[0][0].messages.filter((row: { role: string }) => row.role !== "system")
+  expect(providerRows).toEqual(questionImage
+    ? [{ role: "user", content: [
+        { type: "text", text: "old question" },
+        { type: "image_url", image_url: { url: questionImage, detail: "auto" } }
+      ] }]
+    : [{ role: "user", content: "old question" }])
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0]).toMatchObject({ save_to_db: true, tldw_history_branch: true,
+    metadata: { tldw_regenerate_from_message_id: "a1" },
+    tldw_history_selection_v1: { messages: [{ id: "u-old", revision: "r1" }, { id: "a1", revision: "r2" }] } })
+  expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({ view_session_id: "origin" }), "alternative-answer", expect.any(Function))
+  expect(mocks.setMessages.mock.calls.every(([rows]) =>
+    !Array.isArray(rows) || original.every((row, index) => rows[index] === row)
+  )).toBe(true)
   }
 )
 
@@ -1777,6 +1912,7 @@ it.each([false, true])(
     draftStore.setState({ historyId: null, serverChatId: null })
     const sourceDraft = draftStore.getState().chatDraftAddress
     bridgeDraftStore(draftStore)
+    h1.greetingSettings = { greetingEnabled: false }
     h1.native = true
     mocks.chatBaseState.historyId = null as any
     mocks.storeState.serverChatId = null
@@ -2094,6 +2230,13 @@ describe("selected-history mutations", () => {
   })
   it("edit-and-send and regeneration reject without owner writes or display truncation", async () => {
     const helpers = await import("@/db/dexie/helpers")
+    const metadata = {
+      sender_role: "user", sender_name: "You", local_history: {}, rich_context: true
+    }
+    const current = h1.controller.getCurrent()
+    current.capture.selected_content = current.capture.selected_content.map((row: HistorySelectedContentV1) =>
+      row.id === "u-old" ? { ...row, message: "question", extra_metadata: metadata } : row
+    )
     mocks.storeState.serverChatId = null
     mocks.storeState.messages = visible
     const options = {
@@ -2101,16 +2244,41 @@ describe("selected-history mutations", () => {
       setHistory: mocks.setHistory
     }
     const { result } = renderHook(() => useMessage())
-    options.setMessages.mockClear()
-    options.setHistory.mockClear()
+    mocks.setMessages.mockClear()
+    mocks.setHistory.mockClear()
     await expect(
       result.current.editMessage(1, "new question", true, true)
     ).rejects.toThrow("unsupported_history_edit_and_send:u-old")
+    expect(mocks.setMessages).not.toHaveBeenCalled()
+    expect(mocks.setHistory).not.toHaveBeenCalled()
+    expect(h1.capture).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(helpers.updateMessageById).not.toHaveBeenCalled()
+    expect(helpers.removeMessageById).not.toHaveBeenCalled()
+  })
+  it("regeneration rejects multiple original images before submission or display truncation", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const images = ["data:image/png;base64,first", "data:image/png;base64,second"]
+    const current = h1.controller.getCurrent()
+    current.capture.selected_content = current.capture.selected_content.map((row: HistorySelectedContentV1) =>
+      row.id === "u-old" ? { ...row, message: "question", images } : row
+    )
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = visible.map((row) =>
+      row.id === "u-old" ? { ...row, images } : row
+    )
+    const { result } = renderHook(() => useMessage())
+    mocks.setMessages.mockClear()
+    mocks.setHistory.mockClear()
     await expect(result.current.regenerateLastMessage()).rejects.toThrow(
       "unsupported_history_regeneration"
     )
-    expect(options.setMessages).not.toHaveBeenCalled()
-    expect(options.setHistory).not.toHaveBeenCalled()
+    expect(mocks.setMessages).not.toHaveBeenCalled()
+    expect(mocks.setHistory).not.toHaveBeenCalled()
+    expect(h1.capture).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
     expect(helpers.updateMessageById).not.toHaveBeenCalled()
     expect(helpers.removeMessageById).not.toHaveBeenCalled()
   })
@@ -3148,7 +3316,9 @@ describe("compact submission outcomes", () => {
       input_text: "next",
       state: "accepted_unsent"
     })
-    expect(h1.controller.followResult).not.toHaveBeenCalled()
+    expect(h1.controller.followResult).toHaveBeenCalledOnce()
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.any(Object), h1.append.mock.calls[0][1].id)
+    expect(h1.append).toHaveBeenCalledOnce()
   })
 
   it.each([false, true])(
@@ -5572,4 +5742,36 @@ it.each(["saved", "partial", "missing creation"])("actual Compact native Copy re
   expect(nativeCopyQueries.cancel).toHaveBeenCalledTimes(outcome === "missing creation" ? 0 : 2)
   expect(nativeCopyQueries.refresh).toHaveBeenCalledTimes(outcome === "missing creation" ? 0 : 2)
   expect(localForks.commit).not.toHaveBeenCalled()
+})
+it.each(["character", "ordinary"])("B02 sidepanel saved-question dispatch is explicit (%s)", async mode => {
+  h1.native = mode === "character"
+  mocks.storeState.serverChatCharacterId = mode === "character" ? "12" : null
+  mocks.storeState.serverChatAssistantKind = mode === "character" ? "character" : null
+  const current = h1.controller.getCurrent()
+  current.settingsQualified = true
+  current.view = {...current.view, cursor: {kind: "after_message", message_id: "u-old"}}
+  const fresh = (view: any) => {
+    const result = captureFor(view)
+    result.snapshot.nodes = result.snapshot.nodes.filter(row => row.id === "u-old")
+    result.rows = result.snapshot.nodes
+    result.selected_content = [{id: "u-old", revision: "r1", message: "old question", images: []}]
+    return result
+  }
+  current.capture = fresh(current.view)
+  h1.capture.mockImplementation(async (_id, request) => ({...fresh(request.view), acknowledged_capability: request.required_capability}))
+  h1.wire.mockImplementation(async function* () {
+    yield {choices: [{delta: {content: "answer"}}]}
+    yield {tldw_message_id: "existing-answer", tldw_conversation_id: "tracked-chat-1"}
+  })
+  const {result} = renderHook(() => useMessage())
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.onSubmit({message: "old question", image: "",
+    historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true}} as any) })
+  if (mode === "character") {
+    expect(outcome).toEqual({ status: "submitted" })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0].messages).toEqual([])
+    expect(h1.wire.mock.calls[0][0].tldw_history_server_existing_input_v1.messages).toEqual([{id: "u-old", revision: "r1"}])
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({view_session_id: "origin"}), "existing-answer")
+  } else expect(h1.wire).not.toHaveBeenCalled()
 })

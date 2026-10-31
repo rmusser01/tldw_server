@@ -1,15 +1,9 @@
-import React, { useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMemo } from "react"
 import {
   matchesPromptSearchText,
   matchesTagFilter,
-  mapServerSearchItemsToLocalPrompts,
-  PROMPT_SEARCH_FIELDS,
   type TagMatchMode
 } from "../custom-prompts-utils"
-import {
-  searchPromptsServer
-} from "@/services/prompts-api"
 import {
   isPromptInCollection
 } from "../prompt-collections-utils"
@@ -25,9 +19,7 @@ import { classifyPromptRecipe } from "../prompt-recipe-library"
 
 export interface UsePromptFilteredDataDeps {
   data: any[] | undefined
-  isOnline: boolean
   normalizedSearchText: string
-  shouldUseServerSearch: boolean
   projectFilter: string | null
   typeFilter: PromptListQueryState["typeFilter"]
   syncFilter: string
@@ -51,9 +43,7 @@ export interface UsePromptFilteredDataDeps {
 export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
   const {
     data,
-    isOnline,
     normalizedSearchText,
-    shouldUseServerSearch,
     projectFilter,
     typeFilter,
     syncFilter,
@@ -73,27 +63,6 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     getPromptLastUsedAt,
     t
   } = deps
-
-  const {
-    data: serverSearchData,
-    status: serverSearchStatus
-  } = useQuery({
-    queryKey: [
-      "searchPrompts",
-      normalizedSearchText,
-      currentPage,
-      resultsPerPage
-    ],
-    queryFn: () =>
-      searchPromptsServer({
-        searchQuery: normalizedSearchText,
-        searchFields: PROMPT_SEARCH_FIELDS,
-        page: currentPage,
-        resultsPerPage,
-        includeDeleted: false
-      }),
-    enabled: shouldUseServerSearch
-  })
 
   const allTags = useMemo(() => {
     const set = new Set<string>()
@@ -120,7 +89,7 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
 
   const baseFilteredData = useMemo(() => {
     let items = ((data || []) as any[]).filter(
-      (prompt) => classifyPromptRecipe(prompt).kind !== "quarantined_recipe"
+      (prompt) => !prompt?.deletedAt && classifyPromptRecipe(prompt).kind !== "quarantined_recipe"
     )
     if (projectFilter) {
       const projectId = parseInt(projectFilter, 10)
@@ -201,7 +170,7 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
 
   const sidebarCounts = useMemo(() => {
     const all = ((data || []) as any[]).filter(
-      (prompt) => classifyPromptRecipe(prompt).kind !== "quarantined_recipe"
+      (prompt) => !prompt?.deletedAt && classifyPromptRecipe(prompt).kind !== "quarantined_recipe"
     )
     const typeCounts: Record<string, number> = { all: all.length }
     const syncCounts: Record<string, number> = { all: all.length }
@@ -246,7 +215,7 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     }
   }, [data, getPromptType, getPromptKeywords, getPromptUsageCount])
 
-  const localSearchFilteredData = useMemo(() => {
+  const filteredData = useMemo(() => {
     if (normalizedSearchText.length === 0) {
       return baseFilteredData
     }
@@ -255,42 +224,6 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
       matchesPromptSearchText(prompt, queryLower, getPromptKeywords)
     )
   }, [baseFilteredData, normalizedSearchText, getPromptKeywords])
-
-  const serverSearchMappedData = useMemo(() => {
-    if (!shouldUseServerSearch || serverSearchStatus !== "success" || !serverSearchData) {
-      return []
-    }
-    return mapServerSearchItemsToLocalPrompts(serverSearchData.items, baseFilteredData)
-  }, [baseFilteredData, serverSearchData, serverSearchStatus, shouldUseServerSearch])
-
-  const hasLocalRecipeSearchOverlay = useMemo(
-    () =>
-      shouldUseServerSearch &&
-      localSearchFilteredData.some((prompt: any) => {
-        const syncStatus = prompt?.syncStatus ?? "local"
-        return (
-          classifyPromptRecipe(prompt).kind === "recipe" &&
-          (syncStatus === "local" || syncStatus === "pending")
-        )
-      }),
-    [localSearchFilteredData, shouldUseServerSearch]
-  )
-
-  const useServerSearchResults =
-    shouldUseServerSearch &&
-    serverSearchStatus === "success" &&
-    !hasLocalRecipeSearchOverlay
-
-  const filteredData = useMemo(() => {
-    if (useServerSearchResults) {
-      return serverSearchMappedData
-    }
-    return localSearchFilteredData
-  }, [
-    localSearchFilteredData,
-    serverSearchMappedData,
-    useServerSearchResults
-  ])
 
   const sortedFilteredData = useMemo(() => {
     if (!promptSort.key || !promptSort.order) {
@@ -324,22 +257,11 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
   ])
 
   const paginatedData = useMemo(() => {
-    if (useServerSearchResults) {
-      return sortedFilteredData
-    }
     const start = (currentPage - 1) * resultsPerPage
     return sortedFilteredData.slice(start, start + resultsPerPage)
-  }, [currentPage, resultsPerPage, sortedFilteredData, useServerSearchResults])
+  }, [currentPage, resultsPerPage, sortedFilteredData])
 
-  const tableTotal = useMemo(() => {
-    if (useServerSearchResults) {
-      return Math.max(
-        serverSearchData?.total_matches ?? 0,
-        sortedFilteredData.length
-      )
-    }
-    return sortedFilteredData.length
-  }, [serverSearchData?.total_matches, sortedFilteredData.length, useServerSearchResults])
+  const tableTotal = sortedFilteredData.length
 
   const customPromptRows = useMemo<PromptRowVM[]>(() => {
     return paginatedData.map((prompt: any) => {
@@ -384,15 +306,7 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     getPromptLastUsedAt
   ])
 
-  const hiddenServerResultsOnPage = useMemo(() => {
-    if (!useServerSearchResults || !serverSearchData) {
-      return 0
-    }
-    return Math.max(0, serverSearchData.items.length - serverSearchMappedData.length)
-  }, [serverSearchData, serverSearchMappedData.length, useServerSearchResults])
-
   return {
-    serverSearchStatus,
     allTags,
     pendingSyncCount,
     localSyncBatchPlan,
@@ -400,8 +314,6 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
     sidebarCounts,
     sortedFilteredData,
     customPromptRows,
-    tableTotal,
-    hiddenServerResultsOnPage,
-    useServerSearchResults
+    tableTotal
   }
 }

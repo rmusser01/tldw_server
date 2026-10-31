@@ -27,8 +27,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
 from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
-from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.models import validate_notes_note_upsert_payload
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
     StudioDiagramManifestV1,
@@ -588,6 +588,74 @@ class NoteStore:
         except CharactersRAGDBError:
             logger.error("Database error tombstoning synced note ID {}.", normalized_note_id, exc_info=True)
             raise
+
+    def tombstone_unsynced_note_from_sync(
+        self,
+        *,
+        note_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> str:
+        """Make a note the Sync dataset holds no state for absent, and report what that took.
+
+        A device can tombstone a note this server never received through Sync.
+        The end state it asks for is "gone", so there is nothing to conflict
+        with: either no row carries the id, or the row is a copy kept outside
+        Sync, which the delete now reaches too, with everything an ordinary Sync
+        delete does to it (provenance, clipper sidecars, graph and Studio state).
+
+        Only a note owned by ``sync_client_id`` is looked at. The lookup is by
+        id, and on PostgreSQL one database holds every owner's notes; with no
+        Sync state to tie the id to this owner, the note's owner is the only
+        thing that does.
+
+        Args:
+            note_id: The note id the tombstone names.
+            sync_client_id: The projection's client id: the owner whose notes are
+                searched, and the id stamped on a deleted row.
+            object_revision: The tombstone's revision, stored as the row version.
+            object_hash: The tombstone's payload hash.
+            conn: The caller's transaction, if any.
+
+        Returns:
+            ``"absent"`` when this owner has no note with the id and nothing
+            changed, or ``"deleted"`` when the note is now (or already was)
+            soft-deleted.
+        """
+
+        normalized_note_id = str(note_id).strip()
+        if not normalized_note_id:
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        owner = str(sync_client_id)
+        lock_suffix = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+
+        def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> str:
+            row = transaction_conn.execute(
+                "SELECT deleted FROM notes WHERE id = ? AND client_id = ?" + lock_suffix,  # nosec B608
+                (normalized_note_id, owner),
+            ).fetchone()
+            if row is None:
+                return "absent"
+            if bool(row["deleted"]):
+                return "deleted"
+            self.tombstone_note_from_sync(
+                note_id=normalized_note_id,
+                sync_client_id=owner,
+                object_revision=object_revision,
+                object_hash=object_hash,
+                conn=transaction_conn,
+            )
+            return "deleted"
+
+        if conn is None:
+            with self._db.transaction() as transaction_conn:
+                return _execute(transaction_conn)
+        return _execute(conn)
 
     # ------------------------------------------------------------------
     # Note retrieval
@@ -2849,23 +2917,65 @@ class NoteStore:
         ).fetchone()
         return int(row["cnt"]) if row else 0
 
+    def _keyword_token_filter(
+        self,
+        tokens: list[str],
+        match: str,
+        keyword_table: str,
+    ) -> tuple[str, list[Any]]:
+        """Build the keyword-token predicate for a notes search (NL-N1).
+
+        Tokens match keywords exactly, ignoring case. ``match="any"`` keeps a
+        note that has at least one of the tokens; ``match="all"`` keeps only a
+        note that has every token. The caller joins ``k`` (keywords) and ``n``
+        (notes); the "all" subquery applies the same owner and deleted filters
+        to its own keyword alias.
+        """
+        if match not in ("all", "any"):
+            raise ValueError(f"Unsupported keyword match mode: {match!r}")
+        placeholders = ", ".join(["?"] * len(tokens))
+        clause = f"LOWER(k.keyword) IN ({placeholders})"
+        params: list[Any] = list(tokens)
+        if match == "all" and len(tokens) > 1:
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                deleted_false = "FALSE"
+                k2_scope, k2_owner_params = self._db._selected_owner_filter(self._db.client_id, "k2")
+            else:
+                deleted_false = "0"
+                k2_scope, k2_owner_params = "", ()
+            clause += (
+                " AND n.id IN ("
+                "SELECT nk2.note_id FROM note_keywords nk2 "
+                f"JOIN {keyword_table} k2 ON k2.id = nk2.keyword_id "
+                f"WHERE k2.deleted = {deleted_false}{k2_scope} "
+                f"AND LOWER(k2.keyword) IN ({placeholders}) "
+                "GROUP BY nk2.note_id "
+                "HAVING COUNT(DISTINCT LOWER(k2.keyword)) = ?)"
+            )
+            params.extend([*k2_owner_params, *tokens, len(tokens)])
+        return clause, params
+
     def search_notes_with_keywords(
         self,
         search_term: str | None,
         keyword_tokens: list[str],
         limit: int = 10,
-        offset: int = 0
+        offset: int = 0,
+        match: str = "all",
     ) -> list[dict[str, Any]]:
-        """Search notes with an optional FTS query and keyword-token filter."""
-        tokens = [t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()]
+        """Search notes with an optional FTS query and keyword-token filter.
+
+        Tokens match keywords exactly (case-insensitive); ``match`` is "all"
+        (every token, the default) or "any" (at least one).
+        """
+        tokens = list(dict.fromkeys(t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return []
             return self.search_notes(search_term=str(search_term), limit=limit, offset=offset)
 
         keyword_table = self._db._map_table_for_backend("keywords")
-        like_clause = " OR ".join(["LOWER(k.keyword) LIKE ?"] * len(tokens))
-        like_params = [f"%{t}%" for t in tokens]
+        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
 
         if self._db.backend_type == BackendType.POSTGRESQL:
             note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
@@ -2946,17 +3056,20 @@ class NoteStore:
         self,
         search_term: str | None,
         keyword_tokens: list[str],
+        match: str = "all",
     ) -> int:
-        """Return the total active notes matching an optional FTS query and keyword-token filter."""
-        tokens = [t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()]
+        """Return the total active notes matching an optional FTS query and keyword-token filter.
+
+        Uses the same exact, ``match``-mode token rules as ``search_notes_with_keywords``.
+        """
+        tokens = list(dict.fromkeys(t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return 0
             return self._db.count_notes_matching(str(search_term))
 
         keyword_table = self._db._map_table_for_backend("keywords")
-        like_clause = " OR ".join(["LOWER(k.keyword) LIKE ?"] * len(tokens))
-        like_params = [f"%{t}%" for t in tokens]
+        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
 
         if self._db.backend_type == BackendType.POSTGRESQL:
             note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")

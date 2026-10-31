@@ -142,6 +142,7 @@ def update_claim_review(
     expected_version: int | None = None,
     action_ip: str | None = None,
     action_user_agent: str | None = None,
+    actor_user_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Update review fields on a claim with optional optimistic locking."""
     with self.transaction() as conn:
@@ -240,7 +241,9 @@ def update_claim_review(
                 new_status,
                 old_text,
                 new_text,
-                int(reviewer_id) if reviewer_id is not None else row.get("reviewer_id"),
+                int(actor_user_id) if actor_user_id is not None else (
+                    int(reviewer_id) if reviewer_id is not None else row.get("reviewer_id")
+                ),
                 review_notes,
                 review_reason_code,
                 action_ip,

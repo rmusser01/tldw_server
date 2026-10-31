@@ -364,6 +364,8 @@ async def append_roleplay_resume_input(
     current_user: User = Depends(get_request_user),
 ):
     """Append exactly one owned global Resume input or replay its original receipt."""
+    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import format_roleplay_resume_messages
+
     scope = _resolve_message_scope(scope_type, workspace_id)
     if scope.scope_type != "global" or scope.workspace_id is not None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -377,6 +379,7 @@ async def append_roleplay_resume_input(
             chat_id,
             body.model_dump(mode="json"),
             owner_client_id=str(current_user.id),
+            build_messages=format_roleplay_resume_messages,
             validate_message_count=lambda count: limiter.validate_message_limit(chat_id, count),
         )
     except RoleplayResumeConflictError as exc:
@@ -524,7 +527,11 @@ async def send_message(
                 ) from e
 
         history_admission = None
-        versioned = message_data.tldw_history_selection_v1 is not None or message_data.tldw_history_admission_v1 is not None
+        versioned = any(value is not None for value in (
+            message_data.tldw_history_selection_v1,
+            message_data.tldw_history_admission_v1,
+            message_data.tldw_history_existing_input_v1,
+        ))
         sync_service = _active_message_sync_service(current_user, scope)
 
         if sync_service is not None and image_data is not None:
@@ -564,7 +571,7 @@ async def send_message(
                         ),
                     )
                     return admission["input_message_id"], admission
-            else:
+            elif message_data.tldw_history_admission_v1 is not None:
                 reference = message_data.tldw_history_admission_v1.model_dump(mode="json")
                 # The accepted input goes first, so a reply is never published ahead of
                 # an input whose own capture was lost.
@@ -573,6 +580,13 @@ async def send_message(
                 def history_write() -> tuple[str, dict[str, Any] | None]:
                     return db.settle_history_admission(
                         chat_id, reference, data, owner_client_id=owner_id, owner_key=owner), None
+            else:
+                selection = message_data.tldw_history_existing_input_v1.model_dump(mode="json")
+                published_ids = [message_data.id]
+
+                def history_write() -> tuple[str, dict[str, Any] | None]:
+                    return db.settle_selected_existing_input(
+                        chat_id, selection, data, owner_client_id=owner_id, owner_key=owner), None
             try:
                 if sync_service is None:
                     created_id, history_admission = await run_in_threadpool(history_write)
@@ -1377,15 +1391,34 @@ async def delete_message(
             )
         if sync_service is not None:
             try:
+                conversation_id = str(message.get("conversation_id") or "")
+                tombstone_payload: dict[str, object] = {
+                    "id": message_id,
+                    "deleted": True,
+                    "conversation_id": conversation_id,
+                    "client_id": str(current_user.id),
+                    "owner_user_id": str(current_user.id),
+                }
                 # A message Sync never saw (it predates the profile, or was saved by a path
-                # that publishes nothing) is deleted directly, as without a profile. It was
-                # never in the log, so there is nothing to retract there (#3181).
+                # that publishes nothing) is deleted directly, as without a profile (#3181),
+                # and then published by id, so a device that kept a copy outside Sync
+                # deletes it too (Q8).
                 published = await run_in_threadpool(
                     delete_unenrolled_server_origin_objects,
                     sync_service,
                     user_id=str(current_user.id),
                     objects=[("chat.message", message_id)],
                     delete=lambda _unpublished: delete_directly(),
+                    tombstones=[
+                        AppliedServerOriginObject(
+                            domain="chat.message",
+                            operation="tombstone",
+                            object_id=message_id,
+                            parent_id=conversation_id,
+                            payload=tombstone_payload,
+                        )
+                    ],
+                    source="server_api",
                 )
                 if published:
                     capture_server_origin_mutation(
@@ -1394,14 +1427,8 @@ async def delete_message(
                         domain="chat.message",
                         operation="tombstone",
                         object_id=message_id,
-                        parent_id=str(message.get("conversation_id") or ""),
-                        payload={
-                            "id": message_id,
-                            "deleted": True,
-                            "conversation_id": str(message.get("conversation_id") or ""),
-                            "client_id": str(current_user.id),
-                            "owner_user_id": str(current_user.id),
-                        },
+                        parent_id=conversation_id,
+                        payload=tombstone_payload,
                         source="server_api",
                     )
             except HTTPException:

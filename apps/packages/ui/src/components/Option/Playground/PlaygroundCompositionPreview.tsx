@@ -12,6 +12,7 @@ import type {
 
 export type PlaygroundCompositionPreviewProps = {
   summary: PlaygroundCompositionPreviewSummary;
+  defaultOpen?: boolean;
 };
 
 type PreviewDesignSystemStateKey =
@@ -52,11 +53,9 @@ const designSystemStateLabels = {
 
 const stateClass = (state: PlaygroundCompositionPreviewEntryState) => {
   if (state === "active") return "border-border bg-surface2 text-text-muted";
-  if (state === "degraded")
-    return "border-warning/40 bg-warning/10 text-warning";
-  if (state === "unavailable")
-    return "border-danger/40 bg-danger/10 text-danger";
-  if (state === "loading") return "border-info/40 bg-info/10 text-info";
+  if (state === "degraded") return "border-warning/40 bg-warning/10 text-text";
+  if (state === "unavailable") return "border-danger/40 bg-danger/10 text-text";
+  if (state === "loading") return "border-info/40 bg-info/10 text-text";
   return "border-border bg-surface2 text-text-muted";
 };
 
@@ -122,18 +121,19 @@ const PreviewRow = ({
 
 export const PlaygroundCompositionPreview = ({
   summary,
+  defaultOpen = true,
 }: PlaygroundCompositionPreviewProps) => {
   const { t } = useTranslation("playground");
-  const [sectionOpen, setSectionOpen] = React.useState(true);
+  const [sectionOpen, setSectionOpen] = React.useState(defaultOpen);
   const [open, setOpen] = React.useState(false);
   const bodyId = React.useId();
   const panelId = React.useId();
   const sectionToggleLabel = sectionOpen
-    ? t("cockpit.collapseRailSection", "Collapse Composition", {
-        title: t("cockpit.composition", "Composition"),
+    ? t("cockpit.collapseRailSection", "Collapse Request preview", {
+        title: t("cockpit.requestPreview", "Request preview"),
       })
-    : t("cockpit.expandRailSection", "Expand Composition", {
-        title: t("cockpit.composition", "Composition"),
+    : t("cockpit.expandRailSection", "Expand Request preview", {
+        title: t("cockpit.requestPreview", "Request preview"),
       });
   const detailButtonLabel = open
     ? t("cockpit.hideCompositionDetails", "Hide composition details")
@@ -181,17 +181,17 @@ export const PlaygroundCompositionPreview = ({
         "cockpit.nextMessageComposition",
         "Next message composition",
       )}
-      className="min-w-0"
+      className={cockpitRailStyles.section}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-[11px] font-semibold uppercase text-text-muted">
-            {t("cockpit.composition", "Composition")}
+          <h2 className={cockpitRailStyles.heading}>
+            {t("cockpit.requestPreview", "Request preview")}
           </h2>
           <p className="mt-1 text-sm font-medium text-text">
             {t("cockpit.plannedNextMessage", "Planned next message")}
           </p>
-          {summary.settingsScopeLabel ? (
+          {sectionOpen && summary.settingsScopeLabel ? (
             <p className="mt-0.5 truncate text-xs text-text-muted">
               {t(
                 "cockpit.settingsScope",

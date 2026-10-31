@@ -16,10 +16,10 @@ from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as ing
 from tldw_Server_API.app.api.v1.endpoints.media import process_web_scraping as endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Context_Integrity import prompt_loader
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
-from tldw_Server_API.app.core.Utils import prompt_loader
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scraper_mod
 from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced
@@ -110,9 +110,12 @@ def context(
     monkeypatch.setattr(service, "get_web_scraping_service", lambda: state.service)
     monkeypatch.setattr(legacy, "scrape_article", page)
     monkeypatch.setattr(service, "scrape_article", page)
-    monkeypatch.setattr(
-        service, "scrape_from_sitemap", lambda *args, **kwargs: [article(), article("https://example.com/b")]
-    )
+    def sitemap(url: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Replace the legacy sitemap fetch; it runs in a worker thread."""
+        state.fetches.append(url)
+        return [article(), article("https://example.com/b")]
+
+    monkeypatch.setattr(service, "scrape_from_sitemap", sitemap)
     monkeypatch.setattr(summary, "loaded_config_data", {"openai_api": {"model": "test-model"}})
     monkeypatch.setattr(
         prompt_loader, "_prompts_dir", lambda: str(Path(__file__).resolve().parents[2] / "Config_Files" / "Prompts")
@@ -547,6 +550,19 @@ WEB_SUMMARY_REQUESTS = [
         {"urls": ["https://example.com/a"], "scrape_method": "recursive_scraping", "perform_chunking": False},
         "perform_analysis",
         id="ingest-web-content-recursive-default-provider",
+    ),
+    # No provider named: LLM extraction can still run, and its refusal would discard the scraped pages (TASK-13889).
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "individual", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-individual-no-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "sitemap", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-sitemap-no-provider",
     ),
     pytest.param(
         "/api/v1/media/process-web-scraping",

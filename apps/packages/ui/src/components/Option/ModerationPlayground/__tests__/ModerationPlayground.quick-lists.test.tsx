@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as moderationService from "@/services/moderation"
 
 vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn().mockResolvedValue(undefined) }),
   useQuery: () => ({ data: null, isFetching: false, error: null, refetch: vi.fn() })
 }))
 

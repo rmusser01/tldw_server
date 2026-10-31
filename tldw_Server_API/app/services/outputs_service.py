@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     normalize_output_storage_filename,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, LLMQuotaExceededError
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 
@@ -769,7 +770,9 @@ def group_items(
                     values = [str(val)] if val else []
                 for val in values:
                     match = False
-                    if mode == "exact":
+                    if mode == "exact" and field == "tag":
+                        match = normalize_keyword_identity(val) == normalize_keyword_identity(pattern)
+                    elif mode == "exact":
                         match = val == pattern
                     elif mode == "contains":
                         match = pattern.lower() in val.lower()

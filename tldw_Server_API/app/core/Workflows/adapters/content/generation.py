@@ -21,7 +21,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Notes.studio_markdown import (
     canonical_studio_sections,
@@ -211,7 +211,7 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
     model = config.get("model")
 
     type_instructions = {
-        "basic": "Create standard question/answer flashcards.",
+        "basic": "Create question/answer flashcards: the front asks a question; the back directly answers the front question using only the supplied source.",
         "cloze": "Create cloze deletion cards.",
         "basic_reverse": "Create bidirectional cards.",
         "true_false": "Create true/false cards with a short explanation in the back.",
@@ -267,14 +267,14 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             f"{plan_lines}\n"
             f"{difficulty_hints.get(difficulty, difficulty_hints['medium'])}{topics_hint}\n"
             "Every JSON object must include generation_type set to one of: basic, basic_reverse, cloze, true_false.\n"
-            'Return JSON array: [{"front": "Q", "back": "A", "tags": [], "generation_type": "basic"}]'
+            'Return only a JSON array of distinct source-supported flashcards. Each object must have front (string) and back (string) following the matching card-type instruction; tags (array of strings); generation_type (string): the requested generation type.'
         )
     else:
         system_prompt = (
             f"Generate {num_cards} flashcards.\n"
             f"{type_instructions.get(card_type, type_instructions['basic'])}\n"
             f"{difficulty_hints.get(difficulty, difficulty_hints['medium'])}{topics_hint}\n"
-            'Return JSON array: [{"front": "Q", "back": "A", "tags": []}]'
+            'Return only a JSON array of distinct source-supported flashcards. Each object must have front (string) and back (string) following the requested card-type instruction; tags (array of strings).'
         )
 
     system_prompt += (
@@ -303,6 +303,7 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
         if not isinstance(flashcards, list):
             flashcards = []
         cleaned_flashcards = []
+        seen_pairs: set[tuple[str, str, str]] = set()
         for card in flashcards:
             if not isinstance(card, dict):
                 continue
@@ -321,6 +322,14 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             else:
                 raw_generation_type = card_type
                 card["generation_type"] = raw_generation_type
+            pair = (
+                " ".join(front.split()).casefold(),
+                " ".join(back.split()).casefold(),
+                raw_generation_type,
+            )
+            if pair in seen_pairs:
+                return {"error": "duplicate_flashcards", "flashcards": [], "count": 0}
+            seen_pairs.add(pair)
             card["model_type"] = "basic" if raw_generation_type == "true_false" else raw_generation_type or "basic"
             cleaned_flashcards.append(card)
         if planned_request:

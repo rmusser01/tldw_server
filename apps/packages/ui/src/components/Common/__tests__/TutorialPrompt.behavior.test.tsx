@@ -285,4 +285,35 @@ describe("TutorialPrompt behavior", () => {
     })
     expect(infoMock).toHaveBeenCalledTimes(2)
   })
+
+  // XP-05: opening a note writes /notes?note=<id> to the address. A same-page
+  // address change before the prompt appears must not cancel it for the rest
+  // of the session; it is shown once the page settles.
+  it("still shows the prompt once after a same-page address change before it appears", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes"]}>
+        <NavigatorBridge />
+        <TutorialPrompt />
+      </MemoryRouter>
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+    act(() => {
+      capturedNavigate?.("/notes?note=n1")
+    })
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(infoMock).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      capturedNavigate?.("/notes?note=n2")
+    })
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    expect(infoMock).toHaveBeenCalledTimes(1)
+  })
 })

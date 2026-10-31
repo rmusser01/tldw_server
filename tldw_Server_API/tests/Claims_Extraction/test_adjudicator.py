@@ -782,3 +782,27 @@ class TestClaimAdjudicatorLLMQuota:
         assert refused.value.detail["category"] == "llm_tokens_month"
         assert off_loop == [True]
         assert decided_for == [7]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_neutral_counter_evidence_does_not_count():
+    """Only CONTRADICTS documents enter the contradict score; FVA's unfloored anti-context list rests on this (TASK-13881)."""
+
+    def _analyze(api_endpoint, input_data, prompt, *args, **kwargs):
+        if "Evidence: The sky is blue, not green." in prompt:
+            return '{"stance": "CONTRADICTS", "confidence": 0.9}'
+        return '{"stance": "NEUTRAL", "confidence": 0.6}'
+
+    claim = MockClaim(id="1", text="The sky is green.")
+    neutral = [Document(id=f"n{i}", content=f"Unrelated note {i}.", metadata={}, score=0.5) for i in range(3)]
+
+    result = await ClaimAdjudicator(llm_analyze_fn=_analyze).adjudicate(
+        claim=claim,
+        supporting_docs=[],
+        contradicting_docs=[Document(id="c", content="The sky is blue, not green.", metadata={}, score=0.5), *neutral],
+        original_verification=MockClaimVerification(claim=claim),
+    )
+
+    assert result.contradict_score == 0.9
+    assert [a.document.id for a in result.contradicting_evidence] == ["c"]

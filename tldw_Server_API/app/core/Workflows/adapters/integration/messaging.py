@@ -18,7 +18,8 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     ConflictError,
@@ -27,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     KanbanDBError,
     NotFoundError,
 )
+from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
 from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Workflows.adapters._common import resolve_context_user_id
@@ -222,7 +224,7 @@ async def run_kanban_adapter(config: dict[str, Any], context: dict[str, Any]) ->
         user_id_int = user_id
 
     db_path = DatabasePaths.get_kanban_db_path(user_id_int)
-    db = KanbanDB(db_path=str(db_path), user_id=user_id)
+    db = KanbanDB(db_path=str(db_path), user_id=user_id, vector_search_factory=create_kanban_vector_search)
 
     try:
         if action == "board.list":
@@ -603,6 +605,9 @@ async def run_kanban_adapter(config: dict[str, Any], context: dict[str, Any]) ->
     tags=["integration", "chatbooks"],
     config_model=ChatbooksConfig,
 )
+# Independent: a request's detached task (engine.continue_run) can run this after the
+# request has closed its operation.
+@owns_chacha_checkouts(independent=True)
 async def run_chatbooks_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Export and import chatbooks within a workflow step.
 

@@ -1,3 +1,4 @@
+import { useModelPickerOpenRequests } from "./useModelPickerOpenRequests"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
@@ -37,6 +38,7 @@ import {
   Tooltip,
   message
 } from "antd"
+import { SidepanelPersistenceSwitch } from "./SidepanelPersistenceSwitch"
 import { useWebUI } from "~/store/webui"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import {
@@ -95,10 +97,15 @@ import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
 import { KnowledgePanel } from "@/components/Knowledge"
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
-import { ModelSelect } from "@/components/Common/ModelSelect"
+import { ModelSelect, type ModelSelectHandle } from "@/components/Common/ModelSelect"
+import { useSidepanelStartupModel } from "./hooks/useSidepanelStartupModel"
 import { ConnectionStatusIndicator } from "@/components/Sidepanel/Chat/ConnectionStatusIndicator"
 import { ControlRow } from "@/components/Sidepanel/Chat/ControlRow"
 import { SidepanelComposerControlArea } from "@/components/Sidepanel/Chat/SidepanelComposerControlArea"
+import {
+  SidepanelResponseStatus,
+  resolveSidepanelPrimaryAction
+} from "@/components/Sidepanel/Chat/sidepanel-response-status"
 import { PromptAssistComposerAction } from "@/components/Chat/composer/PromptAssistComposerAction"
 import { ContextChips } from "@/components/Sidepanel/Chat/ContextChips"
 import { SlashCommandMenu } from "@/components/Sidepanel/Chat/SlashCommandMenu"
@@ -189,6 +196,7 @@ import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterCon
 import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
 import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { readVisiblePageContextForHandoff } from "./sidepanel-chat-handoff-context"
+import { isChatWithPageActive } from "./page-chat-mode"
 import {
   DEFAULT_DOCUMENT_PROCESSING_MODE,
   documentProcessingSelectionKey,
@@ -293,6 +301,10 @@ export const SidepanelForm = ({
     connectionReadyRef.current = isConnectionReady
   }, [isConnectionReady])
   const { data: chatModels, isFetching: chatModelsLoading } = useChatModelCatalog(isConnectionReady)
+  useSidepanelStartupModel({ enabled: isConnectionReady, models: chatModels })
+  // Opens the model picker (Casual chip or Pro control row) when a send is blocked by the model (XS-02).
+  const modelPickerRef = React.useRef<ModelSelectHandle>(null)
+  useModelPickerOpenRequests(modelPickerRef) // the history review's "Switch model" (CC-02)
   const voiceChatModelOptions = React.useMemo(() => {
     const options = [
       {
@@ -416,6 +428,7 @@ export const SidepanelForm = ({
     draftOwnerKey,
     isDraftOwnerCurrent,
     captureCompletionGuard,
+    captureDraftOwnership,
     captureStopGuard,
     retainCurrentDraft,
     clearDraft,
@@ -1302,7 +1315,7 @@ export const SidepanelForm = ({
           }
         ]
       : []),
-    ...(pageContextActive
+    ...(isChatWithPageActive(chatMode)
       ? [
           {
             id: "page-context",
@@ -1352,7 +1365,7 @@ export const SidepanelForm = ({
       ? [
           {
             id: "image",
-            label: t("playground:actions.upload", "Attach image"),
+            label: form.values.imageFilename || t("playground:actions.upload", "Attach image"),
             previewSrc: form.values.image,
             onRemove: () => {
               form.setFieldValue("image", "")
@@ -1381,8 +1394,10 @@ export const SidepanelForm = ({
   // base64 encoding); we supply Sidepanel-specific toast callbacks.
   const attachmentHandler = useComposerAttachments({
     chatMode: "normal",
+    captureImageOwnership: () => captureDraftOwnership().isImageCurrent,
     setImageField: (base64) => form.setFieldValue("image", base64),
     onImageAccepted: (file) => {
+      form.setFieldValue("imageFilename", file.name)
       message.success({
         content: t("sidepanel:composer.imageUploaded", {
           defaultValue: "Image added: {{name}}",
@@ -1407,7 +1422,7 @@ export const SidepanelForm = ({
       message.error({
         content: t(
           "sidepanel:composer.imageUploadError",
-          "Failed to process image"
+          "This image could not be opened. Choose a valid image file."
         ),
         duration: 3
       })
@@ -1968,37 +1983,73 @@ export const SidepanelForm = ({
     if (draftReady && keyboardShortcutsEnabled) onComposerReady?.();
   }, [draftReady, keyboardShortcutsEnabled, onComposerReady]);
 
-  const ensureEmbeddingModelAvailable = async (): Promise<boolean> => {
+  const contextKeyFor = (mode = chatMode, searchEnabled = webSearch) =>
+    JSON.stringify([
+      selectedModel,
+      mode,
+      searchEnabled,
+      selectedSystemPrompt,
+      toolChoice,
+      useOCR,
+      temporaryChat,
+      selectedCharacterId,
+      conversationContextSettings,
+      selectedDocuments.map((doc) => [doc.id, doc.title, doc.url]),
+      currentDocumentSelectionKey,
+      ragPinnedResults,
+      replyTarget,
+      chatWithWebsiteEmbedding,
+      imageBackendDefaultTrimmed,
+    ]);
+  const contextKey = contextKeyFor();
+  const contextRevisionRef = React.useRef({ key: contextKey, revision: 0 });
+  React.useLayoutEffect(() => {
+    if (contextRevisionRef.current.key !== contextKey) {
+      contextRevisionRef.current = {
+        key: contextKey,
+        revision: contextRevisionRef.current.revision + 1,
+      };
+    }
+  }, [contextKey]);
+
+  const ensureEmbeddingModelAvailable = async (
+    isCurrent: () => boolean,
+    mode: string,
+    searchEnabled: boolean,
+  ): Promise<boolean> => {
     // Fast path: no RAG or web search enabled
-    if (chatMode !== "rag" && !webSearch) {
-      return true
+    if (mode !== "rag" && !searchEnabled) {
+      return true;
     }
 
-    let defaultEM: string | null | undefined
+    let defaultEM: string | null | undefined;
 
     // When chatting with the current page via embeddings, require a default embedding model
-    if (chatMode === "rag" && chatWithWebsiteEmbedding) {
-      defaultEM = await defaultEmbeddingModelForRag()
+    if (mode === "rag" && chatWithWebsiteEmbedding) {
+      defaultEM = await defaultEmbeddingModelForRag();
+      if (!isCurrent()) return false;
       if (!defaultEM) {
-        form.setFieldError("message", t("formError.noEmbeddingModel"))
-        return false
+        form.setFieldError("message", t("formError.noEmbeddingModel"));
+        return false;
       }
     }
 
     // When web search is enabled and not in simple-search mode, also require an embedding model
-    if (webSearch) {
+    if (searchEnabled) {
       if (typeof defaultEM === "undefined") {
-        defaultEM = await defaultEmbeddingModelForRag()
+        defaultEM = await defaultEmbeddingModelForRag();
+        if (!isCurrent()) return false;
       }
-      const simpleSearch = await getIsSimpleInternetSearch()
+      const simpleSearch = await getIsSimpleInternetSearch();
+      if (!isCurrent()) return false;
       if (!defaultEM && !simpleSearch) {
-        form.setFieldError("message", t("formError.noEmbeddingModel"))
-        return false
+        form.setFieldError("message", t("formError.noEmbeddingModel"));
+        return false;
       }
     }
 
-    return true
-  }
+    return true;
+  };
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -2099,7 +2150,17 @@ export const SidepanelForm = ({
     }
     const connectionGeneration = connectionGenerationRef.current
     const submittedKnowledgeMentionRevision = knowledgeMentionRevision.current
+    const draftOwnership = captureDraftOwnership()
+    const contextRevision = contextRevisionRef.current.revision
+    let ownSlashKey: string | null = null
+    const contextIsCurrent = () => draftOwnership.isCurrent() &&
+      (contextRevisionRef.current.revision === contextRevision ||
+        (ownSlashKey !== null && contextRevisionRef.current.revision === contextRevision + 1 &&
+          contextRevisionRef.current.key === ownSlashKey))
+    if (!contextIsCurrent()) return
     const intent = resolveSubmissionIntent(rawMessage, options)
+    const effective = useStoreMessageOption.getState()
+    if (intent.handled) ownSlashKey = contextKeyFor(effective.chatMode, effective.webSearch)
     if (intent.invalidImageCommand) {
       notification.error({
         message: t("error", { defaultValue: "Error" }),
@@ -2116,6 +2177,7 @@ export const SidepanelForm = ({
       return
     }
     const savedRoleplay = isSavedRoleplayConversation(greetingHistorySelection)
+    if (!intent.isImageCommand && !savedRoleplay && !draftOwnership.normalizeMessage(intent.message)) return
     const trimmed = savedRoleplay ? intent.message : intent.combinedMessage.trim()
     if (
       !intent.isImageCommand &&
@@ -2144,7 +2206,7 @@ export const SidepanelForm = ({
           selectedModel: selectedModel ?? "",
           selectionSource: { model: "global", toolChoice: "global" }
         })
-    const preparationIsCurrent = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
+    const preparationIsCurrent = () => contextIsCurrent() && connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
       (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
     if (
       savedRoleplay &&
@@ -2181,14 +2243,12 @@ export const SidepanelForm = ({
       selectionKey: string
       isCurrent: () => boolean
     } | null = null
-    if (!intent.isImageCommand) {
-      documentPreparation = {
-        controller: new AbortController(),
-        selectionKey: currentDocumentSelectionKeyRef.current,
-        isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
-      }
-      sidepanelDocumentPreparationRef.current = documentPreparation
+    documentPreparation = {
+      controller: new AbortController(),
+      selectionKey: currentDocumentSelectionKeyRef.current,
+      isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
     }
+    sidepanelDocumentPreparationRef.current = documentPreparation
     try {
       if (!intent.isImageCommand) {
         try {
@@ -2212,6 +2272,7 @@ export const SidepanelForm = ({
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
+          modelPickerRef.current?.openAndFocus()
           return
         }
         const unavailableModel = findUnavailableChatModel(
@@ -2227,11 +2288,12 @@ export const SidepanelForm = ({
               "Selected model is not available on this server. Refresh models or choose a different model."
             )
           )
+          modelPickerRef.current?.openAndFocus()
           return
         }
       }
       if (!intent.isImageCommand && !savedRoleplay) {
-        const hasEmbedding = await ensureEmbeddingModelAvailable()
+        const hasEmbedding = await ensureEmbeddingModelAvailable(preparationIsCurrent, effective.chatMode, effective.webSearch)
         if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
         if (!hasEmbedding) {
           return
@@ -2373,9 +2435,10 @@ export const SidepanelForm = ({
           textAreaFocus()
         },
         afterSend: (result) => {
+          const outcome = normalizeChatSubmitResult(result)
           if (
             promptAssistAttemptId !== null &&
-            isChatSubmitSuccess(normalizeChatSubmitResult(result))
+            isChatSubmitSuccess(outcome)
           ) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             // Legacy void outcomes can include a swallowed failure.
@@ -2385,7 +2448,8 @@ export const SidepanelForm = ({
               setContextFiles(current => current === contextFiles ? [] : current)
               if (knowledgeMentionRevision.current === submittedKnowledgeMentionRevision) setKnowledgeMentionActive(false)
             }
-          } else if (promptAssistAttemptId !== null) {
+          } else if (promptAssistAttemptId !== null &&
+            (outcome.status === "skipped" || (outcome.status === "failed" && outcome.restoreDraft))) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
         },
@@ -3350,6 +3414,7 @@ export const SidepanelForm = ({
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
+          modelPickerRef.current?.openAndFocus()
           return
         }
         const unavailableModel = findUnavailableChatModel(
@@ -3365,6 +3430,7 @@ export const SidepanelForm = ({
               "Selected model is not available on this server. Refresh models or choose a different model."
             )
           )
+          modelPickerRef.current?.openAndFocus()
           return
         }
       }
@@ -3412,18 +3478,17 @@ export const SidepanelForm = ({
     [form, submitCurrentRequest]
   )
 
-  const shouldQueuePrimaryAction = isSending && isConnectionReady
-  const primaryActionLabel = shouldQueuePrimaryAction
-    ? t("common:queue", "Queue")
-    : t("common:send", "Send")
-  const primaryActionTitle = personaSubmitDisabledReason ?? (!isConnectionReady
-    ? t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string
-    : shouldQueuePrimaryAction
-      ? t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string
-      : sendButtonTitle)
-  const primaryActionAriaLabel = shouldQueuePrimaryAction
-    ? (t("playground:composer.queue.primaryAria", "Queue request") as string)
-    : (t("playground:composer.submitAria", "Send message") as string)
+  const primaryAction = resolveSidepanelPrimaryAction({
+    isSending,
+    isConnectionReady,
+    sendTitle: sendButtonTitle,
+    disabledReason: personaSubmitDisabledReason,
+    t: (key, fallback, options) => String(t(key, fallback, options))
+  })
+  const shouldQueuePrimaryAction = primaryAction.queuesAfterReply
+  const primaryActionLabel = primaryAction.label
+  const primaryActionTitle = primaryAction.title
+  const primaryActionAriaLabel = primaryAction.ariaLabel
   const v5DocumentProcessingFacet = React.useMemo(() => {
     if (contextFiles.length === 0) return null
 
@@ -3824,14 +3889,23 @@ export const SidepanelForm = ({
                         </div>
                       )
 
+                      const composerResponseStatusNode = (
+                        <SidepanelResponseStatus
+                          isSending={isSending}
+                          messages={messages}
+                          selectedModel={selectedModel}
+                          models={chatModels}
+                          className="px-2 py-1"
+                        />
+                      )
+
                       const composerInlineMessagesNode = (
                         <>
                           {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
                           {isConnectionReady && !isProMode && <ModelSelect
+                            ref={modelPickerRef}
                             iconClassName="size-4"
                             showSelectedName
-                            showPicker={Boolean(!normalizeChatModelId(selectedModel) ||
-                              findUnavailableChatModel([selectedModel], availableChatModelIds))}
                           />}
                           {form.errors.message && (
                             <div
@@ -3911,20 +3985,15 @@ export const SidepanelForm = ({
                       const composerControlAreaNode = (
                         <div className="mt-2 flex min-w-0 flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            size="small"
-                            checked={!temporaryChat}
-                            disabled={temporaryChatLocked || isFireFoxPrivateMode}
-                            onChange={(checked) =>
-                              handleToggleTemporaryChat(!checked)
-                            }
-                            aria-label={persistenceControlLabel}
-                          />
-                          <span className="text-xs text-text whitespace-nowrap">
-                            {temporaryChatToggleLabel}
-                          </span>
-                        </div>
+                        <SidepanelPersistenceSwitch
+                          checked={!temporaryChat}
+                          disabled={temporaryChatLocked || isFireFoxPrivateMode}
+                          onChange={(checked) =>
+                            handleToggleTemporaryChat(!checked)
+                          }
+                          ariaLabel={persistenceControlLabel}
+                          label={temporaryChatToggleLabel}
+                        />
                       </Tooltip>
                       <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-between gap-1.5">
                       {isProMode ? (
@@ -3986,6 +4055,7 @@ export const SidepanelForm = ({
                               onOpenChatInWebUi={
                                 openChatInWebUiWithDocumentHandoff
                               }
+                              modelPickerRef={modelPickerRef}
                             />
                           )}
                           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
@@ -3998,7 +4068,7 @@ export const SidepanelForm = ({
                               className="flex min-w-0 flex-wrap items-center gap-2">
                               {/* L15: gap-2 provides visual separation */}
                               <>
-                                {!streaming ? (
+                                {!primaryAction.showStop ? (
                                   <>
                                     <Tooltip
                                       title={t("playground:actions.upload", "Attach image")}
@@ -4490,7 +4560,7 @@ export const SidepanelForm = ({
                             )}
                           </div>
                           <div className="flex items-end gap-2">
-                            {streaming && (
+                            {primaryAction.showStop && (
                               <div className="flex flex-col items-center gap-1">
                                 <Tooltip title={t("tooltip.stopStreaming")}>
                                   <button
@@ -4544,7 +4614,12 @@ export const SidepanelForm = ({
                       )
 
                       if (nextgenComposerEnabled) {
-                        const sharedNoticesSlot = composerInlineMessagesNode
+                        const sharedNoticesSlot = (
+                          <>
+                            {composerInlineMessagesNode}
+                            {composerResponseStatusNode}
+                          </>
+                        )
 
                         // Compact brief for V3 in the sidepanel — same idea
                         // as Playground's, trimmed to the data Sidepanel
@@ -4657,7 +4732,7 @@ export const SidepanelForm = ({
                           "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                         const v5InlineSlot = (
                           <>
-                            {!streaming ? (
+                            {!primaryAction.showStop ? (
                               <>
                                 <Tooltip
                                   title={t(
@@ -4919,6 +4994,7 @@ export const SidepanelForm = ({
                         <>
                           {composerTextareaShellNode}
                           {composerInlineMessagesNode}
+                          {composerResponseStatusNode}
                           {composerControlAreaNode}
                         </>
                       )

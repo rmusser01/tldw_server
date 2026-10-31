@@ -27,6 +27,7 @@ from fastapi import (
     Response,
     WebSocket,
     WebSocketDisconnect,
+    WebSocketException,
     status,
 )
 from fastapi.responses import FileResponse, StreamingResponse
@@ -41,6 +42,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     get_request_user,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_cursor_pagination_meta,
@@ -75,10 +77,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     WORKFLOWS_RUNS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
-)
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import auth_subprotocol, resolve_ws_principal
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_workflows_database,
@@ -92,7 +91,6 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.Security.egress import (
     ALLOWED_PORTS_ENV,
     DEFAULT_ALLOWED_PORTS,
@@ -1366,7 +1364,8 @@ def _demote_preflight_issues_to_warnings(issues: list[dict[str, Any]]) -> list[d
     return warnings
 
 
-@router.post("", response_model=WorkflowDefinitionResponse, status_code=201)
+@router.post("", response_model=WorkflowDefinitionResponse, status_code=201,
+             dependencies=[Depends(require_expected_user)])
 async def create_definition(
     body: WorkflowDefinitionCreate,
     current_user: User = Depends(get_request_user),
@@ -1426,7 +1425,8 @@ async def create_definition(
     )
 
 
-@router.get("", response_model=list[WorkflowDefinitionResponse])
+@router.get("", response_model=list[WorkflowDefinitionResponse],
+            dependencies=[Depends(require_expected_user)])
 async def list_definitions(
     current_user: User = Depends(get_request_user),
     db: WorkflowsDatabase = Depends(_get_db),
@@ -1444,7 +1444,7 @@ async def list_definitions(
 @router.post(
     "/preflight",
     response_model=WorkflowPreflightResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def preflight_definition(
     body: WorkflowPreflightRequest,
@@ -1472,7 +1472,8 @@ async def preflight_definition(
 ## get_definition moved below '/runs*' routes to avoid path shadowing
 
 
-@router.post("/{workflow_id}/versions", response_model=WorkflowDefinitionResponse, status_code=201)
+@router.post("/{workflow_id}/versions", response_model=WorkflowDefinitionResponse, status_code=201,
+             dependencies=[Depends(require_expected_user)])
 async def create_new_version(
     workflow_id: int,
     body: WorkflowDefinitionCreate,
@@ -1666,7 +1667,7 @@ import contextlib
 @router.post(
     "/{workflow_id}/run",
     response_model=WorkflowRunResponse,
-    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="workflows.run_saved", count_as="run"))],
+    dependencies=[Depends(require_expected_user), Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="workflows.run_saved", count_as="run"))],
 )
 async def run_saved(
     workflow_id: int,
@@ -2291,6 +2292,7 @@ async def run_adhoc(
     "/runs/{run_id}",
     response_model=WorkflowRunResponse,
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
@@ -3386,7 +3388,7 @@ async def get_chunker_options():
 @router.get(
     "/runs/{run_id}/investigation",
     response_model=WorkflowRunInvestigationResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_run_investigation(
     run_id: str,
@@ -3407,7 +3409,7 @@ async def get_run_investigation(
 @router.get(
     "/runs/{run_id}/steps",
     response_model=WorkflowRunStepsResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_run_steps(
     run_id: str,
@@ -3428,7 +3430,7 @@ async def get_run_steps(
 @router.get(
     "/runs/{run_id}/steps/{step_id}/attempts",
     response_model=WorkflowStepAttemptsResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_step_attempts(
     run_id: str,
@@ -3451,6 +3453,7 @@ async def get_step_attempts(
 @router.post(
     "/runs/{run_id}/{action}",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
@@ -4241,6 +4244,7 @@ async def retry_run(
 @router.get(
     "/{workflow_id}",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
@@ -4287,6 +4291,7 @@ class HumanReviewPayload(BaseModel):
 @router.post(
     "/runs/{run_id}/steps/{step_id}/approve",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
@@ -4354,6 +4359,7 @@ async def approve_step(
 @router.post(
     "/runs/{run_id}/steps/{step_id}/reject",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
@@ -4638,35 +4644,16 @@ def _workflow_history_budget() -> _WorkflowHistoryBudget:
 async def workflows_ws(
     websocket: WebSocket,
     run_id: str,
-    token: Optional[str] = Query(None),
     types: Optional[list[str]] = Query(None),
     db: WorkflowsDatabase = Depends(_get_db),
 ):
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    authenticated_user_id: str | None = str(cookie_identity.user_id) if cookie_identity is not None else None
-    # Extract token: prefer query param; fallback to Authorization header
-    if not token:
-        auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
-        if auth_hdr and auth_hdr.lower().startswith("bearer "):
-            token = auth_hdr.split(" ", 1)[1].strip()
-    if not token and authenticated_user_id is None:
-        cookie_code = cookie_websocket_rejection_code(websocket)
-        await _close_workflows_websocket(
-            websocket,
-            cookie_code or 4401,
-            "cookie_auth_rejected" if cookie_code is not None else "authentication_required",
-        )
+    try:
+        principal = await resolve_ws_principal(websocket, required_scope="read")
+    except WebSocketException as exc:
+        await _close_workflows_websocket(websocket, exc.code, exc.reason)
         return
-
-    # Verify token
-    if authenticated_user_id is None:
-        try:
-            jwtm = get_jwt_manager()
-            token_data = jwtm.verify_token(token)
-            authenticated_user_id = str(token_data.sub)
-        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-            await _close_workflows_websocket(websocket, 4401, "invalid_token", error_type=type(exc).__name__)
-            return
+    # A service principal has no user id, and str(None) must never match a run owner.
+    authenticated_user_id = str(principal.user_id) if principal.user_id is not None else None
 
     # Enforce the existing owner-only rule.
     try:
@@ -4682,7 +4669,7 @@ async def workflows_ws(
         await _close_workflows_websocket(websocket, 4403, "not_run_owner")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=auth_subprotocol(websocket))
     # Wrap for metrics and activity tracking; keep domain frames unchanged
     stream = WebSocketStream(
         websocket,

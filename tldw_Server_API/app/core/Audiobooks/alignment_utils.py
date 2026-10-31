@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.audiobook_schemas import AlignmentPayload, AlignmentWord
+from tldw_Server_API.app.core.Audiobooks.audiobook_schemas import AlignmentPayload, AlignmentWord
 
 
 @dataclass(frozen=True)

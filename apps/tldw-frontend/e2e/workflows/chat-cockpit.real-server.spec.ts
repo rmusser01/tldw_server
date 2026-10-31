@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
-import { readStore } from "../../../extension/tests/e2e/utils/history-selection";
+import { choose, readStore } from "../../../extension/tests/e2e/utils/history-selection";
+import type { ServerChatMessage } from "../../../packages/ui/src/services/tldw/TldwApiClient";
 import type { HistoryBookmark } from "../../../packages/ui/src/db/dexie/types";
+import type { HistorySelectionCaptureV1 } from "../../../packages/ui/src/types/history-selection";
 /**
  * /chat cockpit real-server parity checks.
  *
@@ -199,7 +201,7 @@ const waitForMobileCockpitPanel = async (page: Page, panel: 'context' | 'runtime
   await expect(rails).toBeVisible({ timeout: 10_000 });
   await expect(rails).toHaveAttribute('data-mobile-panel', panel);
   const button = rails.getByRole('button', {
-    name: panel === 'context' ? 'Context' : 'Chat settings',
+    name: panel === 'context' ? 'Context' : 'Runtime',
     exact: true,
   });
   await expect(button).toHaveAttribute('id', config.buttonId);
@@ -207,7 +209,7 @@ const waitForMobileCockpitPanel = async (page: Page, panel: 'context' | 'runtime
   await expect(button).toHaveAttribute('aria-controls', config.panelId);
   await expect(button).toHaveAttribute('aria-expanded', 'true');
   const region = rails.getByRole('region', {
-    name: panel === 'context' ? 'Context' : 'Chat settings',
+    name: panel === 'context' ? 'Context' : 'Runtime',
     exact: true,
   });
   await expect(region).toHaveAttribute('id', config.panelId);
@@ -495,6 +497,11 @@ const buildConfiguredChatModelSelection = (payload: any, metadata: unknown): Rea
     key: `${configuredProvider}:${matches[0].id}`,
   };
 };
+
+// The composition preview names the model as "model (Provider)" (CC-06); the
+// raw provider:model route is shown only in the runtime inspector.
+const compositionScopeText = (modelKey: string): string =>
+  `Scope: ${modelKey.slice(modelKey.indexOf(':') + 1)} (`;
 
 const getConfiguredChatModelSelection = async (
   request: APIRequestContext
@@ -819,20 +826,11 @@ const trackRealApiHits = (page: Page) => {
 };
 
 const ensureComposerOptionsVisible = async (page: Page) => {
-  const mode = page.locator('[data-ui-mode]').first();
-  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
-  const casual = page.getByTestId('composer-casual-advanced-chip');
-  if ((await mode.getAttribute('data-ui-mode')) === 'casual') {
-    await expect(casual).toBeEnabled();
-    if ((await casual.getAttribute('aria-expanded')) !== 'true') await casual.click();
-    await expect(casual).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.getByTestId('composer-casual-advanced-controls-row')).toBeVisible();
-    return;
-  }
-  const toggle = page.getByTestId('composer-options-toggle');
-  await expect(toggle).toBeVisible();
-  const label = await toggle.getAttribute('aria-label');
-  if (/show composer options/i.test(label || '')) await toggle.click();
+  const tools = page.getByTestId('composer-options-toggle');
+  await expect(tools).toBeVisible();
+  await expect(tools).toBeEnabled();
+  if (await tools.getAttribute('aria-expanded') !== 'true') await tools.click();
+  await expect(page.getByTestId('composer-options-panel')).toBeVisible();
 };
 
 const closeSearchContextIfOpen = async (page: Page) => {
@@ -879,10 +877,12 @@ const assertVisibleTooltipForControl = async (
 const getDesktopContextRail = (page: Page): Locator =>
   page.getByTestId('playground-cockpit-left-rail').getByTestId('playground-context-rail');
 
-const getDesktopCompositionPreview = (page: Page): Locator =>
-  getDesktopContextRail(page).getByRole('region', {
-    name: 'Next message composition',
-  });
+const getDesktopCompositionPreview = async (page: Page): Promise<Locator> => {
+  const context = getDesktopContextRail(page);
+  const expand = context.getByRole('button', { name: 'Expand Request preview', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  return context.getByRole('region', { name: 'Next message composition' });
+};
 
 const getDesktopRuntimeInspector = (page: Page): Locator =>
   page.getByTestId('playground-cockpit-right-rail').getByTestId('playground-runtime-inspector');
@@ -897,51 +897,22 @@ const assertCoreComposerControls = async (
   page: Page,
   options: { mobile?: boolean; composerOnly?: boolean } = {}
 ) => {
-  const mode = page.locator('[data-ui-mode]').first();
-  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
-  const casual = page.getByTestId('composer-casual-advanced-chip');
-  const isCasual = (await mode.getAttribute('data-ui-mode')) === 'casual';
-  await expect(isCasual ? casual : page.getByTestId('composer-options-toggle')).toBeVisible();
+  await expect(page.getByTestId('composer-options-toggle')).toBeVisible();
   await expect(page.getByTestId('chat-input')).toBeVisible();
   await expect(page.getByRole('button', { name: /send message/i })).toBeVisible();
   if (options.composerOnly) return;
   await ensureComposerOptionsVisible(page);
   await expect(page.getByTestId('model-selector').first()).toBeVisible();
   await expect(page.getByTestId('attachment-button')).toBeVisible();
-  if (isCasual) {
-    const customize = page.getByTestId('composer-casual-advanced-controls-row');
-    const research = customize.getByRole('group', { name: 'Research & context' });
-    const character = customize.getByRole('group', { name: 'Character & your role' });
-    const response = customize.getByRole('group', { name: 'Response settings' });
-    await expect(research).toBeVisible();
-    await expect(character).toBeVisible();
-    await expect(response).toBeVisible();
-    await expect(character.getByTestId('character-select')).toBeVisible();
-    await expect(response.getByTestId('chat-prompt-select')).toBeVisible();
-    await expect(research.getByTestId('mcp-tools-toggle')).toBeVisible();
-    const advancedSummary = customize.locator('summary').filter({ hasText: 'Advanced customization' });
-    const advancedDetails = advancedSummary.locator('..');
-    if (!(await advancedDetails.evaluate(node => (node as HTMLDetailsElement).open)))
-      await advancedSummary.click();
-    await expect(advancedDetails).toHaveAttribute('open', '');
-    const advanced = customize.getByRole('group', { name: 'Advanced composer controls', exact: true });
-    await expect(advanced.getByTestId('tools-button')).toBeVisible();
-    if (options.mobile)
-      await expect(
-        advanced.getByRole('button', { name: /Health & diagnostics|Server:/i })
-      ).toBeVisible();
-    return;
-  }
-  await expect(page.getByTestId('chat-prompt-select')).toBeVisible();
-  await expect(page.getByTestId('character-select')).toBeVisible();
-  await expect(page.getByTestId('tools-button')).toBeVisible();
-  if (options.mobile) {
-    await expect(page.getByRole('button', { name: /More options/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Health & diagnostics|Server:/i })).toBeVisible();
-    return;
-  }
-  await expect(page.getByTestId('mcp-tools-toggle')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Advanced controls/i })).toBeVisible();
+  const tools = page.getByTestId('composer-options-panel');
+  const context = tools.getByRole('region', { name: 'Context setup', exact: true });
+  const prompts = tools.getByRole('region', { name: 'Prompts & people', exact: true });
+  const response = tools.getByRole('region', { name: 'Response & tools', exact: true });
+  for (const group of [context, prompts, response]) await expect(group).toBeVisible();
+  await expect(prompts.getByTestId('character-select')).toBeVisible();
+  await expect(prompts.getByTestId('chat-prompt-select')).toBeVisible();
+  await expect(context.getByTestId('mcp-tools-toggle')).toBeVisible();
+  await expect(response.getByTestId('tools-button')).toBeVisible();
 };
 
 const fillEditableComposer = async (page: Page, value: string) => {
@@ -957,13 +928,14 @@ const ensureDesktopCockpitRailsVisible = async (page: Page) => {
 };
 
 const assertRuntimeProviderSummary = async (runtimeInspector: Locator) => {
-  const runtimeState = runtimeInspector.getByRole('region', { name: 'Runtime state' });
-  await expect(runtimeState.getByRole('heading', { name: 'Chat settings' })).toBeVisible();
-  await expect(runtimeState.getByText('Model', { exact: true })).toBeVisible();
-  const providerRoute = runtimeState.getByText('Provider route');
-  if (await providerRoute.isVisible().catch(() => false)) {
-    await expect(providerRoute).toBeVisible();
-  }
+  const modelRoute = runtimeInspector.getByRole('region', { name: 'Model route', exact: true });
+  await expect(modelRoute.getByRole('heading', { name: 'Model & settings', exact: true })).toBeVisible();
+  await expect(modelRoute.getByText('Provider', { exact: true })).toBeVisible();
+  await expect(modelRoute.getByText('Model', { exact: true })).toBeVisible();
+  const routeValues = modelRoute.locator('dl').first().locator('dd');
+  await expect(routeValues).toHaveCount(2);
+  for (const value of await routeValues.all()) await expect(value).not.toBeEmpty();
+  await expect(modelRoute.getByRole('button', { name: 'Open model settings' })).toHaveAttribute('title', /^[^:]+:.+/);
 };
 
 const assertRuntimeMcpRailState = async (runtimeInspector: Locator) => {
@@ -1225,17 +1197,9 @@ const assertProviderQualifiedPayload = async (page: Page, responseOrRequest: Res
   expect(payload.model.trim().length).toBeGreaterThan(0);
 
   const runtimeInspector = getDesktopRuntimeInspector(page);
-  const visibleRouteLabel = await runtimeInspector
-    .getByText('Provider route')
-    .locator('xpath=following-sibling::p[1]')
-    .textContent()
-    .catch(() => null);
-  const routeText = await runtimeInspector
-    .getByText(/^Route /)
-    .first()
-    .textContent()
-    .catch(() => null);
-  const routeLabel = visibleRouteLabel?.trim() || routeText?.replace(/^Route\s+/, '').trim() || '';
+  const modelSettings = runtimeInspector.locator('[data-cockpit-model-settings-trigger]');
+  await expect(modelSettings).toHaveAttribute('title', /^[^:]+:.+/);
+  const routeLabel = (await modelSettings.getAttribute('title'))!.trim();
   const separatorIndex = routeLabel.indexOf(':');
   if (separatorIndex > 0 && separatorIndex < routeLabel.length - 1) {
     const provider = routeLabel.slice(0, separatorIndex);
@@ -1259,18 +1223,18 @@ const selectConfiguredCockpitModel = async (
   await ensureComposerOptionsVisible(page);
   await page.getByTestId('model-selector').first().click();
 
+  // CC-06: the scope is a two-way "Ready to use | All models" control.
   const scopeToggle = page.getByTestId('model-list-scope-toggle');
   await expect(scopeToggle).toBeVisible();
-  await expect(scopeToggle).toHaveText(/Search all models/);
-  await expect(page.getByText('Usable configured models')).toBeVisible();
+  const readyToUse = scopeToggle.getByRole('radio', { name: 'Ready to use' });
+  const allModels = scopeToggle.getByRole('radio', { name: 'All models' });
+  await expect(readyToUse).toBeChecked();
 
-  await scopeToggle.click();
-  await expect(scopeToggle).toHaveText(/Configured/);
-  await expect(page.getByText('All known models')).toBeVisible();
+  await scopeToggle.getByText('All models', { exact: true }).click();
+  await expect(allModels).toBeChecked();
 
-  await scopeToggle.click();
-  await expect(scopeToggle).toHaveText(/Search all models/);
-  await expect(page.getByText('Usable configured models')).toBeVisible();
+  await scopeToggle.getByText('Ready to use', { exact: true }).click();
+  await expect(readyToUse).toBeChecked();
 
   await page.getByLabel('Search models').fill(selection.model);
 
@@ -1833,7 +1797,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const collapseRuntimeSidechannel = page
       .getByTestId('playground-cockpit-right-rail')
-      .getByRole('button', { name: 'Hide chat settings' });
+      .getByRole('button', { name: 'Hide runtime' });
     await assertVisibleTooltipForControl(
       page,
       collapseRuntimeSidechannel,
@@ -1901,9 +1865,9 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     const modeSummary = page.getByTestId('playground-cockpit-mode-summary');
-    await expect(modeSummary).toHaveText('Context and chat settings visible.');
-    await expect(getDesktopCompositionPreview(page)).toContainText(
-      `Scope: ${chatModelSelection.key}`
+    await expect(modeSummary).toHaveText('Context and runtime visible.');
+    await expect(await getDesktopCompositionPreview(page)).toContainText(
+      compositionScopeText(chatModelSelection.key)
     );
 
     await page
@@ -1920,11 +1884,11 @@ test.describe('/chat cockpit real-server parity', () => {
     });
     await page.getByTestId('playground-cockpit-left-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
-    await expect(modeSummary).toHaveText('Context and chat settings visible.');
+    await expect(modeSummary).toHaveText('Context and runtime visible.');
 
     await page
       .getByTestId('playground-cockpit-right-rail')
-      .getByRole('button', { name: 'Hide chat settings' })
+      .getByRole('button', { name: 'Hide runtime' })
       .click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeVisible();
@@ -1932,7 +1896,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
     await page.getByTestId('playground-cockpit-right-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
-    await expect(modeSummary).toHaveText('Context and chat settings visible.');
+    await expect(modeSummary).toHaveText('Context and runtime visible.');
 
     await page
       .getByTestId('playground-cockpit-left-rail')
@@ -1940,10 +1904,10 @@ test.describe('/chat cockpit real-server parity', () => {
       .click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
-    await expect(modeSummary).toHaveText('Context hidden. Chat settings visible.');
+    await expect(modeSummary).toHaveText('Context hidden. Runtime visible.');
     await page
       .getByTestId('playground-cockpit-right-rail')
-      .getByRole('button', { name: 'Hide chat settings' })
+      .getByRole('button', { name: 'Hide runtime' })
       .click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
@@ -1951,20 +1915,19 @@ test.describe('/chat cockpit real-server parity', () => {
     await page.getByTestId('playground-cockpit-left-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
-    await expect(modeSummary).toHaveText('Chat settings hidden. Context visible.');
+    await expect(modeSummary).toHaveText('Runtime hidden. Context visible.');
     await page.getByTestId('playground-cockpit-right-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
-    await expect(modeSummary).toHaveText('Context and chat settings visible.');
+    await expect(modeSummary).toHaveText('Context and runtime visible.');
     const contextRail = getDesktopContextRail(page);
     const runtimeInspector = getDesktopRuntimeInspector(page);
     await assertRuntimeProviderSummary(runtimeInspector);
-    await expect(runtimeInspector.getByText('Provider:model settings')).toBeVisible();
     await expect(runtimeInspector.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
     await expect(
       runtimeInspector.getByRole('button', { name: 'Open model settings' })
     ).toBeVisible();
     await expect(
-      runtimeInspector.getByRole('button', { name: 'Select character or persona' })
+      contextRail.getByRole('button', { name: 'Select character or persona' })
     ).toBeVisible();
     await assertRuntimeMcpRailState(runtimeInspector);
     const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
@@ -1998,12 +1961,8 @@ test.describe('/chat cockpit real-server parity', () => {
       await page.keyboard.press('Escape');
     }
 
-    const advanced = page.getByTestId('composer-advanced-toggle');
-    await expect(advanced).toBeEnabled();
-    if (await advanced.getAttribute('aria-expanded') !== 'true') await advanced.click();
-    await expect(page.getByTestId('composer-options-panel')).toBeVisible();
-    await expect(page.getByTestId('composer-advanced-toggle')).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator('#composer-pro-advanced-controls-row')).toBeVisible();
+    await ensureComposerOptionsVisible(page);
+    await expect(page.getByRole('region', { name: 'Response & tools', exact: true })).toBeVisible();
 
     const modelSelector = page.getByTestId('model-selector').first();
     await modelSelector.focus();
@@ -2023,7 +1982,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(promptSearch).toBeHidden();
     await expect(promptTrigger).toBeFocused();
 
-    const assistantTrigger = runtimeInspector.getByRole('button', { name: 'Select character or persona' });
+    const assistantTrigger = contextRail.getByRole('button', { name: 'Select character or persona' });
     await assistantTrigger.click();
     const assistantSearch = page.getByRole('textbox', { name: 'Search characters and personas', exact: true });
     await expect(assistantSearch).toBeFocused();
@@ -2083,7 +2042,7 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     await switchChatLayoutMode(page, 'cockpit');
-    await expect(modeSummary).toHaveText('Context and chat settings visible.');
+    await expect(modeSummary).toHaveText('Context and runtime visible.');
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeHidden();
@@ -2218,10 +2177,10 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(
         contextRail.getByRole('region', { name: 'Prompt management' }).getByText(promptName)
       ).toBeVisible();
-      const compositionPreview = getDesktopCompositionPreview(page);
+      const compositionPreview = await getDesktopCompositionPreview(page);
       await expect(compositionPreview).toBeVisible();
       await expect(compositionPreview).toContainText(promptName);
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       await expect(compositionPreview).toContainText(
         /MCP tools|MCP unavailable|MCP tools managed from composer/
       );
@@ -2241,7 +2200,6 @@ test.describe('/chat cockpit real-server parity', () => {
       const modelSettingsTrigger = runtimeInspector.locator(
         '[data-cockpit-model-settings-trigger]'
       );
-      await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
       const modelSettingsOpenDetail = page.evaluate(
         () =>
           new Promise<{ settingsScope?: string | null }>((resolve) => {
@@ -2377,9 +2335,9 @@ test.describe('/chat cockpit real-server parity', () => {
       const draftBox = await page.getByTestId('chat-input').boundingBox();
       expect(draftBox?.width ?? 0).toBeGreaterThanOrEqual(180);
     };
-    const expectNoMobileBottomControls = async () => {
+    const expectMobileComposerFooter = async () => {
       await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
-      await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
+      await expect(page.getByTestId('composer-bottom-bar')).toBeVisible();
     };
     const panelControlledByButton = async (panel: 'context' | 'runtime') => {
       const config = mobileCockpitPanelConfig[panel];
@@ -2393,7 +2351,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await fillEditableComposer(page, mobileDraft);
     await expectMobileDraftReachable();
     await waitForPlaygroundDraftSaved(page);
-    await expectNoMobileBottomControls();
+    await expectMobileComposerFooter();
 
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
       'data-mode',
@@ -2407,9 +2365,9 @@ test.describe('/chat cockpit real-server parity', () => {
       'Context panel active. Composer draft remains available below.'
     );
     await expectMobileDraftPreserved();
-    await expectNoMobileBottomControls();
+    await expectMobileComposerFooter();
     const contextButton = mobileRails.getByRole('button', { name: 'Context', exact: true });
-    const runtimeButton = mobileRails.getByRole('button', { name: 'Chat settings', exact: true });
+    const runtimeButton = mobileRails.getByRole('button', { name: 'Runtime', exact: true });
     await expect(mobileRails.getByRole('group', { name: 'Mobile cockpit panels' })).toBeVisible();
     await expect(mobileRails.getByRole('tab')).toHaveCount(0);
     const initialContextPanel = await panelControlledByButton('context');
@@ -2505,6 +2463,12 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(promptSearch).toBeHidden();
     await expect(page.getByTestId('chat-input')).toBeVisible();
     await expectMobileDraftReachable();
+    const assistantTrigger = contextPanel.getByRole('button', { name: 'Select character or persona' });
+    await assistantTrigger.click();
+    await expect(page.getByRole('tab', { name: 'Characters' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(assistantTrigger).toBeFocused();
+    await expectMobileDraftPreserved();
     // Retire earlier composer layout timers before focusing its sibling rail.
     await page.waitForTimeout(1000);
     await runtimeButton.click();
@@ -2512,7 +2476,7 @@ test.describe('/chat cockpit real-server parity', () => {
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expect(runtimeButton).toHaveAttribute('aria-expanded', 'true');
     await expect(contextButton).toHaveAttribute('aria-expanded', 'false');
-    const runtimePanel = mobileRails.getByRole('region', { name: 'Chat settings', exact: true });
+    const runtimePanel = mobileRails.getByRole('region', { name: 'Runtime', exact: true });
     await expect(runtimePanel).toBeVisible();
     await expect(contextPanelTarget).toBeHidden();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
@@ -2520,7 +2484,6 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expectMobileDraftPreserved();
     await assertRuntimeProviderSummary(runtimePanel);
-    await expect(runtimePanel.getByText('Provider:model settings')).toBeVisible();
     await expect(runtimePanel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
     const mobileModelSettingsTrigger = runtimePanel.getByRole('button', {
       name: 'Open model settings',
@@ -2528,7 +2491,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(mobileModelSettingsTrigger).toBeVisible();
     await expect(
       runtimePanel.getByRole('button', { name: 'Select character or persona' })
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
     await assertMobileComposerDraftVisible(page);
@@ -2552,10 +2515,6 @@ test.describe('/chat cockpit real-server parity', () => {
     await modelSettingsDialog.getByRole('button', { name: 'Close' }).click();
     await expect(modelSettingsDialog).toBeHidden();
     await expect(mobileModelSettingsTrigger).toBeFocused({ timeout: 5_000 });
-    await expectMobileDraftPreserved();
-    await runtimePanel.getByRole('button', { name: 'Select character or persona' }).click();
-    await expect(page.getByRole('tab', { name: 'Characters' })).toBeVisible();
-    await page.keyboard.press('Escape');
     await expectMobileDraftPreserved();
     await runtimePanel.getByRole('button', { name: 'Configure MCP tools' }).click();
     const mcpSettingsDialog = page.getByRole('dialog', {
@@ -2582,11 +2541,11 @@ test.describe('/chat cockpit real-server parity', () => {
       path: testInfo.outputPath('chat-cockpit-mobile-focus.png'),
       fullPage: true,
     });
-    await expectNoMobileBottomControls();
+    await expectMobileComposerFooter();
     await switchChatLayoutMode(page, 'cockpit');
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expectMobileDraftPreserved();
-    await expect(mobileRails.getByRole('region', { name: 'Chat settings', exact: true })).toBeVisible();
+    await expect(mobileRails.getByRole('region', { name: 'Runtime', exact: true })).toBeVisible();
     await assertNoHorizontalOverflow(page);
   });
 
@@ -2636,7 +2595,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
       await assertNoBlockingServerDialog(page);
       const rails = await waitForMobileCockpitPanel(page, 'runtime');
-      const runtimePanel = rails.getByRole('region', { name: 'Chat settings', exact: true });
+      const runtimePanel = rails.getByRole('region', { name: 'Runtime', exact: true });
       const draft = 'Keep this draft while MCP tools arrive.';
       await fillEditableComposer(page, draft);
       await waitForPlaygroundDraftSaved(page);
@@ -2709,7 +2668,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await page.setViewportSize({ width: 390, height: 600 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     const rails = await waitForMobileCockpitPanel(page, 'runtime');
-    const panel = rails.getByRole('region', { name: 'Chat settings', exact: true });
+    const panel = rails.getByRole('region', { name: 'Runtime', exact: true });
     await expect(panel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
     await fillEditableComposer(page, 'Keep this short-screen draft.');
     await assertMobileComposerDraftVisible(page);
@@ -2750,7 +2709,7 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
     await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
-    await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
+    await expect(page.getByTestId('composer-bottom-bar')).toBeVisible();
 
     const mobileWebSearchControl = page.getByRole('button', {
       name: 'Web search',
@@ -2878,9 +2837,9 @@ test.describe('/chat cockpit real-server parity', () => {
         runtimeInspector.getByRole('button', { name: 'Open Scene Director' })
       ).toBeVisible();
       const contextRail = getDesktopContextRail(page);
-      const compositionPreview = getDesktopCompositionPreview(page);
+      const compositionPreview = await getDesktopCompositionPreview(page);
       await expect(compositionPreview).toContainText(characterName);
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       const assistantContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')
@@ -3021,9 +2980,9 @@ test.describe('/chat cockpit real-server parity', () => {
       ).toBeVisible();
 
       const contextRail = getDesktopContextRail(page);
-      const compositionPreview = getDesktopCompositionPreview(page);
+      const compositionPreview = await getDesktopCompositionPreview(page);
       await expect(compositionPreview).toContainText(String(selectedPersona.name));
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       const personaContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')
@@ -3249,12 +3208,22 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const modelKey = await selectConfiguredCockpitModel(page, chatModelSelection);
     const runtimeInspector = getDesktopRuntimeInspector(page);
-    const compositionPreview = getDesktopCompositionPreview(page);
+    const compositionPreview = await getDesktopCompositionPreview(page);
 
-    await expect(compositionPreview).toContainText(`Scope: ${modelKey}`);
+    await expect(compositionPreview).toContainText(compositionScopeText(modelKey));
     expect(modelKey).toBe(chatModelSelection.key);
-    await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
-    await expect(runtimeInspector.getByText(modelKey, { exact: true })).toBeVisible();
+    await assertRuntimeProviderSummary(runtimeInspector);
+    const modelRoute = runtimeInspector.getByRole('region', { name: 'Model route', exact: true });
+    const routeValues = modelRoute.locator('dl').first().locator('dd');
+    // Plain names (CC-06): the provider's display name ("Custom OpenAI API"
+    // for custom-openai-api), never a raw key, route or the empty fallback.
+    const compactName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    await expect(routeValues.nth(0)).not.toHaveText(/:|No provider selected/);
+    expect(compactName((await routeValues.nth(0).textContent()) ?? '')).toContain(
+      compactName(normalizeCockpitProviderKey(chatModelSelection.provider))
+    );
+    await expect(routeValues.nth(1)).toHaveText(chatModelSelection.model);
+    await expect(modelRoute.getByRole('button', { name: 'Open model settings' })).toHaveAttribute('title', modelKey);
 
     const prompt = `Cockpit model provider proof ${Date.now()}: answer in one short sentence.`;
     await page.getByTestId('chat-input').fill(prompt);
@@ -3316,15 +3285,24 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(regenerateControl).toBeDisabled();
 
     const prompt = `Cockpit streaming controls proof ${Date.now()}: reply with a concise numbered list.`;
+    let selectedPrompt = prompt;
     const completionAttempt = page.waitForRequest(
       (request) => isChatCompletionRequest(page, request),
       { timeout: 90_000 }
     );
 
+    const completionResponse = completionAttempt.then(hit => hit.response());
     await page.getByTestId('chat-input').fill(prompt);
     await page.getByRole('button', { name: /send message/i }).click();
     const completionRequest = await completionAttempt;
-    await assertProviderQualifiedPayload(page, completionRequest);
+    // Short replies are held before HTTP headers; qualify saved input without waiting for output.
+    const originalChatId = completionRequest.postDataJSON().conversation_id ?? completionRequest.postDataJSON().tldw_history_selection_v1?.conversation_id;
+    expect(typeof originalChatId).toBe('string');
+    const messagesPath = `/api/v1/chats/${originalChatId}/messages?include_metadata=true&render_placeholders=false`;
+    await expect.poll(async () => {
+      const saved = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+      return saved.status === 200 && saved.body.messages.some(row => row.sender === 'user' && row.content === prompt);
+    }, { timeout: 30_000 }).toBe(true);
 
     const runtimeStop = runtimeInspector.getByRole('button', { name: 'Stop generation' });
     const messageStop = page.getByRole('button', { name: /Stop streaming response/i }).first();
@@ -3334,6 +3312,7 @@ test.describe('/chat cockpit real-server parity', () => {
     ];
     const stopControl = await waitForFirstAvailableControl(stopCandidates, 15_000);
 
+    let clickedStopControl: ControlCandidate | null = null;
     if (!stopControl) {
       const note =
         'No streaming stop control became observable before the provider response completed.';
@@ -3346,8 +3325,7 @@ test.describe('/chat cockpit real-server parity', () => {
       }
       await assertChatCompletionRenderedOrRecoverable(page);
     } else {
-      const clickedStopControl =
-        (await clickFirstAvailableControl([stopControl, ...stopCandidates])) ?? null;
+      clickedStopControl = await clickFirstAvailableControl([stopControl, ...stopCandidates]);
       if (!clickedStopControl && expectStreamingControlEvidence) {
         throw new Error(
           `Streaming stop control "${stopControl.label}" appeared but disappeared before it could be clicked.`
@@ -3360,26 +3338,42 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
     }
 
+    await assertProviderQualifiedPayload(page, completionRequest);
+    const admittedResponse = await completionResponse;
+    if (admittedResponse) {
+      expect(admittedResponse.status(), admittedResponse.status() === 200
+        ? 'Initial completion must succeed unless Stop aborts it'
+        : await admittedResponse.text()).toBe(200);
+    } else {
+      expect(clickedStopControl).not.toBeNull();
+    }
     await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
     await expect(messageStop).toBeHidden({ timeout: 30_000 });
     const assistantMessages = page
       .getByRole('log', { name: /chat messages/i })
       .locator("article[aria-label*='Assistant message']");
-    if ((await assistantMessages.count()) === 0) {
-      // Stopping before the first token correctly removes the empty assistant
-      // stub. Complete another turn so the history gate has a response to gate.
-      await expect(regenerateControl).toBeDisabled();
-      await expect(
-        runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
-      ).toBeVisible();
+    const stopped = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+    expect(stopped.status).toBe(200);
+    const stoppedQuestion = stopped.body.messages.find(row => row.sender === 'user' && row.content === prompt);
+    expect(stoppedQuestion).toBeDefined();
+    const savedStoppedAnswer = stopped.body.messages.find(row => row.sender === 'assistant' &&
+      row.parent_message_id === stoppedQuestion!.id && row.content.trim());
+    const emptyResponse = (await assistantMessages.count()) === 0;
+    if (emptyResponse || !savedStoppedAnswer) {
+      // Unsaved partial text is readable, but cannot authorize a saved-history branch.
+      if (emptyResponse) {
+        await expect(regenerateControl).toBeDisabled();
+        await expect(
+          runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
+        ).toBeVisible();
+      }
       // Stop may precede the server settlement receipt; reload the saved history before a new turn.
-      const originalChatId = completionRequest.postDataJSON().conversation_id ?? completionRequest.postDataJSON().tldw_history_selection_v1?.conversation_id;
-      expect(typeof originalChatId).toBe('string');
       const originalRecoveries = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
         .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}));
       const stoppedInput = originalRecoveries.find(turn => turn.input_text === prompt);
       expect(stoppedInput).toBeDefined();
-      await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      if (emptyResponse) await expect(page.getByText('The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.', { exact: true })).toBeVisible();
+      else expect(stoppedInput!.result_text.trim()).not.toBe('');
       const automaticTurnAttempts: string[] = [];
       const observeAutomaticTurn = (hit: Request) => {
         if (hit.method() !== 'POST') return;
@@ -3396,12 +3390,36 @@ test.describe('/chat cockpit real-server parity', () => {
           .find(turn => turn.operation_id === stoppedInput!.operation_id);
         expect(coldRecovery).toEqual(stoppedInput);
         await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
-        const savedSource = page.getByRole('list', { name: 'Complete source messages', exact: true });
+        const savedSource = page.getByRole('list', { name: 'All messages in this chat', exact: true });
         await expect(savedSource).toBeVisible();
-        const continueAfterSaved = savedSource.locator('[data-history-message-id]').last()
-          .getByRole('button', { name: 'Continue after this message', exact: true });
-        await expect(continueAfterSaved).toBeEnabled();
-        await continueAfterSaved.click();
+        const reloaded = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+        expect(reloaded.status).toBe(200);
+        const lateAnswer = reloaded.body.messages.find(row => row.sender === 'assistant' && row.parent_message_id === stoppedQuestion!.id && row.content.trim());
+        const captureBoundary = async (id: string): Promise<HistorySelectionCaptureV1> => {
+          const captured = page.waitForResponse(response => response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === `/api/v1/chat/conversations/${originalChatId}/history/selection` &&
+            response.request().postDataJSON()?.view?.cursor?.message_id === id && response.status() === 200);
+          const continueAfterSaved = savedSource.locator(`[data-history-message-id="${escapeCssAttrValue(id)}"]`)
+            .getByRole('button', { name: 'Continue after this message', exact: true });
+          await expect(continueAfterSaved).toBeEnabled();
+          await continueAfterSaved.click();
+          const boundary: HistorySelectionCaptureV1 = await (await captured).json();
+          expect(boundary).toMatchObject({ status: 'captured', view: { conversation_id: originalChatId,
+            cursor: { kind: 'after_message', message_id: id } } });
+          return boundary;
+        };
+        let boundaryId = lateAnswer?.id ?? stoppedQuestion!.id;
+        let boundary = await captureBoundary(boundaryId);
+        const lateChildren = boundary.snapshot.nodes.filter(node => node.parent_id === boundaryId);
+        if (lateChildren.length) {
+          // A stopped reply can settle between the API read and this captured manifest.
+          expect(boundaryId).toBe(stoppedQuestion!.id);
+          expect(lateChildren).toHaveLength(1);
+          expect(lateChildren[0]).toMatchObject({ role: 'assistant', settled: true });
+          boundaryId = lateChildren[0].id;
+          boundary = await captureBoundary(boundaryId);
+        }
+        expect(boundary.snapshot.nodes.filter(node => node.parent_id === boundaryId)).toEqual([]);
         await page.getByRole('button', { name: 'Cancel review', exact: true }).click();
         await expect(page.locator("article[data-role='user']").filter({ hasText: prompt })).toHaveCount(1);
         await expect(page.getByRole('button', { name: /send message/i })).toBeEnabled();
@@ -3410,18 +3428,86 @@ test.describe('/chat cockpit real-server parity', () => {
         page.removeListener('request', observeAutomaticTurn);
       }
       const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
-      await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
+      selectedPrompt = 'Reply with one short sentence to verify the saved-history regeneration gate.';
+      await page.getByTestId('chat-input').fill(selectedPrompt);
       await page.getByRole('button', { name: /send message/i }).click();
       const followUpResponse = await followUpCompletion;
       expect(followUpResponse.status()).toBeLessThan(400);
       await assertProviderQualifiedPayload(page, followUpResponse);
       await waitForStreamComplete(page, 60_000);
     }
-    await expect(assistantMessages.last()).toBeVisible();
-    await expect(regenerateControl).toBeDisabled({ timeout: 30_000 });
-    await expect(runtimeInspector.getByText('Regeneration is unavailable for selected history.')).toBeVisible();
+    await expect.poll(async () => {
+      const saved = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+      const question = saved.body.messages.find(row => row.sender === 'user' && row.content === selectedPrompt);
+      return saved.status === 200 && Boolean(question && saved.body.messages.some(row =>
+        row.sender === 'assistant' && row.parent_message_id === question.id && row.content.trim()));
+    }, { timeout: 30_000 }).toBe(true);
+    const chatId = originalChatId;
+    const canonical = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+    expect(canonical.status).toBe(200);
+    const originals = canonical.body.messages;
+    const question = originals.find(row => row.sender === 'user' && row.content === selectedPrompt)!;
+    const answer = originals.find(row => row.sender === 'assistant' && row.parent_message_id === question.id)!;
+    const answerId = answer.id;
+    expect(answer).toMatchObject({ sender: 'assistant', conversation_id: chatId });
+    expect(answer.content.trim()).not.toBe('');
+    expect(question).toMatchObject({ sender: 'user', content: selectedPrompt });
+    const selectedResponse = page.waitForResponse(response => response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === `/api/v1/chat/conversations/${chatId}/history/selection` &&
+      response.request().postDataJSON()?.view?.cursor?.message_id === answerId && response.status() === 200);
+    await choose(page, answerId);
+    const selected = await (await selectedResponse).json();
+    expect(selected).toMatchObject({ status: 'captured', view: { conversation_id: chatId,
+      cursor: { kind: 'after_message', message_id: answerId } } });
+    expect(selected.view.owner_key).toBe(selected.snapshot.owner_key);
+    expect(selected.rows.slice(-2)).toMatchObject([
+      { id: question.id, role: 'user' },
+      { id: answerId, role: 'assistant', parent_id: question.id, settled: true },
+    ]);
+    await expect.poll(async () => ((await readStore(page, 'historySelections')) as HistoryBookmark[]).some(row =>
+      row.conversation_id === chatId && row.owner_key === selected.view.owner_key &&
+      row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === answerId)).toBe(true);
+    const unsent = 'UNSENT next question must survive Regenerate';
+    await page.getByTestId('chat-input').fill(unsent);
+    await expect(regenerateControl).toBeEnabled();
+    const calls = captureAllApiCalls(page);
+    try {
+      const regeneration = waitForChatCompletionAttempt(page, 90_000);
+      await regenerateControl.click();
+      const response = await regeneration;
+      expect(response.status()).toBeLessThan(400);
+      await assertProviderQualifiedPayload(page, response);
+      const payload = response.request().postDataJSON();
+      expect(payload).toMatchObject({ conversation_id: chatId, save_to_db: true, tldw_history_branch: true,
+        metadata: { tldw_regenerate_from_message_id: answerId },
+        tldw_history_selection_v1: { conversation_id: chatId, owner_key: selected.view.owner_key,
+          cursor: { kind: 'after_message', message_id: answerId } } });
+      expect(payload.messages.at(-1)).toMatchObject({ role: 'user', content: question.content });
+      await expect.poll(async () => {
+        const saved = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+        const added = saved.body.messages.filter(row => !originals.some(old => old.id === row.id));
+        return saved.status === 200 && added.length === 1 && added[0].sender === 'assistant' &&
+          added[0].parent_message_id === question.id && Boolean(added[0].content.trim());
+      }, { timeout: 60_000 }).toBe(true);
+      await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
+      const after = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+      expect(after.status).toBe(200);
+      expect(after.body.messages.filter(row => originals.some(old => old.id === row.id))).toEqual(originals);
+      const alternatives = after.body.messages.filter(row => !originals.some(old => old.id === row.id));
+      expect(alternatives).toEqual([expect.objectContaining({ sender: 'assistant', parent_message_id: question.id })]);
+      expect(alternatives[0].content.trim()).not.toBe('');
+      await expect(assistantMessages.last()).toHaveAttribute('data-server-message-id', alternatives[0].id);
+      expect(after.body.messages.filter(row => row.sender === 'user')).toEqual(originals.filter(row => row.sender === 'user'));
+      await expect(page.getByTestId('chat-input')).toHaveValue(unsent);
+      const requests = await calls.stop();
+      expect(requests.filter(call => call.method === 'POST' && new URL(call.url).pathname === new URL(response.url()).pathname)).toHaveLength(1);
+      expect(requests.filter(call => call.method === 'POST' && new URL(call.url).pathname === `/api/v1/chats/${chatId}/messages` &&
+        (call.requestBody as { role?: unknown } | null)?.role === 'user')).toEqual([]);
+    } finally {
+      await calls.stop();
+    }
     await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history-gated.png'),
+      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history-branch.png'),
       fullPage: true,
     });
   });
@@ -3473,7 +3559,7 @@ test('refreshes a real empty native source after late settlement without replay 
     await expect(page.getByRole("button", { name: "Review conversation history", exact: true })).toBeFocused();
     await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
     await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
-    await expect(page.getByRole('list', { name: 'Complete source messages', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
+    await expect(page.getByRole('list', { name: 'All messages in this chat', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
     const records = ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id);
     expect(records.flatMap(row => Object.values(row.pending_turns ?? {})).find(turn => turn.operation_id === recovery.operation_id)).toEqual(recovery);
     expect(attempts).toEqual([]);
@@ -3562,7 +3648,7 @@ for (const format of ['v2', 'png'] as const) test('imports a real '+format+' car
     expect(canonical.body.messages[0].content).toBe(imported.firstMessage);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('log', { name: /chat messages/i })).toContainText('Imported card second turn '+format);
-    const customize = page.getByRole('button', { name: 'Customize chat', exact: true });
+    const customize = page.getByTestId('composer-options-toggle');
     if (await customize.isVisible() && await customize.getAttribute('aria-expanded') === 'false') await customize.click();
     await page.getByTestId('composer-role-play-setup').click();
     const scene = page.getByRole('dialog', { name: 'Role-play setup', exact: true });

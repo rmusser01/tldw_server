@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator
 
 from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     PersonalContextSyncCapabilitiesResponse,
+    export_personal_context_ongoing_contract,
 )
 from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PERSONAL_CONTEXT_ONGOING_ENDPOINTS,
@@ -23,7 +24,6 @@ from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
     PersonalContextExchangeProof,
     PersonalContextPurgeReceipt,
     PersonalContextRelayContinuation,
-    export_personal_context_ongoing_contract,
     validate_client_personal_context_metadata,
 )
 

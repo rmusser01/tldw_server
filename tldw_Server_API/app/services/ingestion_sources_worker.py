@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
 from tldw_Server_API.app.core.Ingestion_Sources.archive_snapshot import (
     build_archive_snapshot_from_bytes_with_failures,
@@ -532,6 +533,7 @@ async def _apply_snapshot_changes(
     return result_summary
 
 
+@owns_chacha_checkouts
 async def _process_sync_job(
     jm,
     jid: int,

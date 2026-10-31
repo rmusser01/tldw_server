@@ -5,8 +5,8 @@ import threading
 import pytest
 from loguru import logger
 
-from tldw_Server_API.app.core.LLM_Calls import anthropic_messages as anthropic_messages_module
-from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import (
+from tldw_Server_API.app.core.Chat import anthropic_messages as anthropic_messages_module
+from tldw_Server_API.app.core.Chat.anthropic_messages import (
     anthropic_messages_to_openai,
     anthropic_tool_choice_to_openai,
     openai_response_to_anthropic,

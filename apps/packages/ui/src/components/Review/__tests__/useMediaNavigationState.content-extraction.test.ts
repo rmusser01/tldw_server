@@ -25,7 +25,7 @@ describe("media navigation content extraction", () => {
 
     expect(hydrationBlock.indexOf("setLastFetchedId(resolvedId)")).toBeGreaterThan(-1)
     expect(hydrationBlock.indexOf("setLastFetchedId(resolvedId)")).toBeLessThan(
-      hydrationBlock.indexOf("setSelected(hydratedSelection)")
+      hydrationBlock.indexOf("publishSelected(hydratedSelection)")
     )
   })
 })

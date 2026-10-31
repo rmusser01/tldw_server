@@ -42,6 +42,8 @@ import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { resetHistoryTurnRegistry } from "@/services/history-turn-keep"
 import { resetServerChatSaveStatus } from "@/store/server-chat-save-status"
+import { resetServerChatRouteState } from "@/hooks/chat/server-chat-route"
+import { resetSavedReplyRefusals } from "@/hooks/chat/saved-reply-actions"
 import { tldwModels } from "@/services/tldw"
 import { clearChatModelsCache } from "@/services/tldw-server"
 import { ConnectionPhase } from "@/types/connection"
@@ -175,6 +177,8 @@ const resetAppStores = () => {
   // Page-lifetime chat state: running turns and acknowledged server writes.
   resetHistoryTurnRegistry()
   resetServerChatSaveStatus()
+  resetServerChatRouteState()
+  resetSavedReplyRefusals()
 }
 
 export const resetPlaygroundHarness = async () => {
@@ -279,7 +283,7 @@ export const renderPlayground = async ({
     const state = useConnectionStore.getState().state
     expect(state.isConnected && state.phase === ConnectionPhase.CONNECTED).toBe(true)
   }, HARNESS_WAIT)
-  const composer = await screen.findByPlaceholderText(/Type a message/i, {}, HARNESS_WAIT)
+  const composer = await screen.findByTestId("chat-input", {}, HARNESS_WAIT)
   return Object.assign(page, { user, queryClient, server, composer })
 }
 

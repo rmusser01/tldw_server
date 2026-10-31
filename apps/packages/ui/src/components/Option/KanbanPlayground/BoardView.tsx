@@ -21,26 +21,8 @@ import { useSortable } from "@dnd-kit/react/sortable"
 import { closestCorners } from "@dnd-kit/collision"
 import { arrayMove } from "@dnd-kit/helpers"
 
-import {
-  createList,
-  createCard,
-  updateBoard,
-  updateList,
-  deleteList,
-  updateCard,
-  deleteCard,
-  moveCard,
-  archiveList,
-  unarchiveList,
-  archiveCard,
-  unarchiveCard,
-  reorderLists,
-  reorderCards,
-  generateClientId,
-  isCardOverdue,
-  getPriorityColor,
-  formatDueDate
-} from "@/services/kanban"
+import { generateClientId, isCardOverdue, getPriorityColor, formatDueDate } from "@/services/kanban"
+import { useKanbanScope } from "./KanbanScope"
 import type {
   BoardWithLists,
   ListWithCards,
@@ -82,6 +64,8 @@ export const BoardView = ({
   shortcutHandlersRef
 }: BoardViewProps) => {
   const queryClient = useQueryClient()
+  const { api, key, isActive } = useKanbanScope()
+  const { createList, createCard, updateBoard, updateList, deleteList, updateCard, deleteCard, moveCard, archiveList, unarchiveList, archiveCard, unarchiveCard, reorderLists, reorderCards } = api
 
   // Drag state
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -129,6 +113,11 @@ export const BoardView = ({
 
   // Undo state
   const undoRef = useRef<UndoAction | null>(null)
+  const undoToastRef = useRef<ReturnType<typeof message.open> | null>(null)
+  useEffect(() => () => {
+    undoRef.current = null
+    undoToastRef.current?.()
+  }, [])
 
   useEffect(() => {
     setRenameValue(board.name)
@@ -137,8 +126,10 @@ export const BoardView = ({
   // Show undo toast after archive
   const showUndoToast = useCallback(
     (action: UndoAction) => {
+      if (!isActive()) return
+      undoToastRef.current?.()
       undoRef.current = action
-      message.open({
+      undoToastRef.current = message.open({
         type: "success",
         content: (
           <div className="flex items-center gap-2">
@@ -147,29 +138,34 @@ export const BoardView = ({
               type="link"
               size="small"
               onClick={() => {
+                if (!isActive()) return
                 const a = undoRef.current
                 if (!a) return
                 undoRef.current = null
                 if (a.type === "archive-card") {
                   unarchiveCard(a.entityId)
                     .then(() => {
+                      if (!isActive()) return
                       queryClient.invalidateQueries({
-                        queryKey: ["kanban-board", board.id]
+                        queryKey: key("kanban-board", board.id)
                       })
                       message.success("Card restored")
                     })
                     .catch(() => {
+                      if (!isActive()) return
                       message.error("Failed to restore card. Please try again.")
                     })
                 } else if (a.type === "archive-list") {
                   unarchiveList(a.entityId)
                     .then(() => {
+                      if (!isActive()) return
                       queryClient.invalidateQueries({
-                        queryKey: ["kanban-board", board.id]
+                        queryKey: key("kanban-board", board.id)
                       })
                       message.success("List restored")
                     })
                     .catch(() => {
+                      if (!isActive()) return
                       message.error("Failed to restore list. Please try again.")
                     })
                 }
@@ -182,7 +178,7 @@ export const BoardView = ({
         duration: 10
       })
     },
-    [board.id, queryClient]
+    [board.id, isActive, key, queryClient, unarchiveCard, unarchiveList]
   )
 
   // Mutations
@@ -190,12 +186,14 @@ export const BoardView = ({
     mutationFn: (name: string) =>
       createList(board.id, { name, client_id: generateClientId() }),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("List created")
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
       setAddingList(false)
       setNewListName("")
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to create list. Please try again.")
     }
   })
@@ -203,12 +201,14 @@ export const BoardView = ({
   const updateBoardMutation = useMutation({
     mutationFn: (name: string) => updateBoard(board.id, { name }),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Board renamed")
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards"] })
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards") })
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
       setRenameModalOpen(false)
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to rename board. Please try again.")
     }
   })
@@ -217,10 +217,12 @@ export const BoardView = ({
     mutationFn: ({ listId, data }: { listId: number; data: ListUpdate }) =>
       updateList(listId, data),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("List renamed")
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to rename list. Please try again.")
     }
   })
@@ -228,10 +230,12 @@ export const BoardView = ({
   const deleteListMutation = useMutation({
     mutationFn: (listId: number) => deleteList(listId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("List deleted")
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete list. Please try again.")
     }
   })
@@ -240,10 +244,12 @@ export const BoardView = ({
     mutationFn: ({ listId, listName }: { listId: number; listName: string }) =>
       archiveList(listId),
     onSuccess: (_data, { listId, listName }) => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
       showUndoToast({ type: "archive-list", entityId: listId, label: listName })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to archive list. Please try again.")
     }
   })
@@ -257,7 +263,8 @@ export const BoardView = ({
       cardTitle: string
     }) => archiveCard(cardId),
     onSuccess: (_data, { cardId, cardTitle }) => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
       setDetailPanelOpen(false)
       setSelectedCard(null)
       showUndoToast({
@@ -267,6 +274,7 @@ export const BoardView = ({
       })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to archive card. Please try again.")
     }
   })
@@ -275,10 +283,12 @@ export const BoardView = ({
     mutationFn: ({ listId, title }: { listId: number; title: string }) =>
       createCard(listId, { title, client_id: generateClientId() }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
       setAddingCardListId(null)
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to create card. Please try again.")
     }
   })
@@ -287,9 +297,11 @@ export const BoardView = ({
     mutationFn: ({ cardId, data }: { cardId: number; data: CardUpdate }) =>
       updateCard(cardId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to update card. Please try again.")
     }
   })
@@ -297,12 +309,14 @@ export const BoardView = ({
   const deleteCardMutation = useMutation({
     mutationFn: (cardId: number) => deleteCard(cardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Card deleted")
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
       setDetailPanelOpen(false)
       setSelectedCard(null)
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete card. Please try again.")
     }
   })
@@ -318,9 +332,11 @@ export const BoardView = ({
       position?: number
     }) => moveCard(cardId, targetListId, position),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to move card. Please try again.")
     }
   })
@@ -328,13 +344,15 @@ export const BoardView = ({
   const reorderListsMutation = useMutation({
     mutationFn: (listIds: number[]) => reorderLists(board.id, listIds),
     onMutate: async (listIds) => {
-      await queryClient.cancelQueries({ queryKey: ["kanban-board", board.id] })
-      const previous = queryClient.getQueryData<BoardWithLists>(["kanban-board", board.id])
+      if (!isActive()) return
+      await queryClient.cancelQueries({ queryKey: key("kanban-board", board.id) })
+      if (!isActive()) return
+      const previous = queryClient.getQueryData<BoardWithLists>(key("kanban-board", board.id))
       if (previous) {
         const reordered = listIds
           .map((id) => previous.lists.find((l) => l.id === id))
           .filter(Boolean) as ListWithCards[]
-        queryClient.setQueryData<BoardWithLists>(["kanban-board", board.id], {
+        queryClient.setQueryData<BoardWithLists>(key("kanban-board", board.id), {
           ...previous,
           lists: reordered
         })
@@ -342,13 +360,15 @@ export const BoardView = ({
       return { previous }
     },
     onError: (_err, _vars, context) => {
+      if (!isActive()) return
       if (context?.previous) {
-        queryClient.setQueryData(["kanban-board", board.id], context.previous)
+        queryClient.setQueryData(key("kanban-board", board.id), context.previous)
       }
       message.error("Failed to reorder lists. Please try again.")
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
     }
   })
 
@@ -356,8 +376,10 @@ export const BoardView = ({
     mutationFn: ({ listId, cardIds }: { listId: number; cardIds: number[] }) =>
       reorderCards(listId, cardIds),
     onMutate: async ({ listId, cardIds }) => {
-      await queryClient.cancelQueries({ queryKey: ["kanban-board", board.id] })
-      const previous = queryClient.getQueryData<BoardWithLists>(["kanban-board", board.id])
+      if (!isActive()) return
+      await queryClient.cancelQueries({ queryKey: key("kanban-board", board.id) })
+      if (!isActive()) return
+      const previous = queryClient.getQueryData<BoardWithLists>(key("kanban-board", board.id))
       if (previous) {
         const updated = {
           ...previous,
@@ -369,18 +391,20 @@ export const BoardView = ({
             return { ...l, cards: reordered }
           })
         }
-        queryClient.setQueryData<BoardWithLists>(["kanban-board", board.id], updated)
+        queryClient.setQueryData<BoardWithLists>(key("kanban-board", board.id), updated)
       }
       return { previous }
     },
     onError: (_err, _vars, context) => {
+      if (!isActive()) return
       if (context?.previous) {
-        queryClient.setQueryData(["kanban-board", board.id], context.previous)
+        queryClient.setQueryData(key("kanban-board", board.id), context.previous)
       }
       message.error("Failed to reorder cards. Please try again.")
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", board.id] })
+      if (!isActive()) return
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", board.id) })
     }
   })
 
@@ -400,11 +424,12 @@ export const BoardView = ({
   const handleSaveCard = useCallback(
     async (cardId: number, data: CardUpdate) => {
       const updatedCard = await updateCardMutation.mutateAsync({ cardId, data })
+      if (!isActive()) return
       setSelectedCard((current) =>
         current?.id === updatedCard.id ? updatedCard : current
       )
     },
-    [updateCardMutation]
+    [isActive, updateCardMutation]
   )
 
   // Delete card
@@ -859,7 +884,7 @@ export const BoardView = ({
         }
         onCopied={() => {
           queryClient.invalidateQueries({
-            queryKey: ["kanban-board", board.id]
+            queryKey: key("kanban-board", board.id)
           })
         }}
       />

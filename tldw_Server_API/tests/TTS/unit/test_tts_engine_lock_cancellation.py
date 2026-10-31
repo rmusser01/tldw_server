@@ -19,6 +19,7 @@ import anyio
 import numpy as np
 import pytest
 
+from tldw_Server_API.app.core.TTS import utils as tts_utils
 from tldw_Server_API.app.core.TTS.adapters import supertonic2_adapter, supertonic_adapter
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
 
@@ -40,13 +41,39 @@ class _Gate:
             raise RuntimeError("the test never released the engine call")
 
 
+async def _until(condition: Callable[[], object], what: str) -> None:
+    """Poll ``condition``; fail after 5 s rather than hang the run."""
+    for _ in range(500):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    pytest.fail(f"timed out waiting for {what}")
+
+
+def _queued_on(lock: asyncio.Lock) -> bool:
+    """Whether a caller is queued on ``lock``: asyncio.Lock keeps each queued acquire's future in _waiters."""
+    return any(not waiter.done() for waiter in lock._waiters or ())
+
+
+def _model_load_lock() -> asyncio.Lock:
+    """The one model-load lock (tts_model_load_lock) held on this test's loop."""
+    loop = asyncio.get_running_loop()
+    (lock,) = [lock for (owner, _provider, _model), lock in tts_utils._MODEL_LOAD_LOCKS.items() if owner is loop]
+    return lock
+
+
 async def _assert_cancelled_call_keeps_the_engine(
     call: Callable[[], Awaitable[object]],
     gate: _Gate,
     *,
+    lock: Callable[[], asyncio.Lock],
     via_anyio_scope: bool,
 ) -> None:
-    """Cancel one call mid-engine-call while a second waits; the second must not start until the first returns."""
+    """Cancel one call mid-engine-call while a second waits; the second must not start until the first returns.
+
+    Checked by state, not by elapsed time (TASK-13893): once the cancel has unwound, the second call must
+    end up queued on ``lock`` (the lock the first call holds), not running its own engine call.
+    """
     scopes: list[anyio.CancelScope] = []
 
     async def _first() -> None:
@@ -59,20 +86,20 @@ async def _assert_cancelled_call_keeps_the_engine(
 
     first = asyncio.create_task(_first())
     try:
-        for _ in range(500):
-            if gate.started:
-                break
-            await asyncio.sleep(0.01)
-        assert gate.started, "the first call never reached the engine"
+        await _until(lambda: gate.started, "the first call to reach the engine")
+        held = lock()
+        # Ready callbacks run in FIFO order, so the second call takes its first step before the cancel lands.
         second = asyncio.create_task(call())
-        await asyncio.sleep(0.05)
         if via_anyio_scope:
             scopes[0].cancel()
         else:
             first.cancel()
-        await asyncio.sleep(0.1)
-        # The cancelled request's engine call is still running, so the next one has not started.
+        await asyncio.wait({first}, timeout=5)
+        assert first.done(), "the cancelled call never unwound"
+        await _until(lambda: _queued_on(held) or len(gate.started) > 1, "the second call to queue on the lock")
+        # The cancelled call's engine thread still runs, so the lock is still held and the second call queued on it.
         assert len(gate.started) == 1
+        assert _queued_on(held)
     finally:
         gate.release.set()
     # Bounded waits: a lock-leak regression must fail here, not hang the run until pytest-timeout kills it (Review M1).
@@ -127,7 +154,9 @@ async def test_pocket_tts_generate_keeps_the_engine_until_its_call_returns(via_a
     async def call():
         return await adapter.generate(_pocket_request(stream=False))
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 @pytest.mark.asyncio
@@ -140,7 +169,9 @@ async def test_pocket_tts_stream_keeps_the_engine_until_its_call_returns(via_any
         response = await adapter.generate(_pocket_request(stream=True))
         return [chunk async for chunk in response.audio_stream]
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _luxtts_adapter(gate: _Gate):
@@ -173,22 +204,29 @@ async def test_luxtts_keeps_the_engine_until_its_call_returns(via_anyio_scope):
             TTSRequest(text="hello", format=AudioFormat.PCM, voice_reference=_WAV_HEADER, stream=False)
         )
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
-def _supertonic_adapter(monkeypatch, tmp_path, gate: _Gate, *, version: int):
+def _supertonic_adapter(monkeypatch, tmp_path, gate: _Gate, *, version: int, gate_load: bool = False):
     onnx_dir = tmp_path / "onnx"
-    onnx_dir.mkdir()
+    onnx_dir.mkdir(exist_ok=True)
     voices_dir = tmp_path / "voices"
-    voices_dir.mkdir()
+    voices_dir.mkdir(exist_ok=True)
     (voices_dir / "M1.json").write_text("{}")
 
     def _engine(*_args):
         gate.enter("synthesize")
         return np.zeros((1, 2400), dtype=np.float32), np.array([0.1])
 
+    def _load_text_to_speech(_onnx_dir, _use_gpu=False):
+        if gate_load:
+            gate.enter("load")
+        return _engine
+
     vendor = types.SimpleNamespace(
-        load_text_to_speech=lambda _onnx_dir, _use_gpu=False: _engine,
+        load_text_to_speech=_load_text_to_speech,
         load_voice_style=lambda _paths, _verbose=False: {"style": "dummy"},
     )
     if version == 1:
@@ -222,7 +260,9 @@ async def test_supertonic_keeps_the_engine_until_its_call_returns(monkeypatch, t
         # WAV, not PCM: Supertonic accepts only MP3 and WAV, and MP3 needs PyAV.
         return await adapter.generate(TTSRequest(text="hello", voice=voice, format=AudioFormat.WAV, stream=False))
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _omnivoice_runtime(monkeypatch, tmp_path, gate: _Gate, *, gate_load: bool):
@@ -256,7 +296,9 @@ async def test_omnivoice_runtime_synthesis_keeps_the_model_until_its_call_return
     async def call():
         return await runtime.synthesize(OmniVoiceSynthesizeRequest(text="hello", mode="auto", language_id="en"))
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: runtime._generate_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _vibevoice_adapter(monkeypatch, gate: _Gate):
@@ -305,7 +347,9 @@ async def test_vibevoice_keeps_the_model_until_its_call_returns(monkeypatch, via
         request = TTSRequest(text="Speaker 1: hello", format=AudioFormat.PCM, stream=True)
         return [chunk async for chunk in adapter._stream_audio_vibevoice(request, "speaker_1", 1)]
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._model_state_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 @pytest.mark.asyncio
@@ -314,15 +358,57 @@ async def test_omnivoice_runtime_load_keeps_the_lock_until_the_load_returns(monk
     gate = _Gate()
     runtime = _omnivoice_runtime(monkeypatch, tmp_path, gate, gate_load=True)
 
-    await _assert_cancelled_call_keeps_the_engine(runtime.load, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        runtime.load, gate, lock=lambda: runtime._load_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
-@pytest.mark.asyncio
-@CANCEL_MODES
-async def test_qwen3_mlx_model_load_keeps_the_lock_until_the_load_returns(monkeypatch, via_anyio_scope):
+def _echo_adapter(gate: _Gate):
+    from tldw_Server_API.app.core.TTS.adapters.echo_tts_adapter import EchoTTSAdapter
+
+    def load_model_from_hf(**_kwargs):
+        gate.enter("load_model_from_hf")
+        return object()
+
+    adapter = EchoTTSAdapter({})
+    adapter.device = "cuda"  # initialize() resolves it; these tests skip initialize()
+    adapter._echo_modules_loaded = True
+    adapter._echo_inference = types.SimpleNamespace(
+        load_model_from_hf=load_model_from_hf,
+        load_fish_ae_from_hf=lambda **_kwargs: object(),
+        load_pca_state_from_hf=lambda **_kwargs: object(),
+    )
+    adapter._import_torch = lambda: types.SimpleNamespace(bfloat16="bf16", float16="f16", float32="f32")
+    return adapter
+
+
+def _kitten_adapter(monkeypatch, gate: _Gate):
+    from tldw_Server_API.app.core.TTS.adapters import kitten_tts_adapter as kitten_mod
+
+    def kitten_runtime(assets):
+        gate.enter("KittenRuntime")
+        return types.SimpleNamespace(sample_rate=24000)
+
+    monkeypatch.setattr(kitten_mod, "resolve_model_revision", lambda _model, revision: revision)
+    monkeypatch.setattr(kitten_mod, "download_model_assets", lambda model, **_kwargs: types.SimpleNamespace(repo_id=model))
+    monkeypatch.setattr(kitten_mod, "KittenRuntime", kitten_runtime)
+    return kitten_mod.KittenTTSAdapter({})
+
+
+def _qwen3_pipeline_adapter(gate: _Gate):
     from tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter import Qwen3TTSAdapter
 
-    gate = _Gate()
+    def build_pipeline(_model_id):
+        gate.enter("build_pipeline")
+        return object()
+
+    adapter = Qwen3TTSAdapter({})
+    adapter._pipeline_builders = [("fake", build_pipeline)]
+    return adapter
+
+
+async def _qwen3_mlx_runtime(monkeypatch, gate: _Gate):
+    from tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter import Qwen3TTSAdapter
 
     def load_model(_model_id):
         gate.enter("load_model")
@@ -337,78 +423,54 @@ async def test_qwen3_mlx_model_load_keeps_the_lock_until_the_load_returns(monkey
     monkeypatch.setattr(platform, "machine", lambda: "arm64")
     adapter = Qwen3TTSAdapter({"runtime": "mlx", "device": "mps"})
     await adapter.ensure_initialized()
-    runtime = adapter._get_runtime()
+    return adapter._get_runtime()
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_qwen3_mlx_model_load_keeps_the_lock_until_the_load_returns(monkeypatch, via_anyio_scope):
+    gate = _Gate()
+    runtime = await _qwen3_mlx_runtime(monkeypatch, gate)
 
     async def call():
         return await runtime._get_model("auto")
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
 
 
 @pytest.mark.asyncio
 @CANCEL_MODES
 async def test_qwen3_pipeline_load_keeps_the_lock_until_the_load_returns(via_anyio_scope):
-    from tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter import Qwen3TTSAdapter
-
     gate = _Gate()
-
-    def build_pipeline(_model_id):
-        gate.enter("build_pipeline")
-        return object()
-
-    adapter = Qwen3TTSAdapter({})
-    adapter._pipeline_builders = [("fake", build_pipeline)]
+    adapter = _qwen3_pipeline_adapter(gate)
 
     async def call():
         return await adapter._get_pipeline("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
 
 
 @pytest.mark.asyncio
 @CANCEL_MODES
 async def test_echo_tts_model_load_keeps_the_lock_until_the_load_returns(via_anyio_scope):
-    from tldw_Server_API.app.core.TTS.adapters.echo_tts_adapter import EchoTTSAdapter
-
     gate = _Gate()
+    adapter = _echo_adapter(gate)
 
-    def load_model_from_hf(**_kwargs):
-        gate.enter("load_model_from_hf")
-        return object()
-
-    adapter = EchoTTSAdapter({})
-    adapter.device = "cuda"  # initialize() resolves it; this test skips initialize()
-    adapter._echo_modules_loaded = True
-    adapter._echo_inference = types.SimpleNamespace(
-        load_model_from_hf=load_model_from_hf,
-        load_fish_ae_from_hf=lambda **_kwargs: object(),
-        load_pca_state_from_hf=lambda **_kwargs: object(),
+    await _assert_cancelled_call_keeps_the_engine(
+        adapter._ensure_models_loaded, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope
     )
-    adapter._import_torch = lambda: types.SimpleNamespace(bfloat16="bf16", float16="f16", float32="f32")
-
-    await _assert_cancelled_call_keeps_the_engine(adapter._ensure_models_loaded, gate, via_anyio_scope=via_anyio_scope)
 
 
 @pytest.mark.asyncio
 @CANCEL_MODES
 async def test_kitten_tts_runtime_load_keeps_the_lock_until_the_load_returns(monkeypatch, via_anyio_scope):
-    from tldw_Server_API.app.core.TTS.adapters import kitten_tts_adapter as kitten_mod
-
     gate = _Gate()
-
-    def kitten_runtime(assets):
-        gate.enter("KittenRuntime")
-        return types.SimpleNamespace(sample_rate=24000)
-
-    monkeypatch.setattr(kitten_mod, "resolve_model_revision", lambda _model, revision: revision)
-    monkeypatch.setattr(kitten_mod, "download_model_assets", lambda model, **_kwargs: types.SimpleNamespace(repo_id=model))
-    monkeypatch.setattr(kitten_mod, "KittenRuntime", kitten_runtime)
-    adapter = kitten_mod.KittenTTSAdapter({})
+    adapter = _kitten_adapter(monkeypatch, gate)
 
     async def call():
         return await adapter._load_runtime_for_model("KittenML/kitten-tts-nano-0.8")
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
 
 
 def _kokoro_adapter(monkeypatch, tmp_path, gate: _Gate, *, backend: str, init_timeout_sec: float | None = None):
@@ -483,7 +545,9 @@ async def test_kokoro_model_load_keeps_the_lock_until_the_load_returns(
     gate = _Gate()
     adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend=backend, init_timeout_sec=init_timeout_sec)
 
-    await _assert_cancelled_call_keeps_the_engine(getattr(adapter, entry), gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        getattr(adapter, entry), gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 @pytest.mark.asyncio
@@ -509,17 +573,15 @@ async def test_kokoro_load_past_init_timeout_keeps_the_lock_until_the_load_retur
 
 
 @pytest.mark.asyncio
-async def test_kokoro_onnx_load_ignores_init_timeout_sec(monkeypatch, tmp_path):
-    """init_timeout_sec is PyTorch-only: an ONNX load that outlasts it still completes for its caller."""
+async def test_kokoro_onnx_load_honours_init_timeout_sec(monkeypatch, tmp_path):
+    """init_timeout_sec bounds an ONNX load's caller as it does a PyTorch one: a hung constructor returns False."""
     gate = _Gate()
     adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend="onnx", init_timeout_sec=0.1)
-    load = asyncio.create_task(adapter._ensure_model_loaded())
     try:
-        await asyncio.sleep(0.3)  # three times the bound
-        assert not load.done()
+        assert await asyncio.wait_for(adapter._ensure_model_loaded(), 2) is False
+        assert gate.started == ["load"]
     finally:
         gate.release.set()
-    assert await asyncio.wait_for(load, 5) is True
 
 
 @pytest.mark.asyncio
@@ -537,6 +599,57 @@ async def test_kokoro_load_timeout_error_is_not_reported_as_the_bound(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_kokoro_failed_pytorch_load_is_not_retried_on_the_event_loop(monkeypatch, tmp_path):
+    """A KModel load that fails on its worker thread is not run again on the event loop."""
+    loop_thread = threading.get_ident()
+    attempts = []
+
+    class _FailingKModel:
+        def __init__(self, **_kwargs):
+            attempts.append(threading.get_ident())
+            raise RuntimeError("corrupt checkpoint")
+
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, _Gate(), backend="pytorch")
+    monkeypatch.setattr(sys.modules["kokoro.model"], "KModel", _FailingKModel)
+    with pytest.raises(RuntimeError, match="corrupt checkpoint"):
+        await asyncio.wait_for(adapter._ensure_model_loaded(), 5)
+    assert len(attempts) == 1
+    assert loop_thread not in attempts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kokoro_package", [True, False], ids=["kmodel", "generic-torch"])
+async def test_kokoro_pytorch_load_runs_off_the_event_loop(monkeypatch, tmp_path, kokoro_package):
+    """The whole PyTorch load runs on the worker thread: KModel with its device move, or the generic torch.jit.load."""
+    from tldw_Server_API.app.core.TTS.adapters import kokoro_adapter as kokoro_mod
+
+    loop_thread = threading.get_ident()
+    threads = []
+
+    class _Model:
+        def __init__(self, **_kwargs):
+            threads.append(threading.get_ident())
+
+        def eval(self):
+            threads.append(threading.get_ident())
+            return self
+
+        def cpu(self):
+            threads.append(threading.get_ident())
+            return self
+
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, _Gate(), backend="pytorch")
+    if kokoro_package:
+        monkeypatch.setattr(sys.modules["kokoro.model"], "KModel", _Model)
+    else:
+        monkeypatch.setitem(sys.modules, "kokoro.model", None)  # `from kokoro.model import KModel` raises ImportError
+        jit = types.SimpleNamespace(load=lambda *_args, **_kwargs: _Model())
+        monkeypatch.setattr(kokoro_mod, "safe_import_torch", lambda: types.SimpleNamespace(jit=jit))
+    assert await asyncio.wait_for(adapter._ensure_model_loaded(), 5) is True
+    assert threads and loop_thread not in threads
+
+
+@pytest.mark.asyncio
 async def test_kokoro_close_releases_the_pytorch_model(monkeypatch, tmp_path):
     """close() drops the PyTorch model and pipelines, so the next ensure_initialized() loads the model again."""
     gate = _Gate()
@@ -549,4 +662,137 @@ async def test_kokoro_close_releases_the_pytorch_model(monkeypatch, tmp_path):
 
     assert (adapter.kokoro_pt_model, adapter.kokoro_pt_pipelines) == (None, {})
     assert await adapter.ensure_initialized()
+    assert gate.started == ["load", "load"]
+
+
+# TASK-13893: the load lock is shared by every adapter instance that loads the same model, so a load on a
+# new instance (a request-owned override adapter, a re-registration, a registry retry) waits for another
+# instance's load thread, even one whose caller was cancelled. Each factory returns a call that builds a
+# NEW adapter for the same model and runs its load.
+
+
+def _gated_engine_class(gate: _Gate):
+    class _Engine:
+        SAMPLE_RATE = 24000
+
+        def __init__(self, *_args, **_kwargs):
+            gate.enter("load")
+
+    return _Engine
+
+
+def _new_kokoro_load(monkeypatch, tmp_path, gate, backend):
+    return lambda: _kokoro_adapter(monkeypatch, tmp_path, gate, backend=backend).ensure_initialized()
+
+
+def _new_echo_load(monkeypatch, tmp_path, gate):
+    return lambda: _echo_adapter(gate)._ensure_models_loaded()
+
+
+def _new_kitten_load(monkeypatch, tmp_path, gate):
+    return lambda: _kitten_adapter(monkeypatch, gate)._load_runtime_for_model("KittenML/kitten-tts-nano-0.8")
+
+
+def _new_qwen3_pipeline_load(monkeypatch, tmp_path, gate):
+    return lambda: _qwen3_pipeline_adapter(gate)._get_pipeline("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+
+
+def _new_qwen3_mlx_load(monkeypatch, tmp_path, gate):
+    async def call():
+        return await (await _qwen3_mlx_runtime(monkeypatch, gate))._get_model("auto")
+
+    return call
+
+
+def _new_luxtts_load(monkeypatch, tmp_path, gate):
+    from tldw_Server_API.app.core.TTS.adapters.luxtts_adapter import LuxTTSAdapter
+
+    monkeypatch.setattr(LuxTTSAdapter, "_load_engine_class", lambda _self: _gated_engine_class(gate))
+    return lambda: LuxTTSAdapter({}).ensure_initialized()
+
+
+def _new_pocket_load(monkeypatch, tmp_path, gate):
+    from tldw_Server_API.app.core.TTS.adapters.pocket_tts_adapter import PocketTTSOnnxAdapter
+
+    monkeypatch.setattr(PocketTTSOnnxAdapter, "_validate_assets", lambda _self: None)
+    monkeypatch.setattr(PocketTTSOnnxAdapter, "_load_engine_class", lambda _self: _gated_engine_class(gate))
+    return lambda: PocketTTSOnnxAdapter({}).ensure_initialized()
+
+
+def _new_neutts_load(monkeypatch, tmp_path, gate):
+    from tldw_Server_API.app.core.TTS.adapters.neutts_adapter import NeuTTSAdapter
+
+    def load_engine(_self):
+        gate.enter("load")
+        return types.SimpleNamespace(_is_quantized_model=False)
+
+    monkeypatch.setattr(NeuTTSAdapter, "_load_engine", load_engine)
+    return lambda: NeuTTSAdapter({}).ensure_initialized()
+
+
+def _new_index_tts_load(monkeypatch, tmp_path, gate):
+    from tldw_Server_API.app.core.TTS.adapters.index_tts_adapter import IndexTTS2Adapter
+
+    def create_engine(_self):
+        gate.enter("load")
+        return object()
+
+    (tmp_path / "config.yaml").write_text("{}")
+    monkeypatch.setattr(IndexTTS2Adapter, "_create_engine", create_engine)
+    config = {"index_tts_model_dir": str(tmp_path), "index_tts_cfg_path": str(tmp_path / "config.yaml")}
+    return lambda: IndexTTS2Adapter(config).ensure_initialized()
+
+
+def _new_supertonic_load(monkeypatch, tmp_path, gate, version):
+    def call():
+        adapter, _voice = _supertonic_adapter(monkeypatch, tmp_path, gate, version=version, gate_load=True)
+        return adapter.ensure_initialized()
+
+    return call
+
+
+_NEW_INSTANCE_LOADS = {
+    "kokoro-onnx": lambda m, t, g: _new_kokoro_load(m, t, g, "onnx"),
+    "kokoro-pytorch": lambda m, t, g: _new_kokoro_load(m, t, g, "pytorch"),
+    "echo_tts": _new_echo_load,
+    "kitten_tts": _new_kitten_load,
+    "qwen3-pipeline": _new_qwen3_pipeline_load,
+    "qwen3-mlx": _new_qwen3_mlx_load,
+    "lux_tts": _new_luxtts_load,
+    "pocket_tts": _new_pocket_load,
+    "neutts": _new_neutts_load,
+    "index_tts": _new_index_tts_load,
+    "supertonic": lambda m, t, g: _new_supertonic_load(m, t, g, 1),
+    "supertonic2": lambda m, t, g: _new_supertonic_load(m, t, g, 2),
+}
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+@pytest.mark.parametrize("case", sorted(_NEW_INSTANCE_LOADS))
+async def test_a_new_adapter_instance_waits_for_another_instances_load_of_the_same_model(
+    monkeypatch, tmp_path, case, via_anyio_scope
+):
+    """Two adapter instances never load the same model at once, even after the first load's caller is cancelled."""
+    gate = _Gate()
+    call = _NEW_INSTANCE_LOADS[case](monkeypatch, tmp_path, gate)
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
+
+
+@pytest.mark.asyncio
+async def test_kokoro_load_on_a_new_adapter_waits_for_a_timed_out_load(monkeypatch, tmp_path):
+    """A registry retry builds a new adapter: its load waits, up to its own bound, for a timed-out load's thread."""
+    gate = _Gate()
+
+    def new_adapter(init_timeout_sec):
+        return _kokoro_adapter(monkeypatch, tmp_path, gate, backend="pytorch", init_timeout_sec=init_timeout_sec)
+
+    try:
+        assert await asyncio.wait_for(new_adapter(0.1).ensure_initialized(), 5) is False
+        assert await asyncio.wait_for(new_adapter(0.1).ensure_initialized(), 5) is False
+        assert gate.started == ["load"]
+    finally:
+        gate.release.set()
+    assert await asyncio.wait_for(new_adapter(5.0).ensure_initialized(), 5) is True
     assert gate.started == ["load", "load"]

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -75,14 +75,14 @@ vi.mock("@/design-system", async (importActual) => {
 
 import MonitoringDashboardPage from "../MonitoringDashboardPage"
 import { createAdminQueryClient } from "../AdminQueryProvider"
+import { adminKeys } from "@/services/tldw/adminQueries"
 
 /**
  * Render the page under a fresh admin query client so each test owns its
  * cache (B-S4): reference-data queries now flow through react-query.
  */
 const adminQueryClients: QueryClient[] = []
-const renderPage = (ui: React.ReactElement) => {
-  const client = createAdminQueryClient()
+const renderPage = (ui: React.ReactElement, client = createAdminQueryClient()) => {
   adminQueryClients.push(client)
   return render(
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>
@@ -198,6 +198,85 @@ describe("MonitoringDashboardPage", () => {
 
     const alert = await expectDesignSystemAlertForText("No system data available yet.")
     expect(alert).toHaveAttribute("role", "status")
+  })
+
+  it("removes stale health after a failed refresh and recovers only from real new results", async () => {
+    mocks.getSecurityAlertStatus.mockResolvedValue({ health: "ok" })
+    renderPage(<MonitoringDashboardPage />)
+    const overview = within(screen.getByText("System Overview", { exact: true }).closest(".ant-card")!)
+    expect(await overview.findByText("45", { exact: true })).toBeVisible()
+    expect(await overview.findByText("ok", { exact: true })).toBeVisible()
+    mocks.getSystemStats.mockRejectedValueOnce(new Error("Owned system outage"))
+    mocks.getSecurityAlertStatus.mockRejectedValueOnce(new Error("Owned alerting outage"))
+    fireEvent.click(overview.getByRole("button", { name: "Refresh" }))
+    expect(await overview.findByText("System statistics unavailable", { exact: true })).toBeVisible()
+    expect(await overview.findByText("Security alert status unavailable", { exact: true })).toBeVisible()
+    expect(overview.queryByText("45", { exact: true })).toBeNull()
+    expect(overview.queryByText("ok", { exact: true })).toBeNull()
+    expect(overview.queryByText(/^Updated /)).toBeNull()
+    expect(overview.getByText(/Refresh requested/)).toBeVisible()
+    mocks.getSystemStats.mockResolvedValueOnce({ cpu_usage: 0 })
+    mocks.getSecurityAlertStatus.mockResolvedValueOnce({ health: "ok" })
+    fireEvent.click(overview.getByRole("button", { name: "Refresh" }))
+    expect(await overview.findByText("0", { exact: true })).toBeVisible()
+    expect(await overview.findByText("ok", { exact: true })).toBeVisible()
+    expect(overview.queryByText("System statistics unavailable", { exact: true })).toBeNull()
+    expect(overview.queryByText("Security alert status unavailable", { exact: true })).toBeNull()
+  }, 30000)
+
+  it.each(["system", "security"] as const)("keeps healthy independent data when %s is unavailable", async (section) => {
+    mocks.getSecurityAlertStatus.mockResolvedValue({ health: "degraded" })
+    if (section === "system") mocks.getSystemStats.mockRejectedValueOnce(new Error("Owned system outage"))
+    else mocks.getSecurityAlertStatus.mockRejectedValueOnce(new Error("Owned alerting outage"))
+    renderPage(<MonitoringDashboardPage />)
+    const overview = within(screen.getByText("System Overview", { exact: true }).closest(".ant-card")!)
+    expect(await overview.findByText(section === "system" ? "System statistics unavailable" : "Security alert status unavailable", { exact: true })).toBeVisible()
+    expect(overview.getByText(section === "system" ? "degraded" : "45", { exact: true })).toBeVisible()
+    expect(overview.queryByText("No system data available yet.", { exact: true })).toBeNull()
+  }, 30000)
+
+  it.each(["system", "security"] as const)("discards late %s health from an older failed refresh generation", async (section) => {
+    let resolveOld!: (value: Record<string, unknown>) => void
+    const oldResponse = new Promise<Record<string, unknown>>((resolve) => { resolveOld = resolve })
+    const endpoint = section === "system" ? mocks.getSystemStats : mocks.getSecurityAlertStatus
+    endpoint.mockReturnValueOnce(oldResponse).mockRejectedValueOnce(new Error("Owned current outage"))
+    renderPage(<MonitoringDashboardPage />)
+    const overview = within(screen.getByText("System Overview", { exact: true }).closest(".ant-card")!)
+    try {
+      await waitFor(() => expect(endpoint).toHaveBeenCalledTimes(1))
+      fireEvent.click(overview.getByRole("button", { name: "Refresh" }))
+      const errorTitle = section === "system" ? "System statistics unavailable" : "Security alert status unavailable"
+      expect(await overview.findByText(errorTitle, { exact: true })).toBeVisible()
+      await act(async () => { resolveOld({ old_health_marker: "stale-owned-value" }); await oldResponse })
+      expect(overview.getByText(errorTitle, { exact: true })).toBeVisible()
+      expect(overview.queryByText("stale-owned-value", { exact: true })).toBeNull()
+    } finally {
+      resolveOld({})
+    }
+  }, 30000)
+
+  it("keeps shared query waiters on the replacement refresh and ignores the old result", async () => {
+    let resolveOld!: (value: Record<string, unknown>) => void
+    const oldResponse = new Promise<Record<string, unknown>>(resolve => { resolveOld = resolve })
+    const freshStats = { cpu_usage: 12 }
+    mocks.getSystemStats.mockReturnValueOnce(oldResponse).mockResolvedValueOnce(freshStats)
+    const client = createAdminQueryClient()
+    const sharedResult = client.fetchQuery({ queryKey: adminKeys.systemStats, queryFn: () => mocks.getSystemStats() })
+      .then(data => ({ data }), error => ({ error }))
+    renderPage(<MonitoringDashboardPage />, client)
+    const overview = within(screen.getByText("System Overview", { exact: true }).closest(".ant-card")!)
+    try {
+      await waitFor(() => expect(mocks.getSystemStats).toHaveBeenCalledTimes(1))
+      fireEvent.click(overview.getByRole("button", { name: "Refresh" }))
+      expect(await overview.findByText("12", { exact: true })).toBeVisible()
+      expect(await sharedResult).toEqual({ data: freshStats })
+      await act(async () => { resolveOld({ old_health_marker: "stale-shared-value" }); await oldResponse })
+      expect(overview.queryByText("stale-shared-value", { exact: true })).toBeNull()
+      expect(client.getQueryData(adminKeys.systemStats)).toEqual(freshStats)
+      expect(mocks.getSystemStats).toHaveBeenCalledTimes(2)
+    } finally {
+      resolveOld({})
+    }
   })
 
   it("shows empty state with starter rules when no alert rules exist", async () => {

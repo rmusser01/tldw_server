@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import {
   RagTerminalStreamError,
@@ -17,9 +18,9 @@ type ContractCase = {
 
 const fixture = JSON.parse(
   readFileSync(
-    resolve(
-      process.cwd(),
-      "../../../tldw_Server_API/tests/fixtures/rag_terminal_stream_events.json"
+    path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../../../../../../tldw_Server_API/tests/fixtures/rag_terminal_stream_events.json"
     ),
     "utf8"
   )

@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { browser } from "wxt/browser";
 import {
+  useConnectionActions,
   useConnectionState,
   useConnectionUxState,
 } from "@/hooks/useConnectionState";
@@ -14,6 +15,10 @@ import {
   Search,
 } from "lucide-react";
 import { RecoveryCallout, type RecoveryState } from "@/components/ui/state";
+import {
+  useConnectionRetry,
+  useStickyServerErrorUxState,
+} from "./useConnectionRetry";
 
 type EmptySidePanelProps = {
   inputRef?: React.RefObject<HTMLTextAreaElement>;
@@ -27,8 +32,16 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
     "playground",
   ]);
   const { phase, isConnected, serverUrl } = useConnectionState();
-  const { uxState, mode, configStep, hasCompletedFirstRun } =
-    useConnectionUxState();
+  const {
+    uxState: liveUxState,
+    mode,
+    configStep,
+    hasCompletedFirstRun,
+  } = useConnectionUxState();
+  const { checkOnce } = useConnectionActions();
+  // XS-11: a re-check keeps the error card (and its focused buttons) mounted.
+  const uxState = useStickyServerErrorUxState(liveUxState);
+  const { retry, isRetrying, retryButtonRef } = useConnectionRetry(checkOnce);
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
   const primaryButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
@@ -204,6 +217,26 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
       : uxState === "error_auth" || uxState === "error_unreachable"
         ? t("sidepanel:firstRun.reviewSettings", "Review settings")
         : t("sidepanel:firstRun.openOptionsPrimary", "Open tldw Settings");
+    // XS-11: a server error can be retried right away, and the panel keeps
+    // checking in the background while it is unreachable.
+    const isServerError =
+      uxState === "error_unreachable" || uxState === "error_auth";
+    const secondaryActions = isServerError
+      ? [
+          {
+            label: t("sidepanel:firstRun.retryNow", "Retry now"),
+            onClick: retry,
+            loading: isRetrying,
+            ref: retryButtonRef,
+            "data-testid": "chat-connection-retry",
+          },
+          {
+            label: t("sidepanel:firstRun.openDiagnostics", "Open diagnostics"),
+            onClick: () => openExtensionUrl("/options.html#/settings/health"),
+            "data-testid": "chat-connection-diagnostics",
+          },
+        ]
+      : undefined;
     const stepDiagnostics = stepSummary
       ? [
           {
@@ -226,9 +259,19 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
             ref: primaryButtonRef,
             "data-testid": "chat-connection-cta",
           }}
+          secondaryActions={secondaryActions}
           data-testid="chat-empty-connection"
           className="rounded-2xl border-border/70 bg-surface/95"
-        />
+        >
+          {uxState === "error_unreachable" ? (
+            <p className="text-xs text-text-muted">
+              {t(
+                "sidepanel:firstRun.retryingAutomatically",
+                "Retrying automatically every few seconds…",
+              )}
+            </p>
+          ) : null}
+        </RecoveryCallout>
 
         {/* Quick tips for first-time users */}
         {!hasCompletedFirstRun && (

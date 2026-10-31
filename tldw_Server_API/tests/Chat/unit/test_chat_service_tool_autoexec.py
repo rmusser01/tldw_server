@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import execute_non_stream_call
 from tldw_Server_API.app.core.Chat.tool_auto_exec import (
@@ -18,6 +17,8 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionRecord,
 )
 from tldw_Server_API.app.core.Chat.tool_execution_service import request_declares_local_tool_use
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationParseError,
 )
@@ -3133,9 +3134,12 @@ async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_
     assert provider_manager.failures == [("openai", "SanitizedProviderStreamError")]
 
 
-@pytest.mark.asyncio
-@pytest.mark.unit
-async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+def _auto_continue_followup_raises(monkeypatch: pytest.MonkeyPatch, error: Exception):
+    """Auto-execute one tool, then fail the one auto-continuation call with ``error``.
+
+    Returns the message save function and the payloads it saved.
+    """
+
     async def fake_log_llm_usage(**_kwargs):
         return None
 
@@ -3169,7 +3173,7 @@ async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest
     monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
 
     async def fake_followup_call(**_kwargs):
-        raise RuntimeError("continuation failed")
+        raise error
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_followup_call)
 
@@ -3179,11 +3183,44 @@ async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest
         saved_payloads.append(payload)
         return f"m-{len(saved_payloads)}"
 
+    return save_message_fn, saved_payloads
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    save_message_fn, saved_payloads = _auto_continue_followup_raises(monkeypatch, RuntimeError("continuation failed"))
+    provider_manager = _ProviderManagerStub("anthropic")
+
     response = await _run_execute_non_stream_call(
         llm_call_func=_build_llm_response_with_tool_calls,
         save_message_fn=save_message_fn,
+        provider_manager=provider_manager,
     )
 
     assert [p["role"] for p in saved_payloads] == ["assistant", "tool"]
     assert response["choices"][0]["message"]["content"] == "Calling tool"
     assert response["tldw_tool_auto_continue"] == {"attempted": True, "succeeded": False}
+    assert provider_manager.failures == [("openai", "SanitizedProviderStreamError")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_policy_refusal_reaches_the_caller_not_the_provider_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gateway policy refusal of the continuation is the caller's 400, as a quota refusal is (TASK-13950.13)."""
+    refusal = LLMPolicyRefusal("Tool output violates moderation policy")
+    save_message_fn, saved_payloads = _auto_continue_followup_raises(monkeypatch, refusal)
+    provider_manager = _ProviderManagerStub("anthropic")
+
+    with pytest.raises(LLMPolicyRefusal) as raised:
+        await _run_execute_non_stream_call(
+            llm_call_func=_build_llm_response_with_tool_calls,
+            save_message_fn=save_message_fn,
+            provider_manager=provider_manager,
+        )
+
+    assert (raised.value.status_code, raised.value.detail) == (400, "Tool output violates moderation policy")
+    assert [p["role"] for p in saved_payloads] == ["assistant", "tool"]
+    assert provider_manager.failures == []

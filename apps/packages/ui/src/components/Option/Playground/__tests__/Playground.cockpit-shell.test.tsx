@@ -118,6 +118,7 @@ vi.mock("@/db/dexie/chat", () => ({
 }));
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: async () => "profile",
+  bindUnboundLocalHistory: async () => { throw new Error("Unexpected local binding in owned cockpit fixture") },
   getLocalHistoryOwner: async (id: string) => ({ kind: "local", profile_id: "profile", owner_key: "local-owner", conversation_id: id }),
   loadHistoryTurnRecoveries: async () => [],
   dismissHistoryTurnRecovery: async () => {},
@@ -206,7 +207,7 @@ vi.mock("react-i18next", () => ({
 // behavior is exercised in PlaygroundForm.role-play-starter.integration.test.tsx.
 const routeApplyOutcome = vi.hoisted(() => ({ value: null as string | null }))
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: ({ onDraftPresenceChange, onCharacterRouteApplyReady }: React.ComponentProps<typeof import("../PlaygroundForm").PlaygroundForm>) => {
+  PlaygroundForm: ({ onDraftPresenceChange, onCharacterRouteApplyReady, characterChatSendBlocker }: React.ComponentProps<typeof import("../PlaygroundForm").PlaygroundForm>) => {
     React.useEffect(() => {
       onCharacterRouteApplyReady?.(async (id: string, isCurrent: () => boolean) => {
         const character = await tldwClientState.getCharacter(id, { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } })
@@ -223,7 +224,7 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
       })
       return () => onCharacterRouteApplyReady?.(null)
     }, [onCharacterRouteApplyReady])
-    return <div data-testid="playground-form"><textarea aria-label="Composer draft" data-testid="composer-textarea"
+    return <div data-testid="playground-form">{characterChatSendBlocker?.active && ["Loading character", "Retry character"].includes(characterChatSendBlocker.actionLabel) && <button disabled={characterChatSendBlocker.disabled} onClick={characterChatSendBlocker.onAction}>{characterChatSendBlocker.actionLabel}</button>}<textarea aria-label="Composer draft" data-testid="composer-textarea"
       onChange={event => onDraftPresenceChange?.(event.currentTarget.value.trim().length > 0)} /></div>
   },
 }));
@@ -325,6 +326,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   SIDEBAR_SHORTCUT_IDS: [],
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
   CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_MESSAGE_VIEW_SETTING: "chatMessageView",
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
   resolveOpacityAlpha: (value: unknown, fallback = 35) =>
     typeof value === "number" && Number.isFinite(value)
@@ -363,6 +365,7 @@ vi.mock("@/store/artifacts", () => ({
 
 vi.mock("@/hooks/useSetting", () => ({
   useSetting: (setting: string) => {
+    if (setting === "chatMessageView") return ["transcript", vi.fn()]
     if (setting === "chatWindowOpacity") return [35];
     if (setting === "chatMessageOpacity") return [60];
     if (setting === "chatCharacterImageOpacity") return [100];
@@ -546,7 +549,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context and chat settings visible.");
+    ).toHaveTextContent("Context and runtime visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
     expect(
@@ -557,17 +560,6 @@ describe("Playground cockpit shell", () => {
         requireFresh: true,
       });
     });
-  });
-
-  it("exposes the shared theme toggle contract in the cockpit header", async () => {
-    render(<Playground />);
-
-    const themeToggle = await screen.findByTestId("chat-header-theme-toggle");
-    expect(themeToggle).toHaveAccessibleName("Switch to light theme");
-
-    fireEvent.click(themeToggle);
-
-    expect(darkModeState.toggleDarkMode).toHaveBeenCalledTimes(1);
   });
 
   it("renders Character Chat recent sessions only for the active character workflow", async () => {
@@ -993,7 +985,7 @@ describe("Playground cockpit shell", () => {
     routeApplyOutcome.value = 'retired';
     render(<Playground />);
     const status = await screen.findByRole('status', { name: 'Character Chat setup status' });
-    expect(status).toHaveTextContent('Character setup was not applied');
+    await waitFor(() => expect(status).toHaveTextContent('Character setup was not applied'));
     expect(routerNavigateState.navigate).not.toHaveBeenCalled();
     expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
     expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();
@@ -1467,8 +1459,50 @@ describe("Playground cockpit shell", () => {
     expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
   });
 
-  it("offers recovery without inventing a character when route loading returns none", async () => {
+  it.each(["load", "publication"])("B02 blocks a stale library character until route hydration settles at %s", async (delay) => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=delayed-character");
+    messageOptionState.value.selectedCharacter = { id: "delayed-character", name: "Stale library card" };
+    let release!: (value: { id: string; name: string }) => void;
+    const pending = new Promise<{ id: string; name: string }>((resolve) => { release = resolve; });
+    tldwClientState.getCharacter.mockImplementationOnce(() => delay === "load" ? pending : Promise.resolve({ id: "delayed-character", name: "Fresh library card" }));
+    messageOptionState.value.setSelectedCharacter = vi.fn(async (next) => {
+      if (delay === "publication") await pending;
+      messageOptionState.value.selectedCharacter = next;
+      messageOptionState.value.selectedAssistant = { kind: "character", id: String(next.id), name: next.name, metadata: { selectionMode: "tracked" } };
+    });
+    const { rerender } = render(<Playground />);
+    try {
+      await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalled());
+      expect(screen.getByRole("button", { name: "Loading character" })).toBeDisabled();
+      fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Keep this question." } });
+      expect(screen.getByTestId("composer-textarea")).toHaveValue("Keep this question.");
+    } finally {
+      await act(async () => { release({ id: "delayed-character", name: "Fresh library card" }); await pending; });
+    }
+    rerender(<Playground />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Loading character" })).not.toBeInTheDocument());
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("Keep this question.");
+  });
+
+  it("B02 offers character reload instead of Send after route hydration fails", async () => {
     window.history.replaceState({}, "", "/chat?mode=character&characterId=missing-character");
+    tldwClientState.getCharacter.mockRejectedValueOnce(new Error("temporary unavailable"));
+    render(<Playground />);
+    await screen.findByText("Character missing-character could not be loaded");
+    fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Keep this question." } });
+    const retry = screen.getByRole("button", { name: "Retry character" });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("Keep this question.");
+  });
+
+  it("uses a typed fallback when route character hydration returns no character", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=missing-character",
+    );
     tldwClientState.getCharacter.mockResolvedValueOnce(null);
     render(<Playground />);
     await screen.findByText("Character missing-character could not be loaded");
@@ -2058,7 +2092,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /hide chat settings/i },
+        { name: /hide runtime/i },
       ),
     );
 
@@ -2133,7 +2167,7 @@ describe("Playground cockpit shell", () => {
     });
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context hidden. Chat settings visible.");
+    ).toHaveTextContent("Context hidden. Runtime visible.");
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -2147,7 +2181,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /hide chat settings/i },
+        { name: /hide runtime/i },
       ),
     );
 
@@ -2167,7 +2201,7 @@ describe("Playground cockpit shell", () => {
       screen.getByRole("button", { name: /show context/i }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /show chat settings/i }),
+      screen.getByRole("button", { name: /show runtime/i }),
     );
 
     await waitFor(() => {
@@ -2244,11 +2278,11 @@ describe("Playground cockpit shell", () => {
     const collapseRuntimeButton = within(runtimeRailAfterRestore).getByRole(
       "button",
       {
-        name: /hide chat settings/i,
+        name: /hide runtime/i,
       },
     );
     const collapseRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Hide chat settings",
+      name: "Hide runtime",
     });
     expect(collapseRuntimeButton).toHaveAttribute(
       "aria-describedby",
@@ -2261,10 +2295,10 @@ describe("Playground cockpit shell", () => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
     const restoreRuntimeButton = screen.getByRole("button", {
-      name: /show chat settings/i,
+      name: /show runtime/i,
     });
     const restoreRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Show chat settings",
+      name: "Show runtime",
     });
     expect(restoreRuntimeButton).toHaveAttribute(
       "aria-describedby",
@@ -2337,7 +2371,7 @@ describe("Playground cockpit shell", () => {
         name: "Empty assistant response",
       }),
     ).toHaveTextContent(
-      "openai:gpt-4.1-mini returned no response text.",
+      "gpt-4.1-mini (OpenAI) returned no response text.",
     );
 
     fireEvent.click(

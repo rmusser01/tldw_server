@@ -56,7 +56,7 @@ def test_validate_test_runtime_flags_rejects_even_with_override_without_pytest_r
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("ALLOW_TEST_MODE_IN_PRODUCTION", "1")
 
-    with pytest.raises(RuntimeError, match="missing PYTEST_CURRENT_TEST"):
+    with pytest.raises(RuntimeError, match="production-like runtime"):
         validate_test_runtime_flags()
 
 

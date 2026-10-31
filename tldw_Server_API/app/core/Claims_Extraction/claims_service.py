@@ -67,6 +67,7 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, RetryExhaustedError
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
@@ -2844,6 +2845,7 @@ async def review_claim(
             expected_version=int(payload.get("review_version")),
             action_ip=action_ip,
             action_user_agent=action_user_agent,
+            actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
         )
         if updated is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
@@ -2993,6 +2995,7 @@ def bulk_review_claims(
                 expected_version=int(claim_row.get("review_version") or 1),
                 action_ip=action_ip,
                 action_user_agent=action_user_agent,
+                actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
             )
             if isinstance(updated, dict) and updated.get("conflict"):
                 conflicts.append(int(cid))
@@ -4688,9 +4691,9 @@ async def verify_claims_with_fva(
     sources: list[str] | None = None,
     top_k: int = 10,
     fva_config: dict[str, Any] | None = None,
-    user_id: str | None = None,
-    current_user: User | None = None,
-    db: MediaDatabase | None = None,
+    user_id: int | None = None,
+    current_user: User,
+    db: MediaDatabase,
 ) -> dict[str, Any]:
     """
     Verify claims using the FVA (Falsification-Verification Alignment) pipeline.
@@ -4708,13 +4711,39 @@ async def verify_claims_with_fva(
         sources: Data sources to search (defaults to media_db)
         top_k: Number of documents to retrieve
         fva_config: FVA pipeline configuration options
-        user_id: User ID for scoped retrieval
+        user_id: The user to verify for; honoured only for a platform admin, as in
+            rebuild_claims. Anyone else's is ignored and the request runs for current_user.
         current_user: Current authenticated user
-        db: MediaDatabase instance
+        db: The authenticated user's MediaDatabase
 
     Returns:
         FVA verification results with status changes and timing
     """
+    owner_user_id = int(current_user.id)
+    if user_id is None or int(user_id) == owner_user_id or not _legacy_user_has_platform_admin_claims(current_user):
+        return await _verify_claims_with_fva_for(
+            owner_user_id, db, claims=claims, query=query, sources=sources, top_k=top_k, fva_config=fva_config
+        )
+    # An admin verifying for another user: that user's media DB and content scope. The media visibility
+    # filter, the quota decision and the usage rows all read the scope (TASK-13881).
+    # ponytail: the user's personal media only; give the scope their team and org ids if admins need shared media.
+    with scoped_context(user_id=int(user_id), is_admin=False), _claims_user_override_db(int(user_id)) as (owner_db, _):
+        return await _verify_claims_with_fva_for(
+            int(user_id), owner_db, claims=claims, query=query, sources=sources, top_k=top_k, fva_config=fva_config
+        )
+
+
+async def _verify_claims_with_fva_for(
+    owner_user_id: int,
+    db: MediaDatabase,
+    *,
+    claims: list[dict[str, Any]],
+    query: str,
+    sources: list[str] | None,
+    top_k: int,
+    fva_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Run the FVA pipeline on ``db`` and ``owner_user_id``'s vector store, for that user."""
     import time
     from uuid import uuid4
 
@@ -4752,22 +4781,13 @@ async def verify_claims_with_fva(
 
     # Set up budget if specified
     budget: ClaimsJobBudget | None = None
-    job_context: ClaimsJobContext | None = None
     max_budget_usd = config_dict.get("max_budget_usd")
     if max_budget_usd is not None:
         budget = ClaimsJobBudget(max_cost_usd=float(max_budget_usd))
-        job_context = ClaimsJobContext(
-            job_id=str(uuid4()),
-            user_id=user_id or (current_user.username if current_user else None),
-        )
+    job_context = ClaimsJobContext(user_id=owner_user_id)  # the claims_verify usage rows, by id
 
-    # Resolve user_id for retrieval
-    resolved_user_id = user_id
-    if resolved_user_id is None and current_user is not None:
-        resolved_user_id = str(current_user.username) if hasattr(current_user, "username") else None
-
-    # Build retriever
-    retriever = MultiDatabaseRetriever(media_db=db)
+    # The user_id picks the vector store (collection user_{id}_media_embeddings).
+    retriever = MultiDatabaseRetriever({}, user_id=str(owner_user_id), media_db=db)
 
     # Build data sources
     data_sources: list[DataSource] = []
@@ -4779,10 +4799,7 @@ async def verify_claims_with_fva(
         data_sources = [DataSource.MEDIA_DB]
 
     # Retrieve base documents
-    retrieval_config = RetrievalConfig(
-        top_k=top_k,
-        search_mode="hybrid",
-    )
+    retrieval_config = RetrievalConfig(max_results=top_k)  # FTS and vector, merged: the hybrid search
     base_documents = await retriever.retrieve(
         query=query,
         sources=data_sources,
@@ -4827,7 +4844,7 @@ async def verify_claims_with_fva(
         claims=claim_objects,
         query=query,
         documents=base_documents,
-        user_id=resolved_user_id,
+        user_id=str(owner_user_id),
         budget=budget,
         job_context=job_context,
     )

@@ -30,8 +30,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     validate_notes_note_upsert_payload,
 )
 from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+    PERSONAL_CONTEXT_ONGOING_ENDPOINTS,
     PersonalContextActivationReceipt,
     PersonalContextAuthorityMetadata,
+    PersonalContextCleanupAck,
     PersonalContextExchangeProof,
     PersonalContextPurgeReceipt,
     PersonalContextRelayContinuation,
@@ -2507,6 +2509,40 @@ class SyncKeyRecoveryBundleListResponse(BaseModel):
     key_records: list[SyncKeyRecoveryBundleRecord] = Field(default_factory=list)
 
 
+def export_personal_context_ongoing_contract() -> dict[str, object]:
+    """Export the version-one API contract from the API models."""
+
+    from pydantic.json_schema import models_json_schema
+
+    model_classes = (
+        PersonalContextCleanupAck,
+        PersonalContextSyncCapabilitiesResponse,
+        SyncPersonalContextBootstrapRequest,
+        SyncPersonalContextBootstrapResponse,
+        SyncPersonalContextActivationAcknowledgeRequest,
+        SyncPersonalContextActivationAcknowledgeResponse,
+        SyncPushRequest,
+        SyncPushResponse,
+        SyncPullResponse,
+        SyncConflictListResponse,
+        SyncConflictResolveRequest,
+        SyncConflictResolveResponse,
+        SyncPersonalContextPurgeRequest,
+        SyncPersonalContextPurgeResponse,
+    )
+    _, schema = models_json_schema(
+        [(model, "validation") for model in model_classes],
+        title="tldw Personal Context ongoing sync v1",
+    )
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "urn:tldw:personal-context:ongoing-sync:v1",
+        "x-tldw-contract-version": 1,
+        "x-tldw-endpoints": PERSONAL_CONTEXT_ONGOING_ENDPOINTS,
+        **schema,
+    }
+
+
 __all__ = [
     "ConflictResolutionAction",
     "ConflictStatus",
@@ -2628,4 +2664,5 @@ __all__ = [
     "SyncV2EnvelopeResponse",
     "WORKSPACE_SYNC_DOMAINS",
     "WORKSPACE_SYNC_OPERATIONS",
+    "export_personal_context_ongoing_contract",
 ]

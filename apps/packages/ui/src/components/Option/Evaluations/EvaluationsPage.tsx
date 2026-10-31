@@ -28,6 +28,8 @@ export const EvaluationsPage: React.FC = () => {
   const { t } = useTranslation(["evaluations", "common"])
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const searchParamsRef = React.useRef(searchParams)
+  searchParamsRef.current = searchParams
   const tourActive = searchParams.get("tour") === "1"
 
   const activeTab = useEvaluationsStore((s) => s.activeTab)
@@ -90,6 +92,14 @@ export const EvaluationsPage: React.FC = () => {
     navigate(`?${params.toString()}`, { replace: true })
   }
 
+  const handleRecipeRunChange = (runId: string | null) => {
+    const params = new URLSearchParams(searchParamsRef.current)
+    params.set("tab", "recipes")
+    if (runId) params.set("recipeRunId", runId)
+    else params.delete("recipeRunId")
+    navigate(`?${params.toString()}`, { replace: true })
+  }
+
   const tabItems: TabsProps["items"] = [
     {
       key: "recipes",
@@ -102,7 +112,12 @@ export const EvaluationsPage: React.FC = () => {
           {t("evaluations:tabRecipes", "Recipes")}
         </span>
       ),
-      children: <RecipesTab />
+      children: (
+        <RecipesTab
+          recipeRunId={searchParams.get("recipeRunId")}
+          onRecipeRunIdChange={handleRecipeRunChange}
+        />
+      )
     },
     {
       key: "synthetic-review",

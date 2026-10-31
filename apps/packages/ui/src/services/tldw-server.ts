@@ -129,6 +129,9 @@ const mapTldwModelToUi = (model: any) => ({
       : undefined,
   chat_provider:
     typeof model.chatProvider === "string" ? model.chatProvider : undefined,
+  provider_health:
+    typeof model.providerHealth === "string" ? model.providerHealth : undefined,
+  sampling_fields: Array.isArray(model.samplingFields) ? model.samplingFields : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,
@@ -325,6 +328,18 @@ export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: bool
   }
 }
 
+/**
+ * Every chat model the server's catalog lists, including models whose provider
+ * is not set up (they keep their catalog-only flags). Backs the model picker's
+ * "All models" scope (CC-06); sending still uses fetchChatModels.
+ */
+export const fetchChatModelCatalog = async () => {
+  const models = await tldwModels.getModels()
+  return dedupeChatModelsByModel(
+    models.filter((model) => model.type === "chat").map(mapTldwModelToUi)
+  )
+}
+
 export const fetchChatModels = async ({
   returnEmpty = false,
   forceRefresh = false,
@@ -358,29 +373,17 @@ export const fetchChatModels = async ({
   }
   if (!requireFresh && !forceRefresh && !allowNetwork) {
     if (cookieSession) return []
-    if (chatModelsCache?.value) {
-      return chatModelsCache.value
-    }
 
     const cachedChatModels = await tldwModels.getCachedChatModels()
     const resolved = dedupeChatModelsByModel(cachedChatModels.map(mapTldwModelToUi))
     if (fetchGeneration !== getChatModelsCacheGeneration()) {
-      return await fetchChatModels({
-        returnEmpty,
-        forceRefresh,
-        refreshOpenRouter,
-        allowNetwork,
-        requireFresh
-      })
+      return []
     }
-    if (
-      resolved.length > 0 &&
-      fetchGeneration === getChatModelsCacheGeneration()
-    ) {
-      chatModelsCache = {
+    if (fetchGeneration === getChatModelsCacheGeneration()) {
+      chatModelsCache = resolved.length > 0 ? {
         value: resolved,
         expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
-      }
+      } : null
     }
     return resolved
   }
@@ -414,23 +417,20 @@ export const fetchChatModels = async ({
         if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession && chatModelsInFlightFresh === requireFresh) {
           return await currentFetch
         }
-        return await fetchChatModels({
-          returnEmpty,
-          forceRefresh,
-          refreshOpenRouter,
-          allowNetwork,
-        requireFresh
-        })
+        // Join only an actual newer refresh; never recurse into another discovery during an outage.
+        if (!requireFresh && !cookieSession && chatModelsCache && chatModelsCache.expiresAt > Date.now()) {
+          return chatModelsCache.value
+        }
+        return []
       }
       if (
         !cookieSession &&
-        resolved.length > 0 &&
         fetchGeneration === getChatModelsCacheGeneration()
       ) {
-        chatModelsCache = {
+        chatModelsCache = resolved.length > 0 ? {
           value: resolved,
           expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
-        }
+        } : null
       }
       return resolved
     })()
@@ -445,19 +445,15 @@ export const fetchChatModels = async ({
       if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession && chatModelsInFlightFresh === requireFresh) {
         return await currentFetch
       }
-      return await fetchChatModels({
-        returnEmpty,
-        forceRefresh,
-        refreshOpenRouter,
-        allowNetwork,
-        requireFresh
-      })
+      if (requireFresh) throw e
+      if (!cookieSession && chatModelsCache && chatModelsCache.expiresAt > Date.now()) {
+        return chatModelsCache.value
+      }
+      return []
     }
+    chatModelsCache = null
     if (requireFresh) throw e
     console.error("Failed to fetch chat models:", e)
-    if (!cookieSession && chatModelsCache?.value?.length) {
-      return chatModelsCache.value
-    }
     if (returnEmpty) return []
     throw e
   } finally {

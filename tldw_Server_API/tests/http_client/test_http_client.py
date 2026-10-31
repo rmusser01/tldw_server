@@ -1978,27 +1978,25 @@ async def test_stream_response_duplicate_headers_aiohttp_are_comma_joined(monkey
 
 
 @pytest.mark.parametrize("grouped", [False, True])
-def test_metric_registration_suppresses_noncritical_failure(monkeypatch, grouped):
+def test_metric_registration_suppresses_noncritical_failure(grouped):
     if grouped and sys.version_info < (3, 12):
         pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
-    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Metrics import http_client_metrics
+
+    calls: list[str] = []
 
     def fail_registration(definition):
+        calls.append(definition.name)
         error = ValueError("metric registration failed")
         raise builtins.ExceptionGroup("metrics", [error]) if grouped else error
 
-    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
-    monkeypatch.setattr(
-        hc,
-        "get_metrics_registry",
-        lambda: types.SimpleNamespace(register_metric=fail_registration),
-    )
-    hc._register_http_client_metrics_once()
-    assert hc._HTTP_CLIENT_METRICS_REGISTERED is True
+    # Must not raise: each family's failing registration is skipped on its own.
+    http_client_metrics.register_http_client_metrics(types.SimpleNamespace(register_metric=fail_registration))  # type: ignore[arg-type]
+    assert len(calls) == 4
 
 
-def test_metric_registration_propagates_unexpected_failure(monkeypatch):
-    from tldw_Server_API.app.core import http_client as hc
+def test_metric_registration_propagates_unexpected_failure():
+    from tldw_Server_API.app.core.Metrics import http_client_metrics
 
     class UnexpectedMetricError(Exception):
         pass
@@ -2006,11 +2004,98 @@ def test_metric_registration_propagates_unexpected_failure(monkeypatch):
     def fail_registration(definition):
         raise UnexpectedMetricError("unexpected metric failure")
 
-    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
-    monkeypatch.setattr(
-        hc,
-        "get_metrics_registry",
-        lambda: types.SimpleNamespace(register_metric=fail_registration),
-    )
     with pytest.raises(UnexpectedMetricError, match="unexpected metric failure"):
-        hc._register_http_client_metrics_once()
+        http_client_metrics.register_http_client_metrics(types.SimpleNamespace(register_metric=fail_registration))  # type: ignore[arg-type]
+
+
+# --- afetch(content=...): raw request bodies (TASK-13950.11) -----------------------------
+
+
+@requires_httpx
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [b'{"k": "v"}\x00\xff\r\n', '{"event": "café"}'],
+    ids=["bytes", "str"],
+)
+async def test_afetch_content_is_sent_byte_for_byte(body):
+    import warnings
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    sent: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request.content)
+        return httpx.Response(200)
+
+    async with hc.create_async_client(transport=httpx.MockTransport(handler)) as client:
+        with warnings.catch_warnings():
+            # data=<str|bytes> is deprecated in httpx; content= must not go that way.
+            warnings.simplefilter("error", DeprecationWarning)
+            await hc.afetch(
+                method="POST",
+                url="http://93.184.216.34/hook",
+                client=client,
+                content=body,
+                retry=hc.RetryPolicy(attempts=1),
+            )
+
+    (sent_body,) = sent
+    assert sent_body == (body if isinstance(body, bytes) else body.encode("utf-8"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other", ["data", "json", "files"])
+async def test_afetch_content_cannot_be_combined_with_another_body(other):
+    from tldw_Server_API.app.core import http_client as hc
+
+    with pytest.raises(ValueError, match="content cannot be combined"):
+        await hc.afetch(method="POST", url="http://93.184.216.34/hook", content=b"x", **{other: {"k": "v"}})
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_request_io_sends_content_as_the_raw_body():
+    from unittest.mock import create_autospec
+
+    aiohttp = pytest.importorskip("aiohttp")
+
+    from tldw_Server_API.app.core import http_client as hc
+
+    class Response:
+        status = 200
+        headers: dict[str, str] = {}
+        url = "http://93.184.216.34/hook"
+        charset = "utf-8"
+
+        async def read(self) -> bytes:
+            return b"ok"
+
+        def release(self) -> None:
+            return None
+
+    class RequestContext:
+        async def __aenter__(self) -> Response:
+            return Response()
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    request_kwargs: list[dict[str, object]] = []
+
+    def request(*_args: object, **kwargs: object) -> RequestContext:
+        request_kwargs.append(kwargs)
+        return RequestContext()
+
+    session = create_autospec(aiohttp.ClientSession, instance=True, spec_set=True)
+    session.request.side_effect = request
+    await hc._aiohttp_request_io(
+        session=session,
+        method="POST",
+        url="http://93.184.216.34/hook",
+        content=b"\x00raw\xff",
+    )
+
+    assert request_kwargs[0]["data"] == b"\x00raw\xff"

@@ -81,7 +81,6 @@ class MediaFilesRepository:
         include_deleted: bool = False,
     ) -> dict[str, Any] | None:
         db = self.session
-        conn = db.get_connection()
         clauses: list[str] = ["media_id = ?", "file_type = ?"]
         params = (media_id, file_type)
         if not include_deleted:
@@ -90,8 +89,9 @@ class MediaFilesRepository:
         # Reuploads keep distinct blobs; serve the latest successfully registered file.
         sql = f"SELECT * FROM MediaFiles WHERE {where_sql} ORDER BY id DESC LIMIT 1"  # nosec B608
         try:
-            rows = db._fetchall_with_connection(conn, sql, params)
-            return rows[0] if rows else None
+            # execute_query owns its connection; a held request connection would idle in a transaction.
+            rows = db.execute_query(sql, params).fetchall()
+            return dict(rows[0]) if rows else None
         except Exception as exc:
             raise DatabaseError(f"Failed to get MediaFile for media_id={media_id}: {exc}") from exc  # noqa: TRY003
 

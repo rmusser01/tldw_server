@@ -119,6 +119,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         expected_permissions = {
             "media.read",
             "media.create",
+            "media.update",
             "media.delete",
             "sql.read",
             "sql.target:media_db",
@@ -147,7 +148,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             SELECT id, name
             FROM permissions
             WHERE name IN (
-                'media.read','media.create','media.delete','system.configure',
+                'media.read','media.create','media.update','media.delete','system.configure',
                 'users.manage_roles','sql.read','sql.target:media_db','modules.read',
                 'prompts.read','tools.execute:*','notifications.read','notifications.control'
                 ,'notes.graph.suggest','notes.link_keyword','keywords.create'
@@ -162,6 +163,8 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         )
         user_perm_ids = {row[0] for row in await cur.fetchall()}
         assert perm_id["media.read"] in user_perm_ids
+        assert perm_id["media.update"] in user_perm_ids  # nosec B101 - Existing standard-user edit permission must survive bootstrap.
+        assert perm_id["media.delete"] not in user_perm_ids  # nosec B101 - Edit parity does not grant destructive permission.
         assert perm_id["media.create"] in user_perm_ids
         assert perm_id["sql.read"] in user_perm_ids
         assert perm_id["sql.target:media_db"] in user_perm_ids
@@ -189,6 +192,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             (role_id["viewer"],),
         )
         viewer_perm_ids = {row[0] for row in await cur.fetchall()}
+        assert perm_id["media.update"] not in viewer_perm_ids  # nosec B101 - Read-only role remains read-only.
         assert perm_id["media.read"] in viewer_perm_ids
         assert perm_id["notifications.read"] in viewer_perm_ids
         assert perm_id["notifications.control"] in viewer_perm_ids
@@ -201,6 +205,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             (role_id["reviewer"],),
         )
         reviewer_perm_ids = {row[0] for row in await cur.fetchall()}
+        assert perm_id["media.update"] not in reviewer_perm_ids  # nosec B101 - Review role does not acquire general edit permission.
         assert perm_id["notifications.read"] in reviewer_perm_ids
         assert perm_id["notifications.control"] in reviewer_perm_ids
 
