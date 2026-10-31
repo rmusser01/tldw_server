@@ -1,14 +1,11 @@
 name: Frontend E2E Tiers
 
 on:
+  # No `paths:` filter: a required check from a workflow that never triggers
+  # never reports and blocks the PR forever, while a job skipped by its `if:`
+  # counts as passing. The `changes` job below does the path scoping instead.
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'apps/packages/ui/src/**'
-      - 'apps/tldw-frontend/**'
-      - 'apps/extension/**'
-      - 'tldw_Server_API/**'
-      - '.github/workflows/frontend-e2e-tiers.yml'
   workflow_dispatch:
     inputs:
       tier:
@@ -48,7 +45,6 @@ jobs:
       pull-requests: read
       statuses: read
 
-  # ── Tier 1 + Journeys (critical path — always runs on PR) ─────────────
   # The pull_request path reports to the PR, so it is the one branch protection
   # sees -- but it used to start every gate immediately, in parallel with the
   # license audit it is supposed to follow. This makes it wait for the verdict.
@@ -59,9 +55,79 @@ jobs:
       contents: read
       statuses: read
 
+  # Replaces the old pull_request `paths:` filter (apps/packages/ui/src/**,
+  # apps/tldw-frontend/**, apps/extension/**, tldw_Server_API/**, this file).
+  # The browser tiers run when backend_changed || e2e_changed, a superset:
+  #   e2e_changed     covers apps/packages/ui/** (wider than ui/src),
+  #                   apps/tldw-frontend/** and apps/extension/**;
+  #   backend_changed covers tldw_Server_API/** and .github/workflows/**
+  #                   (wider than this file).
+  # It also runs them for .github/actions/**, pyproject.toml, uv.lock,
+  # tools/backlog-py/**, apps/packages/api-types/** and apps/bun.lock; see
+  # Helper_Scripts/ci/path_classifier.py. Docs- and backlog-only PRs skip them.
+  changes:
+    name: Detect Gate Changes
+    needs: [admission, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
+      e2e_changed: ${{ steps.detect.outputs.e2e_changed || steps.detect_admitted.outputs.e2e_changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha }}
+          persist-credentials: false
+      - id: detect
+        name: Classify changed files
+        if: github.event_name != 'workflow_run'
+        uses: ./.github/actions/detect-required-gate-changes
+      - id: detect_admitted
+        name: Classify admitted changed files
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.admission.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
+          mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
+          python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
+
+  # ── Tier 1 + Journeys (critical path — every PR with relevant changes) ─
+  # The last clause of each tier's `if:` is the path scope. A manual dispatch
+  # has no PR diff and always counts as relevant; so does a failed `changes`
+  # job, so an unknown change set runs the tier instead of skipping it.
   critical:
     name: E2E Critical (Tier 1 + Journeys)
-    needs: [admission, await_license]
+    needs: [changes, admission, await_license]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -85,6 +151,12 @@ jobs:
          github.event_name == 'workflow_run') ||
         (github.event_name == 'workflow_dispatch' &&
          contains(fromJSON('["critical","all-tiers"]'), github.event.inputs.tier))
+      ) &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.result != 'success' ||
+        needs.changes.outputs.backend_changed == 'true' ||
+        needs.changes.outputs.e2e_changed == 'true'
       )
     services:
       redis:
@@ -245,7 +317,7 @@ jobs:
   # ── Tier 2 + 3 (features — on dispatch or full suite) ─────────────────
   features:
     name: E2E Features (Tier 2 + 3)
-    needs: [admission, await_license]
+    needs: [changes, admission, await_license]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -267,6 +339,12 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' &&
         contains(fromJSON('["features","all-tiers"]'), github.event.inputs.tier)
+      ) &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.result != 'success' ||
+        needs.changes.outputs.backend_changed == 'true' ||
+        needs.changes.outputs.e2e_changed == 'true'
       )
     services:
       redis:
@@ -361,7 +439,7 @@ jobs:
   # ── Tier 4 + 5 (admin/specialized — on dispatch or full suite) ────────
   admin:
     name: E2E Admin (Tier 4 + 5)
-    needs: [admission, await_license]
+    needs: [changes, admission, await_license]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -383,6 +461,12 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' &&
         contains(fromJSON('["admin","all-tiers"]'), github.event.inputs.tier)
+      ) &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.result != 'success' ||
+        needs.changes.outputs.backend_changed == 'true' ||
+        needs.changes.outputs.e2e_changed == 'true'
       )
     services:
       redis:

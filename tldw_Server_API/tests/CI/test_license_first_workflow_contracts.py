@@ -84,7 +84,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "coverage-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
     "e2e-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
     "e2e-smoke.yml": "47fa5c3b099aeee7d744da19e5c8db6f403d82963b9d19b9f60292f0377d7180",
-    "frontend-e2e-tiers.yml": "ed6145852137a858e8003ea1d94921d840276dac56af311a357a2655a30bf272",
+    "frontend-e2e-tiers.yml": "83b065adf87b98e2a2169cfd6b540a752c22661628bc697ddda1580a13a35920",
     "frontend-required.yml": "3b0371351439f7a458a405b3238da9cc540d34fdb377423c1a39f3978e601978",
     "frontend-ux-gates.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "jobs-suite.yml": "023309eacbc53b533c94c56e00e710422e6e5885ba06a0921524964db7cf4476",
@@ -135,7 +135,7 @@ ORIGINAL_JOB_NAMES = {
     "coverage-required.yml": ("changes", "coverage-required", "queue-tick"),
     "e2e-required.yml": ("changes", "e2e-required", "queue-tick"),
     "e2e-smoke.yml": ("e2e-smoke",),
-    "frontend-e2e-tiers.yml": ("critical", "features", "admin", "ux-regression"),
+    "frontend-e2e-tiers.yml": ("changes", "critical", "features", "admin", "ux-regression"),
     "frontend-required.yml": (
         "changes", "frontend-unit-tests", "shared-ui-coverage",
         "shared-ui-coverage-report", "frontend-required", "queue-tick",
@@ -185,6 +185,9 @@ ORIGINAL_DEPENDENCIES = {
     ("coverage-required.yml", "queue-tick"): ("coverage-required",),
     ("e2e-required.yml", "e2e-required"): ("changes",),
     ("e2e-required.yml", "queue-tick"): ("e2e-required",),
+    ("frontend-e2e-tiers.yml", "critical"): ("changes",),
+    ("frontend-e2e-tiers.yml", "features"): ("changes",),
+    ("frontend-e2e-tiers.yml", "admin"): ("changes",),
     ("frontend-required.yml", "frontend-unit-tests"): ("changes",),
     ("frontend-required.yml", "shared-ui-coverage"): ("changes",),
     ("frontend-required.yml", "shared-ui-coverage-report"): ("changes", "shared-ui-coverage"),
@@ -216,6 +219,9 @@ LICENSE_RED_GATES = {
 }
 DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
     ("backend-required.yml", "backend-required"),
+    ("frontend-e2e-tiers.yml", "critical"),
+    ("frontend-e2e-tiers.yml", "features"),
+    ("frontend-e2e-tiers.yml", "admin"),
     ("frontend-required.yml", "frontend-unit-tests"),
     ("frontend-required.yml", "frontend-required"),
     ("security-required.yml", "security-required"),
@@ -249,6 +255,7 @@ FETCH_DEPTH_CHECKOUTS = {
     ("ci.yml", "changes"),
     ("coverage-required.yml", "changes"),
     ("e2e-required.yml", "changes"),
+    ("frontend-e2e-tiers.yml", "changes"),
     ("frontend-required.yml", "changes"),
     ("frontend-required.yml", "frontend-unit-tests"),
     ("frontend-required.yml", "frontend-required"),
@@ -279,6 +286,8 @@ CHANGE_CLASSIFIER_OUTPUTS = {
         "security_relevant_changed",
         "coverage_required",
     },
+    # The browser tiers' path scope; see the comment on that `changes` job.
+    "frontend-e2e-tiers.yml": {"backend_changed", "e2e_changed"},
     "frontend-required.yml": {
         "backend_changed",
         "frontend_changed",
@@ -628,6 +637,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             "github.event_name == 'workflow_dispatch' && "
             "contains(fromJSON('[\"admin\",\"all-tiers\"]'), github.event.inputs.tier)"
         ),
+        "changes": None,
         # Pull requests (path-scoped inside the job) and the all-tiers dispatch.
         "ux-regression": (
             "(github.event_name == 'pull_request' || "
@@ -636,6 +646,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             "github.event.inputs.tier == 'all-tiers')"
         ),
     }
+    # Replaces the old pull_request `paths:` filter; dispatch and a failed classifier run.
+    frontend_relevance = (
+        "github.event_name == 'workflow_dispatch' || "
+        "needs.changes.result != 'success' || "
+        "needs.changes.outputs.backend_changed == 'true' || "
+        "needs.changes.outputs.e2e_changed == 'true'"
+    )
 
     for name, (data, _) in _load_ordinary_workflows().items():
         jobs = data["jobs"]
@@ -693,6 +710,8 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 expected_condition = admission_clause
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
+                if name == "frontend-e2e-tiers.yml" and job_name in {"critical", "features", "admin"}:
+                    expected_condition += f" && ({frontend_relevance})"
                 if (name, job_name) in LICENSE_RED_GATES:
                     # A required gate must report a license wait that did not pass as failure,
                     # even when the changes job was not admitted (TASK-13502).
@@ -791,7 +810,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 58
+    assert checkout_count == 59
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -834,12 +853,12 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 58
     assert combined_text.count("github.event.pull_request.head.sha") == 54
     # +1 each: backend-required passes the admitted-or-PR base to the backlog
     # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.
     assert combined_text.count("github.event.pull_request.base.sha") == 6
-    assert combined_text.count("needs.admission.outputs.base_sha") == 13
+    assert combined_text.count("needs.admission.outputs.base_sha") == 14
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
         changes_job = workflows[name][0]["jobs"]["changes"]
@@ -1729,3 +1748,20 @@ def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() ->
     assert "test-results/" in upload["with"]["path"]
     assert ".tmp/frontend-e2e/" in upload["with"]["path"]
     assert upload["with"]["include-hidden-files"] is True
+
+
+def test_frontend_critical_always_reports_so_it_can_be_a_required_check() -> None:
+    """A workflow that never triggers never reports its required check, blocking the PR forever.
+
+    So the pull_request trigger has no `paths:` filter, and the path scope is a `changes` output
+    in the job's `if:`: an irrelevant PR skips `critical`, which GitHub counts as passing.
+    """
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    pull_request = _trigger(data)["pull_request"]
+    assert pull_request == {"branches": ["main", "dev"]}
+    critical = data["jobs"]["critical"]
+    assert critical["name"] == "E2E Critical (Tier 1 + Journeys)"
+    assert "changes" in _needs(critical)
+    condition = _normalized(critical["if"])
+    assert "needs.changes.outputs.backend_changed=='true'" in condition
+    assert "needs.changes.outputs.e2e_changed=='true'" in condition
