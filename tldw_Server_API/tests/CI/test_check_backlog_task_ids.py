@@ -55,8 +55,12 @@ def test_backend_required_runs_the_check_on_every_pr() -> None:
     jobs = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]
     checks = [step for step in jobs["changes"]["steps"]
               if "Helper_Scripts/ci/check_backlog_task_ids.py" in step.get("run", "")]
-    # One step in the changes job, which every PR runs, and no condition of its own.
-    assert [step.get("if") for step in checks] == [None]
+    # One step in the changes job, which every PR runs, with no condition of its own, and it blocks:
+    # no continue-on-error on the step or the job, and nothing appended to the command (no `|| true`).
+    assert [(step.get("if"), step.get("continue-on-error"), step["run"].strip()) for step in checks] == [
+        (None, None, "python3 Helper_Scripts/ci/check_backlog_task_ids.py .")
+    ]
+    assert jobs["changes"].get("continue-on-error") is None
     # These tests run in a required step too, so the lines above are enforced, not decoration.
     contracts = next(step for step in jobs["backend-required"]["steps"]
                      if step.get("name") == "Enforce CI contracts and code ratchets")
