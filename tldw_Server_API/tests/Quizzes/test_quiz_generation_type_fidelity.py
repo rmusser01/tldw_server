@@ -70,6 +70,11 @@ def grounded_verifier() -> AsyncMock:
     )
 
 
+async def unexpected_verification(**kwargs: Any) -> None:
+    """Fail if invalid model output reaches external claims verification."""
+    pytest.fail("Invalid quiz output reached claims verification")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_type", ["fill_blank", "unrecognized", None])
 async def test_unselected_raw_type_fails_before_claims_or_persistence(
@@ -78,15 +83,13 @@ async def test_unselected_raw_type_fails_before_claims_or_persistence(
     db, args, payload = quiz_context
     args["question_types"] = ["multiple_choice", "true_false"]
     payload["questions"].append({"question_type": bad_type, "question_text": "Extra item"})
-    verifier = AsyncMock()
     monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", AsyncMock(return_value=completion(payload)))
-    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", verifier)
+    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", unexpected_verification)
 
     with pytest.raises(ValueError, match="question type"):
         await quiz_generator.generate_quiz_from_sources(**args)
 
     assert db.list_quizzes(limit=10, offset=0)["count"] == 0
-    verifier.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -107,6 +110,7 @@ async def test_legacy_selection_allows_any_selected_type_when_count_is_smaller(
     result = await quiz_generator.generate_quiz_from_sources(**args)
 
     assert result["questions"][0]["question_type"] == "true_false"
+    assert llm.await_args is not None
     assert "multiple_choice, true_false" in llm.await_args.kwargs["prompt"]
     assert db.list_quizzes(limit=10, offset=0)["count"] == 1
 
@@ -179,15 +183,13 @@ async def test_qualified_unselected_citation_is_rejected_before_persistence(
         source_type=source_type,
         source_id=f"{source_type}:{source_id}-other",
     )
-    verifier = AsyncMock()
     monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", AsyncMock(return_value=completion(payload)))
-    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", verifier)
+    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", unexpected_verification)
 
     with pytest.raises(quiz_generator.QuizProvenanceValidationError, match="do not map"):
         await quiz_generator.generate_quiz_from_sources(**args)
 
     assert db.list_quizzes(limit=10, offset=0)["count"] == 0
-    verifier.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -203,12 +205,10 @@ async def test_token_limited_reasoning_response_reports_exhaustion(
             }
         ]
     }
-    verifier = AsyncMock()
     monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", AsyncMock(return_value=response))
-    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", verifier)
+    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", unexpected_verification)
 
     with pytest.raises(QuizMalformedOutputError, match="max_tokens"):
         await quiz_generator.generate_quiz_from_sources(**args)
 
     assert db.list_quizzes(limit=10, offset=0)["count"] == 0
-    verifier.assert_not_awaited()
