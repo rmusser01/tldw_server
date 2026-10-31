@@ -29,7 +29,7 @@ _DEFAULT_REBUILD_PAGE_LIMIT = 100
 
 
 def snapshot_cached_chacha_db_instances() -> tuple[CharactersRAGDB, ...]:
-    """Load the API cache lazily so disabled workers have no startup side effects."""
+    """Load the ChaCha provider's cache lazily so disabled workers have no startup side effects."""
 
     from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
         snapshot_cached_chacha_db_instances as snapshot,

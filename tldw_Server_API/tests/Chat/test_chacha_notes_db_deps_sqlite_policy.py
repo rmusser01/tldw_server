@@ -113,7 +113,7 @@ def test_chacha_integrity_preflight_uses_db_management_quick_check(fresh_service
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-@pytest.mark.parametrize("user_id", [True, False, 0, -1])
+@pytest.mark.parametrize("user_id", [True, False, 0, -1, "1"])
 async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(fresh_services, monkeypatch, user_id):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
@@ -125,12 +125,21 @@ async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(fresh
             return object()
 
     monkeypatch.setattr(app_services(), "chacha_runtime", _RecordingRuntime())
+    resolved: list[object] = []
+
+    def record_resolve(uid):
+        resolved.append(uid)
+        return Path("unused")
+
+    monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", record_resolve)
 
     with pytest.raises(HTTPException) as exc_info:
         await deps.get_chacha_db_for_user_id(user_id)
 
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
     assert exc_info.value.detail == "Invalid owner_user_id."
+    # The accessor's own check rejects the id: the path layer is never consulted.
+    assert resolved == []
     assert calls == []
 
 

@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
 from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
     SERVER_CLIENT_ID as SERVER_CLIENT_ID,
 )
+from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import InvalidChaChaOwnerError
 from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
     close_all_chacha_db_instances as close_all_chacha_db_instances,
 )
@@ -114,11 +115,14 @@ def _to_http(exc: Exception) -> HTTPException:
 
 
 async def _as_http(opening: Awaitable[CharactersRAGDB]) -> CharactersRAGDB:
-    """Await a provider accessor; its invalid-id ``ValueError`` is a 400, its runtime errors map via ``_to_http``."""
+    """Await a provider accessor; an invalid owner id is a 400, runtime errors map via ``_to_http``.
+
+    Any other ``ValueError`` (a bad runtime setting, a path fault) propagates as a server error.
+    """
     try:
         return await opening
-    except ValueError as exc:
-        # The provider validates the id; its message may carry a path, so it is never echoed.
+    except InvalidChaChaOwnerError as exc:
+        # Its cause may carry a path, so the detail is the constant, never str(exc).
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid owner_user_id.") from exc
     except (ChaChaRuntimeUnavailableError, ChaChaInitTimeoutError, ChaChaInitFailedError) as exc:
         raise _to_http(exc) from exc

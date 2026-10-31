@@ -17,7 +17,8 @@ Three counts, each frozen per module in its own baseline JSON as a ceiling
 
 One pin has no baseline: no module under ``core/`` or ``services/`` imports
 ``api/v1/API_Deps/ChaCha_Notes_DB_Deps.py``, at module or function level
-(``chacha_adapter_importers``); they use ``core/Character_Chat/chacha_db_provider.py``.
+(``chacha_adapter_importers``, which also resolves relative imports and ``importlib.import_module``
+calls with a literal name); they use ``core/Character_Chat/chacha_db_provider.py``.
 
 Known limits. These escape the counts: getters called through an alias
 (``pool = get_db_pool; pool()``), state built by a module-level helper call, and ``global`` writes
@@ -185,24 +186,35 @@ RATCHETS = (
 _CHACHA_DEPS = "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps"
 
 
-def _imports_chacha_deps(node: ast.AST) -> bool:
+def _imports_chacha_deps(node: ast.AST, importer_package: str) -> bool:
+    """An import of the adapter: absolute, relative (resolved against ``importer_package``) or importlib."""
     package, _, leaf = _CHACHA_DEPS.rpartition(".")
     if isinstance(node, ast.Import):
         return any(alias.name == _CHACHA_DEPS for alias in node.names)
     if isinstance(node, ast.ImportFrom):
-        return node.module == _CHACHA_DEPS or (
-            node.module == package and any(alias.name == leaf for alias in node.names)
-        )
+        module = node.module
+        if node.level:
+            parts = importer_package.split(".")
+            base = parts[: len(parts) - node.level + 1]
+            module = ".".join([*base, node.module] if node.module else base)
+        return module == _CHACHA_DEPS or (module == package and any(alias.name == leaf for alias in node.names))
+    if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant):
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        return name == "import_module" and node.args[0].value == _CHACHA_DEPS
     return False
 
 
 def chacha_adapter_importers(root: Path = APP_ROOT) -> list[str]:
     """Modules under core/ and services/ that import the ChaCha deps adapter, at module or function level."""
-    return sorted(
-        key
-        for key, tree in _modules(root)
-        if key.startswith(("core/", "services/")) and any(map(_imports_chacha_deps, ast.walk(tree)))
-    )
+    found = []
+    for key, tree in _modules(root):
+        if not key.startswith(("core/", "services/")):
+            continue
+        importer_package = ".".join(["tldw_Server_API", "app", *key.split("/")[:-1]])
+        if any(_imports_chacha_deps(node, importer_package) for node in ast.walk(tree)):
+            found.append(key)
+    return sorted(found)
 
 
 # --- Self-tests: each seeds a tree under a fresh tmp root and runs the real scan ---------------
@@ -271,13 +283,17 @@ def test_chacha_adapter_importers_lists_every_import_shape(tmp_path: Path) -> No
         "core/X/plain.py": f"import {_CHACHA_DEPS} as deps\n",
         "services/from_package.py": "from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps\n",
         "services/nested.py": f"async def f():\n    from {_CHACHA_DEPS} import warm_chacha_db_for_user\n",
+        "core/X/relative.py": "from ...api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner\n",
+        "services/dynamic.py": f"import importlib\n\ndeps = importlib.import_module({_CHACHA_DEPS!r})\n",
         # Not listed: an in-app tests package, the api layer, and another deps module.
         "core/X/tests/test_x.py": f"import {_CHACHA_DEPS}\n",
         "api/v1/endpoints/e.py": f"from {_CHACHA_DEPS} import get_chacha_db_for_user\n",
         "services/other.py": "from tldw_Server_API.app.api.v1.API_Deps import DB_Deps\n",
+        "core/X/relative_other.py": "from ...api.v1.API_Deps import DB_Deps\n",
     })
     assert chacha_adapter_importers(root) == [
-        "core/X/absolute.py", "core/X/plain.py", "services/from_package.py", "services/nested.py",
+        "core/X/absolute.py", "core/X/plain.py", "core/X/relative.py",
+        "services/dynamic.py", "services/from_package.py", "services/nested.py",
     ]
 
 

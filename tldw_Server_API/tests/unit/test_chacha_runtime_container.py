@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 
@@ -190,4 +192,61 @@ async def test_closed_runtime_refuses_before_resolving_the_user_directory(
     with pytest.raises(ChaChaRuntimeUnavailableError):
         await call(chacha_db_provider)
 
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: deps.get_chacha_db_for_user_id(1),
+        lambda: deps.get_chacha_db_for_owner(1),
+        lambda: deps.get_chacha_db_for_user(SimpleNamespace(id=1)),
+    ],
+    ids=["user-id", "owner", "depends"],
+)
+async def test_a_bad_runtime_setting_is_a_server_fault_not_an_invalid_owner_400(
+    fresh_services, monkeypatch, tmp_path, call
+) -> None:
+    """get_chacha_runtime() parses its settings inside the accessor; a bad one must stay a logged 500."""
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("CHACHA_INIT_TIMEOUT_SECS", "30s")
+
+    with pytest.raises(ValueError, match="could not convert string to float"):
+        await call()
+
+
+async def test_a_path_fault_for_a_valid_id_is_not_an_invalid_owner_400(fresh_services, monkeypatch) -> None:
+    def escapes_base(_user_id):
+        raise ValueError("Computed user directory escapes base path: '/elsewhere'")
+
+    monkeypatch.setattr(DatabasePaths, "get_user_base_directory", escapes_base)
+
+    with pytest.raises(ValueError, match="escapes base path"):
+        await deps.get_chacha_db_for_user_id(1)
+
+
+@pytest.mark.parametrize("owner_user_id", ["7", None, 0], ids=["str", "none", "zero"])
+async def test_invalid_owner_ids_get_the_constant_400(fresh_services, monkeypatch, tmp_path, owner_user_id) -> None:
+    """The non-int check and the path layer's rejection of 0 both give the 400, which never echoes the cause."""
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.get_chacha_db_for_owner(owner_user_id)
+
+    assert (exc_info.value.status_code, exc_info.value.detail) == (400, "Invalid owner_user_id.")
+
+
+async def test_closed_runtime_skips_warm_up_before_resolving_the_user_directory(
+    fresh_services, monkeypatch, tmp_path
+) -> None:
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
+
+    runtime = ChaChaRuntimeManager()
+    runtime.shutdown()
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(app_services(), "chacha_runtime", runtime)
+
+    assert await chacha_db_provider.warm_chacha_db_for_user(4242) is None
+
+    assert runtime.health_snapshot()["warm_startups"] == 0
     assert list(tmp_path.iterdir()) == []

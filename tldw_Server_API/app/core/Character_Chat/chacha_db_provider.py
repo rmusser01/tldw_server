@@ -2,8 +2,8 @@
 
 Workers and core code open a user's database here. ``get_chacha_runtime()`` owns the cache, executor and
 lifecycle. Every function raises core errors, never ``HTTPException``: the accessors raise
-``ValueError("Invalid owner_user_id.")`` for an invalid id and the runtime's errors otherwise. The API layer's
-ChaCha dependency module maps them to HTTP.
+``InvalidChaChaOwnerError`` (a ``ValueError``) for an invalid id and the runtime's errors otherwise. The API
+layer's ChaCha dependency module maps them to HTTP; any other ``ValueError`` is a server fault.
 """
 
 import asyncio
@@ -45,6 +45,13 @@ from tldw_Server_API.app.core.exceptions import BuiltinCharacterSeedError
 from tldw_Server_API.app.core.Utils.app_services import app_services
 
 _INVALID_OWNER_DETAIL = "Invalid owner_user_id."
+
+
+class InvalidChaChaOwnerError(ValueError):
+    """The caller passed an owner id no ChaChaNotes database can belong to."""
+
+    def __init__(self, message: str = _INVALID_OWNER_DETAIL) -> None:
+        super().__init__(message)
 
 
 def resolve_chacha_user_base_dir() -> Path:
@@ -344,8 +351,16 @@ async def _open(user_id: int, client_id: str | None) -> CharactersRAGDB:
     # Refuse before resolving the user directory: resolving it creates it.
     if runtime.shutting_down:
         raise ChaChaRuntimeUnavailableError(_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL)
+    try:
+        user_dir = DatabasePaths.get_user_base_directory(user_id)
+    except ValueError as exc:
+        # The path layer rejects 0 and, outside tests, a bool or negative id. For a valid id
+        # its ValueError is a configuration fault (e.g. a path escaping the base) and stays one.
+        if isinstance(user_id, bool) or user_id < 1:
+            raise InvalidChaChaOwnerError() from exc
+        raise
     return await runtime.get_db(
-        str(DatabasePaths.get_user_base_directory(user_id)),
+        str(user_dir),
         partial(create_and_prepare_chacha_db, user_id, tenant_client_id(user_id, client_id)),
         user_id=user_id,
     )
@@ -354,11 +369,11 @@ async def _open(user_id: int, client_id: str | None) -> CharactersRAGDB:
 async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB:
     """Return the database of a user whose id the caller already knows (workers, WebSocket handlers).
 
-    Raises ``ValueError`` for a bool, non-int or non-positive id before it touches the runtime.
-    Schedules the default character on the runtime.
+    Raises ``InvalidChaChaOwnerError`` for a bool, non-int or non-positive id before it touches the
+    runtime. Schedules the default character on the runtime.
     """
     if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
-        raise ValueError(_INVALID_OWNER_DETAIL)
+        raise InvalidChaChaOwnerError()
     db_instance = await _open(user_id, client_id)
     runtime = get_chacha_runtime()
     if not runtime.shutting_down:
@@ -369,10 +384,11 @@ async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) 
 async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
     """Return an arbitrary user's database (the workspace owner), as the sharing module reads sources from it.
 
-    Raises ``ValueError`` for a non-int id.
+    Raises ``InvalidChaChaOwnerError`` for a non-int id, and for an id the path layer rejects: 0 always,
+    and a bool or negative id outside tests (test context gives those their own directory).
     """
     if not isinstance(owner_user_id, int):
-        raise ValueError(_INVALID_OWNER_DETAIL)
+        raise InvalidChaChaOwnerError()
     return await _open(owner_user_id, None)
 
 
