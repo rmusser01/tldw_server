@@ -16,7 +16,7 @@ from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs import (
     ResearchWorkspaceOutputArtifactType,
     ResearchWorkspaceOutputSettings,
@@ -708,7 +708,7 @@ async def _process_video_overview_output_payload(
                 generator.generate_from_text,
                 source_text=source_context.text,
                 title_hint=settings.title_hint,
-                provider=settings.provider or DEFAULT_LLM_PROVIDER,
+                provider=settings.provider or get_default_provider(),
                 model=settings.model,
                 api_key=None,
                 temperature=None,

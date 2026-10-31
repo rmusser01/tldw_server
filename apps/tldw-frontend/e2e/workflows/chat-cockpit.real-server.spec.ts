@@ -3285,7 +3285,6 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(regenerateControl).toBeDisabled();
 
     const prompt = `Cockpit streaming controls proof ${Date.now()}: reply with a concise numbered list.`;
-    let selectedPrompt = prompt;
     const completionAttempt = page.waitForRequest(
       (request) => isChatCompletionRequest(page, request),
       { timeout: 90_000 }
@@ -3427,15 +3426,17 @@ test.describe('/chat cockpit real-server parity', () => {
       } finally {
         page.removeListener('request', observeAutomaticTurn);
       }
-      const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
-      selectedPrompt = 'Reply with one short sentence to verify the saved-history regeneration gate.';
-      await page.getByTestId('chat-input').fill(selectedPrompt);
-      await page.getByRole('button', { name: /send message/i }).click();
-      const followUpResponse = await followUpCompletion;
-      expect(followUpResponse.status()).toBeLessThan(400);
-      await assertProviderQualifiedPayload(page, followUpResponse);
-      await waitForStreamComplete(page, 60_000);
     }
+    // CC-04 hides history review for one exchange. Give both Stop outcomes a
+    // second exchange before exercising the selected-history regeneration gate.
+    const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
+    const selectedPrompt = 'Reply with one short sentence to verify the saved-history regeneration gate.';
+    await page.getByTestId('chat-input').fill(selectedPrompt);
+    await page.getByRole('button', { name: /send message/i }).click();
+    const followUpResponse = await followUpCompletion;
+    expect(followUpResponse.status()).toBeLessThan(400);
+    await assertProviderQualifiedPayload(page, followUpResponse);
+    await waitForStreamComplete(page, 60_000);
     await expect.poll(async () => {
       const saved = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
       const question = saved.body.messages.find(row => row.sender === 'user' && row.content === selectedPrompt);
