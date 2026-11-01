@@ -45,7 +45,8 @@ def usage_store():
             provider TEXT, model TEXT, status INTEGER, latency_ms INTEGER,
             prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER,
             prompt_cost_usd REAL, completion_cost_usd REAL, total_cost_usd REAL,
-            currency TEXT, estimated INTEGER, request_id TEXT, estimate_source TEXT
+            currency TEXT, estimated INTEGER, request_id TEXT, estimate_source TEXT,
+            credential_source TEXT
         );
         CREATE UNIQUE INDEX mcp_execution_usage ON llm_usage_log(request_id)
           WHERE operation = 'mcp_model_completion' AND request_id IS NOT NULL;

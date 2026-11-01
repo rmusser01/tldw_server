@@ -362,7 +362,7 @@ async def test_byte_stream_adapters_forward_configured_endpoint(monkeypatch, bac
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scoped", [True, False])
-async def test_public_byte_stream_preserves_optional_scope_without_changing_legacy_kwargs(monkeypatch, scoped):
+async def test_public_byte_stream_preserves_scoped_and_unscoped_endpoints(monkeypatch, scoped):
     from tldw_Server_API.app.core import http_client as hc
     from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
@@ -381,10 +381,7 @@ async def test_public_byte_stream_preserves_optional_scope_without_changing_lega
     ]
 
     assert result == [b"ok"]
-    if scoped:
-        assert calls[0]["configured_endpoint"] is scope
-    else:
-        assert "configured_endpoint" not in calls[0]
+    assert calls[0]["configured_endpoint"] is scope
 
 
 @pytest.mark.asyncio

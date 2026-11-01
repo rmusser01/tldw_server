@@ -97,6 +97,8 @@ async def test_a_table_without_the_column_still_records_counts_and_refuses(monke
 
 async def test_a_failed_postgres_usage_column_is_logged_as_a_warning() -> None:
     """A usage-table statement that times out on PostgreSQL is a warning, so a missing column is visible."""
+    from contextlib import asynccontextmanager
+
     from loguru import logger
 
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_usage_tables_pg
@@ -106,6 +108,11 @@ async def test_a_failed_postgres_usage_column_is_logged_as_a_warning() -> None:
 
         pool = object()
 
+        @asynccontextmanager
+        async def transaction(self):
+            """Expose the atomic usage-DDL boundary used by the canonical pool."""
+            yield self
+
         async def execute(self, sql: str, *_params: object) -> None:
             """Time out every ALTER of llm_usage_log, as asyncpg does."""
             if "ALTER TABLE llm_usage_log" in sql:
@@ -114,7 +121,8 @@ async def test_a_failed_postgres_usage_column_is_logged_as_a_warning() -> None:
     warnings: list[str] = []
     sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
     try:
-        assert await ensure_usage_tables_pg(_Pool())
+        with pytest.raises(TimeoutError):
+            await ensure_usage_tables_pg(_Pool())
     finally:
         logger.remove(sink)
     assert any("PG ensure usage tables DDL failed" in line for line in warnings)
@@ -134,7 +142,10 @@ def test_sqlite_migrations_add_the_column_to_new_and_upgraded_databases(tmp_path
 
     legacy = tmp_path / "legacy.db"
     with sqlite3.connect(legacy) as conn:
-        conn.execute("CREATE TABLE llm_usage_log (id INTEGER PRIMARY KEY, ts TIMESTAMP, user_id INTEGER)")
+        conn.execute(
+            "CREATE TABLE llm_usage_log "
+            "(id INTEGER PRIMARY KEY, ts TIMESTAMP, user_id INTEGER, request_id TEXT, operation TEXT)"
+        )
         conn.execute(
             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP NOT NULL)"
         )

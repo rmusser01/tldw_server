@@ -351,8 +351,8 @@ def test_persona_mcp_tool_receives_authenticated_execution_scope(monkeypatch):
             return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
 
     async def _fake_resolve(ws, *args, **kwargs):
-        ws.state.persona_auth_method = "jwt_authnz"
-        ws.state.persona_api_key_scopes = []
+        ws.state.persona_auth_method = "access"
+        ws.state.persona_api_key_scopes = None
         ws.state.persona_server_auth_scope = scope
         return "1", True, True
 
@@ -380,7 +380,8 @@ def test_persona_mcp_tool_receives_authenticated_execution_scope(monkeypatch):
                     }
                 )
             )
-            _ = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+            result = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+            assert result["ok"] is True
 
     assert fake_server.server_auth_scope == scope
 

@@ -4249,9 +4249,15 @@ async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     if getattr(db_pool, "pool", None) is None:
         return False
     # Readiness is atomic: never swallow a failed accounting DDL statement.
-    async with db_pool.transaction() as conn:
-        for sql, params in _CREATE_USAGE_TABLES:
-            await conn.execute(sql, *params)
+    try:
+        async with db_pool.transaction() as conn:
+            for sql, params in _CREATE_USAGE_TABLES:
+                await conn.execute(sql, *params)
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.bind(exception_type=type(exc).__name__).warning(
+            "PG ensure usage tables DDL failed; usage schema is unavailable"
+        )
+        raise
     logger.info("Ensured PostgreSQL usage tables and durable provider reservations")
     return True
 
