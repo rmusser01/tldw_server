@@ -346,11 +346,19 @@ def release_job(
     *,
     command: ReleaseJobCommand,
     counters_enabled: bool,
+    clock: Callable[[], datetime] | None = None,
 ) -> LifecycleResult:
     """Release one processing Postgres job back to the ready queue."""
 
+    from ..resource import resource_mutation
+
     with conn:
-        with cursor_factory(conn) as cur:
+        with (
+            cursor_factory(conn) as cur,
+            resource_mutation(cur, postgres=True, where="id=%s", params=(command.job_id,), clock=clock) as mutation,
+        ):
+            if not mutation.worker_allowed(command.job_id, command.worker_id, command.lease_id):
+                return LifecycleResult.no_transition(NoTransitionReason.STALE_LEASE)
             enrollment = workflow_enrollment_projection(conn, backend="postgres")
             selected_sql = (
                 "SELECT id, domain, queue, job_type, status, worker_id, lease_id " "FROM jobs WHERE id = %s FOR UPDATE"

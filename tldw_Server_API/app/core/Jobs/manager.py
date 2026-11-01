@@ -138,6 +138,7 @@ from .operations.postgres import release_job as _postgres_release_job
 from .operations.postgres import renew_lease as _postgres_renew_lease
 from .operations.postgres import renew_leases_batch as _postgres_renew_leases_batch
 from .operations.postgres import replay_idempotent_operation as _postgres_replay_idempotent_operation
+from .operations.resource import ResourceMutation, resource_mutation
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
 from .operations.sqlite import apply_prepared_disposition as _sqlite_apply_prepared_disposition
@@ -164,7 +165,7 @@ from .pg_migrations import (
     slides_archive_indexes_ready_pg,
     slides_archive_projection_ready_pg,
 )
-from .resource_contracts import ResourceAdmission, ResourceAdmissionRequest
+from .resource_contracts import RESOURCE_METADATA_FIELDS, ResourceAdmission, ResourceAdmissionRequest, ResourceAttempt
 from .resource_policy import reject_resource_required, validate_resource_command
 from .tracing import job_span
 
@@ -5068,6 +5069,105 @@ class JobManager:
             job_type="optimization",
         )
 
+    @contextlib.contextmanager
+    def _resource_pg_cursor(self, conn: Any, **kwargs: Any) -> Iterator[tuple[Any, ResourceMutation]]:
+        """Keep lifecycle head and exact-row locks inside the caller's transaction."""
+        with self._pg_cursor(conn) as cur, self._resource_mutation(cur, postgres=True, **kwargs) as mutation:
+            yield cur, mutation
+
+    def _resource_mutation(self, executor: Any, **kwargs: Any) -> contextlib.AbstractContextManager[ResourceMutation]:
+        """Use Jobs' injected clock at the executing, locked lifecycle boundary."""
+        return resource_mutation(executor, clock=self._clock.now_utc, **kwargs)
+
+    @contextlib.contextmanager
+    def _resource_sqlite_transaction(self, conn: Any, **kwargs: Any) -> Iterator[ResourceMutation]:
+        """Reserve SQLite's writer before discovering resource mutation targets."""
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            with self._resource_mutation(conn, **kwargs) as mutation:
+                yield mutation
+
+    def validate_resource_attempt(self, attempt: ResourceAttempt) -> bool:
+        """Read exact live Jobs authority, not a cross-store cancellation promise."""
+        if not isinstance(attempt, ResourceAttempt):
+            return False
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with (
+                    conn,
+                    self._resource_pg_cursor(
+                        conn, where="id=%s AND uuid=%s", params=(attempt.job_id, attempt.job_uuid), read_only=True
+                    ) as (_, mutation),
+                ):
+                    return self._resource_attempt_matches(mutation, attempt)
+            with self._resource_sqlite_transaction(
+                conn, where="id=? AND uuid=?", params=(attempt.job_id, attempt.job_uuid), read_only=True
+            ) as mutation:
+                return self._resource_attempt_matches(mutation, attempt)
+        except (ValueError, RuntimeError, KeyError, TypeError):
+            return False
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _resource_attempt_matches(mutation: ResourceMutation, attempt: ResourceAttempt) -> bool:
+        """Compare the immutable binding as well as the current acquired lease."""
+        row = mutation.rows.get(attempt.job_id)
+        return bool(
+            row
+            and row["status"] == "processing"
+            and mutation.bound.get(attempt.job_id) == attempt.binding.scope
+            and row["resource_authority_uuid"] == attempt.binding.authority_uuid
+            and row["resource_generation"] == attempt.binding.generation
+            and mutation.worker_allowed(attempt.job_id, attempt.worker_id, attempt.lease_id, attempt.job_uuid)
+        )
+
+    def _validate_resource_payload_replacement(self, row: dict[str, Any], payload: Any) -> Any:
+        """Return an equal decrypted contract, leaving opted-out payloads unchanged."""
+        from tldw_Server_API.app.core.claims_cluster_rebuild_contract import validate_cluster_rebuild_payload
+
+        from .operations.resource import resource_scope_for
+        from .resource_contracts import canonical_settings_json, settings_fingerprint
+
+        try:
+            scope = resource_scope_for(row)
+            if scope is None:
+                return payload
+            old_payload = row.get("payload")
+            if old_payload is None and row.get("payload_compressed") is not None:
+                old_payload = self._decode_archive_blob(row["payload_compressed"])
+
+            def validated(value: Any) -> dict[str, Any]:
+                """Decode encryption before neutral contract validation."""
+                return validate_cluster_rebuild_payload(
+                    self._maybe_decrypt_json(
+                        self._parse_json_value(value),
+                        fail_on_error=True,
+                        field_name="payload",
+                    )
+                )
+
+            old, new = validated(old_payload), validated(payload)
+            if (
+                row.get("payload_compressed") is not None
+                and validated(self._decode_archive_blob(row["payload_compressed"])) != old
+            ):
+                raise ValueError("resource_payload_conflict")
+            settings = {key: value for key, value in old.items() if key != "owner_user_id"}
+            if settings["method"] == "exact":
+                settings.pop("similarity_threshold")
+            if (
+                old != new
+                or old["owner_user_id"] != scope.owner_user_id
+                or canonical_settings_json(settings) != row["resource_settings_json"]
+                or settings_fingerprint(settings) != row["resource_settings_fingerprint"]
+            ):
+                raise ValueError("resource_payload_conflict")
+            return new
+        except (ValueError, TypeError, KeyError, OSError, EOFError) as exc:
+            raise ValueError("resource_payload_conflict") from exc
+
     def replace_job_payload(
         self,
         job_id: int,
@@ -5093,21 +5193,25 @@ class JobManager:
                     guards.append(str(expected_domain))
                 where_sql = " AND ".join(clauses)
                 with conn:
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where=where_sql, params=tuple(guards), archived=False, payload_replacement=True
+                    ) as (cur, mutation):
+                        where_sql, guards = mutation.where, list(mutation.params)
                         cur.execute(
-                            "SELECT domain, queue, job_type FROM jobs "
-                            f"WHERE {where_sql} FOR UPDATE",  # nosec B608
+                            f"SELECT * FROM jobs WHERE {where_sql} FOR UPDATE",  # nosec B608
                             tuple(guards),
                         )
                         row = cur.fetchone()
                         if not row:
                             return False
+                        payload = self._validate_resource_payload_replacement(dict(row), payload)
                         serialized = self._serialize_replacement_payload(
                             payload,
                             domain=str(row["domain"]),
                             queue=str(row["queue"]),
                             job_type=str(row["job_type"]),
                         )
+                        self._validate_resource_payload_replacement(dict(row), serialized)
                         cur.execute(
                             "UPDATE jobs SET payload = %s::jsonb, "
                             f"updated_at = NOW() WHERE {where_sql}",  # nosec B608
@@ -5124,21 +5228,24 @@ class JobManager:
                 clauses.append("domain = ?")
                 guards.append(str(expected_domain))
             where_sql = " AND ".join(clauses)
-            with conn:
-                conn.execute("BEGIN IMMEDIATE")
+            with self._resource_sqlite_transaction(
+                conn, where=where_sql, params=tuple(guards), archived=False, payload_replacement=True
+            ) as mutation:
+                where_sql, guards = mutation.where, list(mutation.params)
                 row = conn.execute(
-                    "SELECT domain, queue, job_type FROM jobs "
-                    f"WHERE {where_sql}",  # nosec B608
+                    f"SELECT * FROM jobs WHERE {where_sql}",  # nosec B608
                     tuple(guards),
                 ).fetchone()
                 if not row:
                     return False
+                payload = self._validate_resource_payload_replacement(dict(row), payload)
                 serialized = self._serialize_replacement_payload(
                     payload,
-                    domain=str(row[0]),
-                    queue=str(row[1]),
-                    job_type=str(row[2]),
+                    domain=str(row["domain"]),
+                    queue=str(row["queue"]),
+                    job_type=str(row["job_type"]),
                 )
+                self._validate_resource_payload_replacement(dict(row), serialized)
                 cursor = conn.execute(
                     "UPDATE jobs SET payload = ?, updated_at = DATETIME('now') "
                     f"WHERE {where_sql}",  # nosec B608
@@ -5177,21 +5284,25 @@ class JobManager:
                     guards.append(int(expected_archive_locator))
                 where_sql = " AND ".join(clauses)
                 with conn:
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where=where_sql, params=tuple(guards), archived=True, payload_replacement=True
+                    ) as (cur, mutation):
+                        where_sql, guards = mutation.where, list(mutation.params)
                         cur.execute(
-                            "SELECT domain, queue, job_type FROM jobs_archive "
-                            f"WHERE {where_sql} FOR UPDATE",  # nosec B608
+                            f"SELECT * FROM jobs_archive WHERE {where_sql} FOR UPDATE",  # nosec B608
                             tuple(guards),
                         )
                         row = cur.fetchone()
                         if not row:
                             return False
+                        payload = self._validate_resource_payload_replacement(dict(row), payload)
                         serialized = self._serialize_replacement_payload(
                             payload,
                             domain=str(row["domain"]),
                             queue=str(row["queue"]),
                             job_type=str(row["job_type"]),
                         )
+                        self._validate_resource_payload_replacement(dict(row), serialized)
                         cur.execute(
                             "UPDATE jobs_archive SET payload = %s::jsonb, "
                             f"payload_compressed = NULL WHERE {where_sql}",  # nosec B608
@@ -5211,21 +5322,24 @@ class JobManager:
                 clauses.append("archive_id = ?")
                 guards.append(int(expected_archive_locator))
             where_sql = " AND ".join(clauses)
-            with conn:
-                conn.execute("BEGIN IMMEDIATE")
+            with self._resource_sqlite_transaction(
+                conn, where=where_sql, params=tuple(guards), archived=True, payload_replacement=True
+            ) as mutation:
+                where_sql, guards = mutation.where, list(mutation.params)
                 row = conn.execute(
-                    "SELECT domain, queue, job_type FROM jobs_archive "
-                    f"WHERE {where_sql}",  # nosec B608
+                    f"SELECT * FROM jobs_archive WHERE {where_sql}",  # nosec B608
                     tuple(guards),
                 ).fetchone()
                 if not row:
                     return False
+                payload = self._validate_resource_payload_replacement(dict(row), payload)
                 serialized = self._serialize_replacement_payload(
                     payload,
-                    domain=str(row[0]),
-                    queue=str(row[1]),
-                    job_type=str(row[2]),
+                    domain=str(row["domain"]),
+                    queue=str(row["queue"]),
+                    job_type=str(row["job_type"]),
                 )
+                self._validate_resource_payload_replacement(dict(row), serialized)
                 cursor = conn.execute(
                     "UPDATE jobs_archive SET payload = ?, payload_compressed = NULL "
                     f"WHERE {where_sql}",  # nosec B608
@@ -6255,18 +6369,24 @@ class JobManager:
                 if job_types is not None:
                     where.append("job_type = ANY(%s)")
                     params.append(list(job_types))
-                with conn, self._pg_cursor(conn) as cur:
-                    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
-                        effect_event_type,
-                        recover_workflow_expiry_in_transaction,
-                        workflow_enrollment_projection,
-                    )
+                from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+                    effect_event_type,
+                    recover_workflow_expiry_in_transaction,
+                    workflow_enrollment_projection,
+                )
 
-                    enrollment = workflow_enrollment_projection(conn, backend=self.backend)
-                    if enrollment == "workflow_capability_version":
-                        where[1] = (
-                            "(leased_until IS NULL OR leased_until <= CASE WHEN workflow_capability_version=1 THEN clock_timestamp() ELSE NOW() END)"
-                        )
+                enrollment = workflow_enrollment_projection(conn, backend=self.backend)
+                if enrollment == "workflow_capability_version":
+                    where[1] = (
+                        "(leased_until IS NULL OR leased_until <= CASE WHEN workflow_capability_version=1 THEN clock_timestamp() ELSE NOW() END)"
+                    )
+                with (
+                    conn,
+                    self._resource_pg_cursor(
+                        conn, where=" AND ".join(where), params=tuple(params), expired_recovery_limit=batch_size
+                    ) as (cur, mutation),
+                ):
+                    where, params = [mutation.where], list(mutation.params)
                     counter_deltas: dict[tuple[str, str, str], tuple[int, int]] = {}
                     cur.execute(
                         (
@@ -6391,8 +6511,10 @@ class JobManager:
                 ).fetchone()
                 if not precheck:
                     return 0
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where=scoped_where, params=tuple(params), expired_recovery_limit=batch_size
+                ) as mutation:
+                    scoped_where, params = mutation.where, list(mutation.params)
                     rows = conn.execute(
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
@@ -7652,7 +7774,11 @@ class JobManager:
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where="id=%s", params=(int(job_id),), expected_uuid=expected_uuid
+                    ) as (cur, mutation):
+                        if expected_uuid is not None and int(job_id) not in mutation.rows:
+                            return False
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(
@@ -7673,6 +7799,8 @@ class JobManager:
                             expected_uuid is not None
                             and str(stored_uuid or "") != str(expected_uuid)
                         ):
+                            return False
+                        if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                             return False
                         st = str(base.get("status"))
                         ct = base.get("completion_token")
@@ -7918,6 +8046,7 @@ class JobManager:
                                 event_type="job.completed",
                                 job=ev,
                             )
+                            mutation.finish()
                             _commit_postgres_transaction(
                                 conn,
                                 operation="job completion",
@@ -7927,8 +8056,11 @@ class JobManager:
                         res_ok = ok
                         # fall through to finally and return
             else:
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where="id=?", params=(int(job_id),), expected_uuid=expected_uuid
+                ) as mutation:
+                    if expected_uuid is not None and int(job_id) not in mutation.rows:
+                        return False
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(
@@ -7949,6 +8081,8 @@ class JobManager:
                         expected_uuid is not None
                         and str(stored_uuid or "") != str(expected_uuid)
                     ):
+                        return False
+                    if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                         return False
                     st = str(base.get("status"))
                     ct = base.get("completion_token")
@@ -8308,13 +8442,21 @@ class JobManager:
     def batch_complete_jobs(self, items: list[dict[str, Any]], *, enforce: bool | None = None) -> int:
         if enforce is None:
             enforce = self._should_enforce_ack()
+        if not items:
+            return 0
+        ids = tuple(sorted({int(item["job_id"]) for item in items}))
         conn = self._connect()
         done = 0
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(conn, where="id = ANY(%s)", params=(list(ids),), batch=True) as (
+                        cur,
+                        mutation,
+                    ):
                         for it in items:
+                            if not mutation.item_allowed(it):
+                                continue
                             res_obj = it.get("result")
                             # Optional encryption at rest: prefer provided domain, otherwise fetch
                             try:
@@ -8351,8 +8493,12 @@ class JobManager:
                                 )
                             done += cur.rowcount or 0
             else:
-                with conn:
+                with self._resource_sqlite_transaction(
+                    conn, where="id IN (" + ",".join("?" for _ in ids) + ")", params=ids, batch=True
+                ) as mutation:
                     for it in items:
+                        if not mutation.item_allowed(it):
+                            continue
                         res_obj = it.get("result")
                         # Optional encryption at rest (SQLite): prefer provided domain, otherwise fetch
                         try:
@@ -8402,13 +8548,21 @@ class JobManager:
                     raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
+        if not items:
+            return 0
+        ids = tuple(sorted({int(item["job_id"]) for item in items}))
         conn = self._connect()
         cnt = 0
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(conn, where="id = ANY(%s)", params=(list(ids),), batch=True) as (
+                        cur,
+                        mutation,
+                    ):
                         for it in items:
+                            if not mutation.item_allowed(it):
+                                continue
                             if enforce:
                                 cur.execute(
                                     "UPDATE jobs SET status='failed', last_error=%s, error_message=%s, error_code=%s, completed_at=NOW(), leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=%s WHERE id=%s AND status='processing' AND worker_id=%s AND lease_id=%s AND (completion_token IS NULL OR completion_token=%s)",
@@ -8437,8 +8591,12 @@ class JobManager:
                                 )
                             cnt += cur.rowcount or 0
             else:
-                with conn:
+                with self._resource_sqlite_transaction(
+                    conn, where="id IN (" + ",".join("?" for _ in ids) + ")", params=ids, batch=True
+                ) as mutation:
                     for it in items:
+                        if not mutation.item_allowed(it):
+                            continue
                         if enforce:
                             cur = conn.execute(
                                 "UPDATE jobs SET status='failed', last_error=?, error_message=?, error_code=?, completed_at=DATETIME('now'), leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=? WHERE id=? AND status='processing' AND worker_id=? AND lease_id=? AND (completion_token IS NULL OR completion_token=?)",
@@ -8499,6 +8657,7 @@ class JobManager:
         error_stack: dict[str, Any] | None = None,
         completion_token: str | None = None,
         quarantine: bool = True,
+        expected_uuid: str | None = None,
     ) -> bool:
         """Mark a job as failed; optionally reschedule with backoff if retryable.
 
@@ -8531,7 +8690,11 @@ class JobManager:
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where="id=%s", params=(int(job_id),), expected_uuid=expected_uuid
+                    ) as (cur, mutation):
+                        if expected_uuid is not None and int(job_id) not in mutation.rows:
+                            return False
                         # For metrics and idempotency
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
@@ -8539,10 +8702,16 @@ class JobManager:
                                     f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend=pg"
                                 )
                         cur.execute(
-                            "SELECT status, completion_token, retry_count, failure_streak_code, failure_streak_count, domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at FROM jobs WHERE id = %s",
+                            "SELECT status, completion_token, retry_count, failure_streak_code, failure_streak_count, domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at FROM jobs WHERE id = %s FOR UPDATE",
                             (int(job_id),),
                         )
                         elem = cur.fetchone()
+                        if elem is None or (
+                            expected_uuid is not None and str(elem.get("uuid") or "") != str(expected_uuid)
+                        ):
+                            return False
+                        if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
+                            return False
                         if elem:
                             st = str(elem.get("status"))
                             ct = elem.get("completion_token")
@@ -8837,6 +9006,7 @@ class JobManager:
                                         job=event_job,
                                         attrs=attrs,
                                     )
+                                mutation.finish()
                                 _commit_postgres_transaction(
                                     conn,
                                     operation="job retry scheduling",
@@ -9110,6 +9280,7 @@ class JobManager:
                             except _JOB_NONCRITICAL_EXCEPTIONS:
                                 pass
                         if ok:
+                            mutation.finish()
                             _commit_postgres_transaction(
                                 conn,
                                 operation="terminal job failure",
@@ -9125,7 +9296,11 @@ class JobManager:
                         return ok
             else:
                 result = False
-                with conn:
+                with self._resource_sqlite_transaction(
+                    conn, where="id=?", params=(int(job_id),), expected_uuid=expected_uuid
+                ) as mutation:
+                    if expected_uuid is not None and int(job_id) not in mutation.rows:
+                        return False
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(
@@ -9136,6 +9311,10 @@ class JobManager:
                         "SELECT status, completion_token, domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at FROM jobs WHERE id = ?",
                         (job_id,),
                     ).fetchone()
+                    if rowl is None or (expected_uuid is not None and str(rowl["uuid"] or "") != str(expected_uuid)):
+                        return False
+                    if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
+                        return False
                     if rowl:
                         st = str(rowl[0])
                         ct = rowl[1]
@@ -9803,7 +9982,10 @@ class JobManager:
             if self.backend == "postgres":
                 identity_sql, identity_params = _identity_guard("%s")
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(conn, where=identity_sql, params=tuple(identity_params)) as (
+                        cur,
+                        mutation,
+                    ):
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=pg")
@@ -9859,8 +10041,9 @@ class JobManager:
                                     post_commit_cancel_uuid = str(row["uuid"])
             else:
                 identity_sql, identity_params = _identity_guard("?")
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where=identity_sql, params=tuple(identity_params)
+                ) as mutation:
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=sqlite")
@@ -9966,9 +10149,8 @@ class JobManager:
                         lease_id=lease_id,
                         reason=reason,
                     ),
-                    counters_enabled=JobManager._is_truthy(
-                        os.getenv("JOBS_COUNTERS_ENABLED", "")
-                    ),
+                    clock=self._clock.now_utc,
+                    counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                 )
                 if result.outcome is OperationOutcome.APPLIED and result.row is not None:
                     released_job = {
@@ -9987,9 +10169,8 @@ class JobManager:
                         lease_id=lease_id,
                         reason=reason,
                     ),
-                    counters_enabled=JobManager._is_truthy(
-                        os.getenv("JOBS_COUNTERS_ENABLED", "")
-                    ),
+                    clock=self._clock.now_utc,
+                    counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                 )
                 if result.outcome is OperationOutcome.APPLIED and result.row is not None:
                     released_job = {
@@ -10323,7 +10504,7 @@ class JobManager:
         if archive_candidate_ids:
             archive_candidate_where_clause = " WHERE id = ANY(%s)"
             archive_candidate_params: tuple[Any, ...] = (archive_candidate_ids,)
-            archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+            archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS))
             archive_select_projection = ", ".join(
                 (
                     "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
@@ -10331,7 +10512,7 @@ class JobManager:
                     if column in {"leased_until", "lease_id", "worker_id"}
                     else column
                 )
-                for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS)
+                for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS)
             )
             exact_collisions = self._idempotent_slides_archive_collisions(
                 None,
@@ -10546,7 +10727,7 @@ class JobManager:
             and queue in (None, _SLIDES_GENERATION_QUEUE)
             and job_type in (None, _SLIDES_GENERATION_JOB_TYPE)
         )
-        archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+        archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS))
         archive_select_projection = ", ".join(
             (
                 "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
@@ -10554,7 +10735,7 @@ class JobManager:
                 if column in {"leased_until", "lease_id", "worker_id"}
                 else column
             )
-            for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS)
+            for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS)
         )
         conn = self._connect()
         slides_diagnostic_persisted = False
@@ -10563,7 +10744,7 @@ class JobManager:
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
                         if slides_archive_fence:
                             cur.execute(
                                 "SELECT pg_advisory_xact_lock(%s)",
@@ -10628,6 +10809,16 @@ class JobManager:
                                 )
                             return count
 
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                cur,
+                                postgres=True,
+                                where=" AND ".join(where_parts),
+                                params=tuple(params),
+                                pruning=True,
+                            )
+                        )
+                        where_clause, params = " WHERE " + mutation.where, list(mutation.params)
                         # Freeze the exact prune population under row locks before
                         # any archive, counter, or delete mutation. Process that
                         # immutable ID set in bounded batches using the current
@@ -10652,7 +10843,7 @@ class JobManager:
                                 test_mode=_test_mode,
                             )
             else:
-                with conn:
+                with conn, contextlib.ExitStack() as lifecycle:
                     if not dry_run:
                         conn.execute("BEGIN IMMEDIATE")
                     if _test_mode:
@@ -10716,6 +10907,17 @@ class JobManager:
                             )
                     except _JOB_NONCRITICAL_EXCEPTIONS:
                         pass
+
+                    if not dry_run:
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                conn,
+                                where=" AND ".join(where_parts),
+                                params=tuple(params),
+                                pruning=True,
+                            )
+                        )
+                        where_clause, params = " WHERE " + mutation.where, list(mutation.params)
                     # Compute match count up front for accurate reporting
                     cur_cnt = conn.execute(f"SELECT COUNT(*) FROM jobs{where_clause}", tuple(params))  # nosec B608
                     row = cur_cnt.fetchone()
@@ -10913,8 +11115,7 @@ class JobManager:
                                             row_queue,
                                             row_type,
                                         ):
-                                                conn.execute(
-                                                    """
+                                            conn.execute("""
                                                     UPDATE slides_standalone_reconciliation
                                                     SET diagnostic_code=CASE
                                                           WHEN diagnostic_code='duplicate_archive_uuid'
@@ -10929,9 +11130,8 @@ class JobManager:
                                                           THEN diagnostic_at
                                                           ELSE DATETIME('now') END
                                                     WHERE singleton_id=1
-                                                    """
-                                                )
-                                                continue
+                                                    """)
+                                            continue
                                         p64 = None
                                         r64 = None
                                         if isinstance(pl, str) and pl:
@@ -11255,11 +11455,25 @@ class JobManager:
                 metric_facts.append((reason, key, total))
             return affected
 
+        marker = "%s" if self.backend == "postgres" else "?"
+        resource_where = ["status IN ('queued','processing')"]
+        resource_params: list[Any] = []
+        for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type)):
+            if value is not None:
+                resource_where.append(f"{column}={marker}")
+                resource_params.append(value)
+        resource_where_sql = " AND ".join(resource_where)
         conn = self._connect()
         try:
             counter_deltas: dict[tuple[str, str, str], list[int]] = {}
             if self.backend == "postgres":
-                with conn, self._pg_cursor(conn) as cur:
+                with (
+                    conn,
+                    self._resource_pg_cursor(conn, where=resource_where_sql, params=tuple(resource_params)) as (
+                        cur,
+                        mutation,
+                    ),
+                ):
                     if age_seconds is not None:
                         where = [
                             "status='queued'",
@@ -11274,6 +11488,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = %s")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=%s, "
                             "cancellation_reason='ttl_age'"
@@ -11320,6 +11536,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = %s")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=%s, "
                             "cancellation_reason='ttl_runtime'"
@@ -11367,8 +11585,9 @@ class JobManager:
                             )
             else:
                 now_str = ref_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where=resource_where_sql, params=tuple(resource_params)
+                ) as mutation:
                     if age_seconds is not None:
                         where = [
                             "status='queued'",
@@ -11383,6 +11602,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = ?")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=?, "
                             "cancellation_reason='ttl_age'"
@@ -11439,6 +11660,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = ?")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=?, "
                             "cancellation_reason='ttl_runtime'"
@@ -11595,7 +11818,7 @@ class JobManager:
         conn = self._connect()
         try:
             if self.backend == "postgres":
-                with self._pg_cursor(conn) as cur:
+                with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
                     where = ["1=1"]
                     params: list[Any] = []
                     if domain:
@@ -11619,6 +11842,16 @@ class JobManager:
                         )
                         count_row = cur.fetchone()
                         return int(count_row.get("c") if isinstance(count_row, dict) else 0)
+                    mutation = lifecycle.enter_context(
+                        self._resource_mutation(
+                            cur,
+                            postgres=True,
+                            where=wh,
+                            params=tuple(params),
+                            read_only=True,
+                        )
+                    )
+                    wh, params = mutation.where, list(mutation.params)
                     if set_now:
                         with conn:
                             cur.execute(
@@ -11753,9 +11986,18 @@ class JobManager:
                         tuple(params),
                     ).fetchone()
                     return int(row[0]) if row else 0
-                with conn:
+                with conn, contextlib.ExitStack() as lifecycle:
                     if set_now:
                         conn.execute("BEGIN IMMEDIATE")
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                conn,
+                                where=wh,
+                                params=tuple(params),
+                                read_only=True,
+                            )
+                        )
+                        wh, params = mutation.where, list(mutation.params)
                         counter_groups = []
                         if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
                             counter_groups = list(
@@ -11804,6 +12046,15 @@ class JobManager:
                         if delta_seconds is None:
                             raise ValueError("delta_seconds required when set_now=false")  # noqa: TRY003
                         conn.execute("BEGIN IMMEDIATE")
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                conn,
+                                where=wh,
+                                params=tuple(params),
+                                read_only=True,
+                            )
+                        )
+                        wh, params = mutation.where, list(mutation.params)
                         counter_groups = []
                         if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
                             counter_groups = list(
@@ -11866,6 +12117,9 @@ class JobManager:
         By default targets failed jobs with retries remaining. If only_failed is False,
         also adjusts queued scheduled jobs by clearing available_at.
         """
+        eligibility = "(status='failed' AND retry_count < max_retries)"
+        if not only_failed:
+            eligibility += " OR (status='queued' AND available_at IS NOT NULL)"
         conn = self._connect()
         try:
             if self.backend == "postgres":
@@ -11911,7 +12165,10 @@ class JobManager:
                     os.getenv("JOBS_COUNTERS_ENABLED", "")
                 )
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where=f"({wh}) AND ({eligibility})", params=tuple(params), reactivating=True
+                    ) as (cur, mutation):
+                        wh, params = mutation.where, list(mutation.params)
                         cur.execute(
                             (
                                 "WITH changed AS (UPDATE jobs SET status='queued', "
@@ -12034,8 +12291,10 @@ class JobManager:
                 counters_enabled = JobManager._is_truthy(
                     os.getenv("JOBS_COUNTERS_ENABLED", "")
                 )
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where=f"({wh}) AND ({eligibility})", params=tuple(params), reactivating=True
+                ) as mutation:
+                    wh, params = mutation.where, list(mutation.params)
                     failed_groups = []
                     if counters_enabled:
                         failed_groups = list(
@@ -12331,141 +12590,90 @@ class JobManager:
         limit: int = 1000,
         dry_run: bool = False,
     ) -> int:
-        """Re-encrypt encrypted JSON envelopes from old key to new key for selected rows.
+        """Re-encrypt live envelopes without changing admitted resource contracts.
 
-        Fields may include 'payload' and/or 'result'. Returns affected row count.
+        The explicit old/new keys support rotation independently of configured
+        read keys. Archive rewrites use replace_archived_job_payload instead.
         """
-        fields = [f for f in (fields or []) if f in {"payload", "result"}]
+        fields = [field for field in (fields or []) if field in {"payload", "result"}]
         if not fields:
-            raise ValueError("fields must include at least one of: payload, result")  # noqa: TRY003
+            raise ValueError("fields must include at least one of: payload, result")
         if not old_key_b64 or not new_key_b64:
-            raise ValueError("old_key_b64 and new_key_b64 are required")  # noqa: TRY003
-        affected = 0
+            raise ValueError("old_key_b64 and new_key_b64 are required")
+        postgres = self.backend == "postgres"
+        p = "%s" if postgres else "?"
+        where = ["1=1"]
+        params: list[Any] = []
+        for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type)):
+            if value:
+                where.append(f"{column}={p}")
+                params.append(value)
+        where_sql = " AND ".join(where)
+
+        def rotate_rows(executor: Any, rows: list[dict[str, Any]], *, count_only: bool = False) -> int:
+            """Rotate already-locked rows, validating resource plaintext before writes."""
+            affected = 0
+            for row in rows:
+                updates = {}
+                for field in fields:
+                    value = self._parse_json_value(row.get(field))
+                    if not isinstance(value, dict):
+                        continue
+                    envelope = value if value.get("_enc") == "aesgcm:v1" else value.get("_encrypted")
+                    if not isinstance(envelope, dict):
+                        continue
+                    if count_only:
+                        affected += 1
+                        break
+                    plaintext = decrypt_json_blob_with_key(envelope, old_key_b64)
+                    if plaintext is None:
+                        continue
+                    replacement = encrypt_json_blob_with_key(plaintext, new_key_b64)
+                    if not replacement:
+                        continue
+                    if field == "payload":
+                        decoded = {**row, "payload": plaintext}
+                        self._validate_resource_payload_replacement(
+                            decoded,
+                            decrypt_json_blob_with_key(replacement, new_key_b64),
+                        )
+                    updates[field] = json.dumps({"_encrypted": replacement})
+                if not updates:
+                    continue
+                assignments = ",".join(f"{field}={p}" + ("::jsonb" if postgres else "") for field in updates)
+                executor.execute(
+                    f"UPDATE jobs SET {assignments} WHERE id={p}",  # nosec B608 - closed field names/backend syntax; values bound.
+                    (*updates.values(), row["id"]),
+                )
+                affected += 1
+            return affected
+
         conn = self._connect()
         try:
-            if self.backend == "postgres":
-                with self._pg_cursor(conn) as cur:
-                    where = ["1=1"]
-                    params: list[Any] = []
-                    if domain:
-                        where.append("domain=%s")
-                        params.append(domain)
-                    if queue:
-                        where.append("queue=%s")
-                        params.append(queue)
-                    if job_type:
-                        where.append("job_type=%s")
-                        params.append(job_type)
-                    cur.execute(
-                        f"SELECT id, payload, result, domain, queue, job_type FROM jobs WHERE {' AND '.join(where)} ORDER BY id ASC LIMIT %s",  # nosec B608
-                        tuple(params + [int(limit)]),
-                    )
-                    rows = cur.fetchall() or []
+            if postgres:
+                with conn, self._pg_cursor(conn) as cur:
                     if dry_run:
-                        # Count candidates that would be re-encrypted
-                        for r in rows:
-                            for fld in fields:
-                                val = r.get(fld)
-                                env = val if isinstance(val, dict) else None
-                                if env and (env.get("_enc") == "aesgcm:v1" or isinstance(env.get("_encrypted"), dict)):
-                                    affected += 1
-                                    break
-                        return affected
-                    with conn:
-                        for r in rows:
-                            upd = {}
-                            for fld in fields:
-                                val = r.get(fld)
-                                obj = None
-                                if isinstance(val, dict) and val.get("_enc") == "aesgcm:v1":
-                                    obj = decrypt_json_blob_with_key(val, old_key_b64)
-                                elif isinstance(val, dict) and isinstance(val.get("_encrypted"), dict):
-                                    obj = decrypt_json_blob_with_key(val.get("_encrypted"), old_key_b64)
-                                if obj is not None:
-                                    env = encrypt_json_blob_with_key(obj, new_key_b64)
-                                    if env:
-                                        upd[fld] = {"_encrypted": env}
-                            if upd:
-                                sets = []
-                                params_upd: list[Any] = []
-                                for k, v in upd.items():
-                                    sets.append(f"{k}=%s::jsonb")
-                                    params_upd.append(json.dumps(v))
-                                params_upd.append(int(r["id"]))
-                                cur.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = %s", tuple(params_upd))  # nosec B608
-                                affected += 1
-                return affected
-            else:
-                where = ["1=1"]
-                params2: list[Any] = []
-                if domain:
-                    where.append("domain=?")
-                    params2.append(domain)
-                if queue:
-                    where.append("queue=?")
-                    params2.append(queue)
-                if job_type:
-                    where.append("job_type=?")
-                    params2.append(job_type)
-                sql = f"SELECT id, payload, result, domain, queue, job_type FROM jobs WHERE {' AND '.join(where)} ORDER BY id ASC LIMIT ?"  # nosec B608
-                rows = conn.execute(sql, tuple(params2 + [int(limit)])).fetchall() or []
-                if dry_run:
-                    for _rid, pl, rs, *_ in rows:
-                        for fld, val in (("payload", pl), ("result", rs)):
-                            if fld not in fields:
-                                continue
-                            try:
-                                if isinstance(val, str) and val:
-                                    obj = json.loads(val)
-                                elif isinstance(val, dict):
-                                    obj = val
-                                else:
-                                    obj = None
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                obj = None
-                            if isinstance(obj, dict) and (
-                                obj.get("_enc") == "aesgcm:v1" or isinstance(obj.get("_encrypted"), dict)
-                            ):
-                                affected += 1
-                                break
-                    return affected
-                with conn:
-                    for rid, pl, rs, *_ in rows:
-                        upd: dict[str, Any] = {}
-                        for fld, val in (("payload", pl), ("result", rs)):
-                            if fld not in fields:
-                                continue
-                            obj = None
-                            try:
-                                if isinstance(val, str) and val:
-                                    val_obj = json.loads(val)
-                                elif isinstance(val, dict):
-                                    val_obj = val
-                                else:
-                                    val_obj = None
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                val_obj = None
-                            if isinstance(val_obj, dict) and val_obj.get("_enc") == "aesgcm:v1":
-                                obj = decrypt_json_blob_with_key(val_obj, old_key_b64)
-                            elif isinstance(val_obj, dict) and isinstance(val_obj.get("_encrypted"), dict):
-                                obj = decrypt_json_blob_with_key(val_obj.get("_encrypted"), old_key_b64)
-                            if obj is not None:
-                                env = encrypt_json_blob_with_key(obj, new_key_b64)
-                                if env:
-                                    upd[fld] = json.dumps({"_encrypted": env})
-                        if upd:
-                            sets = []
-                            params_upd: list[Any] = []
-                            for k, v in upd.items():
-                                sets.append(f"{k} = ?")
-                                params_upd.append(v)
-                            params_upd.append(int(rid))
-                            conn.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", tuple(params_upd))  # nosec B608
-                            affected += 1
-                return affected
+                        cur.execute(
+                            f"SELECT * FROM jobs WHERE {where_sql} ORDER BY id LIMIT {p}",  # nosec B608 - internal predicate/placeholders; values bound.
+                            (*params, int(limit)),
+                        )
+                        return rotate_rows(cur, [dict(row) for row in cur.fetchall()], count_only=True)
+                    with self._resource_mutation(
+                        cur, postgres=True, where=where_sql, params=tuple(params), limit=int(limit), read_only=True
+                    ) as mutation:
+                        return rotate_rows(cur, list(mutation.rows.values()))
+            if dry_run:
+                rows = conn.execute(
+                    f"SELECT * FROM jobs WHERE {where_sql} ORDER BY id LIMIT {p}",  # nosec B608 - internal predicate/placeholders; values bound.
+                    (*params, int(limit)),
+                ).fetchall()
+                return rotate_rows(conn, [dict(row) for row in rows], count_only=True)
+            with self._resource_sqlite_transaction(
+                conn, where=where_sql, params=tuple(params), limit=int(limit), read_only=True
+            ) as mutation:
+                return rotate_rows(conn, list(mutation.rows.values()))
         finally:
-            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                conn.close()
+            conn.close()
 
     def finalize_cancelled(
         self,
@@ -12497,7 +12705,11 @@ class JobManager:
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where="id=%s", params=(int(job_id),), expected_uuid=expected_uuid
+                    ) as (cur, mutation):
+                        if expected_uuid is not None and int(job_id) not in mutation.rows:
+                            return False
                         cur.execute(
                             "SELECT status, domain, queue, job_type, available_at, uuid, "
                             "owner_user_id, request_id, trace_id, worker_id, lease_id "
@@ -12508,6 +12720,8 @@ class JobManager:
                         if not row:
                             return False
                         if str(row.get("uuid") or "") != expected_uuid:
+                            return False
+                        if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                             return False
                         state = str(row.get("status") or "")
                         if state == "cancelled":
@@ -12618,8 +12832,11 @@ class JobManager:
                                 ),
                             )
             else:
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where="id=?", params=(int(job_id),), expected_uuid=expected_uuid
+                ) as mutation:
+                    if expected_uuid is not None and int(job_id) not in mutation.rows:
+                        return False
                     row = conn.execute(
                         "SELECT status, domain, queue, job_type, available_at, uuid, "
                         "owner_user_id, request_id, trace_id, worker_id, lease_id "
@@ -12629,6 +12846,8 @@ class JobManager:
                     if not row:
                         return False
                     if str(row["uuid"] or "") != expected_uuid:
+                        return False
+                    if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                         return False
                     state = str(row["status"] or "")
                     if state == "cancelled":
@@ -12781,7 +13000,7 @@ class JobManager:
             }
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
                         where_np = [
                             "status <> 'processing'",
                             "(lease_id IS NOT NULL OR worker_id IS NOT NULL OR leased_until IS NOT NULL)",
@@ -12810,7 +13029,18 @@ class JobManager:
                         cur.execute(f"SELECT COUNT(*) AS c FROM jobs WHERE {' AND '.join(where_pr)}", tuple(params_pr))  # nosec B608
                         _pr = cur.fetchone()
                         res["processing_expired"] = int(_pr.get("c") if isinstance(_pr, dict) else 0)
+
                         if fix:
+                            mutation = lifecycle.enter_context(
+                                self._resource_mutation(
+                                    cur,
+                                    postgres=True,
+                                    where=" AND ".join(where_np),
+                                    params=tuple(params_np),
+                                    read_only=True,
+                                )
+                            )
+                            where_np, params_np = [mutation.where], list(mutation.params)
                             # Clear leases for non-processing
                             cur.execute(
                                 f"UPDATE jobs SET lease_id = NULL, leased_until = NULL, worker_id = NULL WHERE {' AND '.join(where_np)}",  # nosec B608
@@ -12849,7 +13079,10 @@ class JobManager:
                 cur2 = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {' AND '.join(where_pr)}", tuple(params_pr))  # nosec B608
                 res["processing_expired"] = int(cur2.fetchone()[0])
                 if fix:
-                    with conn:
+                    with self._resource_sqlite_transaction(
+                        conn, where=" AND ".join(where_np), params=tuple(params_np), read_only=True
+                    ) as mutation:
+                        where_np, params_np = [mutation.where], list(mutation.params)
                         cur_fix_1 = conn.execute(
                             f"UPDATE jobs SET lease_id = NULL, leased_until = NULL, worker_id = NULL WHERE {' AND '.join(where_np)}",  # nosec B608
                             tuple(params_np),

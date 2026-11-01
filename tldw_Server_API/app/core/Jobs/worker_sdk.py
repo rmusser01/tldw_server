@@ -861,6 +861,7 @@ class WorkerSDK:
                 try:
                     finalized = self.jm.fail_job(
                         job_id,
+                        expected_uuid=str(job_row.get("uuid") or ""),
                         error=str(exc),
                         retryable=retryable,
                         backoff_seconds=backoff_s,
@@ -868,8 +869,7 @@ class WorkerSDK:
                         lease_id=lease_id_str,
                         completion_token=(
                             lease_id_str
-                            if self.cfg.bind_completion_token
-                            or is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN"))
+                            if self.cfg.bind_completion_token or is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN"))
                             else None
                         ),
                         enforce=enforce,
