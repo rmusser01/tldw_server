@@ -8,6 +8,7 @@ from ..contracts import (
     RuntimeFailure,
     WebScrapingStatus,
 )
+from . import asyncio_compat as _asyncio_compat
 from .context import (
     BudgetKind,
     PreflightConsumed,
@@ -46,6 +47,8 @@ from .runner import (
     run_analysis,
 )
 from .target import PreflightTarget
+
+_execution_timeout = _asyncio_compat.timeout
 
 __all__ = [
     "AnalysisOutput",

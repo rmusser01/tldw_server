@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.probes import (
     ProbeTimeout,
     ProbeUnavailable,
 )
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import (
     ProbeEgressDecision,
     ProbeEgressGuard,
@@ -35,6 +36,8 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.policy import (
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import (
     RuntimeRequestContext,
 )
+
+from ...runtime.controls import observe_physical
 
 try:
     from curl_cffi import CurlOpt as _CurlOpt
@@ -82,7 +85,7 @@ async def _fresh_decision(
 ) -> ProbeEgressDecision:
     try:
         return await guard.decide(url, context=context)
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except Exception:  # noqa: BLE001 - policy failures must fail closed
         raise ProbeError(
@@ -116,7 +119,7 @@ def _consume_cleanup_task(task: asyncio.Task[Any], *, label: str) -> None:
     _CLEANUP_TASKS.discard(task)
     try:
         task.result()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         return
     except Exception:  # noqa: BLE001 - cleanup failure is deliberately secondary
         logger.warning(f"HTTP probe {label} cleanup failed.")
@@ -138,6 +141,8 @@ async def _close_resources(resources: tuple[tuple[Any, str], ...]) -> None:
     }
     if not tasks:
         return
+    for task in tasks:
+        observe_physical(task)
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _CLEANUP_GRACE_SECONDS
@@ -479,6 +484,9 @@ def _public_response_limit() -> int:
 class HttpxProbeTransport:
     """Single-attempt transport over the central DNS-pinned async boundary."""
 
+    def __init__(self, controls: PreflightRuntimeControls | None = None) -> None:
+        self._controls = controls
+
     async def send(self, request: ProbeHttpRequest) -> Any:
         proxies = _mutable_proxies(request.proxies)
         client = (
@@ -498,9 +506,18 @@ class HttpxProbeTransport:
                 proxies=proxies,
                 retry=http_client.RetryPolicy(attempts=1),
                 sensitive_observability=True,
-                **({"max_response_bytes": _public_response_limit()} if public_url_policy_active() else {}),
+                **(
+                    {"max_response_bytes": _public_response_limit()}
+                    if public_url_policy_active() or (self._controls and self._controls.parent)
+                    else {}
+                ),
+                **(
+                    {"on_response_chunk": self._controls.charge_bytes}
+                    if self._controls and self._controls.parent
+                    else {}
+                ),
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             await _close_resource(client, label="client")
             raise
         except Exception:
@@ -550,8 +567,10 @@ class CurlCffiProbeTransport:
         egress_guard: ProbeEgressGuard,
         request_context: RuntimeRequestContext,
         session_factory: Any = _DEFAULT_SESSION_FACTORY,
+        controls: PreflightRuntimeControls | None = None,
     ) -> None:
         self._egress_guard = egress_guard
+        self._controls = controls
         self._request_context = _subrequest_context(request_context)
         self._session_factory = _CurlAsyncSession if session_factory is _DEFAULT_SESSION_FACTORY else session_factory
 
@@ -581,7 +600,11 @@ class CurlCffiProbeTransport:
         request_options: dict[str, Any] = {}
         if public_capture:
             session_kwargs.update(http_client._public_curl_session_options())
-            collector = http_client._BoundedBodyCollector(_public_response_limit())
+        bounded = public_capture or (self._controls is not None and self._controls.parent is not None)
+        if bounded:
+            collector = http_client._BoundedBodyCollector(
+                _public_response_limit(), on_response_chunk=self._controls.charge_bytes if self._controls else None
+            )
             request_options.update(content_callback=collector, accept_encoding=None)
         if resolve_entries:
             session_kwargs.setdefault("curl_options", {})[_CurlOpt.RESOLVE] = resolve_entries
@@ -601,7 +624,8 @@ class CurlCffiProbeTransport:
                 proxies=proxies,
                 **request_options,
             )
-            if public_capture:
+            if bounded:
+                collector.raise_if_aborted()
                 if 200 <= response.status_code < 300:
                     if http_client._uses_compressed_content_encoding(response.headers):
                         raise ValueError("Compressed responses are not allowed with max_response_bytes")
@@ -610,10 +634,19 @@ class CurlCffiProbeTransport:
                     response.content = collector.body
                 else:
                     response.content = b""
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             await _close_resource(session, label="session")
             raise
         except Exception:
+            if bounded:
+                # Native curl may defer the Python callback error until get() returns.
+                try:
+                    collector.raise_if_aborted()
+                finally:
+                    if response is not None:
+                        await _close_resource(response, label="response")
+                    await _close_resource(session, label="session")
+                raise
             if response is not None:
                 await _close_resource(response, label="response")
             await _close_resource(session, label="session")
@@ -634,13 +667,14 @@ class GuardedHttpProbe:
     ) -> None:
         self._controls = controls
         self._egress_guard = egress_guard
-        self._transport = transport if transport is not None else HttpxProbeTransport()
+        self._transport = transport if transport is not None else HttpxProbeTransport(controls)
         self._curl_transport = (
             curl_transport
             if curl_transport is not None
             else CurlCffiProbeTransport(
                 egress_guard=egress_guard,
                 request_context=controls.request_context,
+                controls=controls,
             )
         )
 
@@ -659,8 +693,10 @@ class GuardedHttpProbe:
                 return await _snapshot_response(raw, fallback_url=request.url)
             finally:
                 await _close_response(raw)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
+        except http_client.ResponseObserverAborted as exc:
+            raise exc._cause from None
         except (ProbeError, PreflightDeadlineExceeded):
             raise
         except Exception as exc:  # noqa: BLE001 - sanitize the transport boundary
@@ -682,7 +718,8 @@ class GuardedHttpProbe:
             if current_key in visited:
                 raise ProbeError("redirect_loop", "Redirect loop detected.")
             visited.add(current_key)
-            await self._controls.reserve("request")
+            if self._controls.parent is None:
+                await self._controls.reserve("request")
             decision = await _fresh_decision(
                 self._egress_guard,
                 current_url,
@@ -691,6 +728,8 @@ class GuardedHttpProbe:
             if not decision.allowed:
                 raise _denied_error(decision.reason)
             timeout_s = self._controls.cap_timeout(request.timeout_s)
+            if self._controls.parent is not None:
+                await self._controls.reserve("request")
             response = await self._dispatch(
                 replace(
                     request,

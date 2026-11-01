@@ -20,6 +20,8 @@ from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Security import egress as egress_policy
 from tldw_Server_API.app.core.Web_Scraping.filters import RobotsFilter
 
+from .runtime.controls import ParentStop
+
 _Mode = Literal["compat", "strict"]
 
 
@@ -210,6 +212,8 @@ async def decide_web_outbound_policy(
             stage=stage,
             source=source,
         )
+    except ParentStop:
+        raise
     except Exception as exc:  # pragma: no cover - explicit behavior covered by monkeypatched tests
         logger.bind(
             source=source,

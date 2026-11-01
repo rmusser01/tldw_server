@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.browser import (
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressGuard
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import RuntimeRequestContext
 
+from ..runtime.controls import ParentControls, ParentStop, physical_work
 from .article_models import ArticleFailure, ArticleLimits, DirectBrowserProfile
 
 _ROUTE_PATTERN = "**/*"
@@ -103,6 +104,8 @@ class _BrowserAcquisitionPool:
                 return
             self._leases.remove(lease)
         self._slots.release()
+        if lease._physical_release is not None:
+            lease._physical_release()
 
 
 class _BrowserAcquisitionLease:
@@ -127,6 +130,8 @@ class _BrowserAcquisitionLease:
         self._sealed = False
         self._owner_finished = False
         self._released = False
+        owner = physical_work.get()
+        self._physical_release = owner.acquire() if owner is not None else None
 
     def admit_callback(self, task: asyncio.Task[Any]) -> str:
         with self._lock:
@@ -336,6 +341,7 @@ class _AcquisitionOutcome:
 
     def __init__(self) -> None:
         self.failure: ArticleFailure | None = None
+        self.parent_stop: BaseException | None = None
         self.callback_cancelled = False
         self._lock = threading.Lock()
 
@@ -358,6 +364,7 @@ class _BrowserTransferLedger:
         outcome: _AcquisitionOutcome,
         lease: _BrowserAcquisitionLease,
         shutdown_factory: Callable[[], Coroutine[Any, Any, None]],
+        parent: ParentControls | None = None,
     ) -> None:
         self._limit = limit
         self._outcome = outcome
@@ -366,6 +373,26 @@ class _BrowserTransferLedger:
         self._lock = threading.Lock()
         self._total = 0
         self._terminal = False
+        self._parent = parent
+
+    def _charge_parent(self, amount: int) -> bool:
+        if self._parent is None:
+            return True
+        try:
+            self._parent.check()
+            if amount:
+                self._parent.charge_bytes(amount)
+        except ParentStop as exc:
+            self._outcome.parent_stop = exc
+            self._lease.ensure_emergency_shutdown(self._shutdown_factory)
+            self._lease.close_callback_admission()
+            return False
+        except asyncio.CancelledError as exc:
+            self._outcome.parent_stop = exc
+            self._lease.ensure_emergency_shutdown(self._shutdown_factory)
+            self._lease.close_callback_admission()
+            return False
+        return True
 
     def on_data_received(self, payload: object) -> None:
         try:
@@ -412,6 +439,8 @@ class _BrowserTransferLedger:
         return int(value)
 
     def _add_text(self, data: str) -> None:
+        if not self._charge_parent(0):
+            return
         failure: ArticleFailure | None = None
         with self._lock:
             if self._terminal:
@@ -442,7 +471,8 @@ class _BrowserTransferLedger:
                         )
                         break
                 else:
-                    self._total += amount
+                    if self._charge_parent(amount):
+                        self._total += amount
             except Exception:  # noqa: BLE001 - malformed CDP text fails closed
                 self._terminal = True
                 failure = ArticleFailure("browser_error", "capability")
@@ -450,6 +480,8 @@ class _BrowserTransferLedger:
             self._latch_and_shutdown(failure)
 
     def _add_binary(self, data: str) -> None:
+        if not self._charge_parent(0):
+            return
         failure: ArticleFailure | None = None
         with self._lock:
             if self._terminal:
@@ -488,6 +520,8 @@ class _BrowserTransferLedger:
                             "browser_transfer",
                         )
                     else:
+                        if not self._charge_parent(amount):
+                            return
                         decoded = base64.b64decode(data, validate=True)
                         if len(decoded) != amount:
                             raise ValueError("invalid base64 decoded length")
@@ -499,6 +533,8 @@ class _BrowserTransferLedger:
             self._latch_and_shutdown(failure)
 
     def _add(self, amount: int) -> None:
+        if not self._charge_parent(amount):
+            return
         failure: ArticleFailure | None = None
         with self._lock:
             if self._terminal:
@@ -557,6 +593,8 @@ class _CallbackLifecycle:
                         await rejection(route)
                     except asyncio.CancelledError:
                         self._outcome.callback_cancelled = True
+                    except ParentStop as exc:
+                        self._outcome.parent_stop = exc
                     except Exception:  # noqa: BLE001 - callback failures are sanitized
                         self._outcome.fail("callback")
 
@@ -565,6 +603,10 @@ class _CallbackLifecycle:
             async def _invoke() -> None:
                 try:
                     await operation(route)
+                except ParentStop as exc:
+                    self._outcome.parent_stop = exc
+                    self._lease.ensure_emergency_shutdown(self._shutdown_factory)
+                    self._lease.close_callback_admission()
                 except asyncio.CancelledError:
                     self._outcome.callback_cancelled = True
                 except Exception:  # noqa: BLE001 - callback failures are sanitized
@@ -688,6 +730,8 @@ class GuardedArticleBrowser:
     ) -> None:
         self._egress_guard = egress_guard
         self._context = context
+        self._parent: ParentControls | None = None
+        self.final_url: str | None = None
         self._launcher = launcher or _DefaultPlaywrightLauncher()
         self._transport_decision = transport_decision
         self._capability_check = capability_check
@@ -707,6 +751,19 @@ class GuardedArticleBrowser:
             self._transport_decision,
             component="article_browser",
         )
+
+    def bind_parent(self, parent: ParentControls, context: RuntimeRequestContext) -> None:
+        """Bind one private acquisition instance, never a serialized profile."""
+        self._parent = parent
+        self._context = context
+
+    def _reserve_parent(self, counter: str) -> None:
+        if self._parent is not None:
+            reservation = self._parent.reserve(counter)
+            try:
+                reservation.commit()
+            finally:
+                reservation.close()
 
     def transport_capability(self) -> dict[str, str | bool]:
         """Return the current bounded browser-transport capability snapshot."""
@@ -744,6 +801,8 @@ class GuardedArticleBrowser:
             await enabled
         except asyncio.CancelledError:
             raise
+        except ParentStop:
+            raise
         except ArticleFailure:
             raise
         except Exception:  # noqa: BLE001 - CDP capability failures are sanitized
@@ -767,6 +826,8 @@ class GuardedArticleBrowser:
                     raise TypeError("CDP send is not awaitable")
                 response = await operation
             except asyncio.CancelledError:
+                raise
+            except ParentStop:
                 raise
             except ArticleFailure:
                 raise
@@ -844,6 +905,8 @@ class GuardedArticleBrowser:
             await route.abort()
         except asyncio.CancelledError:
             raise
+        except ParentStop:
+            raise
         except Exception:  # noqa: BLE001 - sanitize the browser route boundary
             outcome.fail("http_route")
             return
@@ -865,6 +928,8 @@ class GuardedArticleBrowser:
                 allowed = await self._decision_allowed(policy_url)
             except asyncio.CancelledError:
                 raise
+            except ParentStop:
+                raise
             except Exception:  # noqa: BLE001 - egress guard failures fail closed
                 await self._abort_http(route, outcome, failure_stage="egress")
                 return
@@ -872,8 +937,11 @@ class GuardedArticleBrowser:
                 await self._abort_http(route, outcome, failure_stage="egress")
                 return
             try:
+                self._reserve_parent("network_requests")
                 await route.continue_()
             except asyncio.CancelledError:
+                raise
+            except ParentStop:
                 raise
             except Exception:  # noqa: BLE001 - route action failures fail closed
                 outcome.fail("http_route")
@@ -881,9 +949,13 @@ class GuardedArticleBrowser:
                     await route.abort()
                 except asyncio.CancelledError:
                     raise
+                except ParentStop:
+                    raise
                 except Exception:  # noqa: BLE001 - original route failure is authoritative
                     outcome.fail("http_route")
         except asyncio.CancelledError:
+            raise
+        except ParentStop:
             raise
         except Exception:  # noqa: BLE001 - route accessors fail closed
             await self._abort_http(route, outcome, failure_stage="egress")
@@ -900,6 +972,8 @@ class GuardedArticleBrowser:
         try:
             await route.close(code=code, reason=reason)
         except asyncio.CancelledError:
+            raise
+        except ParentStop:
             raise
         except Exception:  # noqa: BLE001 - sanitize the browser route boundary
             outcome.fail("websocket_route")
@@ -925,6 +999,8 @@ class GuardedArticleBrowser:
             try:
                 allowed = await self._decision_allowed(policy_url)
             except asyncio.CancelledError:
+                raise
+            except ParentStop:
                 raise
             except Exception:  # noqa: BLE001 - egress guard failures fail closed
                 await self._close_websocket(
@@ -955,6 +1031,7 @@ class GuardedArticleBrowser:
                 )
                 return
             try:
+                self._reserve_parent("network_requests")
                 connection = connect()
                 if inspect.isawaitable(connection):
                     await connection
@@ -967,6 +1044,8 @@ class GuardedArticleBrowser:
                     failure_stage="websocket_route",
                 )
         except asyncio.CancelledError:
+            raise
+        except ParentStop:
             raise
         except Exception:  # noqa: BLE001 - route accessors fail closed
             await self._close_websocket(
@@ -1060,12 +1139,15 @@ class GuardedArticleBrowser:
                 capability=decision.to_capability_metadata(),
             )
         for attempt in range(attempts):
+            if self._parent is not None:
+                self._parent.check()
             lease = self._acquisition_pool.acquire(
                 callback_capacity=self._callback_capacity,
             )
             if lease is None:
                 raise ArticleFailure("browser_error", "capacity")
             try:
+                self._reserve_parent("browser_attempts")
                 return await self._acquire_with_lease(url, profile, limits, lease)
             except ArticleFailure as failure:
                 if attempt + 1 >= attempts or not self._should_retry(failure):
@@ -1073,7 +1155,9 @@ class GuardedArticleBrowser:
             finally:
                 lease.seal()
                 lease.owner_finished()
-            await self._sleep(_BROWSER_RETRY_DELAY_S)
+            await self._sleep(
+                self._parent.cap_timeout(_BROWSER_RETRY_DELAY_S) if self._parent else _BROWSER_RETRY_DELAY_S
+            )
 
         raise ArticleFailure("browser_error", "launch")
 
@@ -1172,6 +1256,8 @@ class GuardedArticleBrowser:
                 cdp_session = await new_cdp_session(page)
             except asyncio.CancelledError:
                 raise
+            except ParentStop:
+                raise
             except Exception:  # noqa: BLE001 - CDP capability failures are sanitized
                 raise ArticleFailure("browser_error", "capability") from None
             if not callable(getattr(cdp_session, "detach", None)):
@@ -1182,6 +1268,7 @@ class GuardedArticleBrowser:
                 outcome=outcome,
                 lease=lease,
                 shutdown_factory=_shutdown_context,
+                parent=self._parent,
             )
             await self._install_transfer_accounting(cdp_session, transfer)
 
@@ -1213,9 +1300,12 @@ class GuardedArticleBrowser:
                 raise outcome.failure
             stage = "content"
             html = await self._serialize_html(cdp_session, limits.max_article_bytes)
+            self.final_url = str(getattr(page, "url", url) or url)
         except asyncio.CancelledError as exc:
             primary_error = exc
         except ArticleFailure as exc:
+            primary_error = exc
+        except ParentStop as exc:
             primary_error = exc
         except Exception:  # noqa: BLE001 - sanitize the Playwright boundary
             primary_error = outcome.failure or ArticleFailure("browser_error", stage)
@@ -1257,6 +1347,12 @@ class GuardedArticleBrowser:
         else:
             cleanup_failed, teardown_cancelled = await self._await_teardown(teardown_task)
 
+        if outcome.parent_stop is not None:
+            raise outcome.parent_stop
+        if isinstance(primary_error, ParentStop):
+            raise primary_error
+        if self._parent is not None:
+            self._parent.check()
         if isinstance(primary_error, asyncio.CancelledError) or teardown_cancelled or outcome.callback_cancelled:
             raise asyncio.CancelledError()
         transfer_failure = outcome.failure

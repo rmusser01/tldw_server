@@ -884,6 +884,7 @@ class TransportAdapter(Protocol):
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         max_response_bytes: int | None = None,
+        on_response_chunk: Callable[[int], None] | None = None,
         deadline: float | None = None,
     ) -> SyncResponseLike: ...
 
@@ -909,6 +910,7 @@ class TransportAdapter(Protocol):
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         max_response_bytes: int | None = None,
+        on_response_chunk: Callable[[int], None] | None = None,
     ) -> AsyncResponseLike: ...
 
     def stream_bytes(
@@ -980,6 +982,7 @@ class HttpxAdapter:
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         max_response_bytes: int | None = None,
+        on_response_chunk: Callable[[int], None] | None = None,
         deadline: float | None = None,
     ) -> httpx.Response:
         response_limit_kwargs: dict[str, Any] = (
@@ -989,6 +992,8 @@ class HttpxAdapter:
         )
         if deadline is not None:
             response_limit_kwargs["deadline"] = deadline
+        if on_response_chunk is not None:
+            response_limit_kwargs["on_response_chunk"] = on_response_chunk
         return _fetch_httpx_response(
             method=method,
             url=url,
@@ -1032,6 +1037,7 @@ class HttpxAdapter:
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         max_response_bytes: int | None = None,
+        on_response_chunk: Callable[[int], None] | None = None,
     ) -> httpx.Response:
         return await _afetch_httpx(
             method=method,
@@ -1053,6 +1059,7 @@ class HttpxAdapter:
             configured_endpoint=configured_endpoint,
             sensitive_observability=sensitive_observability,
             max_response_bytes=max_response_bytes,
+            **({"on_response_chunk": on_response_chunk} if on_response_chunk is not None else {}),
         )
 
     async def stream_bytes(
@@ -1188,6 +1195,7 @@ class AiohttpAdapter:
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         max_response_bytes: int | None = None,
+        on_response_chunk: Callable[[int], None] | None = None,
     ) -> AsyncResponseLike:
         return await _afetch_aiohttp(
             method=method,
@@ -1209,6 +1217,7 @@ class AiohttpAdapter:
             configured_endpoint=configured_endpoint,
             sensitive_observability=sensitive_observability,
             max_response_bytes=max_response_bytes,
+            **({"on_response_chunk": on_response_chunk} if on_response_chunk is not None else {}),
         )
 
     async def stream_bytes(
@@ -1437,10 +1446,29 @@ def _uses_compressed_content_encoding(headers: Any) -> bool:
     )
 
 
-def _read_bounded_chunks(chunks: Iterable[bytes], max_response_bytes: int) -> bytes:
+class ResponseObserverAborted(Exception):
+    """Opaque observer failure; the cause is private to the composing adapter."""
+
+    def __init__(self, cause: BaseException) -> None:
+        super().__init__("Response observer aborted")
+        self._cause = cause
+
+
+def _observe_response_chunk(observer: Callable[[int], None] | None, amount: int) -> None:
+    if observer is not None and amount:
+        try:
+            observer(amount)
+        except BaseException as exc:  # noqa: BLE001 - isolate private callback errors, including cancellation
+            raise ResponseObserverAborted(exc) from None
+
+
+def _read_bounded_chunks(
+    chunks: Iterable[bytes], max_response_bytes: int, *, on_response_chunk: Callable[[int], None] | None = None
+) -> bytes:
     """Read an iterator without retaining more than the configured byte limit."""
     body = bytearray()
     for chunk in chunks:
+        _observe_response_chunk(on_response_chunk, len(chunk))
         if len(body) + len(chunk) > max_response_bytes:
             raise ValueError("Response exceeds max_response_bytes limit")
         body.extend(chunk)
@@ -1450,8 +1478,10 @@ def _read_bounded_chunks(chunks: Iterable[bytes], max_response_bytes: int) -> by
 class _BoundedBodyCollector:
     """Collect callback-delivered bytes without retaining data past the limit."""
 
-    def __init__(self, max_response_bytes: int) -> None:
+    def __init__(self, max_response_bytes: int, *, on_response_chunk: Callable[[int], None] | None = None) -> None:
         self._max_response_bytes = max_response_bytes
+        self._observer = on_response_chunk
+        self._aborted: ResponseObserverAborted | None = None
         self._body = bytearray()
         self.overflow = False
 
@@ -1460,6 +1490,13 @@ class _BoundedBodyCollector:
         return bytes(self._body)
 
     def __call__(self, chunk: bytes) -> int:
+        if self._aborted is not None:
+            return 0
+        try:
+            _observe_response_chunk(self._observer, len(chunk))
+        except ResponseObserverAborted as exc:
+            self._aborted = exc
+            return 0
         remaining = self._max_response_bytes - len(self._body)
         if len(chunk) > remaining:
             if remaining > 0:
@@ -1468,6 +1505,11 @@ class _BoundedBodyCollector:
         else:
             self._body.extend(chunk)
         return len(chunk)
+
+    def raise_if_aborted(self) -> None:
+        """Rethrow after a native callback has returned its abort signal."""
+        if self._aborted is not None:
+            raise self._aborted from None
 
 
 def _decode_bounded_response_body(response: Any, body: bytes) -> str:
@@ -2150,12 +2192,16 @@ def _refuse_cross_origin_hop(original_url: str, hop_url: str, allowed: bool) -> 
 
 
 @overload
+
+
 def _strip_sensitive_headers_for_cross_origin(
     headers: dict[str, str], *, original_url: str, target_url: str
 ) -> dict[str, str]: ...
 
 
 @overload
+
+
 def _strip_sensitive_headers_for_cross_origin(headers: None, *, original_url: str, target_url: str) -> None: ...
 
 
@@ -3049,6 +3095,7 @@ def _httpx_request_io(
     follow_redirects: bool = False,
     accepted_resolved_ips: tuple[str, ...] = (),
     max_response_bytes: int | None = None,
+    on_response_chunk: Callable[[int], None] | None = None,
 ) -> httpx.Response:
     method_upper = str(method).upper()
     request_timeout = _timeout_or_client_default(timeout)
@@ -3086,7 +3133,8 @@ def _httpx_request_io(
                             "Compressed responses are not allowed with max_response_bytes"
                         )
                     try:
-                        body = _read_bounded_chunks(streamed.iter_raw(), bound)
+                        chunks = streamed.iter_raw(chunk_size=65_536) if on_response_chunk else streamed.iter_raw()
+                        body = _read_bounded_chunks(chunks, bound, on_response_chunk=on_response_chunk)
                     except ValueError as exc:
                         raise NetworkError("Response exceeds max_response_bytes limit") from exc
                 copied_headers = httpx.Headers(streamed.headers)
@@ -3181,6 +3229,7 @@ async def _httpx_arequest_io(
     verify: bool | str | ssl.SSLContext | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
     max_response_bytes: int | None = None,
+    on_response_chunk: Callable[[int], None] | None = None,
 ) -> httpx.Response:
     method_upper = str(method).upper()
     # Only sent when set, so client stubs that predate ``content`` keep working.
@@ -3227,7 +3276,9 @@ async def _httpx_arequest_io(
                             "Compressed responses are not allowed with "
                             "max_response_bytes"
                         )
-                    async for chunk in streamed.aiter_raw():
+                    chunks = streamed.aiter_raw(chunk_size=65_536) if on_response_chunk else streamed.aiter_raw()
+                    async for chunk in chunks:
+                        _observe_response_chunk(on_response_chunk, len(chunk))
                         if len(body) + len(chunk) > bound:
                             raise NetworkError(
                                 "Response exceeds max_response_bytes limit"
@@ -3334,6 +3385,7 @@ async def _aiohttp_request_io(
     ssl_override: Any | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
     max_response_bytes: int | None = None,
+    on_response_chunk: Callable[[int], None] | None = None,
 ) -> _AiohttpResponse:
     original_url = url
     targets = _pinned_transport_targets(url, headers, accepted_resolved_ips)
@@ -3390,9 +3442,10 @@ async def _aiohttp_request_io(
                         )
                     while True:
                         remaining = max_response_bytes - len(bounded_body)
-                        chunk = await resp.content.read(remaining + 1)
+                        chunk = await resp.content.read(min(65_536, remaining + 1))
                         if not chunk:
                             break
+                        _observe_response_chunk(on_response_chunk, len(chunk))
                         if len(bounded_body) + len(chunk) > max_response_bytes:
                             raise NetworkError(
                                 "Response exceeds max_response_bytes limit"
@@ -3662,6 +3715,7 @@ def _sse_network_error(exc: BaseException, *, sensitive_observability: bool) -> 
 # Core request helpers (sync/async) with retries + redirects + egress checks
 # --------------------------------------------------------------------------------------
 
+
 async def _afetch_httpx(
     *,
     method: str,
@@ -3683,6 +3737,7 @@ async def _afetch_httpx(
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
     max_response_bytes: int | None = None,
+    on_response_chunk: Callable[[int], None] | None = None,
 ) -> httpx.Response:
     """Async httpx request with retries and egress enforcement.
 
@@ -3783,6 +3838,7 @@ async def _afetch_httpx(
                     target_url,
                 ),
                 max_response_bytes=max_response_bytes,
+                **({"on_response_chunk": on_response_chunk} if on_response_chunk is not None else {}),
             )
             return r, "ok", None  # noqa: TRY300
         except EgressPolicyError:
@@ -3910,6 +3966,11 @@ async def _afetch_httpx(
                                             cur_url,
                                         ),
                                         max_response_bytes=max_response_bytes,
+                                        **(
+                                            {"on_response_chunk": on_response_chunk}
+                                            if on_response_chunk is not None
+                                            else {}
+                                        ),
                                     )
                                     with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
@@ -4106,6 +4167,7 @@ async def _afetch_aiohttp(
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
     max_response_bytes: int | None = None,
+    on_response_chunk: Callable[[int], None] | None = None,
 ) -> _AiohttpResponse:
     """Async aiohttp request with retries and egress enforcement.
 
@@ -4206,6 +4268,7 @@ async def _afetch_aiohttp(
                     target_url,
                 ),
                 max_response_bytes=max_response_bytes,
+                **({"on_response_chunk": on_response_chunk} if on_response_chunk is not None else {}),
             )
             return resp, "ok", None  # noqa: TRY300
         except EgressPolicyError:
@@ -4287,6 +4350,7 @@ async def _afetch_aiohttp(
                                     cur_url,
                                 ),
                                 max_response_bytes=max_response_bytes,
+                                **({"on_response_chunk": on_response_chunk} if on_response_chunk is not None else {}),
                             )
                             with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.set_attributes({"http.status_code": int(r2_wrap.status_code)})
@@ -4485,6 +4549,7 @@ async def afetch(
     sensitive_observability: bool = False,
     transport: str | None = None,
     max_response_bytes: int | None = None,
+    on_response_chunk: Callable[[int], None] | None = None,
 ) -> Any:
     """Issue one async request, optionally bounding the decoded success body.
 
@@ -4525,6 +4590,7 @@ async def afetch(
         configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
         max_response_bytes=max_response_bytes,
+        **({"on_response_chunk": on_response_chunk} if on_response_chunk is not None else {}),
     )
 
 
@@ -4606,6 +4672,7 @@ def _fetch_httpx_response(
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
     max_response_bytes: int | None = None,
+    on_response_chunk: Callable[[int], None] | None = None,
     deadline: float | None = None,
 ) -> httpx.Response:
     """Sync httpx request with retries and egress enforcement.
@@ -4655,6 +4722,8 @@ def _fetch_httpx_response(
         else {}
     )
     request_io: Callable[..., httpx.Response] = _httpx_request_io
+    if on_response_chunk is not None:
+        response_limit_kwargs["on_response_chunk"] = on_response_chunk
     if deadline is not None:
         request_io = _httpx_request_with_deadline
         response_limit_kwargs.update(deadline=deadline, proxies=proxies)
@@ -5120,6 +5189,7 @@ def fetch(*args, **kwargs):
     proxies = kwargs.get("proxies")
     timeout = kwargs.get("timeout")
     max_response_bytes = kwargs.get("max_response_bytes")
+    on_response_chunk = kwargs.get("on_response_chunk")
 
     if max_response_bytes is not None:
         if type(max_response_bytes) is not int or max_response_bytes <= 0:
@@ -5310,7 +5380,7 @@ def fetch(*args, **kwargs):
                     request_stream = getattr(curl_session, "get", None)
                     if not callable(request_stream):
                         raise RuntimeError("Selected backend does not support bounded response streaming")
-                    body_collector = _BoundedBodyCollector(max_response_bytes)
+                    body_collector = _BoundedBodyCollector(max_response_bytes, on_response_chunk=on_response_chunk)
 
                     req_kwargs: dict[str, Any] = {
                         "headers": hop_headers,
@@ -5323,8 +5393,13 @@ def fetch(*args, **kwargs):
                         req_kwargs["timeout"] = timeout
                     if proxies:
                         req_kwargs["proxies"] = proxies
-                    streamed = request_stream(cur_url, **req_kwargs)
                     try:
+                        streamed = request_stream(cur_url, **req_kwargs)
+                    except BaseException:
+                        body_collector.raise_if_aborted()
+                        raise
+                    try:
+                        body_collector.raise_if_aborted()
                         response_headers = dict(getattr(streamed, "headers", {}) or {})
                         status_code = int(getattr(streamed, "status_code", 0))
                         response_url = str(getattr(streamed, "url", cur_url))
@@ -5417,7 +5492,8 @@ def fetch(*args, **kwargs):
                         iter_raw = getattr(streamed, "iter_raw", None)
                         if not callable(iter_raw):
                             raise RuntimeError("Selected backend does not support bounded response streaming")
-                        body = _read_bounded_chunks(iter_raw(), max_response_bytes)
+                        chunks = iter_raw(chunk_size=65_536) if on_response_chunk else iter_raw()
+                        body = _read_bounded_chunks(chunks, max_response_bytes, on_response_chunk=on_response_chunk)
                         return HttpResponse(
                             status=status,
                             headers=response_headers,

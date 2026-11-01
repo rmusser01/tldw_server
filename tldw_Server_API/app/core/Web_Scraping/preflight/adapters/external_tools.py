@@ -24,7 +24,10 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.probes import (
     ProbeTimeout,
     ProbeUnavailable,
 )
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressGuard
+
+from ...runtime.controls import observe_physical
 
 _WAF_TIMEOUT_SECONDS = 60.0
 _PROCESS_CLEANUP_GRACE_SECONDS = 2.0
@@ -101,7 +104,7 @@ def _denied_error(reason: str) -> ProbeError:
 def _decision_fields(decision: Any) -> tuple[bool, str]:
     try:
         return bool(decision.allowed), str(decision.reason)
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except Exception:  # noqa: BLE001 - policy values must fail closed
         raise ProbeError(
@@ -121,7 +124,7 @@ async def _fresh_decision(
             url,
             context=_subrequest_context(controls),
         )
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except Exception:  # noqa: BLE001 - policy failures fail closed
         raise ProbeError(
@@ -133,14 +136,14 @@ async def _fresh_decision(
 def _consume_wait_task(task: asyncio.Task[int]) -> None:
     try:
         task.exception()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         pass
 
 
 async def _shield_process_wait(task: asyncio.Task[int]) -> None:
     try:
         await asyncio.shield(task)
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         current = asyncio.current_task()
         if current is not None and current.cancelling():
             raise
@@ -163,6 +166,7 @@ class _ProcessCleanupHandle:
                 name="preflight-external-tool-wait",
             )
             self._wait_task.add_done_callback(_consume_wait_task)
+            observe_physical(self._wait_task)
         return self._wait_task
 
     async def close(self) -> None:
@@ -225,16 +229,39 @@ class GuardedExternalToolProbe:
         timeout_s: float,
     ) -> Any:
         argv = (executable, url, *(("-a",) if find_all else ()))
+        spawn_task: asyncio.Task[Any] | None = None
+
+        async def spawn() -> Any:
+            return await self._process_factory(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+        def reclaim() -> None:
+            if spawn_task is None:
+                return
+
+            async def cleanup_late_process() -> None:
+                try:
+                    process = await asyncio.shield(spawn_task)
+                except (Exception, asyncio.CancelledError):  # noqa: BLE001 - spawn failure has no live process
+                    return
+                await self._cleanup_process(_ProcessCleanupHandle(process))
+
+            cleanup_task = asyncio.create_task(cleanup_late_process(), name="preflight-late-spawn-cleanup")
+            observe_physical(cleanup_task)
+            cleanup_task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+
         try:
             async with _asyncio_timeout(timeout_s):
-                return await self._process_factory(
-                    *argv,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-        except asyncio.CancelledError:
+                if self._controls.parent is None:
+                    return await spawn()
+                spawn_task = asyncio.create_task(spawn(), name="preflight-owned-tool-spawn")
+                observe_physical(spawn_task)
+                return await asyncio.shield(spawn_task)
+        except (asyncio.CancelledError, ParentStop):
+            reclaim()
             raise
         except (TimeoutError, asyncio.TimeoutError):
+            reclaim()
+            self._controls.cap_timeout(None)
             if self._controls.deadline_exhausted():
                 raise PreflightDeadlineExceeded() from None
             raise ProbeTimeout() from None
@@ -249,7 +276,7 @@ class GuardedExternalToolProbe:
                 (handle,),
                 grace_s=_PROCESS_CLEANUP_GRACE_SECONDS,
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
         except Exception:  # noqa: BLE001 - cleanup cannot replace the outcome
             logger.warning("External tool process cleanup failed.")
@@ -283,7 +310,8 @@ class GuardedExternalToolProbe:
         if not executable:
             raise ProbeUnavailable(error_code="missing_dependency")
 
-        await self._controls.reserve("active_probe")
+        if self._controls.parent is None:
+            await self._controls.reserve("active_probe")
         decision = await _fresh_decision(
             self._egress_guard,
             url,
@@ -297,6 +325,9 @@ class GuardedExternalToolProbe:
             self._controls.cap_timeout(_WAF_TIMEOUT_SECONDS),
         )
         operation_deadline = _monotonic() + effective_timeout_s
+
+        if self._controls.parent is not None:
+            await self._controls.reserve("active_probe")
 
         process = await self._create_process(
             executable,
@@ -320,7 +351,7 @@ class GuardedExternalToolProbe:
                     raise PreflightDeadlineExceeded()
                 raise ProbeTimeout()
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
+                self._read_output(process) if self._controls.parent is not None else process.communicate(),
                 timeout=timeout_s,
             )
             if _monotonic() >= operation_deadline:
@@ -333,12 +364,13 @@ class GuardedExternalToolProbe:
                 stdout=_decode_output(stdout),
                 stderr=_decode_output(stderr),
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             await self._cleanup_process(handle)
             raise
         except (TimeoutError, asyncio.TimeoutError):
             deadline_exhausted = self._controls.deadline_exhausted()
             await self._cleanup_process(handle)
+            self._controls.cap_timeout(None)
             if deadline_exhausted:
                 raise PreflightDeadlineExceeded() from None
             raise ProbeTimeout() from None
@@ -351,6 +383,37 @@ class GuardedExternalToolProbe:
 
         await self._cleanup_process(handle)
         return result
+
+    async def _read_output(self, process: Any) -> tuple[bytes, bytes]:
+        """Bound opaque tool output, not its hidden HTTP requests or wire bytes."""
+        total = 0
+
+        async def read(stream: Any) -> bytes:
+            nonlocal total
+            body = bytearray()
+            while True:
+                self._controls.cap_timeout(None)
+                chunk = await stream.read(65_536)
+                if not chunk:
+                    return bytes(body)
+                self._controls.charge_bytes(len(chunk))
+                total += len(chunk)
+                if total > 16_777_216:
+                    raise ProbeError("probe_error", "Probe output exceeds limit.")
+                body.extend(chunk)
+
+        tasks = [asyncio.create_task(read(stream)) for stream in (process.stdout, process.stderr)]
+        for task in tasks:
+            observe_physical(task)
+        try:
+            stdout, stderr = await asyncio.gather(*tasks)
+            await process.wait()
+            return stdout, stderr
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 __all__ = ["GuardedExternalToolProbe"]

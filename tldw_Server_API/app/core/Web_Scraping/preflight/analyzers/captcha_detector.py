@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..compatibility import _run_sync_compat
-from ..context import PreflightDeadlineExceeded, PreflightExecutionContext
+from ..context import ParentStop, PreflightDeadlineExceeded, PreflightExecutionContext
 from ..facade import run_legacy_analyzer
 from ..probes import BrowserProbeOptions, ProbeError
 from ._shared import _safe_analyzer_call
@@ -41,7 +41,7 @@ async def _navigate_best_effort(page: Any, url: str) -> None:
     try:
         await page.goto(url, wait_until="load", timeout_ms=30_000)
         await page.wait_for_load_state("networkidle", timeout_ms=5_000)
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except (PreflightDeadlineExceeded, ProbeError):
         raise
