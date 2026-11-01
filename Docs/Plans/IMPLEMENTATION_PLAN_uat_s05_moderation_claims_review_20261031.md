@@ -305,3 +305,8 @@ Final changed-source checks, independent staged review, hooks/local commit, pack
 
 
 Final preparation: independent actual source/tests/docs review CLEAR. Final classifier/typed transport/RG lint/DB precedence6modules69PASS5warnings35.89pytest38.171outer; actual worker scope/cancel2PASS WebUI. Normal explicit pre_commit on29owned paths PASS1.922s natural0; Ruff/Black wizard-only stages report nofiles, not whole-scope formatter qualification. Independent staged review and all local commit/build/live/UX/cleanup gates remain open.
+
+
+## First classification candidate and shared-bundle repair
+
+Normal local f8c8e56f60ee05ceeb28d2c89c7bc1abb813e625 exactly matches reviewed29path patch155683bytes/SHA2561addfa1374f9354b1ae27a693608eab2e00b8a83630757ab7ae16671d9ef1501, tracked-clean only. Offline package at /private/tmp/tldw-s05-classification-20261101/site qualified3828files/337nodes722edges/7.559s/0cleanupErrors; module/dependency qualification only, no app startup/UAT. First frontend compile:prod attempt FAILED82.812s/buildReadyfalse, with original owners unchanged. The wrapper did not emit the child's failure output; fresh artifact metadata and normal postchecks establish token-syncPASS and actual shared budget614797>614400 by397bytes. No whole-build acceptance or hidden replay. Classification copy is duplicated in global English option resources and existing lazy-panel defaults; remove only the global duplicate, preserve all other locale values and controls, verify against actual English resources, then normal same-cap rebuild after review. API/backend source unchanged; no export, package, old tests or other-service replay justified. S05 remains open41/43, no live model check yet.

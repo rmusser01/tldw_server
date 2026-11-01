@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import React from "react";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
+import englishOptions from "@/assets/locale/en/option.json";
 import {
   act,
   fireEvent,
@@ -271,5 +274,44 @@ describe("explicit model classification", () => {
       screen.queryByText(/No configured llama.cpp model is available/),
     ).not.toBeInTheDocument();
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it("keeps the classification controls understandable with the shipped English resources", async () => {
+    const instance = createInstance();
+    await instance.init({
+      lng: "en",
+      fallbackLng: "en",
+      ns: ["option"],
+      defaultNS: "option",
+      resources: { en: { option: englishOptions } },
+    });
+    render(
+      <I18nextProvider i18n={instance}>
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <MemoryRouter>
+            <ModelClassificationPanel
+              configSnapshot={{
+                serverUrl: "https://original.test",
+                authMode: "single-user",
+                apiKey: "panel-fixture-key",
+              }}
+            />
+          </MemoryRouter>
+        </ConfigProvider>
+      </I18nextProvider>,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Model classification" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Flag when")).toBeVisible();
+    expect(screen.getByLabelText("Sample for classification")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Classify and save for review" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        /sample and result are saved to the staff Review queue/i,
+      ),
+    ).toBeVisible();
   });
 });
