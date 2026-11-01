@@ -1,7 +1,7 @@
 ---
 id: TASK-15413
 title: Close Jobs resource lifecycle and attempt authority
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -18,9 +18,9 @@ Head-before-row lifecycle closure, UUID-fenced worker failure finalization, cont
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
-- [ ] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
-- [ ] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
+- [x] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
+- [x] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
+- [x] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,19 +34,21 @@ Final same-code combined qualification after the shared ordinary-mutation guard 
 Hook evidence clarification: the normal configured pre-commit checks were explicitly run over all ten scoped paths before local commit and passed, including canonical Backlog and Python syntax guards. Git has no automatic pre-commit hook installed and no core.hooksPath configured; the commit log therefore has no automatic hook output. No hook bypass, SKIP, or hook-configuration change was used. This corrects the earlier prospective statement about commit-time hooks; explicit staged hook qualification is the evidence. Final local commit and exact commands/results are recorded in task-3-report.md; task remains In Progress.
 Independent Task3 review at e52cd86a674f82715f065e2c15ae657bbb8dd3fc returned Issues found / Needs fixes. Four Important findings validated by controller source/evidence checks: (1) ordinary discovery-window numeric-ID replacement bypasses frozen UUID in single-row cancellation (reviewer official PG probe cancelled resource replacement and left active head), analogous unfrozen reads in completion/failure/release require audit; (2) TTL discovers/locks noneligible resource heads and recovery fetches unbounded populations before batch selection, causing unrelated-owner blocking/materialization; (3) SQLite correlated JSON target membership is quadratic (64/128 targets 11247/42956 VM steps in focused probe); (4) ordinary configured touched-file Ruff confirmed all 21 new findings, narrow selectors missed the gate. No Critical finding; no dependent Task4 work until corrected/re-reviewed. Fix round1/3 resumes original implementer with test-first regressions, bounded eligibility/selection, efficient exact-ID+UUID matching and full configured lint; no gate weakening or new lifecycle system. Full report: .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-3-review.md.
 Task3 fix round1 against e52cd86a674f82715f065e2c15ae657bbb8dd3fc addresses all four independently reviewed Important findings: frozen ID+UUID authority at PG single-row rereads/cancellation writes; actual eligible TTL/reschedule discovery and bounded metadata-only oldest-lease recovery before head locks, with head/row SKIP LOCKED; indexed target-driven null-safe SQLite live/archive matching; and all21 ordinary configured Ruff findings with explicit named local pytest fixture registration, no gates/selects/ignores/noqa weakening. New deterministic mixed-owner/corrupt-or-locked-head/row, bounded materialization, VM/query-plan and ordinary-to-resource ID-replacement regressions pass. Final same-code22-module qualification: 605 passed, 0 skipped, 5160 warnings, 208.09s, exit0 (/tmp/task3-fix1-combined-final-qualified.log). Initial602pass/3fail characterization and one interrupted run remain explicitly recorded; strict SQL hook detection was corrected without changing race assertions, final eight race checks pass. Full configured Ruff and compilation over all nine original Python files plus release race-hook test pass; scoped Black passes. Full touched-production Bandit remains exit1 only for byte-equivalent BASE B608 at manager10244, zero new findings/errors. Final source/test diff SHA256 c622d20be1765a33e37a94ffcc25644ed341074cc98eecfa8db36c1d600b9c2b. Report appended at .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-3-report.md, including precise commands, warnings triage and bounded contended-window semantics (may return less than budget; no additional heads acquired after row locking). Keep In Progress for independent controller review. No ADR/public API/schema change or Task4+ work; normal scoped hooks/local commit follow.
+Task3 fix round1/3 scoped re-review: all four Important findings ADDRESSED, no new Critical/Important breakage, zero open findings. Reviewer verified frozen authoritative reads, actual TTL eligibility and bounded metadata-only recovery with skip behavior, indexed/null-safe SQLite target matching and full configured Ruff. Release race recognizer still asserts actual locking and persisted reassignment; no assertions/gates weakened. Final same-code 605 passed, zero skips, 5160 warnings across22modules (208.09s), ten-file configured Ruff/compile, scoped format/hooks pass. Bandit exit1 for unchanged B608 only, zero new findings/errors. Recovery intentionally uses a bounded candidate window and may underfill/return zero under sustained earliest-candidate contention without refilling; no fairness/full-budget throughput guarantee. Preserve this operational limitation in Task11 handoff. Focused54warning observer traced unchanged infrastructure, not full warning triage. No producer/Task4 rollout claimed. Reports: task-3-report.md correction append and task-3-fix1-review.md in this plans SDD workspace.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed shared Jobs lifecycle closure in e52cd86a67 and reviewed correction 9dbe881ab1. Resource heads precede exact identity locks; terminalization/retry/admin/batch/retention preserve authority, generation and receipt targets. WorkerSDK failure finalization carries acquired UUID; resource calls enforce actual live attempt authority. Live/archive payload replacement validates complete decrypted immutable semantics. Independent review found four defects, all test-first corrected and scoped re-reviewed clean. Final affected evidence:605 passed/zero skips including official PostgreSQL, configured quality/hooks pass, unchanged Bandit B608 and inherited warnings documented. Bounded contended recovery-window underfill remains an explicit operational limitation, not a state/counter/event or fairness guarantee. No Claims lifecycle system or producer enabled.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
