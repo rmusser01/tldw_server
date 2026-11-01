@@ -7788,8 +7788,9 @@ class JobManager:
                         cur.execute(
                             "SELECT id, uuid, status, completion_token, worker_id, lease_id, "
                             "domain, queue, job_type, available_at, started_at, acquired_at, "
-                            "trace_id, request_id, owner_user_id FROM jobs WHERE id = %s FOR UPDATE",
-                            (int(job_id),),
+                            "trace_id, request_id, owner_user_id FROM jobs WHERE id = %s "
+                            f"AND ({mutation.where}) FOR UPDATE",  # nosec B608 - closed resource identity predicate; values bound.
+                            (int(job_id), *mutation.params),
                         )
                         base = cur.fetchone()
                         if base is None:
@@ -8702,8 +8703,10 @@ class JobManager:
                                     f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend=pg"
                                 )
                         cur.execute(
-                            "SELECT status, completion_token, retry_count, failure_streak_code, failure_streak_count, domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at FROM jobs WHERE id = %s FOR UPDATE",
-                            (int(job_id),),
+                            "SELECT status, completion_token, retry_count, failure_streak_code, failure_streak_count, "
+                            "domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at "
+                            f"FROM jobs WHERE id = %s AND ({mutation.where}) FOR UPDATE",  # nosec B608 - closed resource identity predicate; values bound.
+                            (int(job_id), *mutation.params),
                         )
                         elem = cur.fetchone()
                         if elem is None or (
@@ -9986,6 +9989,7 @@ class JobManager:
                         cur,
                         mutation,
                     ):
+                        identity_sql, identity_params = mutation.where, mutation.params
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=pg")
@@ -10044,6 +10048,7 @@ class JobManager:
                 with self._resource_sqlite_transaction(
                     conn, where=identity_sql, params=tuple(identity_params)
                 ) as mutation:
+                    identity_sql, identity_params = mutation.where, mutation.params
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=sqlite")
@@ -11456,8 +11461,21 @@ class JobManager:
             return affected
 
         marker = "%s" if self.backend == "postgres" else "?"
-        resource_where = ["status IN ('queued','processing')"]
+        ttl_candidates = []
         resource_params: list[Any] = []
+        for status, column, seconds in (
+            ("queued", "created_at", age_seconds),
+            ("processing", "COALESCE(started_at, acquired_at)", runtime_seconds),
+        ):
+            if seconds is None:
+                continue
+            if self.backend == "postgres":
+                ttl_candidates.append(f"(status='{status}' AND {column} <= (%s - (%s || ' seconds')::interval))")
+                resource_params.extend((ref_dt, seconds))
+            else:
+                ttl_candidates.append(f"(status='{status}' AND {column} <= DATETIME(?, ?))")
+                resource_params.extend((ref_dt.strftime("%Y-%m-%d %H:%M:%S.%f"), f"-{seconds} seconds"))
+        resource_where = ["(" + " OR ".join(ttl_candidates) + ")"]
         for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type)):
             if value is not None:
                 resource_where.append(f"{column}={marker}")
@@ -11833,6 +11851,8 @@ class JobManager:
                     if status:
                         where.append("status=%s")
                         params.append(status)
+                    if set_now:
+                        where.append("available_at IS NOT NULL")
                     wh = " AND ".join(where)
                     if dry_run:
                         dry_run_where = f"{wh} AND available_at IS NOT NULL" if set_now else wh
@@ -11978,6 +11998,8 @@ class JobManager:
                 if status:
                     where.append("status=?")
                     params.append(status)
+                if set_now:
+                    where.append("available_at IS NOT NULL")
                 wh = " AND ".join(where)
                 if dry_run:
                     dry_run_where = f"{wh} AND available_at IS NOT NULL" if set_now else wh
@@ -12288,9 +12310,7 @@ class JobManager:
                     return int(row[0]) if row else 0
 
                 count = 0
-                counters_enabled = JobManager._is_truthy(
-                    os.getenv("JOBS_COUNTERS_ENABLED", "")
-                )
+                counters_enabled = JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", ""))
                 with self._resource_sqlite_transaction(
                     conn, where=f"({wh}) AND ({eligibility})", params=tuple(params), reactivating=True
                 ) as mutation:
@@ -12713,8 +12733,8 @@ class JobManager:
                         cur.execute(
                             "SELECT status, domain, queue, job_type, available_at, uuid, "
                             "owner_user_id, request_id, trace_id, worker_id, lease_id "
-                            "FROM jobs WHERE id = %s FOR UPDATE",
-                            (int(job_id),),
+                            f"FROM jobs WHERE {mutation.where} FOR UPDATE",  # nosec B608 - closed resource identity predicate; values bound.
+                            mutation.params,
                         )
                         row = cur.fetchone()
                         if not row:

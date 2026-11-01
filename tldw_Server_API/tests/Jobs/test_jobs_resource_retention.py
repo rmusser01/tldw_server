@@ -2,8 +2,11 @@
 
 import pytest
 
+from tldw_Server_API.tests.Jobs import test_jobs_resource_lifecycle as lifecycle
 from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import make_command, make_request, snapshot, sql
-from tldw_Server_API.tests.Jobs.test_jobs_resource_lifecycle import manager, resource_scenario  # noqa: F401
+
+manager_fixture = lifecycle.manager
+resource_scenario_fixture = lifecycle.resource_scenario
 
 
 @pytest.mark.parametrize("archived", [False, True])
@@ -336,3 +339,42 @@ def test_opted_out_duplicate_archive_ids_keep_legacy_replacement_behavior(manage
         (json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]) == {"replacement": True}
         for row in archived
     )
+
+
+@pytest.mark.parametrize("table", ["jobs", "jobs_archive"])
+def test_sqlite_frozen_targets_are_indexed_linear_and_null_safe(tmp_path, table):
+    import sqlite3
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.operations.resource import ResourceAdmissionStore, ResourceMutation
+
+    jm = JobManager(tmp_path / "target-plan.db")
+    conn = jm._connect()
+    steps = []
+    try:
+        for count in (128, 256, 1024):
+            conn.execute(f"DELETE FROM {table}")
+            conn.executemany(
+                f"INSERT INTO {table}(id,uuid,domain,queue,job_type,owner_user_id,status) "
+                "VALUES (?,?,'ordinary','default','ordinary','1','queued')",
+                [(number, None if number == 1 else str(number)) for number in range(1, count + 1)],
+            )
+            mutation = ResourceMutation(ResourceAdmissionStore(conn), where="1=1", archived=table == "jobs_archive")
+            mutation._freeze_rows(
+                [{"id": number, "uuid": None if number == 1 else str(number)} for number in range(1, count + 1)]
+            )
+            query = f"SELECT id FROM {table} WHERE " + mutation.where
+            plan = [row[3] for row in conn.execute("EXPLAIN QUERY PLAN " + query, mutation.params)]
+            instructions = []
+            conn.set_progress_handler(lambda instructions=instructions: instructions.append(1) or 0, 1)
+            assert len(conn.execute(query, mutation.params).fetchall()) == count
+            conn.set_progress_handler(None, 0)
+            steps.append(len(instructions))
+            conn.execute(f"UPDATE {table} SET uuid='replacement' WHERE id=2")
+            assert len(conn.execute(query, mutation.params).fetchall()) == count - 1
+        assert steps[1] < 3 * steps[0], (steps, plan)
+        assert any(f"SEARCH {table} USING INTEGER PRIMARY KEY" in detail for detail in plan), plan
+        conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 10)
+        assert len(conn.execute(query, mutation.params).fetchall()) == 1023
+    finally:
+        conn.close()

@@ -1,7 +1,7 @@
 """Shared resource lifecycle behavior against the official Jobs backends."""
 
-from dataclasses import replace
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -17,7 +17,7 @@ from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import (
 )
 
 
-@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
+@pytest.fixture(name="manager", params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
 def manager(request, tmp_path, monkeypatch):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "observer-jobs.db"))
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
@@ -66,7 +66,7 @@ class ResourceScenario:
         )
 
 
-@pytest.fixture
+@pytest.fixture(name="resource_scenario")
 def resource_scenario(manager):
     return ResourceScenario(manager)
 
@@ -95,7 +95,7 @@ def test_terminalization_releases_only_matching_head(resource_scenario, monkeypa
     s.admit()
     job = s.acquire()
     statements = record_sql(s.manager, monkeypatch)
-    args = dict(worker_id=job["worker_id"], lease_id=job["lease_id"], expected_uuid=job["uuid"])
+    args = {"worker_id": job["worker_id"], "lease_id": job["lease_id"], "expected_uuid": job["uuid"]}
     if transition == "complete":
         assert s.manager.complete_job(job["id"], **args)
     elif transition == "fail":
@@ -170,7 +170,7 @@ def test_old_same_uuid_lease_cannot_finalize_reacquired_attempt(resource_scenari
     current = s.acquire()
     assert current["uuid"] == old["uuid"] and current["lease_id"] != old["lease_id"]
     before = snapshot(s.manager)
-    args = dict(worker_id=old["worker_id"], lease_id=old["lease_id"])
+    args = {"worker_id": old["worker_id"], "lease_id": old["lease_id"]}
     if operation == "complete":
         result = s.manager.complete_job(old["id"], expected_uuid=old["uuid"], enforce=enforce, **args)
     elif operation == "fail":
@@ -512,7 +512,7 @@ def test_worker_identity_is_not_an_admin_queued_override(resource_scenario, monk
     old = s.acquire()
     assert s.manager.release_job(old["id"], worker_id=old["worker_id"], lease_id=old["lease_id"])
     before = snapshot(s.manager)
-    args = dict(expected_uuid=old["uuid"], worker_id=old["worker_id"], lease_id=old["lease_id"])
+    args = {"expected_uuid": old["uuid"], "worker_id": old["worker_id"], "lease_id": old["lease_id"]}
     if operation == "complete":
         result = s.manager.complete_job(old["id"], enforce=False, **args)
     elif operation == "fail":
@@ -602,3 +602,201 @@ def test_opted_out_recovery_still_skips_locked_rows(jobs_pg_dsn, monkeypatch):
     with psycopg.connect(jobs_pg_dsn) as blocker:
         blocker.execute("SELECT id FROM jobs WHERE id=%s FOR UPDATE", (job["id"],))
         assert manager._recover_expired_processing_jobs(domain="ordinary", queue="default") == 0
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("operation", ["complete", "fail", "cancel", "release", "finalize"])
+def test_discovery_window_replacement_never_locks_or_mutates_new_resource(jobs_pg_dsn, monkeypatch, operation):
+    import psycopg
+
+    from tldw_Server_API.app.core.Jobs.operations.resource import ResourceAdmissionStore, ResourceMutation
+
+    jm = JobManager(backend="postgres", db_url=jobs_pg_dsn)
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    old = jm.create_job(domain="claims", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+    old = jm.acquire_next_job(domain="claims", queue="default", worker_id="old", lease_seconds=300)
+    select = ResourceMutation._select
+    execute = ResourceAdmissionStore.execute
+    state = {}
+    statements = []
+    blockers = []
+    original_cursor = jm._pg_cursor
+
+    @contextmanager
+    def cursor(conn):
+        with original_cursor(conn) as cur:
+            cur.execute("SET LOCAL lock_timeout='100ms'")
+            yield cur
+
+    monkeypatch.setattr(jm, "_pg_cursor", cursor)
+
+    def discover(mutation, *args, **kwargs):
+        rows = select(mutation, *args, **kwargs)
+        if not state and rows and rows[0]["uuid"] == old["uuid"]:
+            state["replaced"] = True
+            assert jm.cancel_job(old["id"])
+            assert jm.prune_jobs(older_than_days=0, statuses=["cancelled"]) == 1
+            sql(jm, "SELECT setval(pg_get_serial_sequence('jobs','id'), ?, false)", (old["id"],))
+            new = jm.admit_resource_job(make_command(), request=make_request(key=None)).job
+            assert new["id"] == old["id"] and new["uuid"] != old["uuid"]
+            new = jm.acquire_next_job(domain="claims", queue="default", worker_id="new", lease_seconds=300)
+            state["before"] = snapshot(jm)
+            blocker = psycopg.connect(jobs_pg_dsn)
+            blockers.append(blocker)
+            blocker.execute("SELECT * FROM jobs WHERE id=%s FOR UPDATE", (new["id"],))
+        return rows
+
+    def track(store, statement, values=()):
+        if "before" in state:
+            statements.append(statement)
+        return execute(store, statement, values)
+
+    monkeypatch.setattr(ResourceMutation, "_select", discover)
+    monkeypatch.setattr(ResourceAdmissionStore, "execute", track)
+    try:
+        if operation == "complete":
+            result = jm.complete_job(old["id"], enforce=False)
+        elif operation == "fail":
+            result = jm.fail_job(old["id"], error="old failure", retryable=False, enforce=False)
+        elif operation == "release":
+            result = jm.release_job(old["id"], worker_id="old", enforce=False)
+        elif operation == "finalize":
+            result = jm.finalize_cancelled(
+                old["id"], expected_uuid=old["uuid"], worker_id=old["worker_id"], lease_id=old["lease_id"]
+            )
+        else:
+            result = jm.cancel_job(old["id"])
+    finally:
+        for blocker in blockers:
+            blocker.rollback()
+            blocker.close()
+    assert result is False
+    assert snapshot(jm) == state["before"]
+    assert not any("job_resource_heads" in statement and "FOR UPDATE" in statement for statement in statements)
+
+
+def _maintenance_population(jm, policy):
+    ordinary = jm.create_job(domain="claims", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+    if policy == "runtime":
+        ordinary = jm.acquire_next_job(domain="claims", queue="default", worker_id="ordinary", lease_seconds=300)
+    command = make_command(owner_user_id="2", payload={**make_command().payload, "owner_user_id": "2"})
+    healthy = jm.admit_resource_job(command, request=make_request(command, key=None)).job
+    if policy == "age":
+        healthy = jm.acquire_next_job(
+            domain="claims", queue="default", job_type=command.job_type, worker_id="healthy", lease_seconds=300
+        )
+        assert healthy["owner_user_id"] == "2"
+        sql(jm, "UPDATE jobs SET created_at='2000-01-01' WHERE id=?", (healthy["id"],))
+    sql(jm, "UPDATE jobs SET created_at='2000-01-01',started_at='2000-01-01' WHERE id=?", (ordinary["id"],))
+    return ordinary, healthy
+
+
+@pytest.mark.parametrize("policy", ["age", "runtime"])
+def test_ttl_eligible_discovery_ignores_other_owner_corrupt_head(manager, policy):
+    ordinary, healthy = _maintenance_population(manager, policy)
+    sql(manager, "UPDATE job_resource_heads SET active_job_uuid='00000000-0000-0000-0000-000000000001'")
+    before = snapshot(manager)
+    assert manager.apply_ttl_policies(**{policy + "_seconds": 60}, domain="claims") == 1
+    after = snapshot(manager)
+    assert next(row for row in after["jobs"] if row["id"] == ordinary["id"])["status"] == "cancelled"
+    assert next(row for row in after["jobs"] if row["id"] == healthy["id"]) == next(
+        row for row in before["jobs"] if row["id"] == healthy["id"]
+    )
+    assert after["job_resource_heads"] == before["job_resource_heads"]
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("policy", ["age", "runtime"])
+@pytest.mark.parametrize("locked", ["head", "row"])
+def test_ttl_eligible_discovery_ignores_other_owner_locked_head(jobs_pg_dsn, monkeypatch, policy, locked):
+    import psycopg
+
+    jm = JobManager(backend="postgres", db_url=jobs_pg_dsn)
+    _, healthy = _maintenance_population(jm, policy)
+    original = jm._pg_cursor
+
+    @contextmanager
+    def cursor(conn):
+        with original(conn) as cur:
+            cur.execute("SET LOCAL lock_timeout='100ms'")
+            yield cur
+
+    monkeypatch.setattr(jm, "_pg_cursor", cursor)
+    with psycopg.connect(jobs_pg_dsn) as blocker:
+        if locked == "head":
+            blocker.execute("SELECT * FROM job_resource_heads FOR UPDATE")
+        else:
+            blocker.execute("SELECT * FROM jobs WHERE id=%s FOR UPDATE", (healthy["id"],))
+        assert jm.apply_ttl_policies(**{policy + "_seconds": 60}, domain="claims") == 1
+
+
+def test_recovery_discovery_materializes_only_bounded_oldest_candidates(manager, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.operations.resource import ResourceMutation
+
+    monkeypatch.setenv("JOBS_EXPIRED_RECOVERY_BATCH_SIZE", "1")
+    ordinary, healthy = _maintenance_population(manager, "runtime")
+    healthy = manager.acquire_next_job(domain="claims", queue="default", worker_id="healthy", lease_seconds=300)
+    sql(manager, "UPDATE jobs SET leased_until='2000-01-01' WHERE id=?", (ordinary["id"],))
+    sql(manager, "UPDATE jobs SET leased_until='2010-01-01' WHERE id=?", (healthy["id"],))
+    sql(manager, "UPDATE job_resource_heads SET active_job_uuid='00000000-0000-0000-0000-000000000001'")
+    original = ResourceMutation._select
+    discovered = []
+
+    def select(mutation, *args, **kwargs):
+        rows = original(mutation, *args, **kwargs)
+        if mutation.expired_recovery_limit and not kwargs.get("lock"):
+            discovered.extend(rows)
+        return rows
+
+    monkeypatch.setattr(ResourceMutation, "_select", select)
+    assert manager._recover_expired_processing_jobs(domain="claims") == 1
+    assert [row["id"] for row in discovered] == [ordinary["id"]]
+    assert all("payload" not in row and "result" not in row for row in discovered)
+    assert sql(manager, "SELECT status FROM jobs WHERE id=?", (healthy["id"],), rows=True)[0]["status"] == "processing"
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("locked", ["head", "row"])
+def test_resource_recovery_skips_locked_candidate_before_active_validation(jobs_pg_dsn, monkeypatch, locked):
+    import psycopg
+
+    jm = JobManager(backend="postgres", db_url=jobs_pg_dsn)
+    job = jm.admit_resource_job(make_command(), request=make_request(key=None)).job
+    job = jm.acquire_next_job(domain="claims", queue="default", worker_id="worker", lease_seconds=300)
+    ordinary = jm.create_job(domain="claims", queue="default", job_type="ordinary", payload={}, owner_user_id="2")
+    ordinary = jm.acquire_next_job(domain="claims", queue="default", worker_id="ordinary", lease_seconds=300)
+    sql(jm, "UPDATE jobs SET leased_until='2000-01-01' WHERE id=?", (job["id"],))
+    sql(jm, "UPDATE jobs SET leased_until='2010-01-01' WHERE id=?", (ordinary["id"],))
+    before = snapshot(jm)
+    original = jm._pg_cursor
+
+    @contextmanager
+    def cursor(conn):
+        with original(conn) as cur:
+            cur.execute("SET LOCAL lock_timeout='100ms'")
+            yield cur
+
+    monkeypatch.setattr(jm, "_pg_cursor", cursor)
+    with psycopg.connect(jobs_pg_dsn) as blocker:
+        if locked == "head":
+            blocker.execute("SELECT * FROM job_resource_heads FOR UPDATE")
+        else:
+            blocker.execute("SELECT * FROM jobs WHERE id=%s FOR UPDATE", (job["id"],))
+        assert jm._recover_expired_processing_jobs(domain="claims") == 1
+    after = snapshot(jm)
+    assert next(row for row in after["jobs"] if row["id"] == job["id"]) == next(
+        row for row in before["jobs"] if row["id"] == job["id"]
+    )
+    assert after["job_resource_heads"] == before["job_resource_heads"]
+    recovered = next(row for row in after["jobs"] if row["id"] == ordinary["id"])
+    assert recovered["status"] == "queued" and recovered["retry_count"] == 1
+
+
+def test_reschedule_discovery_ignores_ineligible_ready_resource(manager):
+    ordinary = manager.create_job(domain="claims", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+    command = make_command(owner_user_id="2", payload={**make_command().payload, "owner_user_id": "2"})
+    manager.admit_resource_job(command, request=make_request(command, key=None))
+    sql(manager, "UPDATE jobs SET available_at='2100-01-01' WHERE id=?", (ordinary["id"],))
+    sql(manager, "UPDATE job_resource_heads SET active_job_uuid='00000000-0000-0000-0000-000000000001'")
+    assert manager.reschedule_jobs(domain="claims", set_now=True) == 1

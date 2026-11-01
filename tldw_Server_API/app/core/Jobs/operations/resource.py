@@ -67,20 +67,25 @@ class ResourceAdmissionStore:
         """Implemented by backend modules: caller already owns the transaction."""
         raise NotImplementedError
 
-    def resolve_job(self, scope: contracts.ResourceScope, job_uuid: str, *, normalize: bool = True) -> dict[str, Any]:
-        """Lock exact live/archive targets after the head, rejecting ambiguity."""
+    def resolve_job(
+        self, scope: contracts.ResourceScope, job_uuid: str, *, normalize: bool = True, lock: bool = True
+    ) -> dict[str, Any]:
+        """Resolve exact targets under the head, optionally locking them too.
+
+        Recovery uses lock=False only after its SKIP LOCKED target-row selection.
+        """
         p = self.marker
         fields = ",".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *contracts.RESOURCE_METADATA_FIELDS))
-        lock = " FOR UPDATE" if self.postgres else ""
+        suffix = " FOR UPDATE" if self.postgres and lock else ""
         values = (job_uuid, scope.domain, scope.owner_user_id)
         live = self.execute(
             f"SELECT {fields}, NULL AS payload_compressed, NULL AS result_compressed, "  # nosec B608 - fixed projection/syntax; values bound.
-            f"0 AS archived FROM jobs WHERE uuid={p} AND domain={p} AND owner_user_id={p}{lock}",
+            f"0 AS archived FROM jobs WHERE uuid={p} AND domain={p} AND owner_user_id={p}{suffix}",
             values,
         ).fetchall()
         archived = self.execute(
             f"SELECT {fields}, payload_compressed, result_compressed, 1 AS archived "  # nosec B608 - fixed projection/syntax; values bound.
-            f"FROM jobs_archive WHERE uuid={p} AND domain={p} AND owner_user_id={p}{lock}",
+            f"FROM jobs_archive WHERE uuid={p} AND domain={p} AND owner_user_id={p}{suffix}",
             values,
         ).fetchall()
         rows = [*live, *archived]
@@ -88,15 +93,17 @@ class ResourceAdmissionStore:
             raise RuntimeError("resource Job target is missing or ambiguous")
         return normalize_slides_archive_projection(rows[0]) if normalize else dict(rows[0])
 
-    def active_jobs(self, scope: contracts.ResourceScope, command: CreateJobCommand) -> list[dict[str, Any]]:
+    def active_jobs(
+        self, scope: contracts.ResourceScope, command: CreateJobCommand, *, lock: bool = True
+    ) -> list[dict[str, Any]]:
         """Detect bound or legacy active candidates across all queues/methods."""
         p = self.marker
-        lock = " FOR UPDATE" if self.postgres else ""
+        suffix = " FOR UPDATE" if self.postgres and lock else ""
         alias_prefix = command.job_type.replace("!", "!!").replace("%", "!%").replace("_", "!_") + ".v%"
         rows = self.execute(
             f"SELECT * FROM jobs WHERE domain={p} AND owner_user_id={p} "  # nosec B608 - backend placeholders only; values bound.
             f"AND (resource={p} OR job_type={p} OR job_type LIKE {p} ESCAPE '!') "
-            f"AND status IN ('queued','processing') ORDER BY id{lock}",
+            f"AND status IN ('queued','processing') ORDER BY id{suffix}",
             (*self.scope_values(scope), command.job_type, alias_prefix),
         ).fetchall()
         active = []
@@ -264,12 +271,16 @@ class ResourceMutation:
         """Read a fixed internal table and caller-built parameterized predicate."""
         suffix = " FOR UPDATE" if lock and self.store.postgres else ""
         order = "id"
+        fields = "*"
         if self.expired_recovery_limit is not None:
             order = "leased_until ASC NULLS FIRST,id" if self.store.postgres else "leased_until ASC,id"
-            if lock:
-                limit = self.expired_recovery_limit
-                if self.store.postgres:
-                    suffix += " SKIP LOCKED"
+            limit = self.expired_recovery_limit
+            if not lock:
+                fields = ",".join(
+                    ("id", "uuid", "domain", "queue", "job_type", "owner_user_id", *contracts.RESOURCE_METADATA_FIELDS)
+                )
+            if lock and self.store.postgres:
+                suffix += " SKIP LOCKED"
         limit_sql = ""
         if limit is not None:
             limit_sql = " LIMIT %s" if self.store.postgres else " LIMIT ?"
@@ -277,10 +288,35 @@ class ResourceMutation:
         return [
             dict(row)
             for row in self.store.execute(
-                f"SELECT * FROM {self.table} WHERE {where} ORDER BY {order}{limit_sql}{suffix}",  # nosec B608 - internal table/predicate; values bound.
+                f"SELECT {fields} FROM {self.table} WHERE {where} ORDER BY {order}{limit_sql}{suffix}",  # nosec B608 - internal projection/table/predicate; values bound.
                 params,
             ).fetchall()
         ]
+
+    def _validate_head(self, scope: contracts.ResourceScope, candidate: dict[str, Any]) -> None:
+        """Validate under the held head; recovery already owns its selected row."""
+        head = self.heads[scope]
+        command = CreateJobCommand(scope.domain, candidate["queue"], candidate["job_type"], {}, scope.owner_user_id)
+        lock = self.expired_recovery_limit is None
+        active = self.store.active_jobs(scope, command, lock=lock)
+        if head["active_job_uuid"] is None:
+            if active:
+                raise RuntimeError("resource has ambiguous or unbound active Jobs")
+        else:
+            target = self.store.resolve_job(scope, head["active_job_uuid"], normalize=False, lock=lock)
+            _validate_target(
+                target,
+                head,
+                command,
+                contracts.ResourceAdmissionRequest(scope, json.loads(target["resource_settings_json"])),
+            )
+            if (
+                len(active) != 1
+                or active[0]["uuid"] != head["active_job_uuid"]
+                or target["status"] not in ("queued", "processing")
+                or target.get("archived")
+            ):
+                raise RuntimeError("resource active authority is invalid")
 
     def __enter__(self) -> ResourceMutation:
         """Discover, lock heads, then lock/revalidate the exact candidate population."""
@@ -309,42 +345,38 @@ class ResourceMutation:
         p = self.store.marker
         for scope in sorted(candidates, key=self.store.scope_values):
             suffix = " FOR UPDATE" if self.store.postgres else ""
+            if suffix and self.expired_recovery_limit is not None:
+                suffix += " SKIP LOCKED"
             row = self.store.execute(
                 f"SELECT * FROM job_resource_heads WHERE {self.store.scope_where}{suffix}",  # nosec B608 - fixed predicate/placeholders; values bound.
                 self.store.scope_values(scope),
             ).fetchone()
             if row is None:
+                if (
+                    self.expired_recovery_limit is not None
+                    and self.store.execute(
+                        f"SELECT 1 FROM job_resource_heads WHERE {self.store.scope_where}",  # nosec B608 - fixed predicate/placeholders; values bound.
+                        self.store.scope_values(scope),
+                    ).fetchone()
+                ):
+                    continue
                 raise RuntimeError("resource head is missing")
             self.heads[scope] = dict(row)
-        for scope, head in self.heads.items():
-            candidate = candidates[scope]
-            command = CreateJobCommand(scope.domain, candidate["queue"], candidate["job_type"], {}, scope.owner_user_id)
-            active = self.store.active_jobs(scope, command)
-            if head["active_job_uuid"] is None:
-                if active:
-                    raise RuntimeError("resource has ambiguous or unbound active Jobs")
-            else:
-                target = self.store.resolve_job(scope, head["active_job_uuid"], normalize=False)
-                _validate_target(
-                    target,
-                    head,
-                    command,
-                    contracts.ResourceAdmissionRequest(scope, json.loads(target["resource_settings_json"])),
-                )
-                if (
-                    len(active) != 1
-                    or active[0]["uuid"] != head["active_job_uuid"]
-                    or target["status"] not in ("queued", "processing")
-                    or target.get("archived")
-                ):
-                    raise RuntimeError("resource active authority is invalid")
+        if self.expired_recovery_limit is None:
+            for scope in self.heads:
+                self._validate_head(scope, candidates[scope])
+        else:
+            preliminary = [
+                row for row in preliminary if (scope := resource_scope_for(row)) is None or scope in self.heads
+            ]
         if not preliminary:
             return self
-        ids = [row["id"] for row in preliminary]
-        identity_where, identity_params = self._ids_predicate(ids)
-        locked = self._select(
-            f"({self.original_where}) AND {identity_where}", (*self.original_params, *identity_params), lock=True
-        )
+        self._freeze_rows(preliminary)
+        locked = self._select(self.where, self.params, lock=True)
+        if self.expired_recovery_limit is not None:
+            selected_scopes = {resource_scope_for(row) for row in locked} - {None}
+            for scope in sorted(selected_scopes, key=self.store.scope_values):
+                self._validate_head(scope, candidates[scope])
         original = {row["id"]: row for row in preliminary}
         reservations: dict[contracts.ResourceScope, str] = {}
         for row in locked:
@@ -359,7 +391,7 @@ class ResourceMutation:
                 command = CreateJobCommand(row["domain"], row["queue"], row["job_type"], {}, row["owner_user_id"])
                 request = contracts.ResourceAdmissionRequest(scope, settings)
                 _validate_target(row, head, command, request)
-                self.store.resolve_job(scope, row["uuid"], normalize=False)
+                self.store.resolve_job(scope, row["uuid"], normalize=False, lock=self.expired_recovery_limit is None)
                 active = head["active_job_uuid"]
                 if row["status"] in ("queued", "processing") and active != row["uuid"]:
                     raise RuntimeError("resource active authority is invalid")
@@ -390,15 +422,21 @@ class ResourceMutation:
         """Fence all broad writes to discovered numeric IDs AND logical UUIDs."""
         rows = list(self.rows.values()) if rows is None else rows
         if not rows:
+            self.where, self.params = "1=0", ()
             return
         targets = json.dumps([{"id": row["id"], "uuid": row["uuid"]} for row in rows])
+        # Drive SQLite from targets into existing ID indexes, then match outer
+        # rowids. An EXISTS correlated on each Jobs row rescans the JSON array.
         predicates = {
-            (False, "jobs"): "EXISTS (SELECT 1 FROM json_each(?) AS resource_targets "
-            "WHERE jobs.id=json_extract(resource_targets.value,'$.id') "
-            "AND jobs.uuid IS json_extract(resource_targets.value,'$.uuid'))",
-            (False, "jobs_archive"): "EXISTS (SELECT 1 FROM json_each(?) AS resource_targets "
-            "WHERE jobs_archive.id=json_extract(resource_targets.value,'$.id') "
-            "AND jobs_archive.uuid IS json_extract(resource_targets.value,'$.uuid'))",
+            (False, "jobs"): "jobs.rowid IN (SELECT target_job.rowid FROM json_each(?) AS resource_targets "
+            "CROSS JOIN jobs AS target_job WHERE target_job.id=json_extract(resource_targets.value,'$.id') "
+            "AND target_job.uuid IS json_extract(resource_targets.value,'$.uuid'))",
+            (
+                False,
+                "jobs_archive",
+            ): "jobs_archive.rowid IN (SELECT target_job.rowid FROM json_each(?) AS resource_targets "
+            "CROSS JOIN jobs_archive AS target_job WHERE target_job.id=json_extract(resource_targets.value,'$.id') "
+            "AND target_job.uuid IS json_extract(resource_targets.value,'$.uuid'))",
             (
                 True,
                 "jobs",
@@ -412,12 +450,6 @@ class ResourceMutation:
         }
         self.where = f"({self.original_where}) AND {predicates[self.store.postgres, self.table]}"
         self.params = (*self.original_params, targets)
-
-    def _ids_predicate(self, ids: list[int]) -> tuple[str, tuple]:
-        """Bound large maintenance populations without SQLite's variable limit."""
-        if self.store.postgres:
-            return "id = ANY(%s)", (ids,)
-        return "id IN (SELECT value FROM json_each(?))", (json.dumps(ids),)
 
     def worker_allowed(
         self, job_id: int, worker_id: str | None, lease_id: str | None, expected_uuid: str | None = None
@@ -530,7 +562,7 @@ class ResourceMutation:
                         (before["uuid"], *self.store.scope_values(scope)),
                     )
                 head["active_job_uuid"] = before["uuid"]
-            elif not self.table == "jobs_archive":
+            elif self.table != "jobs_archive":
                 self.store.execute(
                     f"UPDATE job_resource_heads SET active_job_uuid=NULL WHERE {self.store.scope_where} AND active_job_uuid={p}",  # nosec B608 - fixed predicate/placeholders; values bound.
                     (*self.store.scope_values(scope), before["uuid"]),
