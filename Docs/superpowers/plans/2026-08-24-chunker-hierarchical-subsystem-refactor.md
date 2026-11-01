@@ -1606,7 +1606,7 @@ Fresh verification:
 
 - [x] Reconcile latest dev, approved tracking IDs and independent review.
 - [x] Correct new type gaps and deterministic test dependency; verify all gates.
-- [ ] Publish verified branch and answer/resolve the sixth Qodo thread.
+- [x] Publish verified branch and answer/resolve the sixth Qodo thread.
 - [ ] Complete exact-head Qodo review and every live required CI check.
 - [ ] Guarded normal merge commit; verify merge result and finalize tracking.
 
@@ -1615,3 +1615,23 @@ The live required checks now number eight, including
 Do not merge until every substantive required check passes on the exact head.
 Keep the requester's human Change summary verbatim; add the approved diagnostic
 rationale and current evidence only to the technical summary.
+
+Published code head: `eca6dc44596bc6544bff427878223d62b5e6d13d`, with an
+explicit force-with-lease against freshly inspected remote `cca5c4fe37`.
+GitHub readback confirms the pinned dev base and unchanged human Change summary.
+Evidence reply `4436544407` is in the original sixth Qodo thread, now resolved;
+all six original review threads are resolved and no changes-requested review
+is outstanding. Manual current-head review requested in comment `6561036538`.
+
+External blocker: Qodo replied in comment `6561037043` that reviews are paused
+because the workspace is out of credits. This is not a completed review or
+zero-findings evidence, and does not waive the exact-head review gate. Requester
+or workspace admin must restore credits before review can resume. The previous
+network-permission block and both earlier approval questions are resolved.
+No billing/account change or merge bypass is authorized or attempted.
+
+Exact-head CI snapshot: 43 check runs, 14 queued, three in progress, 26 completed,
+no failures observed. The trusted frontend-license status passes; the seven
+other substantive required check names have not posted yet. None may be treated
+as passed or waived. Follow-up pauses for the required credits action, with
+TASK-15286 still In Progress. No merge or task completion is claimed.
