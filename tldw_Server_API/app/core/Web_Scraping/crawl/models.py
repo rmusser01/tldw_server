@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, fields, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, fields, replace
 from types import MappingProxyType
 from typing import Any, Protocol
 
@@ -73,13 +73,15 @@ class CrawlLimits:
     active_probes: int = 2_000
     transfer_bytes: int = 1_073_741_824
     discovered_candidates: int = 50_000
+    max_url_bytes: int = 65_536
+    discovered_url_bytes: int = 67_108_864
     frontier_entries: int = 10_000
     execution_seconds: float = 1_800
 
     def __post_init__(self) -> None:
-        for field in fields(self):
-            validator = positive_duration if field.name == "execution_seconds" else positive_integer
-            validator(getattr(self, field.name), field.name)
+        for descriptor in fields(self):
+            validator = positive_duration if descriptor.name == "execution_seconds" else positive_integer
+            validator(getattr(self, descriptor.name), descriptor.name)
 
 
 @dataclass(frozen=True)
@@ -92,8 +94,8 @@ class CheckpointLimits:
     max_results: int = 1_000
 
     def __post_init__(self) -> None:
-        for field in fields(self):
-            positive_integer(getattr(self, field.name), field.name)
+        for descriptor in fields(self):
+            positive_integer(getattr(self, descriptor.name), descriptor.name)
 
     def validate_for(self, limits: CrawlLimits) -> None:
         """Require explicit checkpoint capacity for all effective crawl dimensions."""
@@ -101,6 +103,8 @@ class CheckpointLimits:
             self.max_candidates < limits.discovered_candidates
             or self.max_frontier < limits.frontier_entries
             or self.max_results < limits.page_attempts
+            or self.max_file_bytes < limits.discovered_url_bytes
+            or self.max_file_bytes < limits.max_url_bytes
         ):
             raise ValueError("checkpoint ceilings are smaller than effective crawl limits")
 
@@ -131,5 +135,69 @@ class CrawlControls(ParentControls, Protocol):
     def cancel(self) -> None: ...
     def attach(self, handle: WorkHandle[Any]) -> None: ...
     def snapshot(self) -> BudgetSnapshot: ...
+    def restore_budget(self, snapshot: BudgetSnapshot, *, accounting_complete: bool) -> None: ...
     def note_successful_result(self) -> None: ...
     def publish(self, outcome: CrawlOutcome) -> CrawlOutcome: ...
+
+
+@dataclass(frozen=True)
+class CrawlHooks:
+    """Private live callbacks, never part of a serialized plan or checkpoint."""
+
+    url_filter: Callable[[str], bool] | None = field(default=None, repr=False)
+    progress_callback: Callable[[str], None] | None = field(default=None, repr=False)
+    on_progress: Callable[[Mapping[str, Any]], None] | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class FrontierEntry:
+    """One admitted URL identity, its traversal position and priority."""
+
+    url: str
+    parent_url: str | None
+    depth: int
+    sequence: int
+    score: float
+
+
+@dataclass(frozen=True)
+class FrontierSnapshot:
+    """Ordered dispositions and committed article data, without acquisition HTML."""
+
+    queued: tuple[FrontierEntry, ...] = ()
+    inflight: tuple[FrontierEntry, ...] = ()
+    completed: tuple[FrontierEntry, ...] = ()
+    results: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class CheckpointScope:
+    """Trusted owner/crawl namespace; never authorized from stored file contents."""
+
+    owner: str
+    namespace: str
+    trusted_local_path: bool = False
+
+
+@dataclass(frozen=True)
+class CheckpointState:
+    """Credential-free continuation contract; Task 7 supplies bounded storage."""
+
+    scope: CheckpointScope
+    plan: CrawlPlan
+    frontier: FrontierSnapshot
+    budget: BudgetSnapshot
+    stop_reason: str | None = None
+    accounting_complete: bool = True
+    schema_version: int = 1
+
+
+class CheckpointPort(Protocol):
+    """Bound trusted checkpoint ownership, independent of storage implementation."""
+
+    @property
+    def scope(self) -> CheckpointScope: ...
+    def load(self, *, plan: CrawlPlan, scope: CheckpointScope) -> CheckpointState | None: ...
+    def save(self, state: CheckpointState) -> None: ...
+    def clear(self) -> None: ...
+    def close(self) -> None: ...

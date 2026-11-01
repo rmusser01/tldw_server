@@ -26,6 +26,7 @@ COUNTERS = (
     "active_probes",
     "transfer_bytes",
     "discovered_candidates",
+    "discovered_url_bytes",
 )
 
 
@@ -429,6 +430,25 @@ async def test_logically_complete_handle_is_owned_until_physical_drain(ctx):
     assert result.result() == "logical result"
     assert not drained.done()
     drained.set_result(None)
+
+
+@pytest.mark.asyncio
+async def test_physical_drain_promptly_releases_credentials_and_callbacks_without_next_attach(ctx):
+    class Secret:
+        pass
+
+    secret = Secret()
+    retained = weakref.ref(secret)
+    loop = asyncio.get_running_loop()
+    result, drained = loop.create_future(), loop.create_future()
+    result.set_result("done")
+    handle = WorkHandle(result, drained, lambda bound=secret: bound)
+    ctx.attach(handle)
+    del secret, handle
+    assert retained() is not None
+    drained.set_result(None)
+    await asyncio.sleep(0)
+    assert retained() is None
 
 
 @given(st.lists(st.sampled_from(["reserve", "commit", "close"]), max_size=100))
