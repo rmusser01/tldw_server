@@ -919,6 +919,32 @@ Fresh verification includes 833 broader tests before the final helper extraction
 
 Review exclusions were explicitly evaluated: WP3 remains deferred, the ADR's nonparticipating-writer version limitation remains accepted, and pre-existing invite/federation accounting redesign is not folded into this membership migration. Existing transaction-safety tests remain required. External-provider and production-load behavior are not claimed verified; remote CI, rules, feedback and merge policy remain coordinator-owned gates.
 
+### November 1 Moderation-Dev Rebase
+
+## Stage 1: Preserve the Approved WP2 Tree
+**Goal**: Rebase only this merge candidate onto authoritative dev `61d02ed484`.
+**Success Criteria**: All 36 reviewed patches remain identical, with no conflicts or WP2 runtime changes; all eight unrelated upstream paths match dev exactly.
+**Tests**: Authoritative remote refs, clean-worktree check, full range-diff and blob/mode comparisons.
+**Status**: Complete
+
+Head `00f2e9aa47` is preserved at `codex/userprofiles-wp2-pre-dev61d`. The mechanical replay ends at `403809fc11`; all 36 range-diff entries are equal. Upstream retires unused private Moderation delegates and migrates their tests. Its paths do not intersect WP2, and all other files equal the previously approved tree. ADR060 remains governing; no new architecture decision or WP3 work is introduced.
+
+## Stage 2: Verify Rebase Integration
+**Goal**: Requalify the unrelated upstream delta without repeating unchanged whole-PR review or broad suites.
+**Success Criteria**: Scoped tests, lint/compile/diff, Bandit and bounded independent review pass; earlier whole-PR approval remains applicable to preserved WP2 content.
+**Tests**: Moderation compiler/compatibility/blocklist/user-override tests plus profile commands, membership writer/repository and SQLite concurrency tests.
+**Status**: Complete
+
+All 271 scoped tests pass with no skips. Ruff, compileall, diff and ancestry checks pass. Bandit on the sole upstream runtime file has zero findings/errors; unchanged WP2 scan evidence is carried forward rather than claimed rerun. Independent integration review approves with no findings and confirms the complete PR diff, all touched blobs/modes, upstream tree and no remaining repository callers of removed delegates. The executor accepts the prior WP3, version-linearity and bookkeeping deferrals; external private Moderation consumers are upstream-owned with no WP2 dependency, and production-load behavior is not claimed verified.
+
+## Stage 3: Publish and Qualify the New Head
+**Goal**: Publish with a lease against `00f2e9aa47`, then merge only after exact-head review and required CI qualify the rebased candidate.
+**Success Criteria**: Latest remote dev is an ancestor; the human Change summary is unchanged; all eight current required checks pass; expected-head merge/readback and official Backlog finalization complete.
+**Tests**: Current rules/queue mode, paginated review state, authoritative refs, exact-head CI, unchanged summary and merged-state readback.
+**Status**: In Progress
+
+MERGE_QUEUE is unset and auto-merge is unarmed. Existing review threads are resolved, no review requests changes, and the requester-selected independent workflow replaces Qodo. Old-head statuses never qualify the new head. Publish once with the tracking checkpoint and preserve the human summary verbatim; keep TASK-13001.2 In Progress until verified merge.
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
