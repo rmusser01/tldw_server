@@ -12,9 +12,55 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from Helper_Scripts.ci.test_quality_triage import analyze_file
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RATCHET = REPO_ROOT / "Helper_Scripts" / "ci" / "test_quality_triage.py"
 BASELINE = REPO_ROOT / "Helper_Scripts" / "ci" / "test_quality_baseline.txt"
+
+
+@pytest.mark.parametrize(
+    ("imports", "base"),
+    [
+        ("from hypothesis.stateful import RuleBasedStateMachine", "RuleBasedStateMachine"),
+        ("from hypothesis.stateful import RuleBasedStateMachine as StateMachine", "StateMachine"),
+        ("import hypothesis.stateful as stateful", "stateful.RuleBasedStateMachine"),
+        ("import hypothesis", "hypothesis.stateful.RuleBasedStateMachine"),
+    ],
+)
+def test_hypothesis_state_machine_invariants_are_not_fake_assertions(tmp_path, imports, base) -> None:
+    source = tmp_path / "test_state_machine.py"
+    source.write_text(
+        f"{imports}\n\nclass WorkflowMachine({base}):\n"
+        "    def check_store(self):\n"
+        "        assert self.store.read() == self.expected\n",
+        encoding="utf-8",
+    )
+
+    assert analyze_file(source, tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("imports", "base"),
+    [
+        ("", ""),
+        ("", "(RuleBasedStateMachine)"),
+        ("from application import RuleBasedStateMachine", "(RuleBasedStateMachine)"),
+    ],
+)
+def test_non_test_class_assertions_remain_flagged_without_hypothesis_import(tmp_path, imports, base) -> None:
+    source = tmp_path / "test_fake.py"
+    source.write_text(
+        f"{imports}\n\nclass FakeWorkflow{base}:\n"
+        "    def run(self):\n"
+        "        assert self.store.read() == self.expected\n",
+        encoding="utf-8",
+    )
+
+    report = analyze_file(source, tmp_path)
+    assert report is not None
+    assert report.flags["tautology_suspect"] == 1
 
 
 def test_test_quality_triage_enforces_the_committed_baseline() -> None:
