@@ -8,6 +8,7 @@ import {
   getModelId,
   getModelProvider,
 } from "@/hooks/playground/modelSelectorUtils";
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability";
 import type { TldwConfig } from "@/services/tldw/TldwApiClient";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import {
@@ -16,12 +17,6 @@ import {
 } from "@/services/moderation";
 
 const EMPTY_FORM = { modelKey: "", criterion: "", text: "" };
-const SUPPORTED_PROVIDERS = new Set([
-  "llamacpp",
-  "llama.cpp",
-  "llama-cpp",
-  "llama_cpp",
-]);
 
 export default function ModelClassificationPanel({
   configSnapshot,
@@ -35,7 +30,11 @@ export default function ModelClassificationPanel({
   const models = React.useMemo(
     () =>
       (catalog.data ?? [])
-        .filter((model) => SUPPORTED_PROVIDERS.has(getModelProvider(model)))
+        .filter(
+          (model) =>
+            normalizeProviderAvailabilityKey(getModelProvider(model)) ===
+            "llama",
+        )
         .map((model) => ({
           value: getCanonicalModelKey(model),
           label: getModelId(model) + " (llama.cpp)",
