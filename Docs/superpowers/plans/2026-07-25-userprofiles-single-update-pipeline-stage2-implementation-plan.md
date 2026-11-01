@@ -10,7 +10,7 @@
 
 **Source design:** `Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md`
 
-**ADR check (Work Package 2):** ADR required: yes. ADR path: `Docs/ADR/060-authnz-membership-writer-transaction-and-version-ownership.md`. The approved shared membership writer creates a durable AuthNZ transaction, authorization, lock-order, and profile-version ownership boundary; the ADR backfills that decision without changing the approved Stage 2 scope.
+**ADR check (Work Package 2):** ADR required: yes. ADR path: `Docs/ADR/085-authnz-membership-writer-transaction-and-version-ownership.md` (formerly the unmerged ADR060 filename). The approved shared membership writer creates a durable AuthNZ transaction, authorization, lock-order, and profile-version ownership boundary; the ADR backfills that decision without changing the approved Stage 2 scope. Upstream Embeddings now owns accepted ADR060; only the membership record's number and references change, not its accepted rationale. Historical checkpoints retain the numbers used at their recorded time.
 
 **Planning baseline:** Reconciled against `origin/dev` at `2e0d3f1a2cfcad9798008f5bd249d91bbac43f07`. Before implementation, start a fresh `codex/` worktree from the then-current `origin/dev` and bring this spec and plan onto it. Re-run the inventory tests before editing because the runtime writer set may have grown.
 
@@ -843,7 +843,7 @@ The upstream delta changes `CurrentChatModelSettings.tsx` to reuse `buildBaseVal
 
 Fresh verification passed 216 tests (212 Docs plus four task-format checks), with no skips. Runtime Ruff and compileall passed across 27 PR-touched files. Fresh runtime Bandit exactly matches the prior 20 findings (19 low, one medium), with zero new findings or scan errors. Independent bounded review confirms all 31 patches are equal, the complete tree outside the three upstream files is unchanged, and their blobs/modes match dev. Local frontend tests were not rerun because this checkout has no frontend dependencies; successful required frontend CI on the new published head remains mandatory.
 
-Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 OpenAPI export evidence are carried forward, not freshly rerun. Their executable inputs are byte-identical; the fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas), and the prior schema memo reset plus both assertions are unchanged. ADR check: no new ADR is required for this mechanical integration; [ADR060](../../ADR/060-authnz-membership-writer-transaction-and-version-ownership.md) remains governing because transaction/version ownership is unchanged.
+Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 OpenAPI export evidence are carried forward, not freshly rerun. Their executable inputs are byte-identical; the fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas), and the prior schema memo reset plus both assertions are unchanged. ADR check: no new ADR is required for this mechanical integration; [ADR060](../../ADR/085-authnz-membership-writer-transaction-and-version-ownership.md) remains governing because transaction/version ownership is unchanged.
 
 ## Stage 3: Publish and Exact-Head Merge
 **Goal**: Publish with an explicit lease against `3c9b42e795`, then require fresh exact-head Qodo and all seven successful merge gates.
@@ -871,7 +871,7 @@ The upstream delta restores native ownership for fresh connected saved normal ch
 
 Fresh verification passed 216 tests (212 Docs plus four task-format checks), with no skips. Runtime Ruff and compileall passed across 27 PR-touched files. Fresh runtime Bandit exactly matches the prior 20 findings (19 low, one medium), with zero new findings or scan errors. Independent bounded review found no actionable integration issues and confirmed all 32 patches are equal, the complete tree outside the 14 upstream files is unchanged, and their blobs/modes match dev. Native chat creation uses the existing scoped authenticated client; authorization/quota enforcement remains unchanged. Local frontend tests were not run because frontend dependencies are absent; successful new exact-head required frontend and e2e CI remain mandatory.
 
-Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 API export evidence are carried forward, not freshly rerun. Their executable inputs are byte-identical; the fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas), with the prior schema memo reset and both assertions unchanged. ADR check: no new ADR for this mechanical integration; [ADR060](../../ADR/060-authnz-membership-writer-transaction-and-version-ownership.md) remains governing.
+Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 license-fetch skips), Profile/Usage (546 passed, one environment skip), writer/SQLite (485 passed), official live PostgreSQL WP2 (48 passed, no skips), guard-file Bandit and Python 3.12 API export evidence are carried forward, not freshly rerun. Their executable inputs are byte-identical; the fingerprint remains `5cb6cf6736d7` (2107 paths, 3247 schemas), with the prior schema memo reset and both assertions unchanged. ADR check: no new ADR for this mechanical integration; [ADR060](../../ADR/085-authnz-membership-writer-transaction-and-version-ownership.md) remains governing.
 
 ## Stage 3: Publish and Exact-Head Merge
 **Goal**: Publish with an explicit lease against `3fc99cd1a1`, then require fresh exact-head Qodo and all seven successful merge gates.
@@ -1034,6 +1034,26 @@ Explicit verification limit: the bare configured frontend unit attempt includes 
 **Success Criteria**: Human summary unchanged, previous runtime approval preserved, exact-head test remediation approved, queue/unarmed and authoritative refs checked; wait for fresh required CI before merge/readback.
 **Tests**: Canonical tracking, diff/Bandit applicability, review and remote readback.
 **Status**: In Progress
+
+### November 1 Embeddings-Dev Integration
+
+## Stage 1: Preserve Approved WP2 and Accepted Upstream Records
+**Goal**: Rebase onto authoritative dev b4040a6be81e1857292c4bdb8e59812ca0c12800, preserving reviewed runtime/tests and both ADR decisions.
+**Success Criteria**: All 40 patches replay; range-diff changes are confined to ADR index context and the already-upstream E2E precondition. Every WP2 runtime/test blob matches a946130dd4. Upstream Embeddings ADR060 stays intact; membership becomes next-sequential ADR085 after checking dev/open PR paths, with rationale unchanged.
+**Tests**: Object/mode and range-diff comparisons, duplicate-number/path/publication checks, conflict review.
+**Status**: Complete
+
+## Stage 2: Qualify the Bounded Integration
+**Goal**: Verify the new Jobs contract/import foundation coexists with WP2 without extending upstream Jobs design.
+**Success Criteria**: Preserve upstream helper/baseline changes exactly except the preexisting WP2 predicate-line adjustment. Scoped Jobs/CI/profile/writer and boundary gates pass; published membership ADR matches source, no new security finding or policy edit.
+**Tests**: Scoped SQLite/pure Jobs contract/import tests, WP2 regressions, updated quality/shard/CI/Docs checks, upstream-runtime Bandit baseline comparison and independent bounded review. Unchanged broad-suite/live PostgreSQL evidence is carried forward, not claimed rerun.
+**Status**: In Progress
+
+## Stage 3: Publish One Reviewed Latest-Dev Candidate
+**Goal**: Commit rebase/identity evidence and push with a lease against a946130dd4 after queue/remote/summary qualification.
+**Success Criteria**: Exact-head independent approval, human summary unchanged, latest-dev ancestry and all fresh required gates before expected-head merge/readback. WP3 stays untouched.
+**Tests**: Current rules/feedback/checks and remote readback; task stays In Progress until verified merge.
+**Status**: Not Started
 
 ## Work Package 3: Typed Pipeline and Effects
 
