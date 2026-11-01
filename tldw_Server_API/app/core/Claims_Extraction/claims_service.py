@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
@@ -2862,7 +2863,7 @@ async def review_claim(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "error": "version_conflict",
-                    "current": updated.get("current"),
+                    "current": jsonable_encoder(updated.get("current")),
                 },
             )
         latency_s = None
