@@ -44,9 +44,7 @@ class ModelInvocationIdentity:
         try:
             parsed = uuid.UUID(self.execution_id)
         except (AttributeError, TypeError, ValueError):
-            raise ValueError(
-                "execution_id must be a canonical lowercase UUIDv4"
-            ) from None
+            raise ValueError("execution_id must be a canonical lowercase UUIDv4") from None
         if parsed.version != 4 or str(parsed) != self.execution_id:
             raise ValueError("execution_id must be a canonical lowercase UUIDv4")
 
@@ -150,23 +148,37 @@ class ModelCompletionPort(Protocol):
     """Minimal completion capability consumed by an MCP module."""
 
     @property
-    def capabilities(self) -> ModelCompletionCapabilities: ...
+    def capabilities(self) -> ModelCompletionCapabilities:
+        """Return the immutable safety capabilities certified by this adapter."""
+        ...
 
     async def complete(
         self,
         request: ModelCompletionRequest,
         identity: ModelInvocationIdentity,
-    ) -> ModelCompletionResult: ...
+    ) -> ModelCompletionResult:
+        """Complete one bounded request for a server-authenticated invocation identity.
+
+        Return normalized immutable text or raise a sanitized ModelCompletionFailure.
+        Native caller cancellation propagates; implementations must not retry a paid call.
+        """
+        ...
 
 
 class ManagedModelCompletionPort(ModelCompletionPort, Protocol):
     """Completion port with explicit health and lifecycle ownership."""
 
-    def is_healthy(self) -> bool: ...
+    def is_healthy(self) -> bool:
+        """Return whether all required capabilities and lifecycle boundaries are ready."""
+        ...
 
-    async def shutdown(self) -> None: ...
+    async def shutdown(self) -> None:
+        """Stop new admission and initiate cleanup of all adapter-owned work."""
+        ...
 
-    async def wait_for_shutdown_completion(self) -> None: ...
+    async def wait_for_shutdown_completion(self) -> None:
+        """Wait until shutdown cleanup and every retained child have terminated."""
+        ...
 
 
 class ModelCompletionPortFactory(Protocol):
@@ -175,7 +187,9 @@ class ModelCompletionPortFactory(Protocol):
     def __call__(
         self,
         settings: ModelCompletionPortSettings,
-    ) -> ManagedModelCompletionPort: ...
+    ) -> ManagedModelCompletionPort:
+        """Construct a managed port from frozen operator settings without dispatching work."""
+        ...
 
 
 __all__ = [

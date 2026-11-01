@@ -114,8 +114,10 @@ async def test_init_auth_services_runs_sqlite_startup_chain(monkeypatch: pytest.
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("usage_failure", [False, True])
 async def test_init_auth_services_runs_pg_extras_when_pool_present(
     monkeypatch: pytest.MonkeyPatch,
+    usage_failure: bool,
 ) -> None:
     db_pool = SimpleNamespace(pool=object())
     pg_calls: list[str] = []
@@ -132,6 +134,8 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     def _make_pg_ensure(label: str):
         async def _ensure(_pool):
             pg_calls.append(label)
+            if label == "usage" and usage_failure:
+                raise DatabaseError("private-backend-error")
             return True
 
         return _ensure

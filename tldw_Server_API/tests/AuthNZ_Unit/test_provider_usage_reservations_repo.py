@@ -110,8 +110,8 @@ async def reservation_pool(tmp_path, reservation_schema):
     await pool.close()
 
 
-def test_migration_100_registered():
-    assert migrations.get_authnz_migrations()[-1].version == 100
+def test_migration_105_registered():
+    assert migrations.get_authnz_migrations()[-1].version == 105
 
 
 def test_published_user_usage_index_precedes_mcp_reservation_upgrade(tmp_path):
@@ -126,9 +126,19 @@ def test_published_user_usage_index_precedes_mcp_reservation_upgrade(tmp_path):
             ).fetchone()
             is None
         )
+    migrations.apply_authnz_migrations(path, target_version=104)
+    with sqlite3.connect(path) as conn:
+        assert "credential_source" in {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 104
+        assert (
+            conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_usage_reservations'"
+            ).fetchone()
+            is None
+        )
     migrations.apply_authnz_migrations(path)
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 100
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 105
         assert (
             conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_usage_reservations'"
@@ -141,6 +151,13 @@ def test_repository_contract_exists():
     assert api().ProviderUsageReservationsRepo
 
 
+def test_reservation_error_has_one_central_definition():
+    from tldw_Server_API.app.core.exception_types import ProviderUsageReservationError
+    from tldw_Server_API.app.core.exceptions import ProviderUsageReservationError as PublicError
+
+    assert api().ProviderUsageReservationError is ProviderUsageReservationError is PublicError
+
+
 def test_migration_additive_idempotent_and_minimal(tmp_path):
     path = tmp_path / "legacy.db"
     migrations.apply_authnz_migrations(path, target_version=98)
@@ -151,7 +168,7 @@ def test_migration_additive_idempotent_and_minimal(tmp_path):
         )
     migrations.apply_authnz_migrations(path)
     with sqlite3.connect(path) as conn:
-        migrations.migration_100_create_provider_usage_reservations(conn)
+        migrations.migration_105_create_provider_usage_reservations(conn)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
         assert columns == {
             "execution_id",
@@ -189,7 +206,7 @@ def test_migration_fails_for_duplicate_canonical_execution_ids(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         migrations.apply_authnz_migrations(path)
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 99
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 104
         assert "billing_org_id" not in {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
 
 

@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import (
 )
 from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor, RGRequest, daily_caps
 
-pytestmark = pytest.mark.rate_limit
+pytestmark = [pytest.mark.unit, pytest.mark.rate_limit]
 INTEGER_CEILING = (1 << 63) - 1
 
 

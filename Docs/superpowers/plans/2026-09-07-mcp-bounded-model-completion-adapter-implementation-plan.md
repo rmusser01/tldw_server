@@ -507,6 +507,47 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 6. Use `superpowers:requesting-code-review`, address validated findings, rerun affected gates, then use `superpowers:finishing-a-development-branch`.
 7. Final commit if verification requires metadata changes: `docs(mcp): finalize completion adapter evidence`
 
+## PR 3187 Latest-Dev Integration (2026-11-01)
+
+The requester authorized rebasing onto current dev, resolving conflicts, requesting
+an independent code review, and enabling auto-merge after review. The separate
+human-written Change summary requirement is explicitly waived for this PR only.
+Pinned base: `54b321dcec8cdbb6358581f42c1548696260570b`. Published-head lease:
+`b17293ac20e0f49ca92d0eb541d102518e479f4c`. Backup:
+`codex/mcp-completion-pre-nov01-rebase`. No new Skills functionality is authorized.
+
+### Integration Stage 1: Rebase And Semantic Compatibility
+**Goal**: Preserve current dev behavior while integrating the bounded completion path.
+**Success Criteria**: No conflicts; published migrations 100-104 preserved; MCP uses 105;
+shared Persona authentication and HTTP endpoint/SSE scope remain authoritative.
+**Tests**: Persona scope, migration upgrade, shared HTTP, Billing/BYOK, governor regressions.
+**Status**: Complete
+
+### Integration Stage 2: Review Feedback And Verification
+**Goal**: Validate posted findings and run fresh gates on the rebased artifact.
+**Success Criteria**: Confirmed findings fixed, unsupported suggestions explained;
+relevant runtime suites and static/security checks pass with skips documented.
+**Tests**: MCP core, relevant AuthNZ/SQLite/PostgreSQL, Billing/governance, shared HTTP,
+startup schema failure, task-format/ID guards, focused Ruff/Black, compile and Bandit.
+**Status**: In Progress
+
+### Integration Stage 3: Independent Code Review
+**Goal**: Review the immutable rebased range against the approved security/lifecycle contract.
+**Success Criteria**: Reviewer approval; all validated Critical/Important findings fixed and rechecked.
+**Tests**: Reviewer-directed reproductions and affected regression gates.
+**Status**: Not Started
+
+### Integration Stage 4: Publish And Arm Auto-Merge
+**Goal**: Publish with a lease and enable only the requested normal gated auto-merge.
+**Success Criteria**: Remote head matches reviewed source; current dev mergeable;
+normal CI/review requirements retained; auto-merge state read back from GitHub.
+**Tests**: GitHub PR head/base/readiness and auto-merge readback; no manually dispatched gates.
+**Status**: Not Started
+
+ADR assessment: retain proposed ADR-060/061/062; no new durable architecture rule
+is introduced by conflict resolution. Accepted upstream ADRs, especially the
+BYOK accounting and shared authentication/egress contracts, must remain intact.
+
 ## Acceptance-Criteria Traceability
 
 | Criterion | Primary implementation | Required evidence |

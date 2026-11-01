@@ -18,33 +18,11 @@ from uuid import RFC_4122, UUID
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import execute, fetch_all
+from tldw_Server_API.app.core.exception_types import ProviderUsageReservationError
 
 MAX_INT = 2**63 - 1
-_ERROR_CODES = frozenset(
-    {
-        "invalid_reservation",
-        "integer_overflow",
-        "duplicate_execution",
-        "quota_exceeded",
-        "snapshot_unavailable",
-        "reservation_not_found",
-        "invalid_transition",
-        "conflicting_replay",
-        "actuals_exceed_reservation",
-        "usage_write_failed",
-        "reservation_store_unavailable",
-    }
-)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
-
-
-class ProviderUsageReservationError(Exception):
-    """Stable, content-free error with no retained backend exception graph."""
-
-    def __init__(self, code: str) -> None:
-        self.code = code if code in _ERROR_CODES else "reservation_store_unavailable"
-        super().__init__(self.code)
 
 
 def _repository_errors(method: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:

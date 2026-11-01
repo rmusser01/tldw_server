@@ -231,14 +231,15 @@ class ModelCompletionAccounting:
     ) -> bool:
         released = False
         can_release_governor = True
+        operation_logger = logger.bind(operation="mcp_model_completion.pre_dispatch_cleanup")
         try:
             await self._reservations.release_before_dispatch(execution_id)
             released = True
         except ProviderUsageReservationError as exc:
             can_release_governor = exc.code != "invalid_transition"
-            logger.warning("MCP completion pre-dispatch accounting cleanup degraded")
+            operation_logger.warning("MCP completion pre-dispatch accounting cleanup degraded")
         except Exception:  # noqa: BLE001 - preserve conservative exposure when pre-dispatch cleanup fails
-            logger.warning("MCP completion pre-dispatch accounting cleanup degraded")
+            operation_logger.warning("MCP completion pre-dispatch accounting cleanup degraded")
         finally:
             # Storage failure does not retain a never-dispatched concurrency lease.
             # An explicit repository dispatch fence still forbids a refund.
@@ -247,7 +248,7 @@ class ModelCompletionAccounting:
                     await self._governor.release(governor_handle)
                 except Exception:  # noqa: BLE001 - cleanup remains conservative and content-free
                     released = False
-                    logger.warning("MCP completion pre-dispatch governor cleanup degraded")
+                    operation_logger.warning("MCP completion pre-dispatch governor cleanup degraded")
         return released
 
     async def mark_dispatched(self, handle: AccountingReservation) -> None:

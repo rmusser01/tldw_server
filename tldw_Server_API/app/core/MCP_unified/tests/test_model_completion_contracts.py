@@ -1,14 +1,20 @@
+"""Unit contracts for the host-neutral bounded completion port."""
+
 from __future__ import annotations
 
 import dataclasses
 import importlib
 import inspect
 import uuid
+from types import ModuleType
 
 import pytest
 
+pytestmark = pytest.mark.unit
 
-def _contracts():
+
+def _contracts() -> ModuleType:
+    """Import the standalone contracts without resolving a host adapter."""
     return importlib.import_module("mcp_unified.interfaces.model_completion")
 
 

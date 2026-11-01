@@ -16,6 +16,7 @@ from loguru import logger
 from .exception_types import (  # noqa: F401 - centralized compatibility exports.
     PersonaArtworkValidationError,
     PromptCatalogError,
+    ProviderUsageReservationError,
 )
 
 if TYPE_CHECKING:
