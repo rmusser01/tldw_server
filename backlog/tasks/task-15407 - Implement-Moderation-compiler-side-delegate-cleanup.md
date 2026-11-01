@@ -1,7 +1,7 @@
 ---
 id: TASK-15407
 title: Implement Moderation compiler-side delegate cleanup
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-11-01 17:13
 updated_date: 2026-11-01 17:33
@@ -53,12 +53,13 @@ PR preparation: renumbered this branch-owned implementation task because TASK-15
 ADR check: ADR required: no. Removing unused private forwarding methods is local implementation cleanup; compiler/service ownership, public APIs, persistence and security semantics remain unchanged. Backlog editing follows governing ADR-059. Checked Docs/ADR/README.md and module design. Current origin/dev is 54b321dcec; branch contains it. MERGE_QUEUE is unset, so no armed queue entry may be mutated.
 Publication preflight resolved two task-id collisions: design now TASK-15406, implementation TASK-15407. Fully paginated file inventories for all 12 open PRs reaching the 100-file listing cap confirm highest existing id 15405 and no collisions with allocated ids. Both task files pass canonical normalization check and whole-tree duplicate-id check. No application code changed in PR preparation.
 The HEAD-based task-format ratchet initially saw the retired pre-renumber paths and failed while the renames were uncommitted; direct backlog-py canonical checks on both replacement files and the full duplicate-id script passed. Commit the canonical renames, then immediately rerun the unmodified HEAD-based ratchet against origin/dev. This is metadata-only preparation, not a suppressed code/test failure.
+Published PR https://github.com/rmusser01/tldw_server/pull/3396 against dev. git rebase origin/dev reported branch already up to date at 54b321dcec. Fresh requested code review approved 54b321dcec..850a4a6359 with no findings. Publication validation: 409 combined moderation/downstream/task-format tests and 12 Workflow cases passed (421 total); compile, Ruff, scoped Black, zero-finding Bandit and duplicate-id checks passed. User explicitly waived the human-written Change summary gate on 2026-11-01 by replying waived; PR records the exception without falsely attributing AI text to the human. Auto-merge is authorized and will be requested after this last tracking push and review/comment check; required remote CI must still pass. No manual gate dispatch or merge-policy bypass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Removed exactly five repository-unused private ModerationService compiler delegates while preserving PolicyCompiler owners, active helpers, public APIs, import identity, logging, dispatch, persistence and policy semantics. Migrated compiler/report and service warning privacy tests; added five marked structural regression cases with genuine RED/GREEN. All 417 scoped regression cases and quality/security gates passed. Independent per-task, whole-branch, and final docstring-fix reviews are clean. Local branch codex/moderation-compiler-delegate-cleanup is ready for a separate integration decision; publication/merge and a new human-authored PR Change summary remain future gates.
+Completed behavior-preserving five-delegate cleanup and published PR #3396 against current dev. Repaired colliding task IDs (current design TASK-15406, implementation TASK-15407) and canonicalized records via backlog-py. Fresh independent review found no issues; 421 local tests and scoped quality/security checks passed. Requester explicitly waived this PR human-summary gate; exception recorded. Automatic merge authorization is pending the final remote request and required GitHub checks, not a claim of completed merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
