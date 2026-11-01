@@ -1096,6 +1096,7 @@ class UnifiedAuditService:
         # Event buffer
         self.event_buffer: list[AuditEvent] = []
         self.buffer_lock = asyncio.Lock()
+        self._flush_lock = asyncio.Lock()
 
         # Hash chain state for tamper-proofing
         self._last_chain_hash: str = ""
@@ -2494,7 +2495,22 @@ class UnifiedAuditService:
             prev = h
         return prev
 
+    async def flush_event(self, event_id: str) -> None:
+        """Require this event in committed storage, including after bounded recovery."""
+        if not isinstance(event_id, str) or not event_id:
+            raise MandatoryAuditWriteError("Audit event identity missing")
+        await self.flush(raise_on_failure=True)
+        async with self._read_db() as db:
+            existing = await self._fetch_existing_event_ids(db, [event_id])
+        if event_id not in existing:
+            raise MandatoryAuditWriteError("Audit event was not committed")
+
     async def flush(self, *, raise_on_failure: bool = False) -> bool:
+        """Retain flush ownership until commit or complete failure recovery."""
+        async with self._flush_lock:
+            return await self._flush_buffer(raise_on_failure=raise_on_failure)
+
+    async def _flush_buffer(self, *, raise_on_failure: bool = False) -> bool:
         """Flush buffered events to database.
 
         Returns True when flush succeeds (or no events). When raise_on_failure is
