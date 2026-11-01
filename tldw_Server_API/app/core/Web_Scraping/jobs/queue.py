@@ -8,6 +8,7 @@ cancelled to cancel one job, and retries never enqueue a second admission.
 from __future__ import annotations
 
 import asyncio
+import builtins
 import contextvars
 import heapq
 from collections.abc import Callable
@@ -21,7 +22,7 @@ from typing import Any
 from loguru import logger
 
 from ..contracts.execution import PageData
-from ..runtime.controls import ParentControls, Reservation, WorkHandle, positive_integer
+from ..runtime.controls import ParentControls, ParentStop, WorkHandle, positive_integer
 from .admission import Admission, AdmissionLease, JobPayload, QueueRejected, SnapshotTooLarge
 from .models import JobPriority, JobStatus, QueueLimits, QueueStopReport, ScrapingJob
 from .projections import History
@@ -33,6 +34,24 @@ def _observe(future: asyncio.Future) -> None:
     """Detached subscribers must not create unobserved-exception diagnostics."""
     if not future.cancelled():
         future.exception()
+
+
+def _clear_exception_frames(error: BaseException) -> None:
+    """Release execution frames without changing exception identities or links."""
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        current.__traceback__ = None
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+        if isinstance(current, builtins.BaseExceptionGroup):
+            pending.extend(current.exceptions)
 
 
 @dataclass(repr=False)
@@ -179,13 +198,11 @@ class ProcessLocalJobQueue:
 
     async def _run(self, entry: _Entry) -> None:
         retry = False
-        reservation: Reservation | None = None
         try:
             if entry.job.status in TERMINAL:
                 return
             if entry.controls is not None:
-                reservation = entry.controls.reserve("page_attempts")
-                reservation.commit()
+                entry.controls.check()
             if entry.payload is None:
                 raise RuntimeError("execution payload already released")
             entry.handle = self._execute(entry.payload, entry.controls)
@@ -199,10 +216,12 @@ class ProcessLocalJobQueue:
                 raise ValueError("executor did not return PageData")
             article = value.article
             if article.get("error") or article.get("extraction_successful") is False:
-                entry.job.error = article.get("error") or "Source extraction failed"
+                entry.job.error = "source_extraction_failed"
                 retry = entry.job.retries < entry.job.max_retries and self._state == "running"
                 if not retry:
-                    self._terminal(entry, JobStatus.FAILED, value, Exception(entry.job.error))
+                    self._terminal(
+                        entry, JobStatus.FAILED, value, Exception(article.get("error") or "Source extraction failed")
+                    )
             else:
                 self._terminal(entry, JobStatus.COMPLETED, value)
         except asyncio.CancelledError:
@@ -210,8 +229,6 @@ class ProcessLocalJobQueue:
         except Exception as error:  # noqa: BLE001 - injected execution boundary; settle every accepted subscription
             self._terminal(entry, JobStatus.FAILED, error=error)
         finally:
-            if reservation is not None:
-                reservation.close()
             if entry.handle is not None:
                 # Cancellation and logical timeout must not cancel this physical future.
                 await asyncio.shield(entry.handle.drained)
@@ -246,10 +263,13 @@ class ProcessLocalJobQueue:
             entry.job.error = "Job cancelled due to shutdown" if shutdown else "Job cancelled"
             error = Exception(entry.job.error)
         elif error is not None:
-            entry.job.error = str(error)
-            # Preserve exception identity/type, but not execution frames containing
-            # private controls/reservation callbacks after physical drain.
-            error = error.with_traceback(None)
+            entry.job.error = (
+                "source_extraction_failed"
+                if value is not None
+                else (error.reason if isinstance(error, ParentStop) else "execution_failed")
+            )
+            # Causes, contexts and group members can hold the same private frames.
+            _clear_exception_frames(error)
         else:
             entry.job.error = None
         self._history.record(entry.job, value.article if value else None)

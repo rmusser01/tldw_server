@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
-from .admission import bounded_snapshot
+from .admission import bounded_snapshot, public_diagnostic
 from .models import ScrapingJob
 
 ARTICLE_FIELDS = frozenset(
@@ -43,9 +43,11 @@ class History:
 
     def project(self, job: ScrapingJob, article: dict[str, Any] | None) -> tuple[ScrapingJob, int] | None:
         """Size as we copy, stopping before building an oversized result clone."""
-        candidate = replace(job, metadata={}, context=None, result=None)
+        candidate = replace(job, metadata={}, context=None, result=None, error=public_diagnostic(job.error))
         if article is not None:
             candidate.result = {key: value for key, value in article.items() if key in ARTICLE_FIELDS}
+            if article.get("error"):
+                candidate.result["error"] = "source_extraction_failed"
         try:
             snapshot, size = bounded_snapshot(candidate.to_dict(), self.max_bytes, redact=True)
         except ValueError:
