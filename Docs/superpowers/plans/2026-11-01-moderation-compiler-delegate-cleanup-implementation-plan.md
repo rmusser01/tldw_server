@@ -30,7 +30,7 @@
 - Compiler rejection must retain sanitized issue source, reason, and supplied index (Stage 1).
 - Active parser/validator dispatch and public evaluation/redaction overrides must remain intact (Stages 2 and 3).
 
-## Stage 1: Preserve Coverage Through Its Owners
+## Task 1: Preserve Coverage Through Its Owners (Stage 1)
 
 **Goal:** Eliminate test-only dependencies on the removed delegates before deletion.
 **Success Criteria:** The replacement tests pass against unchanged production code and retain every old assertion.
@@ -42,14 +42,14 @@
 
 - [ ] Create a linked implementation Backlog task, read the approved spec, and repeat repository-wide literal-name and quoted-name searches. Stop for new production callers rather than widening scope.
 - [ ] Compile the service/compiler and run the complete Stage 3 regression matrix before editing. Record counts; investigate failures before attributing them to this cleanup. Capture scoped Bandit baseline findings.
-- [ ] Add `test_compile_user_rule_rejects_dangerous_regex_with_sanitized_issue() -> None` to the compiler suite. Use `{id: "danger", pattern: "(a+)+$", is_regex: True, action: "block", phase: "both"}`, a fresh report, and index `7`. Assert result is `None`, issues equal `[PolicyCompilationIssue(source="user_rule", reason="dangerous_regex", index=7)]`, and report repr excludes the regex and rule ID.
+- [ ] Add `test_compile_user_rule_rejects_dangerous_regex_with_sanitized_issue() -> None` to the compiler suite. Use `{id: "private-rule-id-92741", pattern: "(a+)+$", is_regex: True, action: "block", phase: "both"}`, a fresh report, and index `7`. Assert result is `None`, issues equal `[PolicyCompilationIssue(source="user_rule", reason="dangerous_regex", index=7)]`, and report repr excludes the regex and rule ID.
 - [ ] Add `test_compile_user_rule_preserves_phase_action_and_literal_matching() -> None`. Compile `{id: "warn-1", pattern: "heads up", is_regex: False, action: "warn", phase: "input"}`. Assert canonical PatternRule, `action == "warn"`, `phase == "input"`, `categories == {"*"}`, `replacement is None`, an empty report, and matching `"please HEADS UP now"`.
 - [ ] Replace `test_compile_user_rule_sanitizes_rule_id_warning_logs` with `test_effective_policy_compilation_sanitizes_rule_warning_logs() -> None`. Keep the existing three invalid rule dictionaries and all warning/non-disclosure assertions. Create a normal service before adding the warning sink; set a controlled `ModerationPolicy(enabled=True, per_user_overrides=True, block_patterns=[])` and raw `_user_overrides = {"test-user": {"rules": rules}}`; call public `get_effective_policy("test-user")` under the sink and assert the effective policy has no rules. Restore the sink in `finally`. Do not call a setter or sanitizer that removes the invalid rules before compilation.
 - [ ] Run the two new compiler tests and the replacement service-log test against unchanged production code; expect PASS. This is coverage migration, not a behavioral red/green change.
 - [ ] Remove only the two superseded tests from `test_moderation_blocklist_parse.py`; retain the active parser delegation tests. Add concise docstrings and annotations to new/modified tests.
 - [ ] Compile touched test files, run the three complete focused suites, run scoped lint/security checks, and commit the green coverage migration with its Backlog update.
 
-## Stage 2: Remove Exactly Five Unused Delegates
+## Task 2: Remove Exactly Five Unused Delegates (Stage 2)
 
 **Goal:** Retire the redundant service surface with a demonstrated structural red/green cycle.
 **Success Criteria:** Five removal cases pass; compiler and service behavior tests stay green; no other production edits.
@@ -59,7 +59,7 @@
 **Files:** Create `tldw_Server_API/tests/unit/test_moderation_compiler_compatibility_surface.py`; modify `tldw_Server_API/app/core/Moderation/moderation_service.py`.
 **Interfaces:** No new supported interface; the five private methods cease to exist in the service class only.
 
-- [ ] Add this parameterized unit test, with a docstring:
+- [ ] Add module imports for pytest and ModerationService, `pytestmark = pytest.mark.unit`, and this parameterized unit test with a docstring:
 
 ```python
 @pytest.mark.parametrize("name", [
@@ -73,10 +73,10 @@ def test_service_omits_unused_compiler_delegate(name: str) -> None:
 
 - [ ] Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_compiler_compatibility_surface.py -q`; expect exactly five assertion failures because the delegates still exist.
 - [ ] Delete only the five method definitions and their decorators/docstrings from the service. Do not change imports, constants, adjacent bodies, PolicyCompiler, or active delegates.
-- [ ] Compile the service and new test first. Run the surface test plus all three focused suites; expect PASS. Re-run the existing `test_service_parser_wrappers_delegate_to_policy_compiler` case explicitly.
+- [ ] Compile the service and new test first. Run the surface test plus all three focused suites; expect PASS. Run the new module with `-m unit` to prove all five cases are selected. Re-run the existing `test_service_parser_wrappers_delegate_to_policy_compiler` case explicitly.
 - [ ] Confirm remaining references to removed names outside historical docs/tracking are only the new surface test; compiler method names without the private service prefix remain supported. Run lint, formatting of the new file, scoped security checks, and diff checks, then commit the green removal.
 
-## Stage 3: Verify And Review The Complete Change
+## Task 3: Verify And Review The Complete Change (Stage 3)
 
 **Goal:** Demonstrate unchanged supported behavior and obtain independent review.
 **Success Criteria:** The regression matrix and quality gates pass with no new findings; review issues are resolved.

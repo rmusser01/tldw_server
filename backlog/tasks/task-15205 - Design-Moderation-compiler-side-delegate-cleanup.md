@@ -1,10 +1,10 @@
 ---
 id: TASK-15205
 title: Design Moderation compiler-side delegate cleanup
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-01 16:46'
-updated_date: '2026-11-01 16:56'
+updated_date: '2026-11-01 17:12'
 labels:
   - moderation
   - refactor
@@ -40,12 +40,14 @@ Read-only audit against origin/dev 54b321dcec8cdbb6358581f42c1548696260570b. No 
 Human approved the exact five-method design on 2026-11-01. Compilation and 67 focused tests passed before implementation (146 existing warnings on Python 3.14.3). Implementation planning now underway; preserving the earlier subagent-driven execution choice. Current changes are documentation only, so Bandit is not applicable at this checkpoint. MCP task_edit could not find the newly created task; official CLI fallback successfully resolves it.
 
 Implementation plan written and self-reviewed at Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md. Three stages: migrate test coverage against unchanged production, remove the exact five delegates with a five-case red/green structural test, then run the full downstream matrix and independent review. No production or test code changed. Design approved; awaiting implementation-plan review before starting the preserved subagent-driven workflow. git diff --check passed; Bandit is not applicable to this documentation-only change.
+
+User authorized correcting both review findings and continuing implementation. Plan corrected to use private-rule-id-92741 instead of a sentinel contained in dangerous_regex, explicitly mark the new module unit, and select its five cases with -m unit. Task headings aligned to SDD brief extraction; no scope change. Documentation-only checks: git diff --check; source/test files unchanged at this checkpoint, so Bandit not applicable.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Approved exact five-method cleanup design and implementation plan completed; both pre-implementation review findings corrected. Execution handed to a linked implementation task with subagent-driven per-task review and final whole-branch review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -54,10 +56,10 @@ Implementation plan written and self-reviewed at Docs/superpowers/plans/2026-11-
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
