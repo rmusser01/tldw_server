@@ -11,14 +11,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils";
 import { ModelPlaygroundChat } from "../ModelPlaygroundChat";
 
-const turn = vi.hoisted(() => ({ submit: vi.fn() }));
+const turn = vi.hoisted(() => ({
+  submit: vi.fn(),
+  streaming: false,
+  compare: false,
+}));
 
 // The tested owner is ModelPlaygroundChat's own textarea state. Its chat
 // provider is held at the callback boundary while the component stays real.
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => ({
     messages: [],
-    streaming: false,
+    streaming: turn.streaming,
     isProcessing: false,
     regenerateLastMessage: vi.fn(),
     editMessage: vi.fn(),
@@ -27,9 +31,9 @@ vi.mock("@/hooks/useMessageOption", () => ({
     stopStreamingRequest: vi.fn(),
     selectedModel: "ready-model",
     setSelectedModel: vi.fn(),
-    compareMode: false,
+    compareMode: turn.compare,
     setCompareMode: vi.fn(),
-    compareSelectedModels: [],
+    compareSelectedModels: turn.compare ? ["ready-model"] : [],
     setCompareSelectedModels: vi.fn(),
     compareMaxModels: 3,
     clearChat: vi.fn(),
@@ -62,7 +66,33 @@ const deferred = <T,>() => {
 };
 
 describe("Model Playground local draft ownership", () => {
-  beforeEach(() => turn.submit.mockReset());
+  beforeEach(() => {
+    turn.submit.mockReset();
+    turn.streaming = false;
+    turn.compare = false;
+  });
+
+  it("names the primary model and conversation controls", () => {
+    render(<ModelPlaygroundChat />);
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear chat" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Compare Mode" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Select model" })).toBeInTheDocument();
+  });
+
+  it("names Stop while a reply is streaming", () => {
+    turn.streaming = true;
+    render(<ModelPlaygroundChat />);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+  });
+
+  it("names Compare model addition and removal", () => {
+    turn.compare = true;
+    render(<ModelPlaygroundChat />);
+    expect(screen.getByRole("button", { name: "Remove ready-model" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "Add model" })).toBeInTheDocument();
+  });
 
   it.each([
     { label: "submitted", result: { status: "submitted" } as ChatSubmitResult },
