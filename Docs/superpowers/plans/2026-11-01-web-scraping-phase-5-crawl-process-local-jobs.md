@@ -77,6 +77,8 @@ one-over rejection. Existing per-page limits are unchanged.
 | Crawl `active_probes` | 2,000 | Each active probe operation, including an external-tool invocation |
 | Crawl `transfer_bytes` | 1,073,741,824 (1 GiB) | Aggregate observed acquisition bytes; raw HTTP chunks, CDP transfer/frame bytes, bounded tool output |
 | Crawl `discovered_candidates` | 50,000 | Candidates inspected, including duplicate/rejected discoveries; not only accepted links |
+| Crawl `max_url_bytes` | 65,536 (64 KiB) | UTF-8 ceiling per raw/normalized target, resolution base, request/final location or retained URL identity; execution ruling during Task 6 |
+| Crawl `discovered_url_bytes` | 67,108,864 (64 MiB) | Cumulative UTF-8 discovery locations and normalized candidate/parent pairs, separate from transfer bytes; execution ruling during Task 6 |
 | Crawl `frontier_entries` | 10,000 | Current queued plus in-flight entries; released on committed disposition |
 | Crawl `execution_seconds` | 1,800 | Active execution including admission/rate/retry waits, not paused checkpoint time |
 | Queue `max_pending` | 128 | Pending slots plus reserved return-to-queue slots of active retryable jobs |
@@ -514,6 +516,62 @@ admission, attaches ownership, then awaits the result. Candidate accounting belo
 to discovery (seed admission is charged once by the engine); frontier only owns
 occupancy, not a second candidate charge. Robots/sitemap acquisition uses governed
 runtime controls without pretending those transport calls are extracted pages.
+
+**Task 6 Execution Rulings (Controller Decisions, 2026-11-01):** The approved
+bounded-discovery/no-functionality-loss requirements expose three missing private
+contracts. These are builder safety/composition decisions, not new public settings
+or an assertion that the human selected these additional numbers.
+
+1. Add trusted validated `CrawlLimits.max_url_bytes=65_536` and
+   `discovered_url_bytes=67_108_864`. The former applies to raw references and
+   bases before resolution, then normalized targets, retained parents and
+   request/final locations. Check length before encoding/resolving to avoid an
+   oversized derived temporary; UTF-8 is the exact final byte metric, not RSS.
+   Add a separate cumulative `discovered_url_bytes` counter to parent controls and
+   `BudgetSnapshot` (default zero for internal constructor compatibility). Charge
+   request and final sidecar locations once per discovery call and each normalized
+   candidate plus its resolution parent before filtering/deduplication/collection
+   growth; duplicates remain charged. The seed is charged once by the engine with
+   its existing candidate charge. Do not charge a frontier reference again or
+   refund cumulative work when entries leave; all URL bookkeeping must reuse this
+   admitted bounded domain. Invalid references count as encounters but are not
+   retained. An invalid/oversized URL or collective overflow produces explicit
+   `budget_exhausted`, never silent truncation or invented transfer usage. Validate
+   checkpoint file capacity against these injected byte ceilings too; restore
+   known cumulative accounting, explicitly mark legacy unknown history. Chosen
+   local safety defaults are generous per-URL and cap amplification independently
+   of wire bytes; they are not HTTP standards. Exact/one-over and many-relative-
+   links/long-base tests use small trusted limits, no large allocation.
+2. Add private frozen `CrawlHooks` in `crawl/models.py`: optional synchronous
+   `url_filter: Callable[[str], bool]`,
+   `progress_callback: Callable[[str], None]` (legacy messages), and
+   `on_progress: Callable[[Mapping[str, Any]], None]` (owned snapshot updates).
+   Default all to None, hide callable reprs, and pass an optional `hooks` keyword
+   through internal orchestration/engine/discovery only where needed. It is live
+   execution state, never plan options, credentials, checkpoints, metadata or public
+   payload. Preserve profile-specific invocation order: stripped sitemap loc filter
+   before collection/truthy max_urls; recursive filter after established built-in
+   filtering/scoring and before candidate admission, not on the seed. Preserve
+   legacy progress messages but emit no completed notification on interruption.
+   Release hooks with actual owned drain; do not add a new callback framework.
+3. Add private `start_page(..., discovery_on_success: bool = False)` and the narrow
+   dependency flag needed to select callback timing in the existing `_extract`.
+   Default remains the existing pre-extraction callback for standalone/legacy
+   compatibility. Enhanced recursive/url-level composition selects True: invoke
+   discovery only after extraction returns the same truthy `extraction_successful`
+   predicate used by the existing traversal, using the still-bounded same document
+   and effective location, then discard HTML. No filter/candidate debit for a failed
+   enhanced extraction. Do not substitute the stricter retained-data predicate for
+   profile success counting; `note_successful_result` still marks actual retained
+   successful article data. If discovery interrupts this acquisition before
+   PageData reaches the engine, its frontier entry remains unfinished for checkpoint
+   restoration; only previously logically committed articles count as retained
+   partials. Never mark the current unfinished page completed or emit a completion
+   callback. Add a failed-extraction/linked-page budget regression and a successful
+   discovery-interruption/unfinished-frontier regression. No second page fetch.
+
+The cost of a wrong ruling is private interface/limit rework before adapter cutover;
+none authorizes a public signature change, new client knob or silent loss of hooks.
 
 - [ ] **Step 1: Write profile strategy and atomic frontier tests.**
 
