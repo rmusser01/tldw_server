@@ -207,25 +207,31 @@ class PageControls:
         self._lock = Lock()
 
     def cancel(self) -> None:
-        self._cancelled.set()
+        with self._lock:
+            self._cancelled.set()
 
     def _call(self, func: Callable[..., T], *args: object) -> T:
         with self._lock:
-            if self._stop is not None:
-                raise self._stop
-            if self._cancelled.is_set():
-                raise asyncio.CancelledError
-            try:
-                return func(*args)
-            except (ParentStop, asyncio.CancelledError) as exc:
-                self._stop = exc
-                raise
+            return self._call_locked(func, *args)
+
+    def _call_locked(self, func: Callable[..., T], *args: object) -> T:
+        if self._stop is not None:
+            raise self._stop
+        if self._cancelled.is_set():
+            raise asyncio.CancelledError
+        try:
+            return func(*args)
+        except (ParentStop, asyncio.CancelledError) as exc:
+            self._stop = exc
+            raise
 
     def check(self) -> None:
         self._call(self.parent.check)
 
     def reserve(self, counter: Counter, amount: int = 1) -> Reservation:
-        return self._call(self.parent.reserve, counter, amount)
+        reservation = self._call(self.parent.reserve, counter, amount)
+        # Page cancellation and parent commit share the page admission lock.
+        return Reservation(self._lock, lambda: self._call_locked(reservation.commit), reservation.close)
 
     def charge_bytes(self, amount: int) -> None:
         if amount:

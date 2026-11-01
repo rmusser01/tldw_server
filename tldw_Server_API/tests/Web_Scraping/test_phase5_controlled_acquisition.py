@@ -342,3 +342,131 @@ async def test_internal_http_awaiter_cancellation_does_not_claim_thread_exit(mon
         release.set()
         await asyncio.wait_for(asyncio.shield(owner.drained), 3)
         physical_work.reset(token)
+
+
+async def test_page_cancel_between_http_timeout_and_commit_rolls_back_request(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest
+    from tldw_Server_API.app.core.Web_Scraping.runtime import fetch as fetch_module
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PageControls
+
+    parent = CrawlContext(CrawlLimits(), clock=lambda: 0)
+    page = PageControls(parent)
+    cap_timeout = page.cap_timeout
+    dispatched = []
+
+    def cancel_after_timeout(requested):
+        timeout = cap_timeout(requested)
+        page.cancel()
+        return timeout
+
+    def fetch(*args, **_kwargs):
+        dispatched.append(args)
+        return {"url": URL, "status": 200, "text": "late", "headers": {}, "backend": "httpx"}
+
+    monkeypatch.setattr(page, "cap_timeout", cancel_after_timeout)
+    monkeypatch.setattr(fetch_module, "http_fetch", fetch)
+    with pytest.raises(asyncio.CancelledError):
+        fetch_module.DefaultFetchClient(page).fetch(FetchRequest(url=URL, max_response_bytes=100))
+    assert dispatched == []
+    assert parent.snapshot().network_requests == 0
+    sibling = PageControls(parent).reserve("network_requests")
+    sibling.commit()
+    sibling.close()
+    assert parent.snapshot().network_requests == 1
+
+
+async def test_websocket_stop_closes_admission_while_navigation_is_held(monkeypatch):
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import (
+        _adapter,
+        _FakeBrowserRuntime,
+        _FakeGuard,
+        _FakeHttpRoute,
+        _FakePage,
+        _FakeWebSocketRoute,
+        _profile,
+    )
+
+    navigating, release = asyncio.Event(), asyncio.Event()
+
+    async def held_navigation(_page, *_args, **_kwargs):
+        navigating.set()
+        await release.wait()
+
+    monkeypatch.setattr(_FakePage, "goto", held_navigation)
+    runtime = _FakeBrowserRuntime()
+    guard = _FakeGuard([True, True])
+    parent = CrawlContext(CrawlLimits(network_requests=1), clock=lambda: 0)
+    parent.reserve("network_requests").commit()
+    browser = _adapter(runtime, guard)
+    browser.bind_parent(parent, RuntimeRequestContext())
+    acquisition = asyncio.create_task(browser.acquire(URL, _profile()))
+    try:
+        await asyncio.wait_for(navigating.wait(), 1)
+        socket = _FakeWebSocketRoute("wss://example.com/socket")
+        await asyncio.wait_for(runtime.context.dispatch_websocket(socket), 1)
+        await asyncio.wait_for(runtime.context_closed.wait(), 1)
+        assert not release.is_set() and not acquisition.done()
+        assert runtime.context_close_task_names == ["article-browser-emergency-context-shutdown"]
+        assert socket.connect_calls == 0
+        assert (1011, "Connection failed") not in socket.close_calls
+
+        late = _FakeHttpRoute(URL)
+        await asyncio.wait_for(runtime.context.dispatch_http(late), 1)
+        assert late.abort_calls == 1 and late.continue_calls == []
+        assert len(guard.calls) == 1
+    finally:
+        release.set()
+        result = await asyncio.wait_for(asyncio.gather(acquisition, return_exceptions=True), 2)
+    assert isinstance(result[0], ParentStop) and result[0].reason == "budget_exhausted"
+
+
+@pytest.mark.parametrize("cancel_at", ["navigation", "cleanup"])
+async def test_direct_caller_cancel_survives_parent_deadline_during_browser_cleanup(monkeypatch, cancel_at):
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import (
+        _adapter,
+        _FakeBrowserRuntime,
+        _FakeGuard,
+        _FakePage,
+    )
+
+    now = [0.0]
+    navigating, cleanup_started, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_close = _FakePage.close
+
+    async def navigation(_page, *_args, **_kwargs):
+        navigating.set()
+        if cancel_at == "navigation":
+            await asyncio.Event().wait()
+
+    async def held_close(page):
+        cleanup_started.set()
+        await release.wait()
+        await original_close(page)
+
+    monkeypatch.setattr(_FakePage, "goto", navigation)
+    monkeypatch.setattr(_FakePage, "close", held_close)
+    runtime = _FakeBrowserRuntime()
+    harness = _harness(backend="playwright")
+    harness.dependencies = replace(harness.dependencies, browser=_adapter(runtime, _FakeGuard([])))
+    parent = CrawlContext(CrawlLimits(execution_seconds=10), clock=lambda: now[0])
+    handle = _start(monkeypatch, harness, parent)
+    try:
+        await asyncio.wait_for(navigating.wait(), 1)
+        if cancel_at == "navigation":
+            handle.result.cancel("direct-caller-cancel")
+        await asyncio.wait_for(cleanup_started.wait(), 1)
+        if cancel_at == "cleanup":
+            handle.result.cancel("direct-caller-cancel")
+        now[0] = 11.0
+        release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(handle.result, 2)
+        if cancel_at == "navigation":
+            assert caught.value.args == ("direct-caller-cancel",)
+        assert harness.extract.call_count == 0
+        with pytest.raises(ParentStop, match="deadline_exhausted"):
+            parent.check()
+    finally:
+        release.set()
+        await asyncio.gather(handle.result, return_exceptions=True)
+        await asyncio.wait_for(asyncio.shield(handle.drained), 2)
