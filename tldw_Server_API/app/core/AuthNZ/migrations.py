@@ -6756,6 +6756,7 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
             reserved_input_tokens INTEGER NOT NULL CHECK (typeof(reserved_input_tokens) = 'integer' AND reserved_input_tokens >= 0),
             reserved_output_tokens INTEGER NOT NULL CHECK (typeof(reserved_output_tokens) = 'integer' AND reserved_output_tokens >= 0),
             reserved_cost_units INTEGER NOT NULL CHECK (typeof(reserved_cost_units) = 'integer' AND reserved_cost_units >= 0),
+            credential_source TEXT CHECK (credential_source IS NULL OR credential_source IN ('user', 'team', 'org', 'server_default', 'user_unmetered')),
             actual_input_tokens INTEGER CHECK (actual_input_tokens IS NULL OR (typeof(actual_input_tokens) = 'integer' AND actual_input_tokens BETWEEN 0 AND reserved_input_tokens)),
             actual_output_tokens INTEGER CHECK (actual_output_tokens IS NULL OR (typeof(actual_output_tokens) = 'integer' AND actual_output_tokens BETWEEN 0 AND reserved_output_tokens)),
             actual_cost_units INTEGER CHECK (actual_cost_units IS NULL OR (typeof(actual_cost_units) = 'integer' AND actual_cost_units BETWEEN 0 AND reserved_cost_units)),
@@ -6784,6 +6785,13 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
         "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)"
     )
     columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
+    reservation_columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
+    if "credential_source" not in reservation_columns:
+        conn.execute(
+            "ALTER TABLE provider_usage_reservations ADD COLUMN credential_source TEXT "
+            "CHECK (credential_source IS NULL OR credential_source IN "
+            "('user', 'team', 'org', 'server_default', 'user_unmetered'))"
+        )
     if "billing_org_id" not in columns:
         conn.execute("ALTER TABLE llm_usage_log ADD COLUMN billing_org_id INTEGER")
     conn.execute(

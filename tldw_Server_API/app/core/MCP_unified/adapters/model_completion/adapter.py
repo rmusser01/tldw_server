@@ -385,7 +385,9 @@ class ModelCompletionAdapter:
             if failure is not None:
                 raise_detached_error(failure)
             self._guard(invocation)
-            invocation.reservation = await self._accounting.reserve(request, identity)
+            invocation.reservation = await self._accounting.reserve(
+                request, identity, credential_source=getattr(credentials, "credential_source", None)
+            )
             self._guard(invocation)
             invocation.child = self._operation(
                 self._provider(invocation, request, runtime, credentials),

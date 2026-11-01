@@ -21,6 +21,11 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
     apply_postgres_sharing_schema,
     postgres_sharing_schema_issues,
 )
+from tldw_Server_API.app.core.exceptions import (
+    PGUsageSchemaError,
+    SchemaReadinessError,
+    raise_detached_error,
+)
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
@@ -46,6 +51,7 @@ _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     json.JSONDecodeError,
 )
+
 
 _BUDGET_FIELD_KEYS = {
     "budget_day_usd",
@@ -2008,6 +2014,10 @@ _CREATE_USAGE_TABLES = [
             billing_scope_id BIGINT NOT NULL CHECK (billing_scope_id > 0),
             provider TEXT NOT NULL CHECK (length(trim(provider)) > 0),
             model TEXT NOT NULL CHECK (length(trim(model)) > 0),
+            credential_source TEXT CHECK (
+                credential_source IS NULL
+                OR credential_source IN ('user', 'team', 'org', 'server_default', 'user_unmetered')
+            ),
             reserved_input_tokens BIGINT NOT NULL CHECK (reserved_input_tokens >= 0),
             reserved_output_tokens BIGINT NOT NULL CHECK (reserved_output_tokens >= 0),
             reserved_cost_units BIGINT NOT NULL CHECK (reserved_cost_units >= 0),
@@ -2033,6 +2043,12 @@ _CREATE_USAGE_TABLES = [
             CHECK ((state IN ('reserved', 'released') AND dispatched_at IS NULL) OR (state NOT IN ('reserved', 'released') AND dispatched_at IS NOT NULL))
         )
         """,
+        (),
+    ),
+    (
+        "ALTER TABLE provider_usage_reservations ADD COLUMN IF NOT EXISTS credential_source TEXT "
+        "CHECK (credential_source IS NULL "
+        "OR credential_source IN ('user', 'team', 'org', 'server_default', 'user_unmetered'))",
         (),
     ),
     (
@@ -4251,8 +4267,19 @@ async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     # Readiness is atomic: never swallow a failed accounting DDL statement.
     try:
         async with db_pool.transaction() as conn:
-            for sql, params in _CREATE_USAGE_TABLES:
-                await conn.execute(sql, *params)
+            try:
+                for sql, params in _CREATE_USAGE_TABLES:
+                    await conn.execute(sql, *params)
+            except (
+                asyncpg.PostgresError,
+                asyncpg.InterfaceError,
+                asyncpg.InternalClientError,
+                SchemaReadinessError,
+            ):
+                # Classify before the pool discards the native error; retain no private graph.
+                raise_detached_error(PGUsageSchemaError())
+            except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
+                raise_detached_error(TransactionError("PostgreSQL usage schema"))
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.bind(exception_type=type(exc).__name__).warning(
             "PG ensure usage tables DDL failed; usage schema is unavailable"

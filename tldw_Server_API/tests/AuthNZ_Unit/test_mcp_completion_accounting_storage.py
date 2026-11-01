@@ -106,6 +106,52 @@ class AccountingStorageContract:
     """Run the identical composed lifecycle against SQLite and PostgreSQL."""
 
     @pytest.mark.asyncio
+    async def test_hosted_limit_excludes_own_key_pending_and_settled_usage(self, reservation_pool, monkeypatch):
+        service = make_service(reservation_pool, token_limit=2000)
+        async with reservation_pool.acquire() as conn:
+            await execute(
+                conn,
+                reservation_pool.pool is not None,
+                "INSERT INTO llm_usage_log (user_id, billing_org_id, operation, total_tokens, total_cost_usd, credential_source) "
+                "VALUES (1, 12, 'chat', 1000, 0, 'user')",
+                (),
+            )
+
+        async def hosted_limit(self, scope, *, operator_limit, conn):
+            assert operator_limit is None
+            return 47
+
+        monkeypatch.setattr(BillingEnforcer, "get_mcp_token_limit", hosted_limit)
+        own = await service.reserve(
+            request(), ModelInvocationIdentity(1, None, 12, str(uuid4())), credential_source="user"
+        )
+        paid = await service.reserve(
+            request(), ModelInvocationIdentity(1, None, 12, str(uuid4())), credential_source="server_default"
+        )
+        usage = AuthnzUsageRepo(reservation_pool)
+        since = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        async with reservation_pool.acquire() as conn:
+            assert await usage.read_org_token_exposure(conn, 12, since) == 47
+        for handle in (own, paid):
+            await service.mark_dispatched(handle)
+            assert await service.reconcile(handle, input_tokens=6, output_tokens=4)
+        async with reservation_pool.acquire() as conn:
+            assert await usage.read_org_token_exposure(conn, 12, since) == 10
+        with pytest.raises(ModelCompletionFailure) as error:
+            await service.reserve(
+                request(), ModelInvocationIdentity(1, None, 12, str(uuid4())), credential_source="server_default"
+            )
+        assert error.value.code == "model_quota_exceeded"
+
+    @pytest.mark.asyncio
+    async def test_explicit_mcp_ceiling_still_counts_own_key_pending_usage(self, reservation_pool):
+        service = make_service(reservation_pool, token_limit=47)
+        await service.reserve(request(), identity(), credential_source="user")
+        with pytest.raises(ModelCompletionFailure) as error:
+            await service.reserve(request(), identity(), credential_source="user")
+        assert error.value.code == "model_quota_exceeded"
+
+    @pytest.mark.asyncio
     async def test_org_billing_exposure_counts_pending_and_canonical_without_double_counting(self, reservation_pool):
         service = make_service(reservation_pool)
         handle = await service.reserve(request(), ModelInvocationIdentity(1, None, 12, str(uuid4())))

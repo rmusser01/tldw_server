@@ -248,6 +248,7 @@ def build_tldw_model_completion_port(
         pool = _LazyAuthNZPool()
         accounting = ModelCompletionAccounting(
             policy=accounting_policy,
+            quota_pool_factory=get_db_pool if usage is None else None,
             reservations=reservations if reservations is not None else ProviderUsageReservationsRepo(pool),
             usage=usage if usage is not None else AuthnzUsageRepo(pool),
             billing=billing if billing is not None else get_billing_enforcer(),

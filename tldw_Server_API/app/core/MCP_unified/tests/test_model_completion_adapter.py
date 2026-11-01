@@ -117,7 +117,7 @@ def harness():
         reconcile_result = True
         ambiguous_result = True
 
-        async def reserve(self, request, identity):
+        async def reserve(self, request, identity, *, credential_source=None):
             events.append("reserve")
             self.received = (request, identity)
             if gates.reserve:
@@ -313,7 +313,7 @@ async def test_cancel_before_dispatch_releases_unused_reservation(harness):
     h.gates.reserve = asyncio.Event()
     original = h.accounting.reserve
 
-    async def reserve(*args):
+    async def reserve(*args, **kwargs):
         try:
             return await original(*args)
         except asyncio.CancelledError:

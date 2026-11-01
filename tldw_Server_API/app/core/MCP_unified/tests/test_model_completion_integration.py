@@ -212,10 +212,14 @@ async def composed(reservation_pool, monkeypatch, caplog, asyncio_diagnostics):
     monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate)
     provider = FakeProvider(pool)
 
-    def build(*, policy=None, port_settings=None):
+    def build(*, policy=None, port_settings=None, server_config=None):
         port = factory.build_tldw_model_completion_port(
             settings() if port_settings is None else port_settings,
-            server_config_snapshot={"openai_api": {"api_key": KEYS["server"], "api_base_url": BASE}},
+            server_config_snapshot=(
+                {"openai_api": {"api_key": KEYS["server"], "api_base_url": BASE}}
+                if server_config is None
+                else server_config
+            ),
             operator_policy_snapshot=policy if policy is not None else operator_policy(),
             transport_factory=provider.transport,
         )

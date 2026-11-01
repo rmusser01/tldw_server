@@ -1147,6 +1147,14 @@ class SchemaReadinessError(RuntimeError):
     """
 
 
+class PGUsageSchemaError(SchemaReadinessError, TransactionPassthroughError):
+    """A hard usage-schema failure that must survive transaction translation."""
+
+    def __init__(self) -> None:
+        """Expose a fixed readiness code without native failure data."""
+        super().__init__("AUTHNZ_PG_USAGE_SCHEMA_NOT_READY")
+
+
 def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
     """Return ``Outer <- Inner <- ...`` type names for ``error``'s cause/context chain.
 

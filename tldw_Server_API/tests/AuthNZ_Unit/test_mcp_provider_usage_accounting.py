@@ -53,7 +53,7 @@ def usage_store():
         CREATE TABLE provider_usage_reservations (
             execution_id TEXT PRIMARY KEY, billing_scope_type TEXT, billing_scope_id INTEGER,
             state TEXT, reserved_input_tokens INTEGER, reserved_output_tokens INTEGER,
-            reserved_cost_units INTEGER, actual_cost_units INTEGER
+            reserved_cost_units INTEGER, actual_cost_units INTEGER, credential_source TEXT
         );
         INSERT INTO org_members VALUES (7, 10, '2026-01-01');
         INSERT INTO api_keys VALUES (3, 10);
@@ -68,13 +68,13 @@ def usage_store():
         INSERT INTO llm_usage_log (user_id, operation, request_id, total_tokens, total_cost_usd)
           VALUES (7, 'mcp_model_completion', 'team-execution', 17, 0.000000017);
         INSERT INTO provider_usage_reservations VALUES ('team-execution', 'team', 20,
-          'reconciled', 17, 0, 17, 17);
+          'reconciled', 17, 0, 17, 17, NULL);
         INSERT INTO provider_usage_reservations VALUES ('org10-execution', 'org', 10,
-          'reconciled', 7, 0, 7, 7);
+          'reconciled', 7, 0, 7, 7, NULL);
         INSERT INTO provider_usage_reservations VALUES ('org12-execution', 'org', 12,
-          'reconciled', 11, 0, 11, 11);
+          'reconciled', 11, 0, 11, 11, NULL);
         INSERT INTO provider_usage_reservations VALUES ('pending-org', 'org', 10,
-          'ambiguous', 19, 4, 23, NULL);
+          'ambiguous', 19, 4, 23, NULL, NULL);
     """)
     try:
         yield conn, Connection(conn), AuthnzUsageRepo(SimpleNamespace(pool=None))

@@ -182,6 +182,7 @@ def test_migration_additive_idempotent_and_minimal(tmp_path):
             "reserved_input_tokens",
             "reserved_output_tokens",
             "reserved_cost_units",
+            "credential_source",
             "actual_input_tokens",
             "actual_output_tokens",
             "actual_cost_units",

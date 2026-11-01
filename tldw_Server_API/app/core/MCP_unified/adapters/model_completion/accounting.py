@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import await_cancellation_safe_cleanup
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, await_cancellation_safe_cleanup
 from tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo import (
     MAX_INT,
     BillingScope,
@@ -94,6 +96,7 @@ class ModelCompletionAccounting:
         usage: AuthnzUsageRepo,
         billing: BillingEnforcer,
         governor: ResourceGovernor,
+        quota_pool_factory: Callable[[], Awaitable[DatabasePool]] | None = None,
     ) -> None:
         if type(policy) is not CompletionAccountingPolicy or any(
             service is None for service in (reservations, usage, billing, governor)
@@ -104,6 +107,9 @@ class ModelCompletionAccounting:
         self._usage = usage
         self._billing = billing
         self._governor = governor
+        if quota_pool_factory is not None and not callable(quota_pool_factory):
+            raise ValueError("Quota pool factory must be callable")
+        self._quota_pool_factory = quota_pool_factory
         self._owner = object()
 
     @property
@@ -116,7 +122,9 @@ class ModelCompletionAccounting:
             raise ModelCompletionFailure("invalid_accounting_handle", ModelFailureDomain.REQUEST)
         return handle.reservation
 
-    def _exposure(self, request: ModelCompletionRequest, identity: ModelInvocationIdentity) -> ProviderUsageReservation:
+    def _exposure(
+        self, request: ModelCompletionRequest, identity: ModelInvocationIdentity, credential_source: str | None
+    ) -> ProviderUsageReservation:
         if type(request) is not ModelCompletionRequest or type(identity) is not ModelInvocationIdentity:
             raise ValueError("Invalid bounded request")
         scope = (
@@ -150,30 +158,99 @@ class ModelCompletionAccounting:
             input_tokens,
             output_tokens,
             cost,
+            credential_source,
         )
 
+    async def _user_quota_refused(self, reservation: ProviderUsageReservation) -> bool:
+        """Use native profile precedence and counters, never an ambient caller identity.
+
+        MCP's required accounting remains fail-closed, so use the uncached
+        resolver rather than the general chat gate's fail-open/logging wrapper.
+        """
+        if reservation.credential_source == "user":
+            return False
+        from tldw_Server_API.app.core.Usage import quota_resolver
+
+        if not quota_resolver.usage_quotas_enabled():
+            return False
+        pool = await self._quota_pool_factory() if self._quota_pool_factory is not None else self._usage.db_pool
+        usage = AuthnzUsageRepo(pool)
+        now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        for key, since, tokens in (
+            ("limits.llm_tokens_per_month", now.replace(day=1), True),
+            ("limits.llm_cost_per_day_usd", now, False),
+            ("limits.llm_cost_per_month_usd", now.replace(day=1), False),
+        ):
+            limit = await quota_resolver.uncached_user_quota(reservation.user_id, key, db_pool=pool)
+            if limit is None:
+                continue
+            bound = Decimal(str(limit))
+            raw = (
+                await usage.sum_user_llm_tokens_since(user_id=reservation.user_id, since=since)
+                if tokens
+                else await usage.sum_user_llm_cost_since(user_id=reservation.user_id, since=since)
+            )
+            used = Decimal(str(raw))
+            if not bound.is_finite() or not used.is_finite() or used < 0:
+                raise ValueError("Invalid native quota accounting")
+            if tokens:
+                if used + reservation.reserved_input_tokens + reservation.reserved_output_tokens > bound:
+                    return True
+            elif used >= bound:
+                return True
+        return False
+
     async def reserve(
-        self, request: ModelCompletionRequest, identity: ModelInvocationIdentity
+        self,
+        request: ModelCompletionRequest,
+        identity: ModelInvocationIdentity,
+        *,
+        credential_source: str | None = None,
     ) -> AccountingReservation:
         """Reserve durably before acquiring the governor; unwind only pre-dispatch work."""
         reservation = None
         invalid = False
         try:
-            reservation = self._exposure(request, identity)
+            reservation = self._exposure(request, identity, credential_source)
         except (ValueError, UnicodeError, ProviderUsageReservationError):
             invalid = True
         if invalid or reservation is None:
             raise_detached_error(ModelCompletionFailure("invalid_model_request", ModelFailureDomain.REQUEST))
 
         async def snapshot_reader(conn: Any) -> ReservationQuotaSnapshot:
-            limit = await self._billing.get_mcp_token_limit(
-                reservation.billing_scope,
-                operator_limit=self._policy.monthly_token_limit,
-                conn=conn,
-            )
+            hosted_limit = None
+            if reservation.credential_source != "user":
+                hosted_limit = await self._billing.get_mcp_token_limit(
+                    reservation.billing_scope, operator_limit=None, conn=conn
+                )
             month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             tokens, costs = await self._usage.read_provider_scope_usage(conn, reservation.billing_scope, month_start)
-            return ReservationQuotaSnapshot(tokens, limit, costs, self._policy.monthly_cost_limit)
+            hosted_tokens = 0
+            if hosted_limit is not None:
+                hosted_tokens, _ = await self._usage.read_provider_scope_usage(
+                    conn, reservation.billing_scope, month_start, operator_paid_only=True
+                )
+            return ReservationQuotaSnapshot(
+                tokens,
+                self._policy.monthly_token_limit,
+                costs,
+                self._policy.monthly_cost_limit,
+                hosted_used_tokens=hosted_tokens,
+                hosted_token_limit=hosted_limit,
+            )
+
+        quota_failed = False
+        quota_refused = False
+        try:
+            quota_refused = await self._user_quota_refused(reservation)
+        except Exception:  # noqa: BLE001 - keep required quota-service failures content-free
+            quota_failed = True
+        if quota_failed:
+            raise_detached_error(
+                ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
+            )
+        if quota_refused:
+            raise_detached_error(ModelCompletionFailure("model_quota_exceeded", ModelFailureDomain.REQUEST))
 
         durable_accepted = False
         governor_handle = None

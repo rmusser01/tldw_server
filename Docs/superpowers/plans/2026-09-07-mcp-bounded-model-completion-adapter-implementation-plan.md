@@ -535,7 +535,17 @@ startup schema failure, task-format/ID guards, focused Ruff/Black, compile and B
 **Goal**: Review the immutable rebased range against the approved security/lifecycle contract.
 **Success Criteria**: Reviewer approval; all validated Critical/Important findings fixed and rechecked.
 **Tests**: Reviewer-directed reproductions and affected regression gates.
-**Status**: Not Started
+**Status**: In Progress
+
+First immutable review (`54b321..665ca72186`) found three Important compatibility
+gaps: lost own-key provenance, missing native per-user quota checks, and hard PG
+DDL failures hidden by transaction wrapping. All three are validated and repaired.
+The 269-case combined repair gate passes; broad final-source gates and immutable
+follow-up approval remain required. ADR-061 records source-aware hosted exposure,
+all-source MCP safety ceilings and explicit-user uncached native quota checks.
+Hard PG schema failures cross rollback as a fixed central readiness marker;
+transient failures permit later independent ensures. Generic Chat quota policy,
+the database transaction wrapper and accepted ADRs are unchanged.
 
 ### Integration Stage 4: Publish And Arm Auto-Merge
 **Goal**: Publish with a lease and enable only the requested normal gated auto-merge.

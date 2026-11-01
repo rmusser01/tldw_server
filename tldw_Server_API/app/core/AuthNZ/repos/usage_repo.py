@@ -176,6 +176,8 @@ class AuthnzUsageRepo:
         conn: Any,
         scope: BillingScope,
         month_start: datetime,
+        *,
+        operator_paid_only: bool = False,
     ) -> tuple[int, int]:
         """Read strict canonical actuals on the caller's locked transaction.
 
@@ -188,7 +190,8 @@ class AuthnzUsageRepo:
             scope,
             """SELECT l.total_tokens, l.total_cost_usd, l.operation,
                 r.state AS reservation_state, r.actual_cost_units""",
-            "l.ts >= ?" if is_pg else "datetime(l.ts) >= datetime(?)",
+            ("l.ts >= ?" if is_pg else "datetime(l.ts) >= datetime(?)")
+            + (" AND COALESCE(l.credential_source, '') <> 'user'" if operator_paid_only else ""),
         )
         since = _strip_tzinfo(month_start) if is_pg else _strip_tzinfo(month_start).isoformat(" ", timespec="seconds")
         rows = await fetch_all(
@@ -231,6 +234,7 @@ class AuthnzUsageRepo:
                 FROM provider_usage_reservations
                 WHERE billing_scope_type = 'org' AND billing_scope_id = ?
                   AND state IN ('reserved', 'dispatched', 'ambiguous')
+                  AND COALESCE(credential_source, '') <> 'user'
             )""",
             ("l.ts >= ?" if is_pg else "datetime(l.ts) >= datetime(?)")
             + " AND COALESCE(l.credential_source, '') <> 'user'",
@@ -274,6 +278,7 @@ class AuthnzUsageRepo:
             bool(estimated),
             reservation.execution_id,
             "mcp_conservative_ceiling" if estimated else "mcp_provider_counts",
+            getattr(reservation, "credential_source", None),
         )
         now = _strip_tzinfo(datetime.now(timezone.utc))
         timestamp = now if is_pg else now.isoformat(" ", timespec="seconds")
@@ -284,9 +289,9 @@ class AuthnzUsageRepo:
             INSERT INTO llm_usage_log (
                 ts, user_id, billing_org_id, endpoint, operation, provider, model, status, latency_ms,
                 prompt_tokens, completion_tokens, total_tokens, prompt_cost_usd, completion_cost_usd,
-                total_cost_usd, currency, estimated, request_id, estimate_source
+                total_cost_usd, currency, estimated, request_id, estimate_source, credential_source
             ) VALUES (?, ?, ?, '/mcp/model_completion', 'mcp_model_completion',
-                      ?, ?, 200, 0, ?, ?, ?, ?, ?, ?, 'USD', ?, ?, ?)
+                      ?, ?, 200, 0, ?, ?, ?, ?, ?, ?, 'USD', ?, ?, ?, ?)
             ON CONFLICT (request_id) WHERE operation = 'mcp_model_completion' AND request_id IS NOT NULL
             DO NOTHING
         """,
@@ -298,7 +303,7 @@ class AuthnzUsageRepo:
             """
             SELECT user_id, billing_org_id, provider, model, prompt_tokens, completion_tokens,
                    total_tokens, prompt_cost_usd, completion_cost_usd, total_cost_usd,
-                   endpoint, status, latency_ms, currency, estimated, estimate_source
+                   endpoint, status, latency_ms, currency, estimated, estimate_source, credential_source
             FROM llm_usage_log
             WHERE request_id = ? AND operation = 'mcp_model_completion'
         """,
@@ -320,6 +325,7 @@ class AuthnzUsageRepo:
                 "currency",
                 "estimated",
                 "estimate_source",
+                "credential_source",
             ),
         )
         expected = {
@@ -339,6 +345,7 @@ class AuthnzUsageRepo:
             "currency": "USD",
             "estimated": estimated,
             "estimate_source": values[12],
+            "credential_source": values[13],
         }
         for key in ("prompt_cost_usd", "completion_cost_usd", "total_cost_usd"):
             expected[key] = Decimal(str(expected[key]))

@@ -39,6 +39,24 @@ Hosted subscription limits apply only when the usage-quota master switch is enab
 
 The per-scope lock coordinates MCP admission and settlement, not legacy Chat calls that do not adopt this protocol. Operator pricing is captured by value; stored accounting excludes prompt, output, credentials, arbitrary metadata, and raw provider usage.
 
+The issued credential handle's immutable billing-source category is retained in the
+reservation and canonical usage row. Only the vendor-billed `user` category is
+exempt from hosted and native per-user LLM quotas (ADR-083); a user key pointed
+at an operator endpoint remains `user_unmetered` and counts. Hosted admission
+independently reads operator-paid actuals and unresolved reservations under the
+same scope lock. Explicit MCP operator ceilings and Resource Governor limits
+still cover every source, including own-key work; the exemption cannot weaken
+those safety bounds or let own-key exposure consume a hosted allowance.
+
+Before durable admission, operator-paid work checks the explicit invocation
+user's current native profile precedence and monthly-token/daily-cost/monthly-cost
+limits (ADR-064). These reads use the uncached resolver and canonical own-key-aware
+counters on the canonical quota pool, not an ambient prechecked/nested-call
+context. A required lookup/counter failure remains fail-closed and content-free
+for this bounded MCP path; legacy Chat's fail-open wrappers are unchanged. The
+native user check does not promise a transaction spanning legacy Chat or multiple
+MCP billing scopes; durable scope-level MCP ceilings remain the atomic authority.
+
 The canonical usage row determines which completed calls and billing period are counted. Its legacy floating-point USD columns remain compatible, but strict MCP cost enforcement reads the exact integer actual cost from the reservation audit row committed in the same transaction. A missing or inconsistent settlement fails closed instead of reconstructing MCP costs from lossy floats.
 
 Canonical MCP timestamps are bound as UTC values independently of the database session timezone. PostgreSQL's exact numeric token aggregates are accepted only when finite, integral, non-negative, and within the signed-integer accounting bound; malformed values are never treated as zero exposure.

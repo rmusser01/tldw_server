@@ -101,6 +101,7 @@ async def test_a_failed_postgres_usage_column_is_logged_as_a_warning() -> None:
 
     from loguru import logger
 
+    from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_usage_tables_pg
 
     class _Pool:
@@ -121,7 +122,7 @@ async def test_a_failed_postgres_usage_column_is_logged_as_a_warning() -> None:
     warnings: list[str] = []
     sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
     try:
-        with pytest.raises(TimeoutError):
+        with pytest.raises(TransactionError):
             await ensure_usage_tables_pg(_Pool())
     finally:
         logger.remove(sink)

@@ -23,11 +23,14 @@ def identity(team=None, org=None):
 
 
 @pytest.fixture
-def accounting():
+def accounting(monkeypatch):
     from tldw_Server_API.app.core.MCP_unified.adapters.model_completion.accounting import (
         CompletionAccountingPolicy,
         ModelCompletionAccounting,
     )
+    from tldw_Server_API.app.core.Usage import quota_resolver
+
+    monkeypatch.setattr(quota_resolver, "usage_quotas_enabled", lambda: False)
 
     events = []
 

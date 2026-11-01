@@ -99,6 +99,7 @@ class ProviderUsageReservation:
     reserved_input_tokens: int
     reserved_output_tokens: int
     reserved_cost_units: int
+    credential_source: str | None = None
 
     def __post_init__(self) -> None:
         _execution_id(self.execution_id)
@@ -124,6 +125,11 @@ class ProviderUsageReservation:
                 raise ProviderUsageReservationError("invalid_reservation")
         _sum(self.reserved_input_tokens, self.reserved_output_tokens)
         _integer(self.reserved_cost_units)
+        if self.credential_source is not None and (
+            type(self.credential_source) is not str
+            or self.credential_source not in {"user", "team", "org", "server_default", "user_unmetered"}
+        ):
+            raise ProviderUsageReservationError("invalid_reservation")
 
 
 @dataclass(frozen=True)
@@ -134,11 +140,13 @@ class ReservationQuotaSnapshot:
     token_limit: int | None
     used_cost_units: int
     cost_limit: int | None
+    hosted_used_tokens: int = 0
+    hosted_token_limit: int | None = None
 
     def __post_init__(self) -> None:
-        for value in (self.used_tokens, self.used_cost_units):
+        for value in (self.used_tokens, self.used_cost_units, self.hosted_used_tokens):
             _integer(value, code="snapshot_unavailable")
-        for value in (self.token_limit, self.cost_limit):
+        for value in (self.token_limit, self.cost_limit, self.hosted_token_limit):
             if value is not None:
                 _integer(value, code="snapshot_unavailable")
 
@@ -248,16 +256,19 @@ class ProviderUsageReservationsRepo:
             reserved_input_tokens=row["reserved_input_tokens"],
             reserved_output_tokens=row["reserved_output_tokens"],
             reserved_cost_units=row["reserved_cost_units"],
+            credential_source=row["credential_source"],
         )
 
-    async def _outstanding(self, conn: Any, scope: BillingScope) -> dict[str, int]:
+    async def _outstanding(self, conn: Any, scope: BillingScope, *, operator_paid_only: bool = False) -> dict[str, int]:
         result = await self._rows(
             conn,
             "SELECT reserved_input_tokens, reserved_output_tokens, reserved_cost_units "
             "FROM provider_usage_reservations WHERE billing_scope_type = ? AND billing_scope_id = ? "
-            "AND state IN ('reserved', 'dispatched', 'ambiguous')",
+            "AND state IN ('reserved', 'dispatched', 'ambiguous') "
+            "AND (? = 0 OR COALESCE(credential_source, '') <> 'user')",
             scope.kind,
             scope.value,
+            1 if operator_paid_only else 0,
         )
         tokens = cost = 0
         for row in result:
@@ -298,15 +309,25 @@ class ProviderUsageReservationsRepo:
                 snapshot.cost_limit is not None and cost > snapshot.cost_limit
             ):
                 raise ProviderUsageReservationError("quota_exceeded")
+            if snapshot.hosted_token_limit is not None and reservation.credential_source != "user":
+                hosted = await self._outstanding(conn, reservation.billing_scope, operator_paid_only=True)
+                hosted_tokens = _sum(
+                    snapshot.hosted_used_tokens,
+                    hosted["tokens"],
+                    reservation.reserved_input_tokens,
+                    reservation.reserved_output_tokens,
+                )
+                if hosted_tokens > snapshot.hosted_token_limit:
+                    raise ProviderUsageReservationError("quota_exceeded")
             now = self._now()
             inserted = await self._rows(
                 conn,
                 """INSERT INTO provider_usage_reservations
                 (execution_id, user_id, active_team_id, active_organization_id,
                  billing_scope_type, billing_scope_id, provider, model,
-                 reserved_input_tokens, reserved_output_tokens, reserved_cost_units,
+                 reserved_input_tokens, reserved_output_tokens, reserved_cost_units, credential_source,
                  state, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
                 ON CONFLICT (execution_id) DO NOTHING RETURNING execution_id""",
                 reservation.execution_id,
                 reservation.user_id,
@@ -319,6 +340,7 @@ class ProviderUsageReservationsRepo:
                 reservation.reserved_input_tokens,
                 reservation.reserved_output_tokens,
                 reservation.reserved_cost_units,
+                reservation.credential_source,
                 now,
                 now,
             )
