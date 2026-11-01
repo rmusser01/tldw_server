@@ -48,6 +48,8 @@ def resolve_crawl_plan(
         values["max_urls"] = None
     if profile == "enhanced_batch":
         values.update(method="auto", priority="NORMAL", summarize=False)
+    if profile == "enhanced_url_level":
+        values.update(level=3, summarize=False, allow_llm_extraction=False)
     sources = dict.fromkeys(values, "default")
     for name in ("max_pages", "max_depth"):
         value = getattr(request, name)
@@ -93,4 +95,9 @@ def resolve_crawl_plan(
         values[name], sources[name] = value, "supplied"
     if enhanced and recursive:
         values["crawl_strategy"] = str(values["crawl_strategy"]).strip().lower()
+    if profile == "enhanced_url_level":
+        if sources["max_depth"] == "default":
+            values["max_depth"] = values["level"]
+        if sources["allow_llm_extraction"] == "default":
+            values["allow_llm_extraction"] = bool(values["summarize"])
     return CrawlPlan(request, profile, values, sources, limits)

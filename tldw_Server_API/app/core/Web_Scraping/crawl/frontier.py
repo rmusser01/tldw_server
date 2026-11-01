@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..contracts.execution import PageData, _safe_article
 from ..runtime.controls import ParentStop
 from ..url_utils import normalize_for_crawl
+from .discovery import url_bytes
 from .models import CrawlPlan, FrontierEntry, FrontierSnapshot
 
 
@@ -18,6 +21,7 @@ class Frontier:
         self._completed: list[FrontierEntry] = []
         self._results: list[dict] = []
         self._seen: set[str] = set()
+        self._url_level_pending: set[str] = set()
 
     @classmethod
     def from_snapshot(cls, plan: CrawlPlan, snapshot: FrontierSnapshot) -> Frontier:
@@ -33,15 +37,48 @@ class Frontier:
                 raise ValueError("duplicate checkpoint disposition")
             frontier._seen.add(identity)
         frontier._queued = list(snapshot.queued)
+        frontier._url_level_pending.update(item.url for item in snapshot.queued)
         frontier._inflight = list(snapshot.inflight)
         frontier._completed = list(snapshot.completed)
         frontier._results = [_safe_article(item) for item in snapshot.results]
         return frontier
 
     def _identity(self, entry: FrontierEntry) -> str:
+        url_bytes(entry.url, self.plan)
+        if entry.parent_url is not None:
+            url_bytes(entry.parent_url, self.plan)
+        if self.plan.profile in {"enhanced_batch", "legacy_sitemap", "enhanced_sitemap"}:
+            return str(entry.sequence)
         if self.plan.profile.startswith("enhanced_"):
-            return normalize_for_crawl(entry.url, self.plan.request.base_url)
+            url_bytes(self.plan.request.base_url, self.plan)
+            normalized = normalize_for_crawl(entry.url, self.plan.request.base_url)
+            url_bytes(normalized, self.plan)
+            return entry.url if normalized == entry.url else normalized
         return entry.url
+
+    def contains(self, entry: FrontierEntry) -> bool:
+        """Check recursive deduplication before invoking candidate policy hooks."""
+        return self._identity(entry) in self._seen
+
+    def prioritize(self, entry: FrontierEntry, score: float) -> None:
+        """Update a queued seed after asynchronous policy without losing ownership."""
+        index = self._queued.index(entry)
+        self._queued[index] = replace(entry, score=score)
+
+    @property
+    def queued_count(self) -> int:
+        """Queued occupancy, without copying result payloads for progress."""
+        return len(self._queued)
+
+    @property
+    def inflight_count(self) -> int:
+        """Entries whose disposition is not yet committed."""
+        return len(self._inflight)
+
+    @property
+    def completed_count(self) -> int:
+        """Committed dispositions, including profile-discarded page failures."""
+        return len(self._completed)
 
     def admit(self, entry: FrontierEntry) -> bool:
         """Admit once or reject duplicate; never debit candidate encounters here."""
@@ -52,6 +89,8 @@ class Frontier:
             raise ParentStop("budget_exhausted")
         self._seen.add(identity)
         self._queued.append(entry)
+        if self.plan.profile == "legacy_url_level":
+            self._url_level_pending.add(entry.url)
         return True
 
     def take(self) -> FrontierEntry | None:
@@ -75,7 +114,12 @@ class Frontier:
                     item.parent_url or "",
                 )
             )
-        entry = self._queued.pop(0)
+        if self.plan.profile == "legacy_url_level":
+            url = self._url_level_pending.pop()
+            index = next(index for index, item in enumerate(self._queued) if item.url == url)
+        else:
+            index = 0
+        entry = self._queued.pop(index)
         self._inflight.append(entry)
         return entry
 
@@ -92,6 +136,8 @@ class Frontier:
         """Restore unfinished entries in their original admission order."""
         self._queued = sorted(self._queued + self._inflight, key=lambda item: item.sequence)
         self._inflight.clear()
+        if self.plan.profile == "legacy_url_level":
+            self._url_level_pending = {item.url for item in self._queued}
 
     def snapshot(self) -> FrontierSnapshot:
         """Return detached committed payloads and ordered immutable dispositions."""

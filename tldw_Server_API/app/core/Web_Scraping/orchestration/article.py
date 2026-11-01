@@ -160,6 +160,7 @@ class ArticleDependencies:
     supplied_plan: ArticlePlan | None = None
     acquired: Callable[[str, str, str], None] | None = None
     discovery_on_success: bool = False
+    discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,7 +594,8 @@ async def _extract(
 ) -> dict[str, Any]:
     if dependencies.parent is not None:
         dependencies.parent.check()
-    if dependencies.acquired is not None and not dependencies.discovery_on_success:
+    deferred_discovery = dependencies.discovery_on_success or dependencies.discovery_gate is not None
+    if dependencies.acquired is not None and not deferred_discovery:
         dependencies.acquired(html, url, final_url or url)
     handler = dependencies.resolve_handler(plan.handler) if use_route_handler and plan.handler else None
     result = await dependencies.executor.run(
@@ -611,7 +613,12 @@ async def _extract(
     if not isinstance(result, Mapping):
         raise ArticleFailure("extraction_error", "result")
     copied = dict(result)
-    if dependencies.discovery_on_success and copied.get("extraction_successful") and dependencies.acquired is not None:
+    if (
+        deferred_discovery
+        and dependencies.acquired is not None
+        and (not dependencies.discovery_on_success or copied.get("extraction_successful"))
+        and (dependencies.discovery_gate is None or dependencies.discovery_gate(copied))
+    ):
         if dependencies.parent is not None:
             dependencies.parent.check()
         dependencies.acquired(html, url, final_url or url)
@@ -1220,12 +1227,16 @@ def start_page(
     plan: ArticlePlan | None = None,
     allow_llm_extraction: bool = True,
     discovery_on_success: bool = False,
+    configuration: Mapping[str, Any] | None = None,
+    discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None,
+    prepare_plan: Callable[[ArticlePlan], ArticlePlan] | None = None,
 ) -> WorkHandle[PageData]:
     """Start one canonical page attempt with private discovery and physical drain."""
     loop = asyncio.get_running_loop()
     owner = PhysicalWork()
     parent = PageControls(controls)
     cookies = _snapshot_cookies(custom_cookies)
+    configuration = _snapshot_config(configuration) if configuration is not None else None
 
     async def run() -> PageData:
         token = physical_work.set(owner)
@@ -1236,6 +1247,32 @@ def start_page(
             finally:
                 reservation.close()
             dependencies = _build_default_dependencies(cookies)
+            if configuration is not None:
+                dependencies = replace(dependencies, load_config=lambda: configuration)
+            if prepare_plan is not None:
+                original_resolve = dependencies.resolve_plan
+                original_backend = dependencies.backend_setting
+                resolved_settings: dict[int, str] = {}
+
+                def resolve_page(target: str, config: Mapping[str, Any]) -> ArticlePlan:
+                    resolved = original_resolve(target, config)
+                    prepared = prepare_plan(resolved)
+                    # Header-only preparation must not erase raw-route advice
+                    # precedence. An explicit backend change remains explicit.
+                    resolved_settings[id(prepared)] = (
+                        prepared.backend
+                        if prepared.backend != resolved.backend
+                        else original_backend(resolved)
+                        if original_backend
+                        else resolved.backend
+                    )
+                    return prepared
+
+                dependencies = replace(
+                    dependencies,
+                    resolve_plan=resolve_page,
+                    backend_setting=lambda value: resolved_settings.get(id(value), value.backend),
+                )
             # Bind live controls only to this private dependency graph, never request metadata.
             if isinstance(dependencies.fetch_client, DefaultFetchClient):
                 dependencies = replace(dependencies, fetch_client=DefaultFetchClient(parent))
@@ -1258,6 +1295,7 @@ def start_page(
                 supplied_plan=plan,
                 acquired=acquired,
                 discovery_on_success=discovery_on_success,
+                discovery_gate=discovery_gate,
             )
             timeout = preflight_facade._execution_timeout(parent.cap_timeout(None))
             try:

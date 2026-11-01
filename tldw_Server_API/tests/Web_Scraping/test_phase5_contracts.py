@@ -26,6 +26,8 @@ CRAWL_DEFAULTS = {
     "active_probes": 2000,
     "transfer_bytes": 1073741824,
     "discovered_candidates": 50000,
+    "max_url_bytes": 65536,
+    "discovered_url_bytes": 67108864,
     "frontier_entries": 10000,
     "execution_seconds": 1800,
 }
@@ -96,10 +98,10 @@ def test_completed_articles_are_not_partial_results(reason):
 def test_interrupted_reports_classify_successful_data_only(reason):
     report = CrawlReport.interrupted([{"error": "private failure"}, {"content": "ok"}], reason)
     assert report.outcome == CrawlOutcome("cancelled" if reason == "cancelled" else "partial", reason, True)
-    assert report.articles == ({"content": "ok"},)
+    assert report.articles == ({"error": "private failure"}, {"content": "ok"})
     empty = CrawlReport.interrupted([{"error": "private failure"}, {"extraction_successful": False}], reason)
     assert empty.outcome == CrawlOutcome("cancelled" if reason == "cancelled" else "failed", reason, False)
-    assert "private failure" not in repr(empty)
+    assert empty.articles == ({"error": "private failure"}, {"extraction_successful": False})
 
 
 @pytest.mark.parametrize(

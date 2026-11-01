@@ -279,7 +279,9 @@ class ProcessLocalJobQueue:
         for kind, future in targets:
             if future is None or future.done():
                 continue
-            if status is JobStatus.COMPLETED and value is not None:
+            if value is not None and (status is JobStatus.COMPLETED or kind == "page"):
+                # Internal crawl subscribers need the failed page's compatibility
+                # payload/sidecar after retries; legacy article futures still fail.
                 future.set_result(value if kind == "page" else value.article)
             elif kind == "page" and status is JobStatus.CANCELLED:
                 future.cancel()

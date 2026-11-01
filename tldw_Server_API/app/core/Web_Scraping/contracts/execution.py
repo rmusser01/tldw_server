@@ -143,15 +143,17 @@ class CrawlOutcome:
 
 @dataclass(frozen=True)
 class CrawlReport:
-    """Safe successful article data and outcome; failed entries become diagnostics."""
+    """Safe profile-returned payloads; outcome flags reflect actual data only."""
 
     articles: tuple[dict[str, Any], ...]
     outcome: CrawlOutcome
     diagnostics: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        articles = tuple(_safe_article(article) for article in self.articles if successful_article(article))
-        if self.outcome.has_partial_results != (bool(articles) and self.outcome.state != "completed"):
+        articles = tuple(_safe_article(article) for article in self.articles)
+        if self.outcome.has_partial_results != (
+            any(successful_article(item) for item in articles) and self.outcome.state != "completed"
+        ):
             raise ValueError("outcome does not match successful partial article data")
         object.__setattr__(self, "articles", articles)
         object.__setattr__(
@@ -169,7 +171,7 @@ class CrawlReport:
         successful = tuple(article for article in values if successful_article(article))
         state = "cancelled" if stop_reason == "cancelled" else ("partial" if successful else "failed")
         failures = ("execution_failed",) if len(successful) != len(values) else ()
-        return cls(successful, CrawlOutcome(state, stop_reason, bool(successful)), diagnostics + failures)
+        return cls(values, CrawlOutcome(state, stop_reason, bool(successful)), diagnostics + failures)
 
 
 class CrawlInterrupted(Exception):

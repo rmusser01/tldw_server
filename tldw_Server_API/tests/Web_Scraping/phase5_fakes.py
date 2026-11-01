@@ -165,6 +165,7 @@ class Phase5Harness:
         self.executor_release = asyncio.Event()
         self.executor_release.set()
         self.calls: list[dict[str, Any]] = []
+        self.unexpected_urls: list[str] = []
         self.transport_calls: list[dict[str, Any]] = []
         self.fetch_calls: list[dict[str, Any]] = []
         self.policy_calls: list[dict[str, Any]] = []
@@ -193,6 +194,7 @@ class Phase5Harness:
         """Return a fresh canonical result; nested fixtures expose lossy adapters."""
         outcome = self.outcomes.get(url)
         if outcome is None and url != "https://example.com/child-sitemap.xml":
+            self.unexpected_urls.append(url)
             raise AssertionError(f"Unexpected page execution: {url}")
         outcome = outcome or {"url": url}
         return {
@@ -212,7 +214,7 @@ class Phase5Harness:
         }
 
     def _html(self, url: str) -> str:
-        outcome = self.outcomes[url]
+        outcome = {} if url == "https://example.com/child-sitemap.xml" else self.outcomes[url]
         links = "".join(f'<a href="{escape(link, quote=True)}">link</a>' for link in outcome.get("links", []))
         return f"<html><title>Fixture title</title><body>{links}</body></html>"
 
@@ -281,6 +283,8 @@ class Phase5Harness:
                 )
                 self.transport_started.set()
                 await self.transport_release.wait()
+                if url not in self.outcomes:
+                    self.unexpected_urls.append(url)
                 if self.outcomes[url].get("transport_error"):
                     failure = resolve(f"{PREFIX}.orchestration.article_models.ArticleFailure")
                     raise failure("browser_transport_unavailable", "acquire")
@@ -316,7 +320,10 @@ class Phase5Harness:
                     return await add_job(job)
 
                 patch.setattr(self.scraper.job_queue, "add_job", submit)
-            yield
+            try:
+                yield
+            finally:
+                assert not self.unexpected_urls, f"Unexpected executed URLs: {self.unexpected_urls}"
 
     def _legacy(self, directory: str, *, sync: bool = False, **options: Any) -> Any:
         legacy = importlib.import_module(LEGACY)
