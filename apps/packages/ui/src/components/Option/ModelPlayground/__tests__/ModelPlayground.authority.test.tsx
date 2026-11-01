@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
@@ -76,11 +76,38 @@ describe("Model Playground conversation authority", () => {
     expect(fixture.capture?.isCurrent()).toBe(true);
   });
 
-  it("hands Simple Chat to the canonical Chat route", () => {
+  it("hands Simple Chat to the canonical Chat route", async () => {
     const Location = () => <output aria-label="Current route">{useLocation().pathname}</output>;
     render(<MemoryRouter><ModelPlayground /><Location /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Simple Chat" }));
-    expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/chat$/);
+    await waitFor(() => expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/chat$/));
+  });
+
+  it.each([
+    ["/chat?historySelection=prepared-scoped-reference", "/chat?historySelection=prepared-scoped-reference"],
+    [null, "/"],
+  ])("uses the prepared conversation handoff %s", async (prepared, expected) => {
+    const Location = () => <output aria-label="Prepared route">{useLocation().pathname + useLocation().search}</output>;
+    render(<MemoryRouter><ModelPlayground /><Location /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Prepare model question" }));
+    const preparePath = vi.spyOn(fixture.controller!, "prepareExpansionPath").mockResolvedValue(prepared);
+    fireEvent.click(screen.getByRole("button", { name: "Simple Chat" }));
+    await waitFor(() => expect(preparePath).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText("Prepared route").textContent).toBe(expected);
+  });
+
+  it("keeps a retired handoff from navigating after preparation", async () => {
+    const Location = () => <output aria-label="Retired route">{useLocation().pathname + useLocation().search}</output>;
+    render(<MemoryRouter><ModelPlayground /><Location /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Prepare model question" }));
+    let resolve!: (path: string) => void;
+    const preparePath = vi.spyOn(fixture.controller!, "prepareExpansionPath")
+      .mockReturnValue(new Promise<string>((done) => { resolve = done; }));
+    fireEvent.click(screen.getByRole("button", { name: "Simple Chat" }));
+    act(() => fixture.controller!.reset());
+    await act(async () => { resolve("/chat?historySelection=retired-reference"); });
+    expect(preparePath).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Retired route").textContent).toBe("/");
   });
 
   it("admits a standalone question under its verified account", () => {

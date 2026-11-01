@@ -1,5 +1,5 @@
 import React from "react"
-import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
+import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { useStoreMessageOption } from "@/store/option"
 import { useTranslation } from "react-i18next"
@@ -63,8 +63,11 @@ const ModelPlaygroundContent: React.FC = () => {
     hasUnseenMessages
   } = useSmartScroll(messages, streaming, 120)
 
-  const handleGoToChat = () => {
-    navigate("/chat")
+  const historySelection = useHistorySelectionContext()!
+  const handleGoToChat = async () => {
+    const isCurrent = historySelection.fence()
+    const path = await historySelection.prepareExpansionPath()
+    if (path && isCurrent()) navigate(path)
   }
 
   return (
