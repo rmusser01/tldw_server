@@ -1,14 +1,18 @@
 import React from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import { ClaimsReviewShell } from "../ClaimsReviewShell"
 
 const mocks = vi.hoisted(() => ({
-  request: vi.fn(), config: { serverUrl: "http://claims.test", authMode: "single-user", apiKey: "key-a" },
+  request: vi.fn(), config: { serverUrl: "http://claims.test", authMode: "single-user" as const, apiKey: "key-a" },
   authorityLoading: false
 }))
 vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
   useCanonicalConnectionConfig: () => ({ config: mocks.config, loading: false, authorityLoading: mocks.authorityLoading })
+}))
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ready: true, ownerId: "recipe-owner:sha256:" + "a".repeat(64), unavailable: false, boundaryKey: deriveConnectionAuthorityId(mocks.config), retry: () => {} })
 }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => mocks.request(...args) }))
 const claim = (id: number) => ({ id, media_id: id + 10, claim_text: `Claim ${id}`, chunk_index: 2, span_start: 4, span_end: 12, review_status: "pending", review_version: 3 })
