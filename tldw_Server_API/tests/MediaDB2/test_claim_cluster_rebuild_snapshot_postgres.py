@@ -334,3 +334,58 @@ def test_reparenting_during_proof_never_locks_now_foreign_claim(pg_source_db, mo
         assert changed
     finally:
         other.close_connection()
+
+
+@pytest.mark.parametrize("operation", ["edit", "delete", "transfer"])
+def test_cleanup_cluster_media_claim_lock_order_blocks_actual_writers(pg_source_db, monkeypatch, operation):
+    from psycopg.errors import LockNotAvailable
+
+    db = pg_source_db
+    media, claim = seed(db)
+    cluster = db.create_claim_cluster(user_id="42", representative_claim_id=claim)
+    with scoped_context(user_id=42, is_admin=False):
+        db.add_claim_to_cluster(cluster_id=cluster["id"], claim_id=claim)
+    other = MediaDatabase(db_path=":memory:", client_id="42", backend=db.backend, existing_only=True)
+    fetch = db._fetchall_with_connection
+    row_locks = []
+
+    def record(conn, query, params=None):
+        if "FOR UPDATE" in query:
+            row_locks.append(query)
+        return fetch(conn, query, params)
+
+    def mutate():
+        with scoped_context(user_id=42, is_admin=False, team_ids=[9]):
+            with other.transaction() as connection:
+                connection.execute("SET LOCAL lock_timeout = '250ms'")
+                if operation == "transfer":
+                    connection.execute(
+                        "UPDATE media SET owner_user_id = 43, visibility = 'team', team_id = 9, "
+                        "version = version + 1 WHERE id = %s",
+                        (media,),
+                    )
+                elif operation == "edit":
+                    connection.execute("UPDATE claims SET claim_text = 'Concurrent edit' WHERE id = %s", (claim,))
+                else:
+                    connection.execute("DELETE FROM claims WHERE id = %s", (claim,))
+
+    monkeypatch.setattr(db, "_fetchall_with_connection", record)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with scoped_context(user_id=42, is_admin=False):
+                with db.transaction() as conn:
+                    assert importlib.import_module(RUNTIME).lock_claim_cluster_cleanup(
+                        db,
+                        conn,
+                        owner_user_id="42",
+                        limit=50,
+                    ) == (claim,)
+                    assert len(row_locks) == 3
+                    assert "FROM claim_clusters" in row_locks[0]
+                    assert "FROM Media" in row_locks[1]
+                    assert "FROM Claims" in row_locks[2]
+                    with pytest.raises(LockNotAvailable):
+                        pool.submit(mutate).result(timeout=5)
+        assert db.get_claim_cluster(cluster["id"])
+    finally:
+        other.close_connection()
