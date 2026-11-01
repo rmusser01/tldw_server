@@ -7,6 +7,8 @@ from collections.abc import Callable
 from threading import Lock
 from typing import Any
 
+from loguru import logger
+
 from ..contracts.execution import CrawlOutcome
 from ..crawl.models import CrawlLimits
 from ..runtime.controls import (
@@ -96,20 +98,29 @@ class CrawlContext:
                 return
             self._cancelled = True
             handles = tuple(self._handles.values())
-            self._handles.clear()
+        self._cancel_handles(handles)
+
+    @staticmethod
+    def _cancel_handles(handles: tuple[WorkHandle[Any], ...]) -> None:
+        """Finish cancellation fan-out without leaking or raising secondary failures."""
+        failures = 0
         for handle in handles:
-            handle.cancel()
+            try:
+                handle.cancel()
+            except (Exception, asyncio.CancelledError):  # noqa: BLE001 - owned callbacks must not abort fan-out
+                failures += 1
+        if failures:
+            logger.warning("crawl_cancel_callback_failed count={}", failures)
 
     def attach(self, handle: WorkHandle[Any]) -> None:
         """Register owned work, or cancel it if cancellation already won the race."""
         with self._lock:
             cancelled = self._cancelled
-            if not cancelled:
-                # Prune only physically drained ownership, not logical completion.
-                self._handles = {key: item for key, item in self._handles.items() if not item.drained.done()}
-                self._handles[id(handle)] = handle
+            # Cancellation requests are not physical drain, including late attaches.
+            self._handles = {key: item for key, item in self._handles.items() if not item.drained.done()}
+            self._handles[id(handle)] = handle
         if cancelled:
-            handle.cancel()
+            self._cancel_handles((handle,))
 
     def snapshot(self) -> BudgetSnapshot:
         """Return an immutable known-accounting snapshot without suppressing cleanup."""

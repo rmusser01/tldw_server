@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..contracts.requests import CrawlRequest
-from .models import CrawlLimits, CrawlPlan
+from .models import CrawlLimits, CrawlPlan, _freeze_option
 
 _CONFIG_OPTIONS = {
     "include_external": ("web_crawl_include_external", False),
@@ -57,6 +57,7 @@ def resolve_crawl_plan(
         for name, (key, default) in _CONFIG_OPTIONS.items():
             values[name] = config.get(key, default)
             sources[name] = "config" if key in config else "default"
+        values["crawl_strategy"] = _freeze_option("crawl_strategy", values["crawl_strategy"])
         values["include_external"] = bool(values["include_external"])
         try:
             values["score_threshold"] = float(values["score_threshold"])
@@ -75,6 +76,8 @@ def resolve_crawl_plan(
             continue
         if name not in values and name not in {"level"}:
             continue
+        if name == "crawl_strategy":
+            value = _freeze_option(name, value)
         if enhanced and recursive and name in {"include_external", "score_threshold", "crawl_strategy"}:
             if value is None or (name == "crawl_strategy" and not value):
                 sources[name] = "supplied:" + sources[name]
