@@ -77,11 +77,13 @@ def ensure_resource_schema(conn: sqlite3.Connection) -> None:
                 "BEGIN SELECT RAISE(ABORT,'invalid resource binding'); END"
             )
         changed = " OR ".join(f"OLD.{name} IS NOT NEW.{name}" for name in RESOURCE_METADATA_FIELDS)
+        # Payload semantic equality belongs to the validated/decrypting replacement boundary.
         identity_changed = " OR ".join(
-            f"OLD.{name} IS NOT NEW.{name}" for name in ("domain", "owner_user_id", "uuid", "job_type", "payload")
+            f"OLD.{name} IS NOT NEW.{name}" for name in ("domain", "owner_user_id", "uuid", "job_type")
         )
+        conn.execute(f"DROP TRIGGER IF EXISTS trg_{table}_resource_immutable")
         conn.execute(
-            f"CREATE TRIGGER IF NOT EXISTS trg_{table}_resource_immutable BEFORE UPDATE ON {table} "
+            f"CREATE TRIGGER trg_{table}_resource_immutable BEFORE UPDATE ON {table} "
             f"WHEN ({changed}) OR (OLD.resource IS NOT NULL AND ({identity_changed})) "
             "BEGIN SELECT RAISE(ABORT,'resource binding is immutable'); END"
         )

@@ -41,6 +41,7 @@ def ensure_resource_schema(cur: Any) -> None:
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_job_resource_request_receipts_expiry ON job_resource_request_receipts(expires_at)"
     )
+    # Payload semantic equality belongs to the validated/decrypting replacement boundary.
     cur.execute("""
         CREATE OR REPLACE FUNCTION jobs_resource_binding_immutable() RETURNS trigger AS $$
         BEGIN
@@ -50,9 +51,9 @@ def ensure_resource_schema(cur: Any) -> None:
              ROW(NEW.resource, NEW.resource_authority_uuid, NEW.resource_generation,
                  NEW.resource_settings_json, NEW.resource_settings_fingerprint)
              OR (OLD.resource IS NOT NULL AND
-                 ROW(OLD.domain, OLD.owner_user_id, OLD.uuid, OLD.job_type, OLD.payload)
+                 ROW(OLD.domain, OLD.owner_user_id, OLD.uuid, OLD.job_type)
                  IS DISTINCT FROM
-                 ROW(NEW.domain, NEW.owner_user_id, NEW.uuid, NEW.job_type, NEW.payload)) THEN
+                 ROW(NEW.domain, NEW.owner_user_id, NEW.uuid, NEW.job_type)) THEN
             RAISE EXCEPTION 'resource binding is immutable' USING ERRCODE='23514';
           END IF;
           RETURN NEW;

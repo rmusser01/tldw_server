@@ -1,11 +1,15 @@
 """Resource metadata survives upgrades and rejects partial or mutable bindings."""
 
+import base64
+import json
 import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.claims_cluster_rebuild_contract import validate_cluster_rebuild_payload
 from tldw_Server_API.app.core.Jobs.migrations import JOBS_SQLITE_DDL, ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+from tldw_Server_API.app.core.Security.crypto import decrypt_json_blob_with_key, encrypt_json_blob_with_key
 
 AUTHORITY = "58978735-69ad-47d1-a324-04157989d9a8"
 JOB_UUID = "a9dfb098-7959-419a-b017-7884f87eb782"
@@ -43,9 +47,9 @@ def database(request, tmp_path):
             yield conn, "%s", psycopg.IntegrityError
 
 
-def _insert_job(conn, marker, table, binding, *, job_uuid=JOB_UUID):
-    columns = "domain,owner_user_id,queue,job_type,status,uuid," + ",".join(FIELDS)
-    values = ("claims", "u1", "default", "claims_rebuild_clusters", "completed", job_uuid, *binding)
+def _insert_job(conn, marker, table, binding, *, job_uuid=JOB_UUID, payload=None, owner="u1"):
+    columns = "domain,owner_user_id,queue,job_type,status,uuid,payload," + ",".join(FIELDS)
+    values = ("claims", owner, "default", "claims_rebuild_clusters", "completed", job_uuid, payload, *binding)
     return conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({','.join([marker] * len(values))})", values)
 
 
@@ -109,7 +113,6 @@ def test_partial_binding_is_rejected(database, table, missing):
         ("domain", "other"),
         ("uuid", "42d32b39-dbed-4adc-b278-2f59496e3163"),
         ("job_type", "claims_rebuild_clusters.v2"),
-        ("payload", '{"version":2}'),
     ],
 )
 def test_admitted_binding_is_immutable(database, table, field, value):
@@ -117,6 +120,76 @@ def test_admitted_binding_is_immutable(database, table, field, value):
     _insert_job(conn, marker, table, BINDING)
     with pytest.raises(error):
         conn.execute(f"UPDATE {table} SET {field}={marker} WHERE uuid={marker}", (value, JOB_UUID))
+
+
+@pytest.mark.parametrize("table", ["jobs", "jobs_archive"])
+@pytest.mark.parametrize("representation", ["serialization", "encrypted_rotation"])
+def test_bound_payload_representation_can_be_rewritten(database, table, representation):
+    """Schema must not block Task 3's later validated/decrypting replacement boundary."""
+    conn, marker, _ = database
+    payload = {
+        "version": 1,
+        "owner_user_id": "1",
+        "method": "exact",
+        "min_size": 2,
+        "similarity_threshold": None,
+        "algorithm_version": 1,
+    }
+    if representation == "serialization":
+        original = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        replacement = json.dumps(dict(reversed(list(payload.items()))), indent=2)
+        decoded = json.loads(replacement)
+    else:
+        first_key = base64.b64encode(b"1" * 32).decode("ascii")
+        rotated_key = base64.b64encode(b"2" * 32).decode("ascii")
+        first_envelope = encrypt_json_blob_with_key(payload, first_key)
+        rotated_envelope = encrypt_json_blob_with_key(payload, rotated_key)
+        assert first_envelope is not None and rotated_envelope is not None
+        assert decrypt_json_blob_with_key(first_envelope, first_key) == payload
+        decoded = decrypt_json_blob_with_key(rotated_envelope, rotated_key)
+        original = json.dumps({"_encrypted": first_envelope})
+        replacement = json.dumps({"_encrypted": rotated_envelope})
+    assert original != replacement
+    assert validate_cluster_rebuild_payload(decoded) == payload
+    _insert_job(conn, marker, table, BINDING, payload=original, owner="1")
+    updated = conn.execute(f"UPDATE {table} SET payload={marker} WHERE uuid={marker}", (replacement, JOB_UUID))
+    assert updated.rowcount == 1
+    row = conn.execute(f"SELECT payload,{','.join(FIELDS)} FROM {table} WHERE uuid={marker}", (JOB_UUID,)).fetchone()
+    stored = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+    assert stored == json.loads(replacement)
+    assert tuple(row[1:]) == BINDING
+
+
+@pytest.mark.parametrize("table", ["jobs", "jobs_archive"])
+def test_sqlite_repeated_migration_refreshes_installed_payload_freezing_trigger(tmp_path, table):
+    path = ensure_jobs_tables(tmp_path / "previous-resource-trigger.db")
+    with sqlite3.connect(path) as conn:
+        _insert_job(conn, "?", table, BINDING, payload='{"version":1}')
+        conn.execute(f"DROP TRIGGER trg_{table}_resource_immutable")
+        # Model the exact prior guard, including its representation-sensitive payload comparison.
+        changed = " OR ".join(f"OLD.{field} IS NOT NEW.{field}" for field in FIELDS)
+        identity_changed = " OR ".join(
+            f"OLD.{field} IS NOT NEW.{field}" for field in ("domain", "owner_user_id", "uuid", "job_type", "payload")
+        )
+        conn.execute(
+            f"CREATE TRIGGER trg_{table}_resource_immutable BEFORE UPDATE ON {table} "
+            f"WHEN ({changed}) OR (OLD.resource IS NOT NULL AND ({identity_changed})) "
+            "BEGIN SELECT RAISE(ABORT,'resource binding is immutable'); END"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(f"UPDATE {table} SET payload='{{ \"version\": 1 }}' WHERE uuid=?", (JOB_UUID,))
+    ensure_jobs_tables(path)
+    ensure_jobs_tables(path)
+    with sqlite3.connect(path) as conn:
+        updated = conn.execute(f"UPDATE {table} SET payload='{{ \"version\": 1 }}' WHERE uuid=?", (JOB_UUID,))
+        assert updated.rowcount == 1
+        assert (
+            conn.execute(f"SELECT payload FROM {table} WHERE uuid=?", (JOB_UUID,)).fetchone()[0] == '{ "version": 1 }'
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(f"UPDATE {table} SET resource_generation=2 WHERE uuid=?", (JOB_UUID,))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(f"UPDATE {table} SET owner_user_id='u2' WHERE uuid=?", (JOB_UUID,))
 
 
 def test_resource_head_is_owner_scoped_and_generation_is_nonnegative(database):
@@ -173,7 +246,8 @@ def test_postgres_upgrade_preserves_legacy_live_and_archived_rows(jobs_pg_dsn):
 
 
 @pytest.mark.pg_jobs
-def test_postgres_resource_tables_enforce_owner_and_domain_rls(jobs_pg_dsn, monkeypatch):
+@pytest.mark.parametrize("table", ["job_resource_heads", "job_resource_request_receipts"])
+def test_postgres_resource_tables_enforce_owner_and_domain_rls(jobs_pg_dsn, monkeypatch, table):
     import psycopg
 
     from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg
@@ -191,12 +265,45 @@ def test_postgres_resource_tables_enforce_owner_and_domain_rls(jobs_pg_dsn, monk
                 (domain, owner, "c" * 64, FINGERPRINT, JOB_UUID),
             )
     with psycopg.connect(restricted, autocommit=True) as conn:
-        for table in ("job_resource_heads", "job_resource_request_receipts"):
-            assert conn.execute(f"SELECT * FROM {table}").fetchall() == []
+        assert conn.execute(f"SELECT * FROM {table}").fetchall() == []
+        if table == "job_resource_heads":
+            insert_sql = "INSERT INTO job_resource_heads VALUES (%s,%s,%s,%s,0,NULL)"
+            extra_values = (AUTHORITY,)
+            update_sql = "UPDATE job_resource_heads SET generation=1"
+            changed_field = "generation"
+            expected = 1
+        else:
+            insert_sql = "INSERT INTO job_resource_request_receipts VALUES (%s,%s,%s,%s,'{}',%s,%s,NOW())"
+            extra_values = ("c" * 64, FINGERPRINT, JOB_UUID)
+            update_sql = "UPDATE job_resource_request_receipts SET settings_json='{\"version\":1}'"
+            changed_field = "settings_json"
+            expected = '{"version":1}'
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute(insert_sql, ("claims", "u1", "missing-context", *extra_values))
         conn.execute(
             "SELECT set_config('app.owner_user_id','u1',false), set_config('app.domain_allowlist','claims',false)"
         )
-        for table in ("job_resource_heads", "job_resource_request_receipts"):
-            assert conn.execute(f"SELECT domain,owner_user_id FROM {table}").fetchall() == [("claims", "u1")]
+        assert conn.execute(f"SELECT domain,owner_user_id FROM {table}").fetchall() == [("claims", "u1")]
+        assert conn.execute(insert_sql, ("claims", "u1", "same-scope", *extra_values)).rowcount == 1
+        for domain, owner in (("claims", "u2"), ("other", "u1")):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                conn.execute(f"UPDATE {table} SET owner_user_id='u2'")
+                conn.execute(insert_sql, (domain, owner, "foreign-scope", *extra_values))
+        assert conn.execute(update_sql + " WHERE resource='same-scope'").rowcount == 1
+        assert (
+            conn.execute(f"SELECT {changed_field} FROM {table} WHERE resource='same-scope'").fetchone()[0] == expected
+        )
+        for field, value in (("owner_user_id", "u2"), ("domain", "other")):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(f"UPDATE {table} SET {field}=%s WHERE resource='same-scope'", (value,))
+        assert conn.execute(update_sql + " WHERE owner_user_id='u2'").rowcount == 0
+        assert conn.execute(update_sql + " WHERE domain='other'").rowcount == 0
+        assert conn.execute(f"DELETE FROM {table} WHERE owner_user_id='u2'").rowcount == 0
+        assert conn.execute(f"DELETE FROM {table} WHERE domain='other'").rowcount == 0
+        assert conn.execute(f"DELETE FROM {table} WHERE resource='same-scope'").rowcount == 1
+        assert conn.execute(f"SELECT domain,owner_user_id FROM {table}").fetchall() == [("claims", "u1")]
+    with psycopg.connect(jobs_pg_dsn) as admin:
+        assert admin.execute(f"SELECT domain,owner_user_id FROM {table} ORDER BY domain,owner_user_id").fetchall() == [
+            ("claims", "u1"),
+            ("claims", "u2"),
+            ("other", "u1"),
+        ]
