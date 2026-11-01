@@ -233,6 +233,10 @@ def test_membership_scope_capability_is_connection_bound_and_consumed_once(
         ("postgres", "SAVEPOINT __asyncpg_savepoint_a1__;"),
         ("postgres", "RELEASE SAVEPOINT __asyncpg_savepoint_a1__;"),
         ("postgres", "ROLLBACK TO __asyncpg_savepoint_a1__;"),
+        ("postgres", "ROLLBACK;"),
+        ("postgres", "ROLLBACK TO application_savepoint;"),
+        ("sqlite", "ROLLBACK;"),
+        ("sqlite", "ROLLBACK TO application_savepoint;"),
     ],
 )
 def test_unprotected_concrete_sql_is_returned_unchanged(
@@ -1364,3 +1368,33 @@ def test_guard_rejects_postgres_asyncpg_savepoint_commands_on_sqlite(command: st
     """A PostgreSQL driver command does not enlarge the SQLite SQL language."""
     with pytest.raises(ProfileUserWriteRejected):
         _guard_sql(f"{command} __asyncpg_savepoint_a__;", backend="sqlite", connection_identity=object(), operation="execute")
+
+
+@pytest.mark.parametrize("command", ["SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK TO"])
+@pytest.mark.parametrize("identifier", ["0", "01"])
+def test_all_driver_savepoint_commands_reject_noncanonical_identifiers(
+    command: str, identifier: str,
+) -> None:
+    """Every driver command must require the same positive canonical hex id."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            f"{command} __asyncpg_savepoint_{identifier}__;",
+            backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
+
+
+@pytest.mark.parametrize("statement", [
+    "rollback to __asyncpg_savepoint_1__;",
+    "ROLLBACK TO __ASYNCPG_SAVEPOINT_1__;",
+    'ROLLBACK TO "__asyncpg_savepoint_1__";',
+    "ROLLBACK TO SAVEPOINT __asyncpg_savepoint_1__;",
+    "ROLLBACK TO __asyncpg_savepoint_1__",
+])
+def test_driver_rollback_aliases_do_not_bypass_exact_command_check(statement: str) -> None:
+    """Parsed rollback aliases cannot bypass the closed driver command syntax."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement, backend="postgres", connection_identity=object(), operation="execute",
+        )

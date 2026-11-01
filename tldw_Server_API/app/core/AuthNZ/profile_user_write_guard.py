@@ -37,7 +37,7 @@ _POSTGRES_MEMBERSHIP_TIMESTAMP_REPAIR_SQL = {
 }
 _POSTGRES_ASYNCPG_SAVEPOINT_COMMAND_RE = re.compile(
     r"(?:SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO) "
-    r"__asyncpg_savepoint_[0-9a-f]+__;",
+    r"__asyncpg_savepoint_[1-9a-f][0-9a-f]*__;",
     re.ASCII,
 )
 _PROFILE_USER_DOMAIN = "profile_users"
@@ -620,17 +620,13 @@ def _active_capability_count() -> int:
 
 @lru_cache(maxsize=4096)
 def _classify_sql(query: str, backend: str) -> _SqlClassification:
-    # sqlglot cannot parse the driver's exact nested-transaction commands.
-    if backend == "postgres" and re.fullmatch(
-        r"(?:SAVEPOINT|RELEASE SAVEPOINT) __asyncpg_savepoint_[1-9a-f][0-9a-f]*__;", query,
-    ):
-        return _SqlClassification(False, "trusted_savepoint", ())
     normalized_command = " ".join(query.strip().rstrip(";").split()).casefold()
     if backend == "postgres" and query.isascii() and normalized_command in {
         "create extension if not exists pgcrypto",
         'create extension if not exists "uuid-ossp"',
     }:
         return _SqlClassification(False, "trusted_extension_bootstrap", ())
+    # sqlglot cannot parse the driver's exact nested-transaction commands.
     if (
         backend == "postgres"
         and _POSTGRES_ASYNCPG_SAVEPOINT_COMMAND_RE.fullmatch(query)
@@ -668,6 +664,10 @@ def _classify_sql(query: str, backend: str) -> _SqlClassification:
         _SUPPORTED_STATEMENT_ROOTS,
     ):
         raise ProfileUserWriteRejected()
+    if isinstance(statement, exp.Rollback):
+        savepoint = statement.args.get("savepoint")
+        if savepoint is not None and savepoint.name.casefold().startswith("__asyncpg_savepoint_"):
+            raise ProfileUserWriteRejected()
     if (
         isinstance(statement, exp.Create)
         and statement.args.get("kind") in _REJECTED_CREATE_KINDS

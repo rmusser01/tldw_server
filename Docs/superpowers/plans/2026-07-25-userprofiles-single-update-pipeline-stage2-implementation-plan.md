@@ -881,6 +881,36 @@ Previous combined Docs/Privileges/CI/ratchets (724 passed, four host Bash 3 lice
 
 All seven required gates succeeded for old head `3fc99cd1a1`, but none qualify the new head. Fully paginated feedback is unchanged: all four threads resolved, no changes-requested review. Qodo remains explicitly billing-blocked after the single manual trigger; do not repeat triggers, change billing/settings, purchase credits or waive review. Its last completed report is for `47a262cae6`, not this head. The historical optional Redis/offline-harness shard failure and its aggregate retain their failed status and existing evidence without repeated diagnosis. TASK-13001.2 stays In Progress until verified merge; WP3 remains untouched.
 
+### November 1 Current-Dev Integration
+
+## Stage 1: Rebase and Preserve Upstream Contracts
+**Goal**: Rebase WP2 onto pinned authoritative dev `54b321dcec` without restoring superseded quota or exception ownership.
+**Success Criteria**: Preserve the unchanged membership writer/repository/tenant implementation, retain new registration quota and asynchronous hashing tests, and avoid the central/AuthNZ exception import cycle.
+**Tests**: Rebase conflict review, runtime upstream-delta comparison, both exception import orders, foundation identity and rollback tests.
+**Status**: Complete
+
+The pre-rebase head is preserved on `codex/userprofiles-wp2-pre-nov1-rebase`. Registration tests retain both upstream and WP2 cases. AuthNZ base errors remain centrally owned; `RollbackSignal` now joins them with an identity-preserving AuthNZ re-export. Existing managed transaction handlers and private scope-deletion retry share that class. API generation follows dev's shared `apps/packages/api-types` package rather than the retired frontend-local artifact. The scope-predicate baseline changes only the existing registration predicate's line number. ADR060 remains governing; this integration introduces no new architecture rule or WP3 behavior.
+
+## Stage 2: Requalify the Combined Code
+**Goal**: Verify WP2 against the newer persistence, quota, and foundation contracts.
+**Success Criteria**: Focused and broader backend regressions, official PostgreSQL fixtures, API comparison, lint/compilation, baseline Bandit and independent integration review pass without weakened assertions or exemptions.
+**Tests**: UserProfiles/writer/registration/tenant/SQLite/PostgreSQL suites, exception/foundation regressions, touched Python Ruff/compileall/Bandit, structural boundary and scope ratchets, canonical API export and independent runtime integration review.
+**Status**: Complete
+
+The initial 825-test run exposed four failures: two upstream fixture adapters lacked required membership context and two guard cases bypassed dev's positive canonical savepoint identifier restriction. All were reproduced and corrected. Six added driver-command negatives first failed, then an additional uppercase rollback alias exposed the SQL parser fallback; the final guard uses one strict driver pattern and rejects noncanonical parsed rollbacks in the reserved driver namespace. Four ordinary application rollback positives remain supported. Final guard/managed-boundary/exception gate: 241 passed. Final broader UserProfiles/writer/guard/invite gate: 777 passed with 63 structural tests intentionally selected separately; the initial run passed 62 structural cases and the corrected direct-context case passed its scoped pytest rerun. No structural exemption or assertion was removed.
+
+Additional fresh gates: 124 focused writer/registration/tenant/foundation tests, 44 exception/rollback tests, 52 official live PostgreSQL tests, 67 SQLite/federation tests, 253 Docs/task-format/scope/foundation tests, 17 quota-writer tests, three PostgreSQL billing-source tests, and two native storage recovery cases passed. The three upstream fixture adapters retain their original quota, billing, lease and accounting assertions. Ruff and compileall passed for all PR-touched Python files; the scope-predicate baseline is exact. Runtime Bandit matches the pinned dev baseline's 20 findings (19 low, one medium), with zero new findings or scan errors. The fixed-interpreter import-order subprocess has an explicit B603 justification; only pre-existing subprocess findings and pytest assertions remain in that test scope.
+
+Python 3.12 reproduced dev's `69f4ca8a2db0` API fingerprint. The regenerated shared-package fingerprint is `f76f17d0de73`, with 2140 paths and 3316 schemas; the only schema delta is the approved owner-only tenant role. The committed path union is unchanged and rich frontend types were regenerated. Independent bounded runtime and correction reviews found no actionable issues. The membership writer, org/team repository and tenant service are byte-identical to the pre-rebase reviewed head. WP3 remains untouched.
+
+## Stage 3: Publish and Gated Merge
+**Goal**: Push with an exact old-head lease and merge only after current-head review and required checks qualify the new head.
+**Success Criteria**: Human Change summary remains verbatim, current `dev` ancestry is verified, all current required checks pass, and expected-head merge/readback plus Backlog finalization complete.
+**Tests**: Authoritative remote refs, paginated reviews/comments/threads, exact-head CI and merged-state readback.
+**Status**: In Progress
+
+Qodo's latest available response is the explicit workspace-credit block; a new current-head report is still required. Do not repeat the already-blocked manual trigger, change billing/settings, waive review, or merge without the requested review. All prior required statuses qualify only the previous head, not this rebase. Current dev rules require eight checks, including `E2E Critical (Tier 1 + Journeys)` and the trusted license status; verify all current rules at merge time rather than relying on the older seven-check list.
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
