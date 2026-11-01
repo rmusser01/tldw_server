@@ -2,6 +2,12 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { message, Skeleton } from "antd"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { QueryClientProvider } from "@tanstack/react-query"
+import { createQueryClient } from "@/services/query-client"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { Link } from "react-router-dom"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { testModeration } from "@/services/moderation"
@@ -50,6 +56,56 @@ const HERO_GRID_STYLE: React.CSSProperties = {
 }
 
 export const ModerationPlaygroundShell: React.FC = () => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig();
+  const authority = usePromptLocalAuthority();
+  const boundary = deriveConnectionAuthorityId(config);
+  if (
+    !config ||
+    authorityLoading ||
+    authority.boundaryKey !== boundary ||
+    (!authority.ready && !authority.unavailable)
+  ) {
+    return (
+      <div>
+        <p role="status">Resolving Content Rules account…</p>
+        <Link to="/settings/tldw">Open connection settings</Link>
+      </div>
+    );
+  }
+  if (!authority.ready || authority.ownerId === null) {
+    return (
+      <div role="alert">
+        <p>
+          Could not resolve the moderation account. Retry or check connection
+          settings.
+        </p>
+        <button type="button" onClick={authority.retry}>
+          Retry account
+        </button>
+        <Link to="/settings/tldw">Open connection settings</Link>
+      </div>
+    );
+  }
+  return <OwnedModerationRules key={boundary + ":" + authority.ownerId} />;
+};
+
+const OwnedModerationRules: React.FC = () => {
+  const [queryClient] = React.useState(createQueryClient);
+  React.useEffect(
+    () => () => {
+      void queryClient.cancelQueries();
+      queryClient.clear();
+    },
+    [queryClient],
+  );
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ModerationRulesWorkspace />
+    </QueryClientProvider>
+  );
+};
+
+const ModerationRulesWorkspace: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const online = useServerOnline()
   const navigate = useNavigate()
