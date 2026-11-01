@@ -397,7 +397,7 @@ history, and no removal of intentionally requested public article/raw content.
 **Goal:** Connect actual acquisition to parent controls, then build traversal/checkpoints/batches behind injected capabilities.
 **Success Criteria:** No budget bypass, lost in-flight page, orphan child, or duplicate discovery fetch.
 **Tests:** Tasks 5-8 unit/property/transport/checkpoint suites with existing Phase 3/4 regressions.
-**Status:** In Progress (Task 5 independently reviewed; Task 6 traversal integration).
+**Status:** In Progress (Tasks 5-6 independently reviewed; Task 7 safe continuation).
 
 ### Task 5: Integrate Parent Controls With Canonical Acquisition
 
@@ -611,7 +611,7 @@ or an assertion that the human selected these additional numbers.
 The cost of a wrong ruling is private interface/limit rework before adapter cutover;
 none authorizes a public signature change, new client knob or silent loss of hooks.
 
-- [ ] **Step 1: Write profile strategy and atomic frontier tests.**
+- [x] **Step 1: Write profile strategy and atomic frontier tests.**
 
 ```python
 def test_unfinished_restores_admission_order(frontier):
@@ -629,10 +629,10 @@ Add all Task 1 profile fixtures, failure inclusion, robots/sitemap policy and
 credentials, cyclic/duplicate frontiers, final/request URL distinction, scores,
 relative depth, no false completed callback, and normal page-cap versus interruption.
 Use Hypothesis for normalization/order/disposition/accounting invariants.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_frontier.py tldw_Server_API/tests/Web_Scraping/test_phase5_discovery.py tldw_Server_API/tests/Web_Scraping/test_phase5_crawl_engine.py -q`.** Expected: new engine/frontier missing.
-- [ ] **Step 3: Move coherent traversal/parsing rules behind injected acquisition; do not make lower modules call wrappers/services.** Count attempts at physical job attempts and frontier occupancy at entry admission; commit result/frontier/disposition as one state transition. Add no duplicate fetch for links.
-- [ ] **Step 4: Rerun new tests against fake direct and queued acquisition, plus Task 1 parity through the new report path.** Expected: identical successful shapes/order and explicit approved interruption differences.
-- [ ] **Step 5: Commit explicit paths and child task:** `refactor(web-scraping): extract bounded profile-aware crawl engine`.
+- [x] **Step 2: Run the three named frontier/discovery/engine suites.** Initial RED three missing-module errors; final brief suite 58 pass, all-profile focused 147 pass before independent review.
+- [x] **Step 3: Move traversal/parsing rules behind injected acquisition.** No lower owner/wrapper import or duplicate discovery fetch. New bounded normalization, private hooks/policy/seeds and actual policy-work drain follow execution rulings.
+- [x] **Step 4: Rerun direct/queued profile and interruption coverage.** Fresh review I1-I3 fixed and independently re-reviewed; final 636 covering tests pass, scoped Bandit zero findings. Historical broad 3427 pass/26 skip/two baseline arXiv failures and inventory gate remain Task 11 obligations. Sequential direct latency/concurrency implication carried to Task 8/final review, no throughput-parity claim.
+- [x] **Step 5: Commit explicit paths and child task:** `87c794be0f`, `0702dc3ee2`, `55033a803b`; TASK-15413 Done after fresh review/fix gate.
 
 ### Task 7: Implement Safe Legacy Continuation
 
@@ -662,6 +662,34 @@ Read at most limit+1 bytes before JSON parse; validate schema, bounded collectio
 finite counters/options, and binding before any URL execution. Stream JSON to a
 unique temporary file with a byte ceiling, flush, atomically replace, remove temp
 on failure; retain prior valid state. Re-admit resumed URLs with current egress.
+
+**Task 7 Execution Rulings (Controller Decisions, 2026-11-01):**
+
+- Extend private `CheckpointScope` with `root: Path | None = None` (hidden repr).
+  This is the already owner/crawl-scoped authorized directory supplied by trusted
+  composition, not a global root inferred from the candidate path. Non-local
+  `CheckpointStore.open` requires an existing authorized root; composition creates
+  that root deliberately. Canonicalize that trusted root for platform aliases,
+  then refuse descendant/checkpoint/lock/temp symlinks or escapes with the required
+  descriptor/path checks. Explicit trusted-local mode retains legacy absolute or
+  current-directory-relative paths without requiring this service root. Root and
+  trusted-local authorization mode are never loaded from checkpoint JSON or client
+  options; stored owner/namespace are binding checks only, never a grant. Memory
+  ports can keep the default None root because they do not open filesystem paths.
+- Keep store methods synchronous as specified, but engine composition may offload
+  potentially blocking filesystem operations through a narrow owned-operation
+  helper reusing existing runtime PhysicalWork/WorkHandle and crawl registration.
+  Register before dispatch, including eager task factories. Do not invent a new
+  executor or charge file I/O as pages/network/transfer. A canceled awaiter never
+  releases the writer while an actual load/write/replace/clear can still act;
+  include these handles in the existing per-crawl drain/close protocol. Separate
+  bounded logical cleanup return from physical ownership, preserve primary failure
+  and old valid state, and test held filesystem calls plus cancellation. Do not
+  silently replace the structural port with service/orchestration imports below it.
+
+These close the existing trusted-root and sync-protocol ownership gaps, without
+adding a remote resume API or changing public legacy signatures. The cost of a
+wrong ruling is private scope/helper rework before Task 9 adapter cutover.
 
 - [ ] **Step 1: Write continuation, corruption, and failure-precedence tests.**
 

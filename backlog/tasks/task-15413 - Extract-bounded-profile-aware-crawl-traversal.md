@@ -1,7 +1,7 @@
 ---
 id: TASK-15413
 title: Extract bounded profile-aware crawl traversal
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - phase5
@@ -15,9 +15,9 @@ Execute Task 6 of the approved Phase 5 plan as an independently reviewable unit.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 6 behavior and interfaces match the approved spec and plan.
-- [ ] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
-- [ ] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
+- [x] #1 Task 6 behavior and interfaces match the approved spec and plan.
+- [x] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
+- [x] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,19 +32,21 @@ Controller resolved second composition request: Task6 ruling4 adds optional lazy
 Task6 author handoff DONE_WITH_CONCERNS, implementation present; keep InProgress for controller independent gate. All regenerated rulings1-6 applied: lazy private seeds, structural real production TraversalPolicy/frozen decision, exact truthy profile counting separated from actual-data flags, full profile payload/failure/summary retention. Added orchestration/crawl.py; same-document cap/depth/result-aware discovery; all async policy before atomic commit; canonical-owned route preparation; seed continuation and derived-base guards; prompt drain/cancellation-traceback callback release. Internal submit_page now retains final failed PageData after retries; legacy add_job exception convention unchanged. Task1 fake AssertionError swallowing hardened and actual submitted/executed URLs asserted; direct/real-queue fake profile parity covered. Final focused147pass, exact brief58pass; covering3427pass/26skip/2known arXiv failures (133.16s), no deselection. Separate inventory1fail/10pass unchanged; Workspaces/httpx2 full-repo collection blocker explicitly not rerun. Final Ruff/format/compile clean, Bandit0findings0errors3380lines, diff-check clean. Meaningful author self-review and RED/GREEN fixes recorded in .superpowers/sdd/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs/task-6-report.md; detailed full logs linked there. Concern: direct acquisition sequential within preserved ten-selected-entry enhanced traversal window, no throughput-parity claim; Task8 producer work and Task9 wrapper cutover remain separate. Original reviewBASE92bc73fe37 retained, controller plan/ledger untouched/unstaged, no deps/agents/network/push. Incremental author commit87c794be0f plus final scoped commit follows.
 Task6 independent review round 1: addressing exact I1 scoped physical ownership for policy/robots and checkpoint drain; I2 preallocation Unicode-query normalization bounds; I3 ordered per-item batch/sitemap denial failures and continuation. TDD regressions first; scoped warning-visible covering gate and security checks after final edits. Remains In Progress pending independent gate. Prior reviewed HEAD 0702dc3ee2; original review BASE 92bc73fe37 unchanged.
 Round1 author fixes complete: I1 policy/robots transport now registers a scoped PhysicalWork handle before dispatch (including eager task factories); engine cleanup retains checkpoint/private hooks through actual owner drain. I2 exact UTF-8 canonical query size admitted before urlencode/URL assembly and reused for discovery/frontier/policy seed identities. I3 independent batch/sitemap visit denials commit profile-shaped safe failures and continue in input order without enqueueing/fetching denied targets; parent cancellation/deadline/budget still win immediately. Targeted RED/GREEN evidence and meaningful author self-review appended to task-6-report.md. Final warning-visible covering command: all test_phase5_*.py plus phase4 article orchestration, job queue call-context and enhanced status/retention: 636 passed, 1284 warnings, zero failures/skips in 32.64s. Warnings categorized: 1279 existing Python3.14 event-loop-policy deprecations in conftest, two Workflows Pydantic config deprecations, one chat schema warning, one Starlette httpx deprecation, one existing pytest plugins config warning; no filters added. Ruff/format(11 files), compileall, Bandit(0 findings/errors,1446 production LOC), diff check clean. Known arXiv/inventory/Workspaces-httpx2 gates not rerun or modified in this scoped review fix; sequential direct concurrency remains Task8/final-review observation, not a deferred I1-I3 issue. Remains In Progress pending independent review; controller plan/ledger excluded from staging. Original review BASE92bc73fe37, prior reviewed HEAD0702dc3ee2, controller ownership doc0f30e33c7b included in later fix-review range.
+Controller independent gate complete: full Task6 review found I1 unowned policy/robots physical transport, I2 over-limit Unicode query normalization temporary, I3 denied independent item drops failure/later inputs. 55033a803b fixes all; fresh scoped re-review01a19938-e6b7-77f0-973b-58d623ea067e ADDRESSED all3, no new Critical/Important/Minor breakage. Final post-fix636 covering tests pass, zero skips/failures, 1284 warnings categorized to unchanged conftest/framework/schema/config sources; Ruff/format/compile/Bandit clean. Historical fullscope3427pass26skip2arXivfail and inventory1fail10pass remain visible Task11 gates, not post-fix fullgreen. Exact originalBASE92bc73fe37 through55033a803b includes controller execution rulings and author87c794be0f/0702dc3ee2/fix. Task1 swallowed-harness and Task2 drained-handle lifetime minors resolved with actual execution/weakref drain tests. File locking/storage/migration Task7, producer/concurrency Task8, wrapper/service cutover Tasks9/10 remain unimplemented; sequential direct-acquisition latency implication explicitly carried to Task8/final review. Reports/reviews in plan-scoped SDD workspace.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Extracted bounded seven-profile discovery/frontier/engine behind structural traversal policy and canonical governed acquisition, preserving exact payload/count/filter/order semantics, same-document links, private live callbacks, known budget restoration and atomic unfinished-state continuation. Added explicit derived URL limits/counter, strict success classification separate from compatible payload retention, and per-crawl ownership of policy transport through real drain. Three Important review defects fixed and independently re-reviewed;636 final covering tests, zero touched security findings. Later file/producer/cutover work and existing certification gates remain explicit.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
