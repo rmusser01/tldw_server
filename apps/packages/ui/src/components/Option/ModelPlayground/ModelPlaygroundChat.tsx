@@ -391,6 +391,7 @@ export const ModelPlaygroundChat: React.FC = () => {
           <div className="flex items-center gap-2">
             <Switch
               size="small"
+              aria-label={t("playground:workspace.compareMode", "Compare Mode")}
               checked={compareMode}
               onChange={handleCompareToggle}
             />
@@ -406,6 +407,7 @@ export const ModelPlaygroundChat: React.FC = () => {
               value={selectedModel}
               onChange={setSelectedModel}
               options={modelOptions}
+              aria-label={t("playground:composer.selectModel", "Select model")}
               placeholder={t("playground:composer.selectModel", "Select model")}
               className="w-52"
               size="small"
@@ -427,6 +429,11 @@ export const ModelPlaygroundChat: React.FC = () => {
                   <span className="max-w-24 truncate">{getModelLabel(modelId)}</span>
                   <button
                     type="button"
+                    aria-label={t(
+                      "common:documentCard.removeAria",
+                      `Remove ${getModelLabel(modelId)}`,
+                      { name: getModelLabel(modelId) }
+                    )}
                     onClick={() => handleRemoveCompareModel(modelId)}
                     className="ml-0.5 rounded p-0.5 hover:bg-primary/20"
                   >
@@ -435,6 +442,7 @@ export const ModelPlaygroundChat: React.FC = () => {
                 </div>
               ))}
               <Select
+                aria-label={t("playground:workspace.addModel", "Add model")}
                 value={null}
                 onChange={(value) => value && handleAddCompareModel(value)}
                 options={modelOptions.filter(
@@ -458,6 +466,7 @@ export const ModelPlaygroundChat: React.FC = () => {
             <Tooltip title={t("playground:workspace.clearChat", "Clear chat")}>
               <button
                 type="button"
+                aria-label={t("playground:workspace.clearChat", "Clear chat")}
                 onClick={clearChat}
                 disabled={messages.length === 0}
                 className="rounded-lg p-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text disabled:opacity-50"
@@ -489,6 +498,7 @@ export const ModelPlaygroundChat: React.FC = () => {
             <Tooltip title={t("common:stop", "Stop")}>
               <button
                 type="button"
+                aria-label={t("common:stop", "Stop")}
                 onClick={stopStreamingRequest}
                 className="rounded-xl bg-danger p-3 text-white transition hover:bg-danger/90"
               >
@@ -499,6 +509,7 @@ export const ModelPlaygroundChat: React.FC = () => {
             <Tooltip title={t("common:send", "Send")}>
               <button
                 type="button"
+                aria-label={t("common:send", "Send")}
                 onClick={handleSend}
               disabled={!message.trim() || isProcessing || !canSend}
               className="rounded-xl bg-primary p-3 text-white transition hover:bg-primaryStrong disabled:opacity-50 disabled:cursor-not-allowed"
