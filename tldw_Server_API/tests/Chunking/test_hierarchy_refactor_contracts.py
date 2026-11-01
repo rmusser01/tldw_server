@@ -8,7 +8,7 @@ import inspect
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, get_type_hints
 
 import pytest
 from loguru import logger
@@ -134,21 +134,46 @@ def _capture_log_records(call: Any) -> list[Record]:
 
 
 def test_public_hierarchy_signatures_are_stable() -> None:
-    assert str(inspect.signature(Chunker.chunk_text_hierarchical_tree)) == (
-        "(self, text: str, method: str | None = None, max_size: int | None = None, "
-        "overlap: int | None = None, language: str | None = None, "
-        "template: dict[str, Any] | None = None, "
-        "method_options: dict[str, Any] | None = None) -> dict[str, typing.Any]"
+    parameter = inspect.Parameter
+    positional = parameter.POSITIONAL_OR_KEYWORD
+    chunk_parameters = [
+        parameter("self", positional),
+        parameter("text", positional, annotation=str),
+        parameter("method", positional, default=None, annotation=str | None),
+        parameter("max_size", positional, default=None, annotation=int | None),
+        parameter("overlap", positional, default=None, annotation=int | None),
+        parameter("language", positional, default=None, annotation=str | None),
+        parameter("template", positional, default=None, annotation=dict[str, Any] | None),
+        parameter("method_options", positional, default=None, annotation=dict[str, Any] | None),
+    ]
+    expected_signatures = (
+        (
+            Chunker.chunk_text_hierarchical_tree,
+            inspect.Signature(chunk_parameters, return_annotation=dict[str, Any]),
+        ),
+        (
+            Chunker.flatten_hierarchical,
+            inspect.Signature(
+                [parameter("self", positional), parameter("tree", positional, annotation=dict[str, Any])],
+                return_annotation=list[dict[str, Any]],
+            ),
+        ),
+        (
+            Chunker.chunk_text_hierarchical_flat,
+            inspect.Signature(chunk_parameters, return_annotation=list[dict[str, Any]]),
+        ),
     )
-    assert str(inspect.signature(Chunker.flatten_hierarchical)) == (
-        "(self, tree: dict[str, typing.Any]) -> list[dict[str, typing.Any]]"
-    )
-    assert str(inspect.signature(Chunker.chunk_text_hierarchical_flat)) == (
-        "(self, text: str, method: str | None = None, max_size: int | None = None, "
-        "overlap: int | None = None, language: str | None = None, "
-        "template: dict[str, Any] | None = None, "
-        "method_options: dict[str, Any] | None = None) -> list[dict[str, typing.Any]]"
-    )
+    for method, expected in expected_signatures:
+        annotations = get_type_hints(method)
+        actual = inspect.signature(method)
+        resolved = actual.replace(
+            parameters=[
+                value.replace(annotation=annotations.get(name, parameter.empty))
+                for name, value in actual.parameters.items()
+            ],
+            return_annotation=annotations["return"],
+        )
+        assert resolved == expected
 
 
 def test_hierarchy_models_are_passive_and_frozen() -> None:
@@ -274,8 +299,8 @@ def test_hierarchical_modules_do_not_import_outer_owners() -> None:
 def test_hierarchical_lower_layers_do_not_import_upper_layers() -> None:
     for module_name in ("leaves.py", "grouping.py"):
         module_path = _HIERARCHICAL_PACKAGE / module_name
-        if module_path.exists():
-            _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_LOWER_LAYER_IMPORTS)
+        assert module_path.is_file(), f"Required hierarchy module is missing: {module_name}"
+        _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_LOWER_LAYER_IMPORTS)
 
 
 @pytest.mark.parametrize(
@@ -460,7 +485,7 @@ def test_sanitize_output_truthiness_is_evaluated_before_method_resolution(
 
     monkeypatch.setattr(chunker, "_resolve_method", fake_resolve_method)
 
-    chunker.chunk_text_hierarchical_tree(
+    tree = chunker.chunk_text_hierarchical_tree(
         "raw",
         method="structure_aware",
         max_size=10,
@@ -469,6 +494,10 @@ def test_sanitize_output_truthiness_is_evaluated_before_method_resolution(
     )
 
     assert events == ["truthiness", "resolve"]
+    chunks = tree["root"]["children"][0]["children"][0]["chunks"]
+    assert [
+        (chunk["text"], chunk["metadata"]["start_offset"], chunk["metadata"]["end_offset"]) for chunk in chunks
+    ] == [("SAN", 0, 3)]
 
 
 def test_hierarchy_tree_uses_call_time_leaf_builder_with_resolved_call_data(
@@ -605,9 +634,13 @@ def test_metadata_failure_calls_plain_fallback_once(
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_metadata)
     monkeypatch.setattr(chunker, "chunk_text", fake_plain)
 
-    chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10)
+    tree = chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10)
 
     assert trace == ["metadata", "plain"]
+    chunks = tree["root"]["children"][0]["children"][0]["chunks"]
+    assert [
+        (chunk["text"], chunk["metadata"]["start_offset"], chunk["metadata"]["end_offset"]) for chunk in chunks
+    ] == [("raw", 0, 3)]
 
 
 @pytest.mark.parametrize("method", ["words", "sentences", "tokens"])
@@ -643,17 +676,18 @@ def test_outer_fallback_retries_plain_call_once(
 
 
 @pytest.mark.parametrize(
-    ("method", "expected_trace"),
+    ("method", "expected_trace", "expected_offsets"),
     [
-        ("semantic", ["plain"]),
-        ("fixed", ["plain"]),
-        ("structure_aware", []),
+        ("semantic", ["plain"], (None, None)),
+        ("fixed", ["plain"], (0, 3)),
+        ("structure_aware", [], (0, 3)),
     ],
 )
 def test_non_metadata_leaf_call_traces(
     monkeypatch: pytest.MonkeyPatch,
     method: str,
     expected_trace: list[str],
+    expected_offsets: tuple[int | None, int | None],
 ) -> None:
     chunker = Chunker()
     trace: list[str] = []
@@ -670,9 +704,13 @@ def test_non_metadata_leaf_call_traces(
     monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_metadata)
     monkeypatch.setattr(chunker, "chunk_text", fake_plain)
 
-    chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10)
+    tree = chunker.chunk_text_hierarchical_tree("raw", method=method, max_size=10)
 
     assert trace == expected_trace
+    chunks = tree["root"]["children"][0]["children"][0]["chunks"]
+    assert [
+        (chunk["text"], chunk["metadata"]["start_offset"], chunk["metadata"]["end_offset"]) for chunk in chunks
+    ] == [("raw", *expected_offsets)]
 
 
 @pytest.mark.parametrize("method", ["words", "fixed", "semantic"])

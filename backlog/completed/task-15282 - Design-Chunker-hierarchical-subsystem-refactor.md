@@ -14,14 +14,14 @@ references:
 - Docs/superpowers/specs/2026-06-24-chunker-process-text-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-chunker-process-text-refactor.md
 - https://github.com/rmusser01/tldw_server/pull/2517
-- TASK-13113
+- TASK-15283
 documentation:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 modified_files:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
-- backlog/tasks/task-13112 - Design-Chunker-hierarchical-subsystem-refactor.md
-- backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md
-updated_date: 2026-08-25 05:32
+- backlog/completed/task-15282 - Design-Chunker-hierarchical-subsystem-refactor.md
+- backlog/archive/tasks/task-15283 - Implement-Chunker-hierarchical-subsystem-refactor.md
+updated_date: 2026-11-01 09:25
 ---
 
 ## Description

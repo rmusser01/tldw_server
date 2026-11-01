@@ -83,7 +83,24 @@ changed. The isolated branch rebased without conflicts, preserving all 13
 workstream commits and leaving the main checkout untouched. The expanded
 ten-file characterization suite passed with 210 passed, 1 existing PyThaiNLP
 skip, 0 failures, and 435 warnings in 3.91 seconds. This is the current pinned
-implementation baseline; the earlier reconciliation records remain provenance.
+implementation baseline before Task 5; the later reconciliations below are
+authoritative for subsequent verification. Earlier records remain provenance.
+
+Baseline reconciliation on 2026-10-04: the diagnostic correction was reproduced
+against pre-refactor `origin/dev`
+`c95e41fc62a07e55fd74052023826c71b2a2c789` after a conflict-free rebase. The
+intervening hierarchy/process-text source and tests were unchanged. The exact
+baseline method had three missing-warning failures and four passing control
+cases; fallback span assertions already passed. This is the reconciled baseline
+for the separately approved diagnostic correction, not the earlier Task 5 hash.
+
+Baseline reconciliation on 2026-11-01: the current pinned base is
+`54b321dcec8cdbb6358581f42c1548696260570b`. Rebase preserved hierarchy and
+process-text source/test contracts; intervening changes affect only unrelated
+strategy/provider lookups and their tests. Fresh complete Chunking verification
+passed 796 tests with one established PyThaiNLP skip. The approved diagnostic
+baseline and its RED evidence remain historical proof, not an assertion that
+the later refactored implementation is unmodified baseline code.
 
 ## Goals
 
@@ -96,8 +113,11 @@ implementation baseline; the earlier reconciliation records remain provenance.
   metadata, offsets, grouping semantics, logging, and fallback behavior.
 - Share paragraph-span detection directly between hierarchy construction and
   multi-level `process_text` dispatch.
-- Preserve public override and monkeypatch seams while deliberately removing two
-  hierarchy-only private seams.
+- Preserve public override and monkeypatch seams except the two deliberately
+  removed private methods: `Chunker._extract_header_title` and the shared
+  `Chunker._compute_paragraph_spans` / `ProcessTextContext` seam. Multi-level
+  `process_text` now imports the shared span function directly; removal of its
+  former instance monkeypatch seam is an explicit architectural decision.
 - Make hierarchy components independently testable without importing `Chunker`.
 - Permit only reproduced, local correctness fixes that satisfy the correction
   gate.

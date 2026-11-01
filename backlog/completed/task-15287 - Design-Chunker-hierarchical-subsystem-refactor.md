@@ -9,13 +9,13 @@ labels:
 - refactor
 priority: high
 references:
-- backlog/completed/task-13421 - Design-Chunker-hierarchical-subsystem-refactor.md
-- backlog/completed/task-13112 - Design-Chunker-hierarchical-subsystem-refactor.md
+- backlog/completed/task-15285 - Design-Chunker-hierarchical-subsystem-refactor.md
+- backlog/completed/task-15282 - Design-Chunker-hierarchical-subsystem-refactor.md
 - https://github.com/rmusser01/tldw_server/pull/3095
 documentation:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
-updated_date: 2026-10-04 19:08
+updated_date: 2026-11-01 09:25
 ---
 
 ## Description

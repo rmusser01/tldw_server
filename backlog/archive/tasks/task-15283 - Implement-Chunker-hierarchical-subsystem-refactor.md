@@ -4,27 +4,27 @@ title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 created_date: 2026-08-24 07:10
 dependencies:
-- TASK-13112
+- TASK-15282
 labels:
 - chunking
 - refactor
 - implementation
 priority: High
 references:
-- TASK-13112
+- TASK-15282
 documentation:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
 modified_files:
 - Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md
 - Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md
-- backlog/tasks/task-13113 - Implement-Chunker-hierarchical-subsystem-refactor.md
+- backlog/archive/tasks/task-15283 - Implement-Chunker-hierarchical-subsystem-refactor.md
 - tldw_Server_API/app/core/Chunking/chunker.py
 - tldw_Server_API/app/core/Chunking/process_text/models.py
 - tldw_Server_API/app/core/Chunking/process_text/dispatch.py
 - tldw_Server_API/app/core/Chunking/hierarchical/
 - tldw_Server_API/tests/Chunking/
-updated_date: 2026-08-25 05:47
+updated_date: 2026-11-01 09:25
 ---
 
 ## Description
