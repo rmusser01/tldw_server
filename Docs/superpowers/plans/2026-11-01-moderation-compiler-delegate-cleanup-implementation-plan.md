@@ -81,7 +81,7 @@ def test_service_omits_unused_compiler_delegate(name: str) -> None:
 **Goal:** Demonstrate unchanged supported behavior and obtain independent review.
 **Success Criteria:** The regression matrix and quality gates pass with no new findings; review issues are resolved.
 **Tests:** Complete matrix below.
-**Status:** In Progress
+**Status:** Complete
 
 **Files:** Only task records and this plan for status/results, unless review identifies an in-scope correction.
 **Interfaces:** Deliver a reviewed local branch; no PR creation or merge is implied.
@@ -98,9 +98,9 @@ python -m pytest tldw_Server_API/tests/Audio/test_audio_transcription_retention_
 
 - [x] Run Ruff on touched Python files. Run Black on the new surface test; format only newly edited test functions elsewhere to avoid whole-file churn. Compare any existing formatter/lint failures against the baseline rather than hiding them.
 - [x] Run Bandit on touched production and test paths, recording JSON under `/tmp`; exclude expected test-assert B101 only for test scans. Compare existing findings to baseline and fix any new in-scope findings. Run `git diff --check` and inspect `git diff origin/dev...HEAD` for scope.
-- [ ] Have fresh subagents review spec compliance and code quality for each implementation task, then obtain a fresh whole-branch review, following the selected subagent-driven workflow. Review must specifically check preservation of warning-log coverage, active dispatch, canonical imports, and compiler issue semantics.
-- [ ] Fix verified in-scope findings and rerun affected checks. Record commands/counts, residual private-call compatibility risk, and review outcomes in the implementation task; update stage statuses and commit only the related records.
-- [ ] Report local branch readiness. A future AI-authored PR still requires the human-written Change summary; do not reuse the previous PR's summary for this different change.
+- [x] Have fresh subagents review spec compliance and code quality for each implementation task, then obtain a fresh whole-branch review, following the selected subagent-driven workflow. Review must specifically check preservation of warning-log coverage, active dispatch, canonical imports, and compiler issue semantics.
+- [x] Fix verified in-scope findings and rerun affected checks. Record commands/counts, residual private-call compatibility risk, and review outcomes in the implementation task; update stage statuses and commit only the related records.
+- [x] Report local branch readiness. A future AI-authored PR still requires the human-written Change summary; do not reuse the previous PR's summary for this different change.
 
 ## Plan Self-Review
 
