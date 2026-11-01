@@ -128,13 +128,13 @@ def test_explicit_seed_cannot_resolve_against_an_oversized_request_base(monkeypa
         plan(), request=CrawlRequest("https://example.com/" + "x" * 50), limits=CrawlLimits(max_url_bytes=40)
     )
     calls = []
-    original = module.normalize_for_crawl
+    original = module.normalize_reference
 
-    def normalize(url, base):
+    def normalize(url, base, plan):
         calls.append(base)
-        return original(url, base)
+        return original(url, base, plan)
 
-    monkeypatch.setattr(module, "normalize_for_crawl", normalize)
+    monkeypatch.setattr(module, "normalize_reference", normalize)
     frontier = Frontier(resolved)
     with pytest.raises(ParentStop, match="budget_exhausted"):
         frontier.admit(entry("https://e.test/x"))
@@ -151,3 +151,29 @@ def test_legacy_url_level_uses_existing_set_pop_traversal(numbers):
         pending.add(url)
     expected = [pending.pop() for _ in numbers]
     assert [frontier.take().url for _ in numbers] == expected
+
+
+@pytest.mark.parametrize("allowance", [48, 49])
+def test_seed_identity_admits_unicode_query_before_normalized_allocation(monkeypatch, allowance):
+    from tldw_Server_API.app.core.Web_Scraping import url_utils
+
+    original, encoded = url_utils.urlencode, []
+
+    def encode(*args, **kwargs):
+        encoded.append(True)
+        assert allowance == 49, "over-limit seed identity reached allocating urlencode"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(url_utils, "urlencode", encode)
+    frontier = Frontier(
+        replace(plan(), request=CrawlRequest("https://e.test/a"), limits=CrawlLimits(max_url_bytes=allowance))
+    )
+    seed = entry("https://e.test/x?q=" + "\u00e9" * 5)
+    if allowance == 48:
+        with pytest.raises(ParentStop, match="budget_exhausted"):
+            frontier.admit(seed)
+        assert frontier.snapshot().queued == () and not encoded
+    else:
+        assert frontier.admit(seed)
+        assert not frontier.admit(entry("https://e.test/x?q=" + "%C3%A9" * 5, 1))
+        assert encoded

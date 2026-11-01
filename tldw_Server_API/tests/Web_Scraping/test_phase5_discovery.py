@@ -150,3 +150,42 @@ def test_normalization_keeps_encounter_order_and_accounting(numbers):
     result, usage = run(document)
     assert [link.url for link in result.links] == [f"https://example.com/p/{number}" for number in numbers]
     assert usage.discovered_candidates == len(numbers)
+
+
+@pytest.mark.parametrize("allowance", [48, 49])
+def test_unicode_query_normalization_is_admitted_before_percent_encoding(monkeypatch, allowance):
+    from tldw_Server_API.app.core.Web_Scraping import url_utils
+
+    encoded = []
+    original = url_utils.urlencode
+
+    def encode(*args, **kwargs):
+        encoded.append(True)
+        assert allowance == 49, "over-limit query reached allocating urlencode"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(url_utils, "urlencode", encode)
+    kwargs = {
+        "request": "https://e.test/a",
+        "final": "https://e.test/a",
+        "limits": CrawlLimits(max_url_bytes=allowance),
+    }
+    if allowance == 48:
+        with pytest.raises(ParentStop, match="budget_exhausted"):
+            run('<a href="/x?q=' + "\u00e9" * 5 + '">x</a>', **kwargs)
+        assert not encoded
+    else:
+        result, _ = run('<a href="/x?q=' + "\u00e9" * 5 + '">x</a>', **kwargs)
+        assert result.links[0].url == "https://e.test/x?q=" + "%C3%A9" * 5
+        assert len(result.links[0].url.encode()) == allowance
+        assert encoded
+
+
+@given(st.text(alphabet="az09%&=+ /~\u00e9\u0130\u2603\U0001f600", max_size=24))
+def test_bounded_query_normalization_preserves_established_canonicalization(query):
+    from tldw_Server_API.app.core.Web_Scraping.crawl.discovery import normalize_reference
+    from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
+
+    resolved = plan()
+    value = "https://EXAMPLE.com:443/a//b/;unused?utm_source=drop&b=" + query + "&a=&q=%FF#fragment"
+    assert normalize_reference(value, BASE, resolved) == normalize_for_crawl(value, BASE)

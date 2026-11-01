@@ -6,8 +6,7 @@ from dataclasses import replace
 
 from ..contracts.execution import PageData, _safe_article
 from ..runtime.controls import ParentStop
-from ..url_utils import normalize_for_crawl
-from .discovery import url_bytes
+from .discovery import normalize_reference, url_bytes
 from .models import CrawlPlan, FrontierEntry, FrontierSnapshot
 
 
@@ -51,9 +50,7 @@ class Frontier:
             return str(entry.sequence)
         if self.plan.profile.startswith("enhanced_"):
             url_bytes(self.plan.request.base_url, self.plan)
-            normalized = normalize_for_crawl(entry.url, self.plan.request.base_url)
-            url_bytes(normalized, self.plan)
-            return entry.url if normalized == entry.url else normalized
+            return normalize_reference(entry.url, self.plan.request.base_url, self.plan)
         return entry.url
 
     def contains(self, entry: FrontierEntry) -> bool:

@@ -22,6 +22,105 @@ from tldw_Server_API.tests.Web_Scraping.test_phase5_frontier import BASE, plan
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.parametrize("phase", ["seed", "visit"])
+async def test_independent_batch_seed_or_visit_denial_commits_failure_without_acquisition(phase):
+    from tldw_Server_API.app.core.Web_Scraping.crawl.models import TraversalDecision
+
+    resolved = plan("enhanced_batch")
+    context = CrawlContext(resolved.limits, clock=lambda: 0)
+    inputs = [BASE + suffix for suffix in ("/first", "/denied", "/last")]
+    executed = []
+    failure = {"url": inputs[1], "error": "Egress denied: blocked", "extraction_successful": False}
+
+    class Policy:
+        async def evaluate(self, entry, *, phase: str):
+            if entry.url == inputs[1] and phase == denied_phase:
+                return TraversalDecision(False, metadata=failure, reason="policy_denied")
+            return TraversalDecision()
+
+    denied_phase = phase
+
+    async def acquire(entry):
+        executed.append(entry.url)
+        loop = asyncio.get_running_loop()
+        result, drained = loop.create_future(), loop.create_future()
+        result.set_result(
+            PageData(
+                {"url": entry.url, "content": "kept", "extraction_successful": True},
+                DiscoveryResult(entry.url, entry.url, ()),
+            )
+        )
+        drained.set_result(None)
+        return WorkHandle(result, drained, lambda: None)
+
+    report = await run_crawl(resolved, context=context, acquire=acquire, policy=Policy(), seeds=inputs)
+    assert [item["url"] for item in report.articles] == inputs
+    assert report.articles[1] == failure
+    assert executed == [inputs[0], inputs[2]]
+    assert report.outcome.state == "completed"
+
+
+@pytest.mark.parametrize("profile", ["enhanced_batch", "enhanced_sitemap", "legacy_sitemap"])
+@pytest.mark.parametrize("stop", ["cancelled", "deadline_exhausted", "budget_exhausted"])
+async def test_parent_stop_wins_over_independent_denial_and_never_pulls_next_item(profile, stop):
+    from tldw_Server_API.app.core.Web_Scraping.contracts.execution import DiscoveredLink
+    from tldw_Server_API.app.core.Web_Scraping.crawl.models import TraversalDecision
+
+    resolved = plan(profile)
+    now = [0]
+    context = CrawlContext(resolved.limits, clock=lambda: now[0])
+    first, denied, last = (BASE + suffix for suffix in ("/first", "/denied", "/last"))
+    executed, pulled, progress = [], [], []
+
+    def seeds():
+        for url in (first, denied, last):
+            pulled.append(url)
+            yield url
+
+    class Policy:
+        async def evaluate(self, entry, *, phase):
+            if entry.url == denied and phase == "visit":
+                if stop == "cancelled":
+                    context.cancel()
+                elif stop == "deadline_exhausted":
+                    now[0] = resolved.limits.execution_seconds
+                else:
+                    with pytest.raises(ParentStop):
+                        context.reserve("network_requests", resolved.limits.network_requests + 1)
+                return TraversalDecision(False, reason="policy_denied")
+            return TraversalDecision()
+
+    async def acquire(entry):
+        executed.append(entry.url)
+        root = profile.endswith("sitemap") and entry.parent_url is None
+        links = tuple(DiscoveredLink(url, entry.url) for url in (first, denied, last)) if root else ()
+        article = {} if root else {"url": entry.url, "content": "kept", "extraction_successful": True}
+        loop = asyncio.get_running_loop()
+        result, drained = loop.create_future(), loop.create_future()
+        result.set_result(PageData(article, DiscoveryResult(entry.url, entry.url, links)))
+        drained.set_result(None)
+        return WorkHandle(result, drained, lambda: None)
+
+    operation = run_crawl(
+        resolved,
+        context=context,
+        acquire=acquire,
+        policy=Policy(),
+        seeds=seeds() if profile == "enhanced_batch" else None,
+        hooks=CrawlHooks(on_progress=lambda snapshot: progress.append(snapshot["status"])),
+    )
+    if stop == "cancelled":
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+    else:
+        report = await operation
+        assert report.outcome.stop_reason == stop and report.outcome.has_partial_results
+        assert [item["url"] for item in report.articles] == [first]
+    assert executed == ([first] if profile == "enhanced_batch" else [BASE, first])
+    assert last not in pulled
+    assert "completed" not in progress
+
+
 class MemoryCheckpoint:
     """Trusted bound scope; storage never supplies authorization."""
 

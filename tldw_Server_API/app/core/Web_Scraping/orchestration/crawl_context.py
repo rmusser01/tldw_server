@@ -139,6 +139,12 @@ class CrawlContext:
             if current is not None and current.drained is drained:
                 self._handles.pop(key, None)
 
+    def owned_handles(self) -> tuple[WorkHandle[Any], ...]:
+        """Snapshot this crawl's physical-live work, even after logical completion."""
+        with self._lock:
+            self._handles = {key: item for key, item in self._handles.items() if not item.drained.done()}
+            return tuple(self._handles.values())
+
     def restore_budget(self, snapshot: BudgetSnapshot, *, accounting_complete: bool) -> None:
         """Restore known usage once, excluding paused checkpoint wall time."""
         counts = {name: getattr(snapshot, name) for name in COUNTERS}
