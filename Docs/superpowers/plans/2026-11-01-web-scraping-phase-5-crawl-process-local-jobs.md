@@ -395,7 +395,7 @@ history, and no removal of intentionally requested public article/raw content.
 **Goal:** Connect actual acquisition to parent controls, then build traversal/checkpoints/batches behind injected capabilities.
 **Success Criteria:** No budget bypass, lost in-flight page, orphan child, or duplicate discovery fetch.
 **Tests:** Tasks 5-8 unit/property/transport/checkpoint suites with existing Phase 3/4 regressions.
-**Status:** In Progress (Task 5 acquisition integration).
+**Status:** In Progress (Task 5 independently reviewed; Task 6 traversal integration).
 
 ### Task 5: Integrate Parent Controls With Canonical Acquisition
 
@@ -453,7 +453,7 @@ ownership through callbacks/extraction exit. External probes reserve one invocat
 cap subprocess lifetime by remaining time, read stdout/stderr incrementally under
 byte/output allowance instead of unbounded `communicate()`, and preserve cleanup.
 
-- [ ] **Step 1: Write adapter-spanning stop/byte/discovery tests.**
+- [x] **Step 1: Write adapter-spanning stop/byte/discovery tests.**
 
 ```python
 @pytest.mark.parametrize("stage", ["preflight_http", "preflight_browser", "external_tool", "http_fallback", "browser_retry"])
@@ -474,10 +474,10 @@ abort, WebSockets, active timeout, analyzer-local recoverable error versus paren
 stop, advice/attached-result parity, sync thread late completion, private identity
 propagation, and no body/sidecar retention in public history. For chunk observation,
 assert no over-budget chunk appended; do not claim zero kernel buffering overshoot.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_controlled_acquisition.py tldw_Server_API/tests/Web_Scraping/test_phase5_preflight_parent_controls.py tldw_Server_API/tests/http_client/test_crawl_stream_controls.py -q`.** Expected: missing controls/observer hooks fail.
-- [ ] **Step 3: Implement the narrow internal hooks and discovery sidecar; connect physical drain to `WorkHandle.drained`.** Deadline/cancel/budget latches survive every catch boundary. Keep the executor permit until actual thread exit and never install late results.
-- [ ] **Step 4: Run new tests plus `python -m pytest tldw_Server_API/tests/Web_Scraping/ tldw_Server_API/tests/http_client/ -q`.** Expected: pass, with explicit environment-dependent browser skips documented; no changed standalone analyzer behavior.
-- [ ] **Step 5: Commit explicit paths and child task:** `feat(web-scraping): compose crawl controls with governed acquisition`.
+- [x] **Step 2: Run the three named acquisition/preflight/shared-HTTP suites.** Initial RED 19 failures; added deterministic review regressions also reproduced before fixes.
+- [x] **Step 3: Implement narrow internal hooks/discovery sidecar and actual per-operation drain.** Fresh review I1-I3 cancellation/commit/WebSocket/cleanup defects fixed and independently re-reviewed.
+- [x] **Step 4: Run new and existing regressions.** Historical full scope 3288 passed, 26 skipped, 5 failed; three earlier-Phase5 integration failures corrected, two baseline arXiv assertions retained for Task 11. Final 773 covering tests pass; Chromium 3 pass/no skips; touched Bandit zero findings. Inventory/full-repository baseline gates remain visible, no full-scope green claim.
+- [x] **Step 5: Commit explicit paths and child task:** `e3b4515f54`, `db27425016`, `f2abedc4e1`; TASK-15412 Done after fresh review and fix gate.
 
 ### Task 6: Extract Bounded Discovery And Profile Traversal
 
