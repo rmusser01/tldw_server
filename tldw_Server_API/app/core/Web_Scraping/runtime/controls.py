@@ -12,7 +12,13 @@ from threading import Lock
 from typing import Generic, Literal, Protocol, TypeVar
 
 Counter = Literal[
-    "page_attempts", "network_requests", "browser_attempts", "active_probes", "transfer_bytes", "discovered_candidates"
+    "page_attempts",
+    "network_requests",
+    "browser_attempts",
+    "active_probes",
+    "transfer_bytes",
+    "discovered_candidates",
+    "discovered_url_bytes",
 ]
 COUNTERS: tuple[Counter, ...] = (
     "page_attempts",
@@ -21,6 +27,7 @@ COUNTERS: tuple[Counter, ...] = (
     "active_probes",
     "transfer_bytes",
     "discovered_candidates",
+    "discovered_url_bytes",
 )
 T = TypeVar("T")
 
@@ -255,3 +262,4 @@ class BudgetSnapshot:
     discovered_candidates: int
     remaining_seconds: float
     accounting_complete: bool = True
+    discovered_url_bytes: int = 0

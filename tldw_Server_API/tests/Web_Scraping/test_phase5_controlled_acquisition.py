@@ -71,6 +71,60 @@ async def test_authenticated_discovery_uses_same_document(monkeypatch):
     assert controls.snapshot().page_attempts == 1
 
 
+@pytest.mark.parametrize("successful", [False, True, "truthy"])
+async def test_success_only_discovery_uses_truthy_extraction_predicate(monkeypatch, successful):
+    harness = _harness(extract_results=[{"content": "kept", "extraction_successful": successful}])
+    seen = []
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: harness.dependencies)
+
+    def discover(document, request, final):
+        seen.append((document, request, final, harness.extract.call_count))
+        return DiscoveryResult(request, final, ())
+
+    handle = article.start_page(
+        URL,
+        None,
+        controls=CrawlContext(CrawlLimits(), clock=time.monotonic),
+        request_context=RuntimeRequestContext(),
+        discover=discover,
+        discovery_on_success=True,
+    )
+    await handle.result
+    await handle.drained
+    assert len(seen) == int(bool(successful))
+    assert all(item[3] == 1 for item in seen)
+    assert len(harness.fetch.requests) == 1
+
+
+async def test_failed_enhanced_extraction_does_not_spend_discovery_budget(monkeypatch):
+    harness = _harness(
+        fetch_outcomes=[
+            FetchResponse(url=URL, status=200, text='<a href="/child">x</a>' * 3, headers={}, backend="httpx")
+        ],
+        extract_results=[{"extraction_successful": False, "content": ""}],
+    )
+    controls = CrawlContext(CrawlLimits(discovered_candidates=1), clock=time.monotonic)
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: harness.dependencies)
+
+    def discover(document, request, final):
+        controls.reserve("discovered_candidates", 3).commit()
+        return DiscoveryResult(request, final, ())
+
+    handle = article.start_page(
+        URL,
+        None,
+        controls=controls,
+        request_context=RuntimeRequestContext(),
+        discover=discover,
+        discovery_on_success=True,
+    )
+    page = await handle.result
+    await handle.drained
+    assert not page.article["extraction_successful"]
+    assert controls.snapshot().discovered_candidates == 0
+    assert len(harness.fetch.requests) == 1
+
+
 async def test_page_attempt_exact_limit_rejects_retry(monkeypatch):
     harness = _harness()
     controls = CrawlContext(CrawlLimits(page_attempts=1), clock=time.monotonic)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable
 from threading import Lock
 from typing import Any
@@ -36,6 +37,7 @@ class CrawlContext:
         self._stop_reason: str | None = None
         self._outcome: CrawlOutcome | None = None
         self._successful_result_present = False
+        self._accounting_complete = True
         self._handles: dict[int, WorkHandle[Any]] = {}
 
     def _check_locked(self) -> None:
@@ -121,13 +123,53 @@ class CrawlContext:
             # Cancellation requests are not physical drain, including late attaches.
             self._handles = {key: item for key, item in self._handles.items() if not item.drained.done()}
             self._handles[id(handle)] = handle
+        if handle.drained.done():
+            self._release_handle(id(handle), handle.drained)
+        else:
+            # Retain ownership until the actual physical signal, then promptly
+            # drop private callbacks/credentials even when no next attach occurs.
+            key = id(handle)
+            handle.drained.add_done_callback(lambda done: self._release_handle(key, done))
         if cancelled:
             self._cancel_handles((handle,))
+
+    def _release_handle(self, key: int, drained: asyncio.Future[None]) -> None:
+        with self._lock:
+            current = self._handles.get(key)
+            if current is not None and current.drained is drained:
+                self._handles.pop(key, None)
+
+    def restore_budget(self, snapshot: BudgetSnapshot, *, accounting_complete: bool) -> None:
+        """Restore known usage once, excluding paused checkpoint wall time."""
+        counts = {name: getattr(snapshot, name) for name in COUNTERS}
+        if any(
+            type(value) is not int or value < 0 or value > getattr(self._limits, name) for name, value in counts.items()
+        ):
+            raise ValueError("checkpoint counters exceed effective crawl limits")
+        remaining = snapshot.remaining_seconds
+        if (
+            type(remaining) not in (int, float)
+            or not math.isfinite(remaining)
+            or not 0 <= remaining <= self._limits.execution_seconds
+        ):
+            raise ValueError("invalid checkpoint remaining execution time")
+        if type(accounting_complete) is not bool or type(snapshot.accounting_complete) is not bool:
+            raise ValueError("invalid accounting completeness")
+        with self._lock:
+            if any(self._counts.values()) or self._handles or self._outcome is not None or self._cancelled:
+                raise RuntimeError("cannot restore into an active crawl")
+            self._counts = counts
+            self._deadline = self._clock() + remaining
+            self._accounting_complete = accounting_complete and snapshot.accounting_complete
 
     def snapshot(self) -> BudgetSnapshot:
         """Return an immutable known-accounting snapshot without suppressing cleanup."""
         with self._lock:
-            return BudgetSnapshot(**self._counts, remaining_seconds=max(0.0, self._deadline - self._clock()))
+            return BudgetSnapshot(
+                **self._counts,
+                remaining_seconds=max(0.0, self._deadline - self._clock()),
+                accounting_complete=self._accounting_complete,
+            )
 
     def note_successful_result(self) -> None:
         """Mark successful logical commit presence, rejecting stopped/terminal work.

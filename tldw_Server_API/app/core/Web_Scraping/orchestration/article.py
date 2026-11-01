@@ -63,7 +63,7 @@ _SAFE_POLICY_FAILURE = "policy_error"
 _RESPONSE_TOO_LARGE_MESSAGE = "Response exceeds max_response_bytes limit"
 ACTIVE_EVENT_LOOP_ERROR = "Synchronous article scraping cannot run while an event loop is active in this thread"
 BLOCKING_ARTICLE_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 _ARTICLE_LOG_STAGES = frozenset(
     {
@@ -159,6 +159,7 @@ class ArticleDependencies:
     request_context: RuntimeRequestContext | None = None
     supplied_plan: ArticlePlan | None = None
     acquired: Callable[[str, str, str], None] | None = None
+    discovery_on_success: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -592,7 +593,7 @@ async def _extract(
 ) -> dict[str, Any]:
     if dependencies.parent is not None:
         dependencies.parent.check()
-    if dependencies.acquired is not None:
+    if dependencies.acquired is not None and not dependencies.discovery_on_success:
         dependencies.acquired(html, url, final_url or url)
     handler = dependencies.resolve_handler(plan.handler) if use_route_handler and plan.handler else None
     result = await dependencies.executor.run(
@@ -610,6 +611,10 @@ async def _extract(
     if not isinstance(result, Mapping):
         raise ArticleFailure("extraction_error", "result")
     copied = dict(result)
+    if dependencies.discovery_on_success and copied.get("extraction_successful") and dependencies.acquired is not None:
+        if dependencies.parent is not None:
+            dependencies.parent.check()
+        dependencies.acquired(html, url, final_url or url)
     if copied.get("extraction_successful") and handler is None and copied.get("content"):
         copied["content"] = dependencies.convert_content(str(copied["content"]))
     return copied
@@ -1214,6 +1219,7 @@ def start_page(
     discover: Callable[[str, str, str], DiscoveryResult],
     plan: ArticlePlan | None = None,
     allow_llm_extraction: bool = True,
+    discovery_on_success: bool = False,
 ) -> WorkHandle[PageData]:
     """Start one canonical page attempt with private discovery and physical drain."""
     loop = asyncio.get_running_loop()
@@ -1246,7 +1252,12 @@ def start_page(
                 parent.check()
 
             dependencies = replace(
-                dependencies, parent=parent, request_context=request_context, supplied_plan=plan, acquired=acquired
+                dependencies,
+                parent=parent,
+                request_context=request_context,
+                supplied_plan=plan,
+                acquired=acquired,
+                discovery_on_success=discovery_on_success,
             )
             timeout = preflight_facade._execution_timeout(parent.cap_timeout(None))
             try:
