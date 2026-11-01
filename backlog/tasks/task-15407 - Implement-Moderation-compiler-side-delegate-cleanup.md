@@ -1,21 +1,19 @@
 ---
-id: TASK-15403
+id: TASK-15407
 title: Implement Moderation compiler-side delegate cleanup
-status: Done
+status: In Progress
 assignee: []
-created_date: '2026-11-01 17:13'
-updated_date: '2026-11-01 17:33'
+created_date: 2026-11-01 17:13
+updated_date: 2026-11-01 17:33
 labels:
-  - moderation
-  - refactor
+- moderation
+- refactor
 dependencies:
-  - TASK-15205
+- TASK-15406
 references:
-  - >-
-    93d132a766:Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md
+- 93d132a766:Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-11-01-moderation-compiler-delegate-cleanup-design.md
+- Docs/superpowers/specs/2026-11-01-moderation-compiler-delegate-cleanup-design.md
 ---
 
 ## Description
@@ -35,7 +33,7 @@ Execute the approved five-method cleanup design and reviewed implementation plan
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Pre-edit baseline compiled service/compiler and completed 400 combined Moderation/Guardian/Chat/Audio cases plus 12 Workflow adapter cases (47 deselected); overall command exit 0. Existing baseline deprecations and background Audit Loguru closed-stream errors appeared during teardown before source changes. Production and test Bandit baselines each have zero findings/errors, with B101 excluded only for test assertions. Starting Task 1 coverage migration at 1d719a5023; controller owns tracked plan/task records.
 
 Task 1 complete at d381f01af1: only three test files changed. Three replacements passed against unchanged production, then all 67 focused cases passed with 146 existing warnings; compilation, changed-function Black checks, Ruff and Bandit passed. Fresh task reviewer approved spec compliance and code quality with no actionable issues. Controller confirmed its prerequisites (approved spec, caller audit, task tracking, 412-test baseline, zero-finding Bandit baseline) that were outside the task-only diff.
@@ -51,7 +49,11 @@ Whole-branch reviewer approved 54b321dcec..c04c163cd1: no Critical/Important/Min
 Final docstring fix 12ec36b122 was independently re-reviewed: finding addressed, no new breakage. Refreshed exact-tree validation: compilation passed; 405 combined Moderation/Guardian/Chat/Audio tests (848 warnings, 19.79s) and 12 Workflow tests (47 deselected, 36 warnings, 0.85s), total 417; Ruff, Black, Bandit production/tests and diff checks passed. Both security scans have zero findings/errors. All task and whole-branch review gates resolved. Existing warning behavior and external private-caller compatibility risk remain documented; no supported behavior changes. No PR created, push or merge. Evidence will be preserved under /tmp/moderation-compiler-delegate-cleanup-evidence.tgz before removing only this plan scratch workspace. Completed execution plan will be retired per repository instructions, with its completed commit recorded in task references.
 
 Completed plan preserved in git at 93d132a766:Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md and removed from the working tree per repo completion instructions. No source or test changes after exact-tree 417-case verification; evidence archive /tmp/moderation-compiler-delegate-cleanup-evidence.tgz preserves this plan-specific ledger, reviews, reports and red/green logs.
-<!-- SECTION:NOTES:END -->
+PR preparation: renumbered this branch-owned implementation task because TASK-15403 is used by open PR 3319. Highest observed id across dev/open PRs was 15405; TASK-15407 allocated to this implementation. Canonicalized with backlog-py per ADR-059. User authorized publication against dev, requested fresh review and auto-merge; human-written Change summary is still required before arming merge.
+ADR check: ADR required: no. Removing unused private forwarding methods is local implementation cleanup; compiler/service ownership, public APIs, persistence and security semantics remain unchanged. Backlog editing follows governing ADR-059. Checked Docs/ADR/README.md and module design. Current origin/dev is 54b321dcec; branch contains it. MERGE_QUEUE is unset, so no armed queue entry may be mutated.
+Publication preflight resolved two task-id collisions: design now TASK-15406, implementation TASK-15407. Fully paginated file inventories for all 12 open PRs reaching the 100-file listing cap confirm highest existing id 15405 and no collisions with allocated ids. Both task files pass canonical normalization check and whole-tree duplicate-id check. No application code changed in PR preparation.
+The HEAD-based task-format ratchet initially saw the retired pre-renumber paths and failed while the renames were uncommitted; direct backlog-py canonical checks on both replacement files and the full duplicate-id script passed. Commit the canonical renames, then immediately rerun the unmodified HEAD-based ratchet against origin/dev. This is metadata-only preparation, not a suppressed code/test failure.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

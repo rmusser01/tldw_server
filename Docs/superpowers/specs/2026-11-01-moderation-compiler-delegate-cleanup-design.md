@@ -1,8 +1,14 @@
 # Moderation Compiler-Side Delegate Cleanup
 
-Task: TASK-15205
+Task: TASK-15406 (implementation: TASK-15407)
 Status: Approved by the requester on 2026-11-01
 Base: origin/dev at 54b321dcec8cdbb6358581f42c1548696260570b
+
+## ADR Check
+
+ADR required: no. This is local removal of unused private forwarding methods;
+the established compiler/service boundaries, supported APIs, persistence, and
+security semantics do not change. Backlog editing follows ADR-059.
 
 ## Intent
 
