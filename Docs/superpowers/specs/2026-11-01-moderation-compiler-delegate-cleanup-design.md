@@ -1,7 +1,7 @@
 # Moderation Compiler-Side Delegate Cleanup
 
 Task: TASK-15205
-Status: Awaiting human approval
+Status: Approved by the requester on 2026-11-01
 Base: origin/dev at 54b321dcec8cdbb6358581f42c1548696260570b
 
 ## Intent
