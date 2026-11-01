@@ -24,6 +24,7 @@ export default function RequestedResearchWorkspace({
   workspaceId: string | null;
 }) {
   const { t } = useTranslation("playground");
+  const hydrated = useWorkspaceStore((state) => state.storeHydrated !== false);
   const [attempt, setAttempt] = React.useState(0);
   const [result, setResult] = React.useState<Result | null>(null);
   React.useEffect(
@@ -34,7 +35,7 @@ export default function RequestedResearchWorkspace({
     [],
   );
   React.useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId || !hydrated) return;
     let current = true;
     const controller = new AbortController();
     const localWorkError = new Error("Unverified local workspace work");
@@ -109,10 +110,10 @@ export default function RequestedResearchWorkspace({
       current = false;
       controller.abort();
     };
-  }, [workspaceId, attempt]);
+  }, [workspaceId, attempt, hydrated]);
 
   const status =
-    result?.id === workspaceId && result.attempt === attempt
+    hydrated && result?.id === workspaceId && result.attempt === attempt
       ? result.status
       : "loading";
   if (workspaceId && status === "ready") return <LocalWorkspace />;
