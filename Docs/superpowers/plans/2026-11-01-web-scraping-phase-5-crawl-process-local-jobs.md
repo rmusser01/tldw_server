@@ -570,6 +570,35 @@ or an assertion that the human selected these additional numbers.
    partials. Never mark the current unfinished page completed or emit a completion
    callback. Add a failed-extraction/linked-page budget regression and a successful
    discovery-interruption/unfinished-frontier regression. No second page fetch.
+4. Add optional private `seeds: Iterable[str] | None = None` to internal engine /
+   orchestration composition. None selects the request seed; an explicitly empty
+   iterable means no inputs. Consume lazily under candidate/URL-byte/frontier and
+   eventual Task 8 producer-window limits, never eagerly materialize all inputs.
+   `enhanced_batch` preserves repeated inputs, per-input failures and input order;
+   do not apply recursive URL deduplication to distinct batch positions. A live
+   iterable is not credentials/hooks/options or checkpoint content. This adds no
+   new batch resume promise: unsupported continuation combinations fail explicitly
+   rather than silently losing unconsumed input.
+5. Define a private structural `TraversalPolicy` and frozen `TraversalDecision`
+   in `crawl/models.py`; the port has one async
+   `evaluate(entry: FrontierEntry, *, phase: Literal["seed", "discovery", "visit"])`
+   method returning the decision. The decision supplies allowed status, relevance
+   and ordering scores, existing safe crawl metadata and a bounded machine reason
+   where needed. Orchestration implements it from existing filters/scorers and
+   governed policy/robots with private credentials; lower modules import only the
+   structural types. Optional policy injection on `run_crawl` supports pure fakes;
+   production composition always supplies the real port. Keep async policy work
+   before the logical-result commit marker, not between marker and disposition.
+   Preserve per-profile built-in/score/robots/custom-filter order and seed-denial
+   outcome versus an ordinary filtered candidate; no new HTTP authorization
+   policy or second page/transport debit. Do not move these responsibilities onto
+   resource controls or introduce a new plugin registry.
+6. Output retention is not the strict actual-data marker: `CrawlReport.articles`
+   must retain every entry the selected legacy/enhanced profile previously returned,
+   including required structured failures and truthy extraction-success entries
+   with empty content. Only `has_partial_results` and `note_successful_result` use
+   the stricter successful-data predicate. Do not drop compatibility payloads to
+   make outcome classification simpler.
 
 The cost of a wrong ruling is private interface/limit rework before adapter cutover;
 none authorizes a public signature change, new client knob or silent loss of hooks.
