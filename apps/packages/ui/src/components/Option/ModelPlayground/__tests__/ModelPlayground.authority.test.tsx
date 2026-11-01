@@ -64,6 +64,18 @@ beforeEach(() => {
 });
 
 describe("Model Playground conversation authority", () => {
+  it("initializes a missing draft and preserves it on rerender", () => {
+    useStoreMessageOption.setState({ chatDraftAddress: null });
+    const view = render(<MemoryRouter><ModelPlayground /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Prepare model question" }));
+    expect(fixture.capture?.isCurrent()).toBe(true);
+    const address = useStoreMessageOption.getState().chatDraftAddress;
+    expect(address?.kind).toBe("fresh");
+    view.rerender(<MemoryRouter><ModelPlayground /></MemoryRouter>);
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(address);
+    expect(fixture.capture?.isCurrent()).toBe(true);
+  });
+
   it("hands Simple Chat to the canonical Chat route", () => {
     const Location = () => <output aria-label="Current route">{useLocation().pathname}</output>;
     render(<MemoryRouter><ModelPlayground /><Location /></MemoryRouter>);
