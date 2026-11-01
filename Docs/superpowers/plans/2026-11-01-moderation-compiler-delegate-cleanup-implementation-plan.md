@@ -10,7 +10,7 @@
 
 **Spec:** `Docs/superpowers/specs/2026-11-01-moderation-compiler-delegate-cleanup-design.md`
 
-**Tracking:** TASK-15205 covers the approved design and this plan. Create a linked implementation task before source/test edits.
+**Tracking:** TASK-15205 covers the approved design and this plan; TASK-15403 tracks implementation and verification.
 
 ## Global Constraints
 
@@ -54,12 +54,12 @@
 **Goal:** Retire the redundant service surface with a demonstrated structural red/green cycle.
 **Success Criteria:** Five removal cases pass; compiler and service behavior tests stay green; no other production edits.
 **Tests:** New surface test plus the Stage 1 focused suites.
-**Status:** In Progress
+**Status:** Complete
 
 **Files:** Create `tldw_Server_API/tests/unit/test_moderation_compiler_compatibility_surface.py`; modify `tldw_Server_API/app/core/Moderation/moderation_service.py`.
 **Interfaces:** No new supported interface; the five private methods cease to exist in the service class only.
 
-- [ ] Add module imports for pytest and ModerationService, `pytestmark = pytest.mark.unit`, and this parameterized unit test with a docstring:
+- [x] Add module imports for pytest and ModerationService, `pytestmark = pytest.mark.unit`, and this parameterized unit test with a docstring:
 
 ```python
 @pytest.mark.parametrize("name", [
@@ -71,22 +71,22 @@ def test_service_omits_unused_compiler_delegate(name: str) -> None:
     assert name not in ModerationService.__dict__
 ```
 
-- [ ] Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_compiler_compatibility_surface.py -q`; expect exactly five assertion failures because the delegates still exist.
-- [ ] Delete only the five method definitions and their decorators/docstrings from the service. Do not change imports, constants, adjacent bodies, PolicyCompiler, or active delegates.
-- [ ] Compile the service and new test first. Run the surface test plus all three focused suites; expect PASS. Run the new module with `-m unit` to prove all five cases are selected. Re-run the existing `test_service_parser_wrappers_delegate_to_policy_compiler` case explicitly.
-- [ ] Confirm remaining references to removed names outside historical docs/tracking are only the new surface test; compiler method names without the private service prefix remain supported. Run lint, formatting of the new file, scoped security checks, and diff checks, then commit the green removal.
+- [x] Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_compiler_compatibility_surface.py -q`; expect exactly five assertion failures because the delegates still exist.
+- [x] Delete only the five method definitions and their decorators/docstrings from the service. Do not change imports, constants, adjacent bodies, PolicyCompiler, or active delegates.
+- [x] Compile the service and new test first. Run the surface test plus all three focused suites; expect PASS. Run the new module with `-m unit` to prove all five cases are selected. Re-run the existing `test_service_parser_wrappers_delegate_to_policy_compiler` case explicitly.
+- [x] Confirm remaining references to removed names outside historical docs/tracking are only the new surface test; compiler method names without the private service prefix remain supported. Run lint, formatting of the new file, scoped security checks, and diff checks, then commit the green removal.
 
 ## Task 3: Verify And Review The Complete Change (Stage 3)
 
 **Goal:** Demonstrate unchanged supported behavior and obtain independent review.
 **Success Criteria:** The regression matrix and quality gates pass with no new findings; review issues are resolved.
 **Tests:** Complete matrix below.
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:** Only task records and this plan for status/results, unless review identifies an in-scope correction.
 **Interfaces:** Deliver a reviewed local branch; no PR creation or merge is implied.
 
-- [ ] Activate the project virtual environment, compile every touched Python file, then run:
+- [x] Activate the project virtual environment, compile every touched Python file, then run:
 
 ```bash
 python -m pytest tldw_Server_API/tests/unit/test_moderation*.py -q
@@ -96,8 +96,8 @@ python -m pytest tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py -
 python -m pytest tldw_Server_API/tests/Audio/test_audio_transcription_retention_and_redaction.py::test_audio_transcriptions_redacts_text_and_segments_when_stt_redaction_enabled -q
 ```
 
-- [ ] Run Ruff on touched Python files. Run Black on the new surface test; format only newly edited test functions elsewhere to avoid whole-file churn. Compare any existing formatter/lint failures against the baseline rather than hiding them.
-- [ ] Run Bandit on touched production and test paths, recording JSON under `/tmp`; exclude expected test-assert B101 only for test scans. Compare existing findings to baseline and fix any new in-scope findings. Run `git diff --check` and inspect `git diff origin/dev...HEAD` for scope.
+- [x] Run Ruff on touched Python files. Run Black on the new surface test; format only newly edited test functions elsewhere to avoid whole-file churn. Compare any existing formatter/lint failures against the baseline rather than hiding them.
+- [x] Run Bandit on touched production and test paths, recording JSON under `/tmp`; exclude expected test-assert B101 only for test scans. Compare existing findings to baseline and fix any new in-scope findings. Run `git diff --check` and inspect `git diff origin/dev...HEAD` for scope.
 - [ ] Have fresh subagents review spec compliance and code quality for each implementation task, then obtain a fresh whole-branch review, following the selected subagent-driven workflow. Review must specifically check preservation of warning-log coverage, active dispatch, canonical imports, and compiler issue semantics.
 - [ ] Fix verified in-scope findings and rerun affected checks. Record commands/counts, residual private-call compatibility risk, and review outcomes in the implementation task; update stage statuses and commit only the related records.
 - [ ] Report local branch readiness. A future AI-authored PR still requires the human-written Change summary; do not reuse the previous PR's summary for this different change.
@@ -107,5 +107,5 @@ python -m pytest tldw_Server_API/tests/Audio/test_audio_transcription_retention_
 The exact-name scope and retained helpers map to Stage 2; all three migrated tests
 and five review-focus conditions map to Stages 1-3. Signatures match the current
 compiler/service code. Production changes are deletions only; the plan adds no
-engine, configuration, model, public API, or behavior changes. Implementation is
-awaiting review of this plan; subagent-driven execution is the preserved method.
+engine, configuration, model, public API, or behavior changes. The requester approved execution after the two plan-review corrections;
+subagent-driven execution is the preserved method.
