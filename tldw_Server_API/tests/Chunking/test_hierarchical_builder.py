@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -22,7 +22,7 @@ class FakeContext:
     """Mutable minimal hierarchy context with observable calls."""
 
     def __init__(self) -> None:
-        self.config = SimpleNamespace(
+        self.config: Any = SimpleNamespace(
             default_method=SimpleNamespace(value="structure_aware"),
             default_max_size=10,
             default_overlap=0,
@@ -438,7 +438,7 @@ def test_service_empty_input_has_no_work(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_service_rejects_non_string_before_other_work() -> None:
     context = FakeContext()
     with pytest.raises(InvalidInputError, match="Expected string input, got int"):
-        service.HierarchyService(context).build_tree(3)
+        service.HierarchyService(context).build_tree(cast(Any, 3))
     assert context.calls == []
 
 
@@ -467,7 +467,7 @@ def test_service_observes_mutated_defaults_and_replaced_method(monkeypatch: pyte
     context.config.default_max_size = "20"
     context.config.default_overlap = 2
     context.config.language = "de"
-    context._sanitize_input = lambda *_args, **_kwargs: "NEW"
+    cast(Any, context)._sanitize_input = lambda *_args, **_kwargs: "NEW"
     assert coordinator.build_tree("raw") == {
         "type": "hierarchical",
         "schema_version": 1,

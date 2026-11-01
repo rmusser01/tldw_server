@@ -1549,3 +1549,69 @@ The local formatting blocker is corrected. Remote CI is not yet rechecked,
 and no rebase, push, review-thread resolution or merge is claimed. The prior
 network-permission block remains uncleared by this narrow approval; keep the
 follow-up paused until permission is restored. TASK-13422 remains In Progress.
+
+### Resumed Review Follow-Up (2026-11-01)
+
+Network access is restored. The isolated branch rebased without conflicts onto
+live `dev` `54b321dcec8cdbb6358581f42c1548696260570b`. All hierarchy source,
+contracts and the approved setup warning are byte-identical to the prior local
+head before the annotation-only cleanup below. Intervening upstream Chunking
+changes touch only unrelated strategy/provider lookup paths and their tests.
+The six requester-approved record renumbers are committed at `8683845b1b`;
+current implementation is TASK-15286 and design is TASK-15287. The duplicate-ID
+checker passes. Exact post-commit task-format ratchet/mutation tests: 46 passed,
+20 warnings, 1.77s (`/tmp/task15286_nov1_tracking_final.txt`). A transient
+pre-commit ratchet failure read the old filenames from committed HEAD; it was
+resolved by committing the renames, without changing the check.
+
+CI's wider informational mypy command exposed 27 hierarchy/test inference gaps
+not covered by the earlier hierarchy-only command. Fixes annotate the builder's
+heterogeneous root and test dictionaries/log records/call traces, declare the
+intentionally dynamic fake configuration, and use identity casts for deliberate
+invalid-input/method-replacement tests. A resolve spy now explicitly appends
+and returns the same value rather than using a None-returning call in an `or`
+expression. Every existing hierarchy assertion is unchanged; the builder's
+operational AST is unchanged after stripping its local annotation.
+
+An existing tokenizer-override test attempted to download the nonexistent
+`test-tokenizer` when transformers was installed. It now patches only the
+external tokenizer constructor with the existing fallback implementation,
+retains real public processing and the original assertion, and adds model-name
+trace, nonempty-result and cached-strategy identity assertions. No production
+tokenizer behavior or skip condition changed. ADR required: no; these are
+compatibility-preserving annotations/test-fixture corrections, not a new
+architecture decision. Tracking migration applies accepted ADR-059.
+
+Fresh verification:
+
+- Focused tokenizer/hierarchy suite: 278 passed, 569 warnings, 3.08s.
+- Full Chunking: 796 passed, one existing PyThaiNLP skip, 2001 warnings, 53.61s
+  (`/tmp/task15286_nov1_full_final.txt`). Three extra optional skips from an
+  empty tokenizer data cache were eliminated by priming through the existing
+  network-enabled offset test (one passed); no installs or skip edits.
+- Ruff, compileall, hierarchy-only mypy (seven files), scoped Black (17 files
+  and the single changed legacy-test range), and diff check pass.
+- Full changed-file mypy has 29 inherited errors across three legacy files,
+  out of 21 checked files (`/tmp/task15286_nov1_mypy_final.txt`). Shadowing
+  those exact files from pinned pre-refactor dev yields 44 errors; all 29
+  remaining fingerprints match, normalizing only shifted embedded line numbers
+  (`/tmp/task15286_nov1_mypy_baseline_final.txt`). This CI step is explicitly
+  informational, not silently claimed green; no new hierarchy/test gaps remain.
+- Production Bandit: zero findings/errors, 2876 LOC
+  (`/tmp/bandit_task15286_nov1.json`). Touched-test Bandit: zero findings/errors,
+  3602 LOC, excluding only expected pytest assertion rule B101
+  (`/tmp/bandit_task15286_nov1_tests.json`).
+- Independent bounded review approved all nine Python changes and six record
+  renumbers with no actionable findings. Reviewer is closed.
+
+- [x] Reconcile latest dev, approved tracking IDs and independent review.
+- [x] Correct new type gaps and deterministic test dependency; verify all gates.
+- [ ] Publish verified branch and answer/resolve the sixth Qodo thread.
+- [ ] Complete exact-head Qodo review and every live required CI check.
+- [ ] Guarded normal merge commit; verify merge result and finalize tracking.
+
+The live required checks now number eight, including
+`E2E Critical (Tier 1 + Journeys)` in addition to the seven previously recorded.
+Do not merge until every substantive required check passes on the exact head.
+Keep the requester's human Change summary verbatim; add the approved diagnostic
+rationale and current evidence only to the technical summary.

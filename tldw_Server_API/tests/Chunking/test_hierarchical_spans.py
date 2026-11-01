@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import builtins
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.Chunking import regex_safety
 from tldw_Server_API.app.core.Chunking.hierarchical.spans import compute_paragraph_spans
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 pytestmark = pytest.mark.unit
 
@@ -85,7 +88,7 @@ def test_invalid_template_flags_fall_back_to_no_flags() -> None:
 def test_template_boundary_setup_failure_warns_and_preserves_builtin_spans(boundaries: object) -> None:
     text = "# Title\nsecret-document-value\n\n- item\n"
     expected = [(0, 8, "header_atx"), (8, 30, "paragraph"), (30, 31, "blank"), (31, 38, "list_unordered")]
-    records: list[dict[str, Any]] = []
+    records: list[Record] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
     try:
         spans = compute_paragraph_spans(text, {"boundaries": boundaries})
@@ -108,7 +111,7 @@ def test_template_boundary_setup_warning_omits_exception_details() -> None:
         def get(self, key: str, default: Any = None) -> Any:
             raise RuntimeError("secret-exception-value")
 
-    records: list[dict[str, Any]] = []
+    records: list[Record] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
     try:
         spans = compute_paragraph_spans("ordinary\n", FailingTemplate(boundaries=["secret-template-value"]))
@@ -137,7 +140,7 @@ def test_successful_or_empty_template_setup_does_not_warn(
     template: dict[str, Any] | None,
     expected: list[tuple[int, int, str]],
 ) -> None:
-    records: list[dict[str, Any]] = []
+    records: list[Record] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
     try:
         spans = compute_paragraph_spans(text, template)
@@ -149,7 +152,7 @@ def test_successful_or_empty_template_setup_does_not_warn(
 
 
 def test_invalid_template_rule_warnings_have_stable_level_and_text() -> None:
-    records: list[dict[str, Any]] = []
+    records: list[Record] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
     try:
         compute_paragraph_spans(

@@ -8,7 +8,7 @@ import inspect
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import pytest
 from loguru import logger
@@ -22,6 +22,9 @@ from tldw_Server_API.app.core.Chunking.hierarchical.models import (
     ResolvedHierarchyOptions,
 )
 from tldw_Server_API.app.core.Chunking.process_text.models import ProcessTextContext
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 pytestmark = pytest.mark.unit
 
@@ -120,8 +123,8 @@ def _assert_no_forbidden_resolved_imports(module_path: Path, forbidden: set[str]
     assert offenders == [], f"{module_path.name} imports forbidden modules: {offenders}"
 
 
-def _capture_log_records(call: Any) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
+def _capture_log_records(call: Any) -> list[Record]:
+    records: list[Record] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="DEBUG")
     try:
         call()
@@ -227,7 +230,7 @@ def test_flatten_does_not_import_builder_or_coordination() -> None:
 
 def test_public_flatten_uses_service_call_time_module_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     chunker = Chunker()
-    tree = {"root": {"chunks": []}}
+    tree: dict[str, Any] = {"root": {"chunks": []}}
     sentinel = [{"text": "sentinel", "metadata": {}}]
     calls = []
 
@@ -349,7 +352,7 @@ def test_public_flat_method_composes_overridable_public_methods(
     calls: list[tuple[str, Any]] = []
     sentinel_tree = {"root": {"kind": "root", "children": []}}
     sentinel_rows = [{"text": "flat", "metadata": {}}]
-    template = {"boundaries": []}
+    template: dict[str, Any] = {"boundaries": []}
     method_options = {"nested": {"value": 1}}
 
     def fake_tree(**kwargs: Any) -> dict[str, Any]:
@@ -407,7 +410,7 @@ def test_hierarchy_options_are_shallow_copied_and_sanitization_is_resolved_first
     expected_text: str,
 ) -> None:
     chunker = Chunker()
-    nested = {"value": []}
+    nested: dict[str, list[Any]] = {"value": []}
     original_options = {**method_options, "nested": nested}
     resolved_options: list[dict[str, Any]] = []
 
@@ -416,11 +419,12 @@ def test_hierarchy_options_are_shallow_copied_and_sanitization_is_resolved_first
         "_sanitize_input",
         lambda text, **_kwargs: "SAN" if text == "raw" else text,
     )
-    monkeypatch.setattr(
-        chunker,
-        "_resolve_method",
-        lambda _method, _language, options: resolved_options.append(options) or "structure_aware",
-    )
+
+    def resolve(_method: Any, _language: Any, options: dict[str, Any]) -> str:
+        resolved_options.append(options)
+        return "structure_aware"
+
+    monkeypatch.setattr(chunker, "_resolve_method", resolve)
 
     tree = chunker.chunk_text_hierarchical_tree(
         "raw",
@@ -471,7 +475,7 @@ def test_hierarchy_tree_uses_call_time_leaf_builder_with_resolved_call_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     chunker = Chunker()
-    nested = {"items": []}
+    nested: dict[str, list[Any]] = {"items": []}
     sentinel_block = {"kind": "sentinel", "children": []}
     calls: list[tuple[Any, Any, Any, Any]] = []
     _patch_single_block(monkeypatch, chunker, resolved_method="fixed_size")

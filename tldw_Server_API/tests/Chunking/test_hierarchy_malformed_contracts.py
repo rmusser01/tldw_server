@@ -132,7 +132,7 @@ def test_invalid_structure_aware_weight_public_raises_and_package_suppresses() -
 def test_flatten_preserves_input_and_metadata_aliasing_contracts(
     flatten: Callable[[dict[str, Any]], list[dict[str, Any]]],
 ) -> None:
-    nested = {"values": []}
+    nested: dict[str, list[Any]] = {"values": []}
     first_metadata = {
         "paragraph_kind": "paragraph",
         "nested": nested,
@@ -140,7 +140,7 @@ def test_flatten_preserves_input_and_metadata_aliasing_contracts(
         "total_chunks": 99,
     }
     second_metadata = {"paragraph_kind": "paragraph", "nested": nested}
-    tree = {
+    tree: dict[str, Any] = {
         "method": "words",
         "root": {
             "kind": "section",

@@ -212,7 +212,7 @@ def test_flatten_uses_call_time_grouping_helpers(monkeypatch: pytest.MonkeyPatch
     from tldw_Server_API.app.core.Chunking import Chunker
     from tldw_Server_API.app.core.Chunking.hierarchical import flatten as module
 
-    calls = []
+    calls: list[tuple[Any, ...]] = []
 
     def merge(parts: list[tuple[str, dict[str, Any]]], *, method: str, default_sep: str, kind_hint: str) -> str:
         calls.append(("merge", method, default_sep, kind_hint))

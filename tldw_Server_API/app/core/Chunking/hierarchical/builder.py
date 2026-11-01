@@ -24,7 +24,14 @@ def build_hierarchy_tree(
 ) -> dict[str, Any]:
     """Build section bounds and append fresh leaf blocks for source spans."""
     text = texts.original
-    root = {"kind": "root", "level": 0, "title": None, "start_offset": 0, "end_offset": len(text), "children": []}
+    root: dict[str, Any] = {
+        "kind": "root",
+        "level": 0,
+        "title": None,
+        "start_offset": 0,
+        "end_offset": len(text),
+        "children": [],
+    }
     current_section: dict[str, Any] | None = None
     section_stack: list[dict[str, Any]] = []
     preface_section: dict[str, Any] | None = None

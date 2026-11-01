@@ -125,7 +125,7 @@ def test_empty_or_reversed_span_returns_none_without_context_calls(
     ],
 )
 def test_rewrite_methods_emit_invalid_offsets_and_call_plain_once(method: str) -> None:
-    nested = {"items": []}
+    nested: dict[str, list[Any]] = {"items": []}
     method_options = {"flag": "kept", "nested": nested}
     context = FakeLeafChunkingContext(plain_effects=[["rewrite", 7]])
     texts = HierarchyTextViews(
@@ -178,7 +178,7 @@ def test_rewrite_methods_emit_invalid_offsets_and_call_plain_once(method: str) -
 
 @pytest.mark.parametrize("method", ["words", "sentences", "tokens"])
 def test_metadata_methods_call_metadata_once_and_forward_exact_arguments(method: str) -> None:
-    nested = {"items": []}
+    nested: dict[str, list[Any]] = {"items": []}
     context = FakeLeafChunkingContext(metadata_effects=[[_metadata_result(start_char=1, end_char=4)]])
     texts = HierarchyTextViews(
         original="--abcdef--",

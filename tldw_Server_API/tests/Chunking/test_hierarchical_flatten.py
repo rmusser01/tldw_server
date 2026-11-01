@@ -109,10 +109,10 @@ def test_direct_function_does_not_own_public_non_dictionary_guard(tree) -> None:
 @pytest.mark.parametrize("kind", ["root", "section"])
 @pytest.mark.parametrize("title", ["Section", "", "   "])
 def test_input_metadata_and_shared_ancestry_identity(kind: str, title: str) -> None:
-    nested = {"values": []}
+    nested: dict[str, list[Any]] = {"values": []}
     first_metadata = {"paragraph_kind": "paragraph", "nested": nested, "chunk_index": 41, "total_chunks": 99}
     second_metadata = {"paragraph_kind": "paragraph", "nested": nested}
-    tree = {
+    tree: dict[str, Any] = {
         "method": "words",
         "root": {
             "kind": kind,
@@ -249,7 +249,7 @@ def test_by_kind_grouping_respects_kind_boundaries_and_weights() -> None:
 
 
 def test_buffered_header_metadata_copy_preserves_target_nested_identity(monkeypatch) -> None:
-    nested = {"values": []}
+    nested: dict[str, list[Any]] = {"values": []}
     target = item("body", nested=nested, start_offset=4, end_offset=8)
     header = item("# H", "header_atx", start_offset=0, end_offset=3)
     gathered = []
