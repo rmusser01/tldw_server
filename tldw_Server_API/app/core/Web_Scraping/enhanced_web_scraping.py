@@ -26,7 +26,7 @@ import time
 import uuid
 import warnings
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum, auto
 from heapq import heappop, heappush
@@ -45,6 +45,10 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, NetworkError
 from tldw_Server_API.app.core.http_client import afetch
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    exception_type_for_log,
+    redact_url_for_log,
+)
 
 #
 # Import existing components
@@ -447,7 +451,7 @@ async def _maybe_enforce_with_rg_web_scraping() -> Optional[dict[str, object]]:
                 try:
                     await gov.commit(handle, None, op_id=op_id)
                 except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS:
-                    logger.debug("Web scraping RG commit failed", exc_info=True)
+                    logger.debug("Web scraping RG commit failed")
             return {"allowed": True, "retry_after": None, "policy_id": policy_id}
         return {
             "allowed": False,
@@ -483,7 +487,7 @@ class CookieManager:
                     self._cookies = json.load(f)
                 logger.info(f"Loaded cookies for {len(self._cookies)} domains")
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Failed to load cookies: {e}")
+                logger.error("Failed to load cookies ({})", exception_type_for_log(e))
 
     def _save_cookies(self):
         """Save cookies to storage"""
@@ -491,7 +495,7 @@ class CookieManager:
             with open(self.storage_path, 'w') as f:
                 json.dump(self._cookies, f, indent=2)
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to save cookies: {e}")
+            logger.error("Failed to save cookies ({})", exception_type_for_log(e))
 
     def add_cookies(self, domain: str, cookies: list[dict[str, Any]]):
         """Add cookies for a domain"""
@@ -531,7 +535,7 @@ class ContentDeduplicator:
                 logger.info(f"Loaded {len(self._hashes)} content hashes")
                 return
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Failed to load hashes: {e}")
+                logger.error("Failed to load hashes ({})", exception_type_for_log(e))
                 # If the configured path itself is the legacy .pkl file, continue
                 # to optional compatibility loading below.
                 if self.storage_path != self._legacy_storage_path:
@@ -558,7 +562,7 @@ class ContentDeduplicator:
                     self._legacy_storage_path,
                 )
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Failed to load legacy hashes: {e}")
+                logger.error("Failed to load legacy hashes ({})", exception_type_for_log(e))
 
     def _save_hashes(self):
         """Save content hashes to storage"""
@@ -569,7 +573,7 @@ class ContentDeduplicator:
                 json.dump(self._hashes, f, ensure_ascii=True, indent=2)
             tmp_path.replace(self.storage_path)
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to save hashes: {e}")
+            logger.error("Failed to save hashes ({})", exception_type_for_log(e))
 
     def _normalize_hash_data(self, data: Any) -> dict[str, dict[str, Any]]:
         """Normalize persisted hash data into the expected dictionary shape."""
@@ -604,7 +608,11 @@ class ContentDeduplicator:
         if content_hash in self._hashes:
             existing = self._hashes[content_hash]
             if existing['url'] != url:
-                logger.info(f"Duplicate content found: {url} duplicates {existing['url']}")
+                logger.info(
+                    "Duplicate content found: {} duplicates {}",
+                    redact_url_for_log(url),
+                    redact_url_for_log(existing["url"]),
+                )
                 return True
 
         return False
@@ -631,7 +639,7 @@ class ContentDeduplicator:
         try:
             self._save_hashes()
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to flush content hashes: {e}")
+            logger.error("Failed to flush content hashes ({})", exception_type_for_log(e))
 
 
 class ScrapingJobQueue:
@@ -668,8 +676,18 @@ class ScrapingJobQueue:
             self._completed_jobs.pop(oldest_job_id, None)
 
     def _record_completed_job(self, job: ScrapingJob) -> None:
+        from .jobs.projections import public_job
+
         job.context = None
-        self._completed_jobs[job.job_id] = job
+        snapshot = public_job(job)
+        self._completed_jobs[job.job_id] = replace(
+            job,
+            url=snapshot["url"],
+            metadata={},
+            context=None,
+            result=snapshot["result"],
+            error=snapshot["error"],
+        )
         self._trim_completed_jobs()
 
     async def start(self):
@@ -697,7 +715,9 @@ class ScrapingJobQueue:
                     if future and not future.done():
                         future.set_exception(Exception("Job cancelled due to shutdown"))
                 except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"Failed to cancel pending scraping job during shutdown: error={e}")
+                    logger.debug(
+                        "Failed to cancel pending scraping job during shutdown ({})", exception_type_for_log(e)
+                    )
 
         # Wait for workers to finish
         await asyncio.gather(*self._workers, return_exceptions=True)
@@ -807,7 +827,7 @@ class ScrapingJobQueue:
             except asyncio.TimeoutError:
                 continue
             except (*_WEBSCRAPE_NONCRITICAL_EXCEPTIONS, LLMQuotaExceededError) as e:
-                logger.error(f"{worker_id} error: {e}")
+                logger.error("{} scraping execution failed", worker_id)
                 if job:
                     async with self._lock:
                         job.completed_at = datetime.now()
@@ -1202,7 +1222,7 @@ class EnhancedWebScraper:
             except ArticleRetrievalError:
                 raise
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"curl backend failed; falling back to httpx: {exc}")
+                logger.debug("curl backend failed; falling back to httpx ({})", exception_type_for_log(exc))
         t0 = time.time()
         resp = None
         try:
@@ -1302,7 +1322,7 @@ class EnhancedWebScraper:
                 self._playwright = None
                 self._browser = None
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Failed to initialize Playwright browser: {e}")
+                logger.error("Failed to initialize Playwright browser ({})", exception_type_for_log(e))
                 logger.warning("Web scraping will proceed without JavaScript rendering support")
                 self._playwright = None
                 self._browser = None
@@ -1489,7 +1509,7 @@ class EnhancedWebScraper:
         except asyncio.CancelledError:
             raise
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to scrape {url}: {e}")
+            logger.error("Failed to scrape {} ({})", redact_url_for_log(url), exception_type_for_log(e))
             return _attach_preflight(
                 _failed_scrape_result(url, e)
             )
@@ -1656,7 +1676,7 @@ class EnhancedWebScraper:
                         else:
                             proxy_cfg = {"server": f"http://{proxy_server}"}
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Playwright proxy validation failed: {exc}")
+                logger.debug("Playwright proxy validation failed ({})", exception_type_for_log(exc))
 
         if proxy_cfg:
             context = await self._browser.new_context(user_agent=effective_user_agent, proxy=proxy_cfg)
@@ -1996,7 +2016,7 @@ class EnhancedWebScraper:
             )
             return summary
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Summarization failed: {e}")
+            logger.error("Summarization failed ({})", exception_type_for_log(e))
             return "Summary generation failed"
 
     async def scrape_sitemap(
@@ -2026,10 +2046,10 @@ class EnhancedWebScraper:
                 config={"web_scraper": self.config or {}},
             )
             if not decision.allowed:
-                logger.error(f"Sitemap blocked by outbound policy: {decision.reason}")
+                logger.error("Sitemap blocked by outbound policy")
                 return []
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"Outbound policy evaluation failed: {exc}")
+            logger.error("Outbound policy evaluation failed ({})", exception_type_for_log(exc))
             return []
         if task_id and task_id not in self._progress:
             self._progress[task_id] = {
@@ -2111,10 +2131,10 @@ class EnhancedWebScraper:
                 config={"web_scraper": self.config or {}},
             )
             if not decision.allowed:
-                logger.error(f"Recursive scrape blocked by outbound policy: {decision.reason}")
+                logger.error("Recursive scrape blocked by outbound policy")
                 return []
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"Outbound policy evaluation failed: {exc}")
+            logger.error("Outbound policy evaluation failed ({})", exception_type_for_log(exc))
             return []
         if task_id and task_id not in self._progress:
             self._progress[task_id] = {
@@ -2158,8 +2178,8 @@ class EnhancedWebScraper:
                     strategy,
                     safe_reason,
                     depth,
-                    url,
-                    detail,
+                    redact_url_for_log(url),
+                    "filtered",
                 )
             else:
                 logger.debug(
@@ -2167,7 +2187,7 @@ class EnhancedWebScraper:
                     strategy,
                     safe_reason,
                     depth,
-                    url,
+                    redact_url_for_log(url),
                 )
 
         def _log_accept(
@@ -2183,10 +2203,10 @@ class EnhancedWebScraper:
                 "Accept URL [{} depth={}]: {} (score={:.3f}, ordering_score={:.3f}, parent={})",
                 strategy,
                 depth,
-                url,
+                redact_url_for_log(url),
                 relevance_score,
                 ordering_score,
-                parent_url,
+                redact_url_for_log(parent_url) if parent_url else None,
             )
 
         # Build filter chain based on config (include_external, allow/deny, patterns, content types)
@@ -2502,7 +2522,9 @@ class EnhancedWebScraper:
                                 heappush(pq, (-float(ord_val), depth + 1, -_ps2, cand, r_url))
                                 seen.add(cand)
                                 remaining -= 1
-                                logger.debug(f"Enqueue URL (score={s_val:.3f}, depth={depth+1}): {cand}")
+                                logger.debug(
+                                    f"Enqueue URL (score={s_val:.3f}, depth={depth + 1}): {redact_url_for_log(cand)}"
+                                )
                                 # Gauge: queue size after enqueue
                                 with contextlib.suppress(_WEBSCRAPE_NONCRITICAL_EXCEPTIONS):
                                     log_gauge("webscraping.crawl.queue_size", float(len(pq)))
@@ -2704,7 +2726,7 @@ class EnhancedWebScraper:
                                 q.append((depth + 1, cand, r_url))
                                 seen_fifo.add(cand)
                                 remaining_cap -= 1
-                                logger.debug(f"Enqueue URL (FIFO, depth={depth+1}): {cand}")
+                                logger.debug(f"Enqueue URL (FIFO, depth={depth + 1}): {redact_url_for_log(cand)}")
                                 with contextlib.suppress(_WEBSCRAPE_NONCRITICAL_EXCEPTIONS):
                                     log_gauge("webscraping.crawl.queue_size", float(len(q)))
                 self._set_progress(
@@ -2742,7 +2764,7 @@ class EnhancedWebScraper:
                 finally:
                     await self._close_response(resp)
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"Failed to fetch HTML for link extraction: {e}")
+                logger.warning("Failed to fetch HTML for link extraction ({})", exception_type_for_log(e))
                 return []
 
         try:
@@ -2754,7 +2776,7 @@ class EnhancedWebScraper:
                     links.append(href)
             return links
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Error parsing links from content: {e}")
+            logger.warning("Error parsing links from content ({})", exception_type_for_log(e))
             return []
 
     def get_progress(

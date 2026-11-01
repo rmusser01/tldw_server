@@ -68,7 +68,7 @@ def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[A
     JSON string escaping is chunked, so oversized strings never create a second
     unbounded serialized result. A depth/cycle guard rejects hostile containers.
     """
-    from ..contracts.execution import _private_article_key
+    from .projections import PUBLIC_CONTENT_KEYS, private_state_key, public_state_string
 
     size = 0
     ancestors: set[int] = set()
@@ -87,11 +87,13 @@ def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[A
             except UnicodeError:
                 raise ValueError("invalid JSON string encoding") from None
 
-    def visit(item: Any, depth: int) -> Any:
+    def visit(item: Any, depth: int, *, public_content: bool = False) -> Any:
         if depth > 64:
             raise ValueError("JSON nesting exceeds allowance")
         kind = type(item)
         if kind is str:
+            if redact and not public_content:
+                item = public_state_string(item)
             string(item)
             return item
         if item is None or kind is bool:
@@ -118,7 +120,7 @@ def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[A
                 for key, child in item.items():
                     if type(key) is not str:
                         raise ValueError("JSON object keys must be strings")
-                    if redact and _private_article_key(key):
+                    if redact and private_state_key(key):
                         continue
                     if redact and "".join(char for char in key.lower() if char.isalnum()) in DIAGNOSTIC_KEYS:
                         child = public_diagnostic(child)
@@ -126,7 +128,7 @@ def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[A
                         charge(1)
                     string(key)
                     charge(1)
-                    result[key] = visit(child, depth + 1)
+                    result[key] = visit(child, depth + 1, public_content=key in PUBLIC_CONTENT_KEYS)
                 return result
             result_list = []
             for child in item:
