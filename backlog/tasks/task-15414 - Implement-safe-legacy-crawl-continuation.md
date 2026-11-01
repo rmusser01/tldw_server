@@ -1,7 +1,7 @@
 ---
 id: TASK-15414
 title: Implement safe legacy crawl continuation
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - phase5
@@ -15,9 +15,9 @@ Execute Task 7 of the approved Phase 5 plan as an independently reviewable unit.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 7 behavior and interfaces match the approved spec and plan.
-- [ ] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
-- [ ] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
+- [x] #1 Task 7 behavior and interfaces match the approved spec and plan.
+- [x] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
+- [x] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -30,19 +30,21 @@ Task 7 implemented at BASE 7a1fac8ea2: bounded versioned/legacy checkpoint store
 Review fix round 1 started from reviewed HEAD a73cad8ad7. Read exact Important I1/I2 in task-7-review.md. TDD scope: strict version-1 wire shape before defaults and legacy integer page count; one aggregate monotonic cleanup deadline, preserving loading=True active deadline and actual background ownership. Will run Task7/engine/composition/controls/native lock scope and static/security checks, append fix report, and commit explicit paths. Keep In Progress; M1 and platform/composition follow-ups are not in this fix loop.
 Controller added concrete packaging correction in round 1: setuptools namespaces=false omits crawl without __init__.py. Include minimal crawl/__init__.py without legacy re-exports and configured package-discovery/import regression in this same fix scope/commit, with RED/GREEN and quality evidence. No dependency changes.
 Round 1 fixes verified from a73cad8ad7: I1 explicit version-1 wire field sets before defaults and bounded integer legacy page counts (RED 6 failed/19 passed -> GREEN 25 passed); I2 one monotonic finalization deadline shared across drain/result/save/clear/close, no logical per-stage renewal, background physical ownership retained (RED 4 failed/1 passed -> GREEN 5 passed with virtual-clock/syscall barriers and canceled/budget/deadline parent cases). Load remains under active _bounded context. Packaging correction: minimal crawl/__init__.py and configured setuptools discovery/import test (RED 1 failed -> GREEN 1 passed). Final requested Task7 + packaging + engine/composition/controls/native-lock scope: 346 passed, 705 warnings, exit 0, 9.21s; warning summary visible, no new filters. Scoped Ruff/format/compile and production Bandit clean; test-only Bandit clean with B101 assertion exclusion. AST run_crawl 265, all touched functions <=300; no ceiling edits or fullrepo/arXiv/other guard fixes. Appended round-1 evidence to task-7-report.md. Keep In Progress for fresh independent full Task7 re-review; M1 and approved Windows/composition follow-ups unchanged.
+Controller gate complete: independent review I1 missing-v1-budget-field defaults/null legacy pages and I2 renewed per-stage cleanup timeout fixed in70e58f4a86; controller packaging omission (crawl missing __init__, namespaces=false) also fixed with actual configured setuptools discovery/import regression. Fresh scoped re-review01a19977-1767-7ed3-8c4a-902128c5ea2f all3ADDRESSED, no new Critical/Important breakage. Final346 covering tests pass, warnings remain visible incl deferredM1 multithreaded-fork deprecation. Newrun_crawl265lines, no ceilingincrease, quality/Banditzero. Six earlier-branch size regressions are NOT baseline debt and remain Task9/10/11 obligations; 2arXiv assertions/inventory/fullrepohttpx2 gates remain disclosed. Native Windows trustedlocal execution unverified here; service-root mode failsclosed without secure capability, explicit localnative mode retained. Future trustedroot/mode selection Task9/10 must come from composition. Reports/review/rereview in plan-scoped SDD workspace.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented versioned and legacy bounded continuation with strict wire schema/bindings/counters, atomic unique-temp state, native cross-process/PID/fork writer ownership, scoped path safety, real filesystem drain retention and current-policy readmission. Corrected aggregate cleanup to one deadline, preserved primary cancellation/failure and old-valid state, and made crawl modules shippable via minimal regular-package initializer. Independent review/fix gate accepted;346 covering pass and zero touched security findings. Windows capability/verification and final certification debts explicitly documented.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
