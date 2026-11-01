@@ -1741,3 +1741,33 @@ items. This satisfies the replacement code-review gate, not the live CI gate.
 All eight required checks must pass on the exact published head before the
 normal guarded merge. The human Change summary remains verbatim, the main
 checkout is untouched, and TASK-15286 remains In Progress until integration.
+
+### Function-Size Ratchet And Tracking Readability (2026-11-01)
+
+Published head `60c15efff8` passed the earlier quality-ratchet correction, then
+`backend-required` job 124927496119 exposed two obsolete function-size baseline
+entries for the extracted tree and flatten delegates. The unchanged ratchet
+reproduced RED: one failed, 12 passed. Remove only those two exceptions from
+`tldw_Server_API/tests/lint/function_size_baseline.json`; all other JSON entries,
+scanner logic and thresholds remain identical. The delegates now measure 27
+and three lines, below the unchanged 300-line threshold. This tightens future
+enforcement rather than weakening a gate. Ratchet plus tracking-format GREEN:
+17 passed, 47 warnings, 7.97s (`/tmp/task15286_readability_ratchet_green.txt`).
+RED and CI logs: `/tmp/task15286_function_size_red.txt` and
+`/tmp/task15286_60c15_backend_failed.txt`.
+
+New cubic comment 4436673866 correctly identified fused words in this task's
+November 1 notes. Restore spacing through backlog-py `task edit --notes`, with
+proof that the entire original body is identical after removing whitespace and
+frontmatter is unchanged. Append current evidence and refresh the current
+summary through the CLI. No archived/completed record is edited. The same
+independent reviewer approved this bounded documentation and two-entry JSON
+delta; the original full code approval remains applicable.
+
+Fresh full Chunking: 796 passed, one established PyThaiNLP skip, 2000 warnings,
+34.87s (`/tmp/task15286_ratchet_cleanup_chunking.txt`). Production Bandit reports
+zero findings/errors across 2876 LOC
+(`/tmp/bandit_task15286_ratchet_cleanup.json`). Ruff, scoped Black, compileall
+and hierarchy mypy remain green. Runtime and test source are unchanged. Publish
+this verified follow-up, reply/resolve the original readability thread, and
+wait for all eight required contexts on the exact new head before merging.
