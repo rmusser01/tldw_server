@@ -1,0 +1,66 @@
+# S06 Specialized tools and discovery UAT — 2026-11-01
+
+Task: TASK-13260.278.18.83.45. S05 is accepted;42/43 selected families accepted. Complete S06 before claiming43/43.
+
+Candidate: local source aca803181ad8fdd3a0692da25e29fae3f57c83f9, backendf8c8e56f60ee05ceeb28d2c89c7bc1abb813e625 at /private/tmp/tldw-s05-classification-20261101/site, frontenda56940932f8b3790d6c8a44584b81d4f9fbe61a3/build mGTZqAja6jYViLeN34z28. Frozen deva412f6580b7ed0cf48fd7d222a47a20cfc0dde92 includes Chat3309/3310/3311. These are current qualified artifacts, not fresh live-dev or release-wide acceptance.
+
+## Scope and pinned case ledger
+
+The selected S-06 catalog and RELEASE_UAT_PLAYBOOK minimum contract govern. This owned plan and the official task serve as the case ledger under the existing no-proof-manifest ruling. No variant may run until its exact current controls, route, request/result identities and oracle are pinned; source inspection alone is not functional acceptance. Each variant includes a concrete action, saved/exported result or supported handoff, reload and truthful invalid-input/unavailable-dependency recovery.
+
+| Variant | Selected input and oracle | Current source/test mapping; remaining preflight |
+| --- | --- | --- |
+| Chunking | Text: “Rowan Observatory opened in 1987.\nThe telescope is named Selene.\nTours start Friday at six in the evening.\nTickets cost 12 credits.” Choose deterministic words/max_size8/overlap0. Require exact text slices at valid ordered offsets, all22 words covered exactly once and no fabricated text. Independently inspect one actual JSON export. Save/load a uniquely named options template after reload; input/results need not be falsely described as auto-persisted. Empty input must give actionable validation without an invalid dispatch. | /chunking-playground; components/Option/ChunkingPlayground, services/chunking, chunking API; golden-path/export and real offset tests. Verify advertised words unit and exact wire metadata before Send. |
+| Model playground | Existing configured llama.cpp/Qwen, temperature0, question asking only the supplied telescope name. Require actual answer “Selene,” selected provider/model identity, canonical saved question/answer and true reload/downstream Chat. Unavailable provider must retain recoverable input and prior saved rows, then one deliberate legitimate Retry. | /model-playground; ModelPlaygroundChat, useMessageOption and shared Chat persistence. Pin compare-mode selection and existing saved-chat handoff before generation. |
+| Skills | One private, explicitly named no-tool skill with argument ORBIT-742. Pin safe actual execution and expected rendered/result text before Run; verify saved definition/version and promised handoff or retained result after reload. Invalid input/unavailable dependency must be explicit, with no fabricated model/tool success. Dry render alone receives no model/tool-execution credit. | /skills; SkillsWorkspace/Manager/SkillPreview, skill_executor and skills endpoints; existing live certification is dry-render-only and does not close this variant. Inspect supported inline/fork and handoff controls before choosing exact execution recipe. |
+| Researchers | Controlled fictional/public Rowan source with1987, Selene, Friday18:00 and12credits. Use actual general_research report preset, require exact source/result IDs and inspectable citations for each reported fact, save/export and reload. Invalid/missing source must preserve prior report. | /for/researchers is a landing page only. Actual Watchlists ReportBuilderDrawer/general_research and its supported source/report persistence are the proposed mapping; confirm exact controls/provider before execution. |
+| Journalists | Same bounded source plus a dated public bulletin changing tours to Saturday18:00. Use actual news_briefing preset; distinguish both dates/sources without inventing current conditions, retain cited saved report/export and reload. Missing input/source must be truthful and preserve prior result. | /for/journalists marketing; actual ReportBuilderDrawer/news_briefing. Pin exact source/run/report creation and citation oracle before execution. |
+| OSINT | Same fictional public observatory/bulletin data only; actual cti_osint preset, bounded chronology with cited source IDs. No private-person targeting or unrelated collection. Save/export/reload and verify missing-evidence warning/failure without fabricated indicators. | /for/osint marketing; actual ReportBuilderDrawer/cti_osint. Pin supported evidence fields, report generation and non-alert warning before execution. |
+| Documentation | Search “Chunking Templates,” open server Docs/User_Guides/Server/Chunking_Templates_User_Guide.md, require matching title/content and correct source/path identity; reload and navigate. Unique impossible query must show no results and recover with the valid query. | /documentation; WebDocumentationRoute, documentation manifest/content handlers and shared DocumentationPage. Confirm actual manifest entry/link format before browser action. |
+| Profile/companion | Dedicated private profile, identity “Rowan guide” and normal saved settings; actual advertised typed interaction ORBIT-742 with matched response, plus saved companion check-in/goal if that is the offered handoff. Reload exact identity/settings/result. Unavailable dependency must be truthful and preserve them. | /profile is a coming-soon placeholder, not a success. /persona has real ProfilePanel and typed Live; /companion offers real saved check-in/goals. Pin supported principal and exact fields before execution. Native voice, hosted billing and sandbox variants require their separate existing plans when selected. |
+
+## Authority, lifecycle and cleanup
+
+All necessary diagnostics/fixes/retries/build/runtime authorization persists; no repeated approval questions. Reuse this checkout/environment/package/build and existing reviewer. No new worktree/agent. One private owned window/tab at a time; preserve original API/frontend/data/keys and original Chrome absence. Original DOM remains untouched/unverified; never ask stale draft questions.
+
+Keep600s workflow/build,120s startup,180s generation,300s test-case and15s ordinary operation/graceful cleanup. No force, installs, downloads, model changes or action on Splash8010. Official restricted isolated PostgreSQL15492 only; no operator SQL or homemade DB. No GitHub/fetch/publication/queue/merge; heartbeat paused. After failures retain precise in-memory terminal/error metadata and concise task notes; reassess after three attempts and test/review a correction before further necessary validation. Do not replay passing actions to repair an operator finish.
+
+Use existing canonical authority, credential, Jobs/Scheduler and DB abstractions. New product behavior requires causal red/minimal green, affected tests, scoped baseline/current Bandit/lint/types, architecture assessment, independent actual/staged review and normal local hooks. Capture a settled screenshot for human UX review. Dispose completed private profiles/exports/images/operators promptly under exact identity and no-handle guards; keep current qualified artifacts/shared helpers only.
+
+ADR assessment:no new architecture decision for validation. ADR007/018/020/046/059/067/080 govern existing workspace, authority, storage, Persona Chat, task tooling, accounting and checkout ownership. Assess any demonstrated repair before changing behavior; do not alter accepted ADR rationale.
+
+## Stage1: Pin interfaces and guarded fixtures
+**Goal**: Resolve all eight recipes against the actual candidate and reuse safe runtime/driver helpers.
+**Success Criteria**: Exact inputs/oracles/routes/control selectors and supported result/ownership/recovery checks pinned before each variant runs; new nontrivial operator logic has small admission/cleanup controls and independent review.
+**Tests**: Focused normal-helper guards, source/provider/build binding, no mocks in live acceptance.
+**Status**: In Progress
+
+## Stage2: Validate deterministic tools first
+**Goal**: Complete Chunking, then Documentation, including exports/templates/search/reload and recovery.
+**Success Criteria**: Exact coverage/boundaries/output and intended linked documentation; screenshots and explicit persistence limits.
+**Tests**: Native UI plus independent output/canonical reader; genuinely affected tests if a defect is demonstrated.
+**Status**: In Progress
+
+## Stage3: Complete provider, skill, domain and companion actions sequentially
+**Goal**: Validate Model Playground, Skills, three cited domain reports and dedicated profile/companion interaction.
+**Success Criteria**: Actual provider where required, precise saved/handoff identities, true reload, truthful recovery, selected/unselected preservation and applicable four-mode/account-isolation composition.
+**Tests**: Real supported routes/services, official SQLite/PostgreSQL fixtures, causal repair checks; no title-only/landing-page/mocked-model credit.
+**Status**: Not Started
+
+## Stage4: Review, accept and dispose
+**Goal**: Close S06 only when every named variant has functional and human UX acceptance.
+**Success Criteria**: All requests/processes retire, private payloads disposed, original runtime/data preserved, final actual/staged review and normal local closure; then selected43/43 with broader release limits explicit.
+**Tests**: Exact count/identity/result and resource checks, independent closure review. Remove only this owned completed plan.
+**Status**: Not Started
+
+
+
+## Chunking template loader qualification
+
+The loader ignored valid flat saved settings whenever the API had added its standard empty config object. Three unchanged-source regressions fail on the actual effective controls; the existing nested format is a passing compatibility control. The minimum repair merges nested settings with top-level leaves and handles method separately. SaveAsTemplateModal and backend contracts remain unchanged. The new real-modal/service test uses controlled transport with the API's actual normalization rule; it is not API integration.
+
+Affected checks: full13 UI PASS22.187s, then only five strengthened new cases PASS13.356s; full13 WebUI PASS25.027s. New checks verify remount/load, one save and the next normal request's method/size25/zero overlap/false adaptive, with no config wrapper leaked. Earlier modal/combobox/visibility/reporting harness failures are not product causal red. Original eight test bodies remain unchanged. The added block formats with identical semantic AST; unsupported test-only ByRole exact option removed without changing default exact string-name behavior.
+
+Configured ESLint baseline/current0errors22warnings/no new/noignored. Separate semantic TypeScript programs use the actual client configurations, two touched files, normal Vitest setup and dependencies:24baseline/24current inherited diagnostics, touched0/0 and no new in both clients. This is not whole-project type qualification. TypeScript-only Bandit is not applicable. Initial formatting/type operator errors are retained in the official task, not counted as passing checks. No new ADR: repair restores the existing supported template formats without changing persistence or API shape.
+
+Final independent actual/staged review and normal local hooks/commit precede one existing-toolchain build. Live exact coverage/export/template reload/recovery and remaining S06 variants are still open. Current old build is not repaired-loader live qualification.
