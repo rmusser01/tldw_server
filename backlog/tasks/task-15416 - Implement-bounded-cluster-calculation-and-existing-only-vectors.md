@@ -1,7 +1,7 @@
 ---
 id: TASK-15416
 title: Implement bounded cluster calculation and existing-only vectors
-status: To Do
+status: In Progress
 labels:
 - claims
 - jobs
@@ -27,6 +27,7 @@ Preserve exact/embedding algorithm semantics with resource limits and non-creati
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved plan task 6: Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md. ADR required: no additional ADR; accepted Docs/ADR/085-jobs-resource-admission-and-domain-publication.md governs the approved resource/publication boundary with ADR-003 and ADR-058. Execute only in the existing linked worktree/branch, test first, use shared Jobs lifecycle APIs, official backend fixtures, focused verification and touched-code Bandit, normal hooks and scoped commits. Task-ID audit explicitly targeted rmusser01/tldw_server after discovering gh defaults to upstream: fetched dev 61d02ed484a3c80f5423676b959cf14e7b572a62, checked all 37 open PR paginated file lists (223 selected Backlog/ADR records, no truncation) and current branch; highest observed id 15410. Reserved TASK-15411 through TASK-15421 for the eleven reviewable plan tasks. No collision with planning records TASK-15282/TASK-15283 or ADR-085. Preserve unrelated main-checkout changes; no push/PR/merge authorized.
+Task5 domain prerequisite independently approved in b5fc7a5bc1/a2236fcf14. Begin approved Task6 bounded exact/embedding calculation and strictly existing-only vectoraccess using task-6-brief.md, constraints.md, task-5-interfaces.md and task-6-integration-notes.md. Preserve legacyalgorithm and collidingembeddingID semantics, no storagewrites or new clustering engine. Alllimits beforepublication. ExistingOnly Chroma mustprove no provisioning acrossabsent/schema/error/disappearance/index cases with realSDKfixtures and supportedversion behavior. Preliminary mode=rw Rust SQLite primitive is notcomplete adapterproof; publicPersistentClient(validate) wasobservedcreatingmissingstorage. IfcompleteSDKcontractcannotenforce approvedno-createboundary, reportconcreteevidence and stopfornarrowreviewedstorageaccessdesign, no stat-onlyguard/stubfallback/dependencybump. Testfirst, configuredlint/Bandit/hooks/scopedlocalcommit, no Task7publication/push/PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
