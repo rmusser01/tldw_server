@@ -535,7 +535,8 @@ or an assertion that the human selected these additional numbers.
    its existing candidate charge. Do not charge a frontier reference again or
    refund cumulative work when entries leave; all URL bookkeeping must reuse this
    admitted bounded domain. Invalid references count as encounters but are not
-   retained. An invalid/oversized URL or collective overflow produces explicit
+   retained; ordinary malformed references keep their existing profile rejection
+   behavior. An oversized URL or collective overflow produces explicit
    `budget_exhausted`, never silent truncation or invented transfer usage. Validate
    checkpoint file capacity against these injected byte ceilings too; restore
    known cumulative accounting, explicitly mark legacy unknown history. Chosen
