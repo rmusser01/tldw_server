@@ -529,13 +529,13 @@ shared Persona authentication and HTTP endpoint/SSE scope remain authoritative.
 relevant runtime suites and static/security checks pass with skips documented.
 **Tests**: MCP core, relevant AuthNZ/SQLite/PostgreSQL, Billing/governance, shared HTTP,
 startup schema failure, task-format/ID guards, focused Ruff/Black, compile and Bandit.
-**Status**: In Progress
+**Status**: Complete
 
 ### Integration Stage 3: Independent Code Review
 **Goal**: Review the immutable rebased range against the approved security/lifecycle contract.
 **Success Criteria**: Reviewer approval; all validated Critical/Important findings fixed and rechecked.
 **Tests**: Reviewer-directed reproductions and affected regression gates.
-**Status**: In Progress
+**Status**: Complete
 
 First immutable review (`54b321..665ca72186`) found three Important compatibility
 gaps: lost own-key provenance, missing native per-user quota checks, and hard PG
@@ -550,7 +550,10 @@ Acquisition, entry, commit, release and unclassified cleanup failures remain fat
 through a fixed central readiness marker. Canonical-wrapper regression reproduced
 seven lifecycle failures before repair and passes all thirteen scenarios after it.
 Generic Chat quota policy, the database transaction wrapper and accepted ADRs are
-unchanged. Final immutable approval is still pending.
+unchanged. Independent final review approved immutable source commit
+`9c41db58671411b1609e7eca82608d11e302c828`: no Critical, Important or Minor findings,
+with sixteen lifecycle scenarios and eight persisted-profile/source/accounting
+checks independently passing. No further source fixes were requested.
 
 Fresh broad verification: MCP core 4,292 passed / 3 existing optional-parser skips;
 AuthNZ unit/SQLite 3,426 passed / 1 optional-driver skip. Shared boundary tests have
@@ -558,13 +561,28 @@ AuthNZ unit/SQLite 3,426 passed / 1 optional-driver skip. Shared boundary tests 
 failures independently reproduced on unchanged pinned dev in an isolated checkout
 (`/tmp/mcp3187_dev_baseline_policy.log`). These unrelated authorization failures
 are documented rather than weakening assertions or altering production policy.
+Final lifecycle/startup gate: 121 passed. Canonical PostgreSQL after the savepoint
+repair: 93 passed / no skips. Task format/ID guards: 10 passed. Full-branch
+configured hooks, focused Ruff/changed-range Black, compilation and whitespace
+checks passed. Production Bandit: 46,739 lines / zero findings / zero scan errors.
+The complete Python artifact manifest is retained at
+`/tmp/mcp3187_final_artifact_sha256.txt`. Broad SQLite/MCP results precede only the
+PG-only lifecycle change, which is covered by the final focused and real-PG gates.
 
 ### Integration Stage 4: Publish And Arm Auto-Merge
 **Goal**: Publish with a lease and enable only the requested normal gated auto-merge.
 **Success Criteria**: Remote head matches reviewed source; current dev mergeable;
 normal CI/review requirements retained; auto-merge state read back from GitHub.
 **Tests**: GitHub PR head/base/readiness and auto-merge readback; no manually dispatched gates.
-**Status**: Not Started
+**Status**: In Progress
+
+All local verification and independent-review prerequisites are complete. Publish
+the final metadata-only checkpoint using the recorded lease, answer the nine
+posted Qodo threads, refresh the PR verification record and arm normal auto-merge.
+GitHub remains authoritative for publication, auto-merge and required-check state;
+do not push further changes while armed. Keep the integration task open until the
+remote landing result is recorded. Latest fetched and API-verified dev remains
+`54b321dcec8cdbb6358581f42c1548696260570b`; MERGE_QUEUE is unset.
 
 ADR assessment: retain proposed ADR-060/061/062; no new durable architecture rule
 is introduced by conflict resolution. Accepted upstream ADRs, especially the
