@@ -1045,6 +1045,7 @@ export type ApiPath =
   | "/api/v1/moderation/blocklist/lint"
   | "/api/v1/moderation/blocklist/managed"
   | "/api/v1/moderation/blocklist/{item_id}"
+  | "/api/v1/moderation/classify"
   | "/api/v1/moderation/policy/effective"
   | "/api/v1/moderation/reload"
   | "/api/v1/moderation/review/audit"

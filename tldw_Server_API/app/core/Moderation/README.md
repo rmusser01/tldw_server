@@ -100,3 +100,14 @@ allowed.
   replacement limits, and tests for edge cases.
 - Do not log raw moderated content when the failure path may include sensitive
   user input.
+
+
+## Explicit model classification
+
+In Content Rules, open **Model classification**, choose a configured llama.cpp model, enter one criterion and a sample, then choose **Classify and save for review**. The sample and result are saved to the staff Review queue. This requires Admin and system.configure authority; Review decisions retain their own permissions.
+
+Both benign and flagged results await human review. Flagged evidence must quote the submitted sample exactly. The model cannot change rules or make a final decision, and no confidence score is fabricated. Deterministic testing and Chat enforcement are unchanged. This version supports the audited native async llama.cpp transport; other providers are explicitly refused.
+
+A call has one attempt, a 120-second deadline and bounded input/output. Errors, refusals and incomplete or ungrounded results never count as benign. Stop cancels the owned request, but a result saved just before disconnection can remain. **Retry saved request** recovers that receipt before another inference; editing the form starts a new receipt. Concurrent duplicate submissions can issue multiple calls but create one Review item; there is no cross-worker exactly-once inference promise.
+
+POST /api/v1/moderation/classify accepts request_id(UUID), provider, model, criterion(max 500 characters) and text(max 4000 characters). The response is the saved Review item. Server-authored context.classification contains provider/model, criterion, label, reason and evidence. Reusing an actor's request ID with changed or redacted inputs returns 409. Request admission reuses chat.default; middleware enforces requests, while LLM quotas and best-effort accounting remain dispatcher-owned.

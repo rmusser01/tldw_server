@@ -1,4 +1,4 @@
-"""Observe structured Slides disconnects outside BaseHTTPMiddleware receive polling."""
+"""Observe bounded generation disconnects outside BaseHTTPMiddleware receive polling."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 _SCOPE_KEY = "tldw.slides_generation_disconnect"
 _PATHS = frozenset(
     "/api/v1/slides/generate" + suffix for suffix in ("", "/from-chat", "/from-media", "/from-notes", "/from-rag")
-)
+) | frozenset({"/api/v1/moderation/classify"})
 
 
 async def generation_disconnected(request: Request) -> bool:
@@ -29,7 +29,7 @@ async def generation_disconnected(request: Request) -> bool:
 
 
 class SlidesGenerationDisconnectMiddleware:
-    """Own one disconnect receive after body consumption on the five fixed POST routes."""
+    """Own one disconnect receive after body consumption on the fixed generation POST routes."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -48,7 +48,7 @@ class SlidesGenerationDisconnectMiddleware:
             try:
                 message = await receive()
                 if message["type"] != "http.disconnect":
-                    raise RuntimeError("Unexpected ASGI message after completed Slides request body")
+                    raise RuntimeError("Unexpected ASGI message after completed generation request body")
                 state["closed"].set()
             except Exception as error:
                 state["error"] = error
