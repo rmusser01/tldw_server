@@ -24,6 +24,7 @@ Execute the approved Phase 5 implementation plan using fresh implementers and ta
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Human selected option 1 (subagent-driven) on 2026-11-01, approving plan execution. Governing plan Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md; approved spec and ADR-085 unchanged. Existing isolated worktree reused on new codex/web-scraping-phase-5 branch from origin/dev 54b321dcec8cdbb6358581f42c1548696260570b. Design branch preserved; only final approved docs/task records copied forward, no dirty-main changes. ADR assessment: no new ADR; implementing ADR-085. IDs reserved above local 15406 and refreshed dev/all paginated open PR maximum 15281 (ADR max 084).
+Task 1 implemented at 2606d6569c and independently approved (spec compliant, quality Approved); 62 added cases pass, final distinct scoped suites 149 pass plus pre-existing inventory line-drift gate. Existing Phase3/4/HTTP baseline 2366 pass/1 skip; whole-repo collection blocked by unchanged Workspaces httpx2 import. Ruling: enhanced recursion appends successes only and expands links after success; preserve actual appended-result predicate/timing, not an assumption failed attempts consume cap. Planned Task 11 owns inventory refresh. Two minor review observations retained in SDD ledger for Task 6/final review. Task 2 next; no product cutover yet.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
