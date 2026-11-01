@@ -281,7 +281,7 @@ versus omitted options. Use Hypothesis for reservation/close invariants.
 **Goal:** Independently tested bounded queue and verified lifecycle access, without an early traversal switch.
 **Success Criteria:** Admission/retry/stop/drain races settle once; lifecycle access uses trusted principals.
 **Tests:** Tasks 3-4 queue/projection/security suites and existing retention/admin suites.
-**Status:** In Progress.
+**Status:** Complete (Tasks 3-4 independently reviewed; physical acquisition wiring follows in Stage 3).
 
 ### Task 3: Own Admission, Retry, Completion, And Drain
 
@@ -369,7 +369,7 @@ and `public_progress(snapshot: Mapping[str, Any]) -> dict[str, Any]` as allowlis
 Private execution payloads never reach them. Keep current owner/admin status and
 cancel methods/signatures; shared initialize/shutdown require platform-admin.
 
-- [ ] **Step 1: Write security/projection tests.**
+- [x] **Step 1: Write security/projection tests.**
 
 ```python
 async def test_claimed_admin_in_options_cannot_shutdown(client, ordinary_user):
@@ -385,17 +385,17 @@ def test_nested_execution_secrets_never_project(projection_fixture, caplog):
 Add verified admin/owner success, wrong owner/not-found semantics, nested URL
 userinfo/header/option credentials, exception logging, no raw discovery HTML in
 history, and no removal of intentionally requested public article/raw content.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py -q`.** Expected: unsafe current lifecycle/projection paths fail.
-- [ ] **Step 3: Implement authorization before side effects and explicit public projections; reuse established auth dependencies and sanitizers.** Make initialization serialized/idempotent without replacing a still-draining queue/executor.
-- [ ] **Step 4: Run new tests and `python -m pytest tldw_Server_API/tests/Services/test_enhanced_webscraping_admin_claims.py tldw_Server_API/tests/Web_Scraping/test_enhanced_service_status_and_queue_retention.py -q`.** Expected: pass with existing response conventions retained.
-- [ ] **Step 5: Commit explicit paths and child task:** `fix(web-scraping): guard lifecycle and redact public job state`.
+- [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py -q`.** RED 15 failed; added nested-redaction and failed-cleanup review regressions also reproduced before fixes.
+- [x] **Step 3: Implement authorization before side effects and explicit public projections; reuse established auth dependencies and sanitizers.** Serialized/idempotent initialization, owned drain guards and explicit failed-cleanup retry; ordinary automatic startup preserved.
+- [x] **Step 4: Run new tests and existing admin/retention regressions.** 471 pre-review covering tests and 197 post-fix covering tests pass; Bandit zero findings; warning sources categorized. Fresh review I1-I2 fixed and independently re-reviewed; deferred startup/shutdown transition minor remains for final review.
+- [x] **Step 5: Commit explicit paths and child task:** `cc4db584dc`, `afe62367b6`; TASK-15411 Done after independent gate.
 
 ## Stage 3: Governed Crawl And Continuation
 
 **Goal:** Connect actual acquisition to parent controls, then build traversal/checkpoints/batches behind injected capabilities.
 **Success Criteria:** No budget bypass, lost in-flight page, orphan child, or duplicate discovery fetch.
 **Tests:** Tasks 5-8 unit/property/transport/checkpoint suites with existing Phase 3/4 regressions.
-**Status:** Not Started.
+**Status:** In Progress (Task 5 acquisition integration).
 
 ### Task 5: Integrate Parent Controls With Canonical Acquisition
 
