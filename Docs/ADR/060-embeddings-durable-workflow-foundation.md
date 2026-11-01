@@ -5,7 +5,7 @@
 **Revised:** 2026-10-04
 **Backfilled from:** not backfilled
 **Decision owner:** repository requester; written approval on 2026-10-04
-**Related task:** TASK-13901 (historical TASK-13450 and TASK-13421 records archived after upstream ID reuse)
+**Related task:** TASK-15401 (historical workstream records renumbered TASK-15404 and TASK-15403 after upstream ID reuse)
 **Related spec/plan:** [Stage 3 design](../superpowers/specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md)
 
 ## Decision

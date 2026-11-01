@@ -1,5 +1,5 @@
 ---
-id: TASK-13450
+id: TASK-15404
 title: Design Embeddings Stage 3 durable workflow store and Jobs runner
 status: Done
 created_date: 2026-10-04 23:05
@@ -77,6 +77,7 @@ Verification-section investigation: Jobs conftest disables lease enforcement and
 
 2026-10-04: Canonical replacement for this branch's original TASK-13421, which now collides with the unrelated Assess Jobs completion SQL ownership task on origin/dev. The requester approved the consolidated written spec and continued into implementation planning. Preserve the original record in archive; use TASK-13450 for this Embeddings design in active links. No new architecture decisions or runtime implementation in this tracking correction.
 2026-10-04: Written approval received, followed by continue. Spec status and ADR-060/index now record accepted written approval; accepted rationale unchanged. Canonical record TASK-13450 preserves the original review notes; old Embeddings TASK-13421 is archived because current origin/dev owns a different active task with that ID. Fresh read-only inventory checked 325 distinct ref tips before selecting free IDs 13450/13451. Verification of approved docs/planning links and metadata: 67 local Markdown links valid, approval/index consistent, task sections balanced, original history preserved. Baseline inline runner/types: 48 passed, 108 warnings, 1.20s; selected SQLite lease-policy tests: 6 passed, 29 deselected, 24 warnings, 1.08s. git diff --check passed. No runtime/test code or migrations changed, Bandit N/A for Markdown-only scope. Future Stage 3 and PostgreSQL/RLS certification remain unimplemented; design acceptance is not activation or merge approval.
+2026-11-01: Historical workstream record formerly TASK13450 renumbered to15404 under ADR084 archive-inclusive uniqueness. Original ID/text history remains in Git; canonical design TASK15401, unrelated upstream TASK13450 untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

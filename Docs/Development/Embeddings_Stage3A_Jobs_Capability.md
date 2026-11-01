@@ -1,7 +1,7 @@
 # Stage 3A Prepared Jobs Capability
 
 Internal contract for the dormant, domain-neutral Jobs substrate implemented
-under TASK-13900 and ADR-060. This is not durable Embeddings execution or
+under TASK-15400 and ADR-060. This is not durable Embeddings execution or
 production activation. Jobs does not import Embeddings, call providers, schedule
 a worker, or start a reconciler. Stages 3B (domain repository and capacity), 3C
 (runner and ports), and 3D (domain certification) remain deferred.

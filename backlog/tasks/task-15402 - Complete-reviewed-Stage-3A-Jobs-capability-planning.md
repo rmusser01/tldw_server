@@ -1,15 +1,15 @@
 ---
-id: TASK-13902
+id: TASK-15402
 title: Complete reviewed Stage 3A Jobs capability planning
 status: Done
 dependencies:
-- TASK-13901
+- TASK-15401
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Canonical tracking identity for the reviewed five-stage Stage3A plan after TASK13451 was reused upstream. Original planning history retained byte-for-byte in backlog/archive/tasks/task-13451 - Plan-Embeddings-Stage-3A-domain-neutral-prepared-Jobs-capability.md. Completed plan is preserved by git show 69f61d67d69696cefdae0f4b24df911452213d94:Docs/superpowers/plans/2026-10-04-embeddings-workflow-stage3a-prepared-jobs-implementation-plan.md and retired from the working tree per AGENTS.md. Implementation TASK13900 is complete; spec/ADR/internal guide remain active.
+Canonical tracking identity for reviewed Stage3A planning, replacing colliding historical TASK13902. Original planning history is backlog/archive/tasks/task-15405 - Plan-Embeddings-Stage-3A-domain-neutral-prepared-Jobs-capability.md, with original IDs retained in Git history. Fully checked plan is preserved by git show 1da87ce970:Docs/superpowers/plans/2026-10-04-embeddings-workflow-stage3a-prepared-jobs-implementation-plan.md and retired from active files per AGENTS. Implementation TASK-15400; spec/ADR/internal guide remain active.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -21,6 +21,7 @@ Canonical tracking identity for the reviewed five-stage Stage3A plan after TASK1
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-10-20: Requester selected option1, subagent-driven execution, after receiving committed plan. Planning gate satisfied. Original baseline54pass; execution baseline63pass,9RUN_JOBS-gated skips,144warnings. Correction: these9 skips were not fixture-declared PostgreSQL unavailability; explicitly enabling RUN_JOBS=1 ran all9 PostgreSQL completion cases successfully (15deselected,30warnings,3.92s), as TASK13900 records. ADR assessment: accepted ADR060 governs; no new architecture decision. All five implementation stages and independent reviews completed under TASK13900. The fully completed plan is preserved in69f61d67d69696cefdae0f4b24df911452213d94 before retirement per AGENTS; no other plan was deleted.
+2026-11-01: Canonical planning identity TASK15402 replaces colliding TASK13902. Implementation TASK15400, design TASK15401, original planning archive TASK15405. Original reviewed plan retained in Git.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
