@@ -17,6 +17,21 @@ from tldw_Server_API.app.core.Web_Scraping.crawl.models import CrawlLimits
 from tldw_Server_API.app.core.Web_Scraping.orchestration.crawl_context import CrawlContext
 from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop, WorkHandle
 
+
+@pytest.mark.asyncio
+async def test_scoped_owned_handles_snapshot_prunes_only_actual_drain(ctx):
+    loop = asyncio.get_running_loop()
+    result, drained = loop.create_future(), loop.create_future()
+    handle = WorkHandle(result, drained, lambda: None)
+    ctx.attach(handle)
+    result.set_result(None)
+    assert ctx.owned_handles() == (handle,)
+    snapshot = ctx.owned_handles()
+    drained.set_result(None)
+    assert ctx.owned_handles() == ()
+    assert snapshot == (handle,)
+
+
 pytestmark = pytest.mark.unit
 
 COUNTERS = (

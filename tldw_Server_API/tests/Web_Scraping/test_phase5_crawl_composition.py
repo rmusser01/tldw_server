@@ -698,3 +698,198 @@ async def test_visit_policy_readmits_restored_identity_before_page_acquisition(m
     decision = await policy.evaluate(FrontierEntry(BASE, None, 0, 0, 0), phase="visit")
     assert not decision.allowed and decision.reason == "policy_denied"
     assert calls == [(BASE, False)]
+
+
+@pytest.mark.parametrize("phase", ["seed", "candidate"])
+@pytest.mark.parametrize("stop", ["cancel", "deadline"])
+async def test_robots_physical_owner_holds_checkpoint_until_thread_exit(monkeypatch, phase, stop):
+    import threading
+    import weakref
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Web_Scraping import outbound_policy
+    from tldw_Server_API.app.core.Web_Scraping.runtime import fetch as fetch_module
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import physical_work
+    from tldw_Server_API.tests.Web_Scraping.test_phase5_crawl_engine import MemoryCheckpoint
+
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    checkpoint = MemoryCheckpoint()
+    contexts, registered, executed, fetched = [], [], [], []
+    context_type = crawl.CrawlContext
+
+    class Callback:
+        def __call__(self, _snapshot):
+            pass
+
+    callback = Callback()
+    retained = weakref.ref(callback)
+
+    def context(*args, **kwargs):
+        result = context_type(*args, **kwargs)
+        contexts.append(result)
+        return result
+
+    def http_fetch(url, **kwargs):
+        fetched.append(url)
+        owner = physical_work.get()
+        registered.append(owner is not None and any(h.drained is owner.drained for h in contexts[0].owned_handles()))
+        entered.set()
+        try:
+            assert release.wait(5), "test failed to release physical request"
+            kwargs["on_response_chunk"](1)
+            return {"url": url, "status": 200, "text": "User-agent: *\nAllow: /", "headers": {}, "backend": "httpx"}
+        finally:
+            exited.set()
+
+    def start(url, cookies, *, discover, **kwargs):
+        executed.append(url)
+        kwargs["controls"].reserve("page_attempts").commit()
+        loop = asyncio.get_running_loop()
+        result, drained = loop.create_future(), loop.create_future()
+        result.set_result(
+            PageData(
+                {"url": url, "content": "kept", "extraction_successful": True},
+                discover('<a href="/blog/child">child</a>', url, url),
+            )
+        )
+        drained.set_result(None)
+        return WorkHandle(result, drained, lambda: None)
+
+    monkeypatch.setattr(crawl, "CrawlContext", context)
+    monkeypatch.setattr(outbound_policy, "evaluate_url_policy", lambda _url: SimpleNamespace(allowed=True))
+    monkeypatch.setenv("WEB_OUTBOUND_POLICY_MODE", "strict")
+    monkeypatch.setattr(fetch_module, "http_fetch", http_fetch)
+    monkeypatch.setattr(crawl.article, "start_page", start)
+    profile = "enhanced_sitemap" if phase == "seed" else "enhanced_recursive"
+    task = asyncio.create_task(
+        crawl.execute_crawl(
+            CrawlRequest(BASE),
+            profile=profile,
+            options={"max_pages": 3},
+            supplied=frozenset({"max_pages"}),
+            config={},
+            credentials={},
+            limits=CrawlLimits(execution_seconds=0.5),
+            checkpoint=checkpoint,
+            hooks=CrawlHooks(on_progress=callback),
+        )
+    )
+    del callback
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        if stop == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 1)
+        else:
+            report = await asyncio.wait_for(task, 2)
+            assert report.outcome.stop_reason == "deadline_exhausted"
+        assert not exited.is_set()
+        assert not checkpoint.closed
+        assert retained() is not None
+        assert registered == [True]
+        assert len(contexts[0].owned_handles()) == 1
+        assert contexts[0].snapshot().page_attempts == int(phase == "candidate")
+        assert fetched == ["https://example.com/robots.txt"]
+        assert executed == ([] if phase == "seed" else [BASE])
+        assert checkpoint.state.frontier.completed == ()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        release.set()
+        assert await asyncio.to_thread(exited.wait, 2)
+        await asyncio.wait_for(
+            asyncio.gather(*(item for item in asyncio.all_tasks() if item.get_name() == "crawl-owned-drain")), 2
+        )
+    assert checkpoint.closed
+    assert contexts[0].owned_handles() == ()
+    assert retained() is None
+
+
+@pytest.mark.skipif(not hasattr(asyncio, "eager_task_factory"), reason="eager task dispatch requires Python 3.12+")
+async def test_policy_transport_is_registered_before_even_eager_task_dispatch(monkeypatch):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import physical_work
+
+    contexts, registered = [], []
+    original = crawl.CrawlContext
+
+    def context(*args, **kwargs):
+        result = original(*args, **kwargs)
+        contexts.append(result)
+        return result
+
+    async def allow(*args, **kwargs):
+        return SimpleNamespace(allowed=True)
+
+    async def fetch(dependencies, request):
+        owner = physical_work.get()
+        registered.append(any(handle.drained is owner.drained for handle in contexts[0].owned_handles()))
+        return FetchResponse(url=request.url, status=200, text="<urlset/>", headers={}, backend="httpx")
+
+    monkeypatch.setattr(crawl, "CrawlContext", context)
+    monkeypatch.setattr(crawl, "decide_web_outbound_policy", allow)
+    monkeypatch.setattr(crawl.article, "_fetch_response", fetch)
+    loop = asyncio.get_running_loop()
+    previous = loop.get_task_factory()
+    try:
+        loop.set_task_factory(asyncio.eager_task_factory)
+        report = await crawl.execute_crawl(
+            CrawlRequest(BASE), profile="legacy_sitemap", options={}, supplied=frozenset(), config={}, credentials={}
+        )
+    finally:
+        loop.set_task_factory(previous)
+    assert registered == [True]
+    assert report.outcome.state == "completed"
+
+
+async def test_production_seed_query_overflow_never_reaches_allocating_normalizer(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import url_utils
+
+    encoded = []
+
+    def forbidden(*args, **kwargs):
+        encoded.append(True)
+        raise AssertionError("oversized seed query reached urlencode")
+
+    monkeypatch.setattr(url_utils, "urlencode", forbidden)
+    seed = "https://e.test/x?q=" + "\u00e9" * 5
+    report, _, submitted, executed = await run_report(
+        monkeypatch, "enhanced_batch", [{"url": seed}], base_url=seed, limits=CrawlLimits(max_url_bytes=48)
+    )
+    assert report.outcome.stop_reason == "budget_exhausted"
+    assert not encoded and submitted == executed == []
+
+
+@pytest.mark.parametrize("queued", [False, True])
+@pytest.mark.parametrize("profile", ["enhanced_batch", "enhanced_sitemap", "legacy_sitemap"])
+async def test_denied_middle_independent_item_retains_failure_and_continues_in_order(monkeypatch, queued, profile):
+    first, denied, last = ("https://example.com/" + name for name in ("first", "denied", "last"))
+    outcomes = [{"url": first, "summary": "original summary"}, {"url": denied}, {"url": last, "content": ""}]
+    report, fixture, submitted, executed = await run_report(
+        monkeypatch,
+        profile,
+        outcomes,
+        queued=queued,
+        denied=[denied],
+        seeds=[first, denied, last] if profile == "enhanced_batch" else None,
+    )
+    failure = {
+        "url": denied,
+        "error": "Blocked by outbound policy",
+        "extraction_successful": False,
+        "policy_reason": "robots_unreachable",
+        "policy_mode": "strict",
+        "policy_stage": "visit",
+        "policy_source": profile,
+    }
+    if profile == "legacy_sitemap":
+        failure.update(title="N/A", author="N/A", date="N/A", content="")
+    assert report.articles == (fixture.article(first), failure, fixture.article(last))
+    assert executed == [first, last]
+    assert submitted == ([fixture.sitemap_url, first, last] if profile.endswith("sitemap") else [first, last])
+    assert denied not in [item["url"] for item in fixture.fetch_calls]
+    assert fixture.budget.page_attempts == 2
+    assert report.outcome.state == "completed" and report.outcome.stop_reason == "frontier_exhausted"
+    assert not report.outcome.has_partial_results

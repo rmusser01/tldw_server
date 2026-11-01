@@ -23,7 +23,7 @@ from ..browser_transport import (
 )
 from ..contracts.execution import CrawlReport, DiscoveryResult, PageData
 from ..contracts.requests import CrawlRequest
-from ..crawl.discovery import discover, resolve_reference, url_bytes
+from ..crawl.discovery import discover, normalize_reference, resolve_reference, url_bytes
 from ..crawl.engine import run_crawl
 from ..crawl.models import CheckpointPort, CrawlHooks, CrawlLimits, CrawlPlan, FrontierEntry, TraversalDecision
 from ..crawl.profiles import resolve_crawl_plan
@@ -39,7 +39,6 @@ from ..scoring import (
     KeywordRelevanceScorer,
     PathDepthScorer,
 )
-from ..url_utils import normalize_for_crawl
 from . import article
 from .crawl_context import CrawlContext
 
@@ -101,7 +100,7 @@ class ProfileTraversalPolicy:
         plan, config, headers = self.plan, self.config, self.headers
         url_bytes(plan.request.base_url, plan)
         self.enhanced = plan.profile in {"enhanced_recursive", "enhanced_url_level"}
-        self.base = normalize_for_crawl(plan.request.base_url, plan.request.base_url)
+        self.base = normalize_reference(plan.request.base_url, plan.request.base_url, plan)
         self.base_depth = _segments(self.base)
         options = plan.options
         allowed = {
@@ -150,7 +149,7 @@ class ProfileTraversalPolicy:
         self.robots = RobotsFilter(headers.get("User-Agent", "*"), fetch_robots=self._fetch_document)
         self._prepared = True
 
-    async def _policy(self, url: str, *, robots: bool, source: str, stage: str) -> bool:
+    async def _policy(self, url: str, *, robots: bool, source: str, stage: str) -> TraversalDecision:
         """Fail closed on local policy errors, never on parent interruption."""
         self.controls.check()
         try:
@@ -163,10 +162,27 @@ class ProfileTraversalPolicy:
                 config={"web_scraper": self.config},
                 robots_filter=self.robots,
             )
-            return bool(decision.allowed)
+            if decision.allowed:
+                return TraversalDecision()
+            failure = article._policy_blocked_result(url, decision)
+            if self.plan.profile.startswith("enhanced_"):
+                # The enhanced collector's established denial payload omits the
+                # legacy placeholder article fields, but keeps policy details.
+                failure = {
+                    key: value for key, value in failure.items() if key not in {"title", "author", "date", "content"}
+                }
+            return TraversalDecision(False, metadata=failure, reason="policy_denied")
         except (AttributeError, ImportError, LookupError, OSError, RuntimeError, TimeoutError, TypeError, ValueError):
             logger.warning("crawl_policy_evaluation_failed")
-            return False
+            if self.plan.profile.startswith("enhanced_"):
+                failure = {
+                    "url": url,
+                    "error": "Outbound policy evaluation failed. Please contact system administrator.",
+                    "extraction_successful": False,
+                }
+            else:
+                failure = {**article._blocking_failure_result(url), "error": "Outbound policy evaluation failed"}
+            return TraversalDecision(False, metadata=failure, reason="policy_denied")
 
     async def evaluate(
         self, entry: FrontierEntry, *, phase: Literal["seed", "discovery", "visit"]
@@ -202,8 +218,8 @@ class ProfileTraversalPolicy:
                     else "recursive_scrape",
                     stage="pre_fetch",
                 )
-                if not decision:
-                    return TraversalDecision(False, reason="policy_denied")
+                if not decision.allowed:
+                    return decision
             return TraversalDecision(ordering_score=self.order.score(entry.url) if self.enhanced else 0)
         if phase == "discovery":
             if self.enhanced:
@@ -215,7 +231,7 @@ class ProfileTraversalPolicy:
                 decision = await self._policy(
                     entry.url, robots=self.respect, source="recursive_scrape_candidate", stage="discovery"
                 )
-                if not decision:
+                if not decision.allowed:
                     return TraversalDecision(False, reason="filtered")
                 relevance = self.scorer.score(entry.url)
                 if relevance < self.plan.options["score_threshold"]:
@@ -237,10 +253,10 @@ class ProfileTraversalPolicy:
             if self.plan.profile == "legacy_url_level":
                 allowed = urlsplit(entry.url).netloc == urlsplit(self.base).netloc
                 return TraversalDecision(allowed, reason="allowed" if allowed else "filtered")
-        if phase == "visit" and not await self._policy(
-            entry.url, robots=False, source=self.plan.profile, stage="visit"
-        ):
-            return TraversalDecision(False, reason="policy_denied")
+        if phase == "visit":
+            decision = await self._policy(entry.url, robots=False, source=self.plan.profile, stage="visit")
+            if not decision.allowed:
+                return decision
         if phase == "visit" and self.enhanced:
             relevance, ordering = self.scorer.score(entry.url), self.order.score(entry.url)
             strategy = str(self.plan.options["crawl_strategy"])
@@ -297,6 +313,37 @@ async def execute_crawl(
     committed = 0
 
     async def fetch_document(url: str) -> dict[str, Any]:
+        """Register transport ownership before any policy/HTTP dispatch."""
+        context.check()
+        owner = PhysicalWork()
+        registered = asyncio.Event()
+
+        async def execute() -> dict[str, Any]:
+            # Also gate eager task factories: registration must precede dispatch,
+            # not merely precede the caller's next await.
+            await registered.wait()
+            token = physical_work.set(owner)
+            try:
+                return await fetch_owned_document(url)
+            finally:
+                physical_work.reset(token)
+
+        def completed(done: asyncio.Task) -> None:
+            owner.finish()
+            if not done.cancelled():
+                done.exception()
+
+        task = asyncio.create_task(execute())
+        task.add_done_callback(completed)
+        context.attach(WorkHandle(task, owner.drained, task.cancel))
+        registered.set()
+        try:
+            return await asyncio.shield(task)
+        except BaseException:
+            task.cancel()
+            raise
+
+    async def fetch_owned_document(url: str) -> dict[str, Any]:
         """Govern each discovery/robots redirect without an extracted-page debit."""
         dependencies = replace(
             article._build_default_dependencies(cookies),

@@ -85,7 +85,18 @@ async def run_crawl(
 
     async def evaluate(entry, phase):
         context.check()
-        return await _bounded(policy.evaluate(entry, phase=phase), context) if policy else TraversalDecision()
+        decision = await _bounded(policy.evaluate(entry, phase=phase), context) if policy else TraversalDecision()
+        context.check()
+        return decision
+
+    def commit_denial(entry, decision):
+        # Orchestration supplies the profile's established safe failure payload;
+        # pure policy fakes can omit details, but cannot manufacture success data.
+        failure = {**dict(decision.metadata), "url": entry.url, "extraction_successful": False}
+        failure.setdefault("error", decision.reason)
+        context.check()
+        frontier.commit(entry, PageData(failure, DiscoveryResult(entry.url, entry.url, ())))
+        notify("in_progress", entry)
 
     def notify(status, entry=None):
         if hooks and hooks.on_progress:
@@ -145,6 +156,10 @@ async def run_crawl(
                         continue
                     decision = await evaluate(entry, "seed")
                     if not decision.allowed:
+                        if plan.profile == "enhanced_batch":
+                            frontier.take()
+                            commit_denial(entry, decision)
+                            continue
                         reason = (
                             decision.reason
                             if decision.reason in {"policy_denied", "transport_unavailable", "execution_failed"}
@@ -178,6 +193,12 @@ async def run_crawl(
                     break
                 visit = await evaluate(entry, "visit")
                 if not visit.allowed:
+                    independent = plan.profile == "enhanced_batch" or (
+                        plan.profile.endswith("sitemap") and entry.parent_url is not None
+                    )
+                    if independent:
+                        commit_denial(entry, visit)
+                        continue
                     reason = visit.reason if visit.reason != "filtered" else "policy_denied"
                     break
                 if legacy:
@@ -261,6 +282,9 @@ async def run_crawl(
         }:
             reason = "execution_failed"
     finally:
+        # Policy/robots operations can outlive their cancelled awaiters without
+        # ever acquiring a page. The crawl owner, not an executor, supplies them.
+        handles = list({id(item): item for item in (*handles, *context.owned_handles())}.values())
         normal = reason in {"frontier_exhausted", "page_cap_reached"}
         if not normal and cancellation is None:
             for owned in handles:
