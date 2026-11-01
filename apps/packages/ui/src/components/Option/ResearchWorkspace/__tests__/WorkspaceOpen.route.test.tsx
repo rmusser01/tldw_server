@@ -243,6 +243,7 @@ beforeEach(() => {
   mirror.histories.clear(); mirror.messages.clear(); mirror.compare.clear(); mirror.selections.clear(); mirror.files.clear(); mirror.transactions = [];
   localStorage.clear();
   useWorkspaceStore.getState().reset();
+  useWorkspaceStore.setState({ storeHydrated: true });
   boundary.userId = "1";
   boundary.scopeKey = "alice-open-scope";
   boundary.controller = new AbortController();
@@ -937,3 +938,49 @@ it.each(["image", "documents", "malformed-image"])(
     expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
     expect([...mirror.messages]).toEqual(raw);
   });
+
+it.each([false, true])(
+  "waits for persisted hydration before opening a requested workspace with local target draft=%s",
+  async (dirtyTarget) => {
+    useWorkspaceStore.setState({ workspaceId: "", storeHydrated: false });
+    await mount("/research-workspace?source_workspace_id=" + TARGET);
+    expect(boundary.request).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+
+    await act(async () => {
+      useWorkspaceStore
+        .getState()
+        .restoreServerWorkspace(
+          snapshot(
+            dirtyTarget ? TARGET : PREVIOUS,
+            dirtyTarget ? "Alpha" : "Beta",
+          ),
+        );
+      useWorkspaceStore.getState().setCurrentNote({
+        title: "Hydrated draft",
+        content: "Keep the persisted local draft",
+        keywords: [],
+        isDirty: true,
+      });
+      useWorkspaceStore.setState({ storeHydrated: true });
+    });
+
+    if (dirtyTarget) {
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Your local draft or saved Chat has been kept.",
+      );
+      expect(useWorkspaceStore.getState().currentNote.content).toBe(
+        "Keep the persisted local draft",
+      );
+      expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+    } else {
+      expect(await screen.findByTestId("opened-sources")).toHaveTextContent(
+        "source-A",
+      );
+      expect(
+        useWorkspaceStore.getState().workspaceSnapshots[PREVIOUS].currentNote
+          .content,
+      ).toBe("Keep the persisted local draft");
+    }
+  },
+);
