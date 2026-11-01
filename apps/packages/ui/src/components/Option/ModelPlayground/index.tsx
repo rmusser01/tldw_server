@@ -1,4 +1,7 @@
 import React from "react"
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
+import { useStoreMessageOption } from "@/store/option"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { PanelRightClose, PanelRightOpen, Bug, FlaskConical } from "lucide-react"
@@ -25,7 +28,19 @@ import {
  * - Debug panel (traces, tokens, timing)
  * - System prompt editor
  */
-export const ModelPlayground: React.FC = () => {
+export const ModelPlayground: React.FC = () => (
+  <HistorySelectionProvider
+    storageKey="tldw-h1-playground-reference"
+    onCapture={(capture) => {
+      const display = formatSelectedHistory(capture)
+      useStoreMessageOption.setState({ history: display.history, messages: display.messages })
+    }}
+  >
+    <ModelPlaygroundContent />
+  </HistorySelectionProvider>
+)
+
+const ModelPlaygroundContent: React.FC = () => {
   const { t } = useTranslation(["playground", "option", "common"])
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useStorage(MODEL_PLAYGROUND_SIDEBAR_KEY, true)
