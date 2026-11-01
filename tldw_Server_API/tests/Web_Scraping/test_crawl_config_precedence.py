@@ -513,3 +513,51 @@ async def test_friendly_ingest_propagates_analysis_intent_to_direct_scrapers(
     )
 
     assert captured["allow_llm_extraction"] is analysis_intent
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_phase5_service_option_presence_runs_real_recursive_adapter(monkeypatch, explicit):
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import make_harness
+
+    harness = make_harness(profile="enhanced_recursive", outcomes=[{"url": "https://example.com/blog/start"}])
+    svc = WebScrapingService()
+    svc._initialized = True
+
+    async def keep_ephemeral(result, _task_id, _user_id):
+        return result
+
+    monkeypatch.setattr(enhanced_svc_mod, "load_and_log_configs", lambda: _cfg(max_pages=42, strategy="default"))
+    monkeypatch.setattr(svc, "_store_ephemeral", keep_ephemeral)
+    options = (
+        {"max_pages": 100, "include_external": False, "score_threshold": 0.0, "crawl_strategy": "best_first"}
+        if explicit
+        else {}
+    )
+    with harness.boundaries():
+        svc.scraper = harness.scraper
+        await svc.scraper.job_queue.start()
+        try:
+            result = await svc.process_web_scraping_task(
+                scrape_method="Recursive Scraping",
+                url_input=harness.seed,
+                mode="ephemeral",
+                summarize_checkbox=False,
+                **options,
+            )
+        finally:
+            await svc.scraper.job_queue.stop()
+
+    cfg = result["crawl_config"]
+    source = "request" if explicit else "config_default"
+    assert cfg["max_pages_source"] == source
+    assert cfg["strategy_source"] == source
+    assert cfg["include_external_source"] == source
+    assert cfg["score_threshold_source"] == source
+    assert cfg["requested_max_pages"] == (100 if explicit else None)
+    assert cfg["effective_max_pages"] == (100 if explicit else 42)
+    assert cfg["include_external"] is (not explicit)
+    assert cfg["score_threshold"] == (0.0 if explicit else 0.33)
+    assert result["articles"][0]["metadata"]["crawl_strategy"] == ("best_first" if explicit else "default")
+    assert harness.calls[0]["kwargs"]["allow_llm_extraction"] is False

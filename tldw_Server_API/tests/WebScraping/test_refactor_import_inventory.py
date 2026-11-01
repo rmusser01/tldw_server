@@ -282,3 +282,26 @@ def test_new_internal_web_scraping_packages_do_not_import_legacy_wrappers() -> N
             violations.append(f"{record.path}:{record.line} imports {record.module}")
 
     assert violations == []  # nosec B101
+
+
+@pytest.mark.unit
+def test_phase5_manifest_expands_actual_crawl_imports_without_rewriting_inventory() -> None:
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import (
+        ENHANCED,
+        LEGACY,
+        PROFILE_MANIFEST,
+        SERVICE,
+        current_crawl_inventory,
+    )
+
+    inventory = current_crawl_inventory()
+    assert inventory.crawl_entrypoints == PROFILE_MANIFEST.entrypoints
+    assert len(inventory.crawl_entrypoints) == 8  # Seven profiles plus the legacy sync entry.
+    assert (
+        "tldw_Server_API/app/services/web_scraping_service.py" in inventory.consumers[f"{LEGACY}.scrape_from_sitemap"]
+    )
+    assert "tldw_Server_API/app/core/Watchlists/fetchers.py" in inventory.consumers[f"{ENHANCED}.scrape_sitemap"]
+    assert (
+        "tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py"
+        in inventory.consumers[f"{SERVICE}._scrape_by_url_level"]
+    )
