@@ -58,7 +58,7 @@ const ModelPlaygroundContent: React.FC = () => {
   } = useSmartScroll(messages, streaming, 120)
 
   const handleGoToChat = () => {
-    navigate("/")
+    navigate("/chat")
   }
 
   return (
