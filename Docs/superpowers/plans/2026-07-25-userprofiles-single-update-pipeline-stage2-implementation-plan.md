@@ -1047,13 +1047,17 @@ Explicit verification limit: the bare configured frontend unit attempt includes 
 **Goal**: Verify the new Jobs contract/import foundation coexists with WP2 without extending upstream Jobs design.
 **Success Criteria**: Preserve upstream helper/baseline changes exactly except the preexisting WP2 predicate-line adjustment. Scoped Jobs/CI/profile/writer and boundary gates pass; published membership ADR matches source, no new security finding or policy edit.
 **Tests**: Scoped SQLite/pure Jobs contract/import tests, WP2 regressions, updated quality/shard/CI/Docs checks, upstream-runtime Bandit baseline comparison and independent bounded review. Unchanged broad-suite/live PostgreSQL evidence is carried forward, not claimed rerun.
-**Status**: In Progress
+**Status**: Complete
+
+Qualification: 244 Jobs SQLite/pure import-contract/admission/lifecycle tests pass; 79 PostgreSQL cases are deliberately deselected from this scoped run, not claimed verified. WP2/updated quality tests pass 205 cases; full boundary suite passes 74. The CI folder passes 940 tests with five existing host Bash>=4 skips (four license-fetch isolation cases and one merge-queue license-dispatch case). The updated dev quality checker passes full-tree enforcement with its baseline unchanged. Shard coverage has zero new uncovered files (869 shards, 5349 files, four ignored, baseline44). Upstream runtime compilation passes; Bandit reports one existing medium B608 in Jobs/manager.py:10114 and zero scan errors, on byte-identical accepted-dev runtime blobs.
+
+Identity checkpoint 2fec219ac349cdf9b8bd9f52f0fe685d6da7ba59 supplies Git history for ADR085. All 212 Docs tests pass without skips, including the actual strict MkDocs build; source/published membership records match and preserve the approved rationale. Independent bounded review finds no issues, confirms 122 prior runtime/test/API artifact files and modes unchanged, and independently passes four cold-import audits plus six direct contract checks. Its upstream-internals and WP3 exclusions are accepted: only rebase-induced compatibility is qualified here, with prior unchanged runtime/live-PG evidence carried forward. Earlier non-green broad-suite/local-environment limits remain recorded, not silently converted to passes. Final publication approval will bind the committed checkpoint SHA; no runtime, dependency, instruction or CI-policy change is introduced by this integration.
 
 ## Stage 3: Publish One Reviewed Latest-Dev Candidate
 **Goal**: Commit rebase/identity evidence and push with a lease against a946130dd4 after queue/remote/summary qualification.
 **Success Criteria**: Exact-head independent approval, human summary unchanged, latest-dev ancestry and all fresh required gates before expected-head merge/readback. WP3 stays untouched.
 **Tests**: Current rules/feedback/checks and remote readback; task stays In Progress until verified merge.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Work Package 3: Typed Pipeline and Effects
 
