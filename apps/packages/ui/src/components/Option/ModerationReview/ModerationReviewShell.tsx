@@ -2,6 +2,10 @@ import React from "react"
 import { Link } from "react-router-dom"
 import { AlertTriangle, CheckCircle2, ClipboardList, ShieldCheck, SlidersHorizontal } from "lucide-react"
 
+import { Button } from "@/components/Common/Button"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { MODERATION_RULES_PATH } from "@/routes/route-paths"
@@ -47,14 +51,58 @@ const backendStatusCopy = (online: boolean, uxState: string) => {
   }
 }
 
-export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
-  compact = false
+export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = (
+  props,
+) => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig();
+  const authority = usePromptLocalAuthority();
+  const boundary = deriveConnectionAuthorityId(config);
+  if (
+    !config ||
+    authorityLoading ||
+    authority.boundaryKey !== boundary ||
+    (!authority.ready && !authority.unavailable)
+  ) {
+    return (
+      <div>
+        <p role="status">Resolving Moderation Review account…</p>
+        <Link to="/settings/tldw">Open connection settings</Link>
+      </div>
+    );
+  }
+  if (!authority.ready || authority.ownerId === null) {
+    return (
+      <div role="alert">
+        <p>
+          Could not resolve the moderation account. Retry or check connection
+          settings.
+        </p>
+        <Button type="button" onClick={authority.retry}>
+          Retry account
+        </Button>
+        <Link to="/settings/tldw">Open connection settings</Link>
+      </div>
+    );
+  }
+  return (
+    <ModerationReviewWorkspace
+      key={`${boundary}:${authority.ownerId}`}
+      {...props}
+      presetOwnerId={authority.ownerId}
+    />
+  );
+};
+
+
+
+const ModerationReviewWorkspace: React.FC<ModerationReviewShellProps & { presetOwnerId: string }> = ({
+  compact = false, presetOwnerId
 }) => {
   const online = useServerOnline()
   const { uxState } = useConnectionUxState()
   const backendStatus = backendStatusCopy(online, uxState)
   const StatusIcon = backendStatus.tone === "ok" ? CheckCircle2 : AlertTriangle
-  const queue = useModerationReviewQueue()
+  const queue = useModerationReviewQueue(presetOwnerId)
   const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const visibleTotal = queue.total ?? queue.items.length
   const selectedStatus = queue.selectedItem?.status || "None"
