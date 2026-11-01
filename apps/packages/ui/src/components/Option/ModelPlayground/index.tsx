@@ -46,6 +46,12 @@ const ModelPlaygroundContent: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useStorage(MODEL_PLAYGROUND_SIDEBAR_KEY, true)
   const [debugOpen, setDebugOpen] = useStorage(MODEL_PLAYGROUND_DEBUG_KEY, false)
 
+  const draftAddress = useStoreMessageOption((state) => state.chatDraftAddress)
+  React.useLayoutEffect(() => {
+    const state = useStoreMessageOption.getState()
+    if (!state.chatDraftAddress) state.startNewChatDraft()
+  }, [draftAddress])
+
   const { messages, streaming } = useMessageOption({
     hydrateServerChat: true,
     forceCompareEnabled: true
