@@ -945,6 +945,36 @@ All 271 scoped tests pass with no skips. Ruff, compileall, diff and ancestry che
 
 MERGE_QUEUE is unset and auto-merge is unarmed. Existing review threads are resolved, no review requests changes, and the requester-selected independent workflow replaces Qodo. Old-head statuses never qualify the new head. Publish once with the tracking checkpoint and preserve the human summary verbatim; keep TASK-13001.2 In Progress until verified merge.
 
+### November 1 Backend Ratchet Remediation
+
+## Stage 1: Reproduce the Exact-Head Failure
+**Goal**: Diagnose backend-required run `41341064484` on reviewed head `8d976f1e5a`.
+**Success Criteria**: Reproduce the function-size and four endpoint getter violations without modifying any ratchet baseline.
+**Tests**: Function-size and service-singleton ratchets; shared busy-response RED test and federation role-ownership characterization.
+**Status**: Complete
+
+Local RED reproduced both ratchet failures (21 other tests passed); the new omitted-argument helper regression failed as expected, with 12 characterization/explicit-argument cases passing.
+
+## Stage 2: Preserve Behavior While Removing the Violations
+**Goal**: Extract the existing federation role-grant loop and reuse the existing AuthNZ busy-response adapter with live policy fallback.
+**Success Criteria**: Assignment verification, manual-versus-managed ownership, transaction boundaries, sanitized logs and policy-derived retry headers remain unchanged. ADR060 continues to govern; no new architecture decision or WP3 work.
+**Tests**: Focused federation, endpoint/helper regressions, unchanged-baseline CI ratchets, Ruff/compile/diff and touched-scope Bandit; independent remediation review.
+**Status**: Complete
+
+GREEN evidence: 127 focused tests; 165 wider authentication adapter/structural tests; 13 final helper/federation tests after test formatting; and 1006 CI-contract tests passed with one existing host Bash-version skip. Full-tree test-quality enforcement passes with all baselines unchanged. Ruff, compilation and whitespace checks pass. Runtime Bandit matches the pre-remediation head exactly: 11 existing low B106 token-label findings in unchanged `auth.py` lines, zero new findings/errors. The two test files report 25 expected pytest B101 assertions and one unchanged synthetic-secret B105 fixture warning, with no scan errors.
+
+Independent remediation review found no Critical, Important or Minor issue. It verified the extracted role loop is AST-identical, the old method falls from 320 to 294 lines, the helper is 46 lines, and all four getter counts return to their unchanged ceilings. Reusing the existing response adapter is genuine rendering consolidation, not aliases or ratchet suppression. No behavior was declined within this remediation scope; unchanged WP2 and remote qualification retain their earlier review and coordinator-owned gates.
+
+The repository-wide `pytest -q --maxfail=1` attempt was interrupted during collection to set a fixture-managed isolated PostgreSQL DSN. Its safe retry stopped during collection at unchanged `tests/Workspaces/test_workspaces_api.py`: `ModuleNotFoundError: httpx2` (12 skips). This is not a passing full-suite result, and no unrelated dependency or test was modified to hide it. No new PostgreSQL evidence is claimed for the unchanged transaction paths.
+
+## Stage 3: Publish and Qualify the Remediated Head
+**Goal**: Push only the reviewed remediation and related tracking, then wait for all required exact-head gates.
+**Success Criteria**: Preserve the human Change summary, latest-dev ancestry, resolved feedback and expected-head merge policy; TASK-13001.2 remains In Progress until verified merge.
+**Tests**: Fresh authoritative refs, queue/auto-merge state, current required checks and merged-state readback.
+**Status**: In Progress
+
+Authoritative dev remains `61d02ed484` and the old reviewed remote head is `8d976f1e5a`; auto-merge is unarmed and MERGE_QUEUE is unset. All old-head statuses remain historical after publication. Preserve the human summary verbatim and publish the bounded reviewed remediation once; do not mark the task Done or merge before fresh required checks succeed.
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types

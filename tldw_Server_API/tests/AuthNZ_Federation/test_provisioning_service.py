@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -10,6 +11,74 @@ from tldw_Server_API.app.core.AuthNZ.federation.provisioning_service import (
     FederationProvisioningService,
 )
 from tldw_Server_API.app.core.AuthNZ.membership_writer import AnchorOwnership
+
+
+@pytest.mark.parametrize(
+    ("role_reads", "managed", "assigned", "applied"),
+    (
+        ([False, True], False, True, True),
+        ([False, False], False, True, False),
+        ([True], False, False, False),
+        ([True], True, False, True),
+    ),
+)
+@pytest.mark.asyncio
+async def test_role_grants_preserve_assignment_and_managed_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+    role_reads: list[bool],
+    managed: bool,
+    assigned: bool,
+    applied: bool,
+) -> None:
+    users_repo = Mock()
+    users_repo.has_role_assignment = AsyncMock(side_effect=role_reads)
+    users_repo.assign_role_if_missing = AsyncMock()
+    managed_repo = Mock()
+    managed_repo.ensure_tables = AsyncMock()
+    managed_repo.list_for_provider_user = AsyncMock(
+        return_value=[{"grant_kind": "role", "target_ref": "member"}] if managed else [],
+    )
+    managed_repo.upsert_grant = AsyncMock()
+    monkeypatch.setattr(provisioning_module, "AuthnzUsersRepo", lambda **_: users_repo)
+    monkeypatch.setattr(provisioning_module, "AuthnzOrgsTeamsRepo", lambda **_: Mock())
+    monkeypatch.setattr(
+        provisioning_module,
+        "FederatedManagedGrantRepo",
+        lambda **_: managed_repo,
+    )
+
+    result = await FederationProvisioningService(db_pool=object()).apply_mapped_grants(
+        provider={"id": 5, "provisioning_policy": {"mode": "jit_grant_only"}},
+        user_id=7,
+        mapped_claims={"derived_roles": ["member"]},
+    )
+
+    assert result == {
+        "mode": "jit_grant_only",
+        "applied": applied,
+        "org_ids": [],
+        "team_ids": [],
+        "roles": ["member"] if applied else [],
+        "revoked_org_ids": [],
+        "revoked_team_ids": [],
+        "revoked_roles": [],
+    }
+    if assigned:
+        users_repo.assign_role_if_missing.assert_awaited_once_with(
+            user_id=7,
+            role_name="member",
+        )
+    else:
+        users_repo.assign_role_if_missing.assert_not_awaited()
+    if applied:
+        managed_repo.upsert_grant.assert_awaited_once_with(
+            identity_provider_id=5,
+            user_id=7,
+            grant_kind="role",
+            target_ref="member",
+        )
+    else:
+        managed_repo.upsert_grant.assert_not_awaited()
 
 
 @pytest.mark.asyncio

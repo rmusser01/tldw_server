@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    _authnz_busy_http_exception,
     get_auth_principal,
     get_db_transaction,
     get_registration_service_dep,
@@ -76,9 +77,6 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
-    get_authnz_transaction_policy,
-)
 from tldw_Server_API.app.core.Billing.subscription_service import get_subscription_service
 from tldw_Server_API.app.services.admin_budgets_service import (
     list_org_budgets as svc_list_org_budgets,
@@ -144,15 +142,7 @@ def _membership_control_http_exception(
         exc,
         (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
     ):
-        return HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication database is busy. Please retry shortly.",
-            headers={
-                "Retry-After": str(
-                    get_authnz_transaction_policy().busy_retry_after_seconds
-                ),
-            },
-        )
+        return _authnz_busy_http_exception()
     if isinstance(exc, MembershipAuthorizationError):
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

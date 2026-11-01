@@ -428,6 +428,53 @@ class FederationProvisioningService:
             "warnings": warnings,
         }
 
+    async def _apply_role_grants(
+        self,
+        *,
+        users_repo: AuthnzUsersRepo,
+        managed_repo: FederatedManagedGrantRepo,
+        provider_id: int,
+        user_id: int,
+        desired_role_names: set[str],
+        existing_managed_keys: set[tuple[str, str]],
+    ) -> list[str]:
+        """Apply role grants without claiming pre-existing unmanaged assignments."""
+        applied_roles: list[str] = []
+        for role_name in sorted(desired_role_names):
+            grant_key = _grant_key("role", role_name)
+            try:
+                has_role = await users_repo.has_role_assignment(
+                    user_id=int(user_id),
+                    role_name=role_name,
+                )
+                if not has_role or grant_key in existing_managed_keys:
+                    if not has_role:
+                        await users_repo.assign_role_if_missing(
+                            user_id=int(user_id),
+                            role_name=role_name,
+                        )
+                        has_role = await users_repo.has_role_assignment(
+                            user_id=int(user_id),
+                            role_name=role_name,
+                        )
+                    if not has_role:
+                        continue
+                    await managed_repo.upsert_grant(
+                        identity_provider_id=provider_id,
+                        user_id=int(user_id),
+                        grant_kind="role",
+                        target_ref=role_name,
+                    )
+                    applied_roles.append(role_name)
+            except Exception as exc:  # pragma: no cover - defensive runtime hardening
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Failed to apply federated role grant provider_id={} user_id={} role={}",
+                    provider_id,
+                    user_id,
+                    role_name,
+                )
+        return applied_roles
+
     async def apply_mapped_grants(
         self,
         *,
@@ -549,40 +596,14 @@ class FederationProvisioningService:
                     team_id,
                 )
 
-        applied_roles: list[str] = []
-        for role_name in sorted(desired_role_names):
-            grant_key = _grant_key("role", role_name)
-            try:
-                has_role = await users_repo.has_role_assignment(
-                    user_id=int(user_id),
-                    role_name=role_name,
-                )
-                if not has_role or grant_key in existing_managed_keys:
-                    if not has_role:
-                        await users_repo.assign_role_if_missing(
-                            user_id=int(user_id),
-                            role_name=role_name,
-                        )
-                        has_role = await users_repo.has_role_assignment(
-                            user_id=int(user_id),
-                            role_name=role_name,
-                        )
-                    if not has_role:
-                        continue
-                    await managed_repo.upsert_grant(
-                        identity_provider_id=provider_id,
-                        user_id=int(user_id),
-                        grant_kind="role",
-                        target_ref=role_name,
-                    )
-                    applied_roles.append(role_name)
-            except Exception as exc:  # pragma: no cover - defensive runtime hardening
-                logger.bind(error_type=type(exc).__name__).warning(
-                    "Failed to apply federated role grant provider_id={} user_id={} role={}",
-                    provider_id,
-                    user_id,
-                    role_name,
-                )
+        applied_roles = await self._apply_role_grants(
+            users_repo=users_repo,
+            managed_repo=managed_repo,
+            provider_id=provider_id,
+            user_id=user_id,
+            desired_role_names=desired_role_names,
+            existing_managed_keys=existing_managed_keys,
+        )
 
         revoked_org_ids: list[int] = []
         revoked_team_ids: list[int] = []

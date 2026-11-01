@@ -13,7 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    _authnz_busy_http_exception,
+    get_auth_principal,
+)
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseLockError,
@@ -25,7 +28,6 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.tenant_provisioning import provision_tenant as create_tenant_records
-from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 
 router = APIRouter(prefix="/provisioning", tags=["admin-provisioning"])
 
@@ -129,15 +131,7 @@ async def provision_tenant(
             detail="Not authorized to provision tenants",
         ) from None
     except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication database is busy. Please retry shortly.",
-            headers={
-                "Retry-After": str(
-                    get_authnz_transaction_policy().busy_retry_after_seconds
-                ),
-            },
-        ) from exc
+        raise _authnz_busy_http_exception() from exc
     except HTTPException:
         raise
     except Exception as exc:

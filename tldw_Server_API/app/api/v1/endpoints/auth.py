@@ -3895,15 +3895,7 @@ async def register(
         log_counter("auth_register_database_busy")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         _finalize_register_diag(http_request, response)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication database is busy. Please retry shortly.",
-            headers={
-                "Retry-After": str(
-                    get_authnz_transaction_policy().busy_retry_after_seconds
-                ),
-            },
-        ) from e
+        raise _authnz_busy_http_exception() from e
     except RegistrationError as e:
         logger.error(f"Registration error: {e}")
         log_counter("auth_register_error")
