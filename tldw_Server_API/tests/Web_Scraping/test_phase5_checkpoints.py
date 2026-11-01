@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import weakref
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -619,3 +620,144 @@ async def test_port_internal_cancellation_is_failure_not_caller_cancellation(sto
         await asyncio.gather(*(asyncio.shield(item.drained) for item in context.owned_handles()))
     finally:
         monkeypatch.setattr(store, "close", original_close)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("primary", ["normal", "cancelled", "budget_exhausted", "deadline_exhausted"])
+async def test_cleanup_stages_share_one_deadline_and_retain_actual_close_owner(store, tmp_path, monkeypatch, primary):
+    """Advance virtual time at event barriers; never assert scheduler wall time."""
+    from tldw_Server_API.app.core.Web_Scraping.crawl import engine
+
+    loop = asyncio.get_running_loop()
+    real_wait_for = asyncio.wait_for
+    now, timeouts = [100.0], []
+    first_wait, close_started, close_exited, expired = (loop.create_future() for _ in range(4))
+    release_close = threading.Event()
+    original_save, original_clear, original_close = store.save, store.clear, store.close
+    active_clock = [0.0]
+    resolved = plan()
+    context = CrawlContext(resolved.limits, clock=lambda: active_clock[0])
+    cancellation = asyncio.CancelledError("caller") if primary == "cancelled" else None
+    if cancellation is not None:
+        context.cancel()
+    elif primary == "deadline_exhausted":
+        active_clock[0] = resolved.limits.execution_seconds
+        with pytest.raises(ParentStop, match=primary):
+            context.check()
+    elif primary == "budget_exhausted":
+        with pytest.raises(ParentStop, match=primary):
+            context.reserve("page_attempts", resolved.limits.page_attempts + 1)
+
+    async def virtual_wait_for(awaitable, timeout):
+        timeouts.append((now[0], timeout))
+        if not first_wait.done():
+            first_wait.set_result(None)
+        future = asyncio.ensure_future(awaitable)
+        done, _ = await asyncio.wait((future, expired), return_when=asyncio.FIRST_COMPLETED)
+        if future in done:
+            return await future
+        # Expire exactly at the supplied virtual deadline, canceling only the
+        # shield/gather proxy just as wait_for would, never a physical future.
+        assert now[0] >= timeouts[-1][0] + timeout
+        future.cancel()
+        raise TimeoutError
+
+    def clear():
+        original_clear()
+        now[0] += 0.75
+
+    def save(value):
+        original_save(value)
+        now[0] += 1.5
+
+    def close():
+        loop.call_soon_threadsafe(close_started.set_result, None)
+        if not release_close.wait(5):
+            raise RuntimeError("test close barrier expired")
+        original_close()
+        loop.call_soon_threadsafe(close_exited.set_result, None)
+
+    class PrivateGraph:
+        pass
+
+    private_graph = PrivateGraph()
+    retained = weakref.ref(private_graph)
+    monkeypatch.setattr(engine, "monotonic", lambda: now[0], raising=False)
+    monkeypatch.setattr(asyncio, "wait_for", virtual_wait_for)
+    monkeypatch.setattr(store, "clear", clear)
+    monkeypatch.setattr(store, "save", save)
+    monkeypatch.setattr(store, "close", close)
+    result, drained = loop.create_future(), loop.create_future()
+    result.set_result(None)
+    handles = []
+    if primary == "normal":
+        handle = WorkHandle(result, drained, lambda: None)
+        context.attach(handle)
+        handles.append(handle)
+    task = asyncio.create_task(
+        engine._finalize_crawl(
+            resolved,
+            context=context,
+            frontier=Frontier(resolved),
+            handles=handles,
+            checkpoint=store,
+            loading=False,
+            count=0,
+            reason="frontier_exhausted" if primary == "normal" else primary,
+            cancellation=cancellation,
+            diagnostics=[],
+            owned=(private_graph,),
+        )
+    )
+    del private_graph
+    try:
+        if primary == "normal":
+            await real_wait_for(asyncio.shield(first_wait), 3)
+            now[0] += 0.75
+            drained.set_result(None)
+        await real_wait_for(asyncio.shield(close_started), 3)
+        assert timeouts[-1][1] == pytest.approx(0.5)
+        assert all(start + timeout == pytest.approx(102.0) for start, timeout in timeouts)
+        now[0] = 102.0
+        expired.set_result(None)
+        report, returned_cancellation = await real_wait_for(asyncio.shield(task), 3)
+        assert returned_cancellation is cancellation
+        assert report.outcome.stop_reason == ("checkpoint_failed" if primary == "normal" else primary)
+        assert report.diagnostics == ("checkpoint_failed",)
+        assert context.owned_handles() and retained() is not None
+        with pytest.raises(CheckpointError, match="checkpoint_in_use"):
+            CheckpointStore.open(tmp_path / "progress.json", scope=store.scope, limits=store.limits)
+    finally:
+        if not drained.done():
+            drained.set_result(None)
+        release_close.set()
+        await real_wait_for(asyncio.shield(close_exited), 3)
+        await real_wait_for(asyncio.shield(task), 3)
+        await real_wait_for(asyncio.gather(*(asyncio.shield(item.drained) for item in context.owned_handles())), 3)
+        monkeypatch.setattr(store, "close", original_close)
+    other = CheckpointStore.open(tmp_path / "progress.json", scope=store.scope, limits=store.limits)
+    other.close()
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_load_stays_under_active_context_not_cleanup_clock(store, monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.crawl import engine
+
+    resolved = plan()
+    context = CrawlContext(resolved.limits, clock=lambda: 0)
+    bounded_calls = []
+    original = engine._bounded
+
+    def cleanup_clock():
+        pytest.fail("load consulted the finalization clock")
+
+    async def bounded(awaitable, current):
+        bounded_calls.append(current)
+        return await original(awaitable, current)
+
+    monkeypatch.setattr(engine, "monotonic", cleanup_clock, raising=False)
+    monkeypatch.setattr(engine, "_bounded", bounded)
+    assert (
+        await engine._checkpoint_call(context, [], store.load, plan=resolved, scope=store.scope, loading=True) is None
+    )
+    assert bounded_calls and all(current is context for current in bounded_calls)
