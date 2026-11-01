@@ -18,6 +18,7 @@ from typing import Any, Optional
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
@@ -28,6 +29,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    exception_type_for_log,
     redact_url_for_log,
     url_hint_for_display,
 )
@@ -45,10 +47,10 @@ from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
     ScrapingJob,
     create_enhanced_scraper,
 )
+from tldw_Server_API.app.core.Web_Scraping.jobs.projections import public_job
 
 # Import existing components
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _WEB_SCRAPE_CONFIG_PARSE_EXCEPTIONS = (TypeError, ValueError)
 _EXTRACTION_FAILURE_MESSAGES = {
@@ -114,7 +116,7 @@ _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     json.JSONDecodeError,
 )
-_PLATFORM_ADMIN_ROLES = frozenset({"admin"})
+_PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
@@ -149,9 +151,31 @@ def _web_chunking_form(
 
 
 def _normalized_claim_values(values: Any) -> set[str]:
-    if not isinstance(values, (list, tuple, set)):
+    if not isinstance(values, (list, tuple, set, frozenset)):
         return set()
     return {str(value).strip().lower() for value in values if str(value).strip()}
+
+
+def is_platform_admin(user: Any) -> bool:
+    """Apply canonical claim policy to a server-verified request principal."""
+    if user is None:
+        return False
+
+    def claim(name: str, default: Any) -> Any:
+        return user.get(name, default) if isinstance(user, Mapping) else getattr(user, name, default)
+
+    role = str(claim("role", "")).strip().lower()
+    roles = _normalized_claim_values(claim("roles", []))
+    permissions = _normalized_claim_values(claim("permissions", []))
+    return role in _PLATFORM_ADMIN_ROLES or bool(
+        roles & _PLATFORM_ADMIN_ROLES or permissions & _ADMIN_CLAIM_PERMISSIONS
+    )
+
+
+def _observe_lifecycle_task(task: asyncio.Task) -> None:
+    """Observe owned cleanup/startup failures even when a request has left."""
+    if not task.cancelled():
+        task.exception()
 
 
 class WebScrapingService:
@@ -161,31 +185,70 @@ class WebScrapingService:
         self.scraper: Optional[EnhancedWebScraper] = None
         self._initialized = False
         self._active_jobs: dict[str, ScrapingJob] = {}
+        self._lifecycle_lock = asyncio.Lock()
+        self._initialization_task: asyncio.Task | None = None
+        self._shutdown_task: asyncio.Task | None = None
+        self._stopping = False
+
+    def _finish_shutdown_if_drained(self) -> bool:
+        """Only the owned queue (or legacy awaited stop) proves resource drain."""
+        if self._shutdown_task is None or not self._shutdown_task.done():
+            return False
+        if self._shutdown_task.cancelled() or self._shutdown_task.exception() is not None:
+            return False
+        if self.scraper is not None:
+            state = self.scraper.job_queue.get_status().get("state")
+            if state is not None and state != "stopped":
+                return False
+        self.scraper = None
+        self._shutdown_task = None
+        self._stopping = False
+        return True
 
     async def initialize(self):
         """Initialize the scraping service"""
-        if not self._initialized:
-            try:
-                self.scraper = await create_enhanced_scraper()
-                self._initialized = True
-                logger.info("Web scraping service initialized with Playwright")
-            except ImportError as e:
-                logger.warning(f"Playwright not available: {e}. Service will use basic scraping only.")
-                self.scraper = None  # Will use fallback methods
-                self._initialized = True
-            except Exception as e:
-                logger.error(f"Failed to initialize enhanced scraper: {e}")
-                import traceback
+        async with self._lifecycle_lock:
+            if self._stopping and not self._finish_shutdown_if_drained():
+                raise HTTPException(status_code=503, detail="Scraping service is draining")
+            if self._initialized:
+                return
+            if self._initialization_task is None:
+                self._initialization_task = asyncio.create_task(self._initialize_scraper())
+                self._initialization_task.add_done_callback(_observe_lifecycle_task)
+            await asyncio.shield(self._initialization_task)
 
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                raise
+    async def _initialize_scraper(self) -> None:
+        """Own startup independently of the request waiting for it."""
+        try:
+            self.scraper = await create_enhanced_scraper()
+            self._initialized = True
+            logger.info("Web scraping service initialized with Playwright")
+        except ImportError:
+            logger.warning("Playwright not available. Service will use basic scraping only.")
+            self.scraper = None  # Will use fallback methods
+            self._initialized = True
+        except Exception as e:
+            logger.error("Failed to initialize enhanced scraper ({})", exception_type_for_log(e))
+            raise
+        finally:
+            self._initialization_task = None
 
     async def shutdown(self):
         """Shutdown the scraping service"""
-        if self.scraper:
-            await self.scraper.stop()
+        async with self._lifecycle_lock:
+            if self._initialization_task is not None:
+                await asyncio.shield(self._initialization_task)
             self._initialized = False
-            logger.info("Web scraping service shutdown")
+            if self.scraper is None:
+                return
+            self._stopping = True
+            if self._shutdown_task is None:
+                self._shutdown_task = asyncio.create_task(self.scraper.stop())
+                self._shutdown_task.add_done_callback(_observe_lifecycle_task)
+            # Request cancellation must not cancel the resource owner's cleanup.
+            await asyncio.shield(self._shutdown_task)
+            if self._finish_shutdown_if_drained():
+                logger.info("Web scraping service shutdown")
 
     async def process_web_scraping_task(
         self,
@@ -441,7 +504,7 @@ class WebScrapingService:
             return stored
 
         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Web scraping task failed: {e}")
+            logger.error("Web scraping task failed ({})", exception_type_for_log(e))
             raise HTTPException(status_code=500, detail="Enhanced web scraping task failed") from e
 
     async def _scrape_individual_urls(
@@ -475,7 +538,7 @@ class WebScrapingService:
             raise RuntimeError("Enhanced scraper not initialized - Playwright may not be available")
 
         logger.info(f"Starting to scrape {len(urls)} URLs with enhanced scraper")
-        logger.debug(f"URLs to scrape: {urls}")
+        logger.debug("URLs to scrape: {}", [redact_url_for_log(url) for url in urls])
 
         # Scrape with enhanced scraper
         results = await self.scraper.scrape_multiple(
@@ -501,7 +564,7 @@ class WebScrapingService:
             logger.debug(
                 f"Result {i}: extraction_successful={result.get('extraction_successful')}, "
                 f"has_content={bool(result.get('content'))}, "
-                f"error={result.get('error')}"
+                f"has_error={bool(result.get('error'))}"
             )
 
         # Apply custom titles if provided
@@ -744,7 +807,7 @@ class WebScrapingService:
             )
             return summary
         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Summarization failed: {e}")
+            logger.error("Summarization failed ({})", exception_type_for_log(e))
             return "Summary generation failed"
 
     async def _store_ephemeral(self, result: dict[str, Any], task_id: str, user_id: Optional[int]) -> dict[str, Any]:
@@ -991,7 +1054,10 @@ class WebScrapingService:
                                     }
                                 )
                         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"webscraping.persist: chunking failed; storing without chunks: {e}")
+                            logger.debug(
+                                "webscraping.persist: chunking failed; storing without chunks ({})",
+                                exception_type_for_log(e),
+                            )
                             try:
                                 if reg:
                                     reg.increment(
@@ -1031,7 +1097,7 @@ class WebScrapingService:
                                 {"method": str(result.get("method", "unknown"))},
                             )
                     except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
-                        logger.debug(f"webscraping.persist: metric observe failed: {me}")
+                        logger.debug("webscraping.persist: metric observe failed ({})", exception_type_for_log(me))
 
                     title = article.get("title", "Untitled")
                     if media_id and message in {
@@ -1064,7 +1130,9 @@ class WebScrapingService:
                                     {"method": str(result.get("method", "unknown"))},
                                 )
                         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
-                            logger.debug(f"webscraping.persist: metric increment failed: {me}")
+                            logger.debug(
+                                "webscraping.persist: metric increment failed ({})", exception_type_for_log(me)
+                            )
                     else:
                         logger.warning(
                             f"Failed to get media_id for article: "
@@ -1079,7 +1147,9 @@ class WebScrapingService:
                                     {"method": str(result.get("method", "unknown"))},
                                 )
                         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
-                            logger.debug(f"webscraping.persist: metric increment failed: {me}")
+                            logger.debug(
+                                "webscraping.persist: metric increment failed ({})", exception_type_for_log(me)
+                            )
 
                 except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
                     logger.error("Failed to store article")
@@ -1090,7 +1160,7 @@ class WebScrapingService:
                                 "webscraping.persist.failed_total", 1, {"method": str(result.get("method", "unknown"))}
                             )
                     except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
-                        logger.debug(f"webscraping.persist: metric increment failed: {me}")
+                        logger.debug("webscraping.persist: metric increment failed ({})", exception_type_for_log(me))
 
             try:
                 if reg:
@@ -1101,7 +1171,7 @@ class WebScrapingService:
                         {"method": str(result.get("method", "unknown"))},
                     )
             except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as me:
-                logger.debug(f"webscraping.persist: batch metric observe failed: {me}")
+                logger.debug("webscraping.persist: batch metric observe failed ({})", exception_type_for_log(me))
 
         stored_articles = len(media_ids)
         status = (
@@ -1126,20 +1196,7 @@ class WebScrapingService:
         }
 
     def _is_admin_user(self, user: Any) -> bool:
-        if user is None:
-            return False
-        role = str(user.get("role", "") if isinstance(user, dict) else getattr(user, "role", "")).strip().lower()
-        if role in _PLATFORM_ADMIN_ROLES:
-            return True
-        roles = _normalized_claim_values(
-            user.get("roles", []) if isinstance(user, dict) else getattr(user, "roles", [])
-        )
-        if roles & _PLATFORM_ADMIN_ROLES:
-            return True
-        permissions = _normalized_claim_values(
-            user.get("permissions", []) if isinstance(user, dict) else getattr(user, "permissions", [])
-        )
-        return bool(permissions & _ADMIN_CLAIM_PERMISSIONS)
+        return is_platform_admin(user)
 
     def _can_access_job(self, job: ScrapingJob, user: Any) -> bool:
         if self._is_admin_user(user):
@@ -1164,7 +1221,7 @@ class WebScrapingService:
         if not self._can_access_job(job, current_user):
             raise HTTPException(status_code=403, detail="Not authorized to access this job")
 
-        return job.to_dict()
+        return public_job(job)
 
     async def cancel_job(self, job_id: str, current_user: Any) -> dict[str, Any]:
         """Cancel a scraping job (best-effort, scoped to the requesting user)."""
@@ -1254,6 +1311,8 @@ async def process_web_scraping_task(**kwargs) -> dict[str, Any]:
 async def shutdown_web_scraping_service():
     """Shutdown the web scraping service"""
     global _web_scraping_service
-    if _web_scraping_service:
-        await _web_scraping_service.shutdown()
-        _web_scraping_service = None
+    service = _web_scraping_service
+    if service:
+        await service.shutdown()
+        if _web_scraping_service is service and not service._stopping:
+            _web_scraping_service = None

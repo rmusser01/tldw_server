@@ -1,10 +1,15 @@
 """Count/byte-bounded allowlisted polling history, independent of live delivery."""
 
+import re
+import sys
 from collections import OrderedDict
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
+from ...Ingestion_Media_Processing.logging_safety import redact_url_for_log
+from ..contracts.execution import CrawlOutcome, _private_article_key
 from .admission import bounded_snapshot, public_diagnostic
 from .models import ScrapingJob
 
@@ -28,8 +33,100 @@ ARTICLE_FIELDS = frozenset(
         "duplicate",
         "is_duplicate",
         "content_hash",
+        "raw_html",
+        "raw_content",
     }
 )
+
+_PRIVATE_STATE_KEYS = frozenset(
+    {
+        "options",
+        "executionoptions",
+        "executionpayload",
+        "payload",
+        "context",
+        "discovery",
+        "discoveryhtml",
+        "rawdiscoveryhtml",
+        "discoveredlinks",
+        "discoveryresult",
+    }
+)
+PUBLIC_CONTENT_KEYS = frozenset({"content", "raw_html", "raw_content"})
+_URL_IN_TEXT = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+_PROGRESS_FIELDS = frozenset(
+    {
+        "status",
+        "total_urls",
+        "processed_urls",
+        "current_url",
+        "started_at",
+        "updated_at",
+        "completed_at",
+        "pages_scraped",
+        "total_pages",
+        "queue_size",
+        "visited",
+        "remaining",
+        "remaining_urls",
+        "max_pages",
+        "max_depth",
+        "current_depth",
+        "error",
+        "crawl_outcome",
+    }
+)
+
+
+def private_state_key(key: str) -> bool:
+    """Exclude execution/discovery containers as well as credential aliases."""
+    normalized = "".join(char for char in key.lower() if char.isalnum())
+    return (
+        _private_article_key(key)
+        or normalized in _PRIVATE_STATE_KEYS
+        or normalized.endswith(("options", "headers", "cookies"))
+    )
+
+
+def public_state_string(value: str) -> str:
+    """Redact URL credentials even in nested metadata, but not article prose."""
+    if value.startswith("//"):
+        return redact_url_for_log("https:" + value).removeprefix("https:")
+    return _URL_IN_TEXT.sub(lambda match: redact_url_for_log(match.group()), value)
+
+
+def public_job(job: ScrapingJob, *, crawl_outcome: CrawlOutcome | None = None) -> dict[str, Any]:
+    """Allowlist polling state for both legacy and process-local job values."""
+    snapshot = {
+        "job_id": job.job_id,
+        "url": job.url,
+        "method": job.method,
+        "user_id": job.user_id,
+        "priority": job.priority.value,
+        "status": job.status.name,
+        "created_at": job.created_at.isoformat(),
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "retries": job.retries,
+        "result": job.result,
+        "error": public_diagnostic(job.error),
+        "metadata": {},
+        "cancel_requested": job.cancel_requested,
+    }
+    if crawl_outcome is not None:
+        snapshot["crawl_outcome"] = {
+            "state": crawl_outcome.state,
+            "stop_reason": crawl_outcome.stop_reason,
+            "has_partial_results": crawl_outcome.has_partial_results,
+        }
+    return bounded_snapshot(snapshot, sys.maxsize, redact=True)[0]
+
+
+def public_progress(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    """Return an allowlisted detached progress snapshot, never resume state."""
+    return bounded_snapshot(
+        {key: value for key, value in snapshot.items() if key in _PROGRESS_FIELDS}, sys.maxsize, redact=True
+    )[0]
 
 
 class History:
@@ -49,10 +146,14 @@ class History:
             if article.get("error"):
                 candidate.result["error"] = "source_extraction_failed"
         try:
-            snapshot, size = bounded_snapshot(candidate.to_dict(), self.max_bytes, redact=True)
+            # Keep sizing incremental; do not build an unbounded public copy first.
+            state = candidate.to_dict()
+            state["url"] = public_state_string(candidate.url)
+            snapshot, size = bounded_snapshot(state, self.max_bytes, redact=True)
         except ValueError:
             return None
         candidate.result = snapshot["result"]
+        candidate.url = snapshot["url"]
         return candidate, size
 
     def record(self, job: ScrapingJob, article: dict[str, Any] | None) -> None:
