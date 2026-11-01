@@ -122,6 +122,26 @@ minimum_seconds)` extends only live authority, bounded by
 `INSUFFICIENT_HORIZON`, not a promise. Database time governs leases/schedules;
 callers must use local monotonic deadlines for their own remaining time.
 
+Generic `renew_job_lease` and `batch_renew_leases` can extend an enrolled delivery
+only with both exact, nonempty worker/lease claims and a strictly unexpired
+database-clock deadline, checked atomically in the renewal UPDATE. Legacy
+`enforce` flags and `JOBS_ENFORCE_LEASE_ACK` cannot relax these requirements.
+Extension uses database time and never shortens the existing lease. Renewal is
+not semantic progress: it does not change retries, failure streaks, epochs,
+no-progress accounting, or retained proofs. Expired authority cannot be revived;
+ordinary expiry recovery closes that episode before a fresh acquisition.
+
+Generic `release_job` rejects every non-null enrollment marker, returning its
+normal `False`/no-transition result without changing the delivery, counters,
+proofs, outbox, or observers. It cannot attest domain facts or close an episode.
+To yield, use a live, domain-revalidated capability `CONTINUE` effect; otherwise
+stop using the lease and let bounded expiry recovery handle it. This also applies
+to the generic release called when a WorkerSDK acquire guard rejects a delivery:
+the job remains processing until expiry, rather than being queued with an open
+epoch. Do not assume guard rejection immediately makes enrolled work available.
+Unknown/corrupt non-null markers fail closed. Ordinary Jobs with null or absent
+markers retain generic renewal/release behavior and do not read support tables.
+
 Effect APIs:
 
 - `lookup_effect(root, effect)` checks retained exact proof without a lease.

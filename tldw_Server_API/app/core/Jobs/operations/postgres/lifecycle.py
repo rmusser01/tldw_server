@@ -14,6 +14,9 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
     apply_postgres_job_counter_transition,
 )
+from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+    workflow_enrollment_projection,
+)
 from tldw_Server_API.app.core.Jobs.migrations import (
     SlidesArchiveNormalizationError,
     normalize_slides_archive_projection,
@@ -217,6 +220,7 @@ def _renew_lease_statement(
     command: RenewLeaseCommand,
     *,
     now: datetime,
+    enrollment_column: bool = False,
 ) -> tuple[str, tuple[Any, ...]]:
     """Build the PostgreSQL statement for one lease renewal attempt."""
 
@@ -224,12 +228,36 @@ def _renew_lease_statement(
     has_message = command.progress_message is not None
     sql = _RENEW_SQL_VARIANTS[(command.enforce, has_percent, has_message)]
     params: list[Any] = [now, now, command.seconds]
+    if enrollment_column:
+        sql = (
+            "UPDATE jobs SET leased_until = CASE WHEN workflow_capability_version IS NULL THEN "
+            "GREATEST(COALESCE(leased_until, %s), %s + (%s || ' seconds')::interval) "
+            "ELSE GREATEST(leased_until,clock_timestamp()+%s*interval '1 second') END"
+        )
+        params.append(command.seconds)
+        if has_percent:
+            sql += ", progress_percent = %s"
+        if has_message:
+            sql += ", progress_message = %s"
+        sql += " WHERE id = %s AND status = 'processing'"
+        if command.enforce:
+            sql += " AND worker_id = %s AND lease_id = %s"
     if has_percent:
         params.append(float(command.progress_percent))
     if has_message:
         params.append(str(command.progress_message))
     params.append(command.job_id)
     if command.enforce:
+        params.extend((command.worker_id, command.lease_id))
+    if enrollment_column:
+        # clock_timestamp is evaluated at the UPDATE, not transaction start or
+        # a precheck that can lose a race with lease expiry.
+        sql += (
+            " AND (workflow_capability_version IS NULL OR (workflow_capability_version=1 "
+            "AND worker_id=%s AND lease_id=%s AND worker_id<>'' AND lease_id<>'' "
+            "AND leased_until>clock_timestamp())) "
+            "RETURNING id, leased_until, progress_percent, progress_message"
+        )
         params.extend((command.worker_id, command.lease_id))
     return sql, tuple(params)
 
@@ -243,10 +271,23 @@ def renew_lease(
 ) -> LifecycleResult:
     """Renew one processing Postgres job lease without shortening it."""
 
-    sql, params = _renew_lease_statement(command, now=now)
-
     with conn:
         with cursor_factory(conn) as cur:
+            enrollment_column = (
+                workflow_enrollment_projection(conn, backend="postgres") == "workflow_capability_version"
+            )
+            sql, params = _renew_lease_statement(
+                command,
+                now=now,
+                enrollment_column=enrollment_column,
+            )
+            if enrollment_column:
+                # An UPDATE qual can run before waiting for an unchanged locked
+                # tuple. Obtain enrolled authority's lock before checking time.
+                cur.execute(
+                    "SELECT id FROM jobs WHERE id=%s AND workflow_capability_version IS NOT NULL FOR UPDATE",
+                    (command.job_id,),
+                )
             cur.execute(sql, params)
             row = cur.fetchone()
             if row is None:
@@ -272,6 +313,9 @@ def renew_leases_batch(
     applied_count = 0
     with conn:
         with cursor_factory(conn) as cur:
+            enrollment_column = (
+                workflow_enrollment_projection(conn, backend="postgres") == "workflow_capability_version"
+            )
             now = clock()
             for item in command.items:
                 item_command = RenewLeaseCommand(
@@ -281,7 +325,12 @@ def renew_leases_batch(
                     worker_id=item.worker_id,
                     lease_id=item.lease_id,
                 )
-                sql, params = _renew_lease_statement(item_command, now=now)
+                sql, params = _renew_lease_statement(item_command, now=now, enrollment_column=enrollment_column)
+                if enrollment_column:
+                    cur.execute(
+                        "SELECT id FROM jobs WHERE id=%s AND workflow_capability_version IS NOT NULL FOR UPDATE",
+                        (item_command.job_id,),
+                    )
                 cur.execute(sql, params)
                 if cur.fetchone() is not None:
                     applied_count += 1
@@ -302,17 +351,24 @@ def release_job(
 
     with conn:
         with cursor_factory(conn) as cur:
-            cur.execute(
-                (
-                    "SELECT id, domain, queue, job_type, status, worker_id, lease_id "
-                    "FROM jobs WHERE id = %s FOR UPDATE"
-                ),
-                (command.job_id,),
+            enrollment = workflow_enrollment_projection(conn, backend="postgres")
+            selected_sql = (
+                "SELECT id, domain, queue, job_type, status, worker_id, lease_id " "FROM jobs WHERE id = %s FOR UPDATE"
             )
+            if enrollment == "workflow_capability_version":
+                selected_sql = (
+                    "SELECT id, domain, queue, job_type, status, worker_id, lease_id, "
+                    "workflow_capability_version FROM jobs WHERE id = %s FOR UPDATE"
+                )
+            cur.execute(selected_sql, (command.job_id,))
             selected = cur.fetchone()
             if selected is None:
                 return LifecycleResult.no_transition(NoTransitionReason.MISSING)
             current = dict(selected)
+            if current.get("workflow_capability_version") is not None:
+                # Only the capability can close an enrolled episode; generic
+                # release must not strand an open epoch in the ready queue.
+                return LifecycleResult.no_transition(NoTransitionReason.WRONG_STATUS, row=current)
             if current.get("status") != "processing":
                 return LifecycleResult.no_transition(
                     NoTransitionReason.WRONG_STATUS,

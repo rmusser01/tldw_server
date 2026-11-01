@@ -4,12 +4,13 @@ import base64
 import hashlib
 import json
 import secrets
+import sqlite3
 from asyncio import CancelledError
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 
@@ -83,6 +84,391 @@ def _encrypted_snapshot(case):
             )
         )
     return case.job_row(), case.serialized_support(), durable
+
+
+def _generic_renew(case, lease, *, batch, enforce, seconds=240):
+    claims = {"worker_id": lease.worker_id, "lease_id": lease.lease_id}
+    if batch:
+        return case.manager.batch_renew_leases(
+            [{"job_id": case.root.job_id_hint, "seconds": seconds, **claims}], enforce=enforce
+        )
+    return case.manager.renew_job_lease(
+        case.root.job_id_hint,
+        seconds=seconds,
+        enforce=enforce,
+        progress_percent=42,
+        progress_message="heartbeat",
+        **claims,
+    )
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+@pytest.mark.parametrize("enforce", [True, False, None])
+def test_generic_expired_renewal_cannot_restore_authority(workflow_case, monkeypatch, batch, enforce):
+    case = workflow_case
+    monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", "false")
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    case.expire_current_lease(fractional=True)
+    with pytest.raises(WorkflowFenceError) as error:
+        with case.capability.transaction(case.root.owner_user_id) as tx:
+            tx.lock_live_root(case.root, lease)
+    assert error.value.outcome is WorkflowOutcome.STALE_LEASE
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    before = _encrypted_snapshot(case)
+    assert not _generic_renew(case, lease, batch=batch, enforce=enforce)
+    assert _encrypted_snapshot(case) == before
+    assert observed == []
+    case.recover("sweep")
+    assert case.no_progress_count() == 1
+    assert case.support_row()["last_closed_epoch"] == 1
+    fresh = case.acquire()
+    assert fresh != lease
+    assert case.support_row()["current_epoch"] == 2
+    assert case.retry_count() == 0
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_generic_live_renewal_requires_exact_nonmissing_claims(workflow_case, monkeypatch, batch):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    before = _encrypted_snapshot(case)
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    for env in ("false", "true"):
+        monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", env)
+        for enforce in (True, False, None):
+            for worker, token in (
+                (None, None),
+                (None, lease.lease_id),
+                (lease.worker_id, None),
+                ("", lease.lease_id),
+                ("stale", lease.lease_id),
+                (lease.worker_id, "stale"),
+            ):
+                item = {"job_id": case.root.job_id_hint, "seconds": 240, "worker_id": worker, "lease_id": token}
+                if batch:
+                    renewed = case.manager.batch_renew_leases([item], enforce=enforce)
+                else:
+                    renewed = case.manager.renew_job_lease(
+                        case.root.job_id_hint, seconds=240, worker_id=worker, lease_id=token, enforce=enforce
+                    )
+                assert not renewed
+                assert _encrypted_snapshot(case) == before
+    assert observed == []
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+@pytest.mark.parametrize("year", [2000, 2100], ids=["behind", "ahead"])
+def test_generic_live_renewal_uses_database_time_without_shortening(workflow_case, monkeypatch, batch, year):
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    before = case.observe()
+    monkeypatch.setattr(case.manager._clock, "now_utc", lambda: datetime(year, 1, 1, tzinfo=timezone.utc))
+    with case.connection() as conn:
+        now = workflow_store(case.manager.backend).database_now(conn)
+    assert _generic_renew(case, lease, batch=batch, enforce=False, seconds=300)
+    deadline = case.job_row()["leased_until"]
+    actual = datetime.fromisoformat(deadline).replace(tzinfo=timezone.utc) if isinstance(deadline, str) else deadline
+    assert 299 <= (actual - now).total_seconds() <= 310
+    assert _generic_renew(case, lease, batch=batch, enforce=None, seconds=1)
+    assert case.job_row()["leased_until"] == deadline
+    assert case.observe() == before
+    with case.capability.transaction(case.root.owner_user_id) as tx:
+        tx.lock_live_root(case.root, lease)
+
+
+def test_generic_release_rejects_enrolled_episode_without_side_effects(workflow_case, monkeypatch):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    monkeypatch.setattr(case.manager, "_update_gauges", lambda **kw: observed.append(kw))
+    before = _encrypted_snapshot(case)
+    for env in ("false", "true"):
+        monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", env)
+        for enforce in (True, False, None):
+            for worker, token in (
+                (lease.worker_id, lease.lease_id),
+                (None, None),
+                (None, lease.lease_id),
+                (lease.worker_id, None),
+                ("stale", lease.lease_id),
+                (lease.worker_id, "stale"),
+            ):
+                assert not case.manager.release_job(
+                    case.root.job_id_hint, worker_id=worker, lease_id=token, enforce=enforce, reason="guard-rejected"
+                )
+                assert _encrypted_snapshot(case) == before
+    assert observed == []
+    assert case.apply(case.effect("a" * 64, WorkflowAction.CONTINUE), lease).outcome is WorkflowOutcome.APPLIED
+    assert case.support_row()["last_closed_epoch"] == 1
+    assert case.acquire() != lease
+    for episode in range(2, 6):
+        case.expire_current_lease()
+        case.recover("sweep")
+        assert case.no_progress_count() == episode
+        assert case.retry_count() == 0
+        assert case.support_row()["last_closed_epoch"] == episode
+        if episode < 5:
+            assert case.acquire() is not None
+    assert case.status() == "failed"
+    assert case.acquire(replace_current=False) is None
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_generic_renewal_rechecks_expiry_at_update_boundary(workflow_case, monkeypatch, batch):
+    from tldw_Server_API.app.core.Jobs.operations.postgres import lifecycle as pg_lifecycle
+    from tldw_Server_API.app.core.Jobs.operations.sqlite import lifecycle as sqlite_lifecycle
+
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    lifecycle = pg_lifecycle if case.manager.backend == "postgres" else sqlite_lifecycle
+    build = lifecycle._renew_lease_statement
+
+    def expire_after_build(*args, **kwargs):
+        statement = build(*args, **kwargs)
+        # A separate committed writer revokes authority after any caller-side
+        # validation but immediately before the actual renewal UPDATE.
+        case.expire_current_lease()
+        return statement
+
+    monkeypatch.setattr(lifecycle, "_renew_lease_statement", expire_after_build)
+    assert not _generic_renew(case, lease, batch=batch, enforce=True)
+    assert case.no_progress_count() == 0
+    case.recover("sweep")
+    assert case.no_progress_count() == 1
+    assert case.acquire() != lease
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_generic_renewal_cannot_outwait_database_deadline(workflow_pg_case, monkeypatch, batch):
+    from tldw_Server_API.app.core.Jobs.operations.postgres import lifecycle
+
+    case = workflow_pg_case
+    case.admit()
+    lease = case.acquire()
+    starting = Event()
+    build = lifecycle._renew_lease_statement
+
+    def signal_update(*args, **kwargs):
+        statement = build(*args, **kwargs)
+        starting.set()
+        return statement
+
+    monkeypatch.setattr(lifecycle, "_renew_lease_statement", signal_update)
+    with case.connection() as conn:
+        case.execute(
+            conn,
+            "UPDATE jobs SET leased_until=clock_timestamp()+interval '1 second' WHERE uuid=?",
+            (case.root.job_uuid,),
+        )
+        conn.commit()
+        case.execute(conn, "SELECT id FROM jobs WHERE uuid=? FOR UPDATE", (case.root.job_uuid,))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(_generic_renew, case, lease, batch=batch, enforce=True)
+            try:
+                assert starting.wait(10)
+                # Hold a real row lock without changing the tuple: a volatile
+                # predicate evaluated before the wait must not retain authority.
+                conn.execute("SELECT pg_sleep(1.1)")
+            finally:
+                conn.commit()
+            assert not pending.result(timeout=10)
+    assert case.no_progress_count() == 0
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+@pytest.mark.parametrize("deadline", ["null", "equal"])
+def test_generic_renewal_rejects_nonlive_deadlines(workflow_case, batch, deadline):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    with case.connection() as conn:
+        value = (
+            "NULL"
+            if deadline == "null"
+            else ("clock_timestamp()" if case.manager.backend == "postgres" else "STRFTIME('%Y-%m-%d %H:%M:%f','now')")
+        )
+        case.execute(conn, f"UPDATE jobs SET leased_until={value} WHERE uuid=?", (case.root.job_uuid,))
+        conn.commit()
+    before = case.job_row(), case.serialized_support()
+    assert not _generic_renew(case, lease, batch=batch, enforce=False)
+    assert (case.job_row(), case.serialized_support()) == before
+
+
+def test_generic_lifecycle_unknown_markers_fail_closed(workflow_case):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    with case.connection() as conn:
+        if case.manager.backend == "postgres":
+            conn.execute("ALTER TABLE jobs DROP CONSTRAINT wf_jobs_enrollment")
+        else:
+            conn.execute("PRAGMA ignore_check_constraints=ON")
+        conn.commit()
+    markers = (2,) if case.manager.backend == "postgres" else (2, "corrupt", 1.5)
+    for marker in markers:
+        with case.connection() as conn:
+            if case.manager.backend == "sqlite":
+                conn.execute("PRAGMA ignore_check_constraints=ON")
+            case.execute(
+                conn, "UPDATE jobs SET workflow_capability_version=? WHERE uuid=?", (marker, case.root.job_uuid)
+            )
+            conn.commit()
+        before = _encrypted_snapshot(case)
+        assert not _generic_renew(case, lease, batch=False, enforce=False)
+        assert not _generic_renew(case, lease, batch=True, enforce=False)
+        assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
+        assert _encrypted_snapshot(case) == before
+
+
+@pytest.mark.parametrize("action", [WorkflowAction.CANCEL, WorkflowAction.COMPLETE, WorkflowAction.FAIL])
+def test_generic_lifecycle_cannot_revive_terminal_root(workflow_case, action):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    effect = case.effect("b" * 64, action, "permanent" if action is WorkflowAction.FAIL else None)
+    assert case.apply(effect, lease).outcome is WorkflowOutcome.APPLIED
+    before = _encrypted_snapshot(case)
+    assert not _generic_renew(case, lease, batch=False, enforce=False)
+    assert not _generic_renew(case, lease, batch=True, enforce=False)
+    assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
+    assert _encrypted_snapshot(case) == before
+    case.recover("sweep")
+    assert case.acquire(replace_current=False) is None
+    assert (case.job_row(), case.serialized_support()) == before[:2]
+
+
+@pytest.mark.parametrize("installed", [False, True], ids=["uninstalled", "null-marker-no-support"])
+def test_generic_legacy_renew_release_keep_permissive_behavior(uninstalled_workflow_case, monkeypatch, installed):
+    from tldw_Server_API.app.core.Jobs.operations.contracts import ReleaseJobCommand
+    from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import release_job as pg_release
+    from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import release_job as sqlite_release
+
+    case = uninstalled_workflow_case
+    monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", "false")
+    if installed:
+        case.install()
+    uuid = "00000000-0000-4000-8000-000000000021"
+    with case.connection() as conn:
+        if installed:
+            for table in ("job_workflow_effect_receipts", "job_workflow_roots", "job_workflow_schema"):
+                conn.execute(f"DROP TABLE {table}")
+        case.insert(
+            conn,
+            "jobs",
+            {
+                "uuid": uuid,
+                "domain": "embeddings",
+                "queue": "workflow",
+                "job_type": "legacy",
+                "payload": "{}",
+                "status": "processing",
+                "leased_until": "2020-01-01 00:00:00",
+            },
+        )
+        job_id = case.execute(conn, "SELECT id FROM jobs WHERE uuid=?", (uuid,)).fetchone()[0]
+        conn.commit()
+    command = ReleaseJobCommand(job_id, enforce=True, worker_id="stale", lease_id="stale")
+    with closing(case.manager._connect()) as conn:
+        result = (
+            pg_release(conn, case.manager._pg_cursor, command=command, counters_enabled=False)
+            if case.manager.backend == "postgres"
+            else sqlite_release(conn, command=command, counters_enabled=False)
+        )
+    assert result.outcome is OperationOutcome.NO_TRANSITION
+    assert result.row["id"] == job_id
+    assert set(result.row) <= {
+        "id",
+        "domain",
+        "queue",
+        "job_type",
+        "status",
+        "worker_id",
+        "lease_id",
+        "workflow_capability_version",
+    }
+    assert case.manager.renew_job_lease(job_id, seconds=240, enforce=False)
+    assert case.manager.batch_renew_leases([{"job_id": job_id, "seconds": 300}], enforce=None) == 1
+    assert case.manager.release_job(job_id, enforce=False)
+    with case.connection() as conn:
+        assert case.execute(conn, "SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()[0] == "queued"
+
+
+@pytest.mark.parametrize("fail_later", [False, True], ids=["counts-order", "rollback"])
+def test_generic_mixed_batch_counts_order_and_rollback(workflow_case, fail_later):
+    case = workflow_case
+    case.admit()
+    live = case.acquire()
+    expired = replace(case, root=case.admit_new_reference().root, current_lease=None)
+    old = expired.acquire()
+    expired.expire_current_lease()
+    with case.connection() as conn:
+        case.insert(
+            conn,
+            "jobs",
+            {
+                "uuid": "00000000-0000-4000-8000-000000000022",
+                "domain": "embeddings",
+                "queue": "workflow",
+                "job_type": "legacy",
+                "payload": "{}",
+                "status": "processing",
+                "leased_until": "2020-01-01 00:00:00",
+            },
+        )
+        legacy_id = conn.execute("SELECT id FROM jobs WHERE job_type='legacy'").fetchone()[0]
+        if fail_later:
+            if case.manager.backend == "sqlite":
+                conn.execute(
+                    "CREATE TRIGGER fail_batch BEFORE UPDATE ON jobs WHEN OLD.job_type='legacy' "
+                    "BEGIN SELECT RAISE(ABORT,'forced renewal failure'); END"
+                )
+                error_type = sqlite3.IntegrityError
+            else:
+                import psycopg
+
+                conn.execute(
+                    "CREATE FUNCTION fail_batch() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                    "BEGIN RAISE EXCEPTION 'forced renewal failure'; END; $$"
+                )
+                conn.execute(
+                    "CREATE TRIGGER fail_batch BEFORE UPDATE ON jobs FOR EACH ROW "
+                    "WHEN (OLD.job_type='legacy') EXECUTE FUNCTION fail_batch()"
+                )
+                error_type = psycopg.Error
+        conn.commit()
+    items = [
+        {"job_id": case.root.job_id_hint, "worker_id": live.worker_id, "lease_id": live.lease_id, "seconds": 300},
+        {"job_id": expired.root.job_id_hint, "worker_id": old.worker_id, "lease_id": old.lease_id, "seconds": 300},
+        {"job_id": legacy_id, "seconds": 300},
+        {"job_id": case.root.job_id_hint, "worker_id": live.worker_id, "lease_id": live.lease_id, "seconds": 1},
+    ]
+    before = case.job_row(), expired.job_row(), case.serialized_support()
+    if fail_later:
+        with pytest.raises(error_type, match="forced renewal failure"):
+            case.manager.batch_renew_leases(items, enforce=False)
+        assert (case.job_row(), expired.job_row(), case.serialized_support()) == before
+    else:
+        assert case.manager.batch_renew_leases(items, enforce=False) == 3
+        assert expired.job_row() == before[1]
+        assert case.serialized_support() == before[2]
+        deadline = case.job_row()["leased_until"]
+        assert case.manager.batch_renew_leases(items[-1:], enforce=True) == 1
+        assert case.job_row()["leased_until"] == deadline
 
 
 @pytest.mark.parametrize("via", ["acquire", "sweep"])
