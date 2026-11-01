@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 from fastapi.testclient import TestClient
+
 from tldw_Server_API.app.core.config import clear_config_cache
 from tldw_Server_API.app.main import app
 
@@ -67,7 +67,7 @@ def test_runtimes_notes_reflect_granular_allowlist(monkeypatch) -> None:
         data = r.json()
         docker = next((rt for rt in data.get("runtimes", []) if rt.get("name") == "docker"), None)
         assert docker is not None
-        assert isinstance(docker.get("notes"), str) and "Granular egress allowlist" in docker["notes"]
+        assert isinstance(docker.get("notes"), str) and "IPv4 destination allowlist" in docker["notes"]
 
 
 def test_firecracker_egress_allowlist_not_advertised_while_scaffolded(monkeypatch) -> None:

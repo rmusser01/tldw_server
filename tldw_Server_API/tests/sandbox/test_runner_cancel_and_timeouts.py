@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import signal
 import types
-from typing import Any, List
+from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 from tldw_Server_API.app.core.Sandbox.runners.seatbelt_runner import SeatbeltRunner
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 
 
-def _spec(cmd: List[str], *, network_policy: str = "deny_all") -> RunSpec:
+def _spec(cmd: list[str], *, network_policy: str = "deny_all") -> RunSpec:
     return RunSpec(
         session_id=None,
         runtime=RuntimeType.docker,
@@ -99,7 +99,7 @@ def test_runner_cancel_term_grace_no_duplicate_end(monkeypatch: pytest.MonkeyPat
     def _is_running(_cid: str) -> bool:
         return states["running"]
 
-    def _subproc_run(args: List[str], check: bool = False, **kwargs: Any):
+    def _subproc_run(args: list[str], check: bool = False, **kwargs: Any):
         # When TERM is sent, mark as not running
         if args[:3] == ["docker", "kill", "--signal"] and args[3] == "TERM":
             states["running"] = False
@@ -132,7 +132,7 @@ def test_runner_completed_run_clears_active_container_and_egress_maps(monkeypatc
     cid = "cid-complete"
     _clear_docker_tracking(rid)
 
-    def _check_output(args: List[str], text: bool = False, timeout: int | None = None, **kwargs: Any):
+    def _check_output(args: list[str], text: bool = False, timeout: int | None = None, **kwargs: Any):
         if args[:2] == ["docker", "create"]:
             return cid
         if args[:3] == ["docker", "image", "inspect"]:
@@ -141,11 +141,11 @@ def test_runner_completed_run_clears_active_container_and_egress_maps(monkeypatc
 
     check_calls: list[list[str]] = []
 
-    def _check_call(args: List[str], timeout: int | None = None, **kwargs: Any):
+    def _check_call(args: list[str], timeout: int | None = None, **kwargs: Any):
         check_calls.append(list(args))
         return 0
 
-    def _run(args: List[str], capture_output: bool = False, text: bool = False, timeout: int | None = None, **kwargs: Any):
+    def _run(args: list[str], capture_output: bool = False, text: bool = False, timeout: int | None = None, **kwargs: Any):
         if args[:2] == ["docker", "wait"]:
             return types.SimpleNamespace(returncode=0, stdout="0")
         return types.SimpleNamespace(returncode=0, stdout="")
@@ -209,7 +209,7 @@ def test_runner_startup_timeout_on_create_removes_precreated_egress_network(
     rid = "run_create_timeout_cleanup"
     run_calls: list[list[str]] = []
 
-    def _run(args: List[str], check: bool = False, **kwargs: Any):
+    def _run(args: list[str], check: bool = False, **kwargs: Any):
         run_calls.append(list(args))
         return types.SimpleNamespace(returncode=0, stdout="")
 
@@ -239,19 +239,19 @@ def test_runner_execution_timeout_on_wait(monkeypatch: pytest.MonkeyPatch) -> No
     # Simulate docker create returns a CID, cp/start succeed, wait times out
     _stub_docker_resource_probes(monkeypatch)
 
-    def _check_output(args: List[str], text: bool = False, timeout: int | None = None):
+    def _check_output(args: list[str], text: bool = False, timeout: int | None = None):
         if args and args[0] == "docker" and args[1] not in ("image",):
             # docker create returns a CID once
             return "cid999"
         # image inspect can return some digest; return empty to skip
         return ""
 
-    def _check_call(args: List[str], timeout: int | None = None):
+    def _check_call(args: list[str], timeout: int | None = None):
         return 0
 
     import subprocess
 
-    def _run(args: List[str], capture_output: bool = False, text: bool = False, timeout: int | None = None):
+    def _run(args: list[str], capture_output: bool = False, text: bool = False, timeout: int | None = None):
         # docker wait should time out
         if args and args[0] == "docker" and args[1] == "wait":
             raise subprocess.TimeoutExpired(cmd=args, timeout=timeout or 1)
@@ -290,14 +290,14 @@ def test_runner_startup_timeout_after_container_create_clears_tracking(monkeypat
     cid = "cid-start-timeout"
     _clear_docker_tracking(rid)
 
-    def _check_output(args: List[str], text: bool = False, timeout: int | None = None):
+    def _check_output(args: list[str], text: bool = False, timeout: int | None = None):
         if args[:2] == ["docker", "create"]:
             return cid
         return ""
 
     check_calls: list[list[str]] = []
 
-    def _check_call(args: List[str], timeout: int | None = None):
+    def _check_call(args: list[str], timeout: int | None = None):
         check_calls.append(list(args))
         if args[:2] == ["docker", "start"]:
             raise subprocess.TimeoutExpired(cmd=args, timeout=timeout or 1)
@@ -305,7 +305,7 @@ def test_runner_startup_timeout_after_container_create_clears_tracking(monkeypat
 
     run_calls: list[list[str]] = []
 
-    def _run(args: List[str], check: bool = False, **kwargs: Any):
+    def _run(args: list[str], check: bool = False, **kwargs: Any):
         run_calls.append(list(args))
         return types.SimpleNamespace(returncode=0, stdout="")
 
@@ -345,7 +345,13 @@ def test_seatbelt_cancel_run_kills_active_process_group_and_removes_run_dir(monk
         SeatbeltRunner._active_run_dir[rid] = str(run_dir)  # type: ignore[attr-defined]
 
     killpg_calls: list[tuple[int, int]] = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killpg_calls.append((pid, sig)), raising=False)
+
+    def _killpg(pid: int, sig: int) -> None:
+        if sig == 0:
+            raise ProcessLookupError
+        killpg_calls.append((pid, sig))
+
+    monkeypatch.setattr("os.killpg", _killpg, raising=False)
     monkeypatch.setattr(SeatbeltRunner, "_cancel_grace_seconds", classmethod(lambda cls: 0))
 
     try:

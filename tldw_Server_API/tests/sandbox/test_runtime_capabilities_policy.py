@@ -4,8 +4,7 @@ import pytest
 
 import tldw_Server_API.app.core.Sandbox.policy as policy_module
 import tldw_Server_API.app.core.Sandbox.service as service_module
-
-from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType, TrustLevel
+from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType, SessionSpec, TrustLevel
 from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy, SandboxPolicyConfig
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
@@ -36,27 +35,85 @@ def test_policy_prefers_shared_runtime_preflight_over_legacy_booleans() -> None:
     assert exc.value.reasons == ["shared_preflight_unavailable"]
 
 
-def test_policy_rejects_worktree_for_untrusted_without_preflight_metadata() -> None:
+@pytest.mark.parametrize(
+    "runtime",
+    [RuntimeType.docker, RuntimeType.worktree, RuntimeType.seatbelt, RuntimeType.vz_macos],
+)
+@pytest.mark.parametrize("with_preflight", [False, True])
+@pytest.mark.parametrize("session", [False, True])
+def test_policy_rejects_non_vm_untrusted_regardless_of_advertised_trust(
+    runtime: RuntimeType, with_preflight: bool, session: bool,
+) -> None:
     policy = SandboxPolicy(SandboxPolicyConfig(default_runtime=RuntimeType.docker))
-    spec = RunSpec(
-        session_id=None,
-        runtime=RuntimeType.worktree,
-        base_image=None,
-        command=["echo", "ok"],
-        trust_level=TrustLevel.untrusted,
+    spec = (
+        SessionSpec(runtime=runtime, trust_level=TrustLevel.untrusted)
+        if session else RunSpec(
+            session_id=None,
+            runtime=runtime,
+            base_image=None,
+            command=["echo", "ok"],
+            trust_level=TrustLevel.untrusted,
+        )
     )
+    preflights = {
+        runtime: RuntimePreflightResult(
+            runtime=runtime,
+            available=True,
+            supported_trust_levels=["untrusted"],
+            enforcement_ready={"deny_all": True},
+        )
+    } if with_preflight else None
 
     with pytest.raises(SandboxPolicy.PolicyUnsupported) as exc:
-        policy.apply_to_run(
+        (policy.apply_to_session if session else policy.apply_to_run)(
             spec,
             firecracker_available=True,
             lima_available=True,
-            runtime_preflights=None,
+            runtime_preflights=preflights,
         )
 
-    assert exc.value.runtime == RuntimeType.worktree
+    assert exc.value.runtime == runtime
     assert exc.value.requirement == "untrusted_requires_vm_runtime"
     assert "trust_level_requires_vm_runtime" in exc.value.reasons
+
+
+@pytest.mark.parametrize(
+    "runtime, eligible",
+    [
+        (RuntimeType.docker, False),
+        (RuntimeType.firecracker, True),
+        (RuntimeType.lima, True),
+        (RuntimeType.vz_linux, True),
+        (RuntimeType.vz_macos, False),
+        (RuntimeType.seatbelt, False),
+        (RuntimeType.worktree, False),
+    ],
+)
+def test_preflight_untrusted_support_requires_vm_and_eligibility(
+    runtime: RuntimeType, eligible: bool,
+) -> None:
+    preflight = RuntimePreflightResult(runtime=runtime, available=True)
+
+    assert ("untrusted" in preflight.supported_trust_levels) is eligible
+
+
+def test_shared_firecracker_preflight_propagates_real_containment_failure(monkeypatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.runners import firecracker_runner
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import collect_runtime_preflights
+
+    monkeypatch.setenv("TLDW_SANDBOX_FIRECRACKER_FAKE_EXEC", "0")
+    monkeypatch.setattr(firecracker_runner, "firecracker_real_enabled", lambda: True)
+    monkeypatch.setattr(firecracker_runner, "firecracker_available", lambda: True)
+    monkeypatch.setattr(
+        firecracker_runner, "_preflight_errors",
+        lambda: ["firecracker_host_containment_not_implemented"],
+    )
+
+    preflight = collect_runtime_preflights()[RuntimeType.firecracker]
+
+    assert preflight.available is False
+    assert preflight.reasons == ["firecracker_host_containment_not_implemented"]
+    assert preflight.enforcement_ready == {"deny_all": False, "allowlist": False}
 
 
 def test_service_start_run_passes_shared_runtime_preflight_to_policy(monkeypatch) -> None:

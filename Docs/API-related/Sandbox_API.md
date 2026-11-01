@@ -39,11 +39,15 @@ guarantee:
 
 If you plan to use the Firecracker runtime, follow the host prerequisites and
 smoke-test steps in `Docs/Deployment/Operations/Firecracker_Host_Checklist.md`.
+Real execution is currently blocked with
+`firecracker_host_containment_not_implemented`; binary availability does not
+establish jailer-equivalent host containment.
 
 ## Lima runtime (macOS/Linux VMs)
 
 Lima is a VM runtime identity backed by Virtualization.framework on macOS or
-QEMU on Linux when host prerequisites and enforcement preflight pass.
+QEMU on Linux. Strict networking is currently unsupported, so real execution
+is unavailable under the API's strict network policy contract.
 
 ### Requirements
 - Install Lima: `brew install lima` (macOS) or via package manager
@@ -62,15 +66,14 @@ QEMU on Linux when host prerequisites and enforcement preflight pass.
 
 ### Notes
 - VMs use Virtualization.framework on macOS or QEMU on Linux
-- Network isolation: `deny_all` only when the Lima enforcer preflight proves
-  strict enforcement for this host
+- Network isolation: both `deny_all` and `allowlist` are unsupported.
+  `networks: []` leaves Lima's default user-mode network enabled.
 - Workspace mounted at `/workspace` inside VM
 - Slower startup than containers (~10-30s vs ~1s for Docker)
-- Recommended for macOS development when VM-grade Linux isolation is available
 - Runtime parity: REST, MCP `sandbox.run`, and ACP use the current runtime enum;
   clients should confirm host support through runtime discovery before dispatch
-- Strict fail-closed mode: Lima accepts `deny_all` only when enforcement is
-  ready; `allowlist` execution is not supported today
+- Strict fail-closed mode rejects execution until a concrete enforcement
+  mechanism and prepared-host tests establish the requested policy.
 - Platform constraint: Windows/WSL strict Lima enforcement is not supported yet and fails closed
 
 ## Trust-Level Tiers
@@ -87,8 +90,8 @@ Risk-based isolation profiles auto-apply resource limits based on code trustwort
 ```json
 {
   "spec_version": "1.0",
-  "runtime": "firecracker",
-  "base_image": "python:3.11-slim",
+  "runtime": "vz_linux",
+  "base_image": "ubuntu-24.04",
   "trust_level": "untrusted"
 }
 ```
@@ -97,16 +100,16 @@ Risk-based isolation profiles auto-apply resource limits based on code trustwort
 ```json
 {
   "spec_version": "1.0",
-  "runtime": "firecracker",
-  "base_image": "python:3.11-slim",
+  "runtime": "vz_linux",
+  "base_image": "ubuntu-24.04",
   "command": ["python", "user_script.py"],
   "trust_level": "untrusted"
 }
 ```
 
-The examples use `firecracker` as a VM-grade runtime placeholder. Replace it
-with a VM-grade runtime available on your host, such as `lima` or `vz_linux`
-when their preflight checks pass.
+The examples require prepared-host `vz_linux` with a template containing the
+requested tools and successful runtime preflight. Ordinary Docker cannot satisfy
+`untrusted`; Lima and real Firecracker currently fail closed.
 
 When `untrusted` is specified and admitted, the run is automatically constrained to:
 - Max 1 CPU
@@ -142,7 +145,7 @@ Response (example):
       "artifact_ttl_hours": 24,
       "boundary_class": "container",
       "vm_grade_isolation": false,
-      "untrusted_eligible": true,
+      "untrusted_eligible": false,
       "isolation_warnings": [],
       "network_policy_contract": {
         "deny_all": {
@@ -198,7 +201,7 @@ Current posture mapping:
 
 | Runtime | `boundary_class` | `vm_grade_isolation` | `untrusted_eligible` | `isolation_warnings` |
 | --- | --- | --- | --- | --- |
-| `docker` | `container` | `false` | `true` | `[]` |
+| `docker` | `container` | `false` | `false` | `[]` |
 | `firecracker` | `vm_grade` | `true` | `true` | `[]` |
 | `lima` | `vm_grade` | `true` | `true` | `[]` |
 | `vz_linux` | `vm_grade` | `true` | `true` | `[]` |
@@ -212,7 +215,7 @@ Network policy contract mapping:
 | --- | --- | --- |
 | `docker` | `supported`, strict, `config` readiness | `host_gated`, strict, `config` readiness |
 | `firecracker` | `host_gated`, strict, `runtime_preflight` readiness | `scaffold`, not strict, `runtime_preflight` readiness |
-| `lima` | `host_gated`, strict, `runtime_preflight` readiness | `unsupported`, not strict, `not_applicable` |
+| `lima` | `unsupported`, not strict, `not_applicable` | `unsupported`, not strict, `not_applicable` |
 | `vz_linux` | `host_gated`, strict, `runtime_preflight` readiness | `unsupported`, not strict, `not_applicable` |
 | `vz_macos` | `scaffold`, not strict, `runtime_preflight` readiness | `unsupported`, not strict, `not_applicable` |
 | `seatbelt` | `unsupported`, not strict, `not_applicable` | `unsupported`, not strict, `not_applicable` |
@@ -507,7 +510,7 @@ Example `422`:
 
 ## Egress Policy and DNS Pinning
 
-Some deployments enforce an egress allowlist for sandboxed runs. The Docker runner supports a deny‑all baseline (network=none) and, when enabled, a granular host‑level allowlist using iptables on the DOCKER-USER chain.
+Some deployments enforce an egress allowlist for sandboxed runs. The Docker runner supports a deny‑all baseline (network=none) and, when enabled, a granular host‑level allowlist using iptables through owned IPv4 policy chains attached first to INPUT and FORWARD.
 
 Utilities exposed in `tldw_Server_API.app.core.Sandbox.network_policy` help you prepare and manage rules:
 
@@ -631,3 +634,14 @@ Response:
 - Spec versions are validated against server config. Default: `["1.0","1.1"]`.
 - Interactivity requires runtime and policy support; fields are ignored otherwise.
 - `log_stream_url` may be unsigned; prefer Authorization headers if signed URLs are disabled.
+
+Cancellation reports `cancelled=true` only after queued dispatch is atomically
+fenced or backend termination is confirmed. Failed/ambiguous cancellation keeps
+the run active and retains capacity. An expired worker lease alone does not
+prove termination. Host process cancellation requires its owning worker; Docker
+and VZ can use stored backend identity on the same prepared host.
+
+Docker allowlists filter IPv4 destination addresses across ports/protocols;
+resolved hostnames do not enforce HTTP Host or TLS identity on shared addresses.
+Writable Docker workspace bind mounts are rejected because their disk quota
+cannot be enforced by this runner.

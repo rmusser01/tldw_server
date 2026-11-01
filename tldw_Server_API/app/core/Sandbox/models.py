@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -122,6 +123,8 @@ class RunSpec:
     workspace_id: str | None = None
     workspace_group_id: str | None = None
     scope_snapshot_id: str | None = None
+    # Internal launch hook; not exposed in the API request schema.
+    on_backend_started: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
 
 
 class RunPhase(str, Enum):
@@ -159,3 +162,6 @@ class RunStatus:
     # Optional execution-claim metadata for durable claim fencing.
     claim_owner: str | None = None
     claim_expires_at: datetime | None = None
+    # Durable runtime identity is retained after the dispatch lease is released.
+    backend_id: str | None = None
+    backend_owner: str | None = None

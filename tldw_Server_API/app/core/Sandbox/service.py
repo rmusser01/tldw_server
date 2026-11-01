@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import os
 import shutil
+import socket
 import tempfile
 import threading
 import time
@@ -63,9 +64,9 @@ from .runtime_capabilities import (
     RuntimePreflightResult,
     collect_runtime_preflights,
     normalize_runtime_reasons,
+    runtime_implementation_state,
     runtime_isolation_metadata,
     runtime_isolation_warnings,
-    runtime_implementation_state,
     runtime_network_policy_effective_support,
     runtime_network_policy_metadata,
     runtime_reason_details_for_codes,
@@ -754,7 +755,24 @@ class SandboxService:
         target.claim_owner = admitted.claim_owner
         target.claim_expires_at = admitted.claim_expires_at
 
-    def _run_with_claim_lease(self, run_id: str, fn):
+    def _run_with_claim_lease(self, run_id: str, fn, *, spec: RunSpec | None = None):
+        status = self._orch.get_run(run_id)
+        if status is None or status.phase not in (RunPhase.starting, RunPhase.running):
+            raise RuntimeError("sandbox_execution_no_longer_active")
+        if status.runtime == RuntimeType.docker:
+            status.backend_id = f"tldw-sbx-{run_id}"
+        elif status.runtime == RuntimeType.lima:
+            status.backend_id = f"tldw-sbx-{run_id[:12]}"
+        else:
+            status.backend_id = run_id
+        status.backend_owner = self._backend_host_identity()
+        self._orch.update_run(run_id, status)
+        persisted = self._orch.get_run(run_id)
+        if (
+            persisted is None or persisted.phase not in (RunPhase.starting, RunPhase.running)
+            or persisted.backend_id != status.backend_id or persisted.backend_owner != status.backend_owner
+        ):
+            raise RuntimeError("sandbox_backend_identity_not_persisted")
         lease_seconds = self._effective_claim_lease_seconds()
         heartbeat_interval = max(0.1, min(10.0, float(lease_seconds) / 3.0))
         stop = threading.Event()
@@ -774,12 +792,32 @@ class SandboxService:
 
         hb = threading.Thread(target=_heartbeat, daemon=True)
         hb.start()
+        def _backend_started(backend_id: str) -> None:
+            current = self._orch.get_run(run_id)
+            if current is None or current.phase not in (RunPhase.starting, RunPhase.running):
+                raise RuntimeError("sandbox_execution_no_longer_active")
+            current.backend_id = backend_id
+            self._orch.update_run(run_id, current)
+            saved = self._orch.get_run(run_id)
+            if saved is None or saved.backend_id != backend_id:
+                raise RuntimeError("sandbox_backend_identity_not_persisted")
+
+        if spec is not None:
+            spec.on_backend_started = _backend_started
         try:
             return fn()
         finally:
+            if spec is not None:
+                spec.on_backend_started = None
             stop.set()
             with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
                 hb.join(timeout=0.1)
+
+    @staticmethod
+    def _backend_host_identity() -> str:
+        """Identify the host and configured Docker endpoint without exposing it."""
+        value = f"{socket.gethostname()}:{os.getenv('DOCKER_HOST', '')}:{os.getenv('DOCKER_CONTEXT', '')}"
+        return hashlib.sha256(value.encode()).hexdigest()
 
     def _mark_run_failed(
         self,
@@ -824,6 +862,7 @@ class SandboxService:
                 real = self._run_with_claim_lease(
                     status.id,
                     lambda: start_run_fn(status.id, spec, workspace_path),
+                    spec=spec,
                 )
             except policy_exceptions:
                 status.phase = RunPhase.failed
@@ -915,7 +954,8 @@ class SandboxService:
         seatbelt_preflight = runtime_preflights.get(RuntimeType.seatbelt)
         worktree_preflight = runtime_preflights.get(RuntimeType.worktree)
         lima_enforcement_ready = dict((lima_preflight.enforcement_ready if lima_preflight else {}) or {})
-        # Allowlist enforcement is not implemented for Lima runtime execution.
+        # Neither strict network mode has a concrete Lima enforcement mechanism.
+        lima_enforcement_ready["deny_all"] = False
         lima_enforcement_ready["allowlist"] = False
         if lima_preflight is not None:
             lima_preflight = RuntimePreflightResult(
@@ -1001,7 +1041,7 @@ class SandboxService:
                 "egress_allowlist_supported": bool(docker_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": (
-                    "Granular egress allowlist (CIDR, hostname) enforced via host iptables (DOCKER-USER) with DNS pinning"
+                    "IPv4 destination allowlist enforced through owned INPUT/FORWARD chains; hostname resolution does not authorize HTTP/TLS identities"
                     if bool(docker_fields["strict_allowlist_supported"] and granular)
                     else (
                         "Docker allowlist enforcement is configured without granular enforcement; "
@@ -1053,7 +1093,7 @@ class SandboxService:
                 "interactive_supported": False,  # Not implemented for Lima yet
                 "egress_allowlist_supported": bool(lima_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
-                "notes": "Full VM isolation via Lima; recommended for macOS",
+                "notes": "Lima strict network enforcement is unsupported; execution is unavailable",
             },
             {
                 "name": "vz_linux",
@@ -1687,6 +1727,8 @@ class SandboxService:
         spec: RunSpec | None = None,
     ) -> None:
         """Log a completion audit event in a fire-and-forget manner."""
+        if status.phase not in (RunPhase.completed, RunPhase.failed, RunPhase.killed, RunPhase.timed_out):
+            return
         try:
             uid_int = None
             try:
@@ -1846,7 +1888,7 @@ class SandboxService:
                         session_id=str(session_id),
                         active_runs=remaining,
                         message="session_cancel_drain_timeout",
-                    )
+                    ) from None
                 time.sleep(0.05)
 
             return self._destroy_session_serialized(session_id)
@@ -2090,6 +2132,7 @@ class SandboxService:
                             real = self._run_with_claim_lease(
                                 status.id,
                                 lambda: dr.start_run(status.id, spec, ws),
+                                spec=spec,
                             )
                             real.id = status.id
                             # Merge results
@@ -2111,9 +2154,9 @@ class SandboxService:
                                 self._orch.update_run(status.id, status)  # type: ignore[attr-defined]
                             except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as _e:
                                 logger.debug(f"sandbox: update_run(completed) skipped: {_e}")
-                            # Ensure an 'end' event is published even if the runner didn't
-                            with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                                get_hub().publish_event(status.id, "end", {"exit_code": status.exit_code})
+                            if status.phase in (RunPhase.completed, RunPhase.failed, RunPhase.killed, RunPhase.timed_out):
+                                with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
+                                    get_hub().publish_event(status.id, "end", {"exit_code": status.exit_code})
                             # Ensure policy hash is present (compute if missing)
                             if not status.policy_hash:
                                 status.policy_hash = compute_policy_hash(self.policy.cfg)
@@ -2146,6 +2189,7 @@ class SandboxService:
                     real = self._run_with_claim_lease(
                         status.id,
                         lambda: dr.start_run(status.id, spec, ws),
+                        spec=spec,
                     )
                     real.id = status.id
                     status.phase = real.phase
@@ -2189,6 +2233,7 @@ class SandboxService:
                             real = self._run_with_claim_lease(
                                 status.id,
                                 lambda: fr.start_run(status.id, spec, ws),
+                                spec=spec,
                             )
                             real.id = status.id
                             status.phase = real.phase
@@ -2227,6 +2272,7 @@ class SandboxService:
                     real = self._run_with_claim_lease(
                         status.id,
                         lambda: fr.start_run(status.id, spec, ws),
+                        spec=spec,
                     )
                     real.id = status.id
                     status.phase = real.phase
@@ -2277,6 +2323,7 @@ class SandboxService:
                             real = self._run_with_claim_lease(
                                 status.id,
                                 lambda: self._start_lima_run_with_execution_preflight(status.id, spec, ws),
+                                spec=spec,
                             )
                             real.id = status.id
                             status.phase = real.phase
@@ -2326,6 +2373,7 @@ class SandboxService:
                         real = self._run_with_claim_lease(
                             status.id,
                             lambda: self._start_lima_run_with_execution_preflight(status.id, spec, ws),
+                            spec=spec,
                         )
                     except (SandboxPolicy.RuntimeUnavailable, SandboxPolicy.PolicyUnsupported) as e:
                         logger.warning(f"Lima execution preflight rejected run: {e}")
@@ -2493,16 +2541,36 @@ class SandboxService:
         # If already finished, no-op
         if st.phase in (RunPhase.completed, RunPhase.failed, RunPhase.killed, RunPhase.timed_out):
             return False
+        # Atomically fence queued dispatch; observing queued alone races admission.
+        if st.phase == RunPhase.queued and self._orch.cancel_queued_run(run_id):
+            with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
+                get_hub().publish_event(run_id, "end", {"exit_code": None, "canceled": True})
+            return True
+        st = self._orch.get_run(run_id)
+        if st is None or st.phase not in (RunPhase.starting, RunPhase.running):
+            return False
+        if st.backend_owner and st.backend_owner != self._backend_host_identity():
+            return False
+        with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
+            get_hub().publish_event(run_id, "cancellation_requested", {})
         cancelled = False
         try:
             if st.runtime == RuntimeType.docker:
                 cancelled = DockerRunner.cancel_run(run_id)
+            elif st.runtime == RuntimeType.firecracker:
+                cancelled = FirecrackerRunner.cancel_run(run_id)
             elif st.runtime == RuntimeType.lima:
-                cancelled = LimaRunner.cancel_run(run_id)
+                cancelled = (
+                    LimaRunner.cancel_run(run_id, backend_id=st.backend_id)
+                    if st.backend_id else LimaRunner.cancel_run(run_id)
+                )
             elif st.runtime == RuntimeType.seatbelt:
                 cancelled = SeatbeltRunner.cancel_run(run_id)
             elif st.runtime == RuntimeType.vz_linux:
-                cancelled = VZLinuxRunner.cancel_run(run_id)
+                cancelled = (
+                    VZLinuxRunner.cancel_run(run_id, backend_id=st.backend_id)
+                    if st.backend_id else VZLinuxRunner.cancel_run(run_id)
+                )
             elif st.runtime == RuntimeType.vz_macos:
                 cancelled = VZMacOSRunner.cancel_run(run_id)
             elif st.runtime == RuntimeType.worktree:
@@ -2510,6 +2578,8 @@ class SandboxService:
         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"cancel_run failed: {e}")
             cancelled = False
+        if not cancelled:
+            return False
         # Update status
         try:
             st.phase = RunPhase.killed
@@ -2517,10 +2587,11 @@ class SandboxService:
             st.finished_at = datetime.utcnow()
             st.exit_code = None
             self._orch.update_run(run_id, st)
-            # Consider the operation successful if we set killed state
-            cancelled = True
+            saved = self._orch.get_run(run_id)
+            if saved is None or saved.phase != RunPhase.killed:
+                return False
         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
-            pass
+            return False
         # Ensure WS end event is sent even if runner didn't publish
         with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
             get_hub().publish_event(run_id, "end", {"exit_code": None, "canceled": True})

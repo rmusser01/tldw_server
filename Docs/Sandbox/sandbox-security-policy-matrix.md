@@ -51,17 +51,17 @@ fall back to a weaker host-local runtime.
 
 | Runtime | Boundary class | `trusted` | `standard` | `untrusted` | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `docker` | container | policy-admitted | policy-admitted | policy-admitted, not VM-grade | Existing compatibility path. Do not describe as the macOS `untrusted` target. |
-| `firecracker` | VM-grade | policy-admitted | policy-admitted | policy-admitted | Linux/KVM host-gated VM runtime. |
-| `lima` | VM-grade | policy-admitted | policy-admitted | policy-admitted | macOS-host Linux VM path with strict preflight requirements. |
+| `docker` | container | policy-admitted | policy-admitted | rejected | Ordinary containers do not satisfy the VM requirement. |
+| `firecracker` | VM-grade | policy-admitted | policy-admitted | policy-admitted | Trust-eligible VM; real execution blocked until host containment is implemented. |
+| `lima` | VM-grade | policy-admitted | policy-admitted | policy-admitted | Trust-eligible VM; execution blocked by unsupported strict networking. |
 | `vz_linux` | VM-grade | policy-admitted | policy-admitted | policy-admitted | Primary Apple silicon Linux VM path. |
-| `vz_macos` | VM-grade scaffold | scaffold | scaffold | scaffold | Runtime identity and preflight shape exist; real execution is not implemented. |
+| `vz_macos` | VM-grade scaffold | scaffold | scaffold | rejected | Runtime identity and preflight shape exist; real execution is not implemented. |
 | `seatbelt` | host-local | policy-admitted | opt-in only | rejected | `standard` requires `TLDW_SANDBOX_SEATBELT_STANDARD_ENABLED=1`; never VM-grade. |
 | `worktree` | host-local | policy-admitted | policy-admitted | rejected | VCS/workspace isolation only; never VM-grade. |
 
 Policy requirements:
 
-- `seatbelt` and `worktree` must reject `untrusted` even if callers omit
+- `docker`, `seatbelt`, `worktree`, and `vz_macos` must reject `untrusted` even if callers omit
   runtime preflight metadata.
 - Runtime preflight `supported_trust_levels` may further restrict admission.
 - No code path may downgrade from a requested VM-grade runtime to a host-local
@@ -87,7 +87,7 @@ stay false even when environment flags or test preflights report readiness.
 | --- | --- | --- | --- |
 | `docker` | Supported through container network isolation where configured. | Supported only when Docker egress enforcement and granular enforcement are enabled. | Do not advertise allowlist when execution would fall back to `network=none`; that fallback is deny-all, not allowlist. |
 | `firecracker` | Host-gated strict deny-all when VM networking is absent or blocked. | Scaffold. | Fail closed when host enforcement cannot prove the requested policy; do not advertise scaffold allowlist as effective support. |
-| `lima` | Host-gated strict deny-all through Lima enforcer readiness. | Unsupported for execution today. | `allowlist` requests must be rejected even if test overrides report readiness. |
+| `lima` | Unsupported: no concrete enforcement mechanism. | Unsupported for execution today. | Both strict modes are rejected regardless of host OS or readiness environment flags. |
 | `vz_linux` | Strict deny-all by Python admission plus helper rejection of non-`deny_all` VM creation; current VM config attaches no network device. | Unsupported. | Helper metadata should echo the accepted policy for diagnostics. |
 | `vz_macos` | Scaffold only. | Unsupported. | Do not claim real network enforcement until real execution exists. |
 | `seatbelt` | Best effort only; not firewall-backed or VM-grade. | Unsupported. | Discovery may report availability while strict network support is false. |

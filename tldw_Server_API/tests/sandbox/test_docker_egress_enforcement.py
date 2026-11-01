@@ -5,14 +5,13 @@ import os
 import shutil
 import subprocess
 from types import SimpleNamespace
-from typing import Any, Dict, List
 
 import pytest
 
 import tldw_Server_API.app.core.Sandbox.network_policy as network_policy_module
 import tldw_Server_API.app.core.Sandbox.runners.docker_runner as docker_module
-from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 
 
 @pytest.mark.unit
@@ -35,7 +34,7 @@ def test_docker_runner_uses_network_none_when_allowlist_enforced_non_granular(
     monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
     monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "false")
 
-    recorded_cmds: List[List[str]] = []
+    recorded_cmds: list[list[str]] = []
 
     class _Called(Exception):
         pass
@@ -76,7 +75,7 @@ def test_docker_runner_creates_dedicated_network_when_granular_enabled(monkeypat
     monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
     monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
 
-    recorded_cmds: List[List[str]] = []
+    recorded_cmds: list[list[str]] = []
 
     class _Called(Exception):
         pass
@@ -116,6 +115,7 @@ def test_apply_egress_rules_atomic_raises_when_fallback_rules_fail(monkeypatch: 
         return SimpleNamespace(returncode=1)
 
     monkeypatch.setattr(network_policy_module.subprocess, "run", _failing_run)
+    monkeypatch.setattr(network_policy_module.subprocess, "check_output", lambda *args, **kwargs: "")
 
     with pytest.raises(RuntimeError, match="iptables"):
         network_policy_module.apply_egress_rules_atomic(
@@ -125,7 +125,7 @@ def test_apply_egress_rules_atomic_raises_when_fallback_rules_fail(monkeypatch: 
         )
 
     assert any(call[:1] == ["iptables-restore"] for call in calls)
-    assert any(call[:1] == ["iptables"] and "-j" in call and "DROP" in call for call in calls)
+    assert any(call[:2] == ["iptables", "-N"] for call in calls)
 
 
 @pytest.mark.unit
@@ -138,6 +138,8 @@ def test_apply_egress_rules_atomic_cleans_partial_fallback_rules(monkeypatch: py
         calls.append(list(args))
         if args[:1] == ["iptables-restore"]:
             return SimpleNamespace(returncode=1)
+        if args[:2] == ["iptables", "-N"]:
+            return SimpleNamespace(returncode=0)
         if "-j" in args and args[args.index("-j") + 1] == "ACCEPT":
             return SimpleNamespace(returncode=0)
         if "-j" in args and args[args.index("-j") + 1] == "DROP":
@@ -145,7 +147,8 @@ def test_apply_egress_rules_atomic_cleans_partial_fallback_rules(monkeypatch: py
         raise AssertionError(f"unexpected iptables call: {args!r}")
 
     monkeypatch.setattr(network_policy_module.subprocess, "run", _partially_failing_run)
-    monkeypatch.setattr(network_policy_module, "delete_rules_by_label", lambda label: cleaned_labels.append(label))
+    monkeypatch.setattr(network_policy_module.subprocess, "check_output", lambda *args, **kwargs: "")
+    monkeypatch.setattr(network_policy_module, "_delete_rules_by_label_locked", lambda label: cleaned_labels.append(label))
 
     with pytest.raises(RuntimeError, match="iptables"):
         network_policy_module.apply_egress_rules_atomic(
@@ -230,16 +233,15 @@ def test_apply_iptables_rules_on_supported_hosts(monkeypatch: pytest.MonkeyPatch
         pytest.skip("iptables mutation not enabled")
     if shutil.which("iptables") is None:
         pytest.skip("iptables not available on host")
-    # Ensure DOCKER-USER chain exists; if not, skip to avoid altering host firewall unexpectedly
-    import subprocess
+    # Probe privileges before mutating only our reserved TEST-NET source policy.
     try:
-        subprocess.check_output(["iptables", "-S", "DOCKER-USER"])  # may fail if chain missing
+        subprocess.check_output(["iptables", "-S"], timeout=5)
     except Exception:
-        pytest.skip("DOCKER-USER chain not present; skipping")
+        pytest.skip("host iptables rules are unavailable")
 
     from tldw_Server_API.app.core.Sandbox.network_policy import apply_egress_rules_atomic, delete_rules_by_label
     label = "tldw-test-egress-allowlist"
-    rules = apply_egress_rules_atomic("172.18.0.2", ["1.1.1.1/32"], label=label)
+    rules = apply_egress_rules_atomic("192.0.2.123", ["192.0.2.10/32"], label=label)
     try:
         # Minimal assertion: rules list is non-empty
         assert isinstance(rules, list) and rules

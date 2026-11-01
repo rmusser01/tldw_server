@@ -8,6 +8,7 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -234,18 +235,38 @@ class SeatbeltRunner:
             return False
 
     @classmethod
-    def _terminate_process_group(cls, proc: subprocess.Popen[bytes]) -> None:
-        with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
-            os.killpg(proc.pid, signal.SIGTERM)
+    def _process_group_exists(cls, proc: subprocess.Popen[bytes]) -> bool:
+        """Treat inaccessible groups as live until absence is confirmed."""
         try:
-            proc.wait(timeout=cls._cancel_grace_seconds())
-            return
+            os.killpg(proc.pid, 0)
+        except ProcessLookupError:
+            return False
         except _SEATBELT_NONCRITICAL_EXCEPTIONS:
-            pass
-        with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
-            os.killpg(proc.pid, signal.SIGKILL)
-        with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
-            proc.wait(timeout=1)
+            return True
+        return True
+
+    @classmethod
+    def _terminate_process_group(cls, proc: subprocess.Popen[bytes]) -> bool:
+        """Confirm every process in the group is gone, including descendants."""
+        for sig, grace in ((signal.SIGTERM, cls._cancel_grace_seconds()), (signal.SIGKILL, 1)):
+            try:
+                os.killpg(proc.pid, sig)
+            except ProcessLookupError:
+                with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
+                    proc.wait(timeout=0)
+                return True
+            except _SEATBELT_NONCRITICAL_EXCEPTIONS:
+                return False
+            deadline = time.monotonic() + grace
+            while True:
+                with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
+                    proc.wait(timeout=0)
+                if not cls._process_group_exists(proc):
+                    return True
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.05)
+        return False
 
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
@@ -255,8 +276,9 @@ class SeatbeltRunner:
         if proc is None:
             return False
 
+        if cls._terminate_process_group(proc) is not True:
+            return False
         cls._mark_cancelled(run_id)
-        cls._terminate_process_group(proc)
         run_dir = cls._clear_active_run(run_id)
         if run_dir:
             with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
@@ -352,6 +374,8 @@ class SeatbeltRunner:
                     start_new_session=True,
                 )
                 self._register_active_run(run_id, proc, run_dir)
+                if spec.on_backend_started is not None:
+                    spec.on_backend_started(str(proc.pid))
 
                 try:
                     wait_result = proc.wait(timeout=max(1, int(spec.timeout_sec or 300)))
@@ -402,17 +426,27 @@ class SeatbeltRunner:
                 message = "canceled_by_user"
         finally:
             finished = datetime.utcnow()
-            run_dir_to_remove = self._clear_active_run(run_id)
-            if run_dir_to_remove:
-                run_dir = run_dir_to_remove
-            if run_dir:
-                with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
-                    shutil.rmtree(run_dir, ignore_errors=True)
+            stopped = proc is None or not self._process_group_exists(proc)
+            if not stopped:
+                stopped = self._terminate_process_group(proc)
+            if stopped:
+                run_dir_to_remove = self._clear_active_run(run_id)
+                if run_dir_to_remove:
+                    run_dir = run_dir_to_remove
+                if run_dir:
+                    with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
+                        shutil.rmtree(run_dir, ignore_errors=True)
+            else:
+                phase = RunPhase.running
+                exit_code = None
+                artifacts_map = {}
+                artifact_counters = {}
+                message = "backend_termination_unconfirmed"
 
         with contextlib.suppress(_SEATBELT_NONCRITICAL_EXCEPTIONS):
             if phase == RunPhase.timed_out:
                 hub.publish_event(run_id, "end", {"exit_code": None, "reason": "execution_timeout"})
-            elif phase != RunPhase.killed:
+            elif phase not in {RunPhase.killed, RunPhase.running}:
                 hub.publish_event(run_id, "end", {"exit_code": exit_code})
 
         try:
@@ -435,7 +469,7 @@ class SeatbeltRunner:
             phase=phase,
             runtime=self.runtime_type,
             started_at=started,
-            finished_at=finished,
+            finished_at=finished if phase != RunPhase.running else None,
             exit_code=exit_code,
             message=message,
             runtime_version=self._version(),
