@@ -6,14 +6,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { MODERATION_RULES_PATH } from "@/routes/route-paths"
 import { ModerationReviewShell } from "../ModerationReviewShell"
-import { useModerationReviewQueue } from "../hooks/useModerationReviewQueue"
+import { useModerationReviewQueue as useScopedModerationReviewQueue } from "../hooks/useModerationReviewQueue"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
+  config: { serverUrl: "http://review-unit.test", authMode: "single-user" as const, apiKey: "unit-key" },
   listModerationReviewItems: vi.fn(),
   getModerationReviewItem: vi.fn(),
   decideModerationReviewItem: vi.fn(),
   undoModerationReviewDecision: vi.fn(),
   bulkDecideModerationReviewItems: vi.fn()
+}))
+
+const presetOwnerId = "recipe-owner:sha256:" + "a".repeat(64)
+const useModerationReviewQueue = () => useScopedModerationReviewQueue(presetOwnerId)
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: mocks.config, loading: false, authorityLoading: false })
+}))
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ready: true, ownerId: presetOwnerId, unavailable: false, boundaryKey: deriveConnectionAuthorityId(mocks.config), retry: () => {} })
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({

@@ -77,12 +77,12 @@ function messageFromError(error: unknown): string {
   return String((error as { message?: unknown })?.message || "Review queue request failed")
 }
 
-function loadStoredPresets(): ModerationReviewFilterPreset[] {
+function loadStoredPresets(storageKey: string): ModerationReviewFilterPreset[] {
   if (typeof window === "undefined") {
     return []
   }
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "[]")
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "[]")
     if (!Array.isArray(parsed)) {
       return []
     }
@@ -101,11 +101,11 @@ function loadStoredPresets(): ModerationReviewFilterPreset[] {
   }
 }
 
-function persistPresets(presets: ModerationReviewFilterPreset[]) {
+function persistPresets(storageKey: string, presets: ModerationReviewFilterPreset[]) {
   if (typeof window === "undefined") {
     return
   }
-  window.localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(presets))
+  window.localStorage.setItem(storageKey, JSON.stringify(presets))
 }
 
 function filterMatchesActiveStatus(item: ModerationReviewItem, filters: ModerationReviewFilters): boolean {
@@ -123,7 +123,11 @@ type ReviewQueuePage = {
   loadedFilters: ModerationReviewFilters
 }
 
-export function useModerationReviewQueue() {
+export function useModerationReviewQueue(presetOwnerId: string) {
+  if (!/^recipe-owner:sha256:[a-f0-9]{64}$/.test(presetOwnerId)) throw new Error("Moderation presets require a resolved account")
+  const capturedOwner = React.useRef(presetOwnerId)
+  if (capturedOwner.current !== presetOwnerId) throw new Error("Moderation account changed; reopen the review workspace")
+  const presetStorageKey = `${FILTER_PRESETS_STORAGE_KEY}:${presetOwnerId}`
   const mutationVersion = React.useRef(0)
   const queueRead = React.useRef(0)
   const detailRead = React.useRef(0)
@@ -153,7 +157,7 @@ export function useModerationReviewQueue() {
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set())
   const [bulkDeciding, setBulkDeciding] = React.useState<ModerationDecisionAction | null>(null)
   const [bulkResult, setBulkResult] = React.useState<ModerationReviewBulkDecisionResponse | null>(null)
-  const [filterPresets, setFilterPresets] = React.useState<ModerationReviewFilterPreset[]>(loadStoredPresets)
+  const [filterPresets, setFilterPresets] = React.useState<ModerationReviewFilterPreset[]>(() => loadStoredPresets(presetStorageKey))
   const selectedItemIds = React.useMemo(() => Array.from(selectedIds), [selectedIds])
   const selectId = React.useCallback((id: string | null) => {
     selectionId.current = id
@@ -475,9 +479,9 @@ export function useModerationReviewQueue() {
         { name: normalized, filters: { ...presetFilters, cursor: null } }
       ].sort((a, b) => a.name.localeCompare(b.name))
       setFilterPresets(next)
-      persistPresets(next)
+      persistPresets(presetStorageKey, next)
     },
-    [filterPresets, filters]
+    [filterPresets, filters, presetStorageKey]
   )
 
   const applyFilterPreset = React.useCallback(
@@ -500,9 +504,9 @@ export function useModerationReviewQueue() {
     (name: string) => {
       const next = filterPresets.filter((entry) => entry.name !== name)
       setFilterPresets(next)
-      persistPresets(next)
+      persistPresets(presetStorageKey, next)
     },
-    [filterPresets]
+    [filterPresets, presetStorageKey]
   )
 
   return {
