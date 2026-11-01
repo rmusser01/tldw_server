@@ -10,7 +10,7 @@
 
 **Spec:** [Approved Stage 2C design](../specs/2026-11-01-claims-jobs-stage2c-cluster-rebuild-design.md).
 
-**Status:** Approved by the requester on 2026-11-01 after all five validated review corrections; execution started with Task 1.
+**Status:** Approved by the requester on 2026-11-01 after all five validated review corrections. Tasks 1-5 are implemented and independently reviewed. Execution stopped at Task 6's approved storage-access safety gate pending a narrow design decision; Tasks 6-11 are incomplete.
 
 **Tracking:** TASK-15283 completed planning; TASK-15282 completed the design. TASK-15411 through TASK-15421 track Tasks 1-11 respectively, with each record maintained through backlog-py. The requester approved this revised plan and, after clarification of the existing WorkerSDK, explicitly requested continuation. No push, PR or merge is authorized by this execution handoff.
 
@@ -267,6 +267,8 @@ def test_transferred_reference_is_not_hidden_by_owner_snapshot(transferred_db):
 **Task 5 evidence (TASK-15415):** Commits `b5fc7a5bc1` and `a2236fcf14`; independent review approved spec compliance and quality with no blocking findings. Final disjoint focused sets cover 218 cases, including 24 actual restricted-role PostgreSQL cases and supplemental cleanup lock-order/writer races, with no fixture skips. Fresh/upgrade schema27, scoped references and bounds, late destination add, configured lint/compilation/scoped formatting/hooks passed; touched Bandit has zero findings/errors. Minor annotation/runtime mismatch for the defensively frozen publication result is explicitly assigned to Task 7 consumer integration, not silently waived. Warnings and inherited whole-file formatting debt remain disclosed. No calculation, publisher or worker enabled by this prerequisite.
 
 ### Task 6: Bounded Exact/Embedding Calculation And Non-Creating Vector Access
+
+**Execution stop (TASK-15416):** Real ChromaDB 1.5.5 probes reproduced provisioning through public validate-mode startup and HNSW file creation/overwrites through lower-level read/write vector reads, even when reads fail. Read-only startup itself attempts a write. Thirteen temporary real-SDK scenarios are feasibility evidence, not passing calculator/adapter tests. The controller inspected the script/results and verified recorded hashes. No calculator, adapter or publisher implementation was added. The approved no-provisioning requirement cannot be weakened with a stat check or sanitized post-write error; a narrowly reviewed storage-access design is required before this task resumes. Evidence-only commit `e72082d0c4` and TASK-15416 retain the observations; all five steps below remain incomplete. No producer or existing synchronous behavior was changed by this stopped attempt.
 
 **Files:** Create `tldw_Server_API/app/core/Claims_Extraction/claims_cluster_rebuild.py`, `claims_cluster_vectors.py`; modify `claims_clustering.py` only for small shared pure helpers, `Embeddings/ChromaDB_Library.py` and `DB_Management/db_path_utils.py` for explicit non-creating access. Create `tldw_Server_API/tests/Claims/test_claims_cluster_rebuild_calculation.py`, `test_claims_cluster_vectors_existing_only.py`, and `property/test_claims_cluster_rebuild_limits.py`.
 
