@@ -52,9 +52,12 @@ _SOURCES = frozenset({"default", "request", "config", "supplied", "supplied:conf
 def _freeze_option(name: str, value: Any) -> Any:
     """Freeze only supported option shapes, not arbitrary credential subtrees."""
     if name == "domain_map" and isinstance(value, Mapping):
-        if any(type(key) is not str or type(item) not in (int, float) for key, item in value.items()):
+        if any(type(key) is not str or type(item) not in (int, float, str, bool) for key, item in value.items()):
             raise ValueError("domain_map option must map domain strings to numeric weights")
-        return MappingProxyType(dict(value))
+        try:
+            return MappingProxyType({key: float(item) for key, item in value.items()})
+        except (ValueError, OverflowError):
+            raise ValueError("domain_map option weights must be numeric scalars") from None
     if value is None or type(value) in (str, int, float, bool):
         return value
     raise ValueError("crawl option must be a scalar or a domain-weight mapping")

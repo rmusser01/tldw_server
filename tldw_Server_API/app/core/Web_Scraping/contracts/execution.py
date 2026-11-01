@@ -44,6 +44,28 @@ _PRIVATE_KEYS = frozenset(
         "_discovered_links",
     }
 )
+_NORMALIZED_PRIVATE_KEYS = frozenset("".join(char for char in key if char.isalnum()) for key in _PRIVATE_KEYS)
+_CREDENTIAL_KEY_SUFFIXES = (
+    "apikey",
+    "clientsecret",
+    "authorization",
+    "password",
+    "accesstoken",
+    "refreshtoken",
+    "authtoken",
+    "sessiontoken",
+    "bearertoken",
+    "accesskey",
+    "accesskeyid",
+    "privatekey",
+    "setcookie",
+)
+
+
+def _private_article_key(key: str) -> bool:
+    """Recognize credential aliases/provider prefixes without scanning article prose."""
+    normalized = "".join(char for char in key.lower() if char.isalnum())
+    return normalized in _NORMALIZED_PRIVATE_KEYS or normalized.endswith(_CREDENTIAL_KEY_SUFFIXES)
 
 
 def _safe_article(value: Any) -> Any:
@@ -52,7 +74,7 @@ def _safe_article(value: Any) -> Any:
         return {
             key: _safe_article(item)
             for key, item in value.items()
-            if type(key) is str and key.lower().replace("-", "_") not in _PRIVATE_KEYS
+            if type(key) is str and not _private_article_key(key)
         }
     if isinstance(value, list | tuple):
         return [_safe_article(item) for item in value]
@@ -129,7 +151,7 @@ class CrawlReport:
 
     def __post_init__(self) -> None:
         articles = tuple(_safe_article(article) for article in self.articles if successful_article(article))
-        if self.outcome.has_partial_results != (bool(articles) and self.outcome.state in {"partial", "cancelled"}):
+        if self.outcome.has_partial_results != (bool(articles) and self.outcome.state != "completed"):
             raise ValueError("outcome does not match successful partial article data")
         object.__setattr__(self, "articles", articles)
         object.__setattr__(

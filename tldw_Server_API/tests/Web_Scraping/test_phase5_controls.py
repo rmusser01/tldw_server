@@ -1,6 +1,8 @@
 """Atomic parent accounting and owned logical/physical completion controls."""
 
 import asyncio
+import gc
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from threading import Barrier
@@ -8,6 +10,7 @@ from threading import Barrier
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from loguru import logger
 
 from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlOutcome
 from tldw_Server_API.app.core.Web_Scraping.crawl.models import CrawlLimits
@@ -309,6 +312,63 @@ def test_cancel_callback_runs_outside_lock_and_snapshot_is_immutable(ctx):
         assert snapshot.accounting_complete is True
     finally:
         loop.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "secondary", [RuntimeError("private-callback-detail"), asyncio.CancelledError("private-detail")]
+)
+async def test_cancel_fanout_reports_secondary_failure_without_masking_caller_cancel(ctx, secondary):
+    loop = asyncio.get_running_loop()
+    calls, messages = [], []
+
+    def failing_cancel():
+        calls.append("first")
+        raise secondary
+
+    first = WorkHandle(loop.create_future(), loop.create_future(), failing_cancel)
+    second = WorkHandle(loop.create_future(), loop.create_future(), lambda: calls.append("second"))
+    ctx.attach(first)
+    ctx.attach(second)
+    original = asyncio.CancelledError("original caller cancellation")
+    sink = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    try:
+        with pytest.raises(asyncio.CancelledError) as caught:
+            try:
+                raise original
+            except asyncio.CancelledError:
+                ctx.cancel()
+                raise
+        ctx.cancel()
+    finally:
+        logger.remove(sink)
+    assert caught.value is original
+    assert calls == ["first", "second"]
+    assert messages == ["crawl_cancel_callback_failed count=1\n"]
+    assert not first.drained.done() and not second.drained.done()
+    assert not first.result.done() and not second.result.done()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("late_attach", [False, True])
+async def test_cancel_retains_owned_handle_until_actual_physical_drain(ctx, late_attach):
+    loop = asyncio.get_running_loop()
+    if late_attach:
+        ctx.cancel()
+    drained = loop.create_future()
+    handle = WorkHandle(loop.create_future(), drained, lambda: None)
+    retained = weakref.ref(handle)
+    ctx.attach(handle)
+    ctx.cancel()
+    del handle
+    gc.collect()
+    assert retained() is not None
+    assert not drained.done()
+    drained.set_result(None)
+    # Existing ownership pruning occurs on attach, only after actual drain.
+    ctx.attach(WorkHandle(loop.create_future(), loop.create_future(), lambda: None))
+    gc.collect()
+    assert retained() is None
 
 
 def test_commit_close_race_never_refunds_started_work(ctx):

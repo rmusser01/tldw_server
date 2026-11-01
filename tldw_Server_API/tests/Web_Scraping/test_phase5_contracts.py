@@ -136,6 +136,41 @@ def test_interruption_carries_sanitized_data_and_plain_extra_metadata():
     assert str(error) == "execution_failed"
 
 
+@pytest.mark.parametrize(
+    "credential_key",
+    [
+        "X-API-Key",
+        "x_api_key",
+        "client_secret",
+        "clientSecret",
+        "OPENAI_API_KEY",
+        "anthropic-api-key",
+        "provider_client_secret",
+        "X-Auth-Token",
+        "Set-Cookie",
+        "AWS_ACCESS_KEY_ID",
+        "aws_secret_access_key",
+        "private-key",
+    ],
+)
+def test_retained_report_removes_nested_credential_aliases_but_preserves_prose_and_extras(credential_key):
+    prose = "Documentation discusses X-API-Key and client_secret without exposing their values."
+    source = {
+        "content": prose,
+        "metadata": {"nested": [{credential_key: "private-credential", "rank": 7}]},
+        "custom_extra": {"token_count": 3, "secretary": "editor"},
+    }
+    report = CrawlReport.interrupted([source], "execution_failed")
+    assert report.articles == (
+        {
+            "content": prose,
+            "metadata": {"nested": [{"rank": 7}]},
+            "custom_extra": {"token_count": 3, "secretary": "editor"},
+        },
+    )
+    assert "private-credential" not in repr(CrawlInterrupted(report).report)
+
+
 def resolve(profile="enhanced_recursive", options=None, supplied=frozenset(), config=None, request=None):
     return resolve_crawl_plan(
         request or CrawlRequest("https://example.com"),
@@ -215,6 +250,34 @@ def test_strategy_retains_existing_truthiness_and_spelling(strategy):
     assert plan.options["crawl_strategy"] == (strategy or "best_first").strip().lower()
 
 
+@pytest.mark.parametrize("source", ["config", "supplied"])
+@pytest.mark.parametrize("value", [{"api_key": "private-key"}, {}, ["private-key"], (), {"private-key"}, lambda: None])
+def test_resolver_rejects_unsafe_strategy_before_coercion(source, value):
+    with pytest.raises(ValueError, match="option") as caught:
+        if source == "config":
+            resolve(config={"web_crawl_strategy": value})
+        else:
+            resolve(options={"crawl_strategy": value}, supplied=frozenset({"crawl_strategy"}))
+    assert "private-key" not in str(caught.value)
+
+
+@pytest.mark.parametrize("source", ["config", "supplied"])
+def test_strategy_rejection_never_calls_private_object_string_conversion(source):
+    calls = []
+
+    class PrivateStrategy:
+        def __str__(self):
+            calls.append("coerced")
+            return "private-key"
+
+    with pytest.raises(ValueError):
+        if source == "config":
+            resolve(config={"web_crawl_strategy": PrivateStrategy()})
+        else:
+            resolve(options={"crawl_strategy": PrivateStrategy()}, supplied=frozenset({"crawl_strategy"}))
+    assert calls == []
+
+
 def test_explicit_none_uses_config_and_invalid_threshold_keeps_config():
     plan = resolve(
         options={"include_external": None, "score_threshold": "bad"},
@@ -259,6 +322,52 @@ def test_plan_freezes_safe_config_only_and_discards_credential_metadata():
         plan.profile = "other"
 
 
+def test_resolver_preserves_existing_scalar_domain_weights_as_immutable_floats():
+    weights = {
+        "example.com": "0.5",
+        "other.example": " 0.75 ",
+        "small.example": "1e-2",
+        "zero.example": 0,
+        "float.example": 0.25,
+        "bool.example": True,
+    }
+    plan = resolve(config={"web_crawl_enable_domain_map": True, "web_crawl_domain_map": weights})
+    weights["example.com"] = "9.0"
+    assert dict(plan.options["domain_map"]) == {
+        "example.com": 0.5,
+        "other.example": 0.75,
+        "small.example": 0.01,
+        "zero.example": 0.0,
+        "float.example": 0.25,
+        "bool.example": 1.0,
+    }
+    assert all(type(weight) is float for weight in plan.options["domain_map"].values())
+    with pytest.raises(TypeError):
+        plan.options["domain_map"]["example.com"] = 1.0
+
+
+@pytest.mark.parametrize("weight", [{"api_key": "private-key"}, ["private-key"], lambda: 0.5, "private-key"])
+def test_resolver_rejects_unsafe_domain_weights_without_private_errors(weight):
+    with pytest.raises(ValueError, match="option") as caught:
+        resolve(config={"web_crawl_enable_domain_map": True, "web_crawl_domain_map": {"example.com": weight}})
+    assert "private-key" not in str(caught.value)
+
+
+def test_domain_weight_rejection_does_not_execute_float_conversion():
+    calls = []
+
+    class ExecutableWeight:
+        def __float__(self):
+            calls.append("executed")
+            return 0.5
+
+    with pytest.raises(ValueError):
+        resolve(
+            config={"web_crawl_enable_domain_map": True, "web_crawl_domain_map": {"example.com": ExecutableWeight()}}
+        )
+    assert calls == []
+
+
 def test_direct_plan_constructor_cannot_bypass_safe_options_and_provenance():
     plan = CrawlPlan(
         CrawlRequest("https://example.com"),
@@ -289,6 +398,12 @@ def test_safe_option_names_do_not_allow_arbitrary_credential_bearing_subtrees(op
 def test_report_rejects_success_claim_without_successful_data():
     with pytest.raises(ValueError):
         CrawlReport(({"error": "failure"},), CrawlOutcome("partial", "budget_exhausted", True))
+
+
+@pytest.mark.parametrize("articles", [({"content": "kept"},), ({"error": "failure"}, {"content": "kept"})])
+def test_failed_report_cannot_deny_retained_successful_data(articles):
+    with pytest.raises(ValueError, match="outcome"):
+        CrawlReport(articles, CrawlOutcome("failed", "execution_failed", False))
 
 
 def test_interruption_cannot_wrap_normal_completion():
