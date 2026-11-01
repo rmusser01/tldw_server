@@ -7033,30 +7033,5 @@
   },
   "header_closePageLauncher": {
     "message": "Close page launcher"
-  },
-  "moderationClassification": {
-    "stopped": "Classification stopped. A result may already be saved; Retry checks the same receipt.",
-    "failed": "Classification failed. Keep this sample and explicitly retry the saved request.",
-    "title": "Model classification",
-    "intro": "Ask a configured model to check one criterion. The sample and result are saved to the staff Review queue. A human makes the final decision; this does not change rules or Chat enforcement.",
-    "retired": "The account changed. Reopen this panel after account verification.",
-    "catalogFailed": "Could not load configured models. Check the connection, then reload models.",
-    "noModel": "No configured llama.cpp model is available. Check provider settings, then reload models.",
-    "reload": "Reload models",
-    "model": "Classification model",
-    "choose": "Choose a configured model",
-    "criterion": "Flag when",
-    "criterionHint": "Example: the sample discloses an unpublished observatory access code.",
-    "sample": "Sample for classification",
-    "pending": "Classifying…",
-    "retry": "Retry saved request",
-    "classify": "Classify and save for review",
-    "stopping": "Stopping…",
-    "stop": "Stop classification",
-    "result": "Model suggestion",
-    "flagged": "Model suggestion: flagged",
-    "benign": "Model suggestion: benign",
-    "status": "Review status",
-    "review": "Open Review queue"
   }
 }
