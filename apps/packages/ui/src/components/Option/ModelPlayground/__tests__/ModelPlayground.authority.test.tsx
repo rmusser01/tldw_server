@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { useStoreMessageOption } from "@/store/option";
@@ -64,6 +64,13 @@ beforeEach(() => {
 });
 
 describe("Model Playground conversation authority", () => {
+  it("hands Simple Chat to the canonical Chat route", () => {
+    const Location = () => <output aria-label="Current route">{useLocation().pathname}</output>;
+    render(<MemoryRouter><ModelPlayground /><Location /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Simple Chat" }));
+    expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/chat$/);
+  });
+
   it("admits a standalone question under its verified account", () => {
     prepare();
     expect(fixture.capture?.isCurrent()).toBe(true);
