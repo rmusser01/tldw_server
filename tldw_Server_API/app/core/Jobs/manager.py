@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid as _uuid
+from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -163,6 +164,8 @@ from .pg_migrations import (
     slides_archive_indexes_ready_pg,
     slides_archive_projection_ready_pg,
 )
+from .resource_contracts import ResourceAdmission, ResourceAdmissionRequest
+from .resource_policy import reject_resource_required, validate_resource_command
 from .tracing import job_span
 
 if TYPE_CHECKING:
@@ -579,7 +582,14 @@ class JobManager:
         conn = self._connect()
         try:
             if self.backend == "postgres":
-                with self._pg_cursor(conn) as cur:
+                # Fair-share is per tenant across domains. Broaden only this
+                # scalar aggregate's domain filter, never a non-admin's owner.
+                # An existing admin claim can be narrowed to the requested owner.
+                aggregate_owner = user_id if self._RLS_IS_ADMIN.get() else self._RLS_OWNER_USER_ID.get()
+                with (
+                    self.scoped_rls_context(is_admin=False, domain_allowlist=None, owner_user_id=aggregate_owner),
+                    self._pg_cursor(conn) as cur,
+                ):
                     cur.execute(
                         "SELECT COUNT(*) AS c FROM jobs WHERE owner_user_id = %s AND status IN ('queued', 'processing')",
                         (user_id,),
@@ -2321,6 +2331,26 @@ class JobManager:
             pass
 
     @classmethod
+    @contextlib.contextmanager
+    def scoped_rls_context(
+        cls, *, is_admin: bool, domain_allowlist: str | None, owner_user_id: str | None
+    ) -> Iterator[None]:
+        """Temporarily bind Jobs scope, not authorization; restore tokens locally.
+
+        Enter and exit inside the same synchronous/threadpool call. A token
+        cannot be reset from a different execution context.
+        """
+        admin_token = cls._RLS_IS_ADMIN.set(bool(is_admin))
+        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain_allowlist if (domain_allowlist or "").strip() else None)
+        owner_token = cls._RLS_OWNER_USER_ID.set(owner_user_id if (owner_user_id or "").strip() else None)
+        try:
+            yield
+        finally:
+            cls._RLS_OWNER_USER_ID.reset(owner_token)
+            cls._RLS_DOMAIN_ALLOWLIST.reset(domain_token)
+            cls._RLS_IS_ADMIN.reset(admin_token)
+
+    @classmethod
     def clear_rls_context(cls) -> None:
         try:
             cls._RLS_IS_ADMIN.set(False)
@@ -3304,6 +3334,7 @@ class JobManager:
     ) -> IdempotentOperationAdmission | None:
         """Read an exact owner-scoped receipt without applying admission policy."""
 
+        reject_resource_required(command.job.domain, command.job.job_type)
         conn = self._connect()
         try:
             if self.backend == "postgres":
@@ -3322,6 +3353,7 @@ class JobManager:
     ) -> IdempotentOperationAdmission:
         """Atomically admit or replay one owner-scoped user operation."""
 
+        reject_resource_required(command.job.domain, command.job.job_type)
         job = command.job
         replay = self.replay_idempotent_operation(command)
         if replay is not None:
@@ -3537,106 +3569,26 @@ class JobManager:
             self._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")),
         )
 
-    def admit_job(
+    def _prepare_job_admission(
         self,
+        command: CreateJobCommand,
         *,
-        domain: str,
-        queue: str,
-        job_type: str,
-        payload: dict[str, Any],
-        owner_user_id: str | None,
-        project_id: int | None = None,
-        batch_group: str | None = None,
-        priority: int = 5,
-        max_retries: int = 3,
-        available_at: datetime | None = None,
-        idempotency_key: str | None = None,
-        request_id: str | None = None,
-        trace_id: str | None = None,
-        owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
-        expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
-        quarantine_threshold: int | None = None,
         fair_share_exempt: bool = False,
-        quota_exempt: bool = False,
-    ) -> AdmissionResult:
-        """Run the complete admission pipeline and return its typed outcome.
-
-        Args:
-            domain: Logical domain (e.g., "chatbooks", "prompt_studio").
-            queue: Queue name within the domain.
-            job_type: Free-form job type string.
-            payload: Opaque payload to be interpreted by the worker.
-            owner_user_id: Owner of the job for scoping/quotas.
-            project_id: Optional project association.
-            batch_group: Optional batch identifier for client-managed grouping.
-            priority: Lower number means higher priority (default 5).
-            max_retries: Maximum automatic retries on failure.
-            available_at: Optional schedule time before the job becomes acquirable.
-            idempotency_key: If provided, duplicate creates return the same row.
-            owner_scope_admission: Optional transactional owner/job-scope limits.
-            expired_lease_policy: Behavior when a processing lease expires.
-            quarantine_threshold: Optional consecutive-failure quarantine limit.
-            fair_share_exempt: Skip the per-user fair-share limit (not the priority adjustment,
-                which still applies), for a next stage queued by a job that is still running and
-                is about to complete (it replaces that job).
-            quota_exempt: Skip the submit quotas (JOBS_QUOTA_MAX_QUEUED*, JOBS_QUOTA_SUBMITS_PER_MIN*), for
-                the same next stage: it continues a job the owner already submitted.
-
-        ``create_job`` delegates here and maps only the final typed outcome to
-        its legacy dict/exception contract.
-        """
-        try:
-            expired_lease_policy = ExpiredLeasePolicy(expired_lease_policy)
-        except (TypeError, ValueError):
-            raise ValueError("expired_lease_policy is invalid") from None
-        if quarantine_threshold is not None and (
-            isinstance(quarantine_threshold, bool)
-            or not isinstance(quarantine_threshold, int)
-            or quarantine_threshold <= 0
-        ):
-            raise ValueError("quarantine_threshold must be a positive integer")
-        canonical_delivery_id: str | None = None
-        if is_admin_webhook_delivery_queue(domain, queue):
-            canonical_delivery_id = _require_canonical_admin_webhook_identity(
-                domain=domain,
-                queue=queue,
-                job_type=job_type,
-                payload=payload,
-            )
-            canonical = (
-                idempotency_key
-                == canonical_admin_webhook_idempotency_key(canonical_delivery_id)
-                and owner_user_id is None
-                and project_id is None
-                and batch_group is None
-                and available_at is None
-                and priority == ADMIN_WEBHOOK_DELIVERY_PRIORITY
-                and max_retries == ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES
-                and expired_lease_policy is ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT
-                and quarantine_threshold
-                == ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD
-            )
-            if not canonical:
-                raise ValueError("canonical admin webhook admission facts are invalid")
+        canonical_delivery_id: str | None = None,
+        resource_request: ResourceAdmissionRequest | None = None,
+    ) -> CreateJobCommand | AdmissionResult:
+        """Apply the shared creation-only preparation, after resource lookup."""
+        domain, queue, job_type = command.domain, command.queue, command.job_type
+        payload, owner_user_id = command.payload, command.owner_user_id
+        priority, idempotency_key = command.priority, command.idempotency_key
+        expired_lease_policy = command.expired_lease_policy
+        quarantine_threshold = command.quarantine_threshold
         slides_generation = _is_slides_generation_scope(domain, queue, job_type)
         slides_replay_controls = {
             "expected_expired_lease_policy": expired_lease_policy,
             "expected_quarantine_threshold": quarantine_threshold,
             "validate_execution_controls": True,
         }
-        if slides_generation:
-            if not isinstance(owner_user_id, str) or not owner_user_id.strip():
-                raise ValueError("presentation.generate jobs require owner_user_id")
-            if not isinstance(idempotency_key, str) or not idempotency_key.strip():
-                raise ValueError("presentation.generate jobs require idempotency_key")
-            existing = self._serialized_slides_generation_replay(
-                owner_user_id=owner_user_id,
-                idempotency_key=idempotency_key,
-                **slides_replay_controls,
-            )
-            if existing is not None:
-                return AdmissionResult.existing(row=existing)
-
         # Queue name policy
         allowed_queues = self._get_allowed_queues(domain)
         if queue not in allowed_queues:
@@ -3707,6 +3659,8 @@ class JobManager:
         max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
         truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
         # Optional encryption at rest for payload
+        if resource_request is not None:
+            validate_resource_command(replace(command, payload=payload), resource_request)
         payload = self._maybe_encrypt_json(payload, domain)
         if canonical_delivery_id is not None:
             _require_unchanged_canonical_admin_webhook_payload(
@@ -3728,7 +3682,7 @@ class JobManager:
             raise
         payload_bytes = len(payload_json.encode("utf-8"))
         if payload_bytes > max_bytes:
-            if truncate:
+            if truncate and resource_request is None:
                 payload = {"_truncated": True, "len_bytes": payload_bytes}
                 if canonical_delivery_id is not None:
                     _require_unchanged_canonical_admin_webhook_payload(
@@ -3759,6 +3713,202 @@ class JobManager:
                 delivery_id=canonical_delivery_id,
             )
         # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
+        # Optional job_type allowlist
+        allowed_job_types: list[str] = []
+        env_all = os.getenv("JOBS_ALLOWED_JOB_TYPES", "").strip()
+        if env_all:
+            allowed_job_types.extend([x.strip() for x in env_all.split(",") if x.strip()])
+        if domain:
+            env_dom = os.getenv(f"JOBS_ALLOWED_JOB_TYPES_{str(domain).upper()}", "").strip()
+            if env_dom:
+                allowed_job_types.extend([x.strip() for x in env_dom.split(",") if x.strip()])
+        if allowed_job_types and job_type not in allowed_job_types:
+            error = ValueError(
+                f"Job type '{job_type}' not allowed for domain '{domain}'. Allowed: {sorted(set(allowed_job_types))}"
+            )
+            if slides_generation:
+                existing = self._serialized_slides_generation_replay(
+                    owner_user_id=owner_user_id,
+                    idempotency_key=idempotency_key,
+                    **slides_replay_controls,
+                    rejection=error,
+                )
+                if existing is not None:
+                    return AdmissionResult.existing(row=existing)
+            raise error  # noqa: TRY003
+
+        return replace(command, payload=payload, priority=priority)
+
+    def admit_resource_job(self, command: CreateJobCommand, *, request: ResourceAdmissionRequest) -> ResourceAdmission:
+        """Atomically replay, reuse, conflict or admit a registered resource Job.
+
+        This does not authorize callers. Enter scoped_rls_context inside the
+        executing call when using owner-facing PostgreSQL reads/admission.
+        """
+        command, request = validate_resource_command(command, request)
+
+        def prepare(candidate: CreateJobCommand) -> CreateJobCommand:
+            prepared = self._prepare_job_admission(candidate, resource_request=request)
+            if isinstance(prepared, AdmissionResult):
+                raise RuntimeError("unexpected resource preparation replay")
+            if not prepared.trace_id:
+                prepared = replace(prepared, trace_id=str(_uuid.uuid4()))
+            return prepared
+
+        conn = self._connect()
+        try:
+            kwargs = {
+                "command": command,
+                "uuid_value": str(_uuid.uuid4()),
+                "now": self._clock.now_utc(),
+                "max_queued_quota": self._quota_get("JOBS_QUOTA_MAX_QUEUED", command.domain, command.owner_user_id),
+                "submits_per_minute_quota": self._quota_get(
+                    "JOBS_QUOTA_SUBMITS_PER_MIN", command.domain, command.owner_user_id
+                ),
+                "counters_enabled": JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
+                "resource_request": request,
+                "prepare_command": prepare,
+            }
+            if self.backend == "postgres":
+                result = _postgres_create_job_admission(conn, self._pg_cursor, **kwargs)
+            else:
+                result = _sqlite_create_job_admission(conn, **kwargs)
+        finally:
+            conn.close()
+        if isinstance(result, ResourceAdmission):
+            return result
+        if result.outcome is not OperationOutcome.APPLIED:
+            return ResourceAdmission("rejected", None, result)
+        self._emit_create_side_effects(result, backend=self.backend, idempotency_key=None)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._update_gauges(domain=command.domain, queue=command.queue, job_type=command.job_type)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._assert_invariants(result.row)
+        return ResourceAdmission("created", result.row, None)
+
+    def admit_job(
+        self,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+        payload: dict[str, Any],
+        owner_user_id: str | None,
+        project_id: int | None = None,
+        batch_group: str | None = None,
+        priority: int = 5,
+        max_retries: int = 3,
+        available_at: datetime | None = None,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+        owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
+        expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
+        quarantine_threshold: int | None = None,
+        fair_share_exempt: bool = False,
+        quota_exempt: bool = False,
+    ) -> AdmissionResult:
+        """Run the complete admission pipeline and return its typed outcome.
+
+        Args:
+            domain: Logical domain (e.g., "chatbooks", "prompt_studio").
+            queue: Queue name within the domain.
+            job_type: Free-form job type string.
+            payload: Opaque payload to be interpreted by the worker.
+            owner_user_id: Owner of the job for scoping/quotas.
+            project_id: Optional project association.
+            batch_group: Optional batch identifier for client-managed grouping.
+            priority: Lower number means higher priority (default 5).
+            max_retries: Maximum automatic retries on failure.
+            available_at: Optional schedule time before the job becomes acquirable.
+            idempotency_key: If provided, duplicate creates return the same row.
+            owner_scope_admission: Optional transactional owner/job-scope limits.
+            expired_lease_policy: Behavior when a processing lease expires.
+            quarantine_threshold: Optional consecutive-failure quarantine limit.
+            fair_share_exempt: Skip the per-user fair-share limit (not the priority adjustment,
+                which still applies), for a next stage queued by a job that is still running and
+                is about to complete (it replaces that job).
+            quota_exempt: Skip the submit quotas (JOBS_QUOTA_MAX_QUEUED*, JOBS_QUOTA_SUBMITS_PER_MIN*), for
+                the same next stage: it continues a job the owner already submitted.
+
+        ``create_job`` delegates here and maps only the final typed outcome to
+        its legacy dict/exception contract.
+        """
+        reject_resource_required(domain, job_type)
+        try:
+            expired_lease_policy = ExpiredLeasePolicy(expired_lease_policy)
+        except (TypeError, ValueError):
+            raise ValueError("expired_lease_policy is invalid") from None
+        if quarantine_threshold is not None and (
+            isinstance(quarantine_threshold, bool)
+            or not isinstance(quarantine_threshold, int)
+            or quarantine_threshold <= 0
+        ):
+            raise ValueError("quarantine_threshold must be a positive integer")
+        canonical_delivery_id: str | None = None
+        if is_admin_webhook_delivery_queue(domain, queue):
+            canonical_delivery_id = _require_canonical_admin_webhook_identity(
+                domain=domain,
+                queue=queue,
+                job_type=job_type,
+                payload=payload,
+            )
+            canonical = (
+                idempotency_key == canonical_admin_webhook_idempotency_key(canonical_delivery_id)
+                and owner_user_id is None
+                and project_id is None
+                and batch_group is None
+                and available_at is None
+                and priority == ADMIN_WEBHOOK_DELIVERY_PRIORITY
+                and max_retries == ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES
+                and expired_lease_policy is ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT
+                and quarantine_threshold == ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD
+            )
+            if not canonical:
+                raise ValueError("canonical admin webhook admission facts are invalid")
+        slides_generation = _is_slides_generation_scope(domain, queue, job_type)
+        slides_replay_controls = {
+            "expected_expired_lease_policy": expired_lease_policy,
+            "expected_quarantine_threshold": quarantine_threshold,
+            "validate_execution_controls": True,
+        }
+        if slides_generation:
+            if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+                raise ValueError("presentation.generate jobs require owner_user_id")
+            if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+                raise ValueError("presentation.generate jobs require idempotency_key")
+            existing = self._serialized_slides_generation_replay(
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                **slides_replay_controls,
+            )
+            if existing is not None:
+                return AdmissionResult.existing(row=existing)
+
+        prepared = self._prepare_job_admission(
+            self._build_create_job_command(
+                domain=domain,
+                queue=queue,
+                job_type=job_type,
+                payload=payload,
+                owner_user_id=owner_user_id,
+                project_id=project_id,
+                batch_group=batch_group,
+                priority=priority,
+                max_retries=max_retries,
+                available_at=available_at,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+                trace_id=trace_id,
+                expired_lease_policy=expired_lease_policy,
+                quarantine_threshold=quarantine_threshold,
+            ),
+            fair_share_exempt=fair_share_exempt,
+            canonical_delivery_id=canonical_delivery_id,
+        )
+        if isinstance(prepared, AdmissionResult):
+            return prepared
+        payload, priority = prepared.payload, prepared.priority
         conn = self._connect()
         try:
             try:
@@ -3787,30 +3937,6 @@ class JobManager:
             avail_param_sqlite = avail_param
             if avail_param_sqlite is not None and getattr(avail_param_sqlite, "tzinfo", None) is not None:
                 avail_param_sqlite = avail_param_sqlite.astimezone(_tz.utc).replace(tzinfo=None)
-            # Optional job_type allowlist
-            allowed_job_types: list[str] = []
-            env_all = os.getenv("JOBS_ALLOWED_JOB_TYPES", "").strip()
-            if env_all:
-                allowed_job_types.extend([x.strip() for x in env_all.split(",") if x.strip()])
-            if domain:
-                env_dom = os.getenv(f"JOBS_ALLOWED_JOB_TYPES_{str(domain).upper()}", "").strip()
-                if env_dom:
-                    allowed_job_types.extend([x.strip() for x in env_dom.split(",") if x.strip()])
-            if allowed_job_types and job_type not in allowed_job_types:
-                error = ValueError(
-                    f"Job type '{job_type}' not allowed for domain '{domain}'. Allowed: {sorted(set(allowed_job_types))}"
-                )
-                if slides_generation:
-                    existing = self._serialized_slides_generation_replay(
-                        owner_user_id=owner_user_id,
-                        idempotency_key=idempotency_key,
-                        **slides_replay_controls,
-                        rejection=error,
-                    )
-                    if existing is not None:
-                        return AdmissionResult.existing(row=existing)
-                raise error  # noqa: TRY003
-
             max_queued_quota = 0 if quota_exempt else self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id)
             submits_per_minute_quota = (
                 0 if quota_exempt else self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id)

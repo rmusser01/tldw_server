@@ -96,6 +96,20 @@ def test_canonical_settings_reject_strings_that_cannot_be_utf8_encoded():
         canonical_settings_json({"text": "\ud800"})
 
 
-@given(st.dictionaries(st.text(), st.integers(), max_size=10))
+@st.composite
+def _bounded_fingerprint_settings(draw):
+    # Boolean draws avoid provider constant-mining across the full suite's
+    # imported modules; no health check or example-count override is needed.
+    keys = ("", "alpha", "Z", "0", "two words", "x" * 32, "caf\u00e9", "\u03bb", "\u4e2d", "\U0001f9ea")
+    values = (0, 1, -1, 2, -2, 1000, -(2**63), 2**63 - 1)
+    settings = {}
+    for key in keys:
+        if draw(st.booleans()):
+            index = sum(int(draw(st.booleans())) << bit for bit in range(3))
+            settings[key] = values[index]
+    return settings
+
+
+@given(_bounded_fingerprint_settings())
 def test_fingerprint_is_independent_of_mapping_insertion_order(settings):
     assert settings_fingerprint(settings) == settings_fingerprint(dict(reversed(list(settings.items()))))

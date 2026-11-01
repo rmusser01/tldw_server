@@ -1,10 +1,34 @@
 """Additive PostgreSQL schema for Jobs-owned exclusive resource authority."""
 
 from typing import Any
+from uuid import uuid4
 
-from ...resource_contracts import RESOURCE_METADATA_FIELDS
+from ...resource_contracts import RESOURCE_METADATA_FIELDS, ResourceScope
+from ..resource import ResourceAdmissionStore
 
 _UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
+class PostgresResourceAdmissionStore(ResourceAdmissionStore):
+    """Create an absent head safely, then lock it before exact Job rows."""
+
+    def __init__(self, executor: Any) -> None:
+        super().__init__(executor, postgres=True)
+
+    def lock_head(self, scope: ResourceScope) -> dict[str, Any]:
+        """ON CONFLICT waits for the creator; the next READ COMMITTED read locks it."""
+        self.execute(
+            "INSERT INTO job_resource_heads (domain,owner_user_id,resource,authority_uuid,generation) "
+            "VALUES (%s,%s,%s,%s,0) ON CONFLICT(domain,owner_user_id,resource) DO NOTHING",
+            (*self.scope_values(scope), str(uuid4())),
+        )
+        row = self.execute(
+            "SELECT * FROM job_resource_heads WHERE domain=%s AND owner_user_id=%s AND resource=%s FOR UPDATE",
+            self.scope_values(scope),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("resource head unavailable")
+        return dict(row)
 
 
 def ensure_resource_schema(cur: Any) -> None:

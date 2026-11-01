@@ -1939,6 +1939,20 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             _sql.Identifier(role),
                         )
                     )
+                    # Owner-facing resource admission inserts under this restricted
+                    # role; INSERT remains subject to the Jobs WITH CHECK policy.
+                    cur.execute(
+                        _sql.SQL("GRANT INSERT ON TABLE {}.jobs TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT USAGE, SELECT ON SEQUENCE {}.jobs_id_seq TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
                     cur.execute(
                         _sql.SQL(
                             "GRANT INSERT ON TABLE "

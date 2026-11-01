@@ -21,6 +21,11 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     is_admin_webhook_delivery_queue,
 )
 
+from ...resource_contracts import ResourceAdmission, ResourceAdmissionRequest
+from ...resource_policy import reject_resource_required, validate_resource_command
+from ..resource import ResourceCreation, lookup_resource_admission
+from .resource import PostgresResourceAdmissionStore
+
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
 _PSYCOPG_REQUIRED_MESSAGE = "psycopg is required for PostgreSQL quota admission"
@@ -248,17 +253,20 @@ def _insert_job(
     payload_json: str,
     available_at: datetime | None,
     idempotent_insert: bool,
+    resource_creation: ResourceCreation | None = None,
 ) -> dict[str, Any] | None:
+    if resource_creation is None:
+        reject_resource_required(command.domain, command.job_type)
     if idempotent_insert:
         sql = (
-            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, expired_lease_policy, quarantine_threshold, retry_count, available_at, created_at, updated_at, request_id, trace_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, %s, %s, 0, %s, NOW(), NOW(), %s, %s) "
+            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, expired_lease_policy, quarantine_threshold, retry_count, available_at, created_at, updated_at, request_id, trace_id, resource, resource_authority_uuid, resource_generation, resource_settings_json, resource_settings_fingerprint) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, %s, %s, 0, %s, NOW(), NOW(), %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (domain, queue, job_type, idempotency_key) DO NOTHING RETURNING *"
         )
     else:
         sql = (
-            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, expired_lease_policy, quarantine_threshold, retry_count, available_at, created_at, updated_at, request_id, trace_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, %s, %s, 0, %s, NOW(), NOW(), %s, %s) RETURNING *"
+            "INSERT INTO jobs (uuid, domain, queue, job_type, owner_user_id, project_id, batch_group, idempotency_key, payload, result, status, priority, max_retries, expired_lease_policy, quarantine_threshold, retry_count, available_at, created_at, updated_at, request_id, trace_id, resource, resource_authority_uuid, resource_generation, resource_settings_json, resource_settings_fingerprint) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NULL, 'queued', %s, %s, %s, %s, 0, %s, NOW(), NOW(), %s, %s, %s, %s, %s, %s, %s) RETURNING *"
         )
     cur.execute(
         sql,
@@ -279,6 +287,7 @@ def _insert_job(
             available_at,
             command.request_id,
             command.trace_id,
+            *(resource_creation.values() if resource_creation is not None else (None,) * 5),
         ),
     )
     row = cur.fetchone()
@@ -329,15 +338,34 @@ def create_job_admission(
     counters_enabled: bool,
     advisory_xact_lock_key: int | None = None,
     pre_admission_lookup: Callable[[Any], dict[str, Any] | None] | None = None,
-) -> AdmissionResult:
+    resource_request: ResourceAdmissionRequest | None = None,
+    prepare_command: Callable[[CreateJobCommand], CreateJobCommand] | None = None,
+) -> AdmissionResult | ResourceAdmission:
     """Create or replay a queued job admission inside a Postgres transaction."""
 
+    if resource_request is None:
+        reject_resource_required(command.domain, command.job_type)
+    else:
+        command, resource_request = validate_resource_command(command, resource_request)
+        if prepare_command is None:
+            raise ValueError("resource admission preparation is required")
+    resource_creation = None
+    store = None
     payload_json = json.dumps(command.payload)
     available_at = _future_available_at(command.available_at, now=now)
     quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
 
-    with _read_committed_quota_transaction(conn, enabled=quota_enabled), conn:
+    with _read_committed_quota_transaction(conn, enabled=quota_enabled or resource_request is not None), conn:
         with cursor_factory(conn) as cur:
+            if resource_request is not None:
+                cur.execute("SAVEPOINT jobs_resource_admission")
+                store = PostgresResourceAdmissionStore(cur)
+                decision = lookup_resource_admission(store, command=command, request=resource_request, now=now)
+                if isinstance(decision, ResourceAdmission):
+                    return decision
+                resource_creation = decision
+                command = prepare_command(command)
+                payload_json = json.dumps(command.payload)
             if advisory_xact_lock_key is not None:
                 cur.execute(
                     "SELECT pg_advisory_xact_lock(%s)",
@@ -367,6 +395,9 @@ def create_job_admission(
                     submits_per_minute_quota=submits_per_minute_quota,
                 )
                 if quota_result is not None:
+                    if store is not None:
+                        store.execute("ROLLBACK TO SAVEPOINT jobs_resource_admission")
+                        return ResourceAdmission("rejected", None, quota_result)
                     return quota_result
 
             if command.idempotency_key:
@@ -403,6 +434,7 @@ def create_job_admission(
                 payload_json=payload_json,
                 available_at=available_at,
                 idempotent_insert=False,
+                **({"resource_creation": resource_creation} if resource_creation is not None else {}),
             )
             if not row:
                 row = {
@@ -412,8 +444,13 @@ def create_job_admission(
                     "queue": command.queue,
                     "job_type": command.job_type,
                 }
+            if store is not None:
+                store.attach_created(resource_request, row, now)
             if counters_enabled:
-                _bump_counters_best_effort(cur, command=command, available_at=available_at)
+                if store is not None:
+                    _bump_counters(cur, command=command, available_at=available_at)
+                else:
+                    _bump_counters_best_effort(cur, command=command, available_at=available_at)
             event = _insert_created_event(
                 cur,
                 row=row,

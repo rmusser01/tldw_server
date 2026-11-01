@@ -1,8 +1,30 @@
 """Additive SQLite schema for Jobs-owned exclusive resource authority."""
 
 import sqlite3
+from typing import Any
+from uuid import uuid4
 
-from ...resource_contracts import RESOURCE_METADATA_FIELDS
+from ...resource_contracts import RESOURCE_METADATA_FIELDS, ResourceScope
+from ..resource import ResourceAdmissionStore
+
+
+class SQLiteResourceAdmissionStore(ResourceAdmissionStore):
+    """Head serialization uses the admission caller's BEGIN IMMEDIATE."""
+
+    def lock_head(self, scope: ResourceScope) -> dict[str, Any]:
+        """Safely create/read a persistent head without resetting its authority."""
+        self.execute(
+            "INSERT INTO job_resource_heads (domain,owner_user_id,resource,authority_uuid,generation) "
+            "VALUES (?,?,?,?,0) ON CONFLICT(domain,owner_user_id,resource) DO NOTHING",
+            (*self.scope_values(scope), str(uuid4())),
+        )
+        row = self.execute(
+            "SELECT * FROM job_resource_heads WHERE domain=? AND owner_user_id=? AND resource=?",
+            self.scope_values(scope),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("resource head unavailable")
+        return dict(row)
 
 
 def _uuid_sql(column: str) -> str:
