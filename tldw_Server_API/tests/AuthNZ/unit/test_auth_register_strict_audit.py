@@ -10,10 +10,8 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import RegisterRequest
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
-)
-from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
-    get_authnz_transaction_policy,
 )
 
 
@@ -94,12 +92,14 @@ async def test_register_returns_503_when_default_api_key_audit_fails(
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "failure_type",
-    (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+    (ConnectionPoolExhaustedError, DatabaseLockError, DatabaseConcurrencyConflict, TimeoutError),
 )
 async def test_register_returns_retryable_503_when_auth_database_is_busy(
     monkeypatch: pytest.MonkeyPatch,
     failure_type: type[Exception],
 ) -> None:
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "17")
+
     class _BusyRegistrationService:
         async def register_user(self, **_kwargs):
             raise failure_type()
@@ -144,8 +144,4 @@ async def test_register_returns_retryable_503_when_auth_database_is_busy(
     assert exc_info.value.detail == (
         "Authentication database is busy. Please retry shortly."
     )
-    assert exc_info.value.headers == {
-        "Retry-After": str(
-            get_authnz_transaction_policy().busy_retry_after_seconds
-        ),
-    }
+    assert exc_info.value.headers == {"Retry-After": "17"}

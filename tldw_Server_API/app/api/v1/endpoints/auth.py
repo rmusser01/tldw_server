@@ -3890,7 +3890,12 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid registration code."
         ) from e
-    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as e:
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as e:
         logger.warning("Registration deferred because the authentication database is busy")
         log_counter("auth_register_database_busy")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)

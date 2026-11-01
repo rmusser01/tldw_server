@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
     DuplicateUserError,
 )
@@ -130,7 +131,12 @@ async def provision_tenant(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to provision tenants",
         ) from None
-    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as exc:
         raise _authnz_busy_http_exception() from exc
     except HTTPException:
         raise

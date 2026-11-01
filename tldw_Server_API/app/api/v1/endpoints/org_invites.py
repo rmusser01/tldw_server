@@ -26,6 +26,7 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -117,7 +118,12 @@ async def redeem_invite(
             ip_address=ip_address,
             user_agent=user_agent,
         )
-    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as exc:
         raise _authnz_busy_http_exception() from exc
 
     if not result.success:

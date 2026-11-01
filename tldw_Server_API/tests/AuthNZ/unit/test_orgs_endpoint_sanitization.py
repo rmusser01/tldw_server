@@ -186,6 +186,7 @@ async def test_create_org_uses_one_atomic_owner_provisioning_boundary(monkeypatc
         ("preflight", 409, "Membership write conflicted; retry the request"),
         ("lock", 503, "Authentication database is busy. Please retry shortly."),
         ("pool", 503, "Authentication database is busy. Please retry shortly."),
+        ("conflict", 503, "Authentication database is busy. Please retry shortly."),
         ("timeout", 503, "Authentication database is busy. Please retry shortly."),
     ),
 )
@@ -193,10 +194,12 @@ def test_membership_race_failures_have_sanitized_http_mappings(
     failure_type: str,
     expected_status: int,
     expected_detail: str,
+    monkeypatch,
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import orgs
     from tldw_Server_API.app.core.AuthNZ.exceptions import (
         ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
         DatabaseLockError,
     )
     from tldw_Server_API.app.core.AuthNZ.membership_writer import (
@@ -205,12 +208,14 @@ def test_membership_race_failures_have_sanitized_http_mappings(
         MembershipTargetNotFound,
     )
 
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "17")
     failures = {
         "scope": MembershipScopeNotFound(),
         "target": MembershipTargetNotFound(),
         "preflight": MembershipPreflightChanged(),
         "lock": DatabaseLockError(),
         "pool": ConnectionPoolExhaustedError(),
+        "conflict": DatabaseConcurrencyConflict(),
         "timeout": TimeoutError(),
     }
     mapped = orgs._membership_control_http_exception(failures[failure_type])
@@ -218,15 +223,7 @@ def test_membership_race_failures_have_sanitized_http_mappings(
     assert mapped.status_code == expected_status
     assert mapped.detail == expected_detail
     if expected_status == 503:
-        from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
-            get_authnz_transaction_policy,
-        )
-
-        assert mapped.headers == {
-            "Retry-After": str(
-                get_authnz_transaction_policy().busy_retry_after_seconds
-            ),
-        }
+        assert mapped.headers == {"Retry-After": "17"}
 
 
 @pytest.mark.asyncio
@@ -744,11 +741,55 @@ async def test_accept_invite_audit_failure_log_is_sanitized(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ("scope", "parent", "target"))
+async def test_accept_invite_invalid_membership_maps_to_invalid_invite(
+    monkeypatch,
+    failure_kind: str,
+) -> None:
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteAcceptRequest
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+        MembershipParentRequired,
+        MembershipScopeNotFound,
+        MembershipTargetNotFound,
+    )
+
+    failures = {
+        "scope": MembershipScopeNotFound(),
+        "parent": MembershipParentRequired(),
+        "target": MembershipTargetNotFound(),
+    }
+
+    class _RegistrationService:
+        async def accept_org_invite_code(self, **_kwargs):
+            raise failures[failure_kind]
+
+    async def _unexpected_audit(*_args):
+        pytest.fail("Invalid invite must not emit success audit")
+
+    monkeypatch.setattr(orgs, "get_or_create_audit_service_for_user_id", _unexpected_audit)
+    with pytest.raises(HTTPException) as raised:
+        await orgs.accept_org_invite(
+            body=OrgInviteAcceptRequest(code="secret-code"),
+            http_request=_request(path="/api/v1/orgs/invites/accept", method="POST"),
+            principal=SimpleNamespace(user_id=7),
+            registration_service=_RegistrationService(),
+        )
+
+    assert raised.value.status_code == 400
+    assert raised.value.detail == "Invalid invite code"
+    assert raised.value.headers is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure_type",
     (
         pytest.param("lock", id="database-lock"),
         pytest.param("pool", id="pool-exhausted"),
+        pytest.param("conflict", id="serialization-conflict"),
         pytest.param("timeout", id="timeout"),
     ),
 )
@@ -762,15 +803,14 @@ async def test_accept_invite_busy_database_returns_retryable_503(
     from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteAcceptRequest
     from tldw_Server_API.app.core.AuthNZ.exceptions import (
         ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
         DatabaseLockError,
     )
-    from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
-        get_authnz_transaction_policy,
-    )
-
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "17")
     failures = {
         "lock": DatabaseLockError(),
         "pool": ConnectionPoolExhaustedError(),
+        "conflict": DatabaseConcurrencyConflict(),
         "timeout": TimeoutError(),
     }
 
@@ -793,11 +833,7 @@ async def test_accept_invite_busy_database_returns_retryable_503(
     assert exc_info.value.detail == (
         "Authentication database is busy. Please retry shortly."
     )
-    assert exc_info.value.headers == {
-        "Retry-After": str(
-            get_authnz_transaction_policy().busy_retry_after_seconds
-        ),
-    }
+    assert exc_info.value.headers == {"Retry-After": "17"}
 
 
 @pytest.mark.asyncio
@@ -857,6 +893,7 @@ async def test_redeem_invite_audit_failure_log_is_sanitized(monkeypatch):
     (
         pytest.param("lock", id="database-lock"),
         pytest.param("pool", id="pool-exhausted"),
+        pytest.param("conflict", id="serialization-conflict"),
         pytest.param("timeout", id="timeout"),
     ),
 )
@@ -870,15 +907,14 @@ async def test_redeem_invite_busy_database_returns_retryable_503(
     from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteRedeemRequest
     from tldw_Server_API.app.core.AuthNZ.exceptions import (
         ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
         DatabaseLockError,
     )
-    from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
-        get_authnz_transaction_policy,
-    )
-
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "17")
     failures = {
         "lock": DatabaseLockError(),
         "pool": ConnectionPoolExhaustedError(),
+        "conflict": DatabaseConcurrencyConflict(),
         "timeout": TimeoutError(),
     }
 
@@ -911,8 +947,4 @@ async def test_redeem_invite_busy_database_returns_retryable_503(
     assert exc_info.value.detail == (
         "Authentication database is busy. Please retry shortly."
     )
-    assert exc_info.value.headers == {
-        "Retry-After": str(
-            get_authnz_transaction_policy().busy_retry_after_seconds
-        ),
-    }
+    assert exc_info.value.headers == {"Retry-After": "17"}

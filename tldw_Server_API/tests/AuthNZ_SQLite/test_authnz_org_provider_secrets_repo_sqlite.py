@@ -31,6 +31,105 @@ async def shared_repo_state(tmp_path, monkeypatch):
     return state, AuthnzOrgProviderSecretsRepo(state["pool"])
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ("org", "team"))
+@pytest.mark.parametrize("operation", ("upsert", "delete"))
+async def test_claimed_platform_admin_cannot_mutate_shared_secret_or_alias(
+    shared_repo_state, monkeypatch, scope_type: str, operation: str,
+) -> None:
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import shared_keys_scoped as routes
+    from tldw_Server_API.app.api.v1.schemas.user_keys import UserProviderKeyUpsertRequest
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    state, repo = shared_repo_state
+    pool = state["pool"]
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        pool,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="unchanged-legacy-secret",
+    )
+    before = [dict(row) for row in await pool.fetchall("SELECT * FROM org_provider_secrets")]
+
+    async def get_repo():
+        return repo
+
+    async def provider_ok(**_kwargs):
+        return "model-test"
+
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", get_repo)
+    monkeypatch.setattr(routes, "test_provider_credentials", provider_ok)
+    principal = AuthPrincipal(
+        kind="user", user_id=int(state["user"]["id"]), roles=["admin"], permissions=["*"],
+    )
+    endpoint = getattr(routes, f"{operation}_{scope_type}_shared_key")
+    kwargs = {f"{scope_type}_id": scope_id, "principal": principal}
+    if operation == "upsert":
+        kwargs.update(
+            payload=UserProviderKeyUpsertRequest(provider="openai", api_key="sk-replacement"),
+            request=Request({"type": "http", "headers": []}),
+        )
+    else:
+        kwargs["provider"] = "openai"
+
+    with pytest.raises(HTTPException) as exc:
+        await endpoint(**kwargs)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == f"{scope_type.title()} manager role required"
+    after = [dict(row) for row in await pool.fetchall("SELECT * FROM org_provider_secrets")]
+    assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ("org", "team"))
+@pytest.mark.parametrize("operation", ("upsert", "list"))
+async def test_shared_manager_read_and_write_live_sqlite_busy_response(
+    shared_repo_state, monkeypatch, scope_type: str, operation: str,
+) -> None:
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import shared_keys_scoped as routes
+    from tldw_Server_API.app.api.v1.schemas.user_keys import UserProviderKeyUpsertRequest
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    state, repo = shared_repo_state
+    pool = state["pool"]
+
+    async def get_repo():
+        return repo
+
+    async def provider_ok(**_kwargs):
+        return "model-test"
+
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", get_repo)
+    monkeypatch.setattr(routes, "test_provider_credentials", provider_ok)
+    principal = AuthPrincipal(kind="user", user_id=int(state["admin"]["id"]), roles=["admin"])
+    suffix = "s" if operation == "list" else ""
+    endpoint = getattr(routes, f"{operation}_{scope_type}_shared_key{suffix}")
+    kwargs = {f"{scope_type}_id": _scope_id(state, scope_type), "principal": principal}
+    if operation == "upsert":
+        kwargs.update(
+            payload=UserProviderKeyUpsertRequest(provider="oai", api_key="sk-must-not-store"),
+            request=Request({"type": "http", "headers": []}),
+        )
+
+    async with pool.transaction():
+        for retry_after in (7, 19):
+            monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", str(retry_after))
+            with pytest.raises(HTTPException) as exc:
+                await endpoint(**kwargs)
+            assert exc.value.status_code == 503
+            assert exc.value.detail == "Authentication database is busy. Please retry shortly."
+            assert exc.value.headers == {"Retry-After": str(retry_after)}
+    assert await pool.fetchval("SELECT COUNT(*) FROM org_provider_secrets") == 0
+
+
 async def _insert_shared_row(
     pool,
     *,

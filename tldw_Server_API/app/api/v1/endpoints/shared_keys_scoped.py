@@ -6,7 +6,10 @@ from typing import NoReturn
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    _authnz_busy_http_exception,
+    get_auth_principal,
+)
 from tldw_Server_API.app.api.v1.schemas.user_keys import (
     ProviderKeyTestRequest,
     SharedProviderKeyResponse,
@@ -27,6 +30,11 @@ from tldw_Server_API.app.core.AuthNZ.byok_testing import (
     test_provider_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     MembershipAuthority,
@@ -54,6 +62,12 @@ from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provi
 
 router = APIRouter(prefix="", tags=["org-team-keys"])
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
+_BUSY_ERRORS = (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
+    DatabaseLockError,
+    TimeoutError,
+)
 
 
 def _raise_provider_validation_http_error(exc: ChatAPIError) -> NoReturn:
@@ -68,10 +82,13 @@ def _raise_provider_validation_http_error(exc: ChatAPIError) -> NoReturn:
 
 
 async def _get_shared_byok_repo() -> AuthnzOrgProviderSecretsRepo:
-    pool = await get_db_pool()
-    repo = AuthnzOrgProviderSecretsRepo(pool)
-    await repo.ensure_tables()
-    return repo
+    try:
+        pool = await get_db_pool()
+        repo = AuthnzOrgProviderSecretsRepo(pool)
+        await repo.ensure_tables()
+        return repo
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
 
 
 def _is_manager(role: str | None) -> bool:
@@ -122,10 +139,10 @@ def _principal_user_id(principal: AuthPrincipal) -> int:
 
 
 async def _require_org_manager(principal: AuthPrincipal, org_id: int) -> None:
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(status_code=403, detail="Org manager role required")
     if _is_admin_principal(principal):
         return
-    if principal.user_id is None:
-        raise HTTPException(status_code=403, detail="Org manager role required")
     try:
         members = await list_org_members(org_id=org_id, limit=1000, offset=0)
         uid = int(principal.user_id)
@@ -136,16 +153,18 @@ async def _require_org_manager(principal: AuthPrincipal, org_id: int) -> None:
                 and _is_manager(m.get("role"))
             ):
                 return
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except Exception:
         logger.debug("Org manager check failed")
     raise HTTPException(status_code=403, detail="Org manager role required")
 
 
 async def _require_team_manager(principal: AuthPrincipal, team_id: int) -> None:
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(status_code=403, detail="Team manager role required")
     if _is_admin_principal(principal):
         return
-    if principal.user_id is None:
-        raise HTTPException(status_code=403, detail="Team manager role required")
     try:
         members = await list_team_members(team_id)
         uid = int(principal.user_id)
@@ -156,6 +175,8 @@ async def _require_team_manager(principal: AuthPrincipal, team_id: int) -> None:
                 and _is_manager(m.get("role"))
             ):
                 return
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except Exception:
         logger.debug("Team manager check failed")
     raise HTTPException(status_code=403, detail="Team manager role required")
@@ -280,6 +301,8 @@ async def upsert_org_shared_key(
             updated_by=actor_id,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Org manager role required") from exc
     except MembershipScopeNotFound as exc:
@@ -312,6 +335,8 @@ async def list_org_shared_keys(
             scope_id=org_id,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Org manager role required") from exc
     except MembershipScopeNotFound as exc:
@@ -357,6 +382,8 @@ async def test_org_shared_key(
             provider=provider_norm,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Org manager role required") from exc
     except MembershipScopeNotFound as exc:
@@ -427,6 +454,8 @@ async def test_org_shared_key(
             provider=provider_norm,
             api_key=api_key,
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     return SharedProviderKeyTestResponse(
@@ -460,6 +489,8 @@ async def delete_org_shared_key(
             revoked_by=actor_id,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Org manager role required") from exc
     except MembershipScopeNotFound as exc:
@@ -562,6 +593,8 @@ async def upsert_team_shared_key(
             updated_by=actor_id,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Team manager role required") from exc
     except MembershipScopeNotFound as exc:
@@ -594,6 +627,8 @@ async def list_team_shared_keys(
             scope_id=team_id,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Team manager role required") from exc
     except MembershipScopeNotFound as exc:
@@ -639,6 +674,8 @@ async def test_team_shared_key(
             provider=provider_norm,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Team manager role required") from exc
     except MembershipScopeNotFound as exc:
@@ -709,6 +746,8 @@ async def test_team_shared_key(
             provider=provider_norm,
             api_key=api_key,
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except ProviderCredentialAliasConflictError as exc:
         raise HTTPException(status_code=409, detail="Conflicting provider credential aliases") from exc
     return SharedProviderKeyTestResponse(
@@ -742,6 +781,8 @@ async def delete_team_shared_key(
             revoked_by=actor_id,
             authorization_context=_manager_write_context(principal),
         )
+    except _BUSY_ERRORS as exc:
+        raise _authnz_busy_http_exception() from exc
     except MembershipAuthorizationError as exc:
         raise HTTPException(status_code=403, detail="Team manager role required") from exc
     except MembershipScopeNotFound as exc:

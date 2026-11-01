@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipLockStatement,
     MembershipMutation,
     MembershipMutationKind,
+    MembershipMutationRelationship,
     MembershipPlanningPreflight,
     MembershipRowLock,
     MembershipScopeType,
@@ -82,6 +83,10 @@ def test_closed_enums_expose_only_the_approved_values() -> None:
         "bootstrap",
         "offline_migration",
     }
+    assert {item.value for item in MembershipMutationRelationship} == {
+        "default_team_companion",
+        "organization_companion",
+    }
 
 
 @pytest.mark.parametrize(
@@ -92,6 +97,7 @@ def test_closed_enums_expose_only_the_approved_values() -> None:
         TrustedMembershipReason,
         MembershipScopeType,
         MembershipMutationKind,
+        MembershipMutationRelationship,
         MembershipLockBackend,
         MembershipLockPhase,
     ],
@@ -222,6 +228,22 @@ def test_mutations_validate_closed_kind_and_role_shape() -> None:
             user_id=2,
             kind=MembershipMutationKind.REMOVE,
             role="submitted-secret",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "relationship",
+    ["submitted-secret", "default_team_companion", "organization_companion", True],
+)
+def test_mutations_require_exact_closed_relationship_members(relationship) -> None:
+    _assert_sanitized_contract_error(
+        lambda: MembershipMutation(
+            scope_type=MembershipScopeType.TEAM,
+            scope_id=1,
+            user_id=2,
+            kind=MembershipMutationKind.REMOVE,
+            relationship=relationship,
         )
     )
 

@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
 from typing import Any, get_type_hints
 
+import aiosqlite
 import pytest
 
 import tldw_Server_API.app.core.AuthNZ.membership_writer as membership_writer_module
@@ -610,9 +611,10 @@ def _postgres_rbac_rows(
     }
     normalized = " ".join(statement.split())
     if normalized.startswith("SELECT ur.role_id"):
+        grant_rows = role_rows or (({"name": "member"},) if role_permission_rows else ())
         return tuple(
-            {"role_id": index, "active": True}
-            for index, _ in enumerate(role_names, start=1)
+            {"role_id": index, "active": row.get("active", True)}
+            for index, row in enumerate(grant_rows, start=1)
         )
     if normalized.startswith("SELECT r.id"):
         return tuple(
@@ -637,7 +639,7 @@ def _postgres_rbac_rows(
             {
                 "permission_id": permission_ids[str(row["name"])],
                 "granted": bool(row["granted"]),
-                "active": True,
+                "active": row.get("active", True),
             }
             for row in direct_rows
         )
@@ -1473,29 +1475,27 @@ async def test_writer_path_honors_direct_deny_over_role_permission(
         )
 
 
-@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("grant_source", ["role", "role_permission", "direct"])
 @pytest.mark.asyncio
 async def test_writer_path_filters_expired_platform_admin_grants(
     monkeypatch,
-    postgres,
+    grant_source,
 ) -> None:
+    grants = {
+        "role": {"role_rows": ({"name": "admin", "active": False},)},
+        "role_permission": {
+            "role_rows": ({"name": "member", "active": False},),
+            "role_permission_rows": ({"name": "system.configure"},),
+        },
+        "direct": {
+            "direct_rows": ({"name": "system.configure", "granted": True, "active": False},),
+        },
+    }
     with pytest.raises(MembershipAuthorizationError):
         await _apply_as_persisted_platform_admin(
             monkeypatch,
-            postgres=postgres,
-        )
-
-    pool = type("Pool", (), {"pool": object() if postgres else None})()
-    conn = _RbacConnection()
-    assert not await MembershipWriter(pool)._has_persisted_platform_admin(conn, 11)
-    if postgres:
-        assert len(conn.statements) == 5
-        assert all("FOR UPDATE" not in statement for statement in conn.statements)
-    else:
-        assert all(
-            "expires_at IS NULL" in statement
-            and "expires_at > CURRENT_TIMESTAMP" in statement
-            for statement in conn.statements
+            postgres=True,
+            **grants[grant_source],
         )
 
 
@@ -1539,22 +1539,125 @@ async def test_platform_admin_honors_permission_deny_and_direct_allow(postgres) 
     assert await writer._has_persisted_platform_admin(allowed, 11)
 
 
-@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("grant_source", ["role", "role_permission", "direct"])
 @pytest.mark.asyncio
-async def test_platform_admin_filters_expired_role_and_direct_grants(postgres) -> None:
-    pool = type("Pool", (), {"pool": object() if postgres else None})()
-    conn = _RbacConnection()
+async def test_platform_admin_filters_expired_role_and_direct_grants(grant_source) -> None:
+    pool = type("Pool", (), {"pool": object()})()
+    grants = {
+        "role": {"role_rows": ({"name": "admin", "active": False},)},
+        "role_permission": {
+            "role_rows": ({"name": "member", "active": False},),
+            "role_permission_rows": ({"name": "system.configure"},),
+        },
+        "direct": {
+            "direct_rows": ({"name": "system.configure", "granted": True, "active": False},),
+        },
+    }
+    conn = _RbacConnection(**grants[grant_source])
 
     assert not await MembershipWriter(pool)._has_persisted_platform_admin(conn, 11)
-    assert len(conn.statements) == (5 if postgres else 3)
-    if postgres:
-        assert all("FOR UPDATE" not in statement for statement in conn.statements)
-    else:
-        assert all(
-            "expires_at IS NULL" in statement
-            and "expires_at > CURRENT_TIMESTAMP" in statement
-            for statement in conn.statements
+    assert len(conn.statements) == 5
+    assert all("FOR UPDATE" not in statement for statement in conn.statements)
+
+
+@pytest.fixture
+async def persisted_authority_sqlite_connection():
+    async with aiosqlite.connect(":memory:") as conn:
+        await conn.executescript(
+            """
+            CREATE TABLE users (id INTEGER PRIMARY KEY, is_active INTEGER,
+                                is_superuser INTEGER, role TEXT);
+            CREATE TABLE organizations (id INTEGER PRIMARY KEY, owner_user_id INTEGER,
+                                        is_active INTEGER);
+            CREATE TABLE org_members (org_id INTEGER, user_id INTEGER, role TEXT, status TEXT);
+            CREATE TABLE roles (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE permissions (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE user_roles (user_id INTEGER, role_id INTEGER, expires_at TEXT);
+            CREATE TABLE role_permissions (role_id INTEGER, permission_id INTEGER);
+            CREATE TABLE user_permissions (user_id INTEGER, permission_id INTEGER,
+                                           granted INTEGER, expires_at TEXT);
+            INSERT INTO users VALUES (7, 1, 0, 'user'), (11, 1, 0, 'user');
+            INSERT INTO organizations VALUES (3, 99, 1);
+            INSERT INTO org_members VALUES (3, 7, 'member', 'active');
+            INSERT INTO permissions VALUES (1, 'system.configure');
+            """
         )
+        await conn.execute("BEGIN IMMEDIATE")
+        yield conn
+
+
+@pytest.mark.parametrize("grant_source", ["role", "role_permission", "direct"])
+@pytest.mark.parametrize(
+    ("expiry", "authorized"),
+    [(None, True), ("2999-01-01 00:00:00", True), ("2000-01-01 00:00:00", False), ("now", False)],
+)
+@pytest.mark.asyncio
+async def test_sqlite_persisted_grant_expiry_controls_writer_authorization(
+    persisted_authority_sqlite_connection, monkeypatch, grant_source, expiry, authorized,
+) -> None:
+    conn = persisted_authority_sqlite_connection
+    if grant_source == "direct":
+        await conn.execute(
+            "INSERT INTO user_permissions VALUES (11, 1, 1, "
+            "CASE WHEN ? = 'now' THEN CURRENT_TIMESTAMP ELSE ? END)",
+            (expiry, expiry),
+        )
+    else:
+        await conn.execute(
+            "INSERT INTO roles VALUES (1, ?)",
+            ("admin" if grant_source == "role" else "member",),
+        )
+        await conn.execute(
+            "INSERT INTO user_roles VALUES (11, 1, "
+            "CASE WHEN ? = 'now' THEN CURRENT_TIMESTAMP ELSE ? END)",
+            (expiry, expiry),
+        )
+        if grant_source == "role_permission":
+            await conn.execute("INSERT INTO role_permissions VALUES (1, 1)")
+
+    writer = MembershipWriter(type("Pool", (), {"pool": None})())
+    assert await writer.has_persisted_platform_admin(conn, 11) is authorized
+    monkeypatch.setattr(membership_writer_module, "VersionedUserWriteGateway", _StableFloorGateway)
+    apply = writer.apply_membership_mutations(
+        conn=conn,
+        context=ActorMembershipWriteContext(
+            actor_user_id=11, required_authority=MembershipAuthority.PLATFORM_ADMIN,
+        ),
+        mutations=(_mutation(),),
+        anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+        operation_time=BASE,
+    )
+    if authorized:
+        result = await apply
+        assert result.mutation_results[0].found is True
+        assert result.mutation_results[0].changed is False
+    else:
+        with pytest.raises(MembershipAuthorizationError):
+            await apply
+    async with conn.execute("SELECT org_id, user_id, role, status FROM org_members") as cursor:
+        assert await cursor.fetchall() == [(3, 7, "member", "active")]
+
+
+@pytest.mark.parametrize(
+    ("expiry", "authorized"),
+    [(None, False), ("2999-01-01 00:00:00", False), ("2000-01-01 00:00:00", True), ("now", True)],
+)
+@pytest.mark.asyncio
+async def test_sqlite_expired_direct_deny_does_not_revoke_active_role_permission(
+    persisted_authority_sqlite_connection, expiry, authorized,
+) -> None:
+    conn = persisted_authority_sqlite_connection
+    await conn.execute("INSERT INTO roles VALUES (1, 'member')")
+    await conn.execute("INSERT INTO user_roles VALUES (11, 1, NULL)")
+    await conn.execute("INSERT INTO role_permissions VALUES (1, 1)")
+    await conn.execute(
+        "INSERT INTO user_permissions VALUES (11, 1, 0, "
+        "CASE WHEN ? = 'now' THEN CURRENT_TIMESTAMP ELSE ? END)",
+        (expiry, expiry),
+    )
+
+    writer = MembershipWriter(type("Pool", (), {"pool": None})())
+    assert await writer.has_persisted_platform_admin(conn, 11) is authorized
 
 
 @pytest.mark.parametrize("postgres", [False, True])

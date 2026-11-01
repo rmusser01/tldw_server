@@ -185,6 +185,7 @@ def test_membership_scope_capability_is_connection_bound_and_consumed_once(
 ) -> None:
     from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
         _mint_membership_scope_sql,
+        _revoke_membership_scope_sql,
     )
 
     connection = object()
@@ -195,22 +196,43 @@ def test_membership_scope_capability_is_connection_bound_and_consumed_once(
         execution_mode="execute",
     )
 
-    assert (
-        _guard_sql(
+    try:
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend=backend,
+                connection_identity=object(),
+                operation="execute",
+            )
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend=backend,
+                connection_identity=connection,
+                operation="execute",
+            )
+        # A mismatched attempt burns the receipt; success needs a fresh one.
+        capability = _mint_membership_scope_sql(
+            statement,
+            backend=backend,
+            connection_identity=connection,
+            execution_mode="execute",
+        )
+        assert _guard_sql(
             capability,
             backend=backend,
             connection_identity=connection,
             operation="execute",
-        )
-        == statement
-    )
-    with pytest.raises(ProfileUserWriteRejected):
-        _guard_sql(
-            capability,
-            backend=backend,
-            connection_identity=connection,
-            operation="execute",
-        )
+        ) == statement
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend=backend,
+                connection_identity=connection,
+                operation="execute",
+            )
+    finally:
+        _revoke_membership_scope_sql(capability)
 
 
 @pytest.mark.parametrize(

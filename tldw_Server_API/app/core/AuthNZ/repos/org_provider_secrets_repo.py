@@ -53,7 +53,13 @@ def _is_active_value(value: Any) -> bool:
 
 @dataclass
 class AuthnzOrgProviderSecretsRepo:
-    """Repository for org/team shared provider secrets (BYOK)."""
+    """Repository for org/team shared provider secrets (BYOK).
+
+    Request-management mutations must supply an actor authorization context for
+    locked persisted-authority rechecks. A ``None`` context preserves the legacy
+    internal storage contract used by secret backends; it does not obtain request
+    authority, and audit user IDs are not authorization grants.
+    """
 
     db_pool: DatabasePool
 
@@ -444,6 +450,12 @@ class AuthnzOrgProviderSecretsRepo:
         updated_by: int | None = None,
         authorization_context: ActorMembershipWriteContext | None = None,
     ) -> dict[str, Any]:
+        """Store credentials with request actor rechecks or internal compatibility.
+
+        Request-management callers must pass ``authorization_context``. Internal
+        secret backends may omit it; ``created_by``/``updated_by`` are audit data,
+        not a source of request authority.
+        """
         scope_norm = _normalize_scope_type(scope_type)
         provider_norm = canonical_provider_name(provider)
         metadata_json = json.dumps(metadata) if metadata is not None else None
@@ -1003,6 +1015,12 @@ class AuthnzOrgProviderSecretsRepo:
         revoked_at: datetime | None = None,
         authorization_context: ActorMembershipWriteContext | None = None,
     ) -> bool:
+        """Revoke credentials, retaining the actor-less internal storage API.
+
+        Request-management callers must pass ``authorization_context`` for locked
+        persisted authorization. An internal backend's ``revoked_by`` audit value
+        does not establish request authority.
+        """
         scope_norm = _normalize_scope_type(scope_type)
         revoked_ts = revoked_at or datetime.now(timezone.utc)
         try:

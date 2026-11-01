@@ -230,6 +230,7 @@ async def test_apply_mapped_grants_ignores_memberships_with_missing_ids(
     assert pool.transaction_count == 1
     assert len(observed_removals) == 1
     assert observed_removals[0]["conn"] is pool.conn
+    assert observed_removals[0]["preserve_non_default_teams"] is True
     assert (
         observed_removals[0]["context"]
         is provisioning_module._FEDERATION_MEMBERSHIP_CONTEXT

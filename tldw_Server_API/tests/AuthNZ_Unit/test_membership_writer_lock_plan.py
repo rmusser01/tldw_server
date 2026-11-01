@@ -1,3 +1,5 @@
+"""Pure membership lock planning without the integration runtime reset fixtures."""
+
 from __future__ import annotations
 
 from inspect import signature
@@ -24,6 +26,8 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     plan_membership_lock_statements,
     plan_membership_write,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class _IntSubclass(int):

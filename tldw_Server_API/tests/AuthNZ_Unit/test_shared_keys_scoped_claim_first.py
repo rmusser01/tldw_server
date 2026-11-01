@@ -34,7 +34,7 @@ async def test_require_org_manager_allows_admin_role_claim_without_membership_lo
     monkeypatch.setattr(shared_keys_scoped, "list_org_members", _fail_if_called)
 
     await shared_keys_scoped._require_org_manager(
-        _principal(user_id=None, roles=["admin"], is_admin=False),
+        _principal(user_id=7, roles=["admin"], is_admin=False),
         org_id=11,
     )
 

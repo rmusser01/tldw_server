@@ -1669,29 +1669,6 @@ class AuthnzOrgsTeamsRepo:
         await conn.release_savepoint("default_team_companion")
         return team_id
 
-    async def _get_team_parent_organization_id(
-        self,
-        conn: Any,
-        team_id: int,
-    ) -> int | None:
-        if self._is_postgres():
-            row = await conn.fetchrow(
-                "SELECT org_id FROM public.teams WHERE id = $1",
-                team_id,
-            )
-        else:
-            cursor = await conn.execute(
-                "SELECT org_id FROM main.teams WHERE id = ?",
-                (team_id,),
-            )
-            row = await cursor.fetchone()
-        if row is None:
-            return None
-        try:
-            return int(row["org_id"])
-        except (TypeError, KeyError, IndexError):
-            return int(row[0])
-
     async def provision_org_membership_on_connection(
         self,
         *,
@@ -1762,10 +1739,7 @@ class AuthnzOrgsTeamsRepo:
         mutations = list(base_mutations)
         if team_id is not None and team_id != default_team_id:
             try:
-                explicit_parent_id = await self._get_team_parent_organization_id(
-                    conn,
-                    team_id,
-                )
+                explicit_parent_id = await self.get_team_parent_organization_id(team_id, conn=conn)
                 if explicit_parent_id is None:
                     raise MembershipScopeNotFound()
                 if explicit_parent_id != org_id:
@@ -2032,8 +2006,9 @@ class AuthnzOrgsTeamsRepo:
         context: MembershipWriteContext,
         anchor_ownership: AnchorOwnership,
         operation_time: datetime,
+        preserve_non_default_teams: bool = False,
     ) -> dict[str, Any]:
-        """Remove an organization and all child-team memberships on ``conn``."""
+        """Remove memberships, optionally preserving independently held child teams."""
 
         writer = MembershipWriter(self.db_pool)
         await writer.lock_membership_parent(
@@ -2045,7 +2020,7 @@ class AuthnzOrgsTeamsRepo:
         if self._is_postgres(conn):
             child_rows = await conn.fetch(
                 """
-                SELECT tm.team_id
+                SELECT tm.team_id, t.name AS team_name
                 FROM public.team_members tm
                 JOIN public.teams t ON t.id = tm.team_id
                 WHERE t.org_id = $1 AND tm.user_id = $2
@@ -2055,10 +2030,14 @@ class AuthnzOrgsTeamsRepo:
                 user_id,
             )
             child_team_ids = tuple(int(row["team_id"]) for row in child_rows)
+            has_non_default_team = preserve_non_default_teams and any(
+                str(row["team_name"] or "").strip() != DEFAULT_BASE_TEAM_NAME
+                for row in child_rows
+            )
         else:
             cursor = await conn.execute(
                 """
-                SELECT tm.team_id
+                SELECT tm.team_id, t.name AS team_name
                 FROM main.team_members tm
                 JOIN main.teams t ON t.id = tm.team_id
                 WHERE t.org_id = ? AND tm.user_id = ?
@@ -2066,7 +2045,15 @@ class AuthnzOrgsTeamsRepo:
                 """,
                 (org_id, user_id),
             )
-            child_team_ids = tuple(int(row[0]) for row in await cursor.fetchall())
+            child_rows = await cursor.fetchall()
+            child_team_ids = tuple(int(row[0]) for row in child_rows)
+            has_non_default_team = preserve_non_default_teams and any(
+                str(row[1] or "").strip() != DEFAULT_BASE_TEAM_NAME
+                for row in child_rows
+            )
+
+        if has_non_default_team:
+            return {"removed": False}
 
         mutations = [
             MembershipMutation(

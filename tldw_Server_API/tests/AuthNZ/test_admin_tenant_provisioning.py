@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_tenant_provisioning import
 from tldw_Server_API.app.core.AuthNZ import tenant_provisioning
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
 )
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
@@ -549,13 +550,17 @@ class TestProvisionEndpointUnit:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "failure_type",
-        (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+        (ConnectionPoolExhaustedError, DatabaseLockError, DatabaseConcurrencyConflict, TimeoutError),
     )
     async def test_busy_database_returns_retryable_503(
         self,
         failure_type: type[Exception],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_tenant_provisioning
+
+        monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "17")
+        monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "13")
 
         class _BusyTransaction:
             async def __aenter__(self):
@@ -568,9 +573,7 @@ class TestProvisionEndpointUnit:
             pool = None
 
             def transaction(self, *, acquire_timeout_seconds=None):
-                assert acquire_timeout_seconds == (
-                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
-                )
+                assert acquire_timeout_seconds == 13.0
                 return _BusyTransaction()
 
         payload = TenantProvisionRequest(
@@ -601,8 +604,4 @@ class TestProvisionEndpointUnit:
         assert exc_info.value.detail == (
             "Authentication database is busy. Please retry shortly."
         )
-        assert exc_info.value.headers == {
-            "Retry-After": str(
-                get_authnz_transaction_policy().busy_retry_after_seconds
-            ),
-        }
+        assert exc_info.value.headers == {"Retry-After": "17"}

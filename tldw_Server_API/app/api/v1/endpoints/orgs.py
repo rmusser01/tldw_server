@@ -58,6 +58,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, A
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateTeamError,
@@ -99,6 +100,7 @@ router = APIRouter(
 
 _MEMBERSHIP_CONTROL_ERRORS = (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
     MembershipAuthorizationError,
     MembershipPreflightChanged,
@@ -131,6 +133,7 @@ def _membership_control_http_exception(
     exc: (
         MembershipAuthorizationError
         | ConnectionPoolExhaustedError
+        | DatabaseConcurrencyConflict
         | DatabaseLockError
         | MembershipPreflightChanged
         | MembershipScopeNotFound
@@ -140,7 +143,12 @@ def _membership_control_http_exception(
 ) -> HTTPException:
     if isinstance(
         exc,
-        (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+        (
+            ConnectionPoolExhaustedError,
+            DatabaseConcurrencyConflict,
+            DatabaseLockError,
+            TimeoutError,
+        ),
     ):
         return _authnz_busy_http_exception()
     if isinstance(exc, MembershipAuthorizationError):
@@ -1112,7 +1120,17 @@ async def accept_org_invite(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc) or "Invalid invite code",
         ) from exc
-    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+    except (MembershipScopeNotFound, MembershipParentRequired, MembershipTargetNotFound) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid invite code",
+        ) from exc
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as exc:
         raise _membership_control_http_exception(exc) from exc
 
     async def _safe_audit_log_invite_accept() -> None:

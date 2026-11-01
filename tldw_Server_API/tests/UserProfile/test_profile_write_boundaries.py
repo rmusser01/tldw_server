@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sqlite3
 import textwrap
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import cache
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -53,7 +54,12 @@ DIRECT_MEMBERSHIP_PROXY_CALLS = frozenset(
             "tldw_Server_API/tests/AuthNZ/unit/test_orgs_endpoint_sanitization.py",
             "orgs",
             "add_org_member",
-        )
+        ),
+        (
+            "tldw_Server_API/tests/AuthNZ_SQLite/test_membership_endpoint_transaction_outcomes.py",
+            "orgs",
+            "add_org_member",
+        ),
     }
 )
 SERVING_MEMBERSHIP_CONTEXT_CATEGORIES = {
@@ -187,6 +193,13 @@ class ObservedWrite:
 
     def diagnostic(self) -> str:
         return f"{self.path}:{self.line} {self.function} -> {self.operation}"
+
+
+@dataclass(frozen=True)
+class PythonWriteScan:
+    writes: tuple[ObservedWrite, ...]
+    callers: tuple[tuple[str, str, str], ...]
+    imports: tuple[tuple[str, str, str, str], ...]
 
 
 EXPECTED_MEMBERSHIP_WRITES = (
@@ -1535,8 +1548,10 @@ def _scan_python_tree(
     path: Path,
     tree: ast.AST,
     repo_root: Path,
-) -> tuple[ObservedWrite, ...]:
+) -> PythonWriteScan:
     observed: list[ObservedWrite] = []
+    callers: list[tuple[str, str, str]] = []
+    imports: list[tuple[str, str, str, str]] = []
     relative_path = _relative_path(path, repo_root)
     grouped, parents = _nodes_in_scope_and_parents(tree)
     module_assignments: dict[str, list[ast.AST]] = defaultdict(list)
@@ -1622,6 +1637,10 @@ def _scan_python_tree(
                     f"{sorted(privileged_entrypoints)}."
                 )
             privileged_entrypoint = next(iter(privileged_entrypoints), None)
+            callers.extend(
+                (entrypoint, relative_path, function)
+                for entrypoint in privileged_entrypoints
+            )
             call_name = privileged_entrypoint or _call_name(node)
             if call_name not in SQL_CALL_NAMES:
                 continue
@@ -1689,6 +1708,7 @@ def _scan_python_tree(
         relative_path=relative_path,
         parents=parents,
     ):
+        imports.append(imported)
         if imported not in APPROVED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL_IMPORTS:
             entrypoint, local_name, _, function = imported
             raise AssertionError(
@@ -1696,7 +1716,11 @@ def _scan_python_tree(
                 f"{entrypoint} as {local_name} at {relative_path}:{line} "
                 f"in {function}."
             )
-    return tuple(sorted(observed))
+    return PythonWriteScan(
+        writes=tuple(sorted(observed)),
+        callers=tuple(sorted(callers)),
+        imports=tuple(sorted(imports)),
+    )
 
 
 def _scan_python_source(
@@ -1706,10 +1730,9 @@ def _scan_python_source(
     repo_root: Path,
 ) -> tuple[ObservedWrite, ...]:
     tree = ast.parse(source, filename=str(path))
-    return _scan_python_tree(path=path, tree=tree, repo_root=repo_root)
+    return _scan_python_tree(path=path, tree=tree, repo_root=repo_root).writes
 
 
-@cache
 def _scan_sql_calls() -> tuple[ObservedWrite, ...]:
     return _scan_python_root(app_root=APP_ROOT, repo_root=REPO_ROOT)
 
@@ -1719,110 +1742,43 @@ def _scan_python_root(
     app_root: Path,
     repo_root: Path,
 ) -> tuple[ObservedWrite, ...]:
-    observed: list[ObservedWrite] = []
-    for path in sorted(app_root.rglob("*.py")):
-        source = path.read_text(encoding="utf-8")
-        observed.extend(
-            _scan_python_source(
-                path=path,
-                source=source,
-                repo_root=repo_root,
-            )
-        )
-    return tuple(sorted(observed))
+    return _scan_python_root_inventory(app_root=app_root, repo_root=repo_root).writes
+
+
+def _scan_python_root_inventory(*, app_root: Path, repo_root: Path) -> PythonWriteScan:
+    # Read every source: timestamps and token prefilters are not security evidence.
+    sources = tuple(
+        (path, path.read_text(encoding="utf-8"))
+        for path in sorted(app_root.rglob("*.py"))
+    )
+    return _scan_python_snapshot(app_root, repo_root, sources)
+
+
+@lru_cache(maxsize=1)
+def _scan_python_snapshot(
+    app_root: Path,
+    repo_root: Path,
+    sources: tuple[tuple[Path, str], ...],
+) -> PythonWriteScan:
+    # Cache immutable evidence, not thousands of mutable ASTs.
+    writes: list[ObservedWrite] = []
+    callers: list[tuple[str, str, str]] = []
+    imports: list[tuple[str, str, str, str]] = []
+    for path, source in sources:
+        tree = ast.parse(source, filename=str(path))
+        scan = _scan_python_tree(path=path, tree=tree, repo_root=repo_root)
+        writes.extend(scan.writes)
+        callers.extend(scan.callers)
+        imports.extend(scan.imports)
+    return PythonWriteScan(tuple(sorted(writes)), tuple(sorted(callers)), tuple(sorted(imports)))
 
 
 def _membership_scope_sql_helper_callers() -> tuple[tuple[str, str, str], ...]:
-    observed: list[tuple[str, str, str]] = []
-    for path in sorted(APP_ROOT.rglob("*.py")):
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
-        grouped, parents = _nodes_in_scope_and_parents(tree)
-        relative_path = _relative_path(path)
-        module_nodes = grouped.get(tree, [])
-        module_aliases = _privileged_membership_scope_sql_import_aliases(
-            module_nodes
-        )
-        module_guard_aliases = _profile_user_write_guard_module_aliases(
-            module_nodes
-        )
-        module_wrapper_aliases = _privileged_wrapper_import_aliases(module_nodes)
-        module_assignments: dict[str, list[ast.AST]] = defaultdict(list)
-        for node in module_nodes:
-            for name, value in _assignment_targets(node):
-                module_assignments[name].append(value)
-        for scope, nodes in grouped.items():
-            assignments: dict[str, list[ast.AST]] = defaultdict(list)
-            aliases = _privileged_membership_scope_sql_import_aliases(nodes)
-            guard_aliases = _profile_user_write_guard_module_aliases(nodes)
-            wrapper_aliases = _privileged_wrapper_import_aliases(nodes)
-            for node in nodes:
-                for name, value in _assignment_targets(node):
-                    assignments[name].append(value)
-            for node in nodes:
-                if not isinstance(node, ast.Call):
-                    continue
-                entrypoints = _resolve_privileged_membership_scope_sql_entrypoints(
-                    node.func,
-                    assignments,
-                    module_assignments,
-                    aliases,
-                    module_aliases,
-                    guard_aliases,
-                    module_guard_aliases,
-                    wrapper_aliases,
-                    module_wrapper_aliases,
-                )
-                entrypoints.update(
-                    _resolve_privileged_membership_scope_sql_entrypoints(
-                        node,
-                        assignments,
-                        module_assignments,
-                        aliases,
-                        module_aliases,
-                        guard_aliases,
-                        module_guard_aliases,
-                        wrapper_aliases,
-                        module_wrapper_aliases,
-                    )
-                )
-                indirect_entrypoints = entrypoints & {
-                    _DYNAMIC_PRIVILEGED_MEMBERSHIP_SCOPE_SQL,
-                    _WRAPPED_PRIVILEGED_MEMBERSHIP_SCOPE_SQL,
-                }
-                if indirect_entrypoints:
-                    raise AssertionError(
-                        "Indirect membership-scope SQL capability caller at "
-                        f"{relative_path}:{node.lineno} in "
-                        f"{_qualified_scope(scope, parents)}: "
-                        f"{sorted(indirect_entrypoints)}."
-                    )
-                observed.extend(
-                    (
-                        entrypoint,
-                        relative_path,
-                        _qualified_scope(scope, parents),
-                    )
-                    for entrypoint in entrypoints
-                )
-    return tuple(sorted(observed))
+    return _scan_python_root_inventory(app_root=APP_ROOT, repo_root=REPO_ROOT).callers
 
 
 def _membership_scope_sql_helper_imports() -> tuple[tuple[str, str, str, str], ...]:
-    observed: list[tuple[str, str, str, str]] = []
-    for path in sorted(APP_ROOT.rglob("*.py")):
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
-        _, parents = _nodes_in_scope_and_parents(tree)
-        observed.extend(
-            imported
-            for imported, _line in _privileged_membership_scope_sql_imports(
-                tree,
-                relative_path=_relative_path(path),
-                parents=parents,
-            )
-        )
-    return tuple(sorted(observed))
+    return _scan_python_root_inventory(app_root=APP_ROOT, repo_root=REPO_ROOT).imports
 
 
 def _partition_inventory() -> dict[str, tuple[ObservedWrite, ...]]:
@@ -2192,6 +2148,108 @@ def _assert_all_write_families(observed: tuple[ObservedWrite, ...]) -> None:
         ("writes", "INSERT org_members"),
         ("writes", "DELETE organizations"),
     }
+
+
+def test_scanner_reuses_one_parse_across_all_inventory_views(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "tldw_Server_API" / "app"
+    path = root / "core" / "AuthNZ" / "membership_writer.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _execute_membership_scope_sql\n"
+        "class MembershipWriter:\n"
+        "    async def _delete_membership(self, conn):\n"
+        '        await _execute_membership_scope_sql(conn, "DELETE FROM org_members", backend="sqlite")\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "APP_ROOT", root)
+    monkeypatch.setitem(globals(), "REPO_ROOT", tmp_path)
+    parsed = []
+    parse = ast.parse
+
+    def record_parse(source, filename="<unknown>", *args, **kwargs):
+        parsed.append(filename)
+        return parse(source, filename, *args, **kwargs)
+
+    with monkeypatch.context() as parser_patch:
+        parser_patch.setattr(ast, "parse", record_parse)
+        writes = _scan_sql_calls()
+        callers = _membership_scope_sql_helper_callers()
+        imports = _membership_scope_sql_helper_imports()
+
+    assert tuple(write.operation for write in writes) == ("DELETE org_members",)
+    assert callers == ((
+        "_execute_membership_scope_sql",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "MembershipWriter._delete_membership",
+    ),)
+    assert imports == ((
+        "_execute_membership_scope_sql",
+        "_execute_membership_scope_sql",
+        "tldw_Server_API/app/core/AuthNZ/membership_writer.py",
+        "<module>",
+    ),)
+    assert parsed == [str(path)]
+
+
+def test_scanner_cache_tracks_content_additions_deletions_and_root(tmp_path) -> None:
+    root = tmp_path / "app"
+    root.mkdir()
+    path = root / "writer.py"
+    path.write_text('async def f(c):\n    await c.execute("DELETE FROM org_members ")\n', encoding="utf-8")
+    original_stat = path.stat()
+    assert tuple(w.operation for w in _scan_python_root(app_root=root, repo_root=tmp_path)) == (
+        "DELETE org_members",
+    )
+    # Same-size content with restored timestamps must not reuse stale evidence.
+    path.write_text('async def f(c):\n    await c.execute("DELETE FROM team_members")\n', encoding="utf-8")
+    os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    assert path.stat().st_size == original_stat.st_size
+    assert path.stat().st_mtime_ns == original_stat.st_mtime_ns
+    assert tuple(w.operation for w in _scan_python_root(app_root=root, repo_root=tmp_path)) == (
+        "DELETE team_members",
+    )
+    added = root / "added.py"
+    added.write_text('async def f(c):\n    await c.execute("DELETE FROM organizations")\n', encoding="utf-8")
+    assert {w.operation for w in _scan_python_root(app_root=root, repo_root=tmp_path)} == {
+        "DELETE team_members", "DELETE organizations",
+    }
+    path.unlink()
+    assert tuple(w.operation for w in _scan_python_root(app_root=root, repo_root=tmp_path)) == (
+        "DELETE organizations",
+    )
+    assert tuple(w.path for w in _scan_python_root(app_root=root, repo_root=tmp_path.parent)) == (
+        f"{tmp_path.name}/app/added.py",
+    )
+    other_root = tmp_path / "other_app"
+    other_root.mkdir()
+    assert _scan_python_root(app_root=other_root, repo_root=tmp_path) == ()
+
+
+@pytest.mark.parametrize(
+    "scan", [_scan_sql_calls, _membership_scope_sql_helper_callers, _membership_scope_sql_helper_imports],
+)
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _mint_membership_scope_sql\n",
+        'async def f(conn, sql):\n    await _execute_membership_scope_sql(conn, sql, backend="sqlite")\n',
+        "import tldw_Server_API.app.core.AuthNZ.profile_user_write_guard as guard\n"
+        "async def f(conn, sql):\n    mint = guard._mint_membership_scope_sql\n    mint(sql)\n",
+    ],
+)
+def test_cached_inventory_views_reject_new_capability_violations(tmp_path, monkeypatch, scan, source) -> None:
+    root = tmp_path / "app"
+    root.mkdir()
+    monkeypatch.setitem(globals(), "APP_ROOT", root)
+    monkeypatch.setitem(globals(), "REPO_ROOT", tmp_path)
+    assert scan() == ()
+
+    (root / "violation.py").write_text(source, encoding="utf-8")
+
+    with pytest.raises(AssertionError, match="Unapproved membership-scope SQL capability"):
+        scan()
+    (root / "violation.py").unlink()
+    assert scan() == ()
 
 
 def test_scanner_parses_every_executescript_statement(

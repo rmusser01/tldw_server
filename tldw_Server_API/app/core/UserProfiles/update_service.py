@@ -168,6 +168,7 @@ class UserProfileUpdateService:
         )
         prepared_memberships: dict[int, _PreparedMembershipUpdate] = {}
         membership_prepare_errors: dict[int, str] = {}
+        membership_validation_skips: list[dict[str, str]] = []
         if membership_context is not None:
             for update_index, (key, value) in enumerate(updates_list):
                 if key not in {
@@ -179,14 +180,12 @@ class UserProfileUpdateService:
                 entry = catalog_map.get(key)
                 if entry is None or not _can_edit(entry, normalized_roles) or value is None:
                     continue
-                if key in {
-                    "memberships.orgs.role",
-                    "memberships.teams.role",
-                } and isinstance(value, dict):
-                    ok, normalized = True, value
-                else:
-                    ok, normalized, _ = _validate_value(entry, value)
+                ok, normalized, err = _validate_value(entry, value)
                 if not ok:
+                    if key in {"memberships.orgs.role", "memberships.teams.role"} and isinstance(value, dict):
+                        membership_validation_skips.append(
+                            {"key": key, "message": err or "invalid_value"}
+                        )
                     continue
                 try:
                     mutation = self._prepare_membership_mutation(
@@ -204,6 +203,10 @@ class UserProfileUpdateService:
                         update_index=update_index,
                         mutation=mutation,
                     )
+        # Invalid role payloads abort; ordinary scalar skips retain bulk partial success.
+        if membership_validation_skips and not dry_run:
+            result.skipped.extend(membership_validation_skips)
+            return result
         membership_results: dict[int, Any] = {}
         if prepared_memberships and not dry_run:
             membership_results, write_result = await self._apply_membership_batch(
@@ -243,10 +246,7 @@ class UserProfileUpdateService:
                 result.skipped.append({"key": key, "message": "null_not_allowed"})
                 continue
 
-            if key in {"memberships.orgs.role", "memberships.teams.role"} and isinstance(value, dict):
-                ok, normalized, err = True, value, None
-            else:
-                ok, normalized, err = _validate_value(entry, value)
+            ok, normalized, err = _validate_value(entry, value)
             if not ok:
                 result.skipped.append({"key": key, "message": err or "invalid_value"})
                 continue
@@ -763,6 +763,19 @@ def _can_edit(entry: UserProfileCatalogEntry, roles: set[str]) -> bool:
 
 
 def _validate_value(entry: UserProfileCatalogEntry, value: Any) -> tuple[bool, Any, str | None]:
+    if entry.key in {"memberships.orgs.role", "memberships.teams.role"}:
+        if isinstance(value, dict) and "role" not in value:
+            return False, None, "invalid_membership_payload"
+        role = value.get("role") if isinstance(value, dict) else value
+        if not isinstance(role, str):
+            return False, None, "invalid_value"
+        role = role.strip().lower()
+        if role not in {"owner", "admin", "lead", "member"} or (
+            entry.enum and role not in entry.enum
+        ):
+            return False, None, "enum_violation"
+        return True, {**value, "role": role} if isinstance(value, dict) else role, None
+
     if entry.enum and value not in entry.enum:
         return False, None, "enum_violation"
 

@@ -99,6 +99,45 @@ async def test_command_service_rechecks_version_before_apply() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stale_after_lock", [False, True])
+async def test_command_service_optional_actor_locks_target_for_version_check(
+    stale_after_lock: bool,
+) -> None:
+    profile_service = _ProfileService()
+    if not stale_after_lock:
+        profile_service.locked = profile_service.initial
+    executor = _Executor()
+    service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=profile_service,
+        planner=_Planner(),
+        executor=executor,
+    )
+    conn = object()
+    command = ProfileUpdateCommand(
+        actor_user_id=None,
+        target_user_id=7,
+        updates=(("preferences.ui.theme", "paper"),),
+        roles=frozenset({"user"}),
+        dry_run=False,
+        expected_profile_version=profile_service.initial,
+    )
+
+    result = await service.apply(command, db_conn=conn, scope=None)
+
+    assert profile_service.lock_calls == [(conn, (7,))]
+    if stale_after_lock:
+        assert result.status_code == 409
+        assert result.error_code == "profile_version_mismatch"
+        assert executor.called is False
+    else:
+        assert result.status_code == 200
+        assert result.applied == ("preferences.ui.theme",)
+        assert result.profile_version == profile_service.after_write
+        assert executor.calls[0]["updated_by"] is None
+
+
+@pytest.mark.asyncio
 async def test_command_service_locks_actor_and_target_once_in_canonical_order() -> None:
     profile_service = _ProfileService()
     profile_service.locked = profile_service.initial

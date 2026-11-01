@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import pytest
 from fastapi import HTTPException
@@ -7,6 +8,7 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyTestRequest,
     SharedProviderKeyUpsertRequest,
 )
+from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseLockError,
@@ -124,7 +126,7 @@ async def _assert_byok_operation_log_sanitized(
     expected_detail: str,
     expected_log: str,
     raw_marker: str,
-) -> None:
+) -> HTTPException:
     messages: list[str] = []
     sink_id = service.logger.add(lambda message: messages.append(str(message)), level="ERROR")
     try:
@@ -139,6 +141,7 @@ async def _assert_byok_operation_log_sanitized(
     assert expected_log in joined
     assert raw_marker not in joined
     assert "/private/" not in joined
+    return exc_info.value
 
 
 @pytest.mark.asyncio
@@ -556,7 +559,8 @@ async def test_list_user_keys_sanitizes_backend_failure_log(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_revoke_user_key_sanitizes_backend_failure_log(monkeypatch):
+@pytest.mark.parametrize("provider", ("openai", "oai", "anthropic"))
+async def test_revoke_user_key_sanitizes_backend_failure_log(monkeypatch, provider):
     async def get_user_repo():
         return _ExplodingUserRepo()
 
@@ -564,15 +568,48 @@ async def test_revoke_user_key_sanitizes_backend_failure_log(monkeypatch):
         return None
 
     _allow_byok(monkeypatch)
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_LOCK_BACKEND", "memory")
     monkeypatch.setattr(service, "get_user_byok_repo", get_user_repo)
     monkeypatch.setattr(service.admin_scope_service, "enforce_admin_user_scope", allow_scope)
 
     await _assert_byok_operation_log_sanitized(
-        lambda: service.revoke_user_key(_principal(), 42, "anthropic"),
+        lambda: service.revoke_user_key(_principal(), 42, provider),
         expected_detail="Failed to revoke user BYOK key",
         expected_log="Failed to revoke user BYOK key",
         raw_marker="user BYOK revoke failed",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ("openai", "oai"))
+async def test_revoke_openai_key_sanitizes_mutation_lock_failure(monkeypatch, provider):
+    sentinel = "sk-lock-backend-secret-/private/openai-lockdir"
+
+    @asynccontextmanager
+    async def unavailable_lock(**_kwargs):
+        raise byok_runtime.ByokResolutionError(
+            "credential_store_unavailable", "openai",
+        ) from RuntimeError(sentinel)
+        yield
+
+    async def get_user_repo():
+        return _ExplodingUserRepo()
+
+    async def allow_scope(*_args, **_kwargs):
+        return None
+
+    _allow_byok(monkeypatch)
+    monkeypatch.setenv("OPENAI_OAUTH_REFRESH_LOCK_BACKEND", "db")
+    monkeypatch.setattr(byok_runtime, "_openai_db_refresh_lock", unavailable_lock)
+    monkeypatch.setattr(service, "get_user_byok_repo", get_user_repo)
+    monkeypatch.setattr(service.admin_scope_service, "enforce_admin_user_scope", allow_scope)
+    with pytest.raises(HTTPException) as exc_info:
+        await service.revoke_user_key(_principal(), 42, provider)
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "BYOK credential storage is temporarily unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__
+    assert sentinel not in repr(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -614,10 +651,22 @@ async def test_upsert_shared_key_maps_alias_conflict_to_409(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_upsert_shared_key_sanitizes_backend_failure_log(monkeypatch):
+    phases = []
+
+    class ObservedRepo(_ExplodingSharedRepo):
+        async def authorize_scope_write(self, **kwargs):
+            await super().authorize_scope_write(**kwargs)
+            phases.append("authorized")
+
+        async def upsert_secret(self, **kwargs):
+            phases.append("store")
+            return await super().upsert_secret(**kwargs)
+
     async def get_shared_repo():
-        return _ExplodingSharedRepo()
+        return ObservedRepo()
 
     async def pass_provider_test(**_kwargs):
+        phases.append("provider")
         return "gpt-test"
 
     _allow_byok(monkeypatch)
@@ -627,7 +676,7 @@ async def test_upsert_shared_key_sanitizes_backend_failure_log(monkeypatch):
     monkeypatch.setattr(service, "encrypt_byok_payload", lambda _payload: {"ciphertext": "sealed"})
     monkeypatch.setattr(service, "dumps_envelope", lambda _envelope: "sealed-envelope")
 
-    await _assert_byok_operation_log_sanitized(
+    error = await _assert_byok_operation_log_sanitized(
         lambda: service.upsert_shared_key(
             _principal(),
             SharedProviderKeyUpsertRequest(
@@ -641,6 +690,8 @@ async def test_upsert_shared_key_sanitizes_backend_failure_log(monkeypatch):
         expected_log="Failed to store shared BYOK key",
         raw_marker="shared BYOK upsert failed",
     )
+    assert (error.status_code, error.detail) == (500, "Failed to store shared BYOK key")
+    assert phases == ["authorized", "provider", "store"]
 
 
 @pytest.mark.asyncio

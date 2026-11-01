@@ -519,7 +519,7 @@ introduced.
 
 **Files:**
 - Create: `tldw_Server_API/app/core/AuthNZ/membership_writer.py`
-- Create: `tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_lock_plan.py`
+- Create: `tldw_Server_API/tests/AuthNZ_Unit/test_membership_writer_lock_plan.py`
 - Create: `tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_context.py`
 
 - [ ] **Step 1: Write pure lock-plan and context tests**
@@ -552,7 +552,7 @@ class MembershipLockSet:
 Run:
 ```bash
 source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_lock_plan.py tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_context.py -q
+python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_membership_writer_lock_plan.py tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_context.py -q
 ```
 Expected: FAIL because the writer module does not exist.
 
@@ -565,7 +565,7 @@ Trusted reasons are a closed enum containing `registration`, `bootstrap`, and `o
 Run the command from Step 2; expected PASS.
 
 ```bash
-git add tldw_Server_API/app/core/AuthNZ/membership_writer.py tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_lock_plan.py tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_context.py
+git add tldw_Server_API/app/core/AuthNZ/membership_writer.py tldw_Server_API/tests/AuthNZ_Unit/test_membership_writer_lock_plan.py tldw_Server_API/tests/AuthNZ/unit/test_membership_writer_context.py
 git commit -m "feat(authnz): define ordered membership writer protocol"
 ```
 
@@ -974,6 +974,44 @@ The repository-wide `pytest -q --maxfail=1` attempt was interrupted during colle
 **Status**: In Progress
 
 Authoritative dev remains `61d02ed484` and the old reviewed remote head is `8d976f1e5a`; auto-merge is unarmed and MERGE_QUEUE is unset. All old-head statuses remain historical after publication. Preserve the human summary verbatim and publish the bounded reviewed remediation once; do not mark the task Done or merge before fresh required checks succeed.
+
+### November 1 Current-Head Feedback and Chunking-Dev Integration
+
+## Stage 1: Validate All Feedback and Preserve the Reviewed Base
+**Goal**: Qualify the conflict-free rebase onto authoritative dev `6bf581da089a7aa6d90440a8801de07f8fdd238b` and validate all 26 Cubic comments on prior head `58d3870f21` as hypotheses, not instructions.
+**Success Criteria**: All 38 existing patches remain equal; each thread has a code-backed disposition. Previously approved compatibility/trusted boundaries are not silently redesigned.
+**Tests**: Range-diff, upstream path/mode comparison, persisted authority/caller inventory and focused RED regressions for confirmed defects.
+**Status**: Complete
+
+## Stage 2: Remediate Confirmed Defects Without WP3 Expansion
+**Goal**: Fix validated contention/invite handling, shared-key boundaries, profile command validation, membership/federation invariants and test-evidence gaps in disjoint focused slices.
+**Success Criteria**: Preserve public contracts, fail-closed authority and transaction/version ownership; no new trusted bypass, ratchet-baseline increase, policy/settings change or unrelated refactor. ADR060 continues to govern; accepted ADR rationale is not rewritten.
+**Tests**: Strict RED/GREEN for each behavioral fix, focused suites and official isolated PostgreSQL fixtures as applicable; unchanged-baseline ratchets, Ruff/compile/diff, touched-scope Bandit and independent remediation/integration review.
+**Status**: Complete
+
+Main slice: four SQLite and one federation RED cases preceded the fixes; 113 repository/federation/SQLite tests pass, plus a deterministic official live PostgreSQL race proving a non-default team grant after preflight survives cleanup with no extra profile touch. Three E2E API gating/stable-seed cases pass. Existing ownerless/stale-owner E2E fixture scopes are recreated only through managed deletion/creation; correct fixture scopes retain IDs. Parent lookup reuse keeps the supplied connection. Upstream Chunking qualification passes 428 tests. Main runtime Ruff/compile/diff pass; Bandit has only the unchanged E2E temp-root allowlist B108.
+
+Profile slice: absent actor lock sorting and scalar/dictionary role validation were reproduced RED. Independent review caught an overbroad early abort for invalid scalar roles; eight corrected RED cases prove it would suppress valid bulk fields. The final dictionary-only abort retains ordinary scalar skips and bulk partial success; 99 final role/command tests pass with persisted override, membership and version assertions. Earlier 143-test evidence predates this correction and is not substituted for the final run.
+
+Boundary slice: expired invite scopes keep their sanitized 400 contract; registration, invite redemption, tenant provisioning and shared-key read/write boundaries propagate/map translated transaction conflicts to live-policy 503 responses. Real SQLite rollback/success cases retain bookkeeping, anchors and success-audit assertions. Boundary worker suites pass 129 plus 15 adjacent tests; final sanitizer/SQLite fixture corrections pass 61 tests using real settings, diagnostics and password hashing where applicable.
+
+Shared-key follow-up: all HTTP credential mutations now supply actor context, including both Telegram aliases with persisted platform-admin rechecks. Reject userless principals before provider/storage effects and map busy errors during precheck, acquisition and mutation. OpenAI/oai mutation-lock and sanitization coverage is restored; internal LocalEncryptedSecretBackend optional-context compatibility remains intentional. Final Telegram/shared-key suites pass 171 tests; earlier adapter/repository runs are separate, overlapping evidence.
+
+Test evidence: wrong-connection capability rejection consumes its token, a fresh token succeeds and replay fails; expiry tests now exercise stored expired rows and real SQLite; closed relationship enums are covered. Pure planner tests moved to AuthNZ_Unit (51 pass), away from heavy conftest initialization. Content-keyed single-snapshot scanner cache has deterministic content/root/add/delete invalidation coverage; the full boundary suite passes 74 tests. The exact endpoint-proxy inventory addition does not permit new raw DML or context-free writes. Earlier test-evidence worker suites pass 448 tests.
+
+Final integration/security: 52 official live PostgreSQL tests pass with fixture-managed databases, including the federation race; upstream Chunking has 428 passes. Backend CI-contract group passes 1006 with one existing local Bash-capability skip; 23 size/getter ratchets pass. Full-tree test-quality enforcement passes with its baseline unchanged; all changed Python files pass Ruff and compilation, and diff checks are clean. All 13 changed runtime files match their old-head Bandit baseline exactly (11 low and one medium, zero new findings/errors). Changed tests contain expected assertions and 31 unchanged synthetic-fixture/SQL findings; no new non-assert finding or scan error.
+
+Independent requesting-code-review review approves the frozen remediation and bounded mechanical integration with no remaining critical, important or minor findings. It upholds the evidence-backed rejections for the approved legacy facade (4437219280), invented trusted runtime audit-proof (4437219289), and batch-wide 503 that would hide committed bulk successes (4437219287). Comment 4437219266 is resolved by fixing missed Telegram HTTP actor authorization, while retaining the internal storage contract. Accepted ADR060 is unchanged; WP3/bulk redesign and previously approved unchanged behavior remain outside this review.
+
+Non-green local limits: root full-suite collection remains blocked by unchanged Workspaces import of missing httpx2. Separate upstream WebSocket tests have 185 passes and eight ACP-runner failures because Go is unavailable locally (preaccept 4404, runner unavailable); these are not passes or silently skipped tests. Fresh exact-head remote CI remains mandatory and cannot be replaced by the local evidence above.
+
+## Stage 3: Resolve Threads and Publish One Qualified Candidate
+**Goal**: Reply to each feedback thread with evidence, resolve only addressed or technically rejected requests, and publish the reviewed integration once.
+**Success Criteria**: Preserve the human summary; latest-dev ancestry, current review/rules and all required exact-head gates qualify before an expected-head merge commit. Keep TASK-13001.2 In Progress until readback/finalization.
+**Tests**: Paginated feedback inventory, authoritative refs, queue/auto-merge checks, exact-head CI and merge readback.
+**Status**: In Progress
+
+Publication candidate rebases all 38 patches unchanged onto dev 6bf581da089a7aa6d90440a8801de07f8fdd238b; all 32 upstream paths/modes match dev. Remote head remains 58d3870f21 before the explicit-lease push, MERGE_QUEUE is unset, and auto-merge is unarmed. Current rules retain eight required checks and merge commits only. Reply/resolve all 26 reviewed feedback threads with commit evidence, preserve the human summary verbatim, then wait for the new candidate's checks; no merge while any gate is absent, pending or unsuccessful.
 
 ## Work Package 3: Typed Pipeline and Effects
 

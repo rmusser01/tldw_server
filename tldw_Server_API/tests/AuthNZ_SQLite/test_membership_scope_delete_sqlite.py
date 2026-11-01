@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
+    AnchorOwnership,
     MembershipAuthority,
     MembershipAuthorizationError,
     MembershipScopeNotFound,
@@ -23,6 +24,73 @@ _BOOTSTRAP = TrustedMembershipWriteContext(
     trusted_reason=TrustedMembershipReason.BOOTSTRAP,
 )
 _FUTURE_FLOOR = datetime(2099, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("non_default_membership", [False, True])
+async def test_federated_org_cleanup_rechecks_child_memberships_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    non_default_membership: bool,
+) -> None:
+    pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    if not non_default_membership:
+        await repo.remove_team_member(
+            team_id=ids["team"],
+            user_id=ids["first"],
+            context=_BOOTSTRAP,
+        )
+    touched = await _record_touches(monkeypatch)
+
+    async with pool.transaction() as conn:
+        result = await repo.remove_org_member_on_connection(
+            conn=conn,
+            org_id=ids["org"],
+            user_id=ids["first"],
+            context=_BOOTSTRAP,
+            anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+            operation_time=datetime.now(timezone.utc),
+            preserve_non_default_teams=True,
+        )
+
+    assert result["removed"] is not non_default_membership
+    assert (await repo.get_org_member(ids["org"], ids["first"]) is not None) is non_default_membership
+    assert (await repo.get_team_member(ids["team"], ids["first"]) is not None) is non_default_membership
+    assert touched == ([] if non_default_membership else [ids["first"]])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_ownerless", [False, True])
+async def test_e2e_org_seed_replaces_stale_owner_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_ownerless: bool,
+) -> None:
+    from tldw_Server_API.app.services.admin_e2e_support_service import (
+        _ORG_NAME,
+        _ORG_SLUG,
+        _ensure_org,
+    )
+
+    _pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    if legacy_ownerless:
+        original = await repo.create_organization(name=_ORG_NAME, slug=_ORG_SLUG)
+    else:
+        original = await repo.create_organization_with_owner_membership(
+            name=_ORG_NAME,
+            slug=_ORG_SLUG,
+            owner_user_id=ids["owner"],
+            context=_BOOTSTRAP,
+        )
+
+    seeded = await _ensure_org(orgs_repo=repo, owner_user_id=ids["first"])
+
+    assert seeded["owner_user_id"] == ids["first"]
+    assert seeded["id"] != original["id"]
+    assert (await repo.get_org_member(seeded["id"], ids["first"]))["role"] == "owner"
+    assert await _ensure_org(orgs_repo=repo, owner_user_id=ids["first"]) == seeded
 
 
 @pytest.mark.integration

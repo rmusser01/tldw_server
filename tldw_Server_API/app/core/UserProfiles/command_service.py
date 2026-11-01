@@ -99,7 +99,11 @@ class ProfileCommandService:
 
         if command.expected_profile_version is not None or membership_keys:
             lock_user_ids = tuple(
-                sorted({command.actor_user_id, command.target_user_id})
+                sorted(
+                    user_id
+                    for user_id in {command.actor_user_id, command.target_user_id}
+                    if user_id is not None
+                )
             )
             locked_versions = await self._profile_service.lock_profile_users(
                 user_ids=lock_user_ids,

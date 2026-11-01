@@ -39,6 +39,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
 )
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
@@ -446,14 +447,17 @@ class TestOrgInviteService:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "failure_type",
-        (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+        (ConnectionPoolExhaustedError, DatabaseLockError, DatabaseConcurrencyConflict, TimeoutError),
     )
     async def test_redeem_invite_preserves_retryable_database_failures(
         self,
         failure_type: type[Exception],
         mock_invites_repo,
         mock_orgs_repo,
+        monkeypatch,
     ) -> None:
+        monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "13")
+
         class _BusyTransaction:
             async def __aenter__(self):
                 raise failure_type()
@@ -465,7 +469,7 @@ class TestOrgInviteService:
             pool = None
 
             def transaction(self, *, acquire_timeout_seconds=None):
-                assert acquire_timeout_seconds is not None
+                assert acquire_timeout_seconds == 13.0
                 return _BusyTransaction()
 
         service = OrgInviteService(
@@ -490,6 +494,8 @@ class TestOrgInviteService:
             await service.redeem_invite(code="VALIDCODE", user_id=100)
 
         mock_invites_repo.record_redemption.assert_not_awaited()
+        mock_invites_repo.increment_uses_count.assert_not_awaited()
+        mock_orgs_repo.provision_org_membership_on_connection.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_redeem_invite_domain_allowlist_mismatch(self, service, mock_invites_repo, mock_orgs_repo):

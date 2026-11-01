@@ -287,15 +287,24 @@ async def _ensure_org(
     orgs_repo: AuthnzOrgsTeamsRepo,
     owner_user_id: int,
 ) -> dict[str, Any]:
-    rows, _ = await orgs_repo.list_organizations(limit=50, offset=0, q=_ORG_SLUG, with_total=False)
-    for row in rows:
-        if str(row.get("slug") or "").strip().lower() == _ORG_SLUG:
-            return row
-
-    rows, _ = await orgs_repo.list_organizations(limit=50, offset=0, q=_ORG_NAME, with_total=False)
-    for row in rows:
-        if str(row.get("name") or "").strip() == _ORG_NAME:
-            return row
+    """Reuse a matching fixture or recreate it when its owner pointer is stale."""
+    existing = None
+    for field, expected in (("slug", _ORG_SLUG), ("name", _ORG_NAME)):
+        rows, _ = await orgs_repo.list_organizations(limit=50, offset=0, q=expected, with_total=False)
+        for row in rows:
+            value = str(row.get(field) or "").strip()
+            if (value.lower() if field == "slug" else value) == expected:
+                existing = row
+                break
+        if existing is not None:
+            break
+    if existing is not None:
+        if existing.get("owner_user_id") == owner_user_id:
+            return existing
+        await orgs_repo.delete_organization_with_provider_secrets(
+            org_id=int(existing["id"]),
+            context=_E2E_MEMBERSHIP_CONTEXT,
+        )
 
     return await orgs_repo.create_organization_with_owner_membership(
         name=_ORG_NAME,

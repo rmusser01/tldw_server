@@ -740,6 +740,7 @@ class FederationProvisioningService:
                                         AnchorOwnership.WRITER_OWNS_ANCHOR
                                     ),
                                     operation_time=operation_time,
+                                    preserve_non_default_teams=True,
                                 )
                             )
                         await managed_repo.delete_grant(

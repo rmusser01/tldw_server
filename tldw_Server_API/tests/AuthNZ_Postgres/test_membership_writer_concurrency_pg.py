@@ -796,6 +796,77 @@ async def test_postgres_concurrent_last_owner_removals_serialize_and_recheck(
 
 
 @pytest.mark.asyncio
+async def test_federated_cleanup_preserves_team_granted_after_precheck(test_db_pool) -> None:
+    ids = await _create_membership_fixture(test_db_pool, f"fed_race_{uuid.uuid4().hex[:8]}")
+    repo = AuthnzOrgsTeamsRepo(test_db_pool)
+    await repo.remove_team_member(
+        team_id=ids["team_id"],
+        user_id=ids["first_id"],
+        context=_BOOTSTRAP,
+    )
+    precheck = await repo.list_memberships_for_user(ids["first_id"])
+    assert all(row["team_name"] == DEFAULT_BASE_TEAM_NAME for row in precheck)
+    lock_attempted = asyncio.Event()
+    allow_lock = asyncio.Event()
+
+    class _PauseBeforeUserLock(_ManagedPostgresConnectionProxy):
+        def __init__(self, conn: Any) -> None:
+            self._conn = conn
+
+        async def fetchrow(self, sql: str, *parameters: Any) -> Any:
+            if sql == "SELECT id FROM public.users WHERE id = $1 FOR UPDATE":
+                lock_attempted.set()
+                await allow_lock.wait()
+            return await self._conn.fetchrow(sql, *parameters)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._conn, name)
+
+    async def _remove() -> dict[str, Any]:
+        async with test_db_pool.transaction() as conn:
+            return await repo.remove_org_member_on_connection(
+                conn=_PauseBeforeUserLock(conn),
+                org_id=ids["org_id"],
+                user_id=ids["first_id"],
+                context=_BOOTSTRAP,
+                anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+                operation_time=_OPERATION_TIME,
+                preserve_non_default_teams=True,
+            )
+
+    removal = asyncio.create_task(_remove())
+    try:
+        await asyncio.wait_for(lock_attempted.wait(), timeout=5)
+        await repo.add_team_member(
+            team_id=ids["team_id"],
+            user_id=ids["first_id"],
+            context=_BOOTSTRAP,
+        )
+        version_after_add = await test_db_pool.fetchval(
+            "SELECT profile_version FROM public.users WHERE id = $1",
+            ids["first_id"],
+        )
+        allow_lock.set()
+        result = await asyncio.wait_for(removal, timeout=5)
+
+        assert result == {"removed": False}
+        assert await repo.get_org_member(ids["org_id"], ids["first_id"]) is not None
+        assert await repo.get_team_member(ids["team_id"], ids["first_id"]) is not None
+        assert (
+            await test_db_pool.fetchval(
+                "SELECT profile_version FROM public.users WHERE id = $1",
+                ids["first_id"],
+            )
+            == version_after_add
+        )
+    finally:
+        allow_lock.set()
+        if not removal.done():
+            removal.cancel()
+        await asyncio.gather(removal, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_postgres_org_member_removal_serializes_concurrent_team_add(
     test_db_pool,
 ) -> None:

@@ -798,7 +798,7 @@ async def test_explicit_team_best_effort_reraises_non_domain_failures(
         raise failure_type()
 
     monkeypatch.setattr(repo, "_get_or_create_default_team_id", _default_team)
-    monkeypatch.setattr(repo, "_get_team_parent_organization_id", _team_parent)
+    monkeypatch.setattr(repo, "get_team_parent_organization_id", _team_parent)
     monkeypatch.setattr(MembershipWriter, "apply_membership_mutations", _apply)
 
     with pytest.raises(failure_type):
@@ -863,7 +863,7 @@ async def test_explicit_team_savepoint_cleanup_preserves_primary_failure(
         raise primary_failure
 
     monkeypatch.setattr(repo, "_get_or_create_default_team_id", _default_team)
-    monkeypatch.setattr(repo, "_get_team_parent_organization_id", _team_parent)
+    monkeypatch.setattr(repo, "get_team_parent_organization_id", _team_parent)
     monkeypatch.setattr(MembershipWriter, "apply_membership_mutations", _apply)
 
     with pytest.raises(primary_type) as exc_info:

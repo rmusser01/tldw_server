@@ -17,6 +17,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
     DatabaseLockError,
 )
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
@@ -395,7 +396,12 @@ class OrgInviteService:
                         operation_time=operation_time,
                     )
                 )
-        except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError):
+        except (
+            ConnectionPoolExhaustedError,
+            DatabaseConcurrencyConflict,
+            DatabaseLockError,
+            TimeoutError,
+        ):
             raise
         except Exception:
             logger.error("Failed to add user to organization")
