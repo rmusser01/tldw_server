@@ -125,6 +125,30 @@ async def test_failed_enhanced_extraction_does_not_spend_discovery_budget(monkey
     assert len(harness.fetch.requests) == 1
 
 
+@pytest.mark.parametrize("successful", [False, True])
+async def test_private_discovery_gate_observes_result_before_deciding_unused_expansion(monkeypatch, successful):
+    harness = _harness(extract_results=[{"extraction_successful": successful, "content": "body"}])
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: harness.dependencies)
+    seen = []
+
+    def gate(result):
+        seen.append((result["extraction_successful"], harness.extract.call_count))
+        return not result["extraction_successful"]
+
+    handle = article.start_page(
+        URL,
+        None,
+        controls=CrawlContext(CrawlLimits(), clock=time.monotonic),
+        request_context=RuntimeRequestContext(),
+        discover=_discover,
+        discovery_gate=gate,
+    )
+    page = await handle.result
+    await handle.drained
+    assert seen == [(successful, 1)]
+    assert bool(page.discovery.links) is not successful
+
+
 async def test_page_attempt_exact_limit_rejects_retry(monkeypatch):
     harness = _harness()
     controls = CrawlContext(CrawlLimits(page_attempts=1), clock=time.monotonic)

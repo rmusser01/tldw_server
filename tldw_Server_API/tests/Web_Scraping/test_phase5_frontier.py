@@ -98,3 +98,56 @@ def test_fifo_dispositions_and_results_match_unique_admission_order(numbers):
 def test_url_bounds_are_trusted_positive_integers(field, bad):
     with pytest.raises(ValueError):
         CrawlLimits(**{field: bad})
+
+
+def test_traversal_decision_freezes_safe_nested_metadata_and_rejects_unbounded_reasons():
+    from tldw_Server_API.app.core.Web_Scraping.crawl.models import TraversalDecision
+
+    source = {"nested": {"rank": 7}, "api_key": "private"}
+    decision = TraversalDecision(metadata=source)
+    source["nested"]["rank"] = 8
+    assert decision.metadata["nested"]["rank"] == 7
+    assert "api_key" not in decision.metadata
+    with pytest.raises(TypeError):
+        decision.metadata["nested"]["rank"] = 9
+    with pytest.raises(ValueError):
+        TraversalDecision(reason="private error detail")
+
+
+def test_frontier_rejects_oversized_identity_before_normalizing_or_retaining():
+    frontier = Frontier(replace(plan(), limits=CrawlLimits(max_url_bytes=20)))
+    with pytest.raises(ParentStop, match="budget_exhausted"):
+        frontier.admit(entry("https://example.com/" + "x" * 21))
+    assert frontier.snapshot().queued == ()
+
+
+def test_explicit_seed_cannot_resolve_against_an_oversized_request_base(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.crawl import frontier as module
+
+    resolved = replace(
+        plan(), request=CrawlRequest("https://example.com/" + "x" * 50), limits=CrawlLimits(max_url_bytes=40)
+    )
+    calls = []
+    original = module.normalize_for_crawl
+
+    def normalize(url, base):
+        calls.append(base)
+        return original(url, base)
+
+    monkeypatch.setattr(module, "normalize_for_crawl", normalize)
+    frontier = Frontier(resolved)
+    with pytest.raises(ParentStop, match="budget_exhausted"):
+        frontier.admit(entry("https://e.test/x"))
+    assert calls == []
+
+
+@given(st.lists(st.integers(min_value=0, max_value=30), min_size=2, max_size=15, unique=True))
+def test_legacy_url_level_uses_existing_set_pop_traversal(numbers):
+    frontier = Frontier(plan("legacy_url_level"))
+    pending = set()
+    for sequence, number in enumerate(numbers):
+        url = f"https://example.com/{number}"
+        frontier.admit(entry(url, sequence))
+        pending.add(url)
+    expected = [pending.pop() for _ in numbers]
+    assert [frontier.take().url for _ in numbers] == expected

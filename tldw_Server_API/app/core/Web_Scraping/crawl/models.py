@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from ..contracts.execution import CrawlOutcome
-from ..contracts.requests import CrawlRequest
+from ..contracts.execution import CrawlOutcome, _safe_article
+from ..contracts.requests import CrawlRequest, _freeze_mapping
 from ..runtime.controls import BudgetSnapshot, ParentControls, WorkHandle, positive_duration, positive_integer
 
 PROFILES = frozenset(
@@ -158,6 +159,36 @@ class FrontierEntry:
     depth: int
     sequence: int
     score: float
+
+
+@dataclass(frozen=True)
+class TraversalDecision:
+    """Safe policy projection; live implementations stay in orchestration."""
+
+    allowed: bool = True
+    relevance_score: float = 0.0
+    ordering_score: float = 0.0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    reason: str = "allowed"
+
+    def __post_init__(self) -> None:
+        if type(self.allowed) is not bool or any(
+            type(value) not in (int, float) or not math.isfinite(value)
+            for value in (self.relevance_score, self.ordering_score)
+        ):
+            raise ValueError("invalid traversal decision")
+        reasons = {"allowed", "filtered", "policy_denied", "execution_failed", "transport_unavailable"}
+        if self.reason not in reasons:
+            raise ValueError("invalid traversal reason")
+        object.__setattr__(self, "metadata", _freeze_mapping(_safe_article(self.metadata)))
+
+
+class TraversalPolicy(Protocol):
+    """Private async traversal decisions, never a serialized capability."""
+
+    async def evaluate(
+        self, entry: FrontierEntry, *, phase: Literal["seed", "discovery", "visit"]
+    ) -> TraversalDecision: ...
 
 
 @dataclass(frozen=True)

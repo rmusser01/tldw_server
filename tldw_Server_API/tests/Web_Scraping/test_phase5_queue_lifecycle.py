@@ -173,6 +173,23 @@ async def test_default_retry_count_and_failed_result_convention():
     await q.stop()
 
 
+async def test_internal_page_subscription_preserves_failed_payload_after_retries():
+    executor = Executor()
+    q = ProcessLocalJobQueue(execute=executor)
+    controls = CrawlContext(CrawlLimits(), clock=lambda: 0)
+    await q.start()
+    handle = await q.submit_page(job(max_retries=1), controls=controls)
+    failed = page(error="fixture failure", extraction_successful=False, metadata={"nested": {"rank": 7}})
+    for _ in range(2):
+        attempt = await executor.started.get()
+        attempt.finish(failed)
+    assert await handle.result is failed
+    await handle.drained
+    assert q.get_job("job").status is JobStatus.FAILED
+    assert controls.snapshot().page_attempts == 2
+    await q.stop()
+
+
 @pytest.mark.parametrize("winner", ["cancel", "result"])
 async def test_cancel_result_race_terminalizes_once(winner):
     executor = Executor()
