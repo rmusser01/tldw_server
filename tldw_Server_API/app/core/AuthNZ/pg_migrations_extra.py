@@ -23,7 +23,6 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
 )
 from tldw_Server_API.app.core.exceptions import (
     PGUsageSchemaError,
-    SchemaReadinessError,
     raise_detached_error,
 )
 
@@ -4261,30 +4260,41 @@ async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     but uses Postgres types and indexes. Intended as bootstrap guardrails when running
     against Postgres without having executed dedicated migrations.
     """
-    db_pool = pool or await get_db_pool()
-    if getattr(db_pool, "pool", None) is None:
-        return False
-    # Readiness is atomic: never swallow a failed accounting DDL statement.
+
+    transient_failure = False
     try:
+        db_pool = pool or await get_db_pool()
+        if getattr(db_pool, "pool", None) is None:
+            return False
         async with db_pool.transaction() as conn:
+            body_failure: BaseException | None = None
             try:
-                for sql, params in _CREATE_USAGE_TABLES:
-                    await conn.execute(sql, *params)
-            except (
-                asyncpg.PostgresError,
-                asyncpg.InterfaceError,
-                asyncpg.InternalClientError,
-                SchemaReadinessError,
-            ):
-                # Classify before the pool discards the native error; retain no private graph.
+                # A savepoint rolls back transient DDL before the outer lifecycle
+                # must positively finish. Opaque cleanup failures remain fatal.
+                async with conn.transaction():
+                    try:
+                        for sql, params in _CREATE_USAGE_TABLES:
+                            await conn.execute(sql, *params)
+                    except (TimeoutError, OSError) as exc:
+                        body_failure = exc
+                        raise
+            except (TimeoutError, OSError) as exc:
+                if exc is not body_failure:
+                    raise_detached_error(PGUsageSchemaError())
+                transient_failure = True
+            except Exception:  # noqa: BLE001 - no unknown schema failure may become nonfatal
                 raise_detached_error(PGUsageSchemaError())
-            except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
-                raise_detached_error(TransactionError("PostgreSQL usage schema"))
-    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.bind(exception_type=type(exc).__name__).warning(
+            finally:
+                body_failure = None
+    except PGUsageSchemaError:
+        raise
+    except Exception:  # noqa: BLE001 - acquisition, entry, commit and release are readiness boundaries
+        raise_detached_error(PGUsageSchemaError())
+    if transient_failure:
+        logger.bind(exception_type="TransactionError").warning(
             "PG ensure usage tables DDL failed; usage schema is unavailable"
         )
-        raise
+        raise_detached_error(TransactionError("PostgreSQL usage schema"))
     logger.info("Ensured PostgreSQL usage tables and durable provider reservations")
     return True
 
@@ -4309,6 +4319,7 @@ async def ensure_generated_files_table_pg(pool: DatabasePool | None = None) -> b
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL generated_files table: {exc}")
         return False
+
 
 async def ensure_data_subject_requests_table_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure data_subject_requests table exists for PostgreSQL backends."""

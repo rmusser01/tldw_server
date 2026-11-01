@@ -212,12 +212,25 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "failure_kind",
-    ["permission", "closed_connection", "timeout", "socket", "readiness", "cancelled"],
+    "failure_kind,failure_phase",
+    [
+        *[
+            (kind, "body")
+            for kind in ("permission", "closed_connection", "timeout", "socket", "readiness", "cancelled")
+        ],
+        ("closed_connection", "acquire"),
+        ("interface", "enter"),
+        ("closed_connection", "commit"),
+        ("closed_connection", "release"),
+        ("closed_connection", "rollback"),
+        ("closed_connection", "release_after_timeout"),
+        ("closed_connection", "commit_after_timeout"),
+    ],
 )
 async def test_pg_usage_ddl_failure_classification_survives_canonical_transaction(
     monkeypatch: pytest.MonkeyPatch,
     failure_kind: str,
+    failure_phase: str,
 ) -> None:
     """Hard DDL failures stop startup; transient failures roll back and continue."""
     from tldw_Server_API.app.core.AuthNZ import pg_migrations_extra
@@ -227,6 +240,7 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
     failures = {
         "permission": asyncpg.InsufficientPrivilegeError(marker),
         "closed_connection": asyncpg.ConnectionDoesNotExistError(marker),
+        "interface": asyncpg.InterfaceError(marker),
         "timeout": TimeoutError(marker),
         "socket": ConnectionError(marker),
         "readiness": SchemaReadinessError("USAGE_SCHEMA_NOT_READY"),
@@ -239,18 +253,32 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
     later_ensures: list[str] = []
 
     class _NativeConnection:
+        depth = 0
+
         @asynccontextmanager
         async def transaction(self):
+            self.depth += 1
+            outer = self.depth == 1
             events.append("begin")
+            if failure_phase == "enter" and outer:
+                raise failure
             try:
                 yield self
             except BaseException:  # noqa: BLE001 - model native rollback on control flow too
                 staged.clear()
                 events.append("rollback")
+                if failure_phase == "rollback" and not outer:
+                    raise failure from None
                 raise
             else:
-                committed.extend(staged)
-                events.append("commit")
+                if outer and failure_phase in {"commit", "commit_after_timeout"}:
+                    staged.clear()
+                    raise failure
+                if outer:
+                    committed.extend(staged)
+                    events.append("commit")
+            finally:
+                self.depth -= 1
 
         async def execute(self, sql: str, *_params: object) -> None:
             events.append("execute")
@@ -258,17 +286,23 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
                 if failure_kind == "cancelled":
                     ddl_blocked.set()
                     await asyncio.Event().wait()
-                if failure is not None:
+                if failure_phase in {"rollback", "release_after_timeout", "commit_after_timeout"}:
+                    raise TimeoutError(marker)
+                if failure is not None and failure_phase == "body":
                     raise failure from ValueError(marker)
             staged.append(sql)
 
     class _NativePool:
         @asynccontextmanager
         async def acquire(self):
+            if failure_phase == "acquire":
+                raise failure
             try:
                 yield _NativeConnection()
             finally:
                 events.append("release")
+                if failure_phase in {"release", "release_after_timeout"}:
+                    raise failure
 
     db_pool = object.__new__(DatabasePool)
     db_pool._initialized = True
@@ -341,11 +375,19 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
     finally:
         startup_auth.logger.remove(sink)
 
-    assert events[0] == "begin"
-    assert events.count("execute") > 1
-    assert events[-2:] == ["rollback", "release"]
-    assert committed == []
-    assert staged == []
+    if failure_phase == "acquire":
+        assert events == []
+    else:
+        assert events[0] == "begin"
+        assert events[-1] == "release"
+    if failure_phase == "body":
+        assert "rollback" in events
+        assert events.count("execute") > 1
+    if failure_phase == "release":
+        assert committed
+    else:
+        assert committed == []
+        assert staged == []
     assert marker not in output.getvalue()
     assert " <- " not in output.getvalue()
     assert all(record["exception"] is None for record in records)

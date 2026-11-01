@@ -543,9 +543,21 @@ DDL failures hidden by transaction wrapping. All three are validated and repaire
 The 269-case combined repair gate passes; broad final-source gates and immutable
 follow-up approval remain required. ADR-061 records source-aware hosted exposure,
 all-source MCP safety ceilings and explicit-user uncached native quota checks.
-Hard PG schema failures cross rollback as a fixed central readiness marker;
-transient failures permit later independent ensures. Generic Chat quota policy,
-the database transaction wrapper and accepted ADRs are unchanged.
+Follow-up review closed the first two findings and exposed a remaining hard PG
+transaction-lifecycle gap. The repair uses a DDL savepoint and permits a transient
+body warning only after rollback and the complete outer lifecycle succeed.
+Acquisition, entry, commit, release and unclassified cleanup failures remain fatal
+through a fixed central readiness marker. Canonical-wrapper regression reproduced
+seven lifecycle failures before repair and passes all thirteen scenarios after it.
+Generic Chat quota policy, the database transaction wrapper and accepted ADRs are
+unchanged. Final immutable approval is still pending.
+
+Fresh broad verification: MCP core 4,292 passed / 3 existing optional-parser skips;
+AuthNZ unit/SQLite 3,426 passed / 1 optional-driver skip. Shared boundary tests have
+1,943 passed / 1 skip / 2 expected Redis failures, plus three policy-admin 403
+failures independently reproduced on unchanged pinned dev in an isolated checkout
+(`/tmp/mcp3187_dev_baseline_policy.log`). These unrelated authorization failures
+are documented rather than weakening assertions or altering production policy.
 
 ### Integration Stage 4: Publish And Arm Auto-Merge
 **Goal**: Publish with a lease and enable only the requested normal gated auto-merge.
