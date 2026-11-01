@@ -119,16 +119,21 @@ class FileReport:
         self.details.append(f"{flag}: {detail}")
 
 
-def _call_name(node: ast.Call) -> str:
-    """Best-effort dotted name of a call target ('mocker.patch.object', ...)."""
+def _expression_name(node: ast.expr) -> str:
+    """Return a best-effort dotted name for an expression."""
     parts: list[str] = []
-    cur: ast.expr = node.func
+    cur = node
     while isinstance(cur, ast.Attribute):
         parts.append(cur.attr)
         cur = cur.value
     if isinstance(cur, ast.Name):
         parts.append(cur.id)
     return ".".join(reversed(parts))
+
+
+def _call_name(node: ast.Call) -> str:
+    """Best-effort dotted name of a call target ('mocker.patch.object', ...)."""
+    return _expression_name(node.func)
 
 
 def _is_mockish_call(node: ast.Call) -> bool:
@@ -169,11 +174,29 @@ def _iter_test_functions(tree: ast.Module):
 
 
 def _module_fake_classes(tree: ast.Module) -> set[str]:
-    """Names of module-level classes that are not pytest Test* classes."""
+    """Exclude pytest classes and explicitly imported Hypothesis test machines."""
+    hypothesis_bases: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "hypothesis.stateful":
+            for imported in node.names:
+                if imported.name == "RuleBasedStateMachine":
+                    hypothesis_bases.add(imported.asname or imported.name)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "hypothesis":
+            for imported in node.names:
+                if imported.name == "stateful":
+                    hypothesis_bases.add(f"{imported.asname or imported.name}.RuleBasedStateMachine")
+        elif isinstance(node, ast.Import):
+            for imported in node.names:
+                if imported.name == "hypothesis.stateful":
+                    hypothesis_bases.add(f"{imported.asname or imported.name}.RuleBasedStateMachine")
+                elif imported.name == "hypothesis":
+                    hypothesis_bases.add(f"{imported.asname or imported.name}.stateful.RuleBasedStateMachine")
     return {
         node.name
         for node in tree.body
-        if isinstance(node, ast.ClassDef) and not node.name.startswith("Test")
+        if isinstance(node, ast.ClassDef)
+        and not node.name.startswith("Test")
+        and not any(_expression_name(base) in hypothesis_bases for base in node.bases)
     }
 
 
