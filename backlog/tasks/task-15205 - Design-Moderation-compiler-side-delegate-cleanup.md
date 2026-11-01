@@ -4,17 +4,18 @@ title: Design Moderation compiler-side delegate cleanup
 status: Done
 assignee: []
 created_date: '2026-11-01 16:46'
-updated_date: '2026-11-01 17:12'
+updated_date: '2026-11-01 17:33'
 labels:
   - moderation
   - refactor
   - design
 dependencies: []
+references:
+  - >-
+    93d132a766:Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md
 documentation:
   - >-
     Docs/superpowers/specs/2026-11-01-moderation-compiler-delegate-cleanup-design.md
-  - >-
-    Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md
 ---
 
 ## Description
@@ -42,6 +43,8 @@ Human approved the exact five-method design on 2026-11-01. Compilation and 67 fo
 Implementation plan written and self-reviewed at Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md. Three stages: migrate test coverage against unchanged production, remove the exact five delegates with a five-case red/green structural test, then run the full downstream matrix and independent review. No production or test code changed. Design approved; awaiting implementation-plan review before starting the preserved subagent-driven workflow. git diff --check passed; Bandit is not applicable to this documentation-only change.
 
 User authorized correcting both review findings and continuing implementation. Plan corrected to use private-rule-id-92741 instead of a sentinel contained in dangerous_regex, explicitly mark the new module unit, and select its five cases with -m unit. Task headings aligned to SDD brief extraction; no scope change. Documentation-only checks: git diff --check; source/test files unchanged at this checkpoint, so Bandit not applicable.
+
+Implementation completed in TASK-15403. All three execution stages are complete. Per repository instructions, only this task-owned implementation plan is removed from the working tree; its completed version is retained in git at 93d132a766:Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md. Design spec remains tracked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

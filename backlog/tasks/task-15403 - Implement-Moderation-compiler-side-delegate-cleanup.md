@@ -10,11 +10,12 @@ labels:
   - refactor
 dependencies:
   - TASK-15205
+references:
+  - >-
+    93d132a766:Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md
 documentation:
   - >-
     Docs/superpowers/specs/2026-11-01-moderation-compiler-delegate-cleanup-design.md
-  - >-
-    Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md
 ---
 
 ## Description
@@ -48,6 +49,8 @@ Task 2 complete at 1f7d3722da: exactly 26 production lines deleted across the fi
 Whole-branch reviewer approved 54b321dcec..c04c163cd1: no Critical/Important/Minor findings; Stage 3 spec and quality PASS. Confirmed retained compiler owners, supported imports/dispatch/logging and test coverage. Excluded unchanged regex/scan redesign, broader LLM moderation and baseline warning repairs per approved scope. Controller then noticed a missing module-level docstring in the new test module (AGENTS compliance); a single final polish fix and scoped re-review are running before task close-out. No further production changes.
 
 Final docstring fix 12ec36b122 was independently re-reviewed: finding addressed, no new breakage. Refreshed exact-tree validation: compilation passed; 405 combined Moderation/Guardian/Chat/Audio tests (848 warnings, 19.79s) and 12 Workflow tests (47 deselected, 36 warnings, 0.85s), total 417; Ruff, Black, Bandit production/tests and diff checks passed. Both security scans have zero findings/errors. All task and whole-branch review gates resolved. Existing warning behavior and external private-caller compatibility risk remain documented; no supported behavior changes. No PR created, push or merge. Evidence will be preserved under /tmp/moderation-compiler-delegate-cleanup-evidence.tgz before removing only this plan scratch workspace. Completed execution plan will be retired per repository instructions, with its completed commit recorded in task references.
+
+Completed plan preserved in git at 93d132a766:Docs/superpowers/plans/2026-11-01-moderation-compiler-delegate-cleanup-implementation-plan.md and removed from the working tree per repo completion instructions. No source or test changes after exact-tree 417-case verification; evidence archive /tmp/moderation-compiler-delegate-cleanup-evidence.tgz preserves this plan-specific ledger, reviews, reports and red/green logs.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
