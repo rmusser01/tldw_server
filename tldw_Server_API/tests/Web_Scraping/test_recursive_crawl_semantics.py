@@ -210,3 +210,76 @@ async def test_best_first_strict_policy_skips_candidate_on_robots_error(monkeypa
 
     assert base in urls
     assert blocked_child not in urls
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", ["default", "best_first"])
+async def test_phase5_failed_children_are_omitted_without_consuming_success_capacity(strategy):
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import make_harness
+
+    root = "https://example.com/blog/start"
+    harness = make_harness(
+        profile="enhanced_recursive",
+        outcomes=[
+            {"url": root, "links": ["/blog/bad", "/blog/good"]},
+            {"url": "https://example.com/blog/bad", "extraction_successful": False, "error": "fixture failure"},
+            {"url": "https://example.com/blog/good", "links": ["/blog/last"]},
+            {"url": "https://example.com/blog/last"},
+        ],
+    )
+    result = await harness.run(max_pages=3, max_depth=2, crawl_strategy=strategy)
+    assert [article["url"] for article in result] == [
+        root,
+        "https://example.com/blog/good",
+        "https://example.com/blog/last",
+    ]
+    assert harness.attempted_urls == [
+        root,
+        "https://example.com/blog/bad",
+        "https://example.com/blog/good",
+        "https://example.com/blog/last",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", ["default", "best_first"])
+async def test_phase5_seed_relative_depth_filters_robots_and_exact_scores(strategy):
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import make_harness
+
+    base = "https://example.com/docs/v1"
+    child = f"{base}/topic"
+    harness = make_harness(
+        profile="enhanced_recursive",
+        outcomes=[
+            {
+                "url": base,
+                "links": [
+                    child,
+                    child,
+                    f"{child}/deep",
+                    f"{base}/blocked",
+                    f"{base}/manual.pdf",
+                    "https://external.example/a",
+                ],
+            },
+            {"url": child},
+        ],
+    )
+    harness.denied_urls.add(f"{base}/blocked")
+    result = await harness.run(max_pages=8, max_depth=1, crawl_strategy=strategy)
+    assert [article["url"] for article in result] == [base, child]
+    assert result[1]["metadata"] == {
+        "nested": {"labels": ["baseline"]},
+        "depth": 1,
+        "parent_url": base,
+        "score": pytest.approx(5 / 6),
+        "ordering_score": 1.0,
+        "score_type": "composite_relevance",
+        "ordering_score_type": "path_depth",
+        "crawl_strategy": strategy,
+    }
+    candidate_calls = [call for call in harness.policy_calls if call["stage"] == "discovery"]
+    assert [call["url"] for call in candidate_calls] == [child, f"{base}/blocked"]
+    assert all(call["respect_robots"] is True for call in candidate_calls)
