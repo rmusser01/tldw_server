@@ -1635,3 +1635,47 @@ no failures observed. The trusted frontend-license status passes; the seven
 other substantive required check names have not posted yet. None may be treated
 as passed or waived. Follow-up pauses for the required credits action, with
 TASK-15286 still In Progress. No merge or task completion is claimed.
+
+### Replacement Review Gate (2026-11-01)
+
+The requester explicitly instructed using `superpowers:requesting-code-review`
+instead of the unavailable Qodo review. This replaces only the user-defined
+review-provider gate; it does not waive repository rules, required CI, validated
+feedback, the human Change summary or verification requirements. Qodo credits
+are no longer a blocker. No billing or repository-policy change is needed.
+
+A fresh independent general-purpose reviewer is inspecting the entire immutable
+PR range `54b321dcec8cdbb6358581f42c1548696260570b` through
+`1d4c7a46ce671dbd6aa51be9cd1e2351acdbf5e1` using the supplied skill/template,
+approved spec/plan and compatibility contracts. The reviewer is read-only,
+receives precise task context rather than chat history, cannot spawn reviewers,
+and must explicitly list declined-to-judge behavior for controller disposition.
+The five-line CI correction below is included as a bounded addendum. Validate
+and address findings before treating this review as approval.
+
+Live CI identified three new contract files outside the existing
+`test_hierarchical_*.py` shard glob. Exact job logs and local guard reproduce
+the missing `test_hierarchy_malformed_contracts.py`,
+`test_hierarchy_refactor_contracts.py` and `test_hierarchy_review_quality.py`.
+The existing comprehensive shard contract also fails first. Add only the
+disjoint `test_hierarchy_*.py` glob next to the existing glob in five primary
+matrix definitions; the sixth matrix inherits the release anchor. Guard,
+baseline, exclusions, tests and merge rules are unchanged. This adds execution
+coverage rather than relaxing a check; no new architecture decision or ADR.
+
+Verification: shard guard RED three uncovered files, GREEN none; complete
+workflow contracts 60 passed, 132 warnings, 22.25s
+(`/tmp/task15286_alt_ci_contract_green.txt`). Guard/job RED logs:
+`/tmp/task15286_alt_shard_guard_red.txt`,
+`/tmp/task15286_alt_shard_guard_job.txt`; contract RED:
+`/tmp/task15286_alt_ci_contract_red.txt`. Fresh full Chunking: 796 passed,
+one existing PyThaiNLP skip, 2003 warnings, 79.52s
+(`/tmp/task15286_alt_review_full.txt`). Production Bandit has zero findings or
+errors across 2876 LOC (`/tmp/bandit_task15286_alt_review.json`); Ruff, scoped
+Black, compileall, hierarchy mypy (seven files) and diff checks pass.
+
+- [x] Request a fresh full-range independent skill review instead of Qodo.
+- [x] Reproduce/fix the CI shard assignment gap without weakening checks.
+- [ ] Validate review findings and obtain applicable independent approval.
+- [ ] Publish any verified fixes and pass all eight live required CI checks.
+- [ ] Guarded normal merge commit, verify MERGED and finalize tracking.

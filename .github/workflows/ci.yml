@@ -995,6 +995,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -2686,6 +2687,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -4215,6 +4217,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -5654,6 +5657,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
@@ -7084,6 +7088,7 @@ jobs:
           - name: ai-chunking-semantic-security
             paths: >-
               tldw_Server_API/tests/Chunking/test_hierarchical_*.py
+              tldw_Server_API/tests/Chunking/test_hierarchy_*.py
               tldw_Server_API/tests/Chunking/test_offsets_additional.py
               tldw_Server_API/tests/Chunking/test_option_aliases.py
               tldw_Server_API/tests/Chunking/test_overlap_clamp.py
