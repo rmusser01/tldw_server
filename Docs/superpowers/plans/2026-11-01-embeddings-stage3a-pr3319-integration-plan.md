@@ -84,3 +84,16 @@ the repaired Jobs suite, remains required before auto-merge. Auto-merge is still
 off at this snapshot. The requester approved narrow task metadata repairs where
 the vendored editor lacks support; the migration/tooling gap is filed as
 `rmusser01/backlog-md-py#197`. No production activation or global policy change.
+
+## Publication Base Update
+
+While publishing, dev advanced from `54b321dcec` to `61d02ed484` through the
+isolated Moderation compiler cleanup in PR #3396. All 34 PR commits rebased
+without conflicts; range-diff reports every patch equivalent, and all 17 reviewed
+source/test/tool hashes remain identical. The complete plan's current reachable
+ancestor is `9eb0e2f81f`. Source verification above is retained, not represented as
+a repeated whole matrix on the new base. Targeted Moderation, API/inline, CI and
+tracking checks passed: 365 cases, zero skips, in 194.85 seconds. Task-ID and all
+17 source hash checks also pass. These qualify the integration delta; final-head remote gates remain
+required before auto-merge. The pre-rebase reviewed head is retained in
+`codex/embeddings-stage3a-pre-dev61d-rebase`.
