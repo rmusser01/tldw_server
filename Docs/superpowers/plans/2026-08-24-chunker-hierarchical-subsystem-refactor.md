@@ -1817,3 +1817,90 @@ findings/errors across 2876 LOC (`/tmp/bandit_task15286_rebase61.json`).
 Preserve the human Change summary verbatim. All eight required contexts must
 pass on the exact newly published head; old-head successes and the local auth
 probe are not substitutes. TASK-15286 remains In Progress, with no merge yet.
+
+### Authorized Voice Auth Test Correction (2026-11-01)
+
+The requester subsequently authorized investigating and fixing the latest
+required AuthNZ test failure. This supersedes the earlier no-edit boundary
+only for this test correction, not production authentication or the separately
+diagnosed optional UX fixture defect. ADR required: no; selecting an existing
+test-reply budget changes no durable architecture or security policy. ADR-059
+continues to govern Backlog edits.
+
+#### Stage 1: Reproduce And Add Regression Coverage
+**Goal:** Distinguish explicit voice acknowledgments from silent admission.
+**Success Criteria:** Reproduce the original failure and detect the wrong budget.
+**Tests:** Real auth route with controlled initialization delay; actual socket
+ACK, refusal and silence contracts.
+**Status:** Complete
+
+Voice initializes session/database state before emitting `auth_ok`. Injecting
+only a 1.1-second delay around its real database dependency reproduces the
+original `silent` versus `answered auth_ok` assertion (one failed,
+`/tmp/task15286_voice_delayed_init_red.txt`). Three deterministic committed
+regressions use actual TestClient sockets and observe the receive budget:
+all three fail against the original helper's silent-admission timeout
+(`/tmp/task15286_voice_reply_budget_red.txt`). The injected delay is a scratch
+experiment, not a production change or a sleep in committed tests.
+
+#### Stage 2: Apply The Minimal Test-Only Correction
+**Goal:** Wait for the voice route's explicit reply with its established budget.
+**Success Criteria:** Delayed valid authentication passes; refusal and silence
+remain distinct from authentication success.
+**Tests:** Same delayed original test and all three regression cases.
+**Status:** Complete
+
+Change only `_voice_auth` to use existing `FRAME_TIMEOUT_S` (10 seconds), not
+`ADMITTED_AFTER_S` (one second). Neither constant, the generic admission probe,
+production route nor any existing assertion changes. GREEN: delayed original
+case one passed, 221 warnings, 12.32s
+(`/tmp/task15286_voice_delayed_init_green.txt`); new contracts three passed,
+20 warnings, 8.26s (`/tmp/task15286_voice_reply_budget_green.txt`).
+
+#### Stage 3: Verify, Independently Review And Publish
+**Goal:** Publish the verified correction without expanding runtime scope.
+**Success Criteria:** No new test/static/security regressions; independent
+bounded review; live required CI still gates integration.
+**Tests:** Focused voice/helper cases, full auth matrix with exact baseline
+comparison, full Chunking, quality/function-size/tracking ratchets and Bandit.
+**Status:** In Progress
+
+Focused voice/helper tests: 21 passed, 161 deselected, 245 warnings, 16.49s
+(`/tmp/task15286_voice_focus_green.txt`). Full auth matrix: 174 passed and
+eight failed, 1089 warnings, 46.63s
+(`/tmp/task15286_voice_full_matrix_after.txt`). All eight failing node IDs
+exactly match the pre-correction baseline and concern ACP-multiplex, not voice;
+the matrix is not claimed globally green. No unrelated ACP fix or skip is
+introduced. Full Chunking: 796 passed, one established PyThaiNLP skip, 2000
+warnings, 34.17s (`/tmp/task15286_voice_fix_chunking.txt`). Quality,
+function-size and tracking-format ratchets: 18 passed, 49 warnings, 37.99s
+(`/tmp/task15286_voice_fix_ratchets.txt`).
+
+Ruff, scoped Black, compileall and hierarchy mypy (seven files) pass. Touched
+production Bandit: zero findings/errors across 2876 LOC
+(`/tmp/bandit_task15286_voice_fix_touched_production.json`). Test-file Bandit
+excludes only pytest B101; its two B105 fixture findings exactly match the
+unmodified baseline, with zero new findings/errors
+(`/tmp/bandit_task15286_voice_fix_test.json`,
+`/tmp/bandit_task15286_voice_baseline.json`). No new suppressions or gate
+changes are added. Independent review and publication evidence follow below.
+
+The prior rebased head `6b9b24729c2d068ed8b11b7902c6adea78f426ed` is published;
+its original pending-publication note is historical, not the current state.
+New review comment 4436965700 is addressed by an explicit chronological
+publication checkpoint in TASK-15286. This correction itself remains pending
+publication until a subsequent checkpoint verifies its remote SHA. Preserve
+the human Change summary verbatim and require all eight live CI contexts on
+the exact new head before the authorized guarded merge.
+
+Bounded independent review approved this test-only delta and its checkpoints
+with no Critical, Important or Minor findings. Controller dispositions of its
+three declined items: retain the unchanged generic silent-admission semantics
+(voice still requires an explicit ACK); record the eight inherited ACP failures
+without introducing unrelated runtime changes or waiving any CI result; retain
+the two unchanged fixture-only B105 findings with no new suppressions or
+credential exposure. Changed auth-test mypy also passes (one source file).
+Final tracking-format rerun: four passed, 20 warnings, 1.17s
+(`/tmp/task15286_voice_final_tracking.txt`); canonical CLI check and diff checks
+pass. Local correction and review are complete; publication and exact-head CI
+remain the next Stage 3 steps, not evidence of an already completed merge.

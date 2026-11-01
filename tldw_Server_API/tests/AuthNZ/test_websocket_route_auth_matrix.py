@@ -845,7 +845,39 @@ def test_realtime_speech_echoes_the_bearer_subprotocol(env: SimpleNamespace, rou
 
 
 def _voice_auth(client: TestClient, url: str = ROUTES[VOICE][0], **frame: object) -> str:
-    return _outcome(client, url, frame={"type": "auth", **frame}, timeout=ADMITTED_AFTER_S)
+    """Voice acknowledges auth after session/DB setup; silence is not its success signal."""
+    return _outcome(client, url, frame={"type": "auth", **frame}, timeout=FRAME_TIMEOUT_S)
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [("/auth-ok", "answered auth_ok"), ("/refuses", "closed 4401"), ("/waits", "silent")],
+)
+def test_voice_auth_waits_for_a_bounded_frame_reply(path: str, expected: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit voice reply uses the frame budget, not the silent-admission probe."""
+    app = _scratch_app()
+
+    @app.websocket("/auth-ok")
+    async def acknowledge(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.receive_json()
+        await websocket.send_json({"type": "auth_ok"})
+
+    monkeypatch.setitem(globals(), "FRAME_TIMEOUT_S", 0.2)
+    monkeypatch.setitem(globals(), "ADMITTED_AFTER_S", 0.01)
+    receive = _receive
+    reply_budgets: list[float] = []
+
+    def observed_receive(ws: object, timeout: float) -> dict[str, object] | None:
+        reply_budgets.append(timeout)
+        return receive(ws, timeout)
+
+    monkeypatch.setitem(globals(), "_receive", observed_receive)
+    with TestClient(app) as client:
+        outcome = _voice_auth(client, path)
+
+    assert outcome == expected
+    assert reply_budgets == [FRAME_TIMEOUT_S]
 
 
 def test_voice_reads_a_deprecated_query_token_only_without_a_frame_token(env: SimpleNamespace) -> None:
