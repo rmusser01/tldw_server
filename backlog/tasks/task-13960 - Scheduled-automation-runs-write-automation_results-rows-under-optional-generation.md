@@ -1,5 +1,5 @@
 ---
-id: TASK-13952
+id: TASK-13960
 title: 'Scheduled-automation runs write automation_results rows under optional generation'
 status: To Do
 assignee: []
