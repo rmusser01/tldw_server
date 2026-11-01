@@ -221,3 +221,12 @@ from ...Utils.jobs_operation_contracts import (
 from ...Utils.jobs_operation_contracts import (
     timezone as timezone,
 )
+# Shared resource facts are also available at the existing operation boundary.
+from ..resource_contracts import (
+    ResourceAdmission as ResourceAdmission,
+    ResourceAdmissionRequest as ResourceAdmissionRequest,
+    ResourceAttempt as ResourceAttempt,
+    ResourceBinding as ResourceBinding,
+    ResourceScope as ResourceScope,
+)
+

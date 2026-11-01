@@ -1480,6 +1480,9 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             ):
                 with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                     conn.execute(f"ALTER TABLE jobs_archive ADD COLUMN {column_sql}")  # nosec B608
+            from .operations.sqlite.resource import ensure_resource_schema
+
+            ensure_resource_schema(conn)
             _upgrade_legacy_admin_webhook_archives_sqlite(conn)
             _ensure_sqlite_dependency_snapshot_columns(conn)
             try:

@@ -1558,6 +1558,9 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             with psycopg.connect(_dsn) as required_conn, required_conn.cursor() as required_cur:
                 _configure_pg_archive_migration_session(required_cur)
                 _ensure_pg_execution_control_columns(required_cur)
+                from .operations.postgres.resource import ensure_resource_schema
+
+                ensure_resource_schema(required_cur)
         except required_migration_exceptions as exc:
             raise RuntimeError(
                 "PostgreSQL Jobs required schema migration failed"
@@ -1769,6 +1772,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                         "ALTER TABLE jobs_archive FORCE ROW LEVEL SECURITY",
                         "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY",
                         "ALTER TABLE job_idempotency_receipts FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_heads ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_heads FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_request_receipts ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_request_receipts FORCE ROW LEVEL SECURITY",
                     ):
                         with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                             _p.execute(_rls_ddl)
@@ -1973,6 +1980,14 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             _sql.Identifier(role),
                         )
                     )
+                    for resource_table in ("job_resource_heads", "job_resource_request_receipts"):
+                        cur.execute(
+                            _sql.SQL("GRANT INSERT ON TABLE {}.{} TO {}").format(
+                                _sql.Identifier(schema_name),
+                                _sql.Identifier(resource_table),
+                                _sql.Identifier(role),
+                            )
+                        )
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
 
@@ -1992,9 +2007,16 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_attachments",
                 "job_dependencies",
                 "job_idempotency_receipts",
+                "job_resource_heads",
+                "job_resource_request_receipts",
             ):
                 _enable_rls(_table)
             admin_expr, domain_filter, owner_filter = build_jobs_rls_predicates()
+            from .operations.postgres.resource import ensure_resource_rls
+
+            ensure_resource_rls(
+                cur, admin_expr=admin_expr, domain_filter=domain_filter, owner_filter=owner_filter
+            )
 
             cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
             cur.execute(
