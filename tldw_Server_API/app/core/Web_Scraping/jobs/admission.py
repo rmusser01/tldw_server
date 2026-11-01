@@ -62,11 +62,14 @@ def public_diagnostic(value: Any) -> Any:
     return "execution_failed"
 
 
-def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[Any, int]:
+def bounded_snapshot(
+    value: Any, limit: int, *, redact: bool = False, article_path: tuple[str, ...] | None = None
+) -> tuple[Any, int]:
     """Copy strict JSON data while sizing UTF-8 incrementally, without coercion.
 
     JSON string escaping is chunked, so oversized strings never create a second
     unbounded serialized result. A depth/cycle guard rejects hostile containers.
+    Only direct prose fields at the trusted article_path bypass URL redaction.
     """
     from .projections import PUBLIC_CONTENT_KEYS, private_state_key, public_state_string
 
@@ -87,11 +90,17 @@ def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[A
             except UnicodeError:
                 raise ValueError("invalid JSON string encoding") from None
 
-    def visit(item: Any, depth: int, *, public_content: bool = False) -> Any:
+    def visit(item: Any, depth: int, path: tuple[str | int, ...]) -> Any:
         if depth > 64:
             raise ValueError("JSON nesting exceeds allowance")
         kind = type(item)
         if kind is str:
+            public_content = (
+                article_path is not None
+                and bool(path)
+                and path[:-1] == article_path
+                and path[-1] in PUBLIC_CONTENT_KEYS
+            )
             if redact and not public_content:
                 item = public_state_string(item)
             string(item)
@@ -128,18 +137,18 @@ def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[A
                         charge(1)
                     string(key)
                     charge(1)
-                    result[key] = visit(child, depth + 1, public_content=key in PUBLIC_CONTENT_KEYS)
+                    result[key] = visit(child, depth + 1, path + (key,))
                 return result
             result_list = []
-            for child in item:
+            for index, child in enumerate(item):
                 if result_list:
                     charge(1)
-                result_list.append(visit(child, depth + 1))
+                result_list.append(visit(child, depth + 1, path + (index,)))
             return result_list
         finally:
             ancestors.remove(identity)
 
-    snapshot = visit(value, 0)
+    snapshot = visit(value, 0, ())
     return snapshot, size
 
 

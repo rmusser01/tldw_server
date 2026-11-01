@@ -161,3 +161,59 @@ def test_option_header_aliases_and_schemeless_url_credentials_are_private():
         "link": "//user:sentinel-password@example.com/path?key=sentinel-query",
     }
     assert "sentinel-" not in json.dumps(projections.public_job(job))
+
+
+@pytest.mark.parametrize("mode", ["polling", "history", "legacy_history"])
+@pytest.mark.parametrize("key", ["content", "raw_html", "raw_content"])
+@pytest.mark.parametrize("container", ["direct", "nested", "list"])
+def test_prose_exemption_applies_only_at_article_boundary(mode, key, container):
+    def wrapped(value):
+        leaf = {key: value}
+        if container == "nested":
+            return {"result": leaf}
+        if container == "list":
+            return {"items": [leaf]}
+        return leaf
+
+    job = private_job()
+    prose = {"content": URL, "raw_html": f"<p>{URL}</p>", "raw_content": URL}
+    job.result = {**prose, "metadata": wrapped(URL), "preflight_analysis": wrapped(URL)}
+    if mode == "polling":
+        result = projections.public_job(job)["result"]
+    elif mode == "history":
+        history = projections.History(1, 10000)
+        history.record(job, job.result)
+        result = history.get("job").result
+    else:
+        from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import ScrapingJobQueue
+
+        queue = ScrapingJobQueue()
+        queue._record_completed_job(job)
+        result = queue.get_job("job").result
+    assert result["metadata"] == wrapped("https://example.com/article")
+    assert result["preflight_analysis"] == wrapped("https://example.com/article")
+    assert {key: result[key] for key in prose} == prose
+    assert job.result["metadata"] == wrapped(URL)
+
+
+def test_nested_prose_redaction_preserves_exact_history_byte_limit():
+    job = private_job()
+    job.result = {"content": URL, "raw_html": f"<p>{URL}</p>", "metadata": {"content": URL}}
+    expected = {
+        **job.to_dict(),
+        "url": "https://example.com/article",
+        "metadata": {},
+        "error": "execution_failed",
+        "result": {"content": URL, "raw_html": f"<p>{URL}</p>", "metadata": {"content": "https://example.com/article"}},
+    }
+    size = len(json.dumps(expected, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    exact = projections.History(1, size)
+    exact.record(job, job.result)
+    retained = exact.get("job")
+    assert retained is not None
+    assert retained.to_dict() == expected
+    assert exact.bytes == size
+    smaller = projections.History(1, size - 1)
+    smaller.record(job, job.result)
+    assert smaller.get("job") is None
+    assert smaller.bytes == 0

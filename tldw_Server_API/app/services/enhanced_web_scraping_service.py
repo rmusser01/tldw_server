@@ -242,7 +242,9 @@ class WebScrapingService:
             if self.scraper is None:
                 return
             self._stopping = True
-            if self._shutdown_task is None:
+            cleanup = self._shutdown_task
+            # Retry a finished unsuccessful attempt, never shadow live cleanup.
+            if cleanup is None or (cleanup.done() and (cleanup.cancelled() or cleanup.exception() is not None)):
                 self._shutdown_task = asyncio.create_task(self.scraper.stop())
                 self._shutdown_task.add_done_callback(_observe_lifecycle_task)
             # Request cancellation must not cancel the resource owner's cleanup.

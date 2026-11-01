@@ -189,6 +189,67 @@ async def test_owned_queue_drain_blocks_replacement_and_global_cleanup(monkeypat
         await svc.shutdown()
 
 
+@pytest.mark.parametrize("failure", [OSError, asyncio.CancelledError])
+async def test_completed_failed_cleanup_can_be_retried_without_replacing_owner(monkeypatch, failure):
+    svc = services.WebScrapingService()
+    calls = 0
+    entered, release = asyncio.Event(), asyncio.Event()
+    state = {"state": "stopping"}
+
+    async def stop():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise failure("transient cleanup failure")
+        entered.set()
+        await release.wait()
+
+    scraper = SimpleNamespace(stop=stop, job_queue=SimpleNamespace(get_status=lambda: dict(state)))
+    svc.scraper, svc._initialized = scraper, True
+    monkeypatch.setattr(services, "_web_scraping_service", svc)
+    with pytest.raises(failure):
+        await services.shutdown_web_scraping_service()
+    assert services.get_web_scraping_service() is svc
+    assert svc.scraper is scraper and svc._stopping
+    with pytest.raises(HTTPException) as error:
+        await svc.initialize()
+    assert error.value.status_code == 503
+    assert calls == 1
+
+    first = asyncio.create_task(svc.shutdown())
+    # Also observe a cached-failure retry promptly instead of waiting on an event
+    # that only a new cleanup attempt can set.
+    started = asyncio.create_task(entered.wait())
+    await asyncio.wait((first, started), return_when=asyncio.FIRST_COMPLETED)
+    try:
+        assert entered.is_set(), "Explicit retry reused the completed failed cleanup"
+        second = asyncio.create_task(svc.shutdown())
+        release.set()
+        await asyncio.gather(first, second)
+        assert calls == 2
+        assert svc.scraper is scraper and svc._stopping
+        with pytest.raises(HTTPException) as error:
+            await svc.initialize()
+        assert error.value.status_code == 503
+        state["state"] = "stopped"
+        await services.shutdown_web_scraping_service()
+        assert services._web_scraping_service is None
+        assert calls == 2
+
+        replacement = SimpleNamespace()
+
+        async def factory():
+            return replacement
+
+        monkeypatch.setattr(services, "create_enhanced_scraper", factory)
+        await svc.initialize()
+        assert svc.scraper is replacement and svc._initialized
+    finally:
+        release.set()
+        started.cancel()
+        await asyncio.gather(first, started, return_exceptions=True)
+
+
 async def test_initialization_and_task_exception_logs_drop_private_text(monkeypatch):
     messages = []
     sink = logger.add(lambda message: messages.append(str(message)), format="{message}")

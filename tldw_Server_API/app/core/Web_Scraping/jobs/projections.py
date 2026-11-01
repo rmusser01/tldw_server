@@ -119,7 +119,7 @@ def public_job(job: ScrapingJob, *, crawl_outcome: CrawlOutcome | None = None) -
             "stop_reason": crawl_outcome.stop_reason,
             "has_partial_results": crawl_outcome.has_partial_results,
         }
-    return bounded_snapshot(snapshot, sys.maxsize, redact=True)[0]
+    return bounded_snapshot(snapshot, sys.maxsize, redact=True, article_path=("result",))[0]
 
 
 def public_progress(snapshot: Mapping[str, Any]) -> dict[str, Any]:
@@ -149,7 +149,7 @@ class History:
             # Keep sizing incremental; do not build an unbounded public copy first.
             state = candidate.to_dict()
             state["url"] = public_state_string(candidate.url)
-            snapshot, size = bounded_snapshot(state, self.max_bytes, redact=True)
+            snapshot, size = bounded_snapshot(state, self.max_bytes, redact=True, article_path=("result",))
         except ValueError:
             return None
         candidate.result = snapshot["result"]
