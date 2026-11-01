@@ -1,7 +1,7 @@
 ---
 id: TASK-15412
 title: Implement Jobs resource admission and request replay
-status: To Do
+status: In Progress
 labels:
 - claims
 - jobs
@@ -27,6 +27,7 @@ Atomic resource admission/replay, independent receipt-facade guards and scoped J
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved plan task 2: Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md. ADR required: no additional ADR; accepted Docs/ADR/085-jobs-resource-admission-and-domain-publication.md governs the approved resource/publication boundary with ADR-003 and ADR-058. Execute only in the existing linked worktree/branch, test first, use shared Jobs lifecycle APIs, official backend fixtures, focused verification and touched-code Bandit, normal hooks and scoped commits. Task-ID audit explicitly targeted rmusser01/tldw_server after discovering gh defaults to upstream: fetched dev 61d02ed484a3c80f5423676b959cf14e7b572a62, checked all 37 open PR paginated file lists (223 selected Backlog/ADR records, no truncation) and current branch; highest observed id 15410. Reserved TASK-15411 through TASK-15421 for the eleven reviewable plan tasks. No collision with planning records TASK-15282/TASK-15283 or ADR-085. Preserve unrelated main-checkout changes; no push/PR/merge authorized.
+Task 1 prerequisites completed in commits 5b12a5f3fa and 3a3c0991ce; independent spec/quality review and fix re-review are clean. Begin approved plan Task 2 using shared contracts/schema, task-1-interfaces.md and task-2-integration-notes.md in this plans isolated SDD workspace. Resource bindings are immutable on UPDATE and therefore must be inserted atomically as complete metadata; schema permits payload representation rewrites while Task 3 later guards semantic replacement. Queue/fair-share/payload preparation must remain shared with ordinary admission while retained replay runs first under the resource lock. This task also closes independent receipt-facade bypasses and defines token-restoring Jobs-specific RLS context. Test first with official PostgreSQL fixtures; no Claims lifecycle, producer enablement, push or PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
