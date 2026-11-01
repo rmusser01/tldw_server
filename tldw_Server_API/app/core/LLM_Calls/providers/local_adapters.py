@@ -17,11 +17,13 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _HC_RetryPolicy,
+    afetch as _hc_afetch,
+    create_async_client as _hc_create_async_client,
     create_client as _hc_create_client,
     fetch as _hc_fetch,
     stream_response as _hc_stream_response,
 )
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy, validate_payload
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     get_http_status_from_exception,
     is_network_error,
@@ -29,6 +31,7 @@ from tldw_Server_API.app.core.LLM_Calls.error_utils import (
 from tldw_Server_API.app.core.LLM_Calls.local_cache_diagnostics import build_local_cache_diagnostic
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     _sanitize_payload_for_logging,
+    build_openai_chat_payload,
     merge_extra_body,
     merge_extra_headers,
 )
@@ -276,6 +279,23 @@ def _extract_text_from_message_content(content: str | list[dict[str, Any]], prov
     return "\n".join(text_parts).strip()
 
 
+def _local_chat_completions_url(api_base_url: str, provider_name: str) -> str:
+    """Preserve the local OpenAI-compatible endpoint path conventions."""
+    chat_completions_path = "v1/chat/completions"  # Standard OpenAI path
+    normalized_base = (api_base_url or "").strip()
+    if not normalized_base:
+        raise ChatConfigurationError(provider=provider_name, message=f"{provider_name} API base URL is required.")
+    normalized_base = normalized_base.rstrip("/")
+    lower_base = normalized_base.lower()
+
+    if "chat/completions" in lower_base or lower_base.endswith("/completion"):
+        return normalized_base
+    elif lower_base.endswith("/v1"):
+        return normalized_base + "/chat/completions"
+    else:
+        return normalized_base + "/" + chat_completions_path
+
+
 def _chat_with_openai_compatible_local_server(
         api_base_url: str,
         model_name: str | None,
@@ -428,19 +448,7 @@ def _chat_with_openai_compatible_local_server(
         return data
 
     # Construct full API URL for chat completions
-    chat_completions_path = "v1/chat/completions" # Standard OpenAI path
-    normalized_base = (api_base_url or "").strip()
-    if not normalized_base:
-        raise ChatConfigurationError(provider=provider_name, message=f"{provider_name} API base URL is required.")
-    normalized_base = normalized_base.rstrip("/")
-    lower_base = normalized_base.lower()
-
-    if "chat/completions" in lower_base or lower_base.endswith("/completion"):
-        full_api_url = normalized_base
-    elif lower_base.endswith("/v1"):
-        full_api_url = normalized_base + "/chat/completions"
-    else:
-        full_api_url = normalized_base + "/" + chat_completions_path
+    full_api_url = _local_chat_completions_url(api_base_url, provider_name)
 
     logging.debug(
         "{}: Posting local chat request. Payload keys: {}",
@@ -2147,6 +2155,88 @@ class LlamaCppAdapter(_LocalAdapterBase):
     name = "llama.cpp"
     supports_tools = False
     _handler = staticmethod(_llama_request)
+
+    strict_async_chat_is_native = True
+
+    @staticmethod
+    def _strict_policy(request: dict[str, Any]) -> ProviderCallPolicy | None:
+        policy = request.get("call_policy")
+        if (
+            isinstance(policy, ProviderCallPolicy)
+            and policy.maximum_timeout_seconds is not None
+            and policy.required_endpoint_scope is not None
+        ):
+            return policy
+        return None
+
+    def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        if self._strict_policy(request) is not None:
+            raise ChatConfigurationError(
+                provider=self.name, message="Strict llama.cpp calls require async nonstreaming transport."
+            )
+        return super().chat(request, timeout=timeout)
+
+    def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        if self._strict_policy(request) is not None:
+            raise ChatConfigurationError(
+                provider=self.name, message="Strict llama.cpp calls require async nonstreaming transport."
+            )
+        return super().stream(request, timeout=timeout)
+
+    async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        policy = self._strict_policy(request)
+        if policy is None:
+            return await super().achat(request, timeout=timeout)
+        limit = (
+            min(float(policy.maximum_timeout_seconds), float(timeout))
+            if timeout is not None
+            else float(policy.maximum_timeout_seconds)
+        )
+        try:
+            async with asyncio.timeout(limit):
+                raw, credentials = self._bind_request_credentials_with_handle(request)
+                endpoint = (
+                    credentials.trusted_endpoint
+                    if credentials is not None
+                    else resolve_trusted_provider_endpoint(self.name)
+                )
+                if endpoint is None:
+                    raise ChatConfigurationError(provider=self.name, message="llama.cpp endpoint is not configured.")
+                url = _local_chat_completions_url(endpoint.base_url, self.name)
+                if not endpoint.scope.matches(url) or not policy.required_endpoint_scope.matches(url):
+                    raise ChatConfigurationError(provider=self.name, message="Configured endpoint scope mismatch.")
+                sanitized = validate_payload(self.name, self._sanitize_request(raw))
+                payload = build_openai_chat_payload(sanitized)
+                payload["stream"] = False
+                payload = merge_extra_body(payload, sanitized)
+                headers = {"Content-Type": "application/json"}
+                if raw.get("api_key"):
+                    headers["Authorization"] = f"Bearer {raw['api_key']}"
+                headers = merge_extra_headers(headers, sanitized)
+                async with _hc_create_async_client(timeout=limit) as client:
+                    response = await _hc_afetch(
+                        method="POST",
+                        url=url,
+                        client=client,
+                        headers=headers,
+                        json=payload,
+                        timeout=limit,
+                        retry=_HC_RetryPolicy(attempts=1),
+                        allow_redirects=False,
+                        configured_endpoint=endpoint.scope,
+                        sensitive_observability=True,
+                        transport="httpx",
+                        max_response_bytes=65536,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    self._raise_if_in_band_provider_error(data, phase="strict_async_response")
+                    return data
+        except asyncio.CancelledError:
+            raise
+        except _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS as exc:
+            _raise_sanitized_local_provider_error(self.name, exc, phase="strict_async_chat")
+
 
     def _to_handler_args(self, request: dict[str, Any], *, streaming: bool | None) -> dict[str, Any]:
         stream_flag = request.get("stream")

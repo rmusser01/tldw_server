@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 from functools import partial
@@ -18,6 +19,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     CurrentPrincipal,
     RequirePermission,
     RequireRole,
+    User,
+    get_request_user,
 )
 from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     BlocklistAppendRequest,
@@ -29,6 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     BlocklistManagedItem,
     BlocklistManagedResponse,
     ModerationBlocklistUpdate,
+    ModerationClassificationRequest,
     ModerationReviewAuditResponse,
     ModerationReviewBulkDecisionRequest,
     ModerationReviewBulkDecisionResponse,
@@ -50,6 +54,9 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope, load_server_config_snapshot
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import capture_provider_override_call_snapshot
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     MODERATION_AUDIT_READ,
     MODERATION_REVIEW_BULK_DECIDE,
@@ -57,12 +64,21 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     MODERATION_REVIEW_READ,
     SYSTEM_CONFIGURE,
 )
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.Moderation.classification import (
+    ClassificationError,
+    audited_transport,
+    classify_sample,
+    saved_classification,
+)
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import get_moderation_review_service
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     GuardianModerationProxy,
     bootstrap_guardian_moderation_runtime,
 )
+from tldw_Server_API.app.core.Slides.generation_disconnect import generation_disconnected
 
 router = APIRouter()
 
@@ -633,6 +649,90 @@ async def test_moderation(
         evaluation=True,
     )
     return response
+
+
+
+@rules_router.post(
+    "/moderation/classify",
+    response_model=ModerationReviewItem,
+    tags=["moderation"],
+    summary="Classify an explicit sample with a configured model for human review",
+)
+async def classify_moderation_sample(
+    payload: ModerationClassificationRequest,
+    request: Request,
+    principal: CurrentPrincipal,
+    current_user: User = Depends(get_request_user),
+) -> ModerationReviewItem:
+    """Save advisory model evidence; never change enforcement or make a human decision."""
+    runtime = None
+    try:
+        owner, team_ids, org_ids, trusted_override = derive_trusted_credential_scope(request, current_user)
+        current_owner = getattr(current_user, "id_int", None) or getattr(current_user, "id", None)
+        if owner is None or principal.user_id != owner or str(current_owner) != str(owner):
+            raise HTTPException(status_code=403, detail="Classification requires an authenticated user owner.")
+        review = get_moderation_review_service()
+        saved = saved_classification(payload, actor_id=principal.principal_id, review=review)
+        if saved is not None:
+            return ModerationReviewItem.model_validate(saved)
+        if not audited_transport(payload.provider):
+            raise ClassificationError("unsupported_provider")
+        runtime = ProviderCredentialRuntime(
+            user_id=owner,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            trusted_base_url_override=trusted_override,
+            server_config_snapshot=copy.deepcopy(load_server_config_snapshot()),
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+        credentials = await runtime.resolve(payload.provider, model=payload.model)
+
+        async def watch_disconnect() -> None:
+            while not await generation_disconnected(request):
+                await asyncio.sleep(0.05)
+
+        if await generation_disconnected(request):
+            raise HTTPException(status_code=499, detail="Classification stopped before inference.")
+
+        operation = asyncio.create_task(
+            classify_sample(
+                payload,
+                actor_id=principal.principal_id,
+                user_id=owner,
+                credentials=credentials,
+                review=review,
+                credential_runtime=runtime,
+            )
+        )
+        monitor = asyncio.create_task(watch_disconnect())
+        try:
+            await asyncio.wait({operation, monitor}, return_when=asyncio.FIRST_COMPLETED)
+            if monitor.done():
+                monitor.result()
+                raise HTTPException(
+                    status_code=499, detail="Classification stopped. Check the saved receipt before retrying."
+                )
+            return ModerationReviewItem.model_validate(await operation)
+        finally:
+            operation.cancel()
+            monitor.cancel()
+            await await_owned_worker(asyncio.gather(operation, monitor, return_exceptions=True))
+    except ClassificationError as exc:
+        code = str(exc)
+        status_code = {"receipt_conflict": 409, "unsupported_provider": 422, "invalid_result": 502}.get(code, 503)
+        messages = {
+            "receipt_conflict": "This request ID already belongs to a different or redacted sample. Open its Review item.",
+            "unsupported_provider": "Model classification currently requires a configured llama.cpp model.",
+            "invalid_result": "The model returned an incomplete or ungrounded result. No classification was saved.",
+            "provider_not_configured": "The selected model provider is not configured.",
+            "provider_failed": "The model request failed or timed out. Check the saved receipt before an explicit retry.",
+        }
+        raise HTTPException(status_code=status_code, detail={"code": code, "message": messages[code]}) from None
+    except ByokResolutionError:
+        raise HTTPException(status_code=503, detail="Provider credentials or configuration are unavailable.") from None
+    finally:
+        if runtime is not None:
+            await await_owned_worker(runtime.close())
 
 
 @review_router.get(
