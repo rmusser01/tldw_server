@@ -1,7 +1,7 @@
 ---
 id: TASK-15412
 title: Record real VZ payload cleanup acceptance without host reboot
-status: Done
+status: In Progress
 labels:
 - sandbox
 - vz-linux
@@ -21,6 +21,7 @@ User explicitly requested stale VM task closeout followed by real-VM cleanup acc
 - [x] #3 Existing real-VM failure workflow passes all expected positive/negative cases without skips or cleanup uncertainty; final receipts prove hashes and safe removal of invocation-owned boot payloads after real teardown.
 - [x] #4 Independent filesystem/process checks confirm removed payload names, preserved provenance and canonical hashes, no owned VM/helper remains, and no historical paths were removed.
 - [x] #5 Evidence tracker and task record exact commands, source/helper hashes, results and limits; relevant portable/style/security checks and review pass. No Docker, reboot or default-helper takeover.
+- [ ] #6 PR #3399 valid review comments are addressed on the verified current head, the requester Change summary is preserved verbatim, all applicable required ruleset gates are satisfied, and integration follows the current merge-queue mode without bypass or host reboot.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -40,6 +41,7 @@ Full real-VM cleanup acceptance PASS on November 1:
 - Updated Docs/Sandbox/vz-linux-prepared-host-evidence.md with accepted packet, command/hashes/counts and residual proof limits. No runtime code changed; no Docker, host reboot, default-helper takeover, distribution build, historical artifact deletion or worktree removal. Independent read-only review is pending before final commit. Existing main checkout has unrelated concurrent sandbox edits; none were touched.
 Final review/verification: independent reviewer Dewey read the diff, raw JUnit/guest receipts, existing production cleanup ordering and independent audit; no actionable findings or overclaiming found. Reviewer did not rerun live tests or mutate files/Git state. Canonical task-format ratchet 4 passed (6 existing warnings); explicit backlog-py normalize --check passed for both closed stale tasks and this new task. git diff --check passed. All five scoped Bandit reports have zero findings/errors and are retained under full/security-reports; intentional pytest assertions excluded only in the test report. All four planned stages are complete. This acceptance establishes real workflow-owned payload removal and provenance/source preservation, not reboot, kernel/VZ-callback hangs, actual mount escape, hostile same-UID interference or SIGKILL/host failure. Host reboot explicitly not performed. Evidence and isolated worktree remain preserved. The related documentation/task updates are committed locally; no PR, branch push, CI redesign or automation resume is part of this request.
 November 1 publication requested explicitly: push codex/vz-real-cleanup-acceptance and create a PR for the two stale-task closeouts plus real-VM evidence. Earlier local-only/no-publication notes describe the completed acceptance phase, not a current restriction. Fresh retained-packet audit passed all12 cases/36 bundles/108 removals/70 input hashes with canonical and selected-source fingerprints unchanged and owned helper absent; no VMs were rerun. Fresh task-format gate4 passed, duplicate-task-ID check and diff checks clean. Checked current dev and paginated large open PR file lists for TASK-15412 collisions. Fetched dev6bf581da089a7aa6d90440a8801de07f8fdd238b; this documentation-only publication preserves the recorded live baseline61d02ed484a3c80f5423676b959cf14e7b572a62 and does not rebase a PR that is not yet about to merge. MERGE_QUEUE is unset; no auto-merge arm, required-gate dispatch, override or merge is requested. ADR required:no; existing ADR-010 and recorded cleanup/manual lifecycle contracts are unchanged. The new PR must obtain its own human Change summary and actual required review/CI gates before merge. Prior PR3061 summary and PR3051 exception do not transfer. Repository diff remains four Markdown task/evidence records; private receipts/images/scripts/helper binaries are retained locally and are not uploaded.
+November 1 requester explicitly authorized continuing PR #3399 through valid review resolution and protected merge, following merge queue rules with no host reboot. Reopen only this task for the added integration criterion; stale tasks TASK-13243.7/.13 remain Done. MERGE_QUEUE is unset and autoMergeRequest null, so manual front-PR rebase is required. PR was BEHIND; refreshed dev remains6bf581da089a7aa6d90440a8801de07f8fdd238b (unrelated Chunker PR #3095). Safe rebase completed without conflicts to b3baa5b6da; range-diff preserves all3 prior patches unchanged. No VZ helper, guest agent, image tooling, Sandbox code/tests or evidence tracker input changed on dev since the accepted live baseline. Do not rerun VMs. PR human Change summary is supplied and unchanged. All review threads and formal reviews are empty. Qodo comment6563854682 reports billing-blocked/out of credits, not a successful review or a code finding. CodeRabbit skipped its automatic non-default-target review; request available review and use fresh independent exact-head review, without claiming Qodo passed. Effective rules are seven strict GitHub Actions15368 contexts plus the license policy context; docs/backlog-only E2E Critical skipped outcome is explicitly accepted by CI_REQUIRED_GATES.md conditional execution policy. Old-head container aggregate is queued; other required aggregates/license passed, but none authorize merging the rebased head. No manual required-gate dispatch, admin bypass or unrelated job cancellation/restart is permitted.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -50,10 +52,10 @@ Completed stale-task closeout and live VZ payload-cleanup acceptance without reb
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
+- [ ] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
