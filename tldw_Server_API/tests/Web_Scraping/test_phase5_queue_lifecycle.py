@@ -1,6 +1,7 @@
 """Owned completion, retries, cancellation, stop and independent physical drain."""
 
 import asyncio
+import builtins
 import contextvars
 import gc
 import weakref
@@ -278,6 +279,29 @@ async def test_retry_checks_parent_and_charges_every_attempt():
     await q.stop()
 
 
+@pytest.mark.parametrize("attempt_limit", [1, 2])
+async def test_canonical_executor_is_the_only_attempt_accounting_owner(attempt_limit):
+    executor = Executor()
+    controls = CrawlContext(CrawlLimits(page_attempts=attempt_limit), clock=lambda: 0)
+
+    def start_page(payload, parent):
+        handle = executor(payload, parent)
+        value = page(error="retry") if len(executor.attempts) < attempt_limit else page()
+        executor.attempts[-1].finish(value)
+        return handle
+
+    q = ProcessLocalJobQueue(execute=start_page)
+    await q.start()
+    handle = await q.submit_page(job(), controls=controls)
+    delivered = await asyncio.gather(handle.result, return_exceptions=True)
+    await handle.drained
+    await settle(q)
+    await q.stop()
+    assert delivered == [page()]
+    assert len(executor.attempts) == attempt_limit
+    assert controls.snapshot().page_attempts == attempt_limit
+
+
 async def test_submit_stop_order_rejects_later_and_settles_prior():
     q = ProcessLocalJobQueue(execute=Executor())
     future = await q.add_job(job())
@@ -449,6 +473,65 @@ async def test_failure_delivery_does_not_retain_controls_via_traceback_after_dra
     gc.collect()
     assert all(reference() is None for reference in references)
     await q.stop()
+
+
+@pytest.mark.parametrize("chain", ["explicit_cause", "implicit_context", "cycle", "nested_group"])
+async def test_exception_graph_releases_payload_and_controls_after_drain(chain):
+    references, originals = [], []
+
+    def failed_acquisition(payload, controls):
+        try:
+            raise ValueError("private provider cause")
+        except ValueError as error:
+            return error
+
+    def execute(payload, controls):
+        references.extend((weakref.ref(payload), weakref.ref(controls)))
+        inner = failed_acquisition(payload, controls)
+        if chain == "nested_group":
+            nested = builtins.ExceptionGroup("nested failure", [inner])
+            outer = builtins.ExceptionGroup("outer failure", [nested])
+            originals.extend((outer, inner, nested))
+            raise outer
+        outer = RuntimeError("outer failure")
+        originals.extend((outer, inner))
+        if chain == "cycle":
+            outer.__cause__ = inner
+            inner.__context__ = outer
+            raise outer
+        try:
+            raise inner
+        except ValueError:
+            if chain == "explicit_cause":
+                raise outer from inner
+            raise outer  # noqa: B904 - deliberately exercise implicit exception context
+
+    q = ProcessLocalJobQueue(execute=execute)
+    controls = CrawlContext(CrawlLimits(), clock=lambda: 0)
+    await q.start()
+    handle = await q.submit_page(job(metadata={"custom_cookies": {"session": "private-cookie"}}), controls=controls)
+    del controls
+    delivered = (await asyncio.gather(handle.result, return_exceptions=True))[0]
+    await handle.drained
+    await settle(q)
+    await q.stop()
+    gc.collect()
+    assert delivered is originals[0]
+    assert type(delivered) is (builtins.ExceptionGroup if chain == "nested_group" else RuntimeError)
+    assert str(delivered) == ("outer failure (1 sub-exception)" if chain == "nested_group" else "outer failure")
+    assert str(originals[1]) == "private provider cause"
+    if chain == "nested_group":
+        assert delivered.exceptions[0] is originals[2]
+        assert originals[2].exceptions[0] is originals[1]
+    elif chain == "implicit_context":
+        assert delivered.__context__ is originals[1]
+    else:
+        assert delivered.__cause__ is originals[1]
+        if chain == "cycle":
+            assert originals[1].__context__ is delivered
+    assert q.get_status()["live_jobs"] == q.get_status()["payload_bytes"] == 0
+    assert all(reference() is None for reference in references)
+    assert all(error.__traceback__ is None for error in originals)
 
 
 async def test_initial_cancel_requested_preserves_legacy_no_execution_behavior():

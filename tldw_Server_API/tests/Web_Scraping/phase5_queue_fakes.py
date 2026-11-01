@@ -38,11 +38,19 @@ class Attempt:
 
 
 class Executor:
+    """Canonical start_page boundary owns one debit per logical invocation."""
+
     def __init__(self):
         self.started = asyncio.Queue()
         self.attempts = []
 
     def __call__(self, payload, controls):
+        if controls is not None:
+            reservation = controls.reserve("page_attempts")
+            try:
+                reservation.commit()
+            finally:
+                reservation.close()
         loop = asyncio.get_running_loop()
         attempt = Attempt(payload, controls, loop.create_future(), loop.create_future())
         self.attempts.append(attempt)

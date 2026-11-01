@@ -23,6 +23,45 @@ class SnapshotTooLarge(ValueError):
     """The incremental JSON representation exhausted its byte allowance."""
 
 
+PUBLIC_DIAGNOSTICS = frozenset(
+    {
+        "execution_failed",
+        "source_extraction_failed",
+        "deadline_exhausted",
+        "budget_exhausted",
+        "Job cancelled",
+        "Job cancelled due to shutdown",
+    }
+)
+DIAGNOSTIC_KEYS = frozenset(
+    {
+        "error",
+        "errors",
+        "errormessage",
+        "errordetail",
+        "diagnostic",
+        "diagnostics",
+        "exception",
+        "exceptions",
+        "exceptionmessage",
+        "traceback",
+        "message",
+        "detail",
+        "details",
+        "reason",
+    }
+)
+
+
+def public_diagnostic(value: Any) -> Any:
+    """Keep known public codes, never arbitrary provider/transport diagnostics."""
+    if value is None or value is False:
+        return value
+    if type(value) is str and (not value or value in PUBLIC_DIAGNOSTICS):
+        return value
+    return "execution_failed"
+
+
 def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[Any, int]:
     """Copy strict JSON data while sizing UTF-8 incrementally, without coercion.
 
@@ -81,6 +120,8 @@ def bounded_snapshot(value: Any, limit: int, *, redact: bool = False) -> tuple[A
                         raise ValueError("JSON object keys must be strings")
                     if redact and _private_article_key(key):
                         continue
+                    if redact and "".join(char for char in key.lower() if char.isalnum()) in DIAGNOSTIC_KEYS:
+                        child = public_diagnostic(child)
                     if result:
                         charge(1)
                     string(key)
