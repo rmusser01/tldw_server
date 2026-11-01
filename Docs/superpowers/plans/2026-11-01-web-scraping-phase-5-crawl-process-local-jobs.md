@@ -676,6 +676,14 @@ on failure; retain prior valid state. Re-admit resumed URLs with current egress.
   trusted-local authorization mode are never loaded from checkpoint JSON or client
   options; stored owner/namespace are binding checks only, never a grant. Memory
   ports can keep the default None root because they do not open filesystem paths.
+- If the platform cannot provide the descriptor-relative no-follow operations
+  required for service-root confinement, that private mode fails closed with a
+  sanitized checkpoint failure; do not add an unsafe lexical/path-check fallback.
+  Explicit trusted-local legacy mode still uses native POSIX/Windows locking.
+  This is a documented service-root capability limitation, not verified Windows
+  service-root support or permission to break Windows legacy resume adapters.
+  Task 9/10 composition must select the correct trusted mode explicitly, never
+  from client options. Native Windows service-root support remains unverified.
 - Keep store methods synchronous as specified, but engine composition may offload
   potentially blocking filesystem operations through a narrow owned-operation
   helper reusing existing runtime PhysicalWork/WorkHandle and crawl registration.
