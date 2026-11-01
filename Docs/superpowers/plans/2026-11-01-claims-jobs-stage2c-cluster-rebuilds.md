@@ -10,9 +10,9 @@
 
 **Spec:** [Approved Stage 2C design](../specs/2026-11-01-claims-jobs-stage2c-cluster-rebuild-design.md).
 
-**Status:** Revised implementation plan; all five validated plan-review findings incorporated, awaiting requester review before execution.
+**Status:** Approved by the requester on 2026-11-01 after all five validated review corrections; execution started with Task 1.
 
-**Tracking:** TASK-15283 plans the implementation; TASK-15282 completed the design. Before executing each reviewable task, create or find its own Backlog execution record with backlog-py and link this plan. This document is not execution approval.
+**Tracking:** TASK-15283 completed planning; TASK-15282 completed the design. TASK-15411 through TASK-15421 track Tasks 1-11 respectively, with each record maintained through backlog-py. The requester approved this revised plan and, after clarification of the existing WorkerSDK, explicitly requested continuation. No push, PR or merge is authorized by this execution handoff.
 
 **ADR check:** No additional ADR is required. Accepted [ADR-085](../../ADR/085-jobs-resource-admission-and-domain-publication.md) governs resource admission and domain publication; ADR-003 and ADR-058 continue to govern Jobs ownership and row identity. A departure from these decisions requires design review, not an implementation shortcut.
 
@@ -121,7 +121,7 @@ Every task runs RED, minimal GREEN, relevant characterization regressions, focus
 **Goal:** Ship a reusable Jobs-owned resource capability before any Claims producer uses it.
 **Success Criteria:** Both backends enforce admission/replay and every relevant lifecycle path without changing opted-out Jobs behavior.
 **Tests:** Tasks 1-3 plus existing admission, lease, retry, quarantine, pruning, RLS, counter and event regressions.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Contracts, Registration And Durable Schema
 
