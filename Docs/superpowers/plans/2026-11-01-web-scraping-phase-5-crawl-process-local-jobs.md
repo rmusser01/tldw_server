@@ -144,7 +144,7 @@ that unwrap/catch outcomes; do not churn unrelated import users.
 **Goal:** Freeze supported behavior and define the interfaces subsequent tasks consume.
 **Success Criteria:** Profile matrix and private values tested; existing public constructors/signatures unchanged.
 **Tests:** Task 1 parity matrix and Task 2 limit/outcome/accounting tests.
-**Status:** In Progress.
+**Status:** Complete (Tasks 1-2 independently reviewed; baseline gates remain recorded).
 
 ### Task 1: Characterize Every Entry Profile
 
@@ -161,7 +161,7 @@ later tasks add `run_report()` without changing captured baseline expectations.
 Profile manifest names: `legacy_recursive`, `enhanced_recursive`, `legacy_sitemap`,
 `legacy_url_level`, `enhanced_sitemap`, `enhanced_url_level`, `enhanced_batch`.
 
-- [ ] **Step 1: Write characterization assertions and the manifest-completeness test.**
+- [x] **Step 1: Write characterization assertions and the manifest-completeness test.**
 
 ```python
 def test_profile_manifest_covers_public_crawl_imports(profile_manifest, inventory):
@@ -184,13 +184,13 @@ sync/async envelopes, nested metadata/extra fields, callbacks, and option presen
 Mark false completion/checkpoint deletion and unsafe projections as intentional
 corrections with separate regression tests in owning tasks, not frozen parity.
 
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_profile_contracts.py -q`.**
+- [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_profile_contracts.py -q`.**
 Expected: incomplete manifest test fails until all current inventory entry points
 are mapped; characterization assertions pass against existing behavior.
-- [ ] **Step 3: Complete the test-only profile manifest/helper from actual imports and three existing patterns: legacy traversal, enhanced traversal, and service precedence.**
+- [x] **Step 3: Complete the test-only profile manifest/helper from actual imports and three existing patterns: legacy traversal, enhanced traversal, and service precedence.**
 No production refactor in this task; record each consumer suite needed in Task 11.
-- [ ] **Step 4: Rerun the command and the three extended compatibility suites.** Expected: all pass; no live network or side effects.
-- [ ] **Step 5: Commit the explicit changed test paths and child task:** `test(web-scraping): characterize Phase 5 compatibility profiles`.
+- [x] **Step 4: Rerun the command and the three extended compatibility suites.** Focused/compatibility suites pass; unchanged inventory artifact line drift remains disclosed for Task 11. No live network or side effects.
+- [x] **Step 5: Commit the explicit changed test paths and child task:** `test(web-scraping): characterize Phase 5 compatibility profiles`.
 
 ### Task 2: Define Controls, Limits, And Internal Reports
 
@@ -227,7 +227,12 @@ and exposes `cancel() -> None`, `attach(handle: WorkHandle[Any]) -> None`,
 `BudgetSnapshot` records counters, remaining_seconds, and accounting completeness.
 Define `CrawlControls(ParentControls, Protocol)` in `crawl/models.py` with the same
 `cancel`, `attach`, `snapshot`, and `publish` signatures. The engine consumes this
-protocol; only orchestration constructs `CrawlContext`.
+protocol; only orchestration constructs `CrawlContext`. Execution ruling: add
+internal `note_successful_result() -> None` on both protocol and context, serialized
+with stop/publication. It marks successful logical-result retention, not a page
+counter; late marks after stop/terminal publication are rejected. Publication can
+then report partial presence accurately when cancellation/exhaustion wins over a
+completed candidate. Task 6 calls the marker at result commit without an intervening await.
 
 In `contracts/execution.py`: frozen `DiscoveredLink(url: str, parent_url: str)`,
 `DiscoveryResult(request_url: str, final_url: str, links: tuple[DiscoveredLink, ...])`,
@@ -243,7 +248,7 @@ CrawlRequest, *, profile: str, options: Mapping[str, Any], supplied: frozenset[s
 config: Mapping[str, Any], limits: CrawlLimits) -> CrawlPlan` retains presence and
 existing precedence. Execution credentials travel separately, never in `options`.
 
-- [ ] **Step 1: Write limit, counter, terminal-publication, and presence tests.**
+- [x] **Step 1: Write limit, counter, terminal-publication, and presence tests.**
 
 ```python
 def test_started_work_not_refunded(ctx):
@@ -266,17 +271,17 @@ def test_terminal_publication_immutable(ctx, completed):
 Also test all default values, invalid/finite values, pre-start rollback, concurrent
 reserve boundary, byte overflow latch, cancel-before-publish, and explicit default
 versus omitted options. Use Hypothesis for reservation/close invariants.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_contracts.py tldw_Server_API/tests/Web_Scraping/test_phase5_controls.py -q`.** Expected: missing internal types/methods fail.
-- [ ] **Step 3: Implement these values and controls with one lock protecting cumulative counters, stop latch, and publication; keep active-capacity leases distinct.** Copy profile resolution from characterized rules rather than normalizing differences.
-- [ ] **Step 4: Rerun Task 2 tests and Task 1 parity.** Expected: pass with public signatures unchanged.
-- [ ] **Step 5: Commit explicit paths and child task:** `feat(web-scraping): define bounded crawl execution contracts`.
+- [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_contracts.py tldw_Server_API/tests/Web_Scraping/test_phase5_controls.py -q`.** Expected: missing internal types/methods fail.
+- [x] **Step 3: Implement these values and controls with one lock protecting cumulative counters, stop latch, and publication; keep active-capacity leases distinct.** Copy profile resolution from characterized rules rather than normalizing differences.
+- [x] **Step 4: Rerun Task 2 tests and Task 1 parity.** 233 passed after review fixes; public signatures unchanged.
+- [x] **Step 5: Commit explicit paths and child task:** `feat(web-scraping): define bounded crawl execution contracts`.
 
 ## Stage 2: Queue Ownership And Service Authorization
 
 **Goal:** Independently tested bounded queue and verified lifecycle access, without an early traversal switch.
 **Success Criteria:** Admission/retry/stop/drain races settle once; lifecycle access uses trusted principals.
 **Tests:** Tasks 3-4 queue/projection/security suites and existing retention/admin suites.
-**Status:** Not Started.
+**Status:** In Progress.
 
 ### Task 3: Own Admission, Retry, Completion, And Drain
 

@@ -1,7 +1,7 @@
 ---
 id: TASK-15410
 title: Isolate Web Scraping Phase 5 bounded job queue
-status: To Do
+status: In Progress
 labels:
 - web-scraping
 - phase5
@@ -24,6 +24,7 @@ Execute Task 3 of the approved Phase 5 plan as an independently reviewable unit.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Parent TASK-15407. Plan Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md, Task 3. ADR assessment: no new ADR; existing ADR-085 governs. Use backlog-py; no product edits outside this task scope without controller ruling. Implementation and review evidence will be linked from the plan-scoped SDD ledger.
+Task 2 independently approved after I1-I5 fixes; start new queue implementation without switching legacy wrapper. Consume runtime.controls ParentControls/WorkHandle and contracts.execution PageData. Define validated QueueLimits in jobs/models.py; create minimal jobs package initializer. Preserve pending retry reservations and live/payload/worker charges through physical drain; keep subscribers private and rejection immediate. Parent TASK-15407; no new ADR beyond ADR-085.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
