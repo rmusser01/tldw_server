@@ -107,7 +107,9 @@ class CrawlContext:
         for handle in handles:
             try:
                 handle.cancel()
-            except (Exception, asyncio.CancelledError):  # noqa: BLE001 - owned callbacks must not abort fan-out
+            except asyncio.CancelledError:
+                failures += 1
+            except Exception:  # noqa: BLE001 - owned callbacks must not abort fan-out
                 failures += 1
         if failures:
             logger.warning("crawl_cancel_callback_failed count={}", failures)
