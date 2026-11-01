@@ -1,7 +1,7 @@
 ---
 id: TASK-15412
 title: Integrate crawl controls with canonical acquisition
-status: To Do
+status: In Progress
 labels:
 - web-scraping
 - phase5
@@ -24,6 +24,7 @@ Execute Task 5 of the approved Phase 5 plan as an independently reviewable unit.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Parent TASK-15407. Plan Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md, Task 5. ADR assessment: no new ADR; existing ADR-085 governs. Use backlog-py; no product edits outside this task scope without controller ruling. Implementation and review evidence will be linked from the plan-scoped SDD ledger.
+Tasks1-4 independent gates complete. Start Task5 canonical parent-controlled acquisition using Task2 contracts and Task3 queue accounting owner: start_page owns page_attempts including retries; queue only checks. baseline-notes.md records current shared HTTP boundaries and physical HTTP thread plus extraction completion ownership. Preserve standalone analyzer behavior, advice precedence, all public signatures and browser attestation. No wrapper/queue cutover yet. Existing inventory artifact line drift remains Task11, full-repo collection blocked by unrelated httpx2 import.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
