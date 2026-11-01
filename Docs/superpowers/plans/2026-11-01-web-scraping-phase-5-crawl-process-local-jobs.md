@@ -593,6 +593,14 @@ or an assertion that the human selected these additional numbers.
    outcome versus an ordinary filtered candidate; no new HTTP authorization
    policy or second page/transport debit. Do not move these responsibilities onto
    resource controls or introduce a new plugin registry.
+   Policy/robots transport must also have a per-operation WorkHandle registered
+   before dispatch, not only counted requests. Add private
+   `CrawlControls.owned_handles() -> tuple[WorkHandle[Any], ...]` returning the
+   current physical-live handles from this crawl owner under its existing lock.
+   Engine stop/finalization includes that snapshot as well as acquired pages for
+   cancellation and checkpoint-close-after-drain; it is not executor-global
+   outstanding work, public state or serialized data. Completed handles are pruned
+   only on actual drain, preserving prompt private-graph release.
 6. Output retention is not the strict actual-data marker: `CrawlReport.articles`
    must retain every entry the selected legacy/enhanced profile previously returned,
    including required structured failures and truthy extraction-success entries
