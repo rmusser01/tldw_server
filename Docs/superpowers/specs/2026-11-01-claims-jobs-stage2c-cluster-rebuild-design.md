@@ -1,13 +1,13 @@
 # Claims Jobs Stage 2C: Cluster Rebuilds
 
-**Status:** Proposed; awaiting approval of this written design
+**Status:** Approved by the requester on 2026-11-01; implementation plan review pending
 **Date:** 2026-11-01
 **Task:** TASK-15282
 **Baseline:** dev `54b321dcec8cdbb6358581f42c1548696260570b`
 **Parent:** [Claims Jobs operational design](2026-06-24-claims-jobs-operational-control-plane-design.md)
 **ADR check:** A new ADR is required for resource-scoped Jobs admission and
 domain publication fencing. [ADR-085](../../ADR/085-jobs-resource-admission-and-domain-publication.md)
-is Proposed, not Accepted. ADR-003 governs Jobs ownership; ADR-058 continues
+is Accepted with this design. ADR-003 governs Jobs ownership; ADR-058 continues
 to govern Jobs completion identity. Neither accepted decision is superseded.
 
 ## Intent And Approved Choices
@@ -27,9 +27,11 @@ The requester approved these product choices in the conversation:
 - A successfully admitted Job never falls back to local execution.
 - All admission and execution lifecycle mechanisms belong to shared Jobs.
 
-The shared resource protocol, publication receipts, read-only owner status route,
-optional request key and initial resource ceilings below are engineering
-proposals for approval with this document, not additional prior user decisions.
+The requester approved this revised written design, including its engineering
+proposals, after the follow-up corrections in commit `92ac607403`. The shared
+resource protocol, publication receipts, read-only owner status route, optional
+request key and initial resource ceilings were engineering proposals, not prior
+product choices. Approval authorizes implementation planning, not implementation.
 
 ## Current Implementation
 
@@ -559,6 +561,8 @@ focused recheck reported "nothing important left". These design checks are not
 evidence that the new contracts have been implemented or tested.
 
 This is design review, not verification of an implemented resource protocol.
-The requester still needs to approve this written design and its engineering
-proposals. Approval authorizes implementation planning next, not an immediate
-unreviewed implementation or merge.
+The requester approved the revised written design and its engineering proposals
+on 2026-11-01. The implementation plan is tracked in TASK-15283 at
+[the Stage 2C plan](../plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md).
+That plan still requires review before implementation; no unreviewed execution
+or merge is authorized by design approval.

@@ -1,11 +1,11 @@
 # ADR-085: Resource Admission In Jobs, Publication Fences In Domain Storage
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-11-01
 **Backfilled from:** not backfilled
-**Decision owner:** Requester for product policy; implementation proposal pending written-design approval
+**Decision owner:** Human requester, approved the revised written design on 2026-11-01
 **Related task:** TASK-15282
-**Related spec/plan:** Docs/superpowers/specs/2026-11-01-claims-jobs-stage2c-cluster-rebuild-design.md
+**Related spec/plan:** Docs/superpowers/specs/2026-11-01-claims-jobs-stage2c-cluster-rebuild-design.md; Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md
 
 ## Decision
 
@@ -28,8 +28,9 @@ Jobs and Media DB may be separate databases. A Claims job registry or local
 mutex would duplicate lifecycle ownership and fail across workers.
 
 This extends ADR-003's ownership boundary and composes with ADR-058's row-identity
-requirements; it supersedes neither accepted decision. The API and schema
-details remain proposals until the accompanying design is approved.
+requirements; it supersedes neither accepted decision. The requester approved
+the accompanying revised design on 2026-11-01; implementation remains subject
+to implementation-plan review.
 
 ## Alternatives Considered
 
@@ -79,6 +80,6 @@ to another Job; existing admin/domain authorization and legacy reads are retaine
 
 ## Follow-Up
 
-- Review the accompanying full design and its builder check before acceptance.
-- After explicit approval, plan shared Jobs prerequisites before Claims adoption.
+- TASK-15283: plan shared Jobs prerequisites before Claims adoption using the
+  approved design and resolved builder checks; await plan review before execution.
 - Keep Stage 3 compatibility cleanup and unrelated prior-PR closeout separate.

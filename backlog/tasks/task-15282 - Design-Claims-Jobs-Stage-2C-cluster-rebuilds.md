@@ -1,7 +1,7 @@
 ---
 id: TASK-15282
 title: Design Claims Jobs Stage 2C cluster rebuilds
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -22,7 +22,7 @@ Design the next Claims Jobs slice for exact and embedding cluster rebuilds. Pres
 - [x] #2 Atomic shared Jobs admission, retries, cancellation, stale workers, queue changes, owner isolation and SQLite/PostgreSQL domain-write safety are grounded in current implementation.
 - [x] #3 The design covers exact and embedding behavior, resource limits, watchlist side effects, rollout/rollback and verification cases without introducing Claims-owned job management.
 - [x] #4 An ADR assessment and any required proposed decision are recorded, and an independent builder check is resolved before handover.
-- [ ] #5 Design-only verification and commit evidence are recorded; implementation planning waits for explicit approval of the written design.
+- [x] #5 Design-only verification and commit evidence are recorded; implementation planning waits for explicit approval of the written design.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -35,19 +35,21 @@ Independent builder recheck of the clarified spec and ADR reports nothing import
 Requester approved correcting all three validated follow-up review findings before implementation planning. Scope: spec and Proposed ADR-085 only, plus this task. Require fail-closed publication when transferred claims retain foreign references, existing-only Watchlists evaluation, and UUID-bound cross-owner admin status links with unchanged RBAC. Prior review reproduced numeric SQLite job-ID reuse after archive; two storage findings were verified against current helpers. ADR check: ADR required yes; amend the existing Proposed ADR-085, not accepted ADRs or a new decision. No implementation plan or product/test code authorized; Bandit remains not applicable to documentation-only changes.
 Follow-up corrections drafted in spec and Proposed ADR-085: bounded foreign-reference integrity guard effective under restricted-role PostgreSQL/RLS, permanent claims_cluster_foreign_reference failure with unchanged domain data/head/receipts; existing-only owner/backend-pinned Watchlists access with absent-storage/schema skip and sanitized errors; optional job_uuid precondition on existing Jobs admin detail, UUID-bound cross-owner links, unchanged RBAC and legacy reads. Added explicit implementation regression requirements for every correction. Fresh verification: 165 Backlog library/format/duplicate-ID tests passed, zero skips, 32 warnings (2.16s); log /tmp/claims-stage2c-review-fixes-backlog-20261101.log. Exact task canonical check, official whole-worktree duplicate-ID check and git diff --check passed. Independent focused recheck in progress. Documentation-only: no product/test code or implementation plan, so runtime implementation tests and Bandit are not applicable.
 Fresh independent focused recheck reports nothing important left across all three corrections; reviewer closed. All applicable staged PR-scoped pre-commit hooks passed; normal no-code hook skips only. Hook log /tmp/claims-stage2c-review-fixes-hooks-20261101.log. The design revision and Proposed ADR remain consistent, with no remaining material findings from this recheck. Final review scope is only this task, the existing spec and Proposed ADR-085; no prior-PR closeout, product/test code, implementation plan, push or PR. Commit records the requester-approved design corrections; task stays In Progress awaiting approval of the revised written design, after which writing-plans is next. Bandit remains not applicable to the documentation-only scope.
+Requester explicitly approved the revised written design after commit 92ac607403. Design work is complete; approval covers the engineering proposals and ADR-085 but authorizes implementation planning only. Follow-up planning is tracked separately in TASK-15283. No product implementation or merge is authorized by this closeout.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Approved Stage 2C design and ADR-085 establish exclusive resource admission in shared Jobs, owner-safe UUID status reads, bounded exact/embedding work, atomic domain publication with replay receipts, strict existing-only access, and controlled rollout/rollback. All three follow-up review findings were corrected and independently rechecked. Local design commits 0adf346cb3 and 92ac607403; latest verification 165 scoped Backlog/format/duplicate-ID tests and applicable hooks passed. Bandit not applicable to documentation-only scope. Implementation planning continues under TASK-15283; production code is unchanged.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
