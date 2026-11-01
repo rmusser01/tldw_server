@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields, replace
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
@@ -200,6 +201,7 @@ class FrontierSnapshot:
     inflight: tuple[FrontierEntry, ...] = ()
     completed: tuple[FrontierEntry, ...] = ()
     results: tuple[dict[str, Any], ...] = ()
+    visited: tuple[str, ...] = ()  # Legacy dedup history is independent of article order.
 
 
 @dataclass(frozen=True)
@@ -209,11 +211,12 @@ class CheckpointScope:
     owner: str
     namespace: str
     trusted_local_path: bool = False
+    root: Path | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
 class CheckpointState:
-    """Credential-free continuation contract; Task 7 supplies bounded storage."""
+    """Credential-free continuation with known usage, not exactly-once crash history."""
 
     scope: CheckpointScope
     plan: CrawlPlan
@@ -222,6 +225,7 @@ class CheckpointState:
     stop_reason: str | None = None
     accounting_complete: bool = True
     schema_version: int = 1
+    pages_scraped: int | None = None  # Preserve the legacy successful-article count.
 
 
 class CheckpointPort(Protocol):

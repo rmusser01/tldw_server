@@ -21,6 +21,7 @@ class Frontier:
         self._results: list[dict] = []
         self._seen: set[str] = set()
         self._url_level_pending: set[str] = set()
+        self._legacy_visited: tuple[str, ...] = ()
 
     @classmethod
     def from_snapshot(cls, plan: CrawlPlan, snapshot: FrontierSnapshot) -> Frontier:
@@ -35,6 +36,9 @@ class Frontier:
             if identity in frontier._seen:
                 raise ValueError("duplicate checkpoint disposition")
             frontier._seen.add(identity)
+        frontier._legacy_visited = snapshot.visited
+        for url in snapshot.visited:
+            frontier._seen.add(frontier._identity(FrontierEntry(url, None, 0, 0, 0.0)))
         frontier._queued = list(snapshot.queued)
         frontier._url_level_pending.update(item.url for item in snapshot.queued)
         frontier._inflight = list(snapshot.inflight)
@@ -143,4 +147,5 @@ class Frontier:
             tuple(self._inflight),
             tuple(self._completed),
             tuple(_safe_article(item) for item in self._results),
+            self._legacy_visited,
         )
