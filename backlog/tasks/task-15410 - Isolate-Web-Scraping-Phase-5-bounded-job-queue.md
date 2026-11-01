@@ -1,7 +1,7 @@
 ---
 id: TASK-15410
 title: Isolate Web Scraping Phase 5 bounded job queue
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - phase5
@@ -15,9 +15,9 @@ Execute Task 3 of the approved Phase 5 plan as an independently reviewable unit.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 3 behavior and interfaces match the approved spec and plan.
-- [ ] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
-- [ ] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
+- [x] #1 Task 3 behavior and interfaces match the approved spec and plan.
+- [x] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
+- [x] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -30,19 +30,21 @@ Task 3 implementation evidence (controller review pending): isolated jobs/{__ini
 Final exact brief-named three-suite rerun: 110 passed / 232 warnings in 1.14s, exit 0 (/tmp/task3-final-queue.log). Final focused 330-test run includes the last validation/pre-cancel parity fixes. No blockers/rulings remain; warning totals untriaged, controller fresh review pending. Final report is local ignored SDD handoff material; committed task evidence records commands/results and links that report.
 Fix round 1 started against reviewed d11d994af4. Read complete task-3-review.md and receiving-code-review skill; verified I1 against Task 5 start_page brief, I2 raw str(error)/article error public copying, and I3 outer-only traceback clearing. Address I1-I3 in separate RED/GREEN cycles, preserving original live exceptions/results; no accounting transfer API, plan or parent task edits. M1: capture covering baseline and final warnings with display enabled, categorize sources without suppressing unrelated warnings. ADR-085 continues to govern; no new ADR. Leave In Progress for controller delta review.
 Fix round 1 I1-I3 verified and fixed in separate focused RED/GREEN cycles against d11d994af4: I1 canonical-shaped real-controls tests RED 2 failures, GREEN lifecycle 30 passes; queue now only checks parent, fake start_page alone reserves/commits attempts. I2 RED 7 diagnostic leaks, GREEN history/lifecycle 45 passes; raw live exception identity/type/message and raw articles preserved, independent public execution_failed/source_extraction_failed codes applied during drain/retry and safe history. I3 RED 4 graph retention cases, GREEN lifecycle 34 passes; cycle-safe cause/context/group traceback clearing preserves original identities/links/messages and weakrefs prove payload/controls release. Python floor >=3.12 honored with builtins exception groups; no accounting transfer API/skip flag. Final exact queue suites 123 passed / 258 warnings (1.78s); covering regressions 343 passed / 698 warnings (24.79s), including wrapper retention/context and Phase 5 contracts/controls/profile suites. M1 baseline 330 passed / 672 warnings (24.41s); warning categories/sources identical after fixes, +26 are existing asyncio cleanup warnings for 13 added cases, no new queue warning source. Explicit scoped Ruff/format/compile and Bandit pass (zero findings); final scoped pre-commit follows. Details, commands, output, affected paths and fix commit appended to task-3-report.md in the existing ignored SDD directory. No parent task, plan, wrapper or service edits, no reviewers/subagents/installs/branches/pushes/merges. Remains In Progress for controller delta review; ADR-085 applies, no new ADR.
+Controller fresh review plus scoped re-review closed I1-I3 at b8224e38ba, no new breakage. M1 warning provenance confirmed: 13 added cases explain26 additional pre-existing conftest cleanup warnings; no new source/suppression. Future production wiring/physical browser lifecycle belongs to Tasks5/9/11, not claimed certified by this isolated queue task. Task3 complete; interfaces remain per original plan, no accounting transfer or restart feature added.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Isolated bounded process-local queue with immutable normalized private payloads, aggregate admission and history limits, retry reservations, detached subscriptions, exactly-once terminalization and truthful physical drain. Legacy wrapper remains unchanged until Task9. Independent review I1-I3 fixed and scoped re-review approved: canonical callback owns attempts once, public diagnostics safe independently of original live exceptions, and exception-graph frames released after drain. 123 queue/343 focused tests pass; scoped static checks and Bandit clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

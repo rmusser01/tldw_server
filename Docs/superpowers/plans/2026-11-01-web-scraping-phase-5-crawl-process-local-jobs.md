@@ -321,7 +321,7 @@ Execution handles retain live/payload charges through physical drain, regardless
 of public terminal state. Retry reuses payload and pending reservation; it does
 not submit a second job. Use stable priority plus sequence tie-breakers.
 
-- [ ] **Step 1: Write deterministic state/lease tests.**
+- [x] **Step 1: Write deterministic state/lease tests.**
 
 ```python
 async def test_full_queue_retry_stop_interleaving(queue_harness):
@@ -349,10 +349,10 @@ Cover all priority levels/shared callers, individual/aggregate bytes/count limit
 no rejected residue, retry-vs-stop, submit-vs-stop, cancel-vs-result, polling versus
 execution timeout, startup idempotency, retention zero/count/bytes, and huge result
 delivery even when history cannot retain it. Hypothesis checks state transitions.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_queue_admission.py tldw_Server_API/tests/Web_Scraping/test_phase5_queue_lifecycle.py tldw_Server_API/tests/Web_Scraping/test_phase5_queue_history.py -q`.** Expected: missing queue API fails.
-- [ ] **Step 3: Implement atomic non-waiting admission and terminalization; run execution outside the lifecycle lock.** Close new/retry admission before stop, terminalize accepted pending jobs, cooperatively cancel active handles, observe subscriptions, and retain drain callbacks/credentials only until release. Do not cancel shared workers to cancel one job.
-- [ ] **Step 4: Rerun Task 3 tests.** Expected: all terminal counts equal one; no pending tasks/futures, lease underflow or retry deadlock. Old wrapper tests still pass unchanged.
-- [ ] **Step 5: Commit explicit paths and child task:** `feat(web-scraping): isolate bounded process-local job ownership`.
+- [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_queue_admission.py tldw_Server_API/tests/Web_Scraping/test_phase5_queue_lifecycle.py tldw_Server_API/tests/Web_Scraping/test_phase5_queue_history.py -q`.** Expected: missing queue API fails.
+- [x] **Step 3: Implement atomic non-waiting admission and terminalization; run execution outside the lifecycle lock.** Close new/retry admission before stop, terminalize accepted pending jobs, cooperatively cancel active handles, observe subscriptions, and retain drain callbacks/credentials only until release. Do not cancel shared workers to cancel one job.
+- [x] **Step 4: Rerun Task 3 tests.** 123 queue and 343 focused tests pass after review fixes, including unchanged wrapper contracts. No pending tasks/futures, lease underflow or retry deadlock in those tests.
+- [x] **Step 5: Commit explicit paths and child task:** `feat(web-scraping): isolate bounded process-local job ownership`.
 
 ### Task 4: Enforce Lifecycle Authorization And Safe Projections
 
