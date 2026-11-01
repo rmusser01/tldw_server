@@ -111,6 +111,101 @@ _FTS = (
 )
 
 
+_OWNER_ENSURED_INDEXES = {
+    "idx_annotations_media_user",
+    "idx_audio_presets_user_kind_default",
+    "idx_audio_presets_user_kind_favorite",
+    "idx_audio_presets_user_kind_updated",
+    "idx_claim_cluster_membership_claim",
+    "idx_claim_clusters_updated",
+    "idx_claim_clusters_user",
+    "idx_claims_analytics_exports_job_id",
+    "idx_claims_analytics_exports_user",
+    "idx_claims_analytics_exports_user_status_export_id",
+    "idx_claims_analytics_exports_user_status_updated_export_id",
+    "idx_claims_cluster_id",
+    "idx_claims_monitoring_alerts_user",
+    "idx_claims_monitoring_events_delivered",
+    "idx_claims_monitoring_events_type",
+    "idx_claims_monitoring_events_user",
+    "idx_claims_monitoring_events_user_created_id",
+    "idx_claims_monitoring_events_user_id",
+    "idx_claims_monitoring_health_user",
+    "idx_claims_monitoring_settings_user",
+    "idx_claims_monitoring_user",
+    "idx_claims_notifications_delivered",
+    "idx_claims_notifications_kind",
+    "idx_claims_notifications_resource",
+    "idx_claims_notifications_review_group",
+    "idx_claims_notifications_target_user",
+    "idx_claims_notifications_user",
+    "idx_claims_review_group",
+    "idx_claims_review_log_claim",
+    "idx_claims_review_log_created",
+    "idx_claims_review_log_reviewer",
+    "idx_claims_review_metrics_date",
+    "idx_claims_review_metrics_extractor",
+    "idx_claims_review_metrics_user",
+    "idx_claims_review_rules_active",
+    "idx_claims_review_rules_user",
+    "idx_claims_review_status",
+    "idx_claims_reviewer_id",
+    "idx_content_items_job",
+    "idx_content_items_run",
+    "idx_content_items_user_domain",
+    "idx_content_items_user_updated",
+    "idx_data_table_columns_table_position",
+    "idx_data_table_rows_table_index",
+    "idx_data_table_sources_table",
+    "idx_data_tables_deleted",
+    "idx_data_tables_status",
+    "idx_data_tables_updated",
+    "idx_data_tables_workspace_tag",
+    "idx_doc_refs_cache_lookup",
+    "idx_email_attachments_message_id",
+    "idx_email_backfill_state_status",
+    "idx_email_label_reverse",
+    "idx_email_labels_tenant_name",
+    "idx_email_media_visibility",
+    "idx_email_message_count_cover",
+    "idx_email_message_labels_label",
+    "idx_email_message_participants_message_role",
+    "idx_email_message_participants_role",
+    "idx_email_messages_identity_cover",
+    "idx_email_messages_source_id",
+    "idx_email_messages_tenant_date",
+    "idx_email_messages_tenant_date_id",
+    "idx_email_messages_tenant_has_attachments_date",
+    "idx_email_messages_tenant_message_id",
+    "idx_email_messages_tenant_source_message",
+    "idx_email_participant_reverse",
+    "idx_email_participants_tenant_email",
+    "idx_email_sources_tenant_provider",
+    "idx_email_sync_state_tenant_source",
+    "idx_highlights_user_item",
+    "idx_media_source_hash",
+    "idx_tts_history_user_created",
+    "idx_tts_history_user_favorite",
+    "idx_tts_history_user_model",
+    "idx_tts_history_user_provider",
+    "idx_tts_history_user_text_hash",
+    "idx_tts_history_user_voice_id",
+    "ux_audio_presets_user_kind_default_active",
+    "ux_audio_presets_user_kind_name_active",
+    "ux_content_items_user_canonical",
+    "ux_content_items_user_hash",
+    "ux_data_table_columns_table_column",
+    "ux_data_table_columns_table_position_live",
+    "ux_data_table_rows_table_index_live",
+    "ux_data_table_rows_table_row",
+    "ux_output_templates_user_name",
+}
+_OWNER_OBSOLETE_INDEXES = {
+    "ux_data_table_columns_table_position_active",
+    "ux_data_table_rows_table_index_active",
+}
+
+
 def canonical_policy_expression(expression: str, table: str) -> exp.Expression:
     """Normalize deparser decoration without changing Boolean or correlated scope."""
 
@@ -193,6 +288,12 @@ def validate_postgres_runtime_schema(db: Any, conn: Any) -> None:
     ).scalar
     if writable_version:
         raise SchemaError("PostgreSQL runtime migration-version authority is unsafe")
+    validate_postgres_schema_catalog(db, conn)
+
+
+def validate_postgres_schema_catalog(db: Any, conn: Any) -> None:
+    """Inspect the complete current Media catalog without changing schema."""
+    backend = db.backend
     tables = backend.execute(
         "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE n.nspname=current_schema() AND c.relkind IN ('r','p') AND c.relname=ANY(%s)",
@@ -333,3 +434,33 @@ def validate_postgres_runtime_schema(db: Any, conn: Any) -> None:
             or row["lanname"] != "plpgsql"
         ):
             raise SchemaError(f"PostgreSQL runtime content helper catalog drifted for {signature}")
+
+
+def validate_postgres_owner_reopen(db: Any, conn: Any) -> None:
+    """Keep mandatory owner repairs observable before skipping reconciliation."""
+    backend = db.backend
+    rows = backend.execute(
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname=current_schema() AND c.relkind IN ('i','I') AND c.relname=ANY(%s)",
+        (sorted(_OWNER_ENSURED_INDEXES | _OWNER_OBSOLETE_INDEXES),),
+        connection=conn,
+    ).rows
+    if {row["relname"] for row in rows} != _OWNER_ENSURED_INDEXES:
+        raise SchemaError("PostgreSQL indexes require schema-owner reconciliation")
+    pending = backend.execute(
+        "SELECT EXISTS(SELECT 1 FROM claims WHERE review_status IS NULL OR review_version IS NULL) "
+        "OR EXISTS(SELECT 1 FROM data_tables WHERE client_id IS NULL OR client_id='' OR last_modified IS NULL)",
+        connection=conn,
+    ).scalar
+    if pending:
+        raise SchemaError("PostgreSQL scoped fields require schema-owner backfill")
+    for alias, table, columns in _FTS:
+        ident = backend.escape_identifier
+        text = " || ' ' || ".join(f"coalesce({ident(column)}, '')" for column in columns)
+        stale = backend.execute(
+            f"SELECT EXISTS(SELECT 1 FROM {ident(table)} WHERE {ident(alias + '_tsv')} "
+            f"IS DISTINCT FROM to_tsvector('english', {text}))",  # nosec B608 -- Fixed schema table/columns are escaped by the actual backend.
+            connection=conn,
+        ).scalar
+        if stale:
+            raise SchemaError(f"PostgreSQL scoped FTS rows require schema-owner backfill for {table}")

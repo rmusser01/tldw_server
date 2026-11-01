@@ -123,6 +123,23 @@ def ensure_postgres_post_core_structures(
     ensure_postgres_keyword_identity(db, conn)
 
 
+def ensure_postgres_email_acceleration_if_missing(db: SupportsPostgresPostCoreStructures, conn: Any) -> None:
+    """Retry optional acceleration only when its existing artifacts are absent."""
+    ready = db.backend.execute(
+        "SELECT to_regclass('public.idx_email_text_trigram') IS NOT NULL "
+        "AND (SELECT count(*) FROM pg_statistic_ext s JOIN pg_namespace n ON n.oid=s.stxnamespace "
+        "WHERE n.nspname=current_schema() AND s.stxname=ANY(%s))=2",
+        (["email_media_visibility_stats", "email_text_condition_stats"],),
+        connection=conn,
+    ).scalar
+    if ready is not True:
+        from tldw_Server_API.app.core.DB_Management.media_db.schema.email_schema_structures import (
+            _ensure_postgres_email_search_acceleration,
+        )
+
+        _ensure_postgres_email_search_acceleration(db, conn)
+
+
 def bootstrap_postgres_schema(db: SupportsPostgresPostCoreStructures) -> None:
     """Initialize or migrate the PostgreSQL schema through package-owned coordination."""
 
@@ -161,6 +178,26 @@ def bootstrap_postgres_schema(db: SupportsPostgresPostCoreStructures) -> None:
             )
             validate_postgres_runtime_schema(db, conn)
             return
+
+        if (
+            authority is not None
+            and authority["can_migrate"] is True
+            and current_version == target_version
+        ):
+            from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation import (
+                validate_postgres_owner_reopen,
+                validate_postgres_schema_catalog,
+            )
+
+            # Reopening a ready schema must not take DDL locks against live readers.
+            try:
+                validate_postgres_schema_catalog(db, conn)
+                validate_postgres_owner_reopen(db, conn)
+            except SchemaError:
+                logger.debug("PostgreSQL catalog validation requires schema-owner repair")
+            else:
+                ensure_postgres_email_acceleration_if_missing(db, conn)
+                return
 
         must_tables = [
             "media",
