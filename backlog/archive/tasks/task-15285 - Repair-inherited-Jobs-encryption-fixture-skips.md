@@ -1,5 +1,5 @@
 ---
-id: TASK-13879
+id: TASK-15285
 title: Repair inherited Jobs encryption fixture skips
 status: To Do
 created_date: 2026-10-20 18:11
@@ -30,6 +30,7 @@ Separate follow-up from strict Jobs completion foundation TASK-13878. Two unchan
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validated during foundation local qualification on source0f2b649cb8688abd7132d8fad7ec7dd293baaf9b; test_jobs_manager.py byte-identical to execution basebe07b6618217743938ea395bc756cf15fb0426aa. Existing literals at lines355,1842,1843 are sliced to44 Base64 chars and decode to33 bytes. /tmp/task13878_skip_diagnosis.log proves crypto backend available and invalid fixture lengths; full non-PG original JUnit /tmp/task13878_sqlite.xml records these2 skips. Foundation leaves these fixtures/production untouched as mandated strict extraction. Local task search and exact test-name search found no existing specific follow-up; live deve5216051/published maximum13877 unchanged, local foundation13878, allocate13879. ADR assessment: no new durable architecture decision for a fixture-only correction; ADR-058/078 foundation decisions unchanged.
+2026-11-01 rebase onto dev54b321dcec: renumbered this Jobs archive from TASK-13879 to TASK-15285 under ADR-084 because the original ID belongs to an unrelated live dev task. Historical notes and evidence are retained; active Jobs foundation TASK-13937 and fixture follow-up TASK-13938 are unchanged. This archival identity correction adds no runtime or scope change.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
