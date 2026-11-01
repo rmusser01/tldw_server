@@ -397,7 +397,7 @@ history, and no removal of intentionally requested public article/raw content.
 **Goal:** Connect actual acquisition to parent controls, then build traversal/checkpoints/batches behind injected capabilities.
 **Success Criteria:** No budget bypass, lost in-flight page, orphan child, or duplicate discovery fetch.
 **Tests:** Tasks 5-8 unit/property/transport/checkpoint suites with existing Phase 3/4 regressions.
-**Status:** In Progress (Tasks 5-6 independently reviewed; Task 7 safe continuation).
+**Status:** In Progress (Tasks 5-7 independently reviewed; Task 8 bounded production).
 
 ### Task 5: Integrate Parent Controls With Canonical Acquisition
 
@@ -699,7 +699,7 @@ These close the existing trusted-root and sync-protocol ownership gaps, without
 adding a remote resume API or changing public legacy signatures. The cost of a
 wrong ruling is private scope/helper rework before Task 9 adapter cutover.
 
-- [ ] **Step 1: Write continuation, corruption, and failure-precedence tests.**
+- [x] **Step 1: Write continuation, corruption, and failure-precedence tests.**
 
 ```python
 async def test_resume_waits_for_physical_owner(checkpoint_harness):
@@ -723,10 +723,10 @@ paused time excluded, successful dedup commit, unsupported version/size/binding,
 malformed counters, credential-free JSON, concurrent processes, symlink escape,
 failed replace/serialization/clear, checkpoint overflow, and interrupted transport
 retention. New writer fixes future in-flight loss; it cannot recover missing old URLs.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_checkpoints.py tldw_Server_API/tests/Web_Scraping/test_phase5_checkpoint_security.py -q`.** Expected: missing checkpoint store/protocol behavior fails.
-- [ ] **Step 3: Implement versioned/legacy loading and atomic storage, then connect finalization before terminal publication.** Clear only normal completion/page cap after finalization succeeds. A secondary save failure cannot replace primary cancel/failure; a primary checkpoint failure yields `checkpoint_failed`.
-- [ ] **Step 4: Rerun Task 7 plus engine interruption tests.** Expected: no lost recorded in-flight URL, prior valid file preserved, no overlap during drain, and no secret/path leak.
-- [ ] **Step 5: Commit explicit paths and child task:** `fix(web-scraping): preserve bounded crawl continuation safely`.
+- [x] **Step 2: Run the two named checkpoint suites.** RED two missing-module collection failures; strict schema/aggregate cleanup/packaging defects also reproduced before correction.
+- [x] **Step 3: Implement versioned/legacy loading, atomic storage and owned finalization.** Single aggregate two-second cleanup deadline, current-policy replay and actual writer drain retain unfinished state without masking primary stops.
+- [x] **Step 4: Rerun checkpoint/engine/lock/package coverage.** Final 346 covering tests pass; scoped quality/Bandit clean. New run_crawl reduced to 265 lines, no ceiling increase; six other branch size regressions remain certification work. Native Windows not verified; service-root capability limitation and M1 fork warning remain explicit.
+- [x] **Step 5: Commit explicit paths and child task:** `efbd0e70fc`, `70e58f4a86`; TASK-15414 Done after fresh task/fix review, including regular-package shipping correction.
 
 ### Task 8: Compose Bounded Batches And Queue-Owned Pages
 
@@ -744,6 +744,39 @@ queue: ProcessLocalJobQueue, make_job: Callable[[str], ScrapingJob]) -> WorkHand
 is internal orchestration glue using `submit_page` so admission and private
 subscription creation are atomic, not public sidecar history. The execute callback
 receives the bound controls and calls `start_page` once for each physical job attempt.
+
+**Task 8 Execution Rulings (Controller Decisions, 2026-11-01):**
+
+- Add an optional trusted private `execute` override to `submit_page` and the
+  internal `queued_page` / `execute_batch` glue where needed. Its signature is
+  the existing queue callback type:
+  `Callable[[JobPayload, ParentControls | None], WorkHandle[PageData]]`.
+  Capture the selected override (or constructor default when None) once in the
+  admitted private entry before it can run. Keep `add_job`, public constructors,
+  legacy return conventions and standalone default execution unchanged. Do not put
+  callbacks/plans/live controls in JobPayload, metadata, context dictionaries or
+  a hidden global registry. Normalized execution inputs still obey count/byte
+  admission; the trusted callable is a separate capability. Retain it for retry
+  and actual drain, then clear it and its captured private graph even if a caller
+  retains a result/cancellation handle. Add callback-isolation, retry and weakref
+  drain-release tests.
+- Internal crawl composition may accept an optional queue for `queued_page`, with
+  direct acquisition remaining the default. A small read-only queue producer-window
+  capability is permitted if needed to avoid reading private admission internals;
+  it never grants admission or creates a waiter. Keep the exact default window
+  `min(max_concurrent, max_pending, max_live)` and remaining parent-page bound.
+  A barrier test must prove available capacity is filled before releasing the
+  first result; an upper bound alone would incorrectly approve serial execution.
+  Preserve the documented Task 6 recursive selection order and do not claim
+  recursive throughput parity from standalone producer tests.
+- There is exactly one terminal publisher per logical operation. Nested queue
+  composition must not publish a second outcome or mark a frontier result
+  successful before its actual atomic commit. Reuse the existing acquisition and
+  profile-conversion logic, not a second scraping pipeline.
+
+These expose required private execution binding without changing public wrapper
+signatures or adding unbounded callback/admission registries. The cost of a wrong
+ruling is private glue/entry rework before Task 9 adapter cutover.
 
 - [ ] **Step 1: Write multi-window and partial-admission ownership tests.**
 
