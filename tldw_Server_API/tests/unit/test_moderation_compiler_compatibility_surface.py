@@ -1,3 +1,5 @@
+"""Verify unused compiler delegates remain absent from the moderation service."""
+
 import pytest
 
 from tldw_Server_API.app.core.Moderation.moderation_service import ModerationService
