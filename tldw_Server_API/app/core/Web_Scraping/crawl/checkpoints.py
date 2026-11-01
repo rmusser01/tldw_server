@@ -30,6 +30,25 @@ _owners: dict[tuple[int, int, str], CheckpointStore] = {}
 _registry_lock = threading.Lock()
 _stores: weakref.WeakSet = weakref.WeakSet()
 _DESCRIPTOR_PATHS = os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW")
+# Wire version 1 is explicit; future dataclass defaults must not replenish usage.
+_STATE_FIELDS = frozenset(
+    {"schema_version", "scope", "binding", "frontier", "budget", "stop_reason", "accounting_complete", "pages_scraped"}
+)
+_BUDGET_FIELDS = frozenset(
+    {
+        "page_attempts",
+        "network_requests",
+        "browser_attempts",
+        "active_probes",
+        "transfer_bytes",
+        "discovered_candidates",
+        "discovered_url_bytes",
+        "remaining_seconds",
+        "accounting_complete",
+    }
+)
+_FRONTIER_FIELDS = frozenset({"queued", "inflight", "completed", "results", "visited"})
+_ENTRY_FIELDS = frozenset({"url", "parent_url", "depth", "sequence", "score"})
 
 
 class CheckpointError(ValueError):
@@ -61,6 +80,13 @@ if hasattr(os, "register_at_fork"):
 
 def _integer(value: Any, maximum: int) -> int:
     if type(value) is not int or not 0 <= value <= maximum:
+        raise CheckpointError()
+    return value
+
+
+def _wire_object(value: Any, required: frozenset[str]) -> dict[str, Any]:
+    """Reject missing/unknown wire fields before internal model construction."""
+    if type(value) is not dict or value.keys() != required:
         raise CheckpointError()
     return value
 
@@ -375,15 +401,15 @@ class CheckpointStore:
             raise CheckpointError()
         if "schema_version" not in data:
             return self._legacy(data, plan)
+        _wire_object(data, _STATE_FIELDS)
         if type(data["schema_version"]) is not int or data["schema_version"] != 1:
             raise CheckpointError()
         if data["scope"] != {"owner": self.scope.owner, "namespace": self.scope.namespace} or json.dumps(
             data["binding"], sort_keys=True, allow_nan=False
         ) != json.dumps(_binding(plan), sort_keys=True, allow_nan=False):
             raise CheckpointError()
-        raw = data["frontier"]
-        if type(raw) is not dict:
-            raise CheckpointError()
+        budget = _wire_object(data["budget"], _BUDGET_FIELDS)
+        raw = _wire_object(data["frontier"], _FRONTIER_FIELDS)
         collections = {}
         for name, maximum in (
             ("queued", self.limits.max_frontier),
@@ -396,7 +422,7 @@ class CheckpointStore:
             if type(values) is not list or len(values) > maximum:
                 raise CheckpointError()
             collections[name] = (
-                tuple(FrontierEntry(**item) for item in values)
+                tuple(FrontierEntry(**_wire_object(item, _ENTRY_FIELDS)) for item in values)
                 if name in {"queued", "inflight", "completed"}
                 else tuple(values)
             )
@@ -405,10 +431,10 @@ class CheckpointStore:
             self.scope,
             plan,
             FrontierSnapshot(**collections),
-            BudgetSnapshot(**data["budget"]),
+            BudgetSnapshot(**budget),
             data["stop_reason"],
             data["accounting_complete"],
-            pages_scraped=data.get("pages_scraped"),
+            pages_scraped=data["pages_scraped"],
         )
         self._validate(state)
         return state
@@ -421,6 +447,7 @@ class CheckpointStore:
             "pages_scraped",
         }:
             raise CheckpointError()
+        pages = _integer(data["pages_scraped"], min(self.limits.max_results, plan.limits.page_attempts))
         visited, queued, articles = (data[name] for name in ("visited", "to_visit", "scraped_articles"))
         for values, maximum in (
             (visited, self.limits.max_candidates),
@@ -446,7 +473,7 @@ class CheckpointStore:
             FrontierSnapshot(pending, (), completed, tuple(articles), tuple(visited)),
             BudgetSnapshot(0, 0, 0, 0, 0, 0, plan.limits.execution_seconds, False),
             accounting_complete=False,
-            pages_scraped=data["pages_scraped"],
+            pages_scraped=pages,
         )
         self._validate(state)
         return CheckpointState(

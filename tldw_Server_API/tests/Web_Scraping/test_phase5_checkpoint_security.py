@@ -11,13 +11,120 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.crawl.checkpoints import CheckpointError, CheckpointStore
+from tldw_Server_API.app.core.Web_Scraping.crawl.engine import run_crawl
 from tldw_Server_API.app.core.Web_Scraping.crawl.models import CheckpointLimits, CheckpointScope, FrontierSnapshot
+from tldw_Server_API.app.core.Web_Scraping.orchestration.crawl_context import CrawlContext
 from tldw_Server_API.app.core.Web_Scraping.runtime.controls import COUNTERS, WorkHandle
 from tldw_Server_API.tests.Web_Scraping.test_phase5_checkpoints import state
 from tldw_Server_API.tests.Web_Scraping.test_phase5_checkpoints import store as store
 from tldw_Server_API.tests.Web_Scraping.test_phase5_frontier import BASE, entry, plan
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field_path",
+    [("budget", counter) for counter in COUNTERS]
+    + [
+        ("budget", "accounting_complete"),
+        ("budget", "remaining_seconds"),
+        ("accounting_complete",),
+        ("pages_scraped",),
+    ],
+)
+async def test_missing_version1_wire_fields_fail_before_acquisition(store, tmp_path, field_path):
+    expected = state(store)
+    store.save(expected)
+    path = tmp_path / "progress.json"
+    data = json.loads(path.read_text())
+    container = data if len(field_path) == 1 else data[field_path[0]]
+    del container[field_path[-1]]
+    path.write_text(json.dumps(data))
+    with pytest.raises(CheckpointError, match="^checkpoint_failed$"):
+        store.load(plan=expected.plan, scope=store.scope)
+
+    acquired = []
+
+    async def acquire(item):
+        acquired.append(item.url)
+        raise AssertionError("malformed checkpoint reached page admission")
+
+    report = await run_crawl(
+        expected.plan,
+        context=CrawlContext(expected.plan.limits, clock=lambda: 0),
+        acquire=acquire,
+        checkpoint=store,
+    )
+    assert report.outcome.stop_reason == "checkpoint_failed"
+    assert acquired == []
+
+
+@pytest.mark.parametrize("container", ["root", "scope", "binding", "budget", "frontier", "entry"])
+def test_version1_wire_objects_reject_unknown_fields(store, tmp_path, container):
+    expected = state(store)
+    store.save(expected)
+    path = tmp_path / "progress.json"
+    data = json.loads(path.read_text())
+    target = data if container == "root" else data["frontier"]["queued"][0] if container == "entry" else data[container]
+    target["unexpected"] = 0
+    path.write_text(json.dumps(data))
+    with pytest.raises(CheckpointError, match="^checkpoint_failed$"):
+        store.load(plan=expected.plan, scope=store.scope)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pages", [None, True, False, 1.0, "1", -1, 1001])
+async def test_legacy_page_count_must_be_bounded_integer_before_acquisition(store, tmp_path, pages):
+    resolved = plan("legacy_recursive", delay=0)
+    (tmp_path / "progress.json").write_text(
+        json.dumps(
+            {
+                "visited": [],
+                "to_visit": [[BASE, 0]],
+                "scraped_articles": [],
+                "pages_scraped": pages,
+            }
+        )
+    )
+    with pytest.raises(CheckpointError, match="^checkpoint_failed$"):
+        store.load(plan=resolved, scope=store.scope)
+
+    acquired = []
+
+    async def acquire(item):
+        acquired.append(item.url)
+        raise AssertionError("malformed legacy counter reached page admission")
+
+    report = await run_crawl(
+        resolved,
+        context=CrawlContext(resolved.limits, clock=lambda: 0),
+        acquire=acquire,
+        checkpoint=store,
+    )
+    assert report.outcome.stop_reason == "checkpoint_failed"
+    assert acquired == []
+
+
+def test_legacy_unknown_usage_stays_explicit_after_versioned_roundtrip(store, tmp_path):
+    resolved = plan("legacy_recursive", delay=0)
+    (tmp_path / "progress.json").write_text(
+        json.dumps(
+            {
+                "visited": [],
+                "to_visit": [[BASE, 0]],
+                "scraped_articles": [],
+                "pages_scraped": 0,
+            }
+        )
+    )
+    migrated = store.load(plan=resolved, scope=store.scope)
+    assert not migrated.accounting_complete and not migrated.budget.accounting_complete
+    assert all(getattr(migrated.budget, counter) == 0 for counter in COUNTERS)
+    store.save(migrated)
+    loaded = store.load(plan=resolved, scope=store.scope)
+    assert loaded == migrated
+    assert loaded.pages_scraped == 0
 
 
 @pytest.mark.parametrize(

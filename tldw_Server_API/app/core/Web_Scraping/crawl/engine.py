@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
+from time import monotonic
 from types import MappingProxyType
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
@@ -119,6 +120,11 @@ async def _readmit_restored(
     return await evaluate(entry, "discovery")
 
 
+async def _within_cleanup(operation: Awaitable[_T], deadline: float) -> _T:
+    """Spend only the remaining aggregate finalization allowance."""
+    return await asyncio.wait_for(operation, max(0.0, deadline - monotonic()))
+
+
 async def _checkpoint_call(
     context: CrawlControls,
     handles: list[WorkHandle[Any]],
@@ -126,32 +132,33 @@ async def _checkpoint_call(
     *args: Any,
     loading: bool = False,
     background: bool = False,
+    cleanup_deadline: float | None = None,
     **kwargs: Any,
 ) -> _T:
     """Await an owned file operation without conflating cancellation and drain."""
+    if not loading and not background and cleanup_deadline is None:
+        raise ValueError("checkpoint cleanup deadline required")
     owned = _checkpoint_operation(context, function, *args, **kwargs)
     handles.append(owned)
-    try:
+
+    async def wait(future):
+        operation = asyncio.shield(future)
         if background:
-            value = await asyncio.shield(owned.result)
-        elif loading:
-            value = await _bounded(asyncio.shield(owned.result), context)
-        else:
-            value = await asyncio.wait_for(asyncio.shield(owned.result), _CLEANUP_SECONDS)
+            return await operation
+        if loading:
+            return await _bounded(operation, context)
+        return await _within_cleanup(operation, cleanup_deadline)
+
+    try:
+        value = await wait(owned.result)
     except asyncio.CancelledError:
-        if owned.result.done():
-            await asyncio.shield(owned.drained)
-            if not asyncio.current_task().cancelling():
-                # A port's own cancellation is a checkpoint error, not authority
-                # to cancel the parent or replace an earlier budget/deadline.
-                raise ValueError("checkpoint_failed") from None
+        if owned.result.done() and not asyncio.current_task().cancelling():
+            # Port cancellation is a checkpoint error, not parent authority.
+            raise ValueError("checkpoint_failed") from None
         raise
-    except Exception:  # noqa: BLE001 - drain already-finished failure before propagating
-        if owned.result.done():
-            await asyncio.shield(owned.drained)
-        raise
-    # Deliver the actual callable's release before restoring a pristine context.
-    await asyncio.shield(owned.drained)
+    # A failed/canceled result leaves physical ownership with the registered
+    # handle. Successful result/drain waits spend the same deadline as each other.
+    await wait(owned.drained)
     # A resolved future can precede its scheduled release callback. Prune through
     # the owner's structural API, not executor-global or private context state.
     context.owned_handles()
@@ -191,6 +198,7 @@ async def _finalize_crawl(
     owned: tuple[object, ...] | None,
 ) -> tuple[CrawlReport, asyncio.CancelledError | None]:
     """Finalize checkpoint and writer ownership before the single publication."""
+    cleanup_deadline = monotonic() + _CLEANUP_SECONDS
     # Policy/robots work may outlive awaiters without ever acquiring a page.
     handles = list({id(item): item for item in (*handles, *context.owned_handles())}.values())
     normal = reason in {"frontier_exhausted", "page_cap_reached"}
@@ -222,12 +230,14 @@ async def _finalize_crawl(
                 # drain is delayed. No normal publication before primary failure.
                 draining = tuple(item.drained for item in handles if not item.drained.done())
                 if draining:
-                    await asyncio.wait_for(
-                        asyncio.gather(*(asyncio.shield(future) for future in draining)), _CLEANUP_SECONDS
+                    await _within_cleanup(
+                        asyncio.gather(*(asyncio.shield(future) for future in draining)), cleanup_deadline
                     )
-                await _checkpoint_call(context, handles, checkpoint.clear)
+                await _checkpoint_call(context, handles, checkpoint.clear, cleanup_deadline=cleanup_deadline)
             else:
-                await _checkpoint_call(context, handles, checkpoint.save, continuation())
+                await _checkpoint_call(
+                    context, handles, checkpoint.save, continuation(), cleanup_deadline=cleanup_deadline
+                )
         except asyncio.CancelledError as exc:
             if cancellation is None:
                 cancellation, reason = exc, "cancelled"
@@ -246,7 +256,7 @@ async def _finalize_crawl(
         task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
     elif checkpoint is not None:
         try:
-            await _checkpoint_call(context, handles, checkpoint.close)
+            await _checkpoint_call(context, handles, checkpoint.close, cleanup_deadline=cleanup_deadline)
         except asyncio.CancelledError as exc:
             if cancellation is None:
                 cancellation, reason = exc, "cancelled"
