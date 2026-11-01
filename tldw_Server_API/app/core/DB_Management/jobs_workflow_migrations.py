@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import WorkflowOutcome
+from tldw_Server_API.app.core.Utils.jobs_workflow_contracts import WorkflowOutcome
 
 ROOT_IDENTITY_COLUMNS = (
     "owner_user_id",

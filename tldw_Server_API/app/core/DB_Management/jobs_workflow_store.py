@@ -14,8 +14,9 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import uuid4
 
-from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult, ExpiredLeasePolicy
-from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
+from tldw_Server_API.app.core.Utils.jobs_errors import JobPayloadDecryptionError
+from tldw_Server_API.app.core.Utils.jobs_operation_contracts import AdmissionResult, ExpiredLeasePolicy
+from tldw_Server_API.app.core.Utils.jobs_workflow_contracts import (
     WorkflowAction,
     WorkflowAdmissionCommand,
     WorkflowAdmissionResult,
@@ -35,8 +36,10 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowScope,
     bounded_workflow_json,
     decode_workflow_receipt,
+    encode_workflow_receipt,
     workflow_effect_fingerprint,
 )
+from tldw_Server_API.app.core.Utils.jobs_workflow_hooks import WorkflowBackendHooks
 
 
 class WorkflowFence:
@@ -93,7 +96,7 @@ class WorkflowStore(Protocol):
         self, connection: Any, manager: Any, command: WorkflowAdmissionCommand, policy: Any
     ) -> None: ...
 
-    def create_root_job(self, connection: Any, inputs: Any, uuid_value: str) -> Any: ...
+    def create_root_job(self, connection: Any, inputs: Any, uuid_value: str, *, hooks: WorkflowBackendHooks) -> Any: ...
 
     def insert_root(self, connection: Any, root: WorkflowRoot, policy: Any) -> None: ...
 
@@ -119,6 +122,7 @@ class WorkflowStore(Protocol):
         backend: str,
         locked_root: Mapping[str, object],
         decode_payload: Callable[..., Any] | None = None,
+        hooks: WorkflowBackendHooks | None = None,
     ) -> WorkflowEffectResult: ...
 
     def extend_horizon(self, connection: Any, job_uuid: str, minimum_seconds: int) -> Any: ...
@@ -134,6 +138,7 @@ class WorkflowStore(Protocol):
         receipt: WorkflowReceipt,
         row: dict,
         *,
+        hooks: WorkflowBackendHooks,
         counters_enabled: bool,
         outbox_enabled: bool,
         expired: bool = False,
@@ -221,7 +226,6 @@ def effect_transition_parameters(
     failure = effect.action in {WorkflowAction.RETRY, WorkflowAction.FAIL}
     streak = (row.get("failure_streak_count") or 0) + 1 if row.get("failure_streak_code") == effect.reason_code else 1
     now = receipt.applied_at
-    from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import encode_workflow_receipt
 
     return (
         receipt.resulting_status,
@@ -251,9 +255,19 @@ class LiveWorkflowTransaction:
     """One synchronous connection, with Jobs-first locks and registered fences."""
 
     def __init__(
-        self, manager: Any, policy: WorkflowPolicy, connection: Any, owner_user_id: str, transaction_id: int | None
+        self,
+        manager: Any,
+        policy: WorkflowPolicy,
+        connection: Any,
+        owner_user_id: str,
+        transaction_id: int | None,
+        *,
+        hooks: WorkflowBackendHooks,
     ) -> None:
+        if type(hooks) is not WorkflowBackendHooks or hooks.backend != manager.backend:
+            raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
         self.manager = manager
+        self.hooks = hooks
         self.policy = policy
         self._connection = connection
         self.owner_user_id = owner_user_id
@@ -402,7 +416,7 @@ class LiveWorkflowTransaction:
             inputs = self.manager._prepare_workflow_admission(command, self.policy)
         except (ValueError, RuntimeError):
             return WorkflowAdmissionResult(WorkflowOutcome.REJECTED)
-        created = self.store.create_root_job(self._connection, inputs, str(uuid4()))
+        created = self.store.create_root_job(self._connection, inputs, str(uuid4()), hooks=self.hooks)
         if created is None:
             return WorkflowAdmissionResult(WorkflowOutcome.REJECTED)
         if created is False:
@@ -695,7 +709,15 @@ class LiveWorkflowTransaction:
         counters = self.manager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", ""))
         outbox = self.manager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
         updated = self.store.transition_effect(
-            self._connection, root, lease, effect, receipt, row, counters_enabled=counters, outbox_enabled=outbox
+            self._connection,
+            root,
+            lease,
+            effect,
+            receipt,
+            row,
+            hooks=self.hooks,
+            counters_enabled=counters,
+            outbox_enabled=outbox,
         )
         self.store.insert_effect_receipt(self._connection, root, receipt, slot)
         self._applied_effects.append((root, effect, receipt))
@@ -836,8 +858,6 @@ def _enrolled_authority(
         or row["expired_lease_policy"] != root.controls.expired_lease_policy.value
     ):
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
-    from tldw_Server_API.app.core.Jobs.manager import JobPayloadDecryptionError
-
     try:
         matches = _workflow_payload_matches(row, support["payload_field"], root.reference_id, decode_payload)
     except (JobPayloadDecryptionError, zlib.error):
@@ -883,7 +903,10 @@ def _recover_workflow_expiry(
     backend: str,
     locked_root: Mapping[str, object],
     decode_payload: Callable[..., Any] | None = None,
+    hooks: WorkflowBackendHooks | None = None,
 ) -> WorkflowEffectResult:
+    if type(hooks) is not WorkflowBackendHooks or hooks.backend != backend:
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
     store = workflow_store(backend)
     root, row, support = _enrolled_authority(store, connection, locked_root, decode_payload)
     if row["status"] in {"completed", "failed", "cancelled", "quarantined"}:
@@ -918,6 +941,7 @@ def _recover_workflow_expiry(
         effect,
         receipt,
         row,
+        hooks=hooks,
         counters_enabled=os.getenv("JOBS_COUNTERS_ENABLED", "").lower() in {"1", "true", "yes", "on"},
         outbox_enabled=os.getenv("JOBS_EVENTS_OUTBOX", "").lower() in {"1", "true", "yes", "on"},
         expired=True,
@@ -932,10 +956,13 @@ def recover_workflow_expiry_in_transaction(
     backend: str,
     locked_root: Mapping[str, object],
     decode_payload: Callable[..., Any] | None = None,
+    hooks: WorkflowBackendHooks | None = None,
 ) -> WorkflowEffectResult:
     """Use the caller's locked expired Jobs identity, never a replacement lease."""
     if locked_root.get("workflow_capability_version") is None:
         return WorkflowEffectResult(WorkflowOutcome.MISSING)
+    if type(hooks) is not WorkflowBackendHooks or hooks.backend != backend:
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
     return workflow_store(backend).recover_workflow_expiry_in_transaction(
-        connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload
+        connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload, hooks=hooks
     )

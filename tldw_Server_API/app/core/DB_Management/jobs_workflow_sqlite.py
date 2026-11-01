@@ -10,7 +10,7 @@ from typing import Any
 
 import sqlglot
 
-from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
+from tldw_Server_API.app.core.Utils.jobs_workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionInputs,
     WorkflowEffect,
@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowRoot,
     encode_workflow_receipt,
 )
+from tldw_Server_API.app.core.Utils.jobs_workflow_hooks import WorkflowBackendHooks
 
 from .jobs_workflow_migrations import (
     RECEIPT_IDENTITY_COLUMNS,
@@ -84,14 +85,19 @@ def insert_root(connection: sqlite3.Connection, root: WorkflowRoot, policy: Work
 
 
 def create_root_job(
-    connection: sqlite3.Connection, inputs: WorkflowAdmissionInputs, uuid_value: str
+    connection: sqlite3.Connection,
+    inputs: WorkflowAdmissionInputs,
+    uuid_value: str,
+    *,
+    hooks: WorkflowBackendHooks,
 ) -> tuple[dict, dict] | bool | None:
     """Reuse transaction-neutral admission leaves, never their committing wrapper."""
-    from tldw_Server_API.app.core.Jobs.operations.sqlite import admission
+    if type(hooks) is not WorkflowBackendHooks or hooks.backend != "sqlite":
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
 
     now = connection.execute("SELECT STRFTIME('%Y-%m-%d %H:%M:%f','now')").fetchone()[0]
     command = inputs.job
-    rejection = admission._quota_rejection(
+    rejection = hooks.quota_rejection(
         connection,
         command=command,
         now_sql=now,
@@ -100,7 +106,7 @@ def create_root_job(
     )
     if rejection is not None:
         return None
-    job_id = admission._insert_job(
+    job_id = hooks.insert_job(
         connection,
         command=command,
         uuid_value=uuid_value,
@@ -113,8 +119,8 @@ def create_root_job(
         return False
     row = jobs_by_uuid(connection, uuid_value)[0]
     if inputs.counters_enabled:
-        admission._bump_counters(connection, command=command, available_at_sql=None)
-    event = admission._insert_created_event(
+        hooks.bump_counters(connection, command=command, available_at_sql=None)
+    event = hooks.insert_created_event(
         connection, row=row, idempotent=False, request_id=command.request_id, trace_id=command.trace_id
     )
     return row, event
@@ -173,17 +179,16 @@ def transition_effect(
     receipt: WorkflowReceipt,
     row: dict,
     *,
+    hooks: WorkflowBackendHooks,
     counters_enabled: bool,
     outbox_enabled: bool,
     expired: bool = False,
 ) -> dict:
     """Native UUID/lease-fenced mutation and existing counter/event semantics."""
-    from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
-        _insert_prepared_event,
-        _prepared_counter_transition,
-    )
-
     from .jobs_workflow_store import effect_event_type, effect_transition_parameters
+
+    if type(hooks) is not WorkflowBackendHooks or hooks.backend != "sqlite":
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
 
     # Jobs compares timestamps as SQL text. Preserve the original UTC instant
     # (including fractions), with a space separator rather than ISO's T/offset.
@@ -204,12 +209,12 @@ def transition_effect(
     if changed.rowcount != 1:
         raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
     if counters_enabled:
-        _prepared_counter_transition(
+        hooks.prepared_counter_transition(
             connection, row=row, new_status=receipt.resulting_status, queued_scheduled=not expired
         )
     updated = jobs_by_uuid(connection, root.job_uuid)[0]
     if outbox_enabled:
-        _insert_prepared_event(
+        hooks.insert_prepared_event(
             connection,
             row=updated,
             event_type=effect_event_type(receipt),
@@ -262,6 +267,7 @@ def recover_workflow_expiry_in_transaction(
     backend: str,
     locked_root: Mapping[str, object],
     decode_payload: Callable[..., Any] | None = None,
+    hooks: WorkflowBackendHooks | None = None,
 ) -> WorkflowEffectResult:
     """Close the exact old episode without owning any transaction boundary."""
     if locked_root.get("workflow_capability_version") is None:
@@ -270,7 +276,7 @@ def recover_workflow_expiry_in_transaction(
 
     try:
         return _recover_workflow_expiry(
-            connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload
+            connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload, hooks=hooks
         )
     except (sqlite3.Error, ValueError, TypeError, KeyError):
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None

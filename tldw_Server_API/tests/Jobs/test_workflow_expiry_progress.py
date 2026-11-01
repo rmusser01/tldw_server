@@ -1173,6 +1173,7 @@ def test_pg_recovery_scope_is_explicit_and_restored(workflow_pg_case):
     case.acquire()
     case.expire_current_lease()
     from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import recover_workflow_expiry_in_transaction
+    from tldw_Server_API.app.core.Jobs.operations.workflow_bindings import workflow_backend_hooks
 
     with case.connection(runtime=True) as conn:
         conn.execute(
@@ -1185,7 +1186,9 @@ def test_pg_recovery_scope_is_explicit_and_restored(workflow_pg_case):
         cursor = case.execute(conn, "SELECT * FROM jobs WHERE uuid=? FOR UPDATE", (case.root.job_uuid,))
         row = dict(zip([column[0] for column in cursor.description], cursor.fetchone()))
         assert (
-            recover_workflow_expiry_in_transaction(conn, backend="postgres", locked_root=row).outcome
+            recover_workflow_expiry_in_transaction(
+                conn, backend="postgres", locked_root=row, hooks=workflow_backend_hooks("postgres")
+            ).outcome
             is WorkflowOutcome.APPLIED
         )
         assert (

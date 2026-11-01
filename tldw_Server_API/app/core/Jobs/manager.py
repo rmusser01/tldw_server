@@ -41,6 +41,7 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Utils.jobs_errors import JobPayloadDecryptionError
 
 from .audit_bridge import submit_job_audit_event
 from .event_stream import emit_job_event, observe_job_event
@@ -224,14 +225,6 @@ class OwnerScopeAdmissionPolicy:
             or self.created_after.utcoffset() is None
         ):
             raise ValueError("owner scope admission policy is invalid")
-
-
-class JobPayloadDecryptionError(RuntimeError):
-    """Raised when an encrypted Jobs value cannot be safely decoded."""
-
-    def __init__(self, field_name: str) -> None:
-        super().__init__(f"Encrypted job {field_name} could not be decrypted")
-        self.field_name = field_name
 
 
 _SLIDES_GENERATION_DOMAIN = "slides"
@@ -6157,6 +6150,81 @@ class JobManager:
         finally:
             conn.close()
 
+    @staticmethod
+    def _transition_expired_legacy_job_postgres(
+        cur: Any, row: dict[str, Any]
+    ) -> tuple[str, dict[str, Any], bool]:
+        """Apply one guarded legacy transition in the caller's recovery transaction."""
+
+        retry_count = int(row["effective_retry_count"])
+        max_retries = int(row["effective_max_retries"])
+        no_attempt = (
+            row["effective_expired_lease_policy"] == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+        )
+        requeue = no_attempt or retry_count < max_retries
+        if no_attempt:
+            cur.execute(
+                (
+                    "UPDATE jobs SET status='queued', available_at=NULL, "
+                    "no_attempt_recovery_fingerprint="
+                    "prepared_disposition_fingerprint, "
+                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
+                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
+                    "WHERE id=%s AND status='processing' "
+                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                    "AND expired_lease_policy='requeue_no_attempt'"
+                ),
+                (int(row["id"]),),
+            )
+            event_type = "job.deferred"
+            attrs = {
+                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                "origin": "recovery",
+            }
+        elif requeue:
+            cur.execute(
+                (
+                    "UPDATE jobs SET status='queued', "
+                    "retry_count=COALESCE(retry_count, 0) + 1, "
+                    "max_retries=COALESCE(max_retries, %s), available_at=NULL, "
+                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=NULL "
+                    "WHERE id=%s AND status='processing' "
+                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                    "AND COALESCE(retry_count, 0) < COALESCE(max_retries, %s)"
+                ),
+                (_DEFAULT_MAX_RETRIES, int(row["id"]), _DEFAULT_MAX_RETRIES),
+            )
+            event_type = "job.retry_scheduled"
+            attrs = {
+                "backoff_seconds": 0,
+                "error_code": _LEASE_EXPIRED_ERROR_CODE,
+                "retry_count": retry_count + 1,
+            }
+        else:
+            cur.execute(
+                (
+                    "UPDATE jobs SET status='failed', "
+                    "retry_count=COALESCE(retry_count, 0), "
+                    "max_retries=COALESCE(max_retries, %s), "
+                    "last_error=%s, error_message=%s, error_code=%s, completed_at=NOW(), "
+                    "leased_until=NULL, worker_id=NULL, lease_id=NULL "
+                    "WHERE id=%s AND status='processing' "
+                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
+                    "AND COALESCE(retry_count, 0) >= COALESCE(max_retries, %s)"
+                ),
+                (
+                    _DEFAULT_MAX_RETRIES,
+                    _LEASE_EXPIRED_ERROR_CODE,
+                    _LEASE_EXPIRED_ERROR_MESSAGE,
+                    _LEASE_EXPIRED_ERROR_CODE,
+                    int(row["id"]),
+                    _DEFAULT_MAX_RETRIES,
+                ),
+            )
+            event_type = "job.failed"
+            attrs = {"error_code": _LEASE_EXPIRED_ERROR_CODE}
+        return event_type, attrs, requeue
+
     def _recover_expired_processing_jobs(
         self,
         *,
@@ -6226,8 +6294,14 @@ class JobManager:
                     for raw_row in rows:
                         row = dict(raw_row)
                         if row.get("workflow_capability_version") is not None:
+                            from .operations.workflow_bindings import workflow_backend_hooks
+
                             result = recover_workflow_expiry_in_transaction(
-                                conn, backend=self.backend, locked_root=row, decode_payload=self._maybe_decrypt_json
+                                conn,
+                                backend=self.backend,
+                                locked_root=row,
+                                decode_payload=self._maybe_decrypt_json,
+                                hooks=workflow_backend_hooks(self.backend),
                             )
                             if result.receipt is not None:
                                 attrs = {"origin": "recovery"}
@@ -6235,73 +6309,7 @@ class JobManager:
                                     attrs["error_code"] = "no_progress_exhausted"
                                 recovered.append((effect_event_type(result.receipt), row, attrs))
                             continue
-                        retry_count = int(row["effective_retry_count"])
-                        max_retries = int(row["effective_max_retries"])
-                        no_attempt = (
-                            row["effective_expired_lease_policy"] == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
-                        )
-                        requeue = no_attempt or retry_count < max_retries
-                        if no_attempt:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status='queued', available_at=NULL, "
-                                    "no_attempt_recovery_fingerprint="
-                                    "prepared_disposition_fingerprint, "
-                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
-                                    "completion_token=NULL, acquired_at=NULL, started_at=NULL "
-                                    "WHERE id=%s AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
-                                    "AND expired_lease_policy='requeue_no_attempt'"
-                                ),
-                                (int(row["id"]),),
-                            )
-                            event_type = "job.deferred"
-                            attrs = {
-                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
-                                "origin": "recovery",
-                            }
-                        elif requeue:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status='queued', "
-                                    "retry_count=COALESCE(retry_count, 0) + 1, "
-                                    "max_retries=COALESCE(max_retries, %s), available_at=NULL, "
-                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=NULL "
-                                    "WHERE id=%s AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
-                                    "AND COALESCE(retry_count, 0) < COALESCE(max_retries, %s)"
-                                ),
-                                (_DEFAULT_MAX_RETRIES, int(row["id"]), _DEFAULT_MAX_RETRIES),
-                            )
-                            event_type = "job.retry_scheduled"
-                            attrs = {
-                                "backoff_seconds": 0,
-                                "error_code": _LEASE_EXPIRED_ERROR_CODE,
-                                "retry_count": retry_count + 1,
-                            }
-                        else:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status='failed', "
-                                    "retry_count=COALESCE(retry_count, 0), "
-                                    "max_retries=COALESCE(max_retries, %s), "
-                                    "last_error=%s, error_message=%s, error_code=%s, completed_at=NOW(), "
-                                    "leased_until=NULL, worker_id=NULL, lease_id=NULL "
-                                    "WHERE id=%s AND status='processing' "
-                                    "AND (leased_until IS NULL OR leased_until <= NOW()) "
-                                    "AND COALESCE(retry_count, 0) >= COALESCE(max_retries, %s)"
-                                ),
-                                (
-                                    _DEFAULT_MAX_RETRIES,
-                                    _LEASE_EXPIRED_ERROR_CODE,
-                                    _LEASE_EXPIRED_ERROR_MESSAGE,
-                                    _LEASE_EXPIRED_ERROR_CODE,
-                                    int(row["id"]),
-                                    _DEFAULT_MAX_RETRIES,
-                                ),
-                            )
-                            event_type = "job.failed"
-                            attrs = {"error_code": _LEASE_EXPIRED_ERROR_CODE}
+                        event_type, attrs, requeue = self._transition_expired_legacy_job_postgres(cur, row)
                         if cur.rowcount != 1:
                             continue
 
@@ -6409,8 +6417,14 @@ class JobManager:
                     for raw_row in rows:
                         row = dict(raw_row)
                         if row.get("workflow_capability_version") is not None:
+                            from .operations.workflow_bindings import workflow_backend_hooks
+
                             result = recover_workflow_expiry_in_transaction(
-                                conn, backend=self.backend, locked_root=row, decode_payload=self._maybe_decrypt_json
+                                conn,
+                                backend=self.backend,
+                                locked_root=row,
+                                decode_payload=self._maybe_decrypt_json,
+                                hooks=workflow_backend_hooks(self.backend),
                             )
                             if result.receipt is not None:
                                 attrs = {"origin": "recovery"}

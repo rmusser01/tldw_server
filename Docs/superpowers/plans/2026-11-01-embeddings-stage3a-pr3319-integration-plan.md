@@ -14,7 +14,7 @@ Requester explicitly waived the human-written Change summary requirement for thi
 **Goal**: Review the full rebased PR with the requested skill, address validated findings, and certify changed behavior.
 **Success Criteria**: No outstanding actionable review findings; explicit treatment of declined scope and baseline debt; no new scoped Bandit findings.
 **Tests**: Both real database backends and acquisition modes, retained proofs/fences/encryption/recovery, legacy lifecycle/UUID/WorkerSDK, inline/endpoint/media compatibility, relevant CI contracts, scoped lint/format/compile/Bandit.
-**Status**: Complete
+**Status**: In Progress
 
 ## Stage 3: Publish And Arm Auto-Merge
 **Goal**: Publish the verified rebase and fixes, record the PR-specific waiver and final evidence, and enable auto-merge according to repository rules.
@@ -97,3 +97,75 @@ tracking checks passed: 365 cases, zero skips, in 194.85 seconds. Task-ID and al
 17 source hash checks also pass. These qualify the integration delta; final-head remote gates remain
 required before auto-merge. The pre-rebase reviewed head is retained in
 `codex/embeddings-stage3a-pre-dev61d-rebase`.
+
+## Structural CI Integration
+
+Final-head backend CI exposed three additional structural ratchets in its full
+contract step: the 406-line recovery method exceeds its 363-line ceiling,
+persistence adds upward Jobs imports, and five of those imports close DB-loading
+cycles. The earlier selected CI checks did not include this full contract step.
+Auto-merge remains off and Stage 2 is reopened. Earlier counts certify the
+pre-correction source, not the forthcoming structural edits.
+
+Preserve the approved behavior and restore the existing layer contract:
+
+1. Extract bounded recovery helpers, retaining exact predicates, ordering,
+   transaction ownership, and current function-size ceilings.
+2. Place inert shared operation/workflow contracts in a lower pure module and
+   retain existing Jobs import surfaces as compatibility facades. Keep type
+   identity, serialized facts, reserved identities, and startup dormancy intact.
+3. Inject the existing admission/counter/event leaves from Jobs callers into
+   persistence adapters. Share the payload error without importing the manager.
+   No raised import/size ceilings, dynamic-import substitutions, or exemptions.
+
+Reproduce all three failures locally, run the complete backend contract command
+and tenant-isolation command from the workflow, re-certify both database modes
+and compatibility, and independently review the full structural delta before
+publication. New final-head CI remains the integration gate.
+
+## Structural Review And Publication Evidence
+
+The exact three structural failures reproduced locally and now pass without
+increasing ceilings, import counts, exemptions, or the quality baseline. Recovery
+is 352 lines against the existing 363 ceiling. The shared ordinary contract file
+is byte-identical to its previous definition; workflow contracts differ only in
+the sibling import location. Existing imports retain object identity. Native
+admission/counter/event functions are injected from Jobs, not relocated into
+persistence. Scope baseline remains 28 entries with seven coordinate changes.
+
+Independent read-only review covered all 20 structural follow-up files and the
+16 frozen Python hashes, including the final two line-wrap-only corrections.
+No Critical, Important, or Minor findings. The reviewer verified executable
+extraction equivalence, export/receipt compatibility, native hook identity,
+caller completeness, fail-closed enrolled recovery, legacy/null behavior,
+transaction ownership, owner/RLS restoration, expiry/fencing and observers.
+Declined scope is explicitly accepted: unchanged earlier PR behavior already
+had independent review; Stages 3B-3D and activation remain separate; live GitHub
+qualification is controller-owned and is not waived.
+
+Functional qualification passed 2,497 distinct selected cases with no skips:
+SQLite 664, real PostgreSQL 537, Jobs compatibility 573, lifecycle/RLS 231,
+inline 48, endpoint/media 155, CI 77, and Docs 212. Repeated focused runs are not
+added to that total. A clean final-format SQLite coverage refresh passed all
+664 cases and measured 87.14% across its 11 loaded modules; the PostgreSQL
+adapter was not loaded in that selection. A fresh joint two-backend run across
+all 12 modules is in progress. The earlier appended coverage mixed file line
+coordinates across a formatting-only change and is not used as final evidence.
+The PR timeline will record the joint result without claiming a pending pass.
+
+Literal backend workflow commands passed tenant isolation (68), contracts/code
+ratchets (1,006 with one declared macOS Bash-version skip), backend unit smoke
+(456), and non-UTC timestamp tests (687). The separate WebSocket matrix had
+182 passes and eight ACP runner-client failures; all eight also failed on an
+untouched dev61d diagnostic checkout. No ACP change, test skip, or required-CI
+bypass is authorized. The actual final-head Linux required gate must pass.
+Scoped Ruff/compile and configured pre-commit hooks pass. Production Bandit has
+no new finding or scan error; its one manager B608 function has identical AST
+to current dev. Old manager/moved-contract formatting and conftest lint debt
+remain baseline limitations, not clean-slate claims.
+
+Published head 09a passed both Jobs database jobs, real-server UX, and its other
+completed required checks; only the structural backend gate failed. These are
+pre-repair remote results. Current dev remains 61d02ed484. Publish the reviewed
+repair, qualify the actual new head, and arm auto-merge only after issues are
+addressed. Auto-merge is still off at this committed readiness snapshot.

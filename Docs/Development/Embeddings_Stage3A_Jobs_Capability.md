@@ -60,6 +60,26 @@ sessions must not retain another owner's authority.
 
 ## Admission And Inspection
 
+### Composition Boundaries
+
+The existing `Jobs.operations.contracts` and `Jobs.operations.workflow_contracts`
+imports remain compatibility surfaces for the same objects. Their canonical
+definitions live in pure `Utils.jobs_operation_contracts` and
+`Utils.jobs_workflow_contracts` modules shared by Jobs and persistence. These are
+closed data/validation contracts, not executable admission or lifecycle services.
+Definition-module introspection now reports the canonical Utils location;
+existing imports, type identities, reserved identities and receipt bytes remain
+compatible. Durable workflow facts use the existing JSON codecs, not pickle.
+
+Executable admission, counter and event leaves stay in Jobs. The Jobs composition
+layer supplies frozen `WorkflowBackendHooks` to persistence adapters through
+`workflow_backend_hooks(backend)`. Public manager/capability paths bind these
+automatically; they are never sourced from requests or stored as durable facts.
+Internal callers of enrolled `recover_workflow_expiry_in_transaction` must pass
+the trusted backend hooks. Missing or mismatched hooks fail unavailable before
+epoch changes; legacy/null enrollment still needs neither hooks nor support
+storage. Hooks never own a transaction or call a committing manager wrapper.
+
 Bind trusted policy, not policy inferred from a request. A capability constructor
 is inert. The following is a Jobs-only admission example, not domain enrollment
 or an installed Embeddings repository:

@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
     workflow_store,
 )
 
+from .operations.workflow_bindings import workflow_backend_hooks
 from .operations.workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionResult,
@@ -61,7 +62,14 @@ class PreparedWorkflowCapability:
                     transaction_id = store.begin_runtime(connection, owner_user_id)
                     if store.inspect_support(connection) is not WorkflowOutcome.APPLIED:
                         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
-                    tx = LiveWorkflowTransaction(manager, self.policy, connection, owner_user_id, transaction_id)
+                    tx = LiveWorkflowTransaction(
+                        manager,
+                        self.policy,
+                        connection,
+                        owner_user_id,
+                        transaction_id,
+                        hooks=workflow_backend_hooks(manager.backend),
+                    )
                     transaction_token = manager._WORKFLOW_TRANSACTION.set(tx)
                     yield tx
                     tx.validate_fences()

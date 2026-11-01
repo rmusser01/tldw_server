@@ -12,7 +12,7 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
-from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
+from tldw_Server_API.app.core.Utils.jobs_workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionInputs,
     WorkflowEffect,
@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowRoot,
     encode_workflow_receipt,
 )
+from tldw_Server_API.app.core.Utils.jobs_workflow_hooks import WorkflowBackendHooks
 
 from .jobs_workflow_migrations import (
     RECEIPT_IDENTITY_COLUMNS,
@@ -132,19 +133,24 @@ def insert_root(connection: Any, root: WorkflowRoot, policy: WorkflowPolicy) -> 
 
 
 def create_root_job(
-    connection: Any, inputs: WorkflowAdmissionInputs, uuid_value: str
+    connection: Any,
+    inputs: WorkflowAdmissionInputs,
+    uuid_value: str,
+    *,
+    hooks: WorkflowBackendHooks,
 ) -> tuple[dict, dict] | bool | None:
     """Use the ordinary quota, insert, counter and event leaves atomically."""
     from psycopg.rows import dict_row
 
-    from tldw_Server_API.app.core.Jobs.operations.postgres import admission
+    if type(hooks) is not WorkflowBackendHooks or hooks.backend != "postgres":
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
 
     command = inputs.job
     with connection.cursor(row_factory=dict_row) as cursor:
         if inputs.max_queued_quota or inputs.submits_per_minute_quota:
-            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (admission._quota_lock_key(command),))
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (hooks.quota_lock_key(command),))
         now = connection.execute("SELECT clock_timestamp()").fetchone()[0]
-        rejection = admission._quota_rejection(
+        rejection = hooks.quota_rejection(
             cursor,
             command=command,
             now=now,
@@ -153,7 +159,7 @@ def create_root_job(
         )
         if rejection is not None:
             return None
-        row = admission._insert_job(
+        row = hooks.insert_job(
             cursor,
             command=command,
             uuid_value=uuid_value,
@@ -164,8 +170,8 @@ def create_root_job(
         if row is None:
             return False
         if inputs.counters_enabled:
-            admission._bump_counters(cursor, command=command, available_at=None)
-        event = admission._insert_created_event(
+            hooks.bump_counters(cursor, command=command, available_at=None)
+        event = hooks.insert_created_event(
             cursor, row=row, idempotent=False, request_id=command.request_id, trace_id=command.trace_id
         )
         return row, event
@@ -222,6 +228,7 @@ def transition_effect(
     receipt: WorkflowReceipt,
     row: dict,
     *,
+    hooks: WorkflowBackendHooks,
     counters_enabled: bool,
     outbox_enabled: bool,
     expired: bool = False,
@@ -229,12 +236,10 @@ def transition_effect(
     """Apply on the caller's locked connection without a committing wrapper."""
     from psycopg.rows import dict_row
 
-    from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
-        _insert_prepared_event,
-        _prepared_counter_transition,
-    )
-
     from .jobs_workflow_store import effect_event_type, effect_transition_parameters
+
+    if type(hooks) is not WorkflowBackendHooks or hooks.backend != "postgres":
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
 
     expiry_guard = "leased_until<=clock_timestamp()" if expired else "leased_until>clock_timestamp()"
     parameters = effect_transition_parameters(root, lease, effect, receipt, row)
@@ -249,12 +254,12 @@ def transition_effect(
         raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
     with connection.cursor(row_factory=dict_row) as cursor:
         if counters_enabled:
-            _prepared_counter_transition(
+            hooks.prepared_counter_transition(
                 cursor, row=row, new_status=receipt.resulting_status, queued_scheduled=not expired
             )
         updated = jobs_by_uuid(connection, root.job_uuid)[0]
         if outbox_enabled:
-            _insert_prepared_event(
+            hooks.insert_prepared_event(
                 cursor,
                 row=updated,
                 event_type=effect_event_type(receipt),
@@ -279,7 +284,7 @@ def _maintenance_owner_scope(connection: Any, owner: str):
     from psycopg import sql
     from psycopg.pq import TransactionStatus
 
-    from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import _text
+    from tldw_Server_API.app.core.Utils.jobs_workflow_contracts import _text
 
     _text(owner, 512)
     old = connection.execute(
@@ -342,6 +347,7 @@ def recover_workflow_expiry_in_transaction(
     backend: str,
     locked_root: Mapping[str, object],
     decode_payload: Callable[..., Any] | None = None,
+    hooks: WorkflowBackendHooks | None = None,
 ) -> WorkflowEffectResult:
     """Lock ownership is external; support access never uses an admin bypass."""
     if locked_root.get("workflow_capability_version") is None:
@@ -353,7 +359,7 @@ def recover_workflow_expiry_in_transaction(
     try:
         with _maintenance_owner_scope(connection, locked_root.get("owner_user_id")):
             return _recover_workflow_expiry(
-                connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload
+                connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload, hooks=hooks
             )
     except (Error, ValueError, TypeError, KeyError):
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
