@@ -1,7 +1,7 @@
 ---
 id: TASK-15409
 title: Define Web Scraping Phase 5 controls and reports
-status: To Do
+status: In Progress
 labels:
 - web-scraping
 - phase5
@@ -24,6 +24,7 @@ Execute Task 2 of the approved Phase 5 plan as an independently reviewable unit.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Parent TASK-15407. Plan Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md, Task 2. ADR assessment: no new ADR; existing ADR-085 governs. Use backlog-py; no product edits outside this task scope without controller ruling. Implementation and review evidence will be linked from the plan-scoped SDD ledger.
+Task 1 complete and independently approved. Start Task 2 after controller bookkeeping commit; inherited real profile fixtures and successful-result inclusion/expansion timing are binding. Define CrawlLimits and CheckpointLimits in crawl/models.py; QueueLimits belongs to Task 3 jobs/models.py. The shared constraints handout includes all approved concrete defaults. No public constructor or runtime cutover in this task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
