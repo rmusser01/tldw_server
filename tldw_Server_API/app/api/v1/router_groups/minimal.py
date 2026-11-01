@@ -744,6 +744,15 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
 
     for ops_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.jobs_owned",
+            log_name="jobs_owned",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("jobs",),
+            route_key="jobs-owned",
+            default_stable=True,
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.jobs_admin",
             log_name="jobs_admin",
             prefix=f"{API_V1_PREFIX}",

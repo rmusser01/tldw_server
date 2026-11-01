@@ -5553,7 +5553,10 @@ class JobManager:
         """Fetch a job from the active table or the archive table.
 
         Returns a job dict with normalized payload/result and an "archived" flag.
+        ``job_uuid`` binds a detail link to its logical Job even if an archived
+        numeric ID has since been reused; a mismatch never returns a replacement.
         """
+
         job = self.get_job(job_id)
         if (
             job
