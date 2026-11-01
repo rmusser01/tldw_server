@@ -14,7 +14,7 @@ Requester explicitly waived the human-written Change summary requirement for thi
 **Goal**: Review the full rebased PR with the requested skill, address validated findings, and certify changed behavior.
 **Success Criteria**: No outstanding actionable review findings; explicit treatment of declined scope and baseline debt; no new scoped Bandit findings.
 **Tests**: Both real database backends and acquisition modes, retained proofs/fences/encryption/recovery, legacy lifecycle/UUID/WorkerSDK, inline/endpoint/media compatibility, relevant CI contracts, scoped lint/format/compile/Bandit.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Publish And Arm Auto-Merge
 **Goal**: Publish the verified rebase and fixes, record the PR-specific waiver and final evidence, and enable auto-merge according to repository rules.
@@ -24,9 +24,12 @@ Requester explicitly waived the human-written Change summary requirement for thi
 
 Check `MERGE_QUEUE` before activation. When `on`, arm the queue and do not rebase,
 update, or hand-merge an armed PR. When unset, `off`, or `dry`, qualify only this
-PR against current dev and wait for required statuses. The requester's explicit
+PR against current dev and wait for required statuses before actual merging. The requester's explicit
 auto-merge instruction applies after that qualification; it does not authorize
 changing queue settings, dispatching replacement checks, or bypassing protection.
+Arming a protected auto-merge request may occur while required CI is pending,
+after local qualification and review-finding closure. Pending checks are not
+passes: GitHub must enforce all eight effective required contexts before merging.
 
 ## Additional Review Intake
 
@@ -157,8 +160,9 @@ Literal backend workflow commands passed tenant isolation (68), contracts/code
 ratchets (1,006 with one declared macOS Bash-version skip), backend unit smoke
 (456), and non-UTC timestamp tests (687). The separate WebSocket matrix had
 182 passes and eight ACP runner-client failures; all eight also failed on an
-untouched dev61d diagnostic checkout. No ACP change, test skip, or required-CI
-bypass is authorized. The actual final-head Linux required gate must pass.
+untouched dev61d diagnostic checkout. No new ACP change, additional test skip,
+or required-CI bypass is authorized; the existing declared Bash-version skip is
+retained. The actual final-head Linux required gate must pass.
 Scoped Ruff/compile and configured pre-commit hooks pass. Production Bandit has
 no new finding or scan error; its one manager B608 function has identical AST
 to current dev. Old manager/moved-contract formatting and conftest lint debt
@@ -169,3 +173,64 @@ completed required checks; only the structural backend gate failed. These are
 pre-repair remote results. Current dev remains 61d02ed484. Publish the reviewed
 repair, qualify the actual new head, and arm auto-merge only after issues are
 addressed. Auto-merge is still off at this committed readiness snapshot.
+
+## Chunker Base Update And Late Review
+
+Dev advanced again through PR3095 to 6bf581da089. The reviewed a2d79b6b25 head
+is retained in `codex/embeddings-stage3a-pre-chunker-rebase`. All 36 patches
+rebased without conflicts and are range-diff equivalent; all 16 reviewed Python
+hashes matched. Current reachable completed-plan ancestor is e85851f435.
+Current-base Chunker/public-output, Embeddings/API, structural/quality/tracking
+and Docs integration passed 977 cases with zero skips; the three new upstream
+AuthNZ reply-budget regressions also passed separately.
+
+Before the late review changes, a clean joint workflow/contract/property run
+passed 1,201 cases with zero skips and measured 1,983/2,242 statements, 88.45%
+line coverage across all 12 modules. This supersedes mixed-line coverage data,
+but is not represented as certification of subsequent runtime changes.
+
+Automated review then raised three comments. Nested caller-owned payload
+mutation in ordinary CreateJobCommand reproduced; the command now deep-copies
+payloads after validating controls, matching neighboring contracts. This is the
+only intentional change to the moved ordinary contract definitions, superseding
+the earlier byte-identity claim for the pre-fix source. It does not change type
+identity or JSON meaning for unchanged values, nor claim transitive immutability.
+Cold-import tests now launch separate interpreters for all four import paths;
+legacy cases permit only their exact facade and namespace parents, while
+canonical cases still cannot load Jobs. Existing I/O/thread/DB/config guards
+remain. The skip wording above now explicitly prohibits new/additional skips,
+not the already recorded platform-specific Bash skip.
+
+Red: three failures and two controls passed. Green: both full contract/import
+test files passed all 100 cases. Ruff, compile and scoped Bandit pass. Fresh
+two-backend workflow/property and native compatibility certification plus a
+bounded independent re-review of this late delta were in progress at that
+snapshot. Review-thread closure remains required before arming auto-merge;
+final-head required CI remains required before any actual merge.
+
+## Final Late-Review Qualification
+
+The late runtime/test/guide delta received a bounded independent read-only
+re-review and documentation addendum. No Critical, Important, or Minor findings.
+The reviewer verified nested/top-level detachment, unchanged JSON values and
+None handling, alias identity, validation-before-copy ordering, absence of
+identity-dependent callers, all four cold-import probes, and exact namespace
+allowlists. Previously reviewed code/equivalent rebase remains certified by its
+earlier review; live publication/CI/tracking outcomes remain controller-owned.
+
+Final late-source qualification passed 1,204 workflow/contract/property cases
+across both real databases and acquisition modes, then all 573 selected native
+Jobs compatibility cases, with zero skips. Fresh joint 12-module line coverage:
+1,984/2,243 statements, 88.45%. The complete literal CI contract/code ratchet
+command passed 1,006 cases with the one existing macOS Bash-version skip. The
+earlier 977+3 current-base integration passes remain evidence for that rebase;
+they are not described as a later whole-matrix rerun. All 17 final Python hashes
+are frozen, with no subsequent source edits. No new scoped Bandit finding.
+
+Stage 2 is complete. Stage 3 publishes the source-identical rebase and reviewed
+late fixes, closes the three remote threads with evidence, verifies the actual
+head/base and absence of unresolved findings/recorded failures, then enables the
+requested protected auto-merge. Final-head required CI may still be pending when
+that request is armed; this is not a CI success claim or bypass. GitHub must
+satisfy all effective required checks before any merge. The PR timeline records
+the actual request and subsequent CI outcome without further source churn.

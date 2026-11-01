@@ -33,11 +33,9 @@ def test_legacy_paths_share_every_export_and_private_helper(legacy_path: str, ca
     assert getattr(legacy, "__all__", None) is getattr(canonical, "__all__", None)
 
 
-@pytest.mark.parametrize("legacy_path,canonical_path", _MODULE_PAIRS)
-def test_canonical_imports_are_inert_without_loading_domain_or_database_modules(
-    legacy_path: str, canonical_path: str, tmp_path: Path
-) -> None:
-    """A clean interpreter must not load Jobs/config/DB code or perform I/O."""
+@pytest.mark.parametrize("module_path", [path for pair in _MODULE_PAIRS for path in pair])
+def test_contract_imports_are_inert_without_loading_services(module_path: str, tmp_path: Path) -> None:
+    """Each cold import permits only pure facts and its exact namespace facade."""
     probe = textwrap.dedent(
         """
         import importlib
@@ -67,6 +65,12 @@ def test_canonical_imports_are_inert_without_loading_domain_or_database_modules(
             "tldw_Server_API.app.core.Utils.jobs_operation_contracts",
             "tldw_Server_API.app.core.Utils.jobs_workflow_contracts",
         }
+        if sys.argv[2].startswith("tldw_Server_API.app.core.Jobs.operations."):
+            allowed.update({
+                "tldw_Server_API.app.core.Jobs",
+                "tldw_Server_API.app.core.Jobs.operations",
+                sys.argv[2],
+            })
         unexpected = sorted(name for name in sys.modules if name.startswith("tldw_Server_API") and name not in allowed)
         print(json.dumps({
             "unexpected_modules": unexpected,
@@ -82,7 +86,7 @@ def test_canonical_imports_are_inert_without_loading_domain_or_database_modules(
             "-c",
             probe,
             str(Path(__file__).resolve().parents[3]),
-            f"{_CORE}.{canonical_path}",
+            f"{_CORE}.{module_path}",
         ],
         cwd=tmp_path,
         capture_output=True,

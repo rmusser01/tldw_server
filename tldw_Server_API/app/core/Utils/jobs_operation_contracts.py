@@ -587,7 +587,7 @@ class TerminalOperationResultPatchCommand:
 
 @dataclass(frozen=True)
 class CreateJobCommand:
-    """Backend-neutral command payload for creating a Jobs row."""
+    """Backend-neutral create command with a caller-independent payload snapshot."""
 
     domain: str
     queue: str
@@ -606,7 +606,7 @@ class CreateJobCommand:
     quarantine_threshold: int | None = None
 
     def __post_init__(self) -> None:
-        """Validate controls that must fail before any backend operation."""
+        """Validate controls and snapshot the payload before any backend operation."""
 
         try:
             policy = ExpiredLeasePolicy(self.expired_lease_policy)
@@ -620,6 +620,7 @@ class CreateJobCommand:
         ):
             raise ValueError("quarantine_threshold must be a positive integer")
         object.__setattr__(self, "expired_lease_policy", policy)
+        object.__setattr__(self, "payload", copy.deepcopy(self.payload))
 
 
 @dataclass(frozen=True)

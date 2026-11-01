@@ -70,6 +70,10 @@ closed data/validation contracts, not executable admission or lifecycle services
 Definition-module introspection now reports the canonical Utils location;
 existing imports, type identities, reserved identities and receipt bytes remain
 compatible. Durable workflow facts use the existing JSON codecs, not pickle.
+The ordinary `CreateJobCommand` takes a defensive deep copy of caller-owned
+payload data at construction, matching the other payload-bearing contracts.
+This is a detached snapshot, not a promise that nested command attributes are
+transitively immutable; unchanged payload values retain the same JSON meaning.
 
 Executable admission, counter and event leaves stay in Jobs. The Jobs composition
 layer supplies frozen `WorkflowBackendHooks` to persistence adapters through
