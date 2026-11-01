@@ -127,12 +127,12 @@
 - `admin-ui/app/webhooks/__tests__/page.test.tsx` - replace stale legacy fixtures and test the complete PR 1 workflow.
 - `admin-ui/docs/feature-guides/webhooks.md` - document only available control-plane behavior and later delivery dependency.
 - `apps/tldw-frontend/lib/api/openapi.fingerprint.json` - record the reviewed canonical PR 1 API delta.
-- `backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md` - retain execution notes, verification evidence, and review state with each implementation unit.
+- `backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md` - retain execution notes, verification evidence, and review state with each implementation unit.
 
 ### Task 0: Rebase, Attach The Plan, And Prove The Baseline
 
 **Files:**
-- Modify: `backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md`
+- Modify: `backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md`
 
 **Interfaces:**
 - Consumes: approved design at `Docs/Design/2026-07-12-canonical-admin-outgoing-webhooks.md`.
@@ -309,7 +309,7 @@ git add tldw_Server_API/app/core/Admin_Webhooks \
   tldw_Server_API/app/core/Security/egress.py \
   tldw_Server_API/tests/Admin_Webhooks/test_domain_config_catalog.py \
   tldw_Server_API/tests/Security/test_egress.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): define canonical control-plane contracts"
 ```
 
@@ -422,7 +422,7 @@ fi
 git add tldw_Server_API/app/core/Admin_Webhooks/crypto.py \
   tldw_Server_API/app/core/Admin_Webhooks/config.py \
   tldw_Server_API/tests/Admin_Webhooks/test_crypto.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): add dedicated contextual encryption"
 ```
 
@@ -520,7 +520,7 @@ git add tldw_Server_API/app/core/AuthNZ/migrations.py \
   tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): add canonical dual-backend schema"
 ```
 
@@ -640,7 +640,7 @@ Expected: PASS when the disposable database is configured; a local SKIP must bec
 git add tldw_Server_API/app/core/DB_Management/admin_webhooks_repository.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): add transactional canonical repository"
 ```
 
@@ -890,7 +890,7 @@ git add tldw_Server_API/app/core/Admin_Webhooks/control_plane.py \
   tldw_Server_API/app/core/Admin_Webhooks/audit.py \
   tldw_Server_API/tests/Admin_Webhooks/test_audit.py \
   tldw_Server_API/tests/Admin_Webhooks/test_control_plane.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): implement canonical registration lifecycle"
 ```
 
@@ -1059,7 +1059,7 @@ git add tldw_Server_API/app/core/Admin_Webhooks/key_rotation.py \
   tldw_Server_API/tests/Admin_Webhooks/test_key_rotation.py \
   tldw_Server_API/tests/Admin_Webhooks/test_repository_postgres.py \
   tldw_Server_API/tests/Admin/test_admin_system_ops_service.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): add resumable encryption-key rotation"
 ```
 
@@ -1226,7 +1226,7 @@ git add tldw_Server_API/app/core/Admin_Webhooks/legacy_import.py \
   pyproject.toml \
   tldw_Server_API/tests/Admin_Webhooks/test_legacy_import.py \
   tldw_Server_API/tests/Admin_Webhooks/test_legacy_import_postgres.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): add crash-safe legacy migration"
 ```
 
@@ -1527,7 +1527,7 @@ git add tldw_Server_API/app/api/v1/schemas/admin_webhooks.py \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
   tldw_Server_API/tests/Admin_Webhooks/test_route_selection.py \
   tldw_Server_API/tests/Admin_Webhooks/test_openapi.py \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(webhooks): expose canonical admin control plane"
 ```
 
@@ -1649,7 +1649,7 @@ git add admin-ui/lib/http.ts admin-ui/lib/server-auth.ts \
   admin-ui/app/api/proxy/__tests__/route.test.ts \
   admin-ui/lib/api-client.ts admin-ui/types/webhooks.ts admin-ui/types/index.ts \
   admin-ui/lib/idempotent-command.ts admin-ui/lib/__tests__/idempotent-command.test.ts \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(admin-ui): support conditional webhook commands"
 ```
 
@@ -1736,7 +1736,7 @@ cd ..
 git add admin-ui/app/webhooks/page.tsx \
   admin-ui/app/webhooks/__tests__/page.test.tsx \
   admin-ui/tests/e2e/webhooks-control-plane.spec.ts \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "feat(admin-ui): manage canonical webhook registrations"
 ```
 
@@ -1749,7 +1749,7 @@ git commit -m "feat(admin-ui): manage canonical webhook registrations"
 - Create: `Docs/Evidence/Admin_Webhooks_PR1_Verification.md`
 - Modify: `admin-ui/docs/feature-guides/webhooks.md`
 - Modify: `apps/tldw-frontend/lib/api/openapi.fingerprint.json`
-- Modify: `backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md`
+- Modify: `backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md`
 
 **Interfaces:**
 - Consumes: all PR 1 implementation and verification output.
@@ -1883,7 +1883,7 @@ git add Docs/Admin_Webhooks_Control_Plane.md \
   Docs/Evidence/Admin_Webhooks_PR1_Verification.md \
   admin-ui/docs/feature-guides/webhooks.md \
   apps/tldw-frontend/lib/api/openapi.fingerprint.json \
-  "backlog/tasks/task-13014 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
+  "backlog/tasks/task-15131 - Implement-canonical-admin-webhook-control-plane-and-migration.md"
 git commit -m "docs(webhooks): add control-plane operations runbooks"
 git status --short
 ```
