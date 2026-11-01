@@ -8,7 +8,12 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import make_command, make_request, snapshot
+from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import (
+    CONFLICT_REFERENCE_FIELDS,
+    make_command,
+    make_request,
+    snapshot,
+)
 
 
 @settings(max_examples=30, deadline=None)
@@ -34,11 +39,14 @@ def test_generated_alias_queue_and_settings_sequences(operations):
             else:
                 expected = "active_reused" if min_size == active_min_size else "active_conflict"
             assert result.kind == expected
-            if result.job is not None:
-                job_uuid = job_uuid or result.job["uuid"]
-                assert result.job["uuid"] == job_uuid
+            assert result.job is not None
+            job_uuid = job_uuid or result.job["uuid"]
+            assert result.job["uuid"] == job_uuid
+            if result.kind in ("created", "active_reused", "request_replayed"):
                 if key is not None:
                     aliases[key] = min_size
+            else:
+                assert set(result.job) == CONFLICT_REFERENCE_FIELDS
         facts = snapshot(manager)
         assert len(facts["jobs"]) == len(facts["job_events"]) == 1
         assert len(facts["job_resource_request_receipts"]) == len(aliases)

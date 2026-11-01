@@ -4,6 +4,7 @@ import pytest
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import (
+    CONFLICT_REFERENCE_FIELDS,
     ResourceAdmissionCases,
     make_command,
     make_request,
@@ -24,6 +25,33 @@ def manager(jobs_pg_dsn, monkeypatch):
 
 class TestPostgres(ResourceAdmissionCases):
     pass
+
+
+@pytest.mark.parametrize("key", [None, "request-1"])
+def test_restricted_conflict_reference_is_owner_scoped(jobs_pg_dsn, monkeypatch, key):
+    from dataclasses import replace
+
+    import psycopg
+
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg
+    from tldw_Server_API.tests.Jobs.test_jobs_rls_postgres import _dsn_or_skip
+
+    seed = JobManager(backend="postgres", db_url=jobs_pg_dsn)
+    foreign = seed.admit_resource_job(make_command(), request=make_request())
+    _, restricted = _dsn_or_skip(monkeypatch)
+    ensure_jobs_rls_policies_pg(jobs_pg_dsn)
+    manager = JobManager(backend="postgres", db_url=restricted)
+    own_command = make_command(owner_user_id="2", payload={**make_command().payload, "owner_user_id": "2"})
+    with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="claims", owner_user_id="2"):
+        own = manager.admit_resource_job(own_command, request=make_request(own_command))
+        changed = replace(own_command, payload={**own_command.payload, "min_size": 3})
+        before = snapshot(manager)
+        conflict = manager.admit_resource_job(changed, request=make_request(changed, key=key))
+        assert conflict.job == {field: own.job[field] for field in CONFLICT_REFERENCE_FIELDS}
+        assert foreign.job["uuid"] not in str(conflict)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            manager.admit_resource_job(make_command(), request=make_request(key=key))
+        assert snapshot(manager) == before
 
 
 def test_restricted_owner_scope_admits_and_replays_from_unset_context(jobs_pg_dsn, monkeypatch):

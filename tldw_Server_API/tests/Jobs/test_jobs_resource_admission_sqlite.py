@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import CreateJobCommand,
 from tldw_Server_API.app.core.Jobs.resource_contracts import ResourceAdmissionRequest, ResourceScope
 
 TYPE = "claims_rebuild_clusters"
+CONFLICT_REFERENCE_FIELDS = {"id", "uuid", "domain", "owner_user_id", "job_type", "resource"}
 
 
 def make_command(**changes):
@@ -104,6 +105,82 @@ def manager(tmp_path, monkeypatch):
 
 
 class ResourceAdmissionCases:
+    @pytest.mark.parametrize("target", ["active", "retained_active", "retained_archive", "retained_with_successor"])
+    def test_conflict_returns_only_exact_authorized_reference_without_mutation(self, manager, target):
+        first = manager.admit_resource_job(make_command(), request=make_request())
+        sql(
+            manager,
+            "UPDATE jobs SET result=?,error_message=? WHERE uuid=?",
+            ('{"private":"must-not-be-exposed"}', "private raw failure", first.job["uuid"]),
+        )
+        if target in ("retained_archive", "retained_with_successor"):
+            sql(manager, "UPDATE jobs SET status='completed' WHERE uuid=?", (first.job["uuid"],))
+            sql(manager, "UPDATE job_resource_heads SET active_job_uuid=NULL")
+            if target == "retained_archive":
+                archive(manager, first.job)
+            else:
+                successor = manager.admit_resource_job(make_command(), request=make_request(key="successor"))
+                assert successor.job["uuid"] != first.job["uuid"]
+        changed = make_command(queue="other", payload={**make_command().payload, "min_size": 3})
+        request = make_request(changed, key="new-alias" if target == "active" else "request-1")
+        before = snapshot(manager)
+        conflict = manager.admit_resource_job(changed, request=request)
+        assert conflict.kind == ("active_conflict" if target == "active" else "request_conflict")
+        assert conflict.job == {field: first.job[field] for field in CONFLICT_REFERENCE_FIELDS}
+        assert snapshot(manager) == before
+
+    @pytest.mark.parametrize("key", [None, "request-1"])
+    def test_conflict_reference_never_discloses_another_owner(self, manager, key):
+        foreign = manager.admit_resource_job(make_command(), request=make_request())
+        own_command = make_command(owner_user_id="2", payload={**make_command().payload, "owner_user_id": "2"})
+        own = manager.admit_resource_job(own_command, request=make_request(own_command))
+        changed = replace(own_command, payload={**own_command.payload, "min_size": 3})
+        before = snapshot(manager)
+        conflict = manager.admit_resource_job(changed, request=make_request(changed, key=key))
+        assert conflict.kind == ("active_conflict" if key is None else "request_conflict")
+        assert conflict.job == {field: own.job[field] for field in CONFLICT_REFERENCE_FIELDS}
+        assert foreign.job["uuid"] not in str(conflict)
+        with pytest.raises(ValueError, match="scope does not match"):
+            manager.admit_resource_job(
+                changed, request=replace(make_request(changed, key=key), scope=make_request().scope)
+            )
+        assert snapshot(manager) == before
+
+    @pytest.mark.parametrize("different", [False, True])
+    def test_older_active_generation_reuses_or_conflicts_without_rewinding_head(self, manager, different):
+        first = manager.admit_resource_job(make_command(), request=make_request())
+        sql(manager, "UPDATE jobs SET status='completed' WHERE uuid=?", (first.job["uuid"],))
+        sql(manager, "UPDATE job_resource_heads SET active_job_uuid=NULL")
+        newer = manager.admit_resource_job(make_command(), request=make_request(key="newer"))
+        assert newer.job["resource_generation"] == 2
+        # Fixture state only: Task 3 owns the reactivation API and its bookkeeping.
+        sql(manager, "UPDATE jobs SET status='completed' WHERE uuid=?", (newer.job["uuid"],))
+        sql(manager, "UPDATE jobs SET status='queued' WHERE uuid=?", (first.job["uuid"],))
+        sql(manager, "UPDATE job_resource_heads SET active_job_uuid=?", (first.job["uuid"],))
+        sql(manager, "UPDATE job_counters SET ready_count=1,scheduled_count=0,processing_count=0")
+        command = make_command(payload={**make_command().payload, "min_size": 3 if different else 2})
+        before = snapshot(manager)
+        outcome = manager.admit_resource_job(command, request=make_request(command, key=None))
+        assert outcome.kind == ("active_conflict" if different else "active_reused")
+        assert outcome.job["uuid"] == first.job["uuid"]
+        if different:
+            assert outcome.job == {field: first.job[field] for field in CONFLICT_REFERENCE_FIELDS}
+        else:
+            assert outcome.job["resource_generation"] == 1
+        assert snapshot(manager) == before
+        assert before["job_resource_heads"][0]["generation"] == 2
+
+    def test_active_generation_above_head_still_fails_without_reference_or_mutation(self, manager):
+        first = manager.admit_resource_job(make_command(), request=make_request())
+        sql(manager, "UPDATE jobs SET status='completed' WHERE uuid=?", (first.job["uuid"],))
+        sql(manager, "UPDATE job_resource_heads SET active_job_uuid=NULL")
+        manager.admit_resource_job(make_command(), request=make_request(key="newer"))
+        sql(manager, "UPDATE job_resource_heads SET generation=1")
+        before = snapshot(manager)
+        with pytest.raises(RuntimeError, match="resource Job authority is invalid"):
+            manager.admit_resource_job(make_command(), request=make_request(key=None))
+        assert snapshot(manager) == before
+
     @pytest.mark.parametrize("job_type", ["claimsXrebuildXclusters.v1", TYPE + ".v0", TYPE + ".version"])
     def test_unregistered_alias_lookalikes_do_not_occupy_resource(self, manager, job_type):
         manager.create_job(domain="claims", queue="default", job_type=job_type, payload={}, owner_user_id="1")

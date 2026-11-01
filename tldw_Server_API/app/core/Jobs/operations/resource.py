@@ -199,6 +199,11 @@ def _validate_target(
         raise RuntimeError("resource Job authority is invalid")
 
 
+def _conflict_reference(job: dict[str, Any]) -> dict[str, Any]:
+    """Project an already validated target without payload, result or raw errors."""
+    return {field: job[field] for field in ("id", "uuid", "domain", "owner_user_id", "job_type", "resource")}
+
+
 def lookup_resource_admission(
     store: ResourceAdmissionStore,
     *,
@@ -225,7 +230,7 @@ def lookup_resource_admission(
                 raise RuntimeError("resource receipt authority is invalid")
             equal = (receipt["settings_json"], receipt["settings_fingerprint"]) == (encoded, fingerprint)
             return contracts.ResourceAdmission(
-                "request_replayed" if equal else "request_conflict", job if equal else None, None
+                "request_replayed" if equal else "request_conflict", job if equal else _conflict_reference(job), None
             )
 
     if head["generation"] == 0 and store.has_bound_history(request.scope):
@@ -240,11 +245,10 @@ def lookup_resource_admission(
             or active[0]["uuid"] != target
             or job.get("archived")
             or job["status"] not in ("queued", "processing")
-            or job["resource_generation"] != head["generation"]
         ):
             raise RuntimeError("resource active authority is invalid")
         if (job["resource_settings_json"], job["resource_settings_fingerprint"]) != (encoded, fingerprint):
-            return contracts.ResourceAdmission("active_conflict", None, None)
+            return contracts.ResourceAdmission("active_conflict", _conflict_reference(job), None)
         if not store.attach_receipt(request, job, now):
             return contracts.ResourceAdmission(
                 "rejected",
