@@ -1,6 +1,6 @@
 # UAT fixes on latest dev — 2026-10-23
 
-Task: TASK-13260.278.18.83.45. Human authorizes rebase, necessary repairs/setup/retries and sequential completion of all43 workflows. X01 through X03 selected acceptances are complete by recorded composition;36accepted,7open. Current product7c10e74 on frozen deva412 includes all three merged Chat redesign PRs, qualified frontend eSscMqvjgbFlezbusZlXw and the final exact-state accessibility baseline correction. Human X03 UX is accepted; current private cleanup and original preservation passed. Continue X04 next. Broader release gates remain open.
+Task: TASK-13260.278.18.83.45. Human authorizes necessary repairs/setup/retries and sequential completion of all43 workflows. Current selected acceptance42/43: S05, including real-provider classification and human UX, is complete; S06 is next. Qualified backendf8c8e56f and frontenda5694093/BUILDmGTZqAja6jYViLeN34z28 compose on frozen deva412 with Chat redesign3309–3311. Completed S05 private payloads are disposed, current artifacts/shared helpers and original runtime/data preserved. Original Chrome is absent; its DOM remains untouched/unverified. Historical checkpoints below retain their exact scope; no fresh live-dev or broader release qualification is claimed.
 
 ## Constraints and rulings
 
