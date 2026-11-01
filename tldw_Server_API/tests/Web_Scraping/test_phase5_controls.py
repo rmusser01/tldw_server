@@ -138,6 +138,100 @@ def test_budget_stop_cannot_publish_success():
     )
 
 
+def test_successful_result_then_cancel_before_completed_publication(ctx):
+    ctx.note_successful_result()
+    ctx.cancel()
+    assert ctx.publish(CrawlOutcome("completed", "frontier_exhausted", False)) == CrawlOutcome(
+        "cancelled", "cancelled", True
+    )
+
+
+@pytest.mark.parametrize("stop", ["cancelled", "budget_exhausted", "deadline_exhausted"])
+@pytest.mark.parametrize("successful", [False, True])
+def test_recorded_presence_when_stop_replaces_completed_candidate(stop, successful):
+    now = [0.0]
+    ctx = CrawlContext(CrawlLimits(transfer_bytes=1, execution_seconds=1), clock=lambda: now[0])
+    # Failed page attempts consume budget but never mark successful result presence.
+    lease = ctx.reserve("page_attempts")
+    lease.commit()
+    if successful:
+        ctx.note_successful_result()
+    if stop == "cancelled":
+        ctx.cancel()
+    elif stop == "budget_exhausted":
+        with pytest.raises(ParentStop, match=stop):
+            ctx.charge_bytes(2)
+    else:
+        now[0] = 1.0
+        with pytest.raises(ParentStop, match=stop):
+            ctx.check()
+    state = "cancelled" if stop == "cancelled" else ("partial" if successful else "failed")
+    assert ctx.publish(CrawlOutcome("completed", "page_cap_reached", False)) == CrawlOutcome(state, stop, successful)
+
+
+def test_successful_presence_is_not_a_counter_or_partial_completed_outcome(ctx):
+    before = ctx.snapshot()
+    ctx.note_successful_result()
+    ctx.note_successful_result()
+    assert ctx.snapshot() == before
+    completed = CrawlOutcome("completed", "page_cap_reached", False)
+    assert ctx.publish(completed) is completed
+    ctx.cancel()
+    assert ctx.publish(completed) is completed
+
+
+@pytest.mark.parametrize("stop", ["cancelled", "budget_exhausted", "deadline_exhausted", "published"])
+def test_late_success_mark_rejected_without_manufacturing_partial_presence(stop):
+    now = [0.0]
+    ctx = CrawlContext(CrawlLimits(transfer_bytes=1, execution_seconds=1), clock=lambda: now[0])
+    completed = CrawlOutcome("completed", "frontier_exhausted", False)
+    if stop == "cancelled":
+        ctx.cancel()
+        error = asyncio.CancelledError
+        expected = CrawlOutcome("cancelled", "cancelled", False)
+    elif stop == "budget_exhausted":
+        with pytest.raises(ParentStop):
+            ctx.charge_bytes(2)
+        error = ParentStop
+        expected = CrawlOutcome("failed", stop, False)
+    elif stop == "deadline_exhausted":
+        now[0] = 1.0
+        error = ParentStop
+        expected = CrawlOutcome("failed", stop, False)
+    else:
+        ctx.publish(completed)
+        error = RuntimeError
+        expected = completed
+    with pytest.raises(error):
+        ctx.note_successful_result()
+    assert ctx.publish(completed) == expected
+
+
+def test_success_mark_cancel_race_records_only_accepted_presence():
+    for _ in range(20):
+        ctx = CrawlContext(CrawlLimits(), clock=lambda: 0)
+        barrier = Barrier(2)
+
+        def mark(ctx=ctx, barrier=barrier):
+            barrier.wait()
+            try:
+                ctx.note_successful_result()
+                return True
+            except asyncio.CancelledError:
+                return False
+
+        def cancel(ctx=ctx, barrier=barrier):
+            barrier.wait()
+            ctx.cancel()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            accepted = pool.submit(mark)
+            pool.submit(cancel).result()
+        assert ctx.publish(CrawlOutcome("completed", "frontier_exhausted", False)) == CrawlOutcome(
+            "cancelled", "cancelled", accepted.result()
+        )
+
+
 def test_parent_stop_reasons_are_only_deadline_and_budget():
     for reason in ("cancelled", "execution_failed", "secret"):
         with pytest.raises(ValueError):

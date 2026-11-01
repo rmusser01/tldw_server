@@ -33,6 +33,7 @@ class CrawlContext:
         self._cancelled = False
         self._stop_reason: str | None = None
         self._outcome: CrawlOutcome | None = None
+        self._successful_result_present = False
         self._handles: dict[int, WorkHandle[Any]] = {}
 
     def _check_locked(self) -> None:
@@ -115,18 +116,29 @@ class CrawlContext:
         with self._lock:
             return BudgetSnapshot(**self._counts, remaining_seconds=max(0.0, self._deadline - self._clock()))
 
+    def note_successful_result(self) -> None:
+        """Mark successful logical commit presence, rejecting stopped/terminal work.
+
+        The engine must commit article/frontier disposition without an intervening
+        await. This bit is neither a page counter nor an article payload copy.
+        """
+        with self._lock:
+            self._check_locked()
+            self._successful_result_present = True
+
     def publish(self, outcome: CrawlOutcome) -> CrawlOutcome:
         """Publish once after finalization; earlier cancellation wins atomically."""
         with self._lock:
             if self._outcome is not None:
                 return self._outcome
+            has_partial_results = self._successful_result_present or outcome.has_partial_results
             if self._cancelled:
-                outcome = CrawlOutcome("cancelled", "cancelled", outcome.has_partial_results)
+                outcome = CrawlOutcome("cancelled", "cancelled", has_partial_results)
             elif self._stop_reason is not None:
                 outcome = CrawlOutcome(
-                    "partial" if outcome.has_partial_results else "failed",
+                    "partial" if has_partial_results else "failed",
                     self._stop_reason,
-                    outcome.has_partial_results,
+                    has_partial_results,
                 )
             self._outcome = outcome
             return outcome
