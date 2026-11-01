@@ -1,8 +1,18 @@
 # Chunker Hierarchical Subsystem Refactor Design
 
-Backlog design task: `TASK-13423`
+Backlog design task: `TASK-15287`
 
-Backlog implementation task: `TASK-13422`
+Backlog implementation task: `TASK-15286`
+
+Tracking reconciliation on 2026-11-01: the requester approved renumbering only
+the six colliding Chunker records. The official CLI preserved their content,
+status and directories, adding the replacement mapping as provenance notes:
+`13112 -> 15282`, `13113 -> 15283`, `13215 -> 15284`, `13421 -> 15285`,
+`13422 -> 15286`, `13423 -> 15287`. No record was deleted or newly archived;
+unrelated records are unchanged. Current design authority is
+`backlog/completed/task-15287 - Design-Chunker-hierarchical-subsystem-refactor.md`;
+implementation and review follow-up use TASK-15286. Older IDs and references
+below remain historical provenance and resolve through this mapping.
 
 Tracking reconciliation on 2026-10-02: these unique records replace the
 workstream's colliding `TASK-13112` design and `TASK-13215` implementation

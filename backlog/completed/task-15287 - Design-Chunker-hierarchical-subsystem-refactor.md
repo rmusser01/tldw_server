@@ -1,5 +1,5 @@
 ---
-id: TASK-13423
+id: TASK-15287
 title: Design Chunker hierarchical subsystem refactor
 status: Done
 created_date: 2026-10-04 19:07
@@ -35,6 +35,7 @@ Preserve the completed, requester-approved compatibility-first hierarchical subs
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-10-04 tracking reconciliation after conflict-free rebase onto d7997bc2052ac52c77427157fe3c5b2e2ca1843f. Historical design records and unrelated upstream Jobs record remain untouched; their exact paths preserve approval evidence. Current implementation TASK-13422 remains unique. All design acceptance criteria and definition-of-done evidence carry forward from completed design record. Metadata-only migration: no production changes, Bandit inapplicable here; implementation will rerun all production gates. Forward spec/plan/current implementation references will use TASK-13423. Requester supplied human-owned PR Change summary directly, posted verbatim and verified.
+2026-11-01 requester explicitly approved renumbering only the six colliding Chunker records. Preserve history, status and directory; nothing deleted or newly archived. Mapping: TASK-13112 -> TASK-15282; TASK-13113 -> TASK-15283; TASK-13215 -> TASK-15284; TASK-13421 -> TASK-15285; TASK-13422 -> TASK-15286 (current implementation); TASK-13423 -> TASK-15287 (completed design). Original references and historical identifiers are provenance; replacement paths have the same directory/name tail with these new IDs. Authoritative current design: backlog/completed/task-15287 - Design-Chunker-hierarchical-subsystem-refactor.md. Official backlog-py renumber used after checking latest dev and paginated filenames on all37openPRs; maximum15281. Unrelated task records unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -1,5 +1,5 @@
 ---
-id: TASK-13215
+id: TASK-15284
 title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 assignee: []
@@ -119,6 +119,7 @@ Gates: Ruff passed for all 3 touched Python files after fixing one test import-o
 
 Baseline concern, deliberately unchanged: weighted overlap uses element count rather than consumed weight and can retain an overlap-only tail, unlike element-window grouping. Existing warning/config diagnostics remain; missing-module RED also emitted closed-stream Loguru diagnostics. Commit subject: refactor: extract hierarchical grouping. TASK-13215 remains In Progress for later Tasks 7-8 and external review; no overall finalization claimed.
 2026-10-02 Task 7 implementer starts at HEAD 3e34078eef78111633a210cda4a476baa25abbeb, origin/dev pinned at 86e287fee7bfa1a1588639232e35db3666851ded. User reports Tasks 5 and 6 specification and independent quality reviews approved. Scope restricted to the exact six Task 7 Python paths, Task 7 plan section, and this record. Test-first direct missing-flatten-module RED precedes extraction; preserve permissive traversal, aliasing, validation order, package catches, and public composition. No main checkout changes, fetch/rebase/push, or Task 8 work.
+2026-11-01 requester explicitly approved renumbering only the six colliding Chunker records. Preserve history, status and directory; nothing deleted or newly archived. Mapping: TASK-13112 -> TASK-15282; TASK-13113 -> TASK-15283; TASK-13215 -> TASK-15284; TASK-13421 -> TASK-15285; TASK-13422 -> TASK-15286 (current implementation); TASK-13423 -> TASK-15287 (completed design). Original references and historical identifiers are provenance; replacement paths have the same directory/name tail with these new IDs. Authoritative current design: backlog/completed/task-15287 - Design-Chunker-hierarchical-subsystem-refactor.md. Official backlog-py renumber used after checking latest dev and paginated filenames on all37openPRs; maximum15281. Unrelated task records unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done

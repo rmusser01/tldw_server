@@ -13,8 +13,21 @@
 ## Source References
 
 - Approved spec: `Docs/superpowers/specs/2026-08-23-chunker-hierarchical-subsystem-refactor-design.md`
-- Completed design task: `TASK-13423`
-- Implementation task: `TASK-13422`
+- Completed design task: `TASK-15287`
+- Implementation task: `TASK-15286`
+
+Tracking reconciliation (2026-11-01): the requester approved renumbering only
+the six colliding Chunker records. Current implementation is TASK-15286 and
+completed design authority is
+`backlog/completed/task-15287 - Design-Chunker-hierarchical-subsystem-refactor.md`.
+Historical mappings are `13112 -> 15282`, `13113 -> 15283`, `13215 -> 15284`,
+`13421 -> 15285`, `13422 -> 15286`, `13423 -> 15287`. The official CLI kept
+content, status and directory, adding mapping notes. No deletion, new archiving
+or unrelated record change occurred. Older IDs/references below are provenance;
+use this mapping for current task operations. Use repository backlog-py, not
+Node Backlog MCP, under accepted ADR-059; no new ADR is required for applying
+that workflow decision. The maximum checked across pinned dev and all 37 open
+PRs was 15281. Duplicate-ID check: RED six collisions, GREEN none.
 
 Tracking note (2026-10-02): `TASK-13421` and `TASK-13422` replace the
 workstream's colliding design/implementation IDs. Historical records remain
@@ -39,7 +52,7 @@ source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
 
 - Follow red-green-refactor within each task. A characterization test is expected to pass before extraction; a new component test is expected to fail with `ModuleNotFoundError`, `ImportError`, or a missing symbol before its component is created.
 - Keep tests behavioral. Do not assert implementation-local helper call graphs except where the approved call multiplicity, public composition, or dependency boundaries are compatibility contracts.
-- Use `apply_patch` for manual edits. Use Backlog MCP to update `TASK-13422` after each task with the commit, touched files, test evidence, and any correction-gate finding.
+- Use `apply_patch` for manual edits. Use repository backlog-py to update `TASK-15286` after each task with the commit, touched files, test evidence, and any correction-gate finding.
 - Do not broaden exception handling, validation, copying, or normalization while moving code.
 - A behavior correction is out of the structural commits. If a candidate appears, apply the gate in the approved spec and use a separate red-green commit only after recording the baseline evidence in `TASK-13422`.
 - Do not use `--no-verify` on any commit.

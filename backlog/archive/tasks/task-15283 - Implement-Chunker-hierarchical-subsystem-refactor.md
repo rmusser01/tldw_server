@@ -1,5 +1,5 @@
 ---
-id: TASK-13113
+id: TASK-15283
 title: Implement Chunker hierarchical subsystem refactor
 status: In Progress
 created_date: 2026-08-24 07:10
@@ -53,6 +53,7 @@ Execute `Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refact
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created during the second spec-review pass to separate implementation tracking from design-only TASK-13112. User approved the final design on 2026-08-24; TASK-13112 was finalized and moved to completed storage, and this task moved to In Progress. Detailed implementation planning completed on 2026-08-24 through the writing-plans workflow. The linked plan uses eight reviewable tasks, incremental active wiring, frozen compatibility characterizations, exact malformed-tree and leaf-call matrices, AST dependency checks, scoped formatting/type/security gates, and an explicit human-written PR Change summary merge blocker. Production code remains untouched pending execution handoff.
+2026-11-01 requester explicitly approved renumbering only the six colliding Chunker records. Preserve history, status and directory; nothing deleted or newly archived. Mapping: TASK-13112 -> TASK-15282; TASK-13113 -> TASK-15283; TASK-13215 -> TASK-15284; TASK-13421 -> TASK-15285; TASK-13422 -> TASK-15286 (current implementation); TASK-13423 -> TASK-15287 (completed design). Original references and historical identifiers are provenance; replacement paths have the same directory/name tail with these new IDs. Authoritative current design: backlog/completed/task-15287 - Design-Chunker-hierarchical-subsystem-refactor.md. Official backlog-py renumber used after checking latest dev and paginated filenames on all37openPRs; maximum15281. Unrelated task records unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
