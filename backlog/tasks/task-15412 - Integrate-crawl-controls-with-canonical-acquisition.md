@@ -1,7 +1,7 @@
 ---
 id: TASK-15412
 title: Integrate crawl controls with canonical acquisition
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - phase5
@@ -15,9 +15,9 @@ Execute Task 5 of the approved Phase 5 plan as an independently reviewable unit.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 5 behavior and interfaces match the approved spec and plan.
-- [ ] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
-- [ ] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
+- [x] #1 Task 5 behavior and interfaces match the approved spec and plan.
+- [x] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
+- [x] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,19 +32,21 @@ Controller ruling extends TASK-15412 narrowly for earlier Phase5 integration reg
 Integration correction GREEN: 147 passed, 306 warnings, no skips, covering all Task2 context tests, exact unchanged Phase4 AST guard, management sanitization, unchanged Task4 authorization/admin claims (including unauthorized403), and all39 new acquisition tests. RED was 3 failed/74 passed. Coverage rerun same147 passed; crawl_context.py 98% branch-aware coverage, both amended handlers exercised. Ruff/Black/compile pass on both amended files; Bandit crawl_context.py zero findings; diff check clean. Report addendum contains full commands/results and explicitly corrects prior classification: the Task2/Task4 failures were this-branch integration regressions and are now fixed, not waived baseline. Only two arXiv failures and inventory drift remain distinct concerns; no full-scope pass total is inferred. Separate correction commit follows; keep In Progress pending independent review of c592c0576a..newHEAD.
 Task5 fix round 1, reviewed HEAD db27425016: read exact Important 1-3 in task-5-review.md. Scope is page-local atomic reserve/commit/cancel with unused rollback; immediate WebSocket ParentStop escape to existing callback lifecycle; preserve captured caller cancellation through browser cleanup before new parent deadline checks. Add deterministic regression cases and keep attempt counts/evidence per issue. No broad refactor, unrelated arXiv fix, reviewer/subagent, warning suppression, or full-repo collection. One final covering run with detailed warnings follows final code changes; retain In Progress for fresh fix-diff review.
 Task5 review fix round1 against db27425016: Important1 now wraps parent Reservation with a page-locked commit/cancel boundary, preserving parent validation and unused rollback; Important2 explicitly rethrows WebSocket ParentStop to existing lifecycle emergency shutdown/admission close; Important3 honors captured caller/cleanup cancellation before a fresh post-cleanup deadline check. Eight deterministic hook/event/clock cases added in controlled_acquisition and preflight_parent_controls. RED task-5-fix1-red.log: 6 failed,2 passed,31 deselected; first green:7 passed,1 test-message failure because shield strips cancel args, diagnosed independently and test awaited result directly; full focused GREEN39 passed. One production attempt each, no limit reached. Final covering after final code changes:773 passed,1558 warnings,0 skips/failures in10.81s (task-5-fix1-covering.log), including runtime/executor/browser lifecycle, preflight and shared HTTP observer suite. Detailed warnings match Task3/4 sources:conftest205=1552,conftest817=1,FastAPI=1,pytestconfig=1,chat schema=1,Workflows Config=2; no filters/new sources or warning-free claim. Ruff/Black4files/compile/diff-check pass; touched-production Bandit0 findings/errors/skips. Exact commands/output, paths, lock-order/outcome self-review and concerns appended task-5-report.md. No broad refactor, unrelated arXiv/fullrepo run, installs, agents/reviewers or plan/ledger edits. Remains In Progress for independent fix-only gate; pre-Task5 arXiv failures/inventory/fullrepo blocker remain distinct from corrected earlier branch integration regressions.
+Controller gate complete: fresh Task5 reviewer found page-local commit race, swallowed WS parent stop and cancellation/deadline cleanup precedence; all three fixed in f2abedc4e1 and independently re-reviewed ADDRESSED, no new Critical/Important breakage. 773 final covering tests pass, no skips; warnings exposed/categorized to known sources, no new observed category; lint/format/compile/Bandit clean. Earlier branch Task2 AST and Task4 management-principal regressions corrected in separate db27425016 (147 covering pass); not waived as pristine baseline. Earlier full Web_Scraping+HTTP run 3288pass26skip5fail is retained as historical evidence, not a post-fix green claim. Two existing arXiv assertions and inventory drift remain visible for Task11; current Watchlists failure contract is None and those consumer/test files match execution baseline. Parser/derived-memory bounds Task6, queued wrapper retry integration Tasks8/9, checkpoint/outcome/history Tasks7/10/11 remain explicit later work. Reports and both independent reviews in plan-scoped SDD directory.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Composed parent controls with canonical page acquisition, existing analyzer graph and real HTTP/browser/robots/probe/extraction boundaries, preserving public APIs/advice/raw content and private same-document discovery. Added generic streaming observer without Web_Scraping coupling and per-operation physical ownership with late-result rejection. Three reviewed cancellation/admission defects fixed and re-reviewed; 773 final covering tests and zero touched security findings. Consumer/inventory/full-repository baseline gates disclosed for certification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
