@@ -22,11 +22,13 @@ Fix the baseline-equivalent UX Smoke Gate failure observed on PR3319 run41328474
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline independently verified by read-only agent01a19816: allthreeattempts missed Review conversation history with exactlyoneuser/assistantpair. Independent31805c63 run has identical frontend/backend/mock/workflowtrees to base54b321dc and samefailure; no PR-introduced UI regression. Change only the relevant E2E test setup, not production.
 Implemented in d9465bba5a52f942b1dd8065de527ba22907c57d: moved the existing eight-statement settled follow-up after the recovery conditional, no production UI or assertion/timeout/retry/skip change. TypeScript5.9.3 parse/transpile0; AST comparison preserves1221assertion/helper-call ASTs; focused Playwright discovery1Chromiumtest passes using existing shared dependencies via NODE_PATH, configuredhooks0, whitespace0. Initial discoverywxt resolution fixed by existing dependency path only, no installs. Real-server local E2E not run because this worktree has no standalone frontend bundle; report /tmp/embeddings-pr3319-ui-fix-report.md. CI UX gate must pass before final AC3/Done and parent auto-merge. Bandit not applicable to this TypeScript-only test fix. No servers/PG resources touched.
+2026-11-01 real-server CI proof: Frontend UX Gates run41333443746 on head8501d897f049a1d95a43d0251c65c9e45c48634c completedSUCCESS,includingOnboardingE2EGateandUXSmokeGate. https://github.com/rmusser01/tldw_server/actions/runs/41333443746 . UItest/productionUI source unchanged inadditionalbackendfixes. Thisvalidatesthetestpreconditionrepairremotely; AC3 remainsopenforfresh finalpublication-headCIbeforeparentauto-merge.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The existing follow-up now always establishes the second settled turn required for history review; production UI and assertions remain unchanged. Real-server UX CI passed at8501d897f0. Fresh final publication-head CI and parent auto-merge qualification remain pending, so this task stays In Progress.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -35,6 +37,6 @@ Implemented in d9465bba5a52f942b1dd8065de527ba22907c57d: moved the existing eigh
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

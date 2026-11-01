@@ -30,15 +30,25 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowProgressKind,
     decode_workflow_receipt,
 )
-from tldw_Server_API.app.core.Jobs.workflow_capability import inspect_workflow_support
+from tldw_Server_API.app.core.Jobs.workflow_capability import (
+    inspect_workflow_support,
+    install_workflow_support,
+)
 from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.pg_jobs
-@pytest.mark.parametrize("denial", ["missing-role", "ungranted-role", "owner-setting"])
-def test_rls_setup_failure_never_continues_as_admin(workflow_pg_case, monkeypatch, denial):
+@pytest.mark.parametrize(
+    "denial,error_type,sqlstate",
+    [
+        ("missing-role", psycopg.errors.InvalidParameterValue, "22023"),
+        ("ungranted-role", psycopg.errors.InsufficientPrivilege, "42501"),
+        ("owner-setting", psycopg.errors.InsufficientPrivilege, "42501"),
+    ],
+)
+def test_rls_setup_failure_never_continues_as_admin(workflow_pg_case, monkeypatch, denial, error_type, sqlstate):
     case = workflow_pg_case
     assert case.runtime_role_flags() == (False, False)
     native_connections = []
@@ -67,9 +77,8 @@ def test_rls_setup_failure_never_continues_as_admin(workflow_pg_case, monkeypatc
             else:
                 case.admit()
         assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
-        assert isinstance(
-            error.value.__cause__, (psycopg.errors.InvalidParameterValue, psycopg.errors.InsufficientPrivilege)
-        )
+        assert type(error.value.__cause__) is error_type
+        assert error.value.__cause__.sqlstate == sqlstate
         assert case.job_count() == 0
         with case.connection() as conn:
             assert conn.execute("SELECT COUNT(*) FROM job_workflow_roots").fetchone()[0] == 0
@@ -110,6 +119,73 @@ def test_runtime_grants_do_not_include_domain_or_schema_ddl(workflow_pg_case):
 
 
 @pytest.mark.pg_jobs
+def test_support_install_requires_explicit_runtime_grants(_workflow_pg_case_factory):
+    case = _workflow_pg_case_factory()
+    install_workflow_support(case.installer)
+    assert inspect_workflow_support(case.installer) is WorkflowOutcome.APPLIED
+    with case.connection(runtime=True) as conn:
+        assert conn.execute(
+            "SELECT has_table_privilege(current_user,'job_workflow_schema','SELECT'),"
+            "has_table_privilege(current_user,'job_workflow_roots','SELECT,INSERT,UPDATE,DELETE'),"
+            "has_table_privilege(current_user,'job_workflow_effect_receipts','SELECT,INSERT,UPDATE,DELETE')"
+        ).fetchone() == (False, False, False)
+    assert case.job_count() == 0
+    case.install()
+    assert case.admit().outcome is WorkflowOutcome.APPLIED
+    with case.reused_runtime_connection():
+        case.set_owner("owner-b")
+        assert case.visible_root_count() == 0
+        case.set_owner(case.root.owner_user_id)
+        assert case.visible_root_count() == 1
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize(
+    "table,privilege",
+    [(None, None), ("job_workflow_schema", "SELECT")]
+    + [
+        (table, privilege)
+        for table in ("job_workflow_roots", "job_workflow_effect_receipts")
+        for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE")
+    ],
+)
+def test_missing_runtime_support_grants_are_typed_unavailable(workflow_pg_case, table, privilege):
+    from psycopg import sql
+
+    case = workflow_pg_case
+    case.admit()
+    effect = case.effect("a" * 64, WorkflowAction.COMPLETE)
+    with case.connection(runtime=True) as conn:
+        role = conn.execute("SELECT current_user").fetchone()[0]
+    with case.connection() as conn:
+        if table is None:
+            conn.execute(
+                sql.SQL(
+                    "REVOKE ALL ON job_workflow_schema,job_workflow_roots,job_workflow_effect_receipts FROM {}"
+                ).format(sql.Identifier(role))
+            )
+        else:
+            conn.execute(
+                sql.SQL("REVOKE {} ON {} FROM {}").format(
+                    sql.SQL(privilege), sql.Identifier(table), sql.Identifier(role)
+                )
+            )
+        conn.commit()
+    before = case.job_row(), case.serialized_support()
+    assert inspect_workflow_support(case.manager) is WorkflowOutcome.UNAVAILABLE
+    with pytest.raises(WorkflowFenceError) as error:
+        if table == "job_workflow_effect_receipts":
+            case.capability.lookup_effect(case.root, effect)
+        else:
+            case.admit()
+    assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+    assert (case.job_row(), case.serialized_support()) == before
+    case.install()
+    assert inspect_workflow_support(case.manager) is WorkflowOutcome.APPLIED
+    assert case.admit().outcome is WorkflowOutcome.ALREADY_APPLIED
+
+
+@pytest.mark.pg_jobs
 @pytest.mark.parametrize("verb", ["select", "insert_root", "insert_receipt", "update", "delete", "release"])
 def test_runtime_denies_direct_cross_owner_support_crud(workflow_pg_case, verb):
     case = workflow_pg_case
@@ -123,6 +199,106 @@ def test_runtime_denies_direct_cross_owner_support_crud(workflow_pg_case, verb):
         else:
             assert not any(case.direct_support_crud("owner-a", verb))
     assert case.serialized_support() == before
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("owner,visible", [(None, False), ("owner-b", False), ("owner-a", True)])
+@pytest.mark.parametrize("verb", ["select", "update", "delete"])
+def test_runtime_direct_jobs_access_requires_matching_owner(workflow_pg_case, owner, visible, verb):
+    case = workflow_pg_case
+    case.admit()
+    statements = {
+        "select": "SELECT uuid FROM jobs WHERE uuid=%s",
+        "update": "UPDATE jobs SET priority=priority WHERE uuid=%s RETURNING uuid",
+        "delete": "DELETE FROM jobs WHERE uuid=%s RETURNING uuid",
+    }
+    with case.reused_runtime_connection() as conn:
+        case.set_owner(owner)
+        assert conn.execute(statements[verb], (case.root.job_uuid,)).fetchall() == (
+            [(case.root.job_uuid,)] if visible else []
+        )
+    assert case.job_row()["uuid"] == case.root.job_uuid
+
+
+@pytest.mark.pg_jobs
+def test_fixture_installs_forced_rls_on_ordinary_jobs_tables(workflow_pg_case):
+    tables = [
+        "jobs",
+        "job_events",
+        "job_counters",
+        "job_queue_controls",
+        "job_sla_policies",
+        "job_attachments",
+        "job_dependencies",
+        "job_idempotency_receipts",
+    ]
+    with workflow_pg_case.connection(runtime=True) as conn:
+        secured = conn.execute(
+            "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=current_schema() AND c.relname=ANY(%s) "
+            "AND c.relrowsecurity AND c.relforcerowsecurity",
+            (tables,),
+        ).fetchall()
+    assert {row[0] for row in secured} == set(tables)
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("operation", ["acquire", "sweep"])
+@pytest.mark.parametrize("broken_support", [False, True], ids=["success", "failure"])
+def test_public_workflow_helpers_scope_owner_and_restore_caller(workflow_pg_case, operation, broken_support):
+    case = workflow_pg_case
+    case.admit()
+    if operation == "sweep":
+        JobManager.set_rls_context(owner_user_id=case.root.owner_user_id, is_admin=False, domain_allowlist=None)
+        try:
+            assert case.acquire() is not None
+        finally:
+            JobManager.clear_rls_context()
+        case.expire_current_lease()
+    if broken_support:
+        with case.connection() as conn:
+            conn.execute("DROP TABLE job_workflow_effect_receipts,job_workflow_roots")
+            conn.commit()
+    JobManager.set_rls_context(owner_user_id="surrounding-owner", is_admin=False, domain_allowlist="other")
+    try:
+        if broken_support:
+            with pytest.raises(WorkflowFenceError) as error:
+                case.acquire() if operation == "acquire" else case.recover("sweep")
+            assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+        elif operation == "acquire":
+            assert case.acquire() is not None
+        else:
+            case.recover("sweep")
+            assert case.no_progress_count() == 1
+        assert JobManager._RLS_OWNER_USER_ID.get() == "surrounding-owner"
+        assert not JobManager._RLS_IS_ADMIN.get()
+        assert JobManager._RLS_DOMAIN_ALLOWLIST.get() == "other"
+    finally:
+        JobManager.clear_rls_context()
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("owner", [None, "owner-b"])
+def test_public_acquire_without_matching_owner_context_fails_closed(workflow_pg_case, owner):
+    case = workflow_pg_case
+    case.admit()
+    JobManager.set_rls_context(owner_user_id=owner, is_admin=False, domain_allowlist=None)
+    try:
+        assert (
+            case.manager.acquire_next_job(
+                domain="embeddings",
+                queue="workflow",
+                job_type="embedding_workflow",
+                owner_user_id=case.root.owner_user_id,
+                lease_seconds=120,
+                worker_id="unscoped-worker",
+            )
+            is None
+        )
+    finally:
+        JobManager.clear_rls_context()
+    assert case.job_row()["status"] == "queued"
+    assert case.support_row()["current_epoch"] == 0
 
 
 @pytest.mark.pg_jobs

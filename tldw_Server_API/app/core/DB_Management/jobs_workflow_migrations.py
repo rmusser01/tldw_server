@@ -47,7 +47,7 @@ def schema_definitions(backend: str) -> dict[str, tuple[dict[str, str], dict[str
 
     def bounded(column: str, maximum: int) -> str:
         size = f"octet_length({column})" if pg else f"length(CAST({column} AS BLOB))"
-        typed = "" if pg else f"typeof({column})='text' AND "
+        typed = "" if pg else f"typeof({column})='text' AND instr(CAST({column} AS BLOB),X'00')=0 AND "
         return f"{typed}{size} BETWEEN 1 AND {maximum} AND trim({column})<>''"
 
     def code(column: str) -> str:

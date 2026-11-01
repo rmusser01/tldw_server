@@ -85,7 +85,9 @@ def _code(value: object) -> None:
 
 def _text(value: object, maximum: int) -> None:
     try:
-        valid = type(value) is str and bool(value.strip()) and len(value.encode("utf-8")) <= maximum
+        valid = (
+            type(value) is str and "\x00" not in value and bool(value.strip()) and len(value.encode("utf-8")) <= maximum
+        )
     except UnicodeError:
         valid = False
     if not valid:
@@ -106,8 +108,8 @@ def _digest(value: object) -> None:
         raise ValueError("workflow key must be 64 lowercase hexadecimal characters")
 
 
-def _integer(value: object, minimum: int) -> None:
-    if type(value) is not int or value < minimum:
+def _integer(value: object, minimum: int, maximum: int | None = None) -> None:
+    if type(value) is not int or value < minimum or (maximum is not None and value > maximum):
         raise ValueError("workflow control must be an exact bounded integer")
 
 
@@ -174,9 +176,10 @@ class WorkflowControls:
     no_progress_limit: int = 5
 
     def __post_init__(self) -> None:
-        _integer(self.max_retries, 0)
+        # Controls must also fit the ordinary Jobs row, not only BIGINT support facts.
+        _integer(self.max_retries, 0, 100)
         if self.quarantine_threshold is not None:
-            _integer(self.quarantine_threshold, 1)
+            _integer(self.quarantine_threshold, 1, 2**31 - 1)
         if self.expired_lease_policy is not ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT:
             raise ValueError("workflow expiry must be REQUEUE_NO_ATTEMPT")
         _integer(self.no_progress_limit, 1)

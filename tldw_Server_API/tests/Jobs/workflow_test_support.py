@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -59,6 +60,18 @@ class WorkflowCase:
     pending_lease: Any = None
     current_lease: Any = None
     runtime_connection: Any = None
+
+    @contextmanager
+    def owner_scope(self, owner_user_id: str | None) -> Iterator[None]:
+        """Supply an explicit test caller identity without retaining its authority."""
+        manager = self.manager
+        variables = (manager._RLS_OWNER_USER_ID, manager._RLS_IS_ADMIN, manager._RLS_DOMAIN_ALLOWLIST)
+        tokens = [variable.set(value) for variable, value in zip(variables, (owner_user_id, False, None))]
+        try:
+            yield
+        finally:
+            for variable, token in zip(variables, tokens):
+                variable.reset(token)
 
     def observe(self) -> WorkflowObservation:
         """Read persisted active/archive state and all proofs independently."""
@@ -331,14 +344,15 @@ class WorkflowCase:
                 # Older fencing tests request a replacement delivery directly.
                 # Expire it explicitly, then let the real public path reclaim it.
                 self.expire_current_lease()
-        row = self.manager.acquire_next_job(
-            domain="embeddings",
-            queue="workflow",
-            job_type="embedding_workflow",
-            owner_user_id=self.root.owner_user_id,
-            lease_seconds=120,
-            worker_id="worker-a",
-        )
+        with self.owner_scope(self.root.owner_user_id):
+            row = self.manager.acquire_next_job(
+                domain="embeddings",
+                queue="workflow",
+                job_type="embedding_workflow",
+                owner_user_id=self.root.owner_user_id,
+                lease_seconds=120,
+                worker_id="worker-a",
+            )
         self.current_lease = WorkflowLease(row["worker_id"], row["lease_id"]) if row else None
         return self.current_lease
 
@@ -360,9 +374,10 @@ class WorkflowCase:
             self.pending_lease = self.acquire(replace_current=False)
             return self.pending_lease
         assert via == "sweep"
-        return self.manager.integrity_sweep(
-            fix=True, domain="embeddings", queue="workflow", job_type="embedding_workflow"
-        )
+        with self.owner_scope(self.command.owner_user_id):
+            return self.manager.integrity_sweep(
+                fix=True, domain="embeddings", queue="workflow", job_type="embedding_workflow"
+            )
 
     def support_row(self):
         with self.connection() as conn:

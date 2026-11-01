@@ -12,7 +12,7 @@ labels:
 priority: high
 references:
 - https://github.com/rmusser01/tldw_server/pull/2790
-- backlog/archive/tasks/task-13421 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
+- backlog/archive/tasks/task-15403 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
 documentation:
 - Docs/superpowers/specs/2026-07-03-embeddings-workflow-architecture-design.md
 - Docs/superpowers/specs/2026-07-18-embeddings-workflow-stage2-concrete-api-steps-design.md
@@ -25,9 +25,9 @@ modified_files:
 - Docs/superpowers/specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md
 - Docs/ADR/060-embeddings-durable-workflow-foundation.md
 - Docs/ADR/README.md
-- backlog/tasks/task-13450 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
-- backlog/archive/tasks/task-13421 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
-updated_date: 2026-10-04 23:28
+- backlog/archive/tasks/task-15404 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
+- backlog/archive/tasks/task-15403 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
+updated_date: 2026-11-01 17:57
 ---
 
 ## Description
@@ -50,8 +50,8 @@ Design the dormant Stage 3 Embeddings durability foundation after merged Stage 2
 <!-- SECTION:PLAN:BEGIN -->
 1. Approved architecture, section reviews, and three sets of written-spec corrections preserved (complete).
 2. Requester approved the consolidated written spec and ADR on 2026-10-04 (complete).
-3. Active links moved to collision-free TASK-13450; original TASK-13421 history archived (complete).
-4. Documentation/approval metadata verified; handoff to separate Stage 3A planning TASK-13451 (complete).
+3. Canonical design links now use TASK-15401; original records remain in archives TASK-15403/TASK-15404 after historical IDs were reused upstream (complete).
+4. Documentation/approval metadata verified; handoff to canonical Stage 3A planning TASK-15402, with original planning history in TASK-15405 (complete).
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -83,7 +83,7 @@ Verification-section investigation: Jobs conftest disables lease enforcement and
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Requester approved the consolidated Stage 3 durable workflow spec and ADR-060 on 2026-10-04. The design defines dormant Jobs-rooted persistence, exact owner/lease/control authority, immutable generations/manifests, bounded sink/accounting recovery and no-progress exhaustion, plus concrete verification and staged rollout gates. Recorded accepted metadata and preserved review history under TASK-13450 to avoid the unrelated upstream TASK-13421 collision. Handed off to separate Stage 3A planning TASK-13451; no runtime implementation, production wiring, PR, or merge.
+Requester approved the consolidated Stage 3 durable workflow spec and ADR-060 on 2026-10-04. The design defines dormant Jobs-rooted persistence, exact owner/lease/control authority, immutable generations/manifests, bounded sink/accounting recovery and no-progress exhaustion, plus concrete verification and staged rollout gates. Canonical design authority is TASK-15401; this TASK-15404 archive and TASK-15403 preserve historical review records. Planning is TASK-15402, with its historical record in TASK-15405. The design deliverable did not implement runtime behavior, production wiring, a PR, or a merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

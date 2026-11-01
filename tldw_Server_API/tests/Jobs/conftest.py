@@ -200,6 +200,7 @@ def _workflow_pg_case_factory(request, monkeypatch):
     from psycopg import sql
 
     from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg
     from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
 
     created = []
@@ -207,7 +208,10 @@ def _workflow_pg_case_factory(request, monkeypatch):
     def make_case():
         dsn = request.getfixturevalue("jobs_pg_dsn")
         monkeypatch.setenv("JOBS_ALLOWED_QUEUES_EMBEDDINGS", "workflow")
+        monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
         installer = JobManager(backend="postgres", db_url=dsn)
+        # Provision ordinary Jobs RLS before the runtime skips schema initialization.
+        ensure_jobs_rls_policies_pg(dsn)
         role = "jobs_workflow_" + secrets.token_hex(8)
         password = secrets.token_hex(32)
         with psycopg.connect(dsn, autocommit=True) as conn:
@@ -247,7 +251,6 @@ def _workflow_pg_case_factory(request, monkeypatch):
                 )
         monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "true")
         monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
-        monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
         parsed = urlparse(dsn)
         authority = f"{quote(role)}:{quote(password)}@{parsed.hostname}:{parsed.port or 5432}"
         runtime_dsn = urlunparse(parsed._replace(netloc=authority))

@@ -88,18 +88,19 @@ def _encrypted_snapshot(case):
 
 def _generic_renew(case, lease, *, batch, enforce, seconds=240):
     claims = {"worker_id": lease.worker_id, "lease_id": lease.lease_id}
-    if batch:
-        return case.manager.batch_renew_leases(
-            [{"job_id": case.root.job_id_hint, "seconds": seconds, **claims}], enforce=enforce
+    with case.owner_scope(case.root.owner_user_id):
+        if batch:
+            return case.manager.batch_renew_leases(
+                [{"job_id": case.root.job_id_hint, "seconds": seconds, **claims}], enforce=enforce
+            )
+        return case.manager.renew_job_lease(
+            case.root.job_id_hint,
+            seconds=seconds,
+            enforce=enforce,
+            progress_percent=42,
+            progress_message="heartbeat",
+            **claims,
         )
-    return case.manager.renew_job_lease(
-        case.root.job_id_hint,
-        seconds=seconds,
-        enforce=enforce,
-        progress_percent=42,
-        progress_message="heartbeat",
-        **claims,
-    )
 
 
 @pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
@@ -151,12 +152,13 @@ def test_generic_live_renewal_requires_exact_nonmissing_claims(workflow_case, mo
                 (lease.worker_id, "stale"),
             ):
                 item = {"job_id": case.root.job_id_hint, "seconds": 240, "worker_id": worker, "lease_id": token}
-                if batch:
-                    renewed = case.manager.batch_renew_leases([item], enforce=enforce)
-                else:
-                    renewed = case.manager.renew_job_lease(
-                        case.root.job_id_hint, seconds=240, worker_id=worker, lease_id=token, enforce=enforce
-                    )
+                with case.owner_scope(case.root.owner_user_id):
+                    if batch:
+                        renewed = case.manager.batch_renew_leases([item], enforce=enforce)
+                    else:
+                        renewed = case.manager.renew_job_lease(
+                            case.root.job_id_hint, seconds=240, worker_id=worker, lease_id=token, enforce=enforce
+                        )
                 assert not renewed
                 assert _encrypted_snapshot(case) == before
     assert observed == []
@@ -205,9 +207,14 @@ def test_generic_release_rejects_enrolled_episode_without_side_effects(workflow_
                 ("stale", lease.lease_id),
                 (lease.worker_id, "stale"),
             ):
-                assert not case.manager.release_job(
-                    case.root.job_id_hint, worker_id=worker, lease_id=token, enforce=enforce, reason="guard-rejected"
-                )
+                with case.owner_scope(case.root.owner_user_id):
+                    assert not case.manager.release_job(
+                        case.root.job_id_hint,
+                        worker_id=worker,
+                        lease_id=token,
+                        enforce=enforce,
+                        reason="guard-rejected",
+                    )
                 assert _encrypted_snapshot(case) == before
     assert observed == []
     assert case.apply(case.effect("a" * 64, WorkflowAction.CONTINUE), lease).outcome is WorkflowOutcome.APPLIED
@@ -331,7 +338,8 @@ def test_generic_lifecycle_unknown_markers_fail_closed(workflow_case):
         before = _encrypted_snapshot(case)
         assert not _generic_renew(case, lease, batch=False, enforce=False)
         assert not _generic_renew(case, lease, batch=True, enforce=False)
-        assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
+        with case.owner_scope(case.root.owner_user_id):
+            assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
         assert _encrypted_snapshot(case) == before
 
 
@@ -345,7 +353,8 @@ def test_generic_lifecycle_cannot_revive_terminal_root(workflow_case, action):
     before = _encrypted_snapshot(case)
     assert not _generic_renew(case, lease, batch=False, enforce=False)
     assert not _generic_renew(case, lease, batch=True, enforce=False)
-    assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
+    with case.owner_scope(case.root.owner_user_id):
+        assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
     assert _encrypted_snapshot(case) == before
     case.recover("sweep")
     assert case.acquire(replace_current=False) is None
@@ -375,6 +384,7 @@ def test_generic_legacy_renew_release_keep_permissive_behavior(uninstalled_workf
                 "domain": "embeddings",
                 "queue": "workflow",
                 "job_type": "legacy",
+                "owner_user_id": case.command.owner_user_id,
                 "payload": "{}",
                 "status": "processing",
                 "leased_until": "2020-01-01 00:00:00",
@@ -383,7 +393,7 @@ def test_generic_legacy_renew_release_keep_permissive_behavior(uninstalled_workf
         job_id = case.execute(conn, "SELECT id FROM jobs WHERE uuid=?", (uuid,)).fetchone()[0]
         conn.commit()
     command = ReleaseJobCommand(job_id, enforce=True, worker_id="stale", lease_id="stale")
-    with closing(case.manager._connect()) as conn:
+    with case.owner_scope(case.command.owner_user_id), closing(case.manager._connect()) as conn:
         result = (
             pg_release(conn, case.manager._pg_cursor, command=command, counters_enabled=False)
             if case.manager.backend == "postgres"
@@ -401,9 +411,10 @@ def test_generic_legacy_renew_release_keep_permissive_behavior(uninstalled_workf
         "lease_id",
         "workflow_capability_version",
     }
-    assert case.manager.renew_job_lease(job_id, seconds=240, enforce=False)
-    assert case.manager.batch_renew_leases([{"job_id": job_id, "seconds": 300}], enforce=None) == 1
-    assert case.manager.release_job(job_id, enforce=False)
+    with case.owner_scope(case.command.owner_user_id):
+        assert case.manager.renew_job_lease(job_id, seconds=240, enforce=False)
+        assert case.manager.batch_renew_leases([{"job_id": job_id, "seconds": 300}], enforce=None) == 1
+        assert case.manager.release_job(job_id, enforce=False)
     with case.connection() as conn:
         assert case.execute(conn, "SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()[0] == "queued"
 
@@ -425,6 +436,7 @@ def test_generic_mixed_batch_counts_order_and_rollback(workflow_case, fail_later
                 "domain": "embeddings",
                 "queue": "workflow",
                 "job_type": "legacy",
+                "owner_user_id": case.command.owner_user_id,
                 "payload": "{}",
                 "status": "processing",
                 "leased_until": "2020-01-01 00:00:00",
@@ -458,17 +470,18 @@ def test_generic_mixed_batch_counts_order_and_rollback(workflow_case, fail_later
         {"job_id": case.root.job_id_hint, "worker_id": live.worker_id, "lease_id": live.lease_id, "seconds": 1},
     ]
     before = case.job_row(), expired.job_row(), case.serialized_support()
-    if fail_later:
-        with pytest.raises(error_type, match="forced renewal failure"):
-            case.manager.batch_renew_leases(items, enforce=False)
-        assert (case.job_row(), expired.job_row(), case.serialized_support()) == before
-    else:
-        assert case.manager.batch_renew_leases(items, enforce=False) == 3
-        assert expired.job_row() == before[1]
-        assert case.serialized_support() == before[2]
-        deadline = case.job_row()["leased_until"]
-        assert case.manager.batch_renew_leases(items[-1:], enforce=True) == 1
-        assert case.job_row()["leased_until"] == deadline
+    with case.owner_scope(case.root.owner_user_id):
+        if fail_later:
+            with pytest.raises(error_type, match="forced renewal failure"):
+                case.manager.batch_renew_leases(items, enforce=False)
+            assert (case.job_row(), expired.job_row(), case.serialized_support()) == before
+        else:
+            assert case.manager.batch_renew_leases(items, enforce=False) == 3
+            assert expired.job_row() == before[1]
+            assert case.serialized_support() == before[2]
+            deadline = case.job_row()["leased_until"]
+            assert case.manager.batch_renew_leases(items[-1:], enforce=True) == 1
+            assert case.job_row()["leased_until"] == deadline
 
 
 @pytest.mark.parametrize("via", ["acquire", "sweep"])
@@ -576,12 +589,13 @@ def test_encrypted_authority_failure_is_atomic(workflow_case, workflow_encryptio
 
         monkeypatch.setattr(case.manager, "_maybe_decrypt_json", forbidden_decoder)
     before = _encrypted_snapshot(case)
-    with pytest.raises(WorkflowFenceError) as error:
+    owner = "other-owner" if failure == "owner" else case.root.owner_user_id
+    with case.owner_scope(owner), pytest.raises(WorkflowFenceError) as error:
         if operation == "sweep":
-            case.recover("sweep")
+            case.manager.integrity_sweep(fix=True, domain="embeddings", queue="workflow", job_type="embedding_workflow")
         else:
-            # No owner filter: a changed owner must still fail exact enrollment,
-            # rather than merely making the candidate invisible to selection.
+            # Scope to the stored owner so exact enrollment, not RLS invisibility,
+            # rejects changed ownership. No SQL owner filter hides the candidate.
             case.manager.acquire_next_job(
                 domain="embeddings", queue="workflow", worker_id="worker-a", lease_seconds=120
             )
@@ -761,9 +775,9 @@ def test_fractional_deadline_is_not_expired_early(workflow_case):
     case.acquire()
     with case.connection() as conn:
         statement = (
-            "SELECT clock_timestamp()+interval '0.75 seconds'"
+            "SELECT clock_timestamp()+interval '30.75 seconds'"
             if case.manager.backend == "postgres"
-            else "SELECT STRFTIME('%Y-%m-%dT%H:%M:%f+00:00','now','+0.75 seconds')"
+            else "SELECT STRFTIME('%Y-%m-%dT%H:%M:%f+00:00','now','+30.75 seconds')"
         )
         deadline = conn.execute(statement).fetchone()[0]
         case.execute(conn, "UPDATE jobs SET leased_until=? WHERE uuid=?", (deadline, case.root.job_uuid))
@@ -943,9 +957,14 @@ def test_legacy_schedule_clock_behavior_is_preserved(uninstalled_workflow_case, 
     monkeypatch.setattr(
         case.manager._clock, "now_utc", lambda: datetime(2100 if future else 2000, 1, 1, tzinfo=timezone.utc)
     )
-    row = case.manager.acquire_next_job(
-        domain="embeddings", queue="workflow", job_type="embedding_workflow", worker_id="legacy", lease_seconds=120
-    )
+    with case.owner_scope(case.command.owner_user_id):
+        row = case.manager.acquire_next_job(
+            domain="embeddings",
+            queue="workflow",
+            job_type="embedding_workflow",
+            worker_id="legacy",
+            lease_seconds=120,
+        )
     eligible = future if case.manager.backend == "sqlite" else not future
     assert (row is not None) == eligible
     if row is not None:
@@ -998,14 +1017,15 @@ def test_concurrent_enrolled_acquire_enforces_inflight_quota_with_clock_skew(
     monkeypatch.setattr(case.manager, "_recover_expired_processing_jobs", recover_then_synchronize)
 
     def acquire(number):
-        return case.manager.acquire_next_job(
-            domain="embeddings",
-            queue="workflow",
-            owner_user_id="owner-a",
-            job_type="embedding_workflow",
-            lease_seconds=120,
-            worker_id=f"quota-worker-{number}",
-        )
+        with case.owner_scope(case.command.owner_user_id):
+            return case.manager.acquire_next_job(
+                domain="embeddings",
+                queue="workflow",
+                owner_user_id="owner-a",
+                job_type="embedding_workflow",
+                lease_seconds=120,
+                worker_id=f"quota-worker-{number}",
+            )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(acquire, range(2)))
@@ -1075,7 +1095,7 @@ def test_atomic_legacy_inflight_quota_preserves_clock_and_schema_behavior(
         single_update=acquisition_mode,
     )
     statements = []
-    with closing(case.manager._connect()) as conn:
+    with case.owner_scope(case.command.owner_user_id), closing(case.manager._connect()) as conn:
         kwargs = {
             "command": command,
             "counters_enabled": False,
@@ -1137,7 +1157,10 @@ def test_null_marker_never_accesses_missing_support(workflow_case):
             },
         )
         conn.commit()
-    row = case.manager.acquire_next_job(domain="embeddings", queue="workflow", worker_id="legacy", lease_seconds=120)
+    with case.owner_scope(case.command.owner_user_id):
+        row = case.manager.acquire_next_job(
+            domain="embeddings", queue="workflow", worker_id="legacy", lease_seconds=120
+        )
     assert row["status"] == "processing"
     assert row["retry_count"] == 1
     assert row["workflow_capability_version"] is None

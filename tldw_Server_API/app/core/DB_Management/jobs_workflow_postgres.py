@@ -503,6 +503,16 @@ def inspect_support(connection: Any) -> WorkflowOutcome:
             (f"wf_immutable_{suffix}", "O", 19, _trigger_body(suffix), False, "plpgsql")
         ]:
             return WorkflowOutcome.UNAVAILABLE
+    privileges = connection.execute(
+        "SELECT bool_and(has_table_privilege(current_user,t.oid,p.privilege)) "
+        "FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace "
+        "CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE')) p(privilege) "
+        "WHERE n.nspname=current_schema() "
+        "AND t.relname IN ('job_workflow_schema','job_workflow_roots','job_workflow_effect_receipts') "
+        "AND (t.relname<>'job_workflow_schema' OR p.privilege='SELECT')"
+    ).fetchone()
+    if privileges != (True,):
+        return WorkflowOutcome.UNAVAILABLE
     version = connection.execute("SELECT singleton,version FROM job_workflow_schema").fetchall()
     return WorkflowOutcome.APPLIED if version == [(1, 1)] else WorkflowOutcome.UNAVAILABLE
 

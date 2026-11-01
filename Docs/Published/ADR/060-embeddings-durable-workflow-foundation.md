@@ -99,5 +99,6 @@ closed trace contracts without expanding inline literals or inferring completion
 before Jobs acknowledgement.
 This proposal was renumbered from ADR-058 and then ADR-059 as `dev` accepted those
 numbers for Jobs completion row identity and the backlog-py task editor cutover.
-ADR-060 is the next free number as of this revision. Recheck numbering before
-integration; do not replace or rewrite accepted records.
+ADR-060 was selected for this record on 2026-10-04. Later integration retained
+that unoccupied identity; it is not a claim about the next available ADR number.
+Do not replace or rewrite accepted records.

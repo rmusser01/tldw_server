@@ -3664,7 +3664,7 @@ class JobManager:
             batch_group=None,
             available_at=None,
             request_id=None,
-            trace_id=None,
+            trace_id=str(_uuid.uuid4()),
             idempotency_key=command.idempotency_key,
             priority=priority,
             max_retries=command.controls.max_retries,

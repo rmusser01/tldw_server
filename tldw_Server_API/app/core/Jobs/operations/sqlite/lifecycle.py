@@ -191,6 +191,13 @@ def _candidate_sql(
             "SELECT 1 FROM jobs WHERE domain=? AND queue=? "
             "AND status='queued' AND available_at IS NOT NULL AND available_at > DATETIME(?)"
         )
+        if workflow_enrollment_projection(conn, backend="sqlite") == "workflow_capability_version":
+            scheduled_sql = (
+                "SELECT 1 FROM jobs WHERE domain=? AND queue=? "
+                "AND status='queued' AND available_at IS NOT NULL AND ("
+                "(workflow_capability_version=1 AND JULIANDAY(available_at)>JULIANDAY('now')) OR "
+                "(workflow_capability_version IS NULL AND available_at>DATETIME(?)))"
+            )
         scheduled_params: list[Any] = [command.domain, command.queue, now_sql]
         if command.owner_user_id:
             scheduled_sql += " AND owner_user_id=?"

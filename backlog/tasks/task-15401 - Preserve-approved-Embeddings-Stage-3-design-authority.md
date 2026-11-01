@@ -18,8 +18,8 @@ Canonical tracking identity for the approved Stage3 design and accepted ADR060 a
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-10-20: Metadata-only identity repair after rebasing onto df7c290fbf. Human approval recorded 2026-10-04 remains governing. Runtime implementation tracked TASK-13900. ADR assessment: ADR required yes, accepted ADR-060 already governs; ADR-022 and ADR-058 preserved.
-2026-11-01: Canonical design identity TASK-15401 replaces colliding TASK-13901. Governing ADR060 and approved design unchanged; historical archives receive unique metadata identities TASK15403/TASK15404 under ADR084.
+2026-10-20: Metadata-only identity repair after rebasing onto df7c290fbf. Human approval recorded 2026-10-04 remains governing. Runtime implementation tracked TASK-15400 (formerly TASK-13900 at that date). ADR assessment: ADR required yes, accepted ADR-060 already governs; ADR-022 and ADR-058 preserved.
+2026-11-01: Canonical design identity TASK-15401 replaces colliding TASK-13901. Governing ADR060 and approved design unchanged; historical archives receive unique metadata identities TASK-15403/TASK-15404 under ADR084. Review clarified the current implementation pointer; former IDs are historical context only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

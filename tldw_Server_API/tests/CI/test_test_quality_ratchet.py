@@ -27,6 +27,8 @@ BASELINE = REPO_ROOT / "Helper_Scripts" / "ci" / "test_quality_baseline.txt"
         ("from hypothesis.stateful import RuleBasedStateMachine as StateMachine", "StateMachine"),
         ("import hypothesis.stateful as stateful", "stateful.RuleBasedStateMachine"),
         ("import hypothesis", "hypothesis.stateful.RuleBasedStateMachine"),
+        ("from hypothesis import stateful", "stateful.RuleBasedStateMachine"),
+        ("from hypothesis import stateful as states", "states.RuleBasedStateMachine"),
     ],
 )
 def test_hypothesis_state_machine_invariants_are_not_fake_assertions(tmp_path, imports, base) -> None:
@@ -47,6 +49,9 @@ def test_hypothesis_state_machine_invariants_are_not_fake_assertions(tmp_path, i
         ("", ""),
         ("", "(RuleBasedStateMachine)"),
         ("from application import RuleBasedStateMachine", "(RuleBasedStateMachine)"),
+        ("from application import stateful", "(stateful.RuleBasedStateMachine)"),
+        ("from .hypothesis import stateful", "(stateful.RuleBasedStateMachine)"),
+        ("from .hypothesis.stateful import RuleBasedStateMachine", "(RuleBasedStateMachine)"),
     ],
 )
 def test_non_test_class_assertions_remain_flagged_without_hypothesis_import(tmp_path, imports, base) -> None:

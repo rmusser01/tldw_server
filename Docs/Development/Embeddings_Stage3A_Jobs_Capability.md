@@ -48,7 +48,9 @@ access, or RLS bypass to make a runtime connection work.
 
 Grant schema `USAGE`, required ordinary Jobs table operations and associated
 sequence usage, support-table `SELECT/INSERT/UPDATE/DELETE`, and version-table
-`SELECT`. Domain privileges belong to the future domain repository's separate
+`SELECT`. Readiness inspection verifies these support-table grants and reports
+`UNAVAILABLE` when they are missing; it does not install grants or reclassify
+unrelated execution errors. Domain privileges belong to the future domain repository's separate
 contract. Both owned support tables have ENABLE and FORCE RLS with owner-only
 USING/WITH CHECK policies. `app.is_admin` and domain allowlists cannot bypass
 those policies. Missing/blank owners see nothing. Runtime transactions set
@@ -88,13 +90,22 @@ admission quotas, pause/drain behavior, counters, and events still apply.
 An admitted root's payload contains only `workflow_id`. The owner is nonblank,
 exact, and at most 512 UTF-8 bytes; reference and Jobs identities are canonical
 UUIDv4 strings. The idempotency key is at most 200 UTF-8 bytes. Numeric Jobs IDs
-are hints, never authority.
+are hints, never authority. Identity text cannot contain embedded NUL bytes on
+either backend. Retry controls are exact integers from 0 through 100; a non-null
+quarantine threshold is from 1 through 2,147,483,647, fitting both ordinary Jobs
+backends. The no-progress limit remains 1 through 5. A new admission generates a
+Jobs trace ID; exact replay retains the original trace and does not emit another
+creation event.
 
 Admission serializes the exact owner/scope/key and retains immutable controls.
 An exact replay returns `ALREADY_APPLIED` before mutable admission policy is
 re-evaluated. Changed reference/controls conflict. A previously bound root is
 never replaced or revived, including after archive/prune. Legacy correlations
-are not enrollment. `lookup(root)` returns active/archive status or a closed
+are not enrollment. Legacy correlation checks are owner-scoped, so another
+owner's archived legacy job does not reserve this owner's workflow key. Ordinary
+active Jobs idempotency uniqueness is unchanged and can still reject a colliding
+active scope/key; the capability does not return another owner's root.
+`lookup(root)` returns active/archive status or a closed
 missing/conflict/unavailable result. No history is not permission to recreate.
 Canonical Admin Webhook identity and prepared-disposition APIs remain separate;
 this capability cannot enroll the reserved Admin Webhook delivery scope.
@@ -106,6 +117,13 @@ job type, owner, worker, and lease duration. Successful enrolled acquisition
 records its durable epoch before committing, in both acquisition modes and on
 both backends. Construct `WorkflowLease(row["worker_id"], row["lease_id"])`
 from that delivery, not an old cached lease.
+
+On PostgreSQL, ordinary manager acquisition, renewal, cancellation, and recovery
+also require the existing Jobs RLS caller context. An owner argument alone does
+not establish session authority. Request/worker boundaries must establish and
+restore the correct non-admin owner context, including across thread boundaries;
+a missing context must not fall back to privileged access. Capability transactions
+establish their own local owner scope as described below.
 
 `capability.transaction(owner_user_id)` yields one synchronous
 `WorkflowTransaction` and owns its outer commit/rollback. The transaction

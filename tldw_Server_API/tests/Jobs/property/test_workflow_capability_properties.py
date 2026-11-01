@@ -261,7 +261,8 @@ class WorkflowMachine(RuleBasedStateMachine):
     def cancel(self):
         if self.model.archived:
             return
-        changed = self.case.manager.cancel_job(self.root.job_id_hint, expected_uuid=self.root.job_uuid)
+        with self.case.owner_scope(self.root.owner_user_id):
+            changed = self.case.manager.cancel_job(self.root.job_id_hint, expected_uuid=self.root.job_uuid)
         assert changed is (not self.model.terminal)
         if changed:
             self.model.status = "cancelled"

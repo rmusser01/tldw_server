@@ -390,12 +390,12 @@ class LiveWorkflowTransaction:
                 return WorkflowAdmissionResult(found.outcome)
             return WorkflowAdmissionResult(WorkflowOutcome.ALREADY_APPLIED, found.root)
         # A legacy correlation is not enrollment, including retained archives.
-        correlation = (scope.domain, scope.queue, scope.job_type, command.idempotency_key)
         if self._rows(
-            "SELECT uuid FROM jobs WHERE domain=? AND queue=? AND job_type=? AND idempotency_key=? LIMIT 1", correlation
+            "SELECT uuid FROM jobs WHERE owner_user_id=? AND domain=? AND queue=? AND job_type=? AND idempotency_key=? LIMIT 1",
+            parameters,
         ) or self._rows(
-            "SELECT uuid FROM jobs_archive WHERE domain=? AND queue=? AND job_type=? AND idempotency_key=? LIMIT 1",
-            correlation,
+            "SELECT uuid FROM jobs_archive WHERE owner_user_id=? AND domain=? AND queue=? AND job_type=? AND idempotency_key=? LIMIT 1",
+            parameters,
         ):
             return WorkflowAdmissionResult(WorkflowOutcome.CONFLICT)
         try:

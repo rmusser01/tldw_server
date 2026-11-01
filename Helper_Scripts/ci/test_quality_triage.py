@@ -177,10 +177,14 @@ def _module_fake_classes(tree: ast.Module) -> set[str]:
     """Exclude pytest classes and explicitly imported Hypothesis test machines."""
     hypothesis_bases: set[str] = set()
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module == "hypothesis.stateful":
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "hypothesis.stateful":
             for imported in node.names:
                 if imported.name == "RuleBasedStateMachine":
                     hypothesis_bases.add(imported.asname or imported.name)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "hypothesis":
+            for imported in node.names:
+                if imported.name == "stateful":
+                    hypothesis_bases.add(f"{imported.asname or imported.name}.RuleBasedStateMachine")
         elif isinstance(node, ast.Import):
             for imported in node.names:
                 if imported.name == "hypothesis.stateful":
