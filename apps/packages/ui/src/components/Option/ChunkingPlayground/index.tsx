@@ -1165,7 +1165,7 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
                         "settings:chunkingPlayground.advanced.templateNameLabel",
                         "Template name"
                       )}>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <AutoComplete
                           value={templateName}
                           onChange={setTemplateName}
@@ -1180,7 +1180,7 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
                               .toLowerCase()
                               .includes(inputValue.toLowerCase())
                           }
-                          className="flex-1"
+                          className="w-full"
                         />
                         <Button
                           size="small"
