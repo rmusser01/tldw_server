@@ -1,4 +1,4 @@
-"""Persisted platform authority governs Telegram secret mutations."""
+"""AuthNZ SQLite coverage for persisted Telegram secret-mutation authority."""
 
 import base64
 from datetime import datetime, timezone

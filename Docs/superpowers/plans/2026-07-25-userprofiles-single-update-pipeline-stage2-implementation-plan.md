@@ -1013,6 +1013,28 @@ Non-green local limits: root full-suite collection remains blocked by unchanged 
 
 Publication candidate rebases all 38 patches unchanged onto dev 6bf581da089a7aa6d90440a8801de07f8fdd238b; all 32 upstream paths/modes match dev. Remote head remains 58d3870f21 before the explicit-lease push, MERGE_QUEUE is unset, and auto-merge is unarmed. Current rules retain eight required checks and merge commits only. Reply/resolve all 26 reviewed feedback threads with commit evidence, preserve the human summary verbatim, then wait for the new candidate's checks; no merge while any gate is absent, pending or unsuccessful.
 
+### November 1 UX Smoke and Test-Shard CI Remediation
+
+## Stage 1: Diagnose the Exact-Head Failure
+**Goal**: Explain UX Smoke Gate job 124990761117 and Shard coverage guard job 124994280729 on 524722d9b5 without widening WP2 runtime scope.
+**Success Criteria**: CI logs/artifacts identify a real scenario mismatch, not an assumed flaky test or product authorization failure.
+**Tests**: Three failed browser CI attempts; captured UI has two messages and no history-review button, matching the existing one-exchange presentation policy and its tests. All involved frontend paths equal dev. The guard identifies exactly two new Telegram test modules with no shard; the correct local guard reproduces both uncovered paths before relocation.
+**Status**: Complete
+
+## Stage 2: Preserve Gate Coverage and Scenario Preconditions
+**Goal**: Send the existing real follow-up turn after both Stop outcomes before selecting saved history, and relocate the two uncovered authority tests into existing AuthNZ shards.
+**Success Criteria**: One E2E scenario changes; both user questions remain persisted. Retain every recovery, selection, provider payload, regeneration, source-preservation and unsent-draft assertion. Move the Telegram unit and SQLite authority tests into AuthNZ_Unit and AuthNZ_SQLite without changing test-body AST. No UI/runtime, timeout, skip, workflow, shard baseline or ignore changes. No new ADR is required for test-only corrections.
+**Tests**: Production frontend build/token-sync/bundle-budget pass; real-server six-case browser gate passes with zero skips, unexpected or flaky results. Existing history presentation/control suites pass 120 tests. Guard RED2 to GREEN0 keeps 869 shards, 5339 test files, four ignored and baseline44 unchanged. Relocated tests and adjacent Telegram API tests pass 48 cases; Ruff/compile/diff pass. Bandit reports only 19 test assertions, no non-assert findings/errors. Full-tree test-quality enforcement passes unchanged baseline. Independent bounded review approves both corrections with no findings.
+**Status**: Complete
+
+Explicit verification limit: the bare configured frontend unit attempt includes 2978 test files and was interrupted with exit130 after observing StandaloneHtmlWorkspace's `keeps an extension runtime source-free after standalone metadata dispatch` five-second timeout. The unchanged case passes alone, and the entire unchanged file passes 111/111 with one worker; this does not establish a green broad suite. No unrelated source fix or skip was introduced. The corrected E2E qualifies regeneration of the subsequent saved answer, not direct regeneration of the initial stopped answer; the reviewer exclusion is accepted. Prior unchanged WP2 runtime approval carries forward; WP3 and remote CI remain separate.
+
+## Stage 3: Publish the Reviewed Test Correction
+**Goal**: Commit related plan/task evidence and publish one qualified candidate without bypassing any gate.
+**Success Criteria**: Human summary unchanged, previous runtime approval preserved, exact-head test remediation approved, queue/unarmed and authoritative refs checked; wait for fresh required CI before merge/readback.
+**Tests**: Canonical tracking, diff/Bandit applicability, review and remote readback.
+**Status**: In Progress
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types

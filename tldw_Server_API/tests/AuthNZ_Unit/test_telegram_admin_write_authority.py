@@ -1,4 +1,4 @@
-"""Request-bound Telegram writes preserve the shared BYOK actor boundary."""
+"""AuthNZ unit coverage for the request-bound Telegram BYOK actor boundary."""
 
 from types import SimpleNamespace
 
