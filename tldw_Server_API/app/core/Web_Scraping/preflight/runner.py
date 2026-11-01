@@ -8,6 +8,8 @@ from typing import Any, TypedDict
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
+
 from ..runtime.requests import RuntimeRequestContext
 from .analyzers.behavioral_detector import (
     _detect_honeypots,
@@ -100,7 +102,7 @@ async def _isolated(
     """Run one analyzer while preserving cancellation and safe failures."""
     try:
         return await call()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except PreflightDeadlineExceeded:
         raise
@@ -230,7 +232,7 @@ async def gather_analysis(
             policy_checker=policy_checker,
         )
         allowed = bool(target.decision.allowed)
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except Exception as exc:  # noqa: BLE001 - direct legacy policy failures are sanitized
         logger.warning("Legacy preflight policy failure: exception={}", type(exc).__name__)
@@ -258,7 +260,7 @@ async def gather_analysis(
     finally:
         try:
             await context.close()
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
         except Exception:  # noqa: BLE001 - preserve the established runner outcome
             logger.warning("Legacy aggregate context cleanup failed.")
