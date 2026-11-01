@@ -406,11 +406,20 @@ async def transfer_ownership(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Ownership transfer requires an authenticated user",
         )
-    if body.new_owner_user_id == principal.user_id:
+    current_owner_user_id = principal.user_id
+    if ctx.is_platform_admin:
+        try:
+            current_owner_user_id = await repo.get_organization_owner_user_id(ctx.org_id)
+        except _MEMBERSHIP_CONTROL_ERRORS as exc:
+            raise _membership_control_http_exception(exc) from exc
+    if current_owner_user_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    if body.new_owner_user_id == current_owner_user_id:
         logger.warning(
-            "User {} attempted to transfer ownership of org {} to themselves",
+            "User {} attempted a no-op transfer of org {} to current owner {}",
             principal.user_id,
             ctx.org_id,
+            current_owner_user_id,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -429,7 +438,7 @@ async def transfer_ownership(
         org = await repo.transfer_organization_ownership(
             org_id=ctx.org_id,
             new_owner_user_id=body.new_owner_user_id,
-            current_owner_user_id=principal.user_id,
+            current_owner_user_id=current_owner_user_id,
             context=_membership_context(principal, ctx),
         )
     except _MEMBERSHIP_CONTROL_ERRORS as exc:
@@ -441,7 +450,7 @@ async def transfer_ownership(
             detail="Organization not found",
         )
 
-    logger.info(f"Org {ctx.org_id} ownership transferred from {principal.user_id} to {body.new_owner_user_id}")
+    logger.info(f"Org {ctx.org_id} ownership transferred from {current_owner_user_id} to {body.new_owner_user_id}")
     return OrganizationResponse(**org)
 
 

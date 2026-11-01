@@ -3,8 +3,10 @@ from __future__ import annotations
 import ast
 import asyncio
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, get_type_hints
 
 import pytest
@@ -47,6 +49,69 @@ _ACTOR_MEMBERSHIP_CONTEXT = ActorMembershipWriteContext(
     actor_user_id=11,
     required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("supplied_connection", [False, True])
+@pytest.mark.parametrize("found", [False, True])
+@pytest.mark.parametrize(
+    ("method_name", "field", "postgres_sql", "sqlite_sql"),
+    [
+        (
+            "get_team_parent_organization_id",
+            "org_id",
+            "SELECT org_id FROM public.teams WHERE id = $1",
+            "SELECT org_id FROM main.teams WHERE id = ?",
+        ),
+        (
+            "get_organization_owner_user_id",
+            "owner_user_id",
+            "SELECT owner_user_id FROM public.organizations WHERE id = $1",
+            "SELECT owner_user_id FROM main.organizations WHERE id = ?",
+        ),
+    ],
+)
+async def test_membership_scope_identity_reads_use_owned_connection_or_bounded_acquire(
+    monkeypatch: pytest.MonkeyPatch,
+    postgres: bool,
+    supplied_connection: bool,
+    found: bool,
+    method_name: str,
+    field: str,
+    postgres_sql: str,
+    sqlite_sql: str,
+) -> None:
+    monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "13")
+    calls = []
+    acquired = []
+
+    class Connection:
+        async def fetchrow(self, query, *args):
+            calls.append((query, args))
+            return {field: 99} if found else None
+
+        async def execute(self, query, args):
+            calls.append((query, args))
+            return self
+
+        async def fetchone(self):
+            return (99,) if found else None
+
+    connection = Connection()
+
+    @asynccontextmanager
+    async def acquire(*, timeout):
+        acquired.append(timeout)
+        yield connection
+
+    repo = AuthnzOrgsTeamsRepo(SimpleNamespace(pool=object() if postgres else None, acquire=acquire))
+    method = getattr(repo, method_name)
+    result = await method(7, conn=connection if supplied_connection else None)
+
+    assert result == (99 if found else None)
+    assert calls == [(postgres_sql if postgres else sqlite_sql, (7,))]
+    assert acquired == ([] if supplied_connection else [13.0])
 
 
 def test_postgres_authnz_relation_literals_are_public_qualified() -> None:

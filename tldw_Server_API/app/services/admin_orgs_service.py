@@ -30,6 +30,8 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateTeamError,
     UserRegistrationException,
@@ -87,6 +89,7 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_stt_settings_repo import AuthnzOrgSttSettingsRepo
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 from tldw_Server_API.app.core.config import get_stt_config
 from tldw_Server_API.app.core.config_sections.stt import _parse_bool
 from tldw_Server_API.app.core.DB_Management.backends.base import (
@@ -158,10 +161,13 @@ def _membership_write_context(
 
 
 _MEMBERSHIP_CONTROL_ERRORS = (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
     MembershipAuthorizationError,
     MembershipPreflightChanged,
     MembershipScopeNotFound,
     MembershipTargetNotFound,
+    TimeoutError,
 )
 
 
@@ -171,8 +177,19 @@ def _membership_control_http_error(
         | MembershipPreflightChanged
         | MembershipScopeNotFound
         | MembershipTargetNotFound
+        | ConnectionPoolExhaustedError
+        | DatabaseLockError
+        | TimeoutError
     ),
 ) -> HTTPException:
+    if isinstance(exc, (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError)):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication database is busy. Please retry shortly.",
+            headers={
+                "Retry-After": str(get_authnz_transaction_policy().busy_retry_after_seconds),
+            },
+        )
     if isinstance(exc, MembershipAuthorizationError):
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

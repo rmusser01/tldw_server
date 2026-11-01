@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     MembershipAuthority,
     MembershipPreflightChanged,
+    MembershipScopeNotFound,
     TrustedMembershipReason,
     TrustedMembershipWriteContext,
 )
@@ -89,6 +90,37 @@ def _owner_context(owner_id: int) -> ActorMembershipWriteContext:
         actor_user_id=owner_id,
         required_authority=MembershipAuthority.SCOPED_MEMBERSHIP,
     )
+
+
+@pytest.mark.parametrize("inactive_parent", [False, True])
+async def test_inactive_scope_rejects_grants_but_allows_org_member_cleanup_pg(
+    test_db_pool,
+    inactive_parent: bool,
+) -> None:
+    ids = await _create_org_fixture(test_db_pool, f"inactive_{uuid.uuid4().hex[:8]}")
+    repo = AuthnzOrgsTeamsRepo(test_db_pool)
+    context = _owner_context(ids["owner"])
+    async with test_db_pool.transaction() as conn:
+        assert await repo.get_team_parent_organization_id(ids["team"], conn=conn) == ids["org"]
+        assert await repo.get_organization_owner_user_id(ids["org"], conn=conn) == ids["owner"]
+        if inactive_parent:
+            await conn.execute("UPDATE public.organizations SET is_active = FALSE WHERE id = $1", ids["org"])
+        else:
+            await conn.execute("UPDATE public.teams SET is_active = FALSE WHERE id = $1", ids["team"])
+    with pytest.raises(MembershipScopeNotFound):
+        await repo.add_team_member(team_id=ids["team"], user_id=ids["second"], context=context)
+    with pytest.raises(MembershipScopeNotFound):
+        await repo.update_team_member_role(team_id=ids["team"], user_id=ids["first"], role="lead", context=context)
+    if inactive_parent:
+        with pytest.raises(MembershipScopeNotFound):
+            await repo.add_org_member(org_id=ids["org"], user_id=ids["second"], context=context)
+
+    result = await repo.remove_org_member(org_id=ids["org"], user_id=ids["first"], context=context)
+
+    assert result["removed"] is True
+    assert await repo.get_team_member(ids["team"], ids["first"]) is None
+    assert await repo.get_org_member(ids["org"], ids["first"]) is None
+    assert await repo.get_organization_owner_user_id(ids["org"]) == ids["owner"]
 
 
 class _ParentLockGate:

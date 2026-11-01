@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     ActorMembershipWriteContext,
     MembershipAuthority,
     MembershipAuthorizationError,
+    MembershipScopeNotFound,
     TrustedMembershipReason,
     TrustedMembershipWriteContext,
 )
@@ -22,6 +23,265 @@ _BOOTSTRAP = TrustedMembershipWriteContext(
     trusted_reason=TrustedMembershipReason.BOOTSTRAP,
 )
 _FUTURE_FLOOR = datetime(2099, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inactive_org", [False, True])
+async def test_org_removal_cleans_memberships_in_inactive_child_team(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    inactive_org: bool,
+) -> None:
+    pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    async with pool.transaction() as conn:
+        await conn.execute("UPDATE teams SET is_active = 0 WHERE id = ?", (ids["team"],))
+        if inactive_org:
+            await conn.execute("UPDATE organizations SET is_active = 0 WHERE id = ?", (ids["org"],))
+    touched = await _record_touches(monkeypatch)
+
+    if inactive_org:
+        with pytest.raises(MembershipScopeNotFound):
+            await repo.add_org_member(org_id=ids["org"], user_id=ids["second"], context=_BOOTSTRAP)
+    result = await repo.remove_org_member(
+        org_id=ids["org"],
+        user_id=ids["first"],
+        context=_owner_context(ids["owner"]),
+    )
+
+    assert result["removed"] is True
+    assert await repo.get_org_member(ids["org"], ids["first"]) is None
+    assert await repo.get_team_member(ids["team"], ids["first"]) is None
+    assert await repo.get_team_member(ids["team"], ids["second"]) is not None
+    assert touched == [ids["first"]]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reverse_order", [False, True])
+@pytest.mark.parametrize("grant_kind", ["add", "update_role"])
+async def test_inactive_team_mixed_batch_never_applies_removal_before_rejected_grant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reverse_order: bool,
+    grant_kind: str,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+        AnchorOwnership,
+        MembershipMutation,
+        MembershipMutationKind,
+        MembershipScopeType,
+        MembershipWriter,
+    )
+
+    pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    async with pool.transaction() as conn:
+        await conn.execute("UPDATE teams SET is_active = 0 WHERE id = ?", (ids["team"],))
+    mutations = (
+        MembershipMutation(
+            scope_type=MembershipScopeType.TEAM,
+            scope_id=ids["team"],
+            user_id=ids["first"],
+            kind=MembershipMutationKind.REMOVE,
+        ),
+        MembershipMutation(
+            scope_type=MembershipScopeType.TEAM,
+            scope_id=ids["team"],
+            user_id=ids["second"],
+            kind=MembershipMutationKind(grant_kind),
+            role="lead",
+        ),
+    )
+    with pytest.raises(MembershipScopeNotFound):
+        async with pool.transaction() as conn:
+            await MembershipWriter(pool).apply_membership_mutations(
+                conn=conn,
+                context=_owner_context(ids["owner"]),
+                mutations=mutations[::-1] if reverse_order else mutations,
+                anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+                operation_time=datetime.now(timezone.utc),
+            )
+    assert (await repo.get_team_member(ids["team"], ids["first"]))["role"] == "member"
+    assert (await repo.get_team_member(ids["team"], ids["second"]))["role"] == "member"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inactive_parent", [False, True])
+@pytest.mark.parametrize("operation", ["remove", "add", "update"])
+async def test_inactive_scope_allows_cleanup_but_not_grants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    inactive_parent: bool,
+    operation: str,
+) -> None:
+    pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    async with pool.transaction() as conn:
+        if inactive_parent:
+            await conn.execute("UPDATE organizations SET is_active = 0 WHERE id = ?", (ids["org"],))
+        else:
+            await conn.execute("UPDATE teams SET is_active = 0 WHERE id = ?", (ids["team"],))
+    context = _owner_context(ids["owner"])
+    if operation == "remove":
+        removed = await repo.remove_team_member(
+            team_id=ids["team"],
+            user_id=ids["first"],
+            context=context,
+        )
+        assert removed["removed"] is True
+        assert await repo.get_team_member(ids["team"], ids["first"]) is None
+    else:
+        call = repo.add_team_member if operation == "add" else repo.update_team_member_role
+        with pytest.raises(MembershipScopeNotFound):
+            await call(team_id=ids["team"], user_id=ids["first"], role="lead", context=context)
+        member = await repo.get_team_member(ids["team"], ids["first"])
+        assert member["role"] == "member"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bulk", [False, True])
+@pytest.mark.parametrize("dry_run", [False, True])
+async def test_org_admin_profile_enrolls_member_in_new_team(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bulk: bool,
+    dry_run: bool,
+) -> None:
+    from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
+        UserProfileBulkUpdateRequest,
+        UserProfileUpdateRequest,
+    )
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.services import admin_profiles_service
+
+    pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    monkeypatch.setenv("ADMIN_UI_ENTERPRISE_MODE", "1")
+    principal = AuthPrincipal(kind="user", user_id=ids["owner"], roles=["org_admin"])
+    updates = [{"key": "memberships.teams.member", "value": {"team_id": ids["empty_team"], "action": "add"}}]
+    before = await ProfileVersionGateway(pool).read(ids["first"])
+    if bulk:
+        response, _audit = await admin_profiles_service.bulk_update_user_profiles(
+            payload=UserProfileBulkUpdateRequest(user_ids=[ids["first"]], updates=updates, dry_run=dry_run),
+            principal=principal,
+        )
+        assert response.updated == 1
+        assert response.failed == 0
+        assert response.results[0].applied == ["memberships.teams.member"]
+    else:
+        async with pool.transaction() as conn:
+            response, audit = await admin_profiles_service.update_user_profile(
+                user_id=ids["first"],
+                payload=UserProfileUpdateRequest(updates=updates, dry_run=dry_run),
+                principal=principal,
+                db=conn,
+            )
+        assert response.applied == ["memberships.teams.member"]
+        assert audit is not None
+    member = await repo.get_team_member(ids["empty_team"], ids["first"])
+    after = await ProfileVersionGateway(pool).read(ids["first"])
+    if dry_run:
+        assert member is None
+        assert after == before
+    else:
+        assert member["role"] == "member"
+        assert after > before
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_owner", ["first", "second", "owner"])
+async def test_platform_admin_endpoint_transfers_actual_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    new_owner: str,
+) -> None:
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.API_Deps.org_deps import OrgContext
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+    from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OwnershipTransferRequest
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    async with pool.transaction() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=ids["second"],
+            profile_visible_fields=("role",),
+            statement="UPDATE users SET role = ? WHERE id = ?",
+            parameters=("admin", ids["second"]),
+        )
+    principal = AuthPrincipal(kind="user", user_id=ids["second"], roles=["admin"], is_admin=True)
+    kwargs = {
+        "body": OwnershipTransferRequest(new_owner_user_id=ids[new_owner]),
+        "ctx": OrgContext(org_id=ids["org"], role="admin", is_platform_admin=True),
+        "principal": principal,
+    }
+    if new_owner == "owner":
+        with pytest.raises(HTTPException) as error:
+            await orgs.transfer_ownership(**kwargs)
+        assert error.value.status_code == 400
+        assert error.value.detail == "New owner must be a different user than the current owner"
+        assert (await repo.get_org_member(ids["org"], ids["owner"]))["role"] == "owner"
+    else:
+        response = await orgs.transfer_ownership(**kwargs)
+        assert response.owner_user_id == ids[new_owner]
+        assert (await repo.get_org_member(ids["org"], ids["owner"]))["role"] == "admin"
+        assert (await repo.get_org_member(ids["org"], ids[new_owner]))["role"] == "owner"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["missing", "race"])
+async def test_profile_membership_control_error_has_no_writes_or_success_audit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    import json
+
+    from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import UserProfileUpdateRequest
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import MembershipPreflightChanged, MembershipWriter
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.services import admin_profiles_service
+
+    pool, repo, ids = await _create_sqlite_fixture(tmp_path, monkeypatch)
+    async with pool.transaction() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=ids["owner"],
+            profile_visible_fields=("role",),
+            statement="UPDATE users SET role = ? WHERE id = ?",
+            parameters=("admin", ids["owner"]),
+        )
+    if failure == "race":
+
+        async def preflight_changed(*_args, **_kwargs):
+            raise MembershipPreflightChanged()
+
+        monkeypatch.setattr(MembershipWriter, "_recheck_preflight", preflight_changed)
+    team_id = ids["empty_team"] if failure == "race" else 100_000
+    before = await ProfileVersionGateway(pool).read(ids["first"])
+    async with pool.transaction() as conn:
+        response, audit = await admin_profiles_service.update_user_profile(
+            user_id=ids["first"],
+            payload=UserProfileUpdateRequest(
+                updates=[
+                    {"key": "preferences.ui.theme", "value": "dark"},
+                    {"key": "memberships.teams.member", "value": {"team_id": team_id, "action": "add"}},
+                ]
+            ),
+            principal=AuthPrincipal(kind="user", user_id=ids["owner"], roles=["admin", "user"], is_admin=True),
+            db=conn,
+        )
+    assert response.status_code == (409 if failure == "race" else 404)
+    body = json.loads(response.body)
+    assert body["error_code"] == ("profile_update_conflict" if failure == "race" else "profile_update_not_found")
+    assert audit is None
+    assert await ProfileVersionGateway(pool).read(ids["first"]) == before
+    assert await repo.get_team_member(ids["empty_team"], ids["first"]) is None
+    assert await pool.fetchval("SELECT COUNT(*) FROM user_config_overrides WHERE user_id = ?", (ids["first"],)) == 0
 
 
 async def _create_sqlite_fixture(

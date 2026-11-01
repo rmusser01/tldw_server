@@ -1122,6 +1122,42 @@ class AuthnzOrgsTeamsRepo:
                 return None
         return meta if isinstance(meta, dict) else None
 
+    async def get_team_parent_organization_id(
+        self,
+        team_id: int,
+        *,
+        conn: Any | None = None,
+    ) -> int | None:
+        """Read a team's persisted parent using the caller's connection when supplied."""
+        if conn is None:
+            async with self._membership_acquire() as owned:
+                return await self.get_team_parent_organization_id(team_id, conn=owned)
+        if self._is_postgres():
+            row = await conn.fetchrow("SELECT org_id FROM public.teams WHERE id = $1", team_id)
+            return int(row["org_id"]) if row else None
+        cursor = await conn.execute("SELECT org_id FROM main.teams WHERE id = ?", (team_id,))
+        row = await cursor.fetchone()
+        return int(row[0]) if row else None
+
+    async def get_organization_owner_user_id(
+        self,
+        org_id: int,
+        *,
+        conn: Any | None = None,
+    ) -> int | None:
+        """Read the owner pointer for preflight; the writer rechecks it under lock."""
+        if conn is None:
+            async with self._membership_acquire() as owned:
+                return await self.get_organization_owner_user_id(org_id, conn=owned)
+        if self._is_postgres():
+            row = await conn.fetchrow("SELECT owner_user_id FROM public.organizations WHERE id = $1", org_id)
+            value = row["owner_user_id"] if row else None
+        else:
+            cursor = await conn.execute("SELECT owner_user_id FROM main.organizations WHERE id = ?", (org_id,))
+            row = await cursor.fetchone()
+            value = row[0] if row else None
+        return int(value) if value is not None else None
+
     async def get_team(self, team_id: int) -> dict[str, Any] | None:
         """
         Get a team by ID.
@@ -2000,7 +2036,7 @@ class AuthnzOrgsTeamsRepo:
         """Remove an organization and all child-team memberships on ``conn``."""
 
         writer = MembershipWriter(self.db_pool)
-        await writer.lock_provisioning_parent(
+        await writer.lock_membership_parent(
             conn=conn,
             context=context,
             organization_id=org_id,

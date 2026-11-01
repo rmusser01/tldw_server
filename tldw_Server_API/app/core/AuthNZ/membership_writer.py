@@ -1124,26 +1124,26 @@ class MembershipWriter:
             version_floors=tuple(floors),
         )
 
-    async def lock_provisioning_parent(
+    async def lock_membership_parent(
         self,
         *,
         conn: Any,
         context: MembershipWriteContext,
         organization_id: int,
         target_user_id: int,
-    ) -> None:
-        """Lock lower-order rows before creating a default team in this transaction."""
+    ) -> dict[str, Any]:
+        """Lock lower-order users and an existing parent before child discovery."""
 
         validate_membership_write_context(context, serving=True)
         _require_positive_id(organization_id)
         _require_positive_id(target_user_id)
         if self._backend is MembershipLockBackend.SQLITE:
             organization = await self._read_organization(conn, organization_id)
-            if organization is None or not _is_active(organization.get("is_active")):
+            if organization is None:
                 raise MembershipScopeNotFound()
             if await self._read_user(conn, target_user_id) is None:
                 raise MembershipTargetNotFound()
-            return
+            return organization
 
         user_ids = {target_user_id}
         if type(context) is ActorMembershipWriteContext:
@@ -1156,7 +1156,26 @@ class MembershipWriter:
         if organization is None:
             raise MembershipScopeNotFound()
         locked = await self._read_organization(conn, organization_id)
-        if locked is None or not _is_active(locked.get("is_active")):
+        if locked is None:
+            raise MembershipScopeNotFound()
+        return locked
+
+    async def lock_provisioning_parent(
+        self,
+        *,
+        conn: Any,
+        context: MembershipWriteContext,
+        organization_id: int,
+        target_user_id: int,
+    ) -> None:
+        """Require an active locked parent before provisioning memberships or teams."""
+        organization = await self.lock_membership_parent(
+            conn=conn,
+            context=context,
+            organization_id=organization_id,
+            target_user_id=target_user_id,
+        )
+        if not _is_active(organization.get("is_active")):
             raise MembershipScopeNotFound()
 
     async def transfer_organization_ownership(
@@ -1721,17 +1740,37 @@ class MembershipWriter:
         conn: Any,
         plan: MembershipLockPlan,
     ) -> dict[str, dict[int, dict[str, Any]]]:
+        active_team_ids = {
+            mutation.scope_id
+            for mutation in plan.mutations
+            if mutation.scope_type is MembershipScopeType.TEAM
+            and mutation.kind is not MembershipMutationKind.REMOVE
+        }
+        active_org_ids = {
+            mutation.scope_id
+            for mutation in plan.mutations
+            if mutation.scope_type is MembershipScopeType.ORGANIZATION
+            and mutation.kind is not MembershipMutationKind.REMOVE
+        } | {
+            parent.organization_id
+            for parent in plan.preflight.team_parents
+            if parent.team_id in active_team_ids
+        }
         organizations: dict[int, dict[str, Any]] = {}
         for org_id in plan.lock_set.org_ids:
             row = await self._read_organization(conn, org_id)
-            if row is None or not _is_active(row.get("is_active")):
+            if row is None or (
+                org_id in active_org_ids and not _is_active(row.get("is_active"))
+            ):
                 raise MembershipScopeNotFound()
             organizations[org_id] = row
 
         teams: dict[int, dict[str, Any]] = {}
         for team_id in plan.lock_set.team_ids:
             row = await self._read_team(conn, team_id)
-            if row is None or not _is_active(row.get("is_active")):
+            if row is None or (
+                team_id in active_team_ids and not _is_active(row.get("is_active"))
+            ):
                 raise MembershipScopeNotFound()
             parent_org_id = int(row["org_id"])
             if parent_org_id not in organizations:

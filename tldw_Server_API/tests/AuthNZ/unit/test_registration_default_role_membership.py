@@ -51,14 +51,15 @@ class _SQLitePool:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.transaction_connections: list[Any] = []
+        self.acquire_timeouts: list[float] = []
 
     @asynccontextmanager
     async def transaction(
         self,
         *,
-        acquire_timeout_seconds: float | None = None,
+        acquire_timeout_seconds: float,
     ) -> AsyncIterator[_GuardedSQLiteConnection]:
-        assert acquire_timeout_seconds is not None
+        self.acquire_timeouts.append(acquire_timeout_seconds)
         conn = await aiosqlite.connect(self.db_path)
         await conn.execute("PRAGMA foreign_keys = ON")
         await conn.execute("BEGIN IMMEDIATE")
@@ -246,7 +247,11 @@ def _registration_audit(db_path: Path, username: str) -> tuple[str, str, str] | 
 
 
 @pytest.mark.asyncio
-async def test_default_registration_persists_canonical_role_before_return(tmp_path: Path) -> None:
+async def test_default_registration_persists_canonical_role_before_return(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "13")
     service, db_path = _make_service(tmp_path)
 
     payload = await service.register_user(
@@ -256,6 +261,7 @@ async def test_default_registration_persists_canonical_role_before_return(tmp_pa
     )
 
     assert payload["role"] == "user"
+    assert service.db_pool.acquire_timeouts == [13.0]
     assert _role_memberships(db_path, "default-user") == ["user"]
     assert _registration_audit(db_path, "default-user") == (
         "user",

@@ -8,6 +8,9 @@ from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileUpdateCommand
 from tldw_Server_API.app.core.UserProfiles.effects import ProfileEffectDispatcher
@@ -128,16 +131,36 @@ class ProfileCommandService:
         if membership_keys:
             try:
                 result = await self._executor.apply_updates(**executor_kwargs)
-            except MembershipAuthorizationError:
+            except (
+                MembershipAuthorizationError,
+                MembershipPreflightChanged,
+                MembershipScopeNotFound,
+                MembershipTargetNotFound,
+            ) as exc:
+                if isinstance(exc, MembershipAuthorizationError):
+                    status_code = 403
+                    error_code = "profile_update_forbidden"
+                    detail = "Caller cannot edit one or more fields"
+                    message = "forbidden"
+                elif isinstance(exc, MembershipPreflightChanged):
+                    status_code = 409
+                    error_code = "profile_update_conflict"
+                    detail = "Membership write conflicted; retry the request"
+                    message = "membership_conflict"
+                else:
+                    status_code = 404
+                    error_code = "profile_update_not_found"
+                    detail = "Membership scope or target not found"
+                    message = "membership_not_found"
                 return LegacyProfileCommandResult(
-                    status_code=403,
+                    status_code=status_code,
                     applied=(),
                     skipped=tuple(
-                        {"key": key, "message": "forbidden"}
+                        {"key": key, "message": message}
                         for key in membership_keys
                     ),
-                    error_code="profile_update_forbidden",
-                    detail="Caller cannot edit one or more fields",
+                    error_code=error_code,
+                    detail=detail,
                 )
         else:
             result = await self._executor.apply_updates(**executor_kwargs)

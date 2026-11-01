@@ -141,11 +141,20 @@ class UserProfileUpdateService:
         updates_list = list(updates)
         membership_context: _MembershipContext | None = None
         if any(str(key).startswith("memberships.") for key, _ in updates_list):
+            requested_team_ids: set[int] = set()
+            for key, value in updates_list:
+                if key == "memberships.teams.member":
+                    try:
+                        team_id, _action, _role = _parse_team_membership_payload(value)
+                    except ValueError:
+                        continue
+                    requested_team_ids.add(team_id)
             membership_context = await self._build_membership_context(
                 user_id=user_id,
                 scope=scope,
                 is_platform_admin=is_platform_admin,
                 db_conn=None if dry_run else db_conn,
+                requested_team_ids=tuple(sorted(requested_team_ids)),
             )
         is_postgres_backend = _is_postgres_backend_for_pool(self._db_pool)
         operation_time = datetime.now(timezone.utc)
@@ -582,6 +591,7 @@ class UserProfileUpdateService:
         scope: ProfileUpdateScope | None,
         is_platform_admin: bool,
         db_conn: Any | None = None,
+        requested_team_ids: tuple[int, ...] = (),
     ) -> _MembershipContext:
         if db_conn is None:
             async def _list_orgs(member_user_id: int) -> list[dict[str, Any]]:
@@ -621,6 +631,13 @@ class UserProfileUpdateService:
             for row in target_team_rows
             if row.get("team_id") is not None and row.get("org_id") is not None
         }
+        membership_repo = AuthnzOrgsTeamsRepo(self._db_pool)
+        for team_id in requested_team_ids:
+            parent_id = await membership_repo.get_team_parent_organization_id(
+                team_id, conn=db_conn,
+            )
+            if parent_id is not None:
+                target_team_orgs[team_id] = parent_id
         actor_org_roles: dict[int, str] = {}
         actor_team_roles: dict[int, str] = {}
         actor_user_id = scope.actor_user_id if scope else None

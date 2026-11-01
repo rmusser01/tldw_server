@@ -16,6 +16,10 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     TeamMemberAddRequest,
     TeamMemberRoleUpdateRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipAuthorizationError,
     MembershipPreflightChanged,
@@ -254,21 +258,45 @@ async def test_create_org_with_owner_rejects_admin_without_persisted_actor_id() 
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_status"),
+    ("error", "expected_status", "expected_detail"),
     [
-        (MembershipAuthorizationError(), 403),
-        (MembershipScopeNotFound(), 404),
-        (MembershipTargetNotFound(), 404),
-        (MembershipPreflightChanged(), 409),
+        (MembershipAuthorizationError(), 403, "Not authorized to manage memberships"),
+        (MembershipScopeNotFound(), 404, "Membership scope or target not found"),
+        (MembershipTargetNotFound(), 404, "Membership scope or target not found"),
+        (MembershipPreflightChanged(), 409, "Membership write conflicted; retry the request"),
     ],
 )
-def test_membership_control_error_http_mapping(error: Exception, expected_status: int) -> None:
+def test_membership_control_error_http_mapping(
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
     mapped = admin_orgs_service._membership_control_http_error(error)
 
     assert mapped.status_code == expected_status
+    assert mapped.detail == expected_detail
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_status", "expected_detail", "expected_headers"),
+    [
+        (MembershipPreflightChanged(), 409, "Membership write conflicted; retry the request", None),
+        (
+            ConnectionPoolExhaustedError(),
+            503,
+            "Authentication database is busy. Please retry shortly.",
+            {"Retry-After": "7"},
+        ),
+        (DatabaseLockError(), 503, "Authentication database is busy. Please retry shortly.", {"Retry-After": "7"}),
+        (
+            TimeoutError("private timeout"),
+            503,
+            "Authentication database is busy. Please retry shortly.",
+            {"Retry-After": "7"},
+        ),
+    ],
+)
 @pytest.mark.parametrize(
     ("service_name", "core_name"),
     [
@@ -284,7 +312,13 @@ async def test_admin_membership_writes_map_preflight_races_to_conflict(
     monkeypatch: pytest.MonkeyPatch,
     service_name: str,
     core_name: str,
+    failure: Exception,
+    expected_status: int,
+    expected_detail: str,
+    expected_headers: dict[str, str] | None,
 ) -> None:
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "7")
+
     async def _allow_team(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return {"org_id": 5}
 
@@ -292,7 +326,7 @@ async def test_admin_membership_writes_map_preflight_races_to_conflict(
         return None
 
     async def _preflight_changed(*_args: Any, **_kwargs: Any) -> Any:
-        raise MembershipPreflightChanged()
+        raise failure
 
     monkeypatch.setattr(
         admin_orgs_service.admin_scope_service,
@@ -337,7 +371,9 @@ async def test_admin_membership_writes_map_preflight_races_to_conflict(
     with pytest.raises(HTTPException) as exc_info:
         await call
 
-    assert exc_info.value.status_code == 409
+    assert exc_info.value.status_code == expected_status
+    assert exc_info.value.detail == expected_detail
+    assert exc_info.value.headers == expected_headers
 
 
 @pytest.mark.asyncio

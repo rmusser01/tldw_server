@@ -45,13 +45,11 @@ class _MembershipReadCursor:
 
 
 class _MembershipReadConnection:
-    def __init__(self, *, postgres: bool) -> None:
-        self.postgres = postgres
-        self.calls: list[tuple[str, tuple[int, ...]]] = []
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, tuple[int, ...]]] = []
 
     async def fetchrow(self, query: str, *params: int) -> dict[str, str]:
-        assert self.postgres is True
-        self.calls.append((query, params))
+        self.calls.append(("fetchrow", query, params))
         return {"role": "member", "status": "active"}
 
     async def execute(
@@ -59,8 +57,7 @@ class _MembershipReadConnection:
         query: str,
         params: tuple[int, ...],
     ) -> _MembershipReadCursor:
-        assert self.postgres is False
-        self.calls.append((query, params))
+        self.calls.append(("execute", query, params))
         return _MembershipReadCursor()
 
 
@@ -104,13 +101,14 @@ async def test_read_membership_uses_static_sql_and_bound_values(
     scope_type: MembershipScopeType,
     expected_sql: str,
 ) -> None:
-    conn = _MembershipReadConnection(postgres=postgres)
+    conn = _MembershipReadConnection()
     writer = MembershipWriter(_MembershipReadPool(postgres=postgres))
 
     result = await writer._read_membership(conn, scope_type, 3, 7)
 
     assert result == {"role": "member", "status": "active"}
-    assert conn.calls == [(expected_sql, (3, 7))]
+    expected_method = "fetchrow" if postgres else "execute"
+    assert conn.calls == [(expected_method, expected_sql, (3, 7))]
 
 
 def _mutation(

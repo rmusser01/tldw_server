@@ -7,6 +7,9 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileUpdateCommand
@@ -291,11 +294,50 @@ async def test_command_service_forbidden_skip_maps_to_legacy_forbidden() -> None
 
 
 @pytest.mark.asyncio
-async def test_command_service_maps_writer_authorization_drift_without_savepoint() -> None:
+@pytest.mark.parametrize(
+    ("failure", "status_code", "error_code", "detail", "message"),
+    [
+        (
+            MembershipAuthorizationError(),
+            403,
+            "profile_update_forbidden",
+            "Caller cannot edit one or more fields",
+            "forbidden",
+        ),
+        (
+            MembershipScopeNotFound(),
+            404,
+            "profile_update_not_found",
+            "Membership scope or target not found",
+            "membership_not_found",
+        ),
+        (
+            MembershipTargetNotFound(),
+            404,
+            "profile_update_not_found",
+            "Membership scope or target not found",
+            "membership_not_found",
+        ),
+        (
+            MembershipPreflightChanged(),
+            409,
+            "profile_update_conflict",
+            "Membership write conflicted; retry the request",
+            "membership_conflict",
+        ),
+    ],
+)
+async def test_command_service_maps_writer_control_errors_without_savepoint(
+    failure: Exception,
+    status_code: int,
+    error_code: str,
+    detail: str,
+    message: str,
+) -> None:
     class _AuthorizationDriftExecutor:
         async def apply_updates(self, **kwargs):
             kwargs["db_conn"].events.append("executor")
-            raise MembershipAuthorizationError()
+            raise failure
 
     write_conn = _RecordingConnection()
     command_service = ProfileCommandService(
@@ -317,13 +359,11 @@ async def test_command_service_maps_writer_authorization_drift_without_savepoint
 
     result = await command_service.apply(command, db_conn=write_conn, scope=object())
 
-    assert result.status_code == 403
-    assert result.error_code == "profile_update_forbidden"
-    assert result.detail == "Caller cannot edit one or more fields"
+    assert result.status_code == status_code
+    assert result.error_code == error_code
+    assert result.detail == detail
     assert result.applied == ()
-    assert result.skipped == (
-        {"key": "memberships.orgs.role", "message": "forbidden"},
-    )
+    assert result.skipped == ({"key": "memberships.orgs.role", "message": message},)
     assert write_conn.events == ["executor"]
 
 

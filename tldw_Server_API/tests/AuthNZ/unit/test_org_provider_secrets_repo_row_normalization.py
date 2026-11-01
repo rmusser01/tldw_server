@@ -78,21 +78,26 @@ class _AuthorizationPool:
 
     def __init__(self, conn: _AuthorizationConnection) -> None:
         self.conn = conn
+        self.acquire_timeouts: list[float] = []
 
     @asynccontextmanager
     async def transaction(
         self,
         *,
-        acquire_timeout_seconds: float | None = None,
+        acquire_timeout_seconds: float,
     ):
-        assert acquire_timeout_seconds is not None
+        self.acquire_timeouts.append(acquire_timeout_seconds)
         yield self.conn
 
 
 @pytest.mark.asyncio
-async def test_shared_secret_upsert_reauthorizes_manager_under_total_lock_order() -> None:
+async def test_shared_secret_upsert_reauthorizes_manager_under_total_lock_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "13")
     conn = _AuthorizationConnection()
-    repo = AuthnzOrgProviderSecretsRepo(_AuthorizationPool(conn))  # type: ignore[arg-type]
+    pool = _AuthorizationPool(conn)
+    repo = AuthnzOrgProviderSecretsRepo(pool)  # type: ignore[arg-type]
 
     await repo.upsert_secret(
         scope_type="org",
@@ -127,6 +132,7 @@ async def test_shared_secret_upsert_reauthorizes_manager_under_total_lock_order(
         if query.startswith("INSERT INTO public.org_provider_secrets")
     )
     assert user_lock < org_lock < membership_lock < insert
+    assert pool.acquire_timeouts == [13.0]
 
 
 @pytest.mark.asyncio
@@ -409,14 +415,15 @@ class _PostgresQualificationPool:
     def __init__(self) -> None:
         self.queries: list[str] = []
         self.connection = _PostgresQualificationConnection(self.queries)
+        self.acquire_timeouts: list[float] = []
 
     @asynccontextmanager
     async def transaction(
         self,
         *,
-        acquire_timeout_seconds: float | None = None,
+        acquire_timeout_seconds: float,
     ):
-        assert acquire_timeout_seconds is not None
+        self.acquire_timeouts.append(acquire_timeout_seconds)
         yield self.connection
 
     async def fetchall(self, query: str, *_args):
@@ -446,7 +453,10 @@ class _PostgresQualificationPool:
 
 
 @pytest.mark.asyncio
-async def test_postgres_secret_queries_are_public_qualified() -> None:
+async def test_postgres_secret_queries_are_public_qualified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTHNZ_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "13")
     pool = _PostgresQualificationPool()
     repo = AuthnzOrgProviderSecretsRepo(db_pool=pool)  # type: ignore[arg-type]
     now = datetime.now(timezone.utc)
@@ -469,6 +479,7 @@ async def test_postgres_secret_queries_are_public_qualified() -> None:
     await repo.delete_secret("org", 9, "openai", revoked_by=7)
     await repo.touch_last_used("org", 9, "openai", now)
 
+    assert pool.acquire_timeouts == [13.0, 13.0]
     secret_queries = [
         query
         for query in pool.queries
