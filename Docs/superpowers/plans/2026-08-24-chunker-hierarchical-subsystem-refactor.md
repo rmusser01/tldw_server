@@ -1771,3 +1771,49 @@ zero findings/errors across 2876 LOC
 and hierarchy mypy remain green. Runtime and test source are unchanged. Publish
 this verified follow-up, reply/resolve the original readability thread, and
 wait for all eight required contexts on the exact new head before merging.
+
+### Latest Dev Integration (2026-11-01)
+
+Live `dev` advanced to `61d02ed484a3c80f5423676b959cf14e7b572a62` through the
+unrelated Moderation-only PR #3396. With the repository merge queue unset, the
+authorized isolated branch rebased cleanly before integration. All 33 patches
+are identical by `git range-diff`; Chunking production/tests, CI shard wiring
+and function-size baseline are byte-identical to `7dac3ec2f0`. The pre-tracking
+rebased head is `e9646acb4800dfe497c6ba8545f55bfd62c34de6`. Existing independent
+code approval remains applicable through this equivalence proof; no new review
+or runtime change is claimed. Use an explicit force-with-lease against the
+freshly inspected published head when publishing.
+
+Seven required contexts passed on the old head, but `backend-required` job
+124940625627 failed the unchanged deprecated-query-token voice auth test:
+`silent` instead of `answered auth_ok`. The helper allows one second while the
+real route initializes session/database state before sending `auth_ok`. This
+supports a timing hypothesis, not a proven cause or permission to waive the
+check. Focused local reproduction passes (one test, 221 warnings, 9.92s).
+The full local auth matrix is not green: 171 passed, eight ACP-multiplex
+failures, 1077 warnings, 41.95s; the voice case passes. Auth source/tests are
+identical to both old and latest dev. Do not alter authentication, timeouts or
+assertions under this refactor. Logs:
+`/tmp/task15286_7dac_backend_failed.txt`,
+`/tmp/task15286_voice_query_auth_probe.txt`,
+`/tmp/task15286_voice_auth_matrix.txt`.
+
+The optional UX failure is separately diagnosed as an inherited E2E precondition
+mismatch: the October 27 CC-04 rule hides review for a clean single exchange,
+but the test conditionally creates a second exchange then unconditionally asks
+for history review. CI snapshots and a successful captured two-node history
+response confirm this state. The source helper returns false for those exact
+nodes and true for a second exchange or alternative reply. No deleted/moved
+button or Chunker regression was found. The requester asked for investigation
+only; no unrelated UI/test correction is introduced. The one bounded UX rerun
+also failed its real-cockpit step; no further blind retry is authorized.
+
+Fresh rebase verification: full Chunking 796 passed, one established PyThaiNLP
+skip, 2000 warnings, 31.72s (`/tmp/task15286_rebase61_chunking.txt`); function-size
+and tracking-format ratchets 17 passed, 47 warnings, 7.50s
+(`/tmp/task15286_rebase61_ratchets.txt`). Ruff, scoped Black (nine files),
+compileall and hierarchy mypy (seven files) pass. Production Bandit has zero
+findings/errors across 2876 LOC (`/tmp/bandit_task15286_rebase61.json`).
+Preserve the human Change summary verbatim. All eight required contexts must
+pass on the exact newly published head; old-head successes and the local auth
+probe are not substitutes. TASK-15286 remains In Progress, with no merge yet.

@@ -94,13 +94,22 @@ baseline method had three missing-warning failures and four passing control
 cases; fallback span assertions already passed. This is the reconciled baseline
 for the separately approved diagnostic correction, not the earlier Task 5 hash.
 
-Baseline reconciliation on 2026-11-01: the current pinned base is
+Earlier baseline reconciliation on 2026-11-01: the then-pinned base was
 `54b321dcec8cdbb6358581f42c1548696260570b`. Rebase preserved hierarchy and
 process-text source/test contracts; intervening changes affect only unrelated
 strategy/provider lookups and their tests. Fresh complete Chunking verification
 passed 796 tests with one established PyThaiNLP skip. The approved diagnostic
 baseline and its RED evidence remain historical proof, not an assertion that
 the later refactored implementation is unmodified baseline code.
+
+Later integration reconciliation on 2026-11-01: the pinned integration base is
+`61d02ed484a3c80f5423676b959cf14e7b572a62`, incorporating the unrelated
+Moderation-only PR #3396. All 33 workstream patches remain identical by
+`git range-diff`; Chunking production/tests, shard configuration and the
+function-size baseline are byte-identical to published `7dac3ec2f0`.
+Fresh complete Chunking verification passes 796 tests with the established
+PyThaiNLP skip. This rebase introduces no behavior correction or new design
+decision; all compatibility and merge gates remain unchanged.
 
 ## Goals
 
