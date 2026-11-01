@@ -290,3 +290,69 @@ async def test_preflight_late_runner_exit_keeps_physical_ownership(monkeypatch):
         release.set()
         await asyncio.gather(task, return_exceptions=True)
         physical_work.reset(token)
+
+
+async def test_page_cancel_before_preflight_commit_rolls_back_both_ledgers(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PageControls
+
+    parent = CrawlContext(CrawlLimits(), clock=lambda: 0)
+    page = PageControls(parent)
+    reserve = page.reserve
+    local = PreflightRuntimeControls(RuntimeRequestContext(), parent=page)
+
+    def cancel_after_reserve(*args, **kwargs):
+        reservation = reserve(*args, **kwargs)
+        page.cancel()
+        return reservation
+
+    monkeypatch.setattr(page, "reserve", cancel_after_reserve)
+    with pytest.raises(asyncio.CancelledError):
+        await local.reserve("request")
+    assert local.consumed.requests == 0
+    assert parent.snapshot().network_requests == 0
+    parent.check()
+
+
+async def test_page_cancel_rejects_reserved_commit_and_refunds_once():
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PageControls
+
+    parent = CrawlContext(CrawlLimits(), clock=lambda: 0)
+    page = PageControls(parent)
+    reservation = page.reserve("browser_attempts")
+    page.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            reservation.commit()
+    finally:
+        reservation.close()
+        reservation.close()
+    assert parent.snapshot().browser_attempts == 0
+
+
+async def test_page_reserved_commit_preserves_crawl_deadline_check_and_rollback():
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PageControls
+
+    now = [0]
+    parent = CrawlContext(CrawlLimits(execution_seconds=1), clock=lambda: now[0])
+    reservation = PageControls(parent).reserve("active_probes")
+    now[0] = 1
+    try:
+        with pytest.raises(ParentStop, match="deadline_exhausted"):
+            reservation.commit()
+    finally:
+        reservation.close()
+    assert parent.snapshot().active_probes == 0
+
+
+async def test_page_commit_before_cancel_remains_charged_and_idempotent():
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PageControls
+
+    parent = CrawlContext(CrawlLimits(), clock=lambda: 0)
+    page = PageControls(parent)
+    reservation = page.reserve("network_requests")
+    reservation.commit()
+    page.cancel()
+    reservation.commit()
+    reservation.close()
+    reservation.close()
+    assert parent.snapshot().network_requests == 1

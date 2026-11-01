@@ -1035,6 +1035,8 @@ class GuardedArticleBrowser:
                 connection = connect()
                 if inspect.isawaitable(connection):
                     await connection
+            except ParentStop:
+                raise
             except Exception:  # noqa: BLE001 - immediate invocation failures fail closed
                 await self._close_websocket(
                     route,
@@ -1351,10 +1353,12 @@ class GuardedArticleBrowser:
             raise outcome.parent_stop
         if isinstance(primary_error, ParentStop):
             raise primary_error
+        if isinstance(primary_error, asyncio.CancelledError):
+            raise primary_error
+        if teardown_cancelled or outcome.callback_cancelled:
+            raise asyncio.CancelledError()
         if self._parent is not None:
             self._parent.check()
-        if isinstance(primary_error, asyncio.CancelledError) or teardown_cancelled or outcome.callback_cancelled:
-            raise asyncio.CancelledError()
         transfer_failure = outcome.failure
         if (
             transfer_failure is not None
