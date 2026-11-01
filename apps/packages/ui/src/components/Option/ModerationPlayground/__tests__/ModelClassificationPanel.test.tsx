@@ -121,6 +121,21 @@ beforeEach(() => {
 });
 
 describe("explicit model classification", () => {
+  it("accepts the canonical llama provider returned by the server catalog", async () => {
+    state.catalog.data = [{ model: "existing-model", provider: "llama" }];
+    call.mockResolvedValue(item());
+    mount();
+    await fill();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Classify and save for review" }),
+    );
+    await waitFor(() => expect(call).toHaveBeenCalledOnce());
+    expect(call.mock.calls[0][0]).toMatchObject({
+      provider: "llama.cpp",
+      model: "existing-model",
+    });
+  });
+
   it("saves advisory evidence with explicit consent and only a configured supported model", async () => {
     call.mockResolvedValue(item());
     mount();
