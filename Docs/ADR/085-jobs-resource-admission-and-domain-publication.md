@@ -52,6 +52,15 @@ running, retry or lease state. A replay returns its committed result; an older
 generation cannot overwrite newer applied output. Cancellation remains best
 effort and cannot undo committed output.
 
+Cluster replacement must validate existing references, including claims whose
+ownership changed before its source snapshot. A DB_Management-owned integrity
+guard remains effective under restricted-role PostgreSQL/RLS; hidden rows do not
+prove absence. Foreign references fail publication without changes to domain
+data, the publication head or receipts, and without cross-owner writes.
+Transfer repair is separate work. Best-effort Watchlists evaluation also uses
+existing-only storage access; missing storage or schema does not authorize
+maintenance to provision it.
+
 Resource counters survive ordinary pruning. Publication receipts do not pin Jobs
 history and are retained with the owner's domain data in this stage; unexpired
 Jobs request receipts protect their own replay targets. Supported restoration
@@ -64,6 +73,9 @@ are accepted costs of the chosen concurrency guarantee.
 Read-only owner status lives in Jobs; granting Claims permission must not grant
 queue administration. The design proposes an owner-safe projection rather than
 exposing arbitrary job payloads or introducing Claims queue-control APIs.
+Cross-owner admin status links also bind the logical UUID using an optional
+admin-detail read precondition. Numeric ID reuse must not redirect such a link
+to another Job; existing admin/domain authorization and legacy reads are retained.
 
 ## Follow-Up
 

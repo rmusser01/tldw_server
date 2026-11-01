@@ -130,12 +130,18 @@ UUIDs return 404. Domain result projection must be explicitly allowlisted by Job
 not an unrestricted serialization of other domains' result dictionaries.
 
 No queue-control permission is conferred by this read route. Existing Jobs admin
-detail/control endpoints and RBAC remain unchanged. A platform administrator
-targeting another owner receives the existing admin detail URL with `domain=claims`
-only after the same Jobs read/domain authorization succeeds; otherwise reject
-the async request before admission. Permission-only Claims administrators retain
-their own-owner rebuild ability and use the owned read route. No Claims status
-endpoint or Claims proxy for Jobs controls is added.
+RBAC and control endpoints remain unchanged. Extend the admin detail read with
+an optional `job_uuid` query precondition, using the existing manager's exact-UUID
+active/archive lookup. A platform administrator targeting another owner receives
+`/api/v1/jobs/{job_id}?domain=claims&job_uuid={job_uuid}` only after the same Jobs
+read/domain authorization succeeds; otherwise reject the async request before
+admission. Never return a numeric-only admin status link: SQLite can reuse a
+pruned numeric ID even while its original UUID remains archived. With the UUID
+precondition, return only that logical Job or 404, never its numeric replacement.
+Legacy detail calls without the optional precondition retain their behavior.
+Permission-only Claims administrators retain their own-owner rebuild ability and
+use the owned read route. No Claims status endpoint or Claims proxy for Jobs
+controls is added.
 
 The owned read route must live in a separate Jobs-owned authenticated router,
 not inherit `jobs_admin.py`'s global admin dependency. Resolve UUIDs in active and
@@ -316,9 +322,25 @@ publication through one DB_Management-owned transaction:
    under the transaction. Include claim ID, media ID, chunk index and claim text,
    and detect additions/deletions/ownership changes. If it changed since the
    snapshot, roll back and let Jobs retry with `claims_cluster_source_changed`.
-5. Atomically replace the owner's clusters, membership and claim assignments,
+5. Validate the bounded existing claim assignments and memberships referencing
+   clusters to be deleted, including references outside the current source set.
+   A transfer completed before the snapshot can leave another owner's claim
+   pointing to an old cluster. If any foreign reference exists, fail without
+   changing clusters, memberships, assignments, publication head or receipt;
+   use non-retryable `claims_cluster_foreign_reference`, not a source-change retry.
+   Do not clear another owner's claim or silently leave a dangling reference.
+6. Atomically replace the owner's clusters, membership and claim assignments,
    advance the publication head, and save the result receipt. No helper commits
    per cluster. Validate all representative/member IDs against the scoped source.
+
+The reference guard belongs to DB_Management and must remain effective under
+restricted-role PostgreSQL/RLS. An owner-filtered query returning no foreign rows
+is not proof that no foreign references exist. Select an integrity guard or
+constraint that enforces this check through commit without broadening the worker
+role or returning foreign claim data. Bound guard/cleanup input sets as below;
+if integrity cannot be established safely, fail closed before replacement.
+Repairing ownership transfers or remapping their cluster references is separate
+work; this rebuild does not acquire cross-owner mutation authority.
 
 On PostgreSQL, the digest read is the defined publication input point, not a
 promise to include every insertion until commit. Lock the bounded source Claims
@@ -377,11 +399,17 @@ corruption error, not a superseded success.
 ## Watchlists, Results And Failure Semantics
 
 Only the attempt that newly commits a domain publication performs the existing
-best-effort watchlist evaluation. Failure logs a sanitized diagnostic and does
-not fail or repeat the committed rebuild. A crash between publication and this
-side effect can omit evaluation; Stage 2C does not promise durable notification
-delivery or create a second side-effect worker. Existing delivery Jobs stay
-unchanged. Replay returns the immutable publication counts without recalculation.
+best-effort watchlist evaluation, through an existing-only Watchlists accessor
+bound to the validated owner/backend. The async path must not call the current
+creating `WatchlistsDatabase.for_user` constructor or any schema/bootstrap helper.
+Missing Watchlists storage or required schema skips this side effect without
+creating a database, directory or table; it does not fail or repeat the committed
+rebuild. Access/storage errors log a sanitized diagnostic rather than being
+misreported as absent storage. The disabled synchronous path keeps its existing
+access behavior. A crash between publication and this side effect can omit
+evaluation; Stage 2C does not promise durable notification delivery or create a
+second side-effect worker. Existing delivery Jobs stay unchanged. Replay returns
+the immutable publication counts without recalculation.
 
 Fresh rebuilds may change cluster IDs and invalidate old subscriptions/links as
 they do today. Preserve and document this behavior, test it explicitly, and do
@@ -394,6 +422,8 @@ Use ClaimsJobError's existing `retryable`, `failure_code` and optional backoff
 attributes. Transient DB locks, connection deadlines, Chroma availability and
 source-snapshot conflicts are retryable through Jobs. Invalid owner/payload,
 malformed vectors, resource limits and unsupported algorithm are permanent.
+Foreign references to clusters selected for deletion are the non-retryable
+integrity failure defined above; fixing them is not an automatic retry side effect.
 An absent owner DB is the non-retryable failure defined above, not a skip or
 database provisioning. Legitimate missing embeddings in an existing DB remain
 receipt-backed domain skips.
@@ -465,6 +495,10 @@ Use test-first regression coverage in the implementation, including these cases:
 - Exact and embedding API -> Jobs -> WorkerSDK -> Media DB flows return the
   approved 200/202/409 contracts; owned status lookup and privileged override
   checks do not broaden Claims or Jobs administration.
+- Owner and cross-owner admin status links stay UUID-bound across archival,
+  numeric-ID reuse and pruning. An admin link returns its original Job or 404,
+  never a replacement; the optional precondition does not bypass admin/domain
+  authorization or change legacy reads without that precondition.
 - Missing DB/collection does not provision it. Missing DB fails without a domain
   receipt; explicit reactivation after DB creation is distinguished from replay
   of a published Job. Owner, foreign representative,
@@ -477,8 +511,15 @@ Use test-first regression coverage in the implementation, including these cases:
   Snapshot changes, atomic replacement failures and over-budget vectors leave
   prior clusters untouched; exact empty and embedding missing/partial outcomes
   preserve the stated semantics. No storage failure becomes `no_embeddings`.
+- Transfer-before-snapshot and transfer-followed-by-source-retry tests cover old
+  foreign assignments/memberships under restricted-role PostgreSQL as well as
+  SQLite. The integrity guard cannot mistake RLS-hidden references for absence;
+  failure leaves domain data, head and receipts unchanged, with no foreign writes.
 - Watchlist evaluation is best effort only for a new publication, never a reason
   to rebuild committed clusters. Existing unstable-ID behavior is not hidden.
+- Existing Media DB with missing Watchlists storage or schema causes no file,
+  directory or table creation during async evaluation. Backend/owner pinning,
+  sanitized access-error handling and unchanged disabled-mode behavior are tested.
 - SQLite and official restricted-role PostgreSQL fixtures cover admission,
   publication, isolation and recovery. Skip only when the official fixture says
   PostgreSQL is unavailable; do not create a custom database harness.
@@ -507,6 +548,15 @@ source-write protection through commit, missing-DB outcomes without storage,
 publication receipt retention versus Jobs pruning, and same-UUID old-backup
 restoration. The clarified contracts above answer all four. The same reviewer
 rechecked the revision and reported "nothing important left".
+
+A follow-up review found three additional gaps: foreign
+cluster references left by pre-snapshot transfers, schema creation by the existing
+Watchlists evaluator, and numeric-only cross-owner admin status links. The
+requester approved correcting all three. This revision adds explicit fail-closed
+reference integrity, non-creating Watchlists access and UUID-bound admin reads,
+with implementation regression requirements for each. A fresh independent
+focused recheck reported "nothing important left". These design checks are not
+evidence that the new contracts have been implemented or tested.
 
 This is design review, not verification of an implemented resource protocol.
 The requester still needs to approve this written design and its engineering
