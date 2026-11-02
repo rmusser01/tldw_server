@@ -195,7 +195,7 @@ Expected: all pass, including unchanged benign baseline behavior.
 **Goal:** A parent can terminate, contain, and reap any admitted worker.
 **Success Criteria:** Deadline/capacity/cancellation failures are typed and bounded; no application-loop blocking.
 **Tests:** Deterministic process doubles plus outer-timeout real-child recovery tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 2: Supervisor and Async Orchestration
 
@@ -204,6 +204,8 @@ Expected: all pass, including unchanged benign baseline behavior.
 `tests/unit/test_moderation_async_execution.py`.
 Create `app/services/startup_moderation_workers.py`; register its provider in
 `app/services/startup_worker_groups.py`. Extend `tests/Services/test_lifecycle_worker_catalog.py`.
+Update the exact worker-name set in `tests/Services/test_startup_worker_groups.py`
+to include the registered `moderation_execution` worker; retain exact-set checking.
 
 **Interfaces:**
 - `ModerationExecutionRunner(bounds: ExecutionBounds, *, clock: Callable[[], float] = time.monotonic, process_factory: Callable[..., subprocess.Popen] = subprocess.Popen)`.
@@ -212,7 +214,7 @@ Create `app/services/startup_moderation_workers.py`; register its provider in
 - `async _run_moderation_offload(call: Callable[[], T], *, scope: ExecutionScope) -> T` in `async_execution.py`: bounded transport-only offload with cancellation ownership; Task 3 adds the public reporting wrapper.
 - `provide_moderation_worker_specs(context: WorkerLifecycleContext) -> Sequence[WorkerSpec]`: lifecycle registration for lazy supervisor ownership and bounded shutdown.
 
-- [ ] **Step 1: Write failing runner/async tests.** Assert
+- [x] **Step 1: Write failing runner/async tests.** Assert
 `test_fifth_active_worker_is_refused_without_queue` gives `capacity_exhausted`;
 `test_decision_and_redaction_share_original_deadline` never grants a fresh two seconds;
 `test_cancel_during_spawn_kills_eventual_child` retains registry ownership;
@@ -222,10 +224,10 @@ Create `app/services/startup_moderation_workers.py`; register its provider in
 `test_context_does_not_leak_between_concurrent_calls` preserves independent scopes.
 Add `test_async_heartbeat_runs_while_worker_stalls` and
 `test_cancelled_offload_signals_owner`.
-- [ ] **Step 2: Run both new unit suites red.**
+- [x] **Step 2: Run both new unit suites red.**
 Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_execution_runner.py tldw_Server_API/tests/unit/test_moderation_async_execution.py -q`.
 Expected: missing runner/async interface assertions fail.
-- [ ] **Step 3: Implement supervision.** Use a fixed argument vector, `shell=False`, closed unrelated descriptors, and allowlisted interpreter environment. Count PID-local slots with thread-safe immediate admission. Register ownership across spawn/cancel races. Concurrent bounded pipe transfer must terminate on deadline or cancellation; do not use unbounded `communicate()` capture. Kill immediately on execution failure, allow 0.5 seconds for cleanup, then retain the slot/registry entry for bounded reaper work. At most four owned children/readers exist; stop admission if cleanup cannot be completed. Reaper work may not create unbounded threads. Do not log raw child output, argv content, or exception messages.
+- [x] **Step 3: Implement supervision.** Use a fixed argument vector, `shell=False`, closed unrelated descriptors, and allowlisted interpreter environment. Count PID-local slots with thread-safe immediate admission. Register ownership across spawn/cancel races. Concurrent bounded pipe transfer must terminate on deadline or cancellation; do not use unbounded `communicate()` capture. Kill immediately on execution failure, allow 0.5 seconds for cleanup, then retain the slot/registry entry for bounded reaper work. At most four owned children/readers exist; stop admission if cleanup cannot be completed. Reaper work may not create unbounded threads. Do not log raw child output, argv content, or exception messages.
 
 Use one bounded orchestration-thread admission per active child, with a dedicated
 cancel event and copied ContextVars. `_run_moderation_offload()` must keep ownership
@@ -233,7 +235,7 @@ through cancellation and signal the synchronous supervisor; merely cancelling a
 future is insufficient. Audit the slot/pipe/reader lifecycle on every exit.
 Reset PID-owned admission safely after an API-worker fork and reject new work
 during lifecycle shutdown. Do not spawn processes from a daemon/pool worker.
-- [ ] **Step 4: Run deterministic suites green, then real-child probes inside an independent process-tree harness.**
+- [x] **Step 4: Run deterministic suites green, then real-child probes inside an independent process-tree harness.**
 Create `tests/helpers/moderation_process_harness.py` with
 `run_isolated_probe(argv: Sequence[str], *, timeout_s: float = 10.0) -> subprocess.CompletedProcess[bytes]`
 and `tests/unit/test_moderation_process_harness.py`. A dedicated stdlib-only
@@ -261,14 +263,14 @@ sent only to the worker child of the probe; assert typed deadline failure, dead/
 and successful later benign request. Test nonzero exit, unsupported limit posture,
 installed-path launch, no imported `regex`, and event-loop heartbeat. Run
 `python -m pytest tldw_Server_API/tests/unit/test_moderation_process_harness.py tldw_Server_API/tests/unit/test_moderation_execution_runner.py tldw_Server_API/tests/unit/test_moderation_async_execution.py tldw_Server_API/tests/Services/test_lifecycle_worker_catalog.py -q`.
-- [ ] **Step 5: Review and commit** as `feat(moderation): supervise regex worker deadlines and cancellation (<implementation task ID>)`.
+- [x] **Step 5: Review and commit** as `feat(moderation): supervise regex worker deadlines and cancellation (<implementation task ID>)`.
 
 ## Stage 3: Safe Admin Incidents
 
 **Goal:** Execution failure reporting is visible without retaining affected content.
 **Success Criteria:** Independent of optional capture, atomically deduplicated, lock-bounded, and accurately rendered.
 **Tests:** Backend report/store/privacy tests and shared review UI tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Operational Incident Reporting
 
@@ -286,6 +288,10 @@ Modify the existing shared UI files under
 `__tests__/review-utils.test.ts`; create `__tests__/ExecutionIncident.test.tsx`.
 Update `apps/packages/ui/src/services/moderation.ts` and its
 `__tests__/moderation.service.contract.test.ts` for the review response phase union.
+Regenerate canonical API artifacts through `apps/packages/api-types` when the
+response schema changes: `openapi.fingerprint.json` and `paths.d.ts` (the path
+union should remain unchanged for this response-only change). Do not add a
+second exporter, hand-edit generated fingerprints, or churn unrelated artifacts.
 Extend `tests/unit/test_moderation_review_store.py` and
 `apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-review.spec.ts`.
 
@@ -294,6 +300,10 @@ The reporter owns no regex/content argument and catches store failure without
 masking the original execution error. Add keyword-only `busy_timeout_ms: int | None = None`
 to `ModerationReviewStore.__init__`; apply it to connect, PRAGMA, and schema-first-use
 operations for the incident store only, leaving the default store unchanged.
+Ensure owned SQLite connections close on success, setup failure, and write
+failure while preserving commit/rollback semantics; a raw sqlite3 transaction
+context does not close its connection. Use the existing DB-management ownership
+patterns rather than relying on garbage collection under mandatory incident load.
 Add `prepare_moderation_incident_store() -> None` in `execution_incidents.py`,
 called from the lifecycle provider before request traffic; the DB-management
 owner performs the migration. Add public
@@ -329,6 +339,7 @@ Add `test_capture_disabled_still_records_incident`,
 `test_outer_and_service_failure_report_once`,
 `test_oversized_input_is_reported_inside_admission_boundary`,
 `test_saturated_reporting_never_blocks_event_loop_or_queues_work`,
+`test_incident_connections_close_after_success_setup_and_write_failures`,
 `test_store_locked_or_unavailable_preserves_original_block`,
 `test_failure_sentinels_never_enter_logs_metrics_or_review`, and
 `test_normal_disconnect_is_not_reported`. Assert the exact category/source/status/
@@ -373,6 +384,9 @@ before activation; do not silently drop or relabel incidents during rollback.
 Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_execution_incidents.py tldw_Server_API/tests/unit/test_moderation_async_execution.py tldw_Server_API/tests/unit/test_moderation_review_phase_migration.py tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py -q` and
 `pnpm --dir apps/packages/ui exec vitest run src/components/Option/ModerationReview/__tests__`.
 Also run `pnpm --dir apps/packages/ui exec vitest run src/services/__tests__/moderation.service.contract.test.ts`.
+Activate the venv and run the existing `bun run generate` in
+`apps/packages/api-types`, then `make openapi-drift-check` from the repo root;
+review the canonical artifact diff and retain only contract-related changes.
 Expected: existing capture/review behavior unchanged and operational incidents correctly distinguished.
 - [ ] **Step 5: Review and commit** as `feat(moderation): surface sanitized execution incidents (<implementation task ID>)`.
 
