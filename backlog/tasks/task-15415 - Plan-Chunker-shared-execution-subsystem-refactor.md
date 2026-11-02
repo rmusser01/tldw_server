@@ -1,7 +1,7 @@
 ---
 id: TASK-15415
 title: Plan Chunker shared execution subsystem refactor
-status: In Progress
+status: Done
 labels:
 - chunking
 - refactor
@@ -20,7 +20,7 @@ Write and self-review the implementation plan for the requester-approved shared 
 - [x] #2 Define three to five independently testable migration stages with baseline characterization, extraction RED/GREEN tests, active facade wiring and explicit verification/commit steps
 - [x] #3 Cover option namespaces, temporal/generator/locking behavior, cache/metadata/error contracts, cold imports, test quality, shard assignments and security gates without weakening policy
 - [x] #4 Complete the writing-plans self-review for coverage, actionable steps, interface consistency, review-focus tests and proportion; verify documentation/task consistency and commit the plan
-- [ ] #5 Present the completed plan for requester review and execution-method choice without starting implementation
+- [x] #5 Present the completed plan for requester review and execution-method choice without starting implementation
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -30,6 +30,7 @@ Requester approved revised design and ADR-086 on 2026-11-02. Source design Docs/
 2026-11-02 implementation-plan draft written at Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md. Five reviewable stages: characterize public behavior; move text execution; move metadata; move lazy generator; share proven preparation and complete integration. Fixed models/context/hooks/service/helper interfaces, explicit option mapping, exact public binding and generator protocol, per-path error/lock/cache/metadata regions and staged cold imports are specified. New test_chunker_execution_* names are already covered by existing test_chunker_* patterns: structured YAML proof confirms all three future module names in all six primary/inherited matrices, with no workflow/baseline changes required. Planner personally completed all five writing-plans self-review checks: coverage, step/action clarity, interface/type consistency, Review Focus ownership and proportion. Corrected an undefined example collector, separated baseline/commit/review/publication steps and supplied exact staging commands. No subagent was dispatched for plan self-review. ADR-086 is Accepted by explicit requester approval; design TASK-15414 Done. Planning remains In Progress pending requester plan review and an execution-method choice; Native is the plan-specific recommendation, not a selected method. No product/test/config/CI edits or dependencies added. Markdown-only Bandit not applicable; final canonical/ID/scope/tracking tests and commit pending.
 2026-11-02 final self-review added explicit Hypothesis option/alignment/valid-word equivalence cases to Stage1. Verified the word eager/generator invariant against 50 deterministic generated examples on the unchanged baseline (/tmp/chunker_execution_plan_words_probe.txt); its two real implementations share _prepare_chunk_records, not the inherited base generator. Plan now has concrete baseline GREEN versus extraction RED/GREEN expectations, finite cold-import timeouts and structured export evidence, explicit staging commands and separate commit/review/publication actions. Six task-ID helper unit tests pass, 24 warnings, 1.07s (/tmp/chunker_execution_plan_ids.txt); explicit canonical checks pass for design15414 and planning15415. Full task-format ratchet must run after the rename is committed, because that gate examines committed HEAD paths rather than uncommitted renames; no gate is waived. Final documentation-link, interface-syntax, scope and approval-state verification precedes commit. No execution stages started; requester plan review and method selection remain pending.
 2026-11-02 final planning validation completed before commit: all eight Python interface/assertion blocks parse and all eight Bash blocks pass bash -n. Fixed a quoted parameter-expansion diagnostic containing an apostrophe that older Bash parsed incorrectly. All spec/plan/ADR relative links resolve; ADR and registry are Accepted, approved design task15414 is Done with every AC/DoD checked, and plan task15415 remains In Progress with AC5/execution-choice handoff pending. Official renumber preserved the entire preceding implementation-note history; original bookkeeping branch still points to1867f6abf9. Scope proof shows no product/test/CI/config/instruction changes. Stage statuses are all Not Started. Planning-time source/test baseline and six-matrix virtual path coverage are recorded; no future extraction test is claimed passed. Bandit is not applicable to these Markdown-only changes. Final commit includes only the plan, our design/ADR approval metadata, registry status and our two tracking records; unrelated UserProfiles task and historical records remain untouched.
+2026-11-02 requester approved the implementation plan and explicitly selected Native execution followed by independent whole-branch review. Read-only plan review found no actionable findings; all eight Python and Bash blocks and virtual file coverage in all six matrices verified. Planning handoff complete. Implementation will use its own collision-free record; no product edits in this planning record.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -40,7 +41,7 @@ Prepared and self-reviewed the five-stage implementation plan for the requester-
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip

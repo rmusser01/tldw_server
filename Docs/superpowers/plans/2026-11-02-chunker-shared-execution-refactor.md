@@ -12,9 +12,9 @@
 
 **ADR:** [Accepted ADR-086](../../ADR/086-chunker-execution-live-context-boundary.md).
 
-**Tracking:** Planning `TASK-15415`; approved design `TASK-15414` (renumbered from colliding TASK-15413). Allocate the implementation Backlog record when execution is approved; link this exact plan, spec and ADR rather than executing under a completed planning task.
+**Tracking:** Implementation `TASK-15416`; completed planning `TASK-15415`; approved design `TASK-15414` (renumbered from colliding TASK-15413). Implementation links this exact plan, spec and ADR rather than executing under a completed planning task.
 
-**Status:** Plan draft for requester review; no implementation has started and no execution method is selected for this plan.
+**Status:** Approved by requester on 2026-11-02 for Native execution followed by independent whole-branch review. Implementation tracked in TASK-15416.
 
 ## Global Constraints
 
@@ -177,20 +177,22 @@ It computes the generator's `ephemeral` flag before entering the lock at the
 baseline point, then passes it explicitly. The strategy helper never rereads
 cache mode to reinterpret that decision or performs a second LLM-hook lookup.
 
-## Stage 1 / Task 1: Freeze Public Execution Contracts
+## Task 1: Freeze Public Execution Contracts (Stage 1)
 
 **Goal:** Establish an independent, passing compatibility oracle before extraction.
 **Success Criteria:** New characterization passes on the reconciled unextracted implementation; no product edit or new skip.
-**Status:** Not Started
+**Status:** Complete
+
+**Evidence:** Fresh original baseline 796 passed/1 established skip; initial characterization 81 passed and full suite 877 passed/1 skip. Final frozen characterization 103 passed, 280 warnings, 3.00s (`/tmp/chunker_execution_task1_frozen.txt`). Ruff/Black/compileall, task-ID/shard guards and test Bandit (B101 only excluded) pass; no production files changed. Independent literal docstrings use `inspect.cleandoc` for Python 3.12 versus 3.13+ compiler indentation portability; final source AST proof will preserve original docstrings exactly. Official implementation task is TASK-15416; all 39 open PR file lists paginated to allocate it.
 
 **Files:** Create the support module and `test_chunker_execution_contracts.py` listed above; update only the active implementation task and this plan's stage evidence.
 
 **Interfaces:** Consumes the current three public methods. Produces test helpers `RecordingLock` (`depth`, event log), `RecordingCache` (configurable get/put result/failure), `RecordingStrategy` (configurable text/metadata/iterator outputs), and `FakeExecutionContext` (neutral config plus the fixed protocol methods). Keep these private to tests; use existing `ChunkResult`/`ChunkMetadata`, not copies of their implementations. A `facade_case` fixture in the contracts module constructs a real `Chunker` with deterministic facilities; component tests later construct only `FakeExecutionContext`.
 
-- [ ] **Step 1: Allocate/find the execution record.** Follow the tracking procedure above and record the actual implementation task ID/path; this is required before the first product/test edit.
-- [ ] **Step 2: Reconcile the execution baseline.** Fetch dev and inspect scoped source/tests, AGENTS, ADR, `pyproject.toml`, `.github/workflows/ci.yml` and relevant guard changes. Follow current queue policy before rebasing the unpublished isolated branch if needed. Preserve all design commits and record the actual base SHA. Relevant behavior changes return to design review.
-- [ ] **Step 3: Verify the baseline.** Run `python -m pytest tldw_Server_API/tests/Chunking -q`; require zero failures and document the existing optional skip. Do not install dependencies or start services to hide a failure.
-- [ ] **Step 4: Write characterization tests with frozen expectations.** Capture complete signatures using independent expected `inspect.Signature` objects and resolved annotations; preserve literal baseline public docstrings. Add the named cases below. They assert existing behavior, so their initial expected result is GREEN, not fabricated RED.
+- [x] **Step 1: Allocate/find the execution record.** Follow the tracking procedure above and record the actual implementation task ID/path; this is required before the first product/test edit.
+- [x] **Step 2: Reconcile the execution baseline.** Fetch dev and inspect scoped source/tests, AGENTS, ADR, `pyproject.toml`, `.github/workflows/ci.yml` and relevant guard changes. Follow current queue policy before rebasing the unpublished isolated branch if needed. Preserve all design commits and record the actual base SHA. Relevant behavior changes return to design review.
+- [x] **Step 3: Verify the baseline.** Run `python -m pytest tldw_Server_API/tests/Chunking -q`; require zero failures and document the existing optional skip. Do not install dependencies or start services to hide a failure.
+- [x] **Step 4: Write characterization tests with frozen expectations.** Capture complete signatures using independent expected `inspect.Signature` objects and resolved annotations; preserve literal baseline public docstrings. Add the named cases below. They assert existing behavior, so their initial expected result is GREEN, not fabricated RED.
 
 | Test name | Required assertions |
 | --- | --- |
@@ -240,16 +242,16 @@ replacement during a strategy call, and a generator created in one thread and
 first advanced under another thread's LLM override. Use events and bounded
 joins, with cleanup in `finally`, not synchronization sleeps.
 
-- [ ] **Step 5: Run the new contracts against the unextracted baseline.** `python -m pytest tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py -q`; require all pass. Run `python Helper_Scripts/ci/check_shard_coverage.py`; require zero newly uncovered test files. Do not raise its baseline/ignore list.
-- [ ] **Step 6: Freeze the oracle and verify integration.** Run `python -m pytest tldw_Server_API/tests/Chunking -q`; require zero failures/no new skips. Run Ruff, Black check, compileall and test Bandit (`-s B101`) on only the two new test/support files, using the same command shapes as Final Verification. Existing assertions and frozen expectations are not editable to accommodate extraction. A correction needs baseline RED and separate requester approval.
-- [ ] **Step 7: Commit the independently reviewable characterization.**
+- [x] **Step 5: Run the new contracts against the unextracted baseline.** `python -m pytest tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py -q`; require all pass. Run `python Helper_Scripts/ci/check_shard_coverage.py`; require zero newly uncovered test files. Do not raise its baseline/ignore list.
+- [x] **Step 6: Freeze the oracle and verify integration.** Run `python -m pytest tldw_Server_API/tests/Chunking -q`; require zero failures/no new skips. Run Ruff, Black check, compileall and test Bandit (`-s B101`) on only the two new test/support files, using the same command shapes as Final Verification. Existing assertions and frozen expectations are not editable to accommodate extraction. A correction needs baseline RED and separate requester approval.
+- [x] **Step 7: Commit the independently reviewable characterization.**
 
 ```bash
 git add -- tldw_Server_API/tests/Chunking/_execution_test_support.py tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md
 git commit -m "test: characterize Chunker execution paths"
 ```
 
-## Stage 2 / Task 2: Move Plain Text Execution Behind The Facade
+## Task 2: Move Plain Text Execution Behind The Facade (Stage 2)
 
 **Goal:** Actively delegate the cached text path without changing its control flow.
 **Success Criteria:** Direct fake-context tests and public wiring pass; all frozen paths still pass.
@@ -271,7 +273,7 @@ git add -- tldw_Server_API/app/core/Chunking/execution/__init__.py tldw_Server_A
 git commit -m "refactor: extract Chunker text execution"
 ```
 
-## Stage 3 / Task 3: Move Metadata Execution
+## Task 3: Move Metadata Execution (Stage 3)
 
 **Goal:** Delegate metadata execution while preserving direct strategy results and alignment.
 **Success Criteria:** Same metadata/list identities, mutation, error regions and no result-cache calls.
@@ -301,7 +303,7 @@ git add -- tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_AP
 git commit -m "refactor: extract Chunker metadata execution"
 ```
 
-## Stage 4 / Task 4: Move Lazy Generator Execution
+## Task 4: Move Lazy Generator Execution (Stage 4)
 
 **Goal:** Delegate generator execution without changing when work or failures happen.
 **Success Criteria:** Generator protocol/timing is preserved and a paused consumer never retains the shared lock.
@@ -332,7 +334,7 @@ git add -- tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_AP
 git commit -m "refactor: extract lazy Chunker execution"
 ```
 
-## Stage 5 / Task 5: Share Preparation And Complete Integration
+## Task 5: Share Preparation And Complete Integration (Stage 5)
 
 **Goal:** Remove proven setup duplication and verify the fully active subsystem.
 **Success Criteria:** Every new helper is used by all applicable paths; all frozen contracts, real cold imports, guards and local verification pass before publication.
@@ -418,7 +420,8 @@ Record this review in TASK-15415. No product/test files change while writing or
 reviewing this plan; documentation-only Bandit is not applicable. This is
 planning verification, not proof that future extraction tests already pass.
 
-Plan review and an execution-method choice remain required. **Native** means
+Requester plan approval and the **Native** execution choice were received on
+2026-11-02, followed by independent whole-branch review. Native means
 one implementer owns these tightly coupled sequential migrations with an
 independent whole-branch review at the end. **Subagent-driven** adds fresh
 implementers and per-task review gates before the next task. Native is the
