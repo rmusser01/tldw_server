@@ -1,9 +1,9 @@
 # ADR-086: Parent-Supervised Standard-Library Regex for Moderation
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-11-02
 **Backfilled from:** not backfilled
-**Decision owner:** Requester; process-isolation approach selected, full design pending approval
+**Decision owner:** Requester; written design approved on 2026-11-02
 **Related task:** TASK-15414
 **Related spec/plan:** Docs/superpowers/specs/2026-11-02-moderation-killable-stdlib-re-design.md
 
@@ -34,7 +34,7 @@ The parent owns admission, an operation-wide deadline, bounded IPC, termination,
 reaping, and fail-closed caller behavior. No overload/error inline fallback is
 allowed. Successful matching retains the existing evaluator algorithms and
 stdlib semantics. Process startup/serialization add overhead. Default values and
-the detailed integration contract remain proposals in the linked design.
+the detailed integration contract are documented in the approved linked design.
 
 Operational reporting is independent of optional content-review capture and
 must not contain failed content or invent a policy match. Reporter failure never
@@ -47,6 +47,6 @@ surfaces are outside this decision's first implementation scope.
 
 ## Follow-up
 
-Complete the builder check and obtain design approval, then write an incremental
-implementation plan with compatibility, process-lifecycle, privacy, and caller
-integration tests. Keep this record Proposed until the complete design is accepted.
+The builder check found no blocking questions, and the requester approved the
+complete design on 2026-11-02. Write an incremental implementation plan with
+compatibility, process-lifecycle, privacy, and caller integration tests.
