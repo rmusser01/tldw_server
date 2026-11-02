@@ -1,4 +1,4 @@
-# ADR-061: MCP Durable Provider Accounting
+# ADR-087: MCP Durable Provider Accounting
 
 **Status:** Proposed
 **Date:** 2026-10-02
@@ -38,6 +38,18 @@ Completion concurrency uses the governor's existing `jobs` lease category. DB-ba
 Hosted subscription limits apply only when the usage-quota master switch is enabled and a Billing repository is wired, following the host's Billing activation contract. OSS or inactive hosted Billing does not impose implicit free-plan limits. Explicit MCP operator bounds and durable usage/reservation recording remain mandatory for this certified execution path. Activation failures still fail closed rather than impersonating an inactive deployment.
 
 The per-scope lock coordinates MCP admission and settlement, not legacy Chat calls that do not adopt this protocol. Operator pricing is captured by value; stored accounting excludes prompt, output, credentials, arbitrary metadata, and raw provider usage.
+
+The reservation table is an internal cross-user AuthNZ accounting authority,
+following the native quota-ledger boundary rather than a per-user content table.
+AuthNZ pools do not establish `app.current_user_id` sessions. A forced owner-only
+RLS policy would deny normal accounting or hide other users' exposure in a shared
+billing scope, weakening admission limits. The reason-backed RLS exemption is
+explicit in `Helper_Scripts/ci/rls_coverage_exemptions.txt`, not the uncovered-table
+baseline. Server-issued identity, immutable scope, exact scope/execution predicates
+and durable scope locks remain the authority; no public row-list API is added.
+SQLite/PostgreSQL cross-user admission tests preserve shared-capacity refusal and
+isolation from unrelated billing scopes. A future public reservation-read surface
+requires its own authorization design rather than inheriting unrestricted access.
 
 The issued credential handle's immutable billing-source category is retained in the
 reservation and canonical usage row. Only the vendor-billed `user` category is

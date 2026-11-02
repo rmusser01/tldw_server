@@ -6735,8 +6735,7 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
         )
         """
     )
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS provider_usage_reservations (
             execution_id TEXT PRIMARY KEY NOT NULL CHECK (
                 length(execution_id) = 36 AND execution_id = lower(execution_id)
@@ -6778,13 +6777,11 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
             CHECK ((state IN ('released', 'reconciled') AND resolved_at IS NOT NULL) OR (state NOT IN ('released', 'reconciled') AND resolved_at IS NULL)),
             CHECK ((state IN ('reserved', 'released') AND dispatched_at IS NULL) OR (state NOT IN ('reserved', 'released') AND dispatched_at IS NOT NULL))
         )
-        """
-    )
+        """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_scope "
         "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)"
     )
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
     reservation_columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
     if "credential_source" not in reservation_columns:
         conn.execute(
@@ -6792,6 +6789,10 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
             "CHECK (credential_source IS NULL OR credential_source IN "
             "('user', 'team', 'org', 'server_default', 'user_unmetered'))"
         )
+    if not _sqlite_table_exists(conn, "llm_usage_log"):
+        logger.info("Migration 105: optional llm_usage_log is absent; accounting remains unavailable")
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
     if "billing_org_id" not in columns:
         conn.execute("ALTER TABLE llm_usage_log ADD COLUMN billing_org_id INTEGER")
     conn.execute(

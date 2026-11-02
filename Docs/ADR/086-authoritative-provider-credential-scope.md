@@ -1,4 +1,4 @@
-# ADR-060: Authoritative Provider Credential Scope
+# ADR-086: Authoritative Provider Credential Scope
 
 **Status:** Proposed
 **Date:** 2026-10-02

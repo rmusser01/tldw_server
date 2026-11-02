@@ -31,14 +31,13 @@ class Cursor:
 
 
 class ReadConnection:
-    """Expose only reads, so transaction management or writes fail the test."""
+    """Record statements while executing every read against the real SQLite store."""
 
     def __init__(self, raw):
         self.raw = raw
         self.queries = []
 
     async def execute(self, sql, args=()):
-        assert sql.lstrip().upper().startswith("SELECT")
         self.queries.append((sql, args))
         return Cursor(self.raw.execute(sql, args))
 
@@ -121,6 +120,7 @@ async def test_mcp_limit_completes_while_one_slot_scope_transaction_is_held(bill
         assert store.raw.in_transaction
         assert store.raw.total_changes == before
         assert conn.queries
+        assert all(sql.lstrip().upper().startswith("SELECT") for sql, _args in conn.queries)
 
 
 @pytest.mark.asyncio

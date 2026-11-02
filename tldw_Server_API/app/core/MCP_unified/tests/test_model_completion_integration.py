@@ -917,7 +917,9 @@ async def test_scope_loss_immediately_before_resolution_never_falls_back(compose
             await UsersDB(env.pool).update_user(env.state["user"], is_active=False)
         else:
             sql, params = mutations[loss]
-            await _execute(env.pool, sql, *params)
+            await _execute(
+                env.pool, sql, *params, membership_fixture=loss in {"team_member_revoked", "org_member_revoked"}
+            )
         gate.release.set()
         with pytest.raises(ModelCompletionFailure) as caught:
             await asyncio.wait_for(call, 5)

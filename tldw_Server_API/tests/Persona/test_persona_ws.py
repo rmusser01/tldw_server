@@ -327,6 +327,26 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
             assert evt_res["output"] == evt_res["result"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active_scope", [None, AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)])
+async def test_persona_mcp_forwarder_preserves_response_and_optional_trusted_scope(active_scope):
+    from unittest.mock import AsyncMock
+
+    request = persona_ep.MCPRequest(method="tools/list", params={})
+    response = SimpleNamespace(error=None, result={"tools": []})
+    metadata = {"source": "persona"}
+    server = SimpleNamespace(handle_http_request=AsyncMock(return_value=response))
+    ws = SimpleNamespace(state=SimpleNamespace(persona_server_auth_scope=active_scope))
+
+    result = await persona_ep._forward_persona_mcp_request(server, request, ws, "1", metadata)
+
+    assert result is response
+    expected = {"user_id": "1", "metadata": metadata}
+    if active_scope is not None:
+        expected["server_auth_scope"] = active_scope
+    server.handle_http_request.assert_awaited_once_with(request, **expected)
+
+
 def test_persona_mcp_tool_receives_authenticated_execution_scope(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 

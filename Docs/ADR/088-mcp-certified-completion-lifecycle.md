@@ -1,4 +1,4 @@
-# ADR-062: MCP Certified Completion Lifecycle
+# ADR-088: MCP Certified Completion Lifecycle
 
 **Status:** Proposed
 **Date:** 2026-10-03
@@ -17,7 +17,7 @@ The managed adapter owns each completion child through termination. Run timeout 
 
 The generic provider stack supports behaviors unsuitable for a bounded MCP model runner, including multiple providers, streaming, retries, and tools. Cancellation of a caller does not prove that a paid provider operation stopped. Task references and durable reservation fences are both necessary: local ownership contains work, while the repository prevents late settlement after abandonment.
 
-ADR-025/026 govern provider routing and outbound egress. ADR-060 fixes credential authority and endpoint provenance; ADR-061 supplies durable admission and settlement. This decision composes those boundaries without exposing a new MCP tool or enabling Skills execution.
+ADR-025/026 govern provider routing and outbound egress. ADR-086 fixes credential authority and endpoint provenance; ADR-087 supplies durable admission and settlement. This decision composes those boundaries without exposing a new MCP tool or enabling Skills execution.
 
 ## Alternatives Considered
 

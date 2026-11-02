@@ -124,6 +124,7 @@ async def test_bounded_async_json_cancellation_closes_owned_stream_and_propagate
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert task.cancelled()
     assert closed == [True]
 
 
@@ -478,6 +479,7 @@ def test_public_bounded_transport_keeps_environment_disabled_with_incompatible_c
 
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
     monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=client_factory))
-    with egress.public_url_policy_scope(), pytest.raises(TypeError, match="trust_env"):
+    with egress.public_url_policy_scope(), pytest.raises(TypeError, match="trust_env") as error:
         hc.fetch(URL, backend="httpx", max_response_bytes=50)
+    assert "unexpected keyword argument" in str(error.value)
     assert calls == []

@@ -12,7 +12,7 @@
 
 **Design source:** `Docs/superpowers/specs/2026-07-23-mcp-skills-model-only-runner-design.md`
 
-**ADR check (2026-10-02):** ADR required: yes. [ADR-060](../../ADR/060-authoritative-provider-credential-scope.md) records exact authenticated scope and absence-only credential fallback. ADR-025 remains the governing provider-routing decision; the bounded adapter's stricter mode disables credential endpoint overrides.
+**ADR check (2026-10-02; current identity 2026-11-02):** ADR required: yes. [ADR-086](../../ADR/086-authoritative-provider-credential-scope.md) records exact authenticated scope and absence-only credential fallback. ADR-025 remains the governing provider-routing decision; the bounded adapter's stricter mode disables credential endpoint overrides.
 
 **Rebase (2026-10-02):** Stage 1 commits rebased cleanly onto `origin/dev` at `9958110df2` before Stage 2 implementation. All five planning/implementation commits were subsequently rebased cleanly onto the newer `origin/dev` at `86e287fee7`; `git range-diff` confirmed unchanged patches before the final evidence update.
 
@@ -172,7 +172,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Status:** Complete
 
-**ADR check (2026-10-02):** ADR required: yes. [ADR-061](../../ADR/061-mcp-durable-provider-accounting.md) records durable conservative admission/dispatch/settlement. ADR-018 and ADR-056 continue to govern the existing Resource Governor policy.
+**ADR check (2026-10-02; current identity 2026-11-02):** ADR required: yes. [ADR-087](../../ADR/087-mcp-durable-provider-accounting.md) records durable conservative admission/dispatch/settlement. ADR-018 and ADR-056 continue to govern the existing Resource Governor policy.
 
 **Revalidation adjustment (2026-10-02):** Acquire the durable scope lock before reading uncached canonical actual usage, not only before summing reservations. The repository accepts a required snapshot-reader callback on the transaction connection, preventing stale snapshots from missing a just-reconciled MCP call. Settlement takes the same lock. All unresolved reservations remain chargeable regardless of age; billing-period reset cannot erase an ambiguous dispatch. Legacy Chat is not coordinated by this lock.
 
@@ -266,7 +266,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Rebase/revalidation (2026-10-03):** Rebasing all eight local commits onto `origin/dev` at `4c4f197f68` changed no production patch; the sole conflict preserved both ADR index additions. Upstream owns ADR-058 for Jobs, so the unmerged MCP credential/accounting ADRs are renumbered to ADR-059/060 without changing their decisions. The new hosted-only Billing activation contract is being revalidated before transport composition; explicit MCP operator limits and durable recording remain separate from implicit OSS free-plan enforcement.
 
-**ADR check (2026-10-03):** ADR required: yes. [ADR-062](../../ADR/062-mcp-certified-completion-lifecycle.md) records the certified single-attempt transport and retained-child lifecycle; ADR-025/026 govern routing/egress and ADR-060/061 govern credentials/accounting.
+**ADR check (2026-10-03; current identity 2026-11-02):** ADR required: yes. [ADR-088](../../ADR/088-mcp-certified-completion-lifecycle.md) records the certified single-attempt transport and retained-child lifecycle; ADR-025/026 govern routing/egress and ADR-086/087 govern credentials/accounting.
 
 **Implementation adjustment (2026-10-03):** The existing JSON helper could consume a full final decoded chunk beyond `max_bytes + 1`. Its public byte-stream wrapper now accepts an optional decoded-byte budget and clips the final chunk to the first overflow byte before the JSON helper rejects it. Unbounded streams and legacy delegate keyword defaults remain unchanged. The guarantee covers application consumption and envelope retention, not internal codec allocations.
 
@@ -587,6 +587,77 @@ remote landing result is recorded. Latest fetched and API-verified dev remains
 ADR assessment: retain proposed ADR-060/061/062; no new durable architecture rule
 is introduced by conflict resolution. Accepted upstream ADRs, especially the
 BYOK accounting and shared authentication/egress contracts, must remain intact.
+
+## PR 3187 CI And Latest-Dev Repair (2026-11-02)
+
+The requester authorized a fresh rebase, all validated PR issue repairs and all
+independent-review findings addressed before normal auto-merge is re-enabled.
+Auto-merge was disabled first. Base: `3ab1ce5d3a49d5a7fd130e8939d55d7639e5a373`.
+Published-head lease: `8cf56d0a71d859f65b14041c08e6f729c82160e1`. Backup:
+`codex/mcp-completion-pre-nov02-rebase`. Prior approval is historical, not approval
+of this new source artifact.
+
+### November Stage 1: Rebase And Preserve Authority
+**Goal**: Integrate the new membership-writer contracts without weakening MCP or legacy BYOK authorization.
+**Success Criteria**: Conflict-free source; locked secret-manager APIs retained; legacy shared-key reads still revalidate membership; published migrations unchanged; proposed ADR identities do not collide.
+**Tests**: Shared-key/strict-scope matrices, membership boundaries, ADR and tracking guards.
+**Status**: Complete
+
+ADR check: no new durable decision is introduced by integration. Preserve accepted
+ADR-060 (Embeddings) and ADR-085 (membership ownership). Renumber the three
+unpublished MCP records to ADR-086/087/088 after checking current dev and open PRs.
+The existing approved three-link task-metadata exception is limited to updating
+those same documentation references; historical task notes remain unchanged.
+
+### November Stage 2: Repair CI And Verify
+**Goal**: Diagnose and repair validated failures without baseline inflation, hidden skips or weakened security checks.
+**Success Criteria**: Required backend guards and affected runtime gates pass; every observed failure has an evidence-based disposition.
+**Tests**: Test-quality ratchet, backend contract guards, MCP core, scope/accounting/Billing/governance/HTTP/startup, canonical PostgreSQL, static checks and Bandit.
+**Status**: In Progress
+
+The requester explicitly expanded this stage to repair unrelated CI suites too
+on 2026-11-02. Child tasks track shared HTTP/model-inventory fixtures
+(`TASK-2294.3.2.1`), backend contract failures (`TASK-2294.3.2.2`), ACP integration
+(`TASK-2294.3.2.3`), and the real-cockpit Playwright flake
+(`TASK-2294.3.2.4`). Workers have disjoint write sets; no global egress relaxation,
+baseline increases, suppressed test collection or unreported baseline exclusions
+are permitted. The 175-case pinned-head CI inventory is the starting checklist,
+not evidence that all those failures persist after the rebase. Current-dev fixes
+must be verified and retained rather than needlessly rewritten.
+
+Verification checkpoint: MCP core `4,292 passed, 3 existing parser skips`;
+CI/published-doc guards `979 passed, 5 existing skips`; Persona/size/HTTP guards
+`167 passed`; strict-scope integration `72 passed`; native authority bootstrap
+`5 passed`. Required backend contract command: `1,006 passed, 1 existing skip`;
+unit smoke: `459 passed, 33 deselected`. The separate WebSocket matrix has eight
+ACP fixture failures assigned to the ACP child task, not an accepted exclusion.
+Shared mock-host/catalog fixtures pass 393 original cases; the final adapter
+suite passes 60, including a fresh-process regression keeping unit inventory
+offline when live-network tests are explicitly enabled. Backend contract repairs
+pass 243 cases with three canonical PostgreSQL availability skips; parent-owned
+PostgreSQL verification is in progress. The RSS Watchlists error-persistence
+path now uses the existing credential sanitizer; its preserved redaction test
+reproduced the bug before the one-line repair.
+
+The frontend scenario has not run: incomplete local dependencies exhausted the
+three-attempt bootstrap limit. All processes and worktree dependency links were
+cleaned up. A dependency-resolution audit now passes, but another launch requires
+explicit approval. Do not claim a flake fix or re-arm auto-merge while this is
+unverified. OpenAPI export also remains under investigation: the same JSON is
+produced on this branch, pinned dev, and the fingerprint-source commit; no blind
+fingerprint refresh is authorized by that equality alone.
+
+### November Stage 3: Independent Final Review
+**Goal**: Request read-only review of an immutable current-dev source artifact and address every finding.
+**Success Criteria**: No unaddressed findings; reviewer explicitly approves the final source.
+**Tests**: Reviewer reproductions and fresh affected regression checks after repairs.
+**Status**: Not Started
+
+### November Stage 4: Publish And Arm
+**Goal**: Publish with an explicit lease and enable only normal gated auto-merge.
+**Success Criteria**: GitHub head matches reviewed source; no unresolved threads; ordinary required gates retained; auto-merge state read back.
+**Tests**: Current dev/head/readiness, required CI and auto-merge readback; no administrative bypass or hand-dispatched required gates.
+**Status**: Not Started
 
 ## Acceptance-Criteria Traceability
 

@@ -4,12 +4,14 @@ import asyncio
 import importlib
 import io
 import sys
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from types import ModuleType, SimpleNamespace
 
 import asyncpg
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import PGUsageSchemaError
 from tldw_Server_API.app.core.exceptions import SchemaReadinessError
@@ -38,6 +40,18 @@ def _noop_reset_llm_provider_overrides_cache(_overrides: object = None) -> None:
 
 def _noop_start_llm_provider_override_refresh_service() -> None:
     return None
+
+
+@pytest.fixture
+def canonical_pg_pool_factory() -> Callable[[object], DatabasePool]:
+    """Keep the production transaction wrapper around a controlled native driver."""
+    def build(native_pool: object) -> DatabasePool:
+        db_pool = object.__new__(DatabasePool)
+        db_pool._initialized = True
+        db_pool.pool = native_pool
+        return db_pool
+
+    return build
 
 
 @pytest.mark.unit
@@ -231,10 +245,10 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
     monkeypatch: pytest.MonkeyPatch,
     failure_kind: str,
     failure_phase: str,
+    canonical_pg_pool_factory,
 ) -> None:
     """Hard DDL failures stop startup; transient failures roll back and continue."""
     from tldw_Server_API.app.core.AuthNZ import pg_migrations_extra
-    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 
     marker = "postgres://admin:private-password@private-host/auth private-row-value"
     failures = {
@@ -304,9 +318,7 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
                 if failure_phase in {"release", "release_after_timeout"}:
                     raise failure
 
-    db_pool = object.__new__(DatabasePool)
-    db_pool._initialized = True
-    db_pool.pool = _NativePool()
+    db_pool = canonical_pg_pool_factory(_NativePool())
 
     async def _successful_ensure(_pool: object) -> bool:
         return True

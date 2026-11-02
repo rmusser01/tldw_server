@@ -34,6 +34,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_endpoints_sqlite import (
     _insert_raw_shared_key,
     _setup_byok_sqlite,
 )
+from tldw_Server_API.tests.AuthNZ_SQLite.test_provider_scope_resolution_sqlite import _execute as _execute_scope_fixture
 
 
 async def _upsert_user_key(repo, user_id, provider, api_key, credential_fields=None):
@@ -1358,12 +1359,20 @@ async def test_authoritative_scope_revoked_before_first_resolution_sqlite(tmp_pa
     if revocation == "user":
         await set_authnz_test_user_active(pool, user_id, False)
     elif revocation == "team_member":
-        await pool.execute(
-            "UPDATE team_members SET status = 'inactive' WHERE team_id = ? AND user_id = ?", (team_id, user_id)
+        await _execute_scope_fixture(
+            pool,
+            "UPDATE team_members SET status = 'inactive' WHERE team_id = ? AND user_id = ?",
+            team_id,
+            user_id,
+            membership_fixture=True,
         )
     elif revocation == "org_member":
-        await pool.execute(
-            "UPDATE org_members SET status = 'inactive' WHERE org_id = ? AND user_id = ?", (org_id, user_id)
+        await _execute_scope_fixture(
+            pool,
+            "UPDATE org_members SET status = 'inactive' WHERE org_id = ? AND user_id = ?",
+            org_id,
+            user_id,
+            membership_fixture=True,
         )
     elif revocation == "team":
         await pool.execute("UPDATE teams SET is_active = 0 WHERE id = ?", (team_id,))
@@ -1394,8 +1403,12 @@ async def test_authoritative_runtime_rechecks_shared_revocation_after_success_sq
     )
     try:
         assert (await runtime.resolve("openai")).api_key == "team-key"
-        await pool.execute(
-            "UPDATE team_members SET status = 'inactive' WHERE team_id = ? AND user_id = ?", (team_id, user_id)
+        await _execute_scope_fixture(
+            pool,
+            "UPDATE team_members SET status = 'inactive' WHERE team_id = ? AND user_id = ?",
+            team_id,
+            user_id,
+            membership_fixture=True,
         )
         with pytest.raises(ByokResolutionError, match="credential_scope_revoked"):
             await runtime.resolve("openai")

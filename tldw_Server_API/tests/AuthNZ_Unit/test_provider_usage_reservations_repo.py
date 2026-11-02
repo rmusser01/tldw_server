@@ -114,6 +114,19 @@ def test_migration_105_registered():
     assert migrations.get_authnz_migrations()[-1].version == 105
 
 
+def test_migration_105_supports_reduced_legacy_schema_without_optional_usage_table():
+    with sqlite3.connect(":memory:") as conn:
+        migrations.migration_105_create_provider_usage_reservations(conn)
+        migrations.migration_105_create_provider_usage_reservations(conn)
+        assert {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")} >= {
+            "execution_id",
+            "user_id",
+            "credential_source",
+            "billing_scope_id",
+        }
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'llm_usage_log'").fetchone() is None
+
+
 def test_published_user_usage_index_precedes_mcp_reservation_upgrade(tmp_path):
     path = tmp_path / "published-099.db"
     migrations.apply_authnz_migrations(path, target_version=99)
@@ -213,6 +226,30 @@ def test_migration_fails_for_duplicate_canonical_execution_ids(tmp_path):
 
 class ReservationContract:
     """The same state, arithmetic, rollback and race assertions on both backends."""
+
+    @pytest.mark.asyncio
+    async def test_shared_scope_admission_counts_other_users_and_keeps_unrelated_scopes_separate(
+        self, reservation_pool
+    ):
+        mod = api()
+        repo = mod.ProviderUsageReservationsRepo(reservation_pool)
+        scope = mod.BillingScope("org", 12)
+        first = reservation(active_organization_id=12, billing_scope=scope)
+        second = reservation(user_id=2, active_organization_id=12, billing_scope=scope)
+        await repo.reserve(first, snapshot_reader=unlimited)
+        assert await repo.outstanding(scope) == {"tokens": 30, "cost_units": 50}
+
+        async def shared_limit(_conn):
+            return mod.ReservationQuotaSnapshot(0, 50, 0, None)
+
+        with pytest.raises(mod.ProviderUsageReservationError) as error:
+            await repo.reserve(second, snapshot_reader=shared_limit)
+        assert error.value.code == "quota_exceeded"
+        assert await repo.get(second.execution_id) is None
+
+        unrelated = reservation(user_id=2, active_organization_id=13, billing_scope=mod.BillingScope("org", 13))
+        assert (await repo.reserve(unrelated, snapshot_reader=shared_limit))["user_id"] == 2
+        assert await repo.outstanding(scope) == {"tokens": 30, "cost_units": 50}
 
     @pytest.mark.asyncio
     async def test_committed_restart_and_scope_totals(self, reservation_pool):

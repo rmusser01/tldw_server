@@ -3605,6 +3605,21 @@ async def _resolve_authenticated_user_id(ws: WebSocket) -> tuple[str | None, boo
     return str(principal.user_id), True, True
 
 
+async def _forward_persona_mcp_request(
+    server: Any,
+    request: MCPRequest,
+    ws: WebSocket,
+    user_id: str,
+    metadata: dict[str, Any],
+) -> Any:
+    """Forward only the server-authenticated scope, outside caller audit metadata."""
+    context: dict[str, Any] = {"user_id": user_id, "metadata": metadata}
+    scope: AuthenticatedExecutionScope | None = getattr(ws.state, "persona_server_auth_scope", None)
+    if scope is not None:
+        context["server_auth_scope"] = scope
+    return await server.handle_http_request(request, **context)
+
+
 @router.get("/profiles", response_model=list[PersonaProfileResponse], tags=["persona"], status_code=status.HTTP_200_OK)
 async def list_persona_profiles(
     active_only: bool = Query(default=False),
@@ -9249,14 +9264,7 @@ async def persona_stream(
                     "persona_ws_scope_resolution_total",
                     {"source": "mcp_tool", "result": "miss"},
                 )
-            mcp_call_kwargs: dict[str, Any] = {
-                "user_id": authenticated_user_id,
-                "metadata": audit_metadata,
-            }
-            server_auth_scope = getattr(ws.state, "persona_server_auth_scope", None)
-            if server_auth_scope is not None:
-                mcp_call_kwargs["server_auth_scope"] = server_auth_scope
-            resp = await server.handle_http_request(req, **mcp_call_kwargs)
+            resp = await _forward_persona_mcp_request(server, req, ws, authenticated_user_id, audit_metadata)
             if resp is None:
                 logger.warning(
                     "Persona MCP tool call returned no response: tool={} mapped_tool={} session_id={} plan_id={}",

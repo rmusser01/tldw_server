@@ -6,6 +6,17 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership,
+    MembershipMutation,
+    MembershipMutationKind,
+    MembershipMutationRelationship,
+    MembershipScopeType,
+    MembershipWriter,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _execute_membership_scope_sql
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import dollar
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
@@ -60,7 +71,12 @@ def single_scope_cases(kind):
     ] + [(case, secret, "unauthorized") for case in denied for secret in (False, True)]
 
 
-async def _execute(pool, sql, *params):
+async def _execute(pool, sql, *params, membership_fixture=False):
+    if membership_fixture:
+        # Intentional revoked/invalid states exercise reads, not serving writes.
+        backend = "postgres" if pool.pool is not None else "sqlite"
+        async with pool.transaction() as conn:
+            return await _execute_membership_scope_sql(conn, dollar(sql), *params, backend=backend)
     if pool.pool is not None:
         return await pool.execute(dollar(sql), *params)
     return await pool.execute(sql, params)
@@ -109,10 +125,26 @@ async def seed_scope_state(pool):
     other_team_id = await _insert_id(
         pool, "INSERT INTO teams (org_id, name) VALUES (?, ?) RETURNING id", other_org_id, f"other-team-{token}"
     )
-    await _execute(pool, "INSERT INTO org_members (org_id, user_id, status) VALUES (?, ?, 'active')", org_id, user_id)
-    await _execute(
-        pool, "INSERT INTO team_members (team_id, user_id, status) VALUES (?, ?, 'active')", team_id, user_id
-    )
+    async with pool.transaction() as conn:
+        await MembershipWriter(pool).apply_membership_mutations(
+            conn=conn,
+            context=TrustedMembershipWriteContext(TrustedMembershipReason.BOOTSTRAP),
+            mutations=(
+                MembershipMutation(
+                    MembershipScopeType.ORGANIZATION, org_id, user_id, MembershipMutationKind.ADD, role="member"
+                ),
+                MembershipMutation(
+                    MembershipScopeType.TEAM,
+                    team_id,
+                    user_id,
+                    MembershipMutationKind.ADD,
+                    role="member",
+                    relationship=MembershipMutationRelationship.ORGANIZATION_COMPANION,
+                ),
+            ),
+            anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+            operation_time=datetime.now(timezone.utc),
+        )
     return {
         "pool": pool,
         "user": user_id,
@@ -185,7 +217,20 @@ async def exercise_scope_case(state, kind, case, with_secret, expected, *, singl
     }
     if case in mutations:
         sql, params = mutations[case]
-        await _execute(pool, sql, *params)
+        await _execute(
+            pool,
+            sql,
+            *params,
+            membership_fixture=case
+            in {
+                "inactive_org_member",
+                "missing_org_member",
+                "inactive_team_member",
+                "missing_team_member",
+                "missing_org",
+                "missing_team",
+            },
+        )
     if case == "unavailable":
         pool = _UnavailablePool(pool)
     if case == "inactive_user":
@@ -261,7 +306,11 @@ async def test_shared_scope_without_optional_ids_does_not_infer_other_membership
     state = await seed_scope_state(scope_sqlite_pool)
     if kind == "team":
         await _execute(
-            scope_sqlite_pool, "DELETE FROM org_members WHERE org_id = ? AND user_id = ?", state["org"], state["user"]
+            scope_sqlite_pool,
+            "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
+            state["org"],
+            state["user"],
+            membership_fixture=True,
         )
     else:
         await _execute(
@@ -269,8 +318,10 @@ async def test_shared_scope_without_optional_ids_does_not_infer_other_membership
             "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
             state["team"],
             state["user"],
+            membership_fixture=True,
         )
     result = await AuthnzOrgProviderSecretsRepo(scope_sqlite_pool).resolve_authorized_secret(
         kind, state[kind], state["user"], "openai"
     )
     assert result.status == "authorized_absent"
+    assert result.record is None

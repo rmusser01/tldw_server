@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     TrustedMembershipWriteContext,
 )
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+from tldw_Server_API.app.core.AuthNZ.password_service import get_password_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_invites_repo import AuthnzOrgInvitesRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -273,9 +274,12 @@ async def test_contention_has_retryable_outcome_without_hidden_writes(
     if operation in {"tenant", "org_member"}:
         pool_owner = database if operation == "tenant" else orgs
         monkeypatch.setattr(pool_owner, "get_db_pool", _pool)
-    credential = secrets.token_urlsafe(24) + "Aa1!"
+    credential = get_password_service().generate_secure_password(length=32, username="new-tenant")
     audit_modules = {
-        "register": (auth,), "accept": (orgs,), "redeem": (org_invites,), "org_member": (orgs,),
+        "register": (auth,),
+        "accept": (orgs,),
+        "redeem": (org_invites,),
+        "org_member": (orgs,),
     }
     for module in audit_modules.get(operation, ()):
         monkeypatch.setattr(module, "get_or_create_audit_service_for_user_id", _unexpected_audit)
