@@ -1062,6 +1062,26 @@ unnecessary startup coordination; retain a changed launch selection only if
 current causal evidence still requires it. Cost if wrong: narrow existing-owner
 interception/accounting rework, not a new architecture.
 
+**Cleanup Integration Ruling (2026-11-02):**
+The browser-scope interceptor belongs to the dedicated browser owner. Native
+controls show that retiring that owned browser with the guard still installed,
+then retiring its closed context/session handles, resolves the OOPIF context-close
+stall. Preserve the existing direct-profile cleanup behavior. Do not detach or
+disable the guard before the owned browser is actually retired, increase cleanup
+grace, or mistake an empty registry for physical exit.
+
+The cancellation control also identifies an adapter completion bug: swallowing
+a failed `Route.abort()` leaves Playwright's route handler awaiting an unsettled
+completion future. Fix through supported route/framework completion semantics,
+never by mutating Playwright internals. A local route fallback is only permissible
+after successful owned-browser retirement and confirmed disconnection, when it
+cannot dispatch network traffic; otherwise preserve fail-closed rejection.
+Require a native held-callback barrier proving bounded caller cancellation,
+zero late destination I/O, the lease retained while the callback is held, and
+capacity recovered only after its actual exit. This proof must pass before the
+owner-order fix is adopted. No startup hook or new subsystem is needed for this
+integration repair. Cost if wrong: narrow cleanup/route completion rework.
+
 The real default enhanced batch callback still bypasses canonical parent controls:
 a matching plan/context network limit of one permits two acquisition calls,
 charges zero requests, and reports completion. Fix this before Task 9 acceptance
