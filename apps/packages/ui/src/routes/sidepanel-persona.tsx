@@ -43,6 +43,7 @@ import {
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import {
@@ -172,6 +173,7 @@ const SidepanelPersona = ({
   const isOnline = useServerOnline()
   const { uxState, hasCompletedFirstRun } = useConnectionUxState()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
+  const accountScope = useHomeMilestoneScope()
   const isCompanionMode = mode === "companion"
   const routeTitle = isCompanionMode
     ? t("option:header.companion", "Companion")
@@ -543,6 +545,11 @@ const SidepanelPersona = ({
 
   // ── Live session hook ──
   const liveSession = usePersonaLiveSession({
+    historyScope:
+      isOnline && !capsLoading && capabilities?.hasPersona &&
+      (!isCompanionMode || (capabilities.hasPersonalization && capabilities.hasCompanion))
+        ? accountScope
+        : null,
     isCompanionMode,
     selectedPersonaId,
     setSelectedPersonaId,
