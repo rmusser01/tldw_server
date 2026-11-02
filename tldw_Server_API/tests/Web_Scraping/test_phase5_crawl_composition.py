@@ -22,6 +22,8 @@ async def run_report(
     outcomes,
     *,
     queued=False,
+    production_queue=False,
+    page_drains=None,
     config=None,
     limits=None,
     hooks=None,
@@ -43,6 +45,7 @@ async def run_report(
     }
     submitted, executed = [], []
     queue = None
+    production = None
     from tldw_Server_API.app.core.Web_Scraping.browser_transport import BrowserTransportDecision
 
     monkeypatch.setattr(
@@ -84,7 +87,10 @@ async def run_report(
 
         task = asyncio.create_task(execute())
         drained = asyncio.get_running_loop().create_future()
-        task.add_done_callback(lambda _done: drained.set_result(None))
+        if page_drains is None:
+            task.add_done_callback(lambda _done: drained.set_result(None))
+        else:
+            page_drains.put_nowait((url, drained))
         return WorkHandle(task, drained, task.cancel)
 
     if real_policy:
@@ -182,17 +188,30 @@ async def run_report(
                 await queue.stop()
 
     monkeypatch.setattr(crawl, "run_crawl", engine)
-    report = await crawl.execute_crawl(
-        CrawlRequest(fixture.sitemap_url if profile.endswith("sitemap") else base_url or fixture.seed),
-        profile=profile,
-        options=options,
-        supplied=frozenset(options),
-        config=config or {},
-        credentials=credentials,
-        limits=limits or CrawlLimits(),
-        hooks=hooks,
-        seeds=seeds,
-    )
+    if production_queue:
+        from tldw_Server_API.app.core.Web_Scraping.jobs.queue import ProcessLocalJobQueue
+
+        def forbidden_default(*_args):
+            raise AssertionError("crawl lost its private execution binding")
+
+        production = ProcessLocalJobQueue(execute=forbidden_default, completed_retention=0)
+        await production.start()
+    try:
+        report = await crawl.execute_crawl(
+            CrawlRequest(fixture.sitemap_url if profile.endswith("sitemap") else base_url or fixture.seed),
+            profile=profile,
+            options=options,
+            supplied=frozenset(options),
+            config=config or {},
+            credentials=credentials,
+            limits=limits or CrawlLimits(),
+            hooks=hooks,
+            seeds=seeds,
+            **({"queue": production} if production_queue else {}),
+        )
+    finally:
+        if production:
+            await production.stop()
     return report, fixture, submitted, executed
 
 

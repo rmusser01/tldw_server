@@ -11,6 +11,7 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Any, Literal
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from loguru import logger
 
@@ -21,6 +22,7 @@ from ..browser_transport import (
     default_browser_transport_decision,
     resolve_browser_transport_decision,
 )
+from ..contracts.conversion import _to_plain
 from ..contracts.execution import CrawlReport, DiscoveryResult, PageData
 from ..contracts.requests import CrawlRequest
 from ..crawl.discovery import discover, normalize_reference, resolve_reference, url_bytes
@@ -28,6 +30,8 @@ from ..crawl.engine import run_crawl
 from ..crawl.models import CheckpointPort, CrawlHooks, CrawlLimits, CrawlPlan, FrontierEntry, TraversalDecision
 from ..crawl.profiles import resolve_crawl_plan
 from ..filters import ContentTypeFilter, DomainFilter, FilterChain, RobotsFilter, URLPatternFilter
+from ..jobs.models import ScrapingJob
+from ..jobs.queue import ProcessLocalJobQueue
 from ..outbound_policy import decide_web_outbound_policy
 from ..runtime import DefaultFetchClient, FetchRequest, RuntimeRequestContext
 from ..runtime.controls import PhysicalWork, WorkHandle, physical_work
@@ -40,6 +44,7 @@ from ..scoring import (
     PathDepthScorer,
 )
 from . import article
+from .batch import queued_page
 from .crawl_context import CrawlContext
 
 _EXCLUDES = [
@@ -290,6 +295,7 @@ async def execute_crawl(
     checkpoint: CheckpointPort | None = None,
     hooks: CrawlHooks | None = None,
     seeds: Iterable[str] | None = None,
+    queue: ProcessLocalJobQueue | None = None,
 ) -> CrawlReport:
     """Snapshot private inputs and compose the sole engine, without wrapper cutover."""
     config = article._snapshot_config(config)
@@ -311,6 +317,7 @@ async def execute_crawl(
         **header_copy,
     }
     committed = 0
+    queued_handles: list[WorkHandle[PageData]] = []
 
     async def fetch_document(url: str) -> dict[str, Any]:
         """Register transport ownership before any policy/HTTP dispatch."""
@@ -408,8 +415,13 @@ async def execute_crawl(
         if hooks.on_progress:
             hooks.on_progress(snapshot)
 
-    async def acquire(entry: FrontierEntry) -> WorkHandle[PageData]:
+    def start_entry(entry: FrontierEntry, execution: Mapping[str, Any] | None = None) -> WorkHandle[PageData]:
         """Return ownership before canonical routing, acquisition or extraction."""
+        page_config, page_headers, page_cookies = (
+            (config, headers, cookies)
+            if execution is None
+            else (execution["configuration"], execution["custom_headers"], execution["custom_cookies"])
+        )
         root_sitemap = profile.endswith("sitemap") and entry.parent_url is None
         level_excluded = profile == "legacy_url_level" and len(
             urlsplit(entry.url).path.strip("/").split("/")
@@ -443,7 +455,7 @@ async def execute_crawl(
 
         def prepare_plan(
             page_plan: article.ArticlePlan,
-            snapshot_headers: Mapping[str, str] = MappingProxyType(dict(headers)),
+            snapshot_headers: Mapping[str, str] = MappingProxyType(dict(page_headers)),
             legacy: bool = profile == "legacy_recursive",
             method: Any = plan.options.get("method"),
         ) -> article.ArticlePlan:
@@ -473,16 +485,51 @@ async def execute_crawl(
 
         return article.start_page(
             entry.url,
-            list(cookies),
+            list(page_cookies),
             controls=context,
             request_context=RuntimeRequestContext(source=profile, stage="fetch", user_id=request.context.user_id),
             discover=links,
             prepare_plan=prepare_plan,
-            configuration=config,
+            configuration=page_config,
             allow_llm_extraction=plan.options["allow_llm_extraction"],
             discovery_on_success=profile in {"enhanced_recursive", "enhanced_url_level"},
             discovery_gate=discovery_gate,
         )
+
+    async def acquire(entry: FrontierEntry) -> WorkHandle[PageData]:
+        """Keep direct traversal default; queued attempts reuse the same conversion."""
+        if queue is None:
+            return start_entry(entry)
+
+        def make_job(url: str) -> ScrapingJob:
+            # Charge normalized execution inputs even though the trusted callable
+            # is a separate, live capability rather than JSON metadata.
+            return ScrapingJob(
+                str(uuid4()),
+                url,
+                "auto",
+                user_id=str(request.context.user_id) if request.context.user_id is not None else None,
+                metadata=_to_plain(
+                    {
+                        "configuration": config,
+                        "custom_headers": headers,
+                        "custom_cookies": cookies,
+                        "crawl_options": plan.options,
+                    }
+                ),
+            )
+
+        def execute(payload, controls):
+            if controls is not context:
+                raise RuntimeError("page execution owner mismatch")
+            return start_entry(replace(entry, url=payload.url), payload.options)
+
+        queued_handles[:] = [handle for handle in queued_handles if not handle.drained.done()]
+        handle = await queued_page(
+            entry, context=context, queue=queue, make_job=make_job, execute=execute, owned=queued_handles
+        )
+        queued_handles.append(handle)
+        return handle
 
     try:
         return await run_crawl(
