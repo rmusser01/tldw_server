@@ -1388,6 +1388,11 @@ it('shares one H1 controller across the WebUI shell and page only for the chat l
   expect(view.getByTestId('chat-sidebar')).toHaveAttribute('data-history-controller', 'present');
   expect(seen.at(-1)).toBe(outer);
   const first = outer;
+  routerState.location.pathname = '/model-playground';
+  view.rerender(<OptionLayout><Page /></OptionLayout>);
+  expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'present');
+  expect(seen.at(-1)).toBe(first);
+  expect(outer).toBe(first);
   routerState.location.pathname = '/workspace';
   view.rerender(<OptionLayout><Page /></OptionLayout>);
   expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'absent');
