@@ -295,6 +295,30 @@ def get_session_preferences_with_activity_surface(
     return dict(updated_preferences), activity_surface
 
 
+def persona_session_transcript_snapshot(
+    db: CharactersRAGDB,
+    *,
+    session_manager: SessionManager,
+    session_id: str,
+    user_id: str,
+    limit_turns: int | None = None,
+    renew: bool = False,
+) -> dict[str, Any] | None:
+    """Prefer durable authority, including retired headers, over a local snapshot."""
+    local = session_manager.get_session_snapshot(session_id=session_id, user_id=user_id)
+    durable = db.get_persona_transcript(session_id, user_id=user_id, renew=renew)
+    if durable is None:
+        snapshot = local
+    else:
+        session_manager.publish_transcript(user_id=user_id, snapshot=durable, touch=renew and not durable["retired"])
+        snapshot = {**(local or {}), **durable}
+    if snapshot is None:
+        return None
+    if limit_turns is not None and limit_turns > 0:
+        snapshot["turns"] = snapshot["turns"][-limit_turns:]
+    return snapshot
+
+
 def materialize_persona_session(
     db: CharactersRAGDB,
     *,
@@ -394,6 +418,10 @@ def materialize_persona_session(
             user_id=user_id,
             persona_id=resolved_persona_id,
             resume_session_id=session_id,
+            persisted=True,
+        )
+        persona_session_transcript_snapshot(
+            db, session_manager=session_manager, session_id=session_id, user_id=user_id, renew=True,
         )
         if created_new_session or surface is not None:
             session_manager.update_preferences(

@@ -253,6 +253,7 @@ from tldw_Server_API.app.core.Persona.session_manager import PlanConfirmationErr
 from tldw_Server_API.app.core.Persona.session_materialization import (
     ensure_default_persona_profile,
     materialize_persona_session,
+    persona_session_transcript_snapshot,
     scope_snapshot_id_from_snapshot,
 )
 from tldw_Server_API.app.core.Persona.visual_generation_recipes import (
@@ -7970,10 +7971,12 @@ async def persona_sessions(
             str(item.get("session_id") or ""): item
             for item in manager.list_sessions(user_id=user_id, persona_id=persona_id, limit=max(limit, 200))
         }
+        durable_counts = db.list_persona_transcript_counts(user_id=user_id, session_ids=[str(row["id"]) for row in rows])
         return [
             _persona_session_summary_from_db(
                 row,
-                manager_row=manager_rows.get(str(row.get("id") or "")),
+                manager_row={**manager_rows.get(str(row.get("id") or ""), {}),
+                             **durable_counts.get(str(row.get("id") or ""), {})},
             )
             for row in rows
         ]
@@ -7993,7 +7996,7 @@ async def persona_session_detail(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaSessionDetail:
-    """Get a single persisted persona session with local runtime turn snapshot (if present)."""
+    """Get an owned session with retained durable transcript and current runtime plans."""
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
@@ -8002,9 +8005,8 @@ async def persona_session_detail(
         row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
         if row is None:
             raise HTTPException(status_code=404, detail="Persona session not found")
-        snapshot = manager.get_session_snapshot(
-            session_id=session_id,
-            user_id=user_id,
+        snapshot = persona_session_transcript_snapshot(
+            db, session_manager=manager, session_id=session_id, user_id=user_id,
             limit_turns=None if limit_turns <= 0 else limit_turns,
         )
         detail = _persona_session_detail_from_db(row, manager_snapshot=snapshot)
@@ -8045,15 +8047,14 @@ async def persona_session_export(
         row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
         if row is None:
             raise HTTPException(status_code=404, detail="Persona session not found")
-        snapshot = manager.get_session_snapshot(
-            session_id=session_id,
-            user_id=user_id,
+        snapshot = persona_session_transcript_snapshot(
+            db, session_manager=manager, session_id=session_id, user_id=user_id,
             limit_turns=None if limit_turns <= 0 else limit_turns,
         )
         if snapshot is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Persona transcript is only available for active live sessions",
+                detail="No retained transcript is available for this legacy Persona session",
             )
         return _persona_session_export_from_db(row, manager_snapshot=snapshot)
     except HTTPException:
@@ -8456,6 +8457,44 @@ async def persona_stream(
         tts_audio_send_lock = asyncio.Lock()
         persona_live_processing_notice_tasks_by_session: dict[str, asyncio.Task[Any]] = {}
 
+        async def _admit_persona_tool_session(*, session_id: str, context: dict[str, Any]) -> bool:
+            runtime_session = session_manager.get(session_id)
+            if bool(context.get("session_terminal")):
+                await _emit_notice(
+                    session_id=session_id, level="error", reason_code="SESSION_TERMINAL", message="Persona session is stopped."
+                )
+                return False
+            try:
+                if runtime_session is None or runtime_session.user_id != connection_user_id:
+                    raise ConflictError("Persona runtime is unavailable.")
+                bound_persona = str(context.get("persona_id") or _DEFAULT_PERSONA_ID)
+                persisted = await run_quiescent_operation(
+                    asyncio.to_thread(
+                        chacha_operation(independent=True)(persona_scope_db.validate_persona_transcript_session),
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        persona_id=bound_persona,
+                        allow_unpersisted=not runtime_session.persisted,
+                    )
+                )
+                _ensure_current_turn(session_id)
+                if not session_manager.admit_tool_session(
+                    runtime_session, user_id=connection_user_id, persona_id=bound_persona, persisted=persisted
+                ):
+                    raise ConflictError("Persona runtime changed during review.")
+                if persisted != bool(context.get("session_exists")):
+                    raise ConflictError("Persona session changed during review.")
+            except Exception as exc:  # noqa: BLE001 -- Every storage failure denies admission; cancellation still propagates.
+                logger.debug("Persona tool admission refused: {}", type(exc).__name__)
+                await _emit_notice(
+                    session_id=session_id,
+                    level="error",
+                    reason_code="SESSION_NOT_FOUND",
+                    message="This Persona session is unavailable. Reconnect and review a new request.",
+                )
+                return False
+            return True
+
         async def _record_turn(
             *,
             session_id: str,
@@ -8469,7 +8508,8 @@ async def persona_stream(
             runtime_mode_override: str | None = None,
             scope_snapshot_id_override: str | None = None,
             memory_kind: str | None = None,
-        ) -> None:
+            parent_turn_id: str | None = None,
+        ) -> dict[str, Any]:
             _ensure_current_turn(session_id)
             effective_persona_id = str(persona_id_override or persona_id or "").strip() or persona_id
             effective_runtime_mode = str(runtime_mode_override or "session_scoped").strip().lower()
@@ -8479,8 +8519,30 @@ async def persona_stream(
                 and effective_runtime_mode == "persistent_scoped"
                 and str(memory_kind or "").strip().lower() == "summary"
             )
-            try:
-                session_manager.append_turn(
+            prepared = session_manager.prepare_turn(
+                role=role,
+                content=content,
+                turn_type=turn_type,
+                metadata=metadata,
+            )
+            runtime_session = session_manager.get(session_id)
+            allow_unpersisted = bool(
+                runtime_session is not None and not runtime_session.persisted and turn_type != "assistant_reply"
+            )
+            snapshot = await run_quiescent_operation(
+                asyncio.to_thread(
+                    chacha_operation(independent=True)(persona_scope_db.append_persona_transcript_turn),
+                    session_id=session_id,
+                    user_id=connection_user_id,
+                    persona_id=effective_persona_id,
+                    turn=prepared,
+                    parent_turn_id=parent_turn_id,
+                    allow_unpersisted=allow_unpersisted,
+                )
+            )
+            _ensure_current_turn(session_id)
+            if snapshot is None:
+                prepared = session_manager.append_turn(
                     session_id=session_id,
                     user_id=connection_user_id,
                     persona_id=effective_persona_id,
@@ -8488,9 +8550,15 @@ async def persona_stream(
                     content=content,
                     turn_type=turn_type,
                     metadata=metadata,
+                    ephemeral_only=True,
                 )
-            except Exception as exc:
-                logger.debug(f"persona turn append skipped: {exc}")
+            else:
+                for retired in snapshot.pop("invalidations", []):
+                    session_manager.publish_transcript(user_id=connection_user_id, snapshot=retired)
+                if not session_manager.publish_transcript(
+                    user_id=connection_user_id, snapshot=snapshot, touch=True, expected_turn=prepared
+                ):
+                    raise ConflictError("Persona runtime retired before transcript publication.")
             if persist_personalization:
                 _ = await asyncio.to_thread(
                     persist_persona_turn,
@@ -8505,6 +8573,7 @@ async def persona_stream(
                     runtime_mode=effective_runtime_mode,
                     scope_snapshot_id=effective_scope_snapshot_id,
                 )
+            return prepared
 
         async def _emit_persona_live_tts_for_assistant_text(
             *,
@@ -9134,9 +9203,8 @@ async def persona_stream(
             description: str | None,
         ) -> None:
             """Persist approval retry state so the client cannot tamper with retried args."""
-            retries = _load_pending_retry_approvals(session_id)
             key = _pending_retry_key(plan_id=plan_id, step_idx=step_idx, tool_name=tool_name)
-            retries[key] = {
+            entry = {
                 "plan_id": str(plan_id or ""),
                 "step_idx": int(step_idx),
                 "step_type": _bounded_label(
@@ -9149,11 +9217,7 @@ async def persona_stream(
                 "why": str(why or ""),
                 "description": str(description or ""),
             }
-            session_manager.update_preferences(
-                session_id=session_id,
-                user_id=connection_user_id,
-                preferences={"pending_retry_approvals": retries},
-            )
+            session_manager.put_retry_approval(session_id=session_id, user_id=connection_user_id, key=key, approval=entry)
 
         def _consume_pending_retry_approval(
             *,
@@ -9161,17 +9225,12 @@ async def persona_stream(
             plan_id: str,
             step_idx: int,
             tool_name: str,
+            session_exists: bool,
         ) -> dict[str, Any] | None:
-            """Remove and return a stored retry approval entry for one tool step."""
-            retries = _load_pending_retry_approvals(session_id)
             key = _pending_retry_key(plan_id=plan_id, step_idx=step_idx, tool_name=tool_name)
-            entry = retries.pop(key, None)
-            session_manager.update_preferences(
-                session_id=session_id,
-                user_id=connection_user_id,
-                preferences={"pending_retry_approvals": retries},
+            return session_manager.consume_retry_approval(
+                session_id=session_id, user_id=connection_user_id, key=key, session_exists=session_exists
             )
-            return dict(entry) if isinstance(entry, dict) else None
 
         async def _call_mcp_tool(
             name: str,
@@ -9443,15 +9502,7 @@ async def persona_stream(
             runtime_mode_value: str,
             scope_snapshot_id: str | None,
         ) -> None:
-            """Emit a tool result and persist its retention/audit side effects."""
-            await _emit_tool_result(
-                session_id=session_id,
-                plan_id=plan_id,
-                step_idx=step_idx,
-                step_type=step_type,
-                tool=tool_name,
-                result=result,
-            )
+            """Retain a tool result before acknowledging it to the client."""
             await _record_turn(
                 session_id=session_id,
                 role="tool",
@@ -9463,6 +9514,14 @@ async def persona_stream(
                 persona_id_override=persona_id,
                 runtime_mode_override=runtime_mode_value,
                 scope_snapshot_id_override=scope_snapshot_id,
+            )
+            await _emit_tool_result(
+                session_id=session_id,
+                plan_id=plan_id,
+                step_idx=step_idx,
+                step_type=step_type,
+                tool=tool_name,
+                result=result,
             )
             _ = await asyncio.to_thread(
                 persist_tool_outcome,
@@ -9815,6 +9874,7 @@ async def persona_stream(
                     user_id=connection_user_id,
                     persona_id=runtime_persona_id,
                     resume_session_id=session_id,
+                    persisted=session_exists,
                 )
                 _mark_live_control_stream_connected(session_id)
                 existing_preferences, activity_surface = _get_session_preferences_with_activity_surface(
@@ -9937,7 +9997,7 @@ async def persona_stream(
             }
             if client_message_id:
                 turn_metadata["client_message_id"] = client_message_id
-            await _record_turn(
+            user_turn = await _record_turn(
                 session_id=session_id,
                 role="user",
                 content=normalized_text,
@@ -10108,6 +10168,7 @@ async def persona_stream(
                     metadata={"client_message_id": client_message_id, "source": source},
                     persona_id_override=runtime_persona_id, runtime_mode_override=runtime_mode,
                     scope_snapshot_id_override=runtime_scope_snapshot_id,
+                    parent_turn_id=user_turn["turn_id"],
                 )
                 await _emit_assistant_delta(session_id=session_id, text_delta=answer, done=True)
                 await _emit_persona_live_tts_for_assistant_text(session_id=session_id, assistant_text=answer)
@@ -10917,6 +10978,9 @@ async def persona_stream(
                         session_id=session_id,
                         user_id=authenticated_user_id,
                     )
+                    reviewed_plan = session_manager.get_plan(session_id=session_id, plan_id=plan_id, user_id=connection_user_id)
+                    if reviewed_plan is not None and not await _admit_persona_tool_session(session_id=session_id, context=runtime_context):
+                        continue
                     try:
                         pending_plan = session_manager.consume_plan_for_confirmation(
                             session_id=session_id,
@@ -10972,6 +11036,8 @@ async def persona_stream(
                 for step in pending_plan.steps:
                     if step.idx not in approved_step_indices:
                         continue
+                    if not await _admit_persona_tool_session(session_id=session_id, context=runtime_context):
+                        break
                     step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
                     step_policy = _evaluate_step_policy(
                         step_type=step_type,
@@ -11105,12 +11171,36 @@ async def persona_stream(
                     str(msg.get("step_type") or "mcp_tool"),
                     tool_name=tool_name,
                 )
-                pending_retry = _consume_pending_retry_approval(
-                    session_id=session_id,
-                    plan_id=plan_id,
-                    step_idx=step_idx,
-                    tool_name=tool_name,
+                pending_retry = _load_pending_retry_approvals(session_id).get(
+                    _pending_retry_key(plan_id=plan_id, step_idx=step_idx, tool_name=tool_name))
+                if pending_retry is None:
+                    await _emit_notice(
+                        session_id=session_id,
+                        step_idx=step_idx,
+                        tool=tool_name,
+                        step_type=step_type,
+                        level="warning",
+                        message="No pending approval retry found for this tool step",
+                        reason_code="APPROVAL_RETRY_NOT_FOUND",
+                    )
+                    continue
+                runtime_context = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
+                    persona_scope_db, session_id=session_id, user_id=authenticated_user_id,
                 )
+                if not await _admit_persona_tool_session(session_id=session_id, context=runtime_context):
+                    continue
+                runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
+                runtime_mode = _bounded_label(runtime_context.get("runtime_mode"), allowed=_PERSONA_RUNTIME_MODES, fallback="session_scoped")
+                runtime_scope_snapshot_id = str(runtime_context.get("scope_snapshot_id") or "").strip() or None
+                try:
+                    pending_retry = _consume_pending_retry_approval(
+                        session_id=session_id, plan_id=plan_id, step_idx=step_idx, tool_name=tool_name,
+                        session_exists=bool(runtime_context.get("session_exists")),
+                    )
+                except PlanConfirmationError as exc:
+                    await _emit_notice(session_id=session_id, level="error", reason_code=exc.reason_code, message=str(exc))
+                    continue
                 if pending_retry is None:
                     await _emit_notice(
                         session_id=session_id,
@@ -11135,19 +11225,6 @@ async def persona_stream(
                 why = str(pending_retry.get("why") or "").strip() or None
                 description = str(pending_retry.get("description") or "").strip() or None
 
-                runtime_context = await asyncio.to_thread(
-                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
-                    persona_scope_db,
-                    session_id=session_id,
-                    user_id=authenticated_user_id,
-                )
-                runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
-                runtime_mode = _bounded_label(
-                    runtime_context.get("runtime_mode"),
-                    allowed=_PERSONA_RUNTIME_MODES,
-                    fallback="session_scoped",
-                )
-                runtime_scope_snapshot_id = str(runtime_context.get("scope_snapshot_id") or "").strip() or None
                 persona_policy_rules = normalize_policy_rules(runtime_context.get("policy_rules"))
                 current_preferences = session_manager.get_preferences(
                     session_id=session_id,
@@ -11224,17 +11301,9 @@ async def persona_stream(
                     fallback="session_scoped",
                 )
                 runtime_scope_snapshot_id = str(runtime_context.get("scope_snapshot_id") or "").strip() or None
+                session_manager.create(user_id=connection_user_id, persona_id=runtime_persona_id,
+                                       resume_session_id=session_id, persisted=bool(runtime_context.get("session_exists")))
                 assistant_text = "(scaffold)"
-                await _emit_assistant_delta(
-                    session_id=session_id,
-                    text_delta=assistant_text,
-                )
-                await _emit_notice(
-                    session_id=session_id,
-                    level="info",
-                    reason_code="ECHO_EVENT",
-                    message=f"echo: {mtype}",
-                )
                 await _record_turn(
                     session_id=session_id,
                     role="assistant",
@@ -11246,6 +11315,17 @@ async def persona_stream(
                     runtime_mode_override=runtime_mode,
                     scope_snapshot_id_override=runtime_scope_snapshot_id,
                 )
+                await _emit_assistant_delta(
+                    session_id=session_id,
+                    text_delta=assistant_text,
+                )
+                await _emit_notice(
+                    session_id=session_id,
+                    level="info",
+                    reason_code="ECHO_EVENT",
+                    message=f"echo: {mtype}",
+                )
+
     except WebSocketDisconnect:
         if auth_revoked_event is not None and auth_revoked_event.is_set():
             logger.info("Persona stream disconnected after auth revalidation failure")
