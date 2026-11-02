@@ -86,6 +86,7 @@ from unittest.mock import patch
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError, TransactionError
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
+from tldw_Server_API.app.core.AuthNZ.membership_writer import TrustedMembershipReason, TrustedMembershipWriteContext
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
@@ -451,8 +452,9 @@ async def main() -> None:
             limit = {'none': None, 'zero': 0, 'limited': 2, 'org': 2, 'team': 3, 'user': 4}[kind]
             if kind in {'org', 'team', 'user'}:
                 memberships = AuthnzOrgsTeamsRepo(pool)
-                await memberships.add_org_member(org_id=51, user_id=owner)
-                await memberships.add_team_member(team_id=52, user_id=owner)
+                fixture_context = TrustedMembershipWriteContext(trusted_reason=TrustedMembershipReason.BOOTSTRAP)
+                await memberships.add_org_member(org_id=51, user_id=owner, context=fixture_context)
+                await memberships.add_team_member(team_id=52, user_id=owner, context=fixture_context)
                 await OrgProfileOverridesRepo(pool).upsert_override(
                     org_id=51, key='limits.storage_quota_mb', value=2, updated_by=owner,
                 )
