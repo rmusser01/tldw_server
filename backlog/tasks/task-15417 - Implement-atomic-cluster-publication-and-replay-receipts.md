@@ -1,7 +1,7 @@
 ---
 id: TASK-15417
 title: Implement atomic cluster publication and replay receipts
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -18,9 +18,9 @@ Atomic owner-scoped publication, source recheck, replay receipts and monotonic a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
-- [ ] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
-- [ ] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
+- [x] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
+- [x] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
+- [x] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,19 +34,21 @@ Final self-review caught and test-first closed concurrent cleanup cluster-set dr
 Independent Task7review21919902aa: Issues/Needsfixes, oneImportant I1/P1 validated by controller source and real official restrictedPG focusedprobe. Deletion-set equality is checked before source-row locks; an ordinary second writer createscluster+adds existing sourceclaim in that gap withoutchangingdigest fields. Publication overwritesassignment but leaves newcluster membership/representative and commitsokreceipt. Accept withinoriginalscope, no newdesignapproval. Fix1/3 originalimplementer must add exactgap regression then bounded deletion-set validation AFTER source/cleanup locks before destructivewrites; retryableclaims_cluster_source_changed rollsbackhead/output/receipt while retainingotherwriter committedstate. No late clusterlocks afterClaims or broadenedwrites. Task remainsInProgress; carriedTask5Mappingannotationminor independentlyverifiedclosed. No Task8untilcleanreview.
 Task7 Fix Round1/3 started at FIX_BASE21919902aa36048c428f747b294334e905f0b4dc. Read complete I1/P1 and verified the guard precedes source locks. Exact source-reader-entry gap regression plus a normal-writer post-lock contention case added before production fix; official restricted PostgreSQL only. Move bounded deletion-set validation after source/cleanup locks with no late cluster locks or broad writes. Preserve controller finding note; keep In Progress for scoped independent re-review.
 Fix Round1/3 I1/P1 implemented at FIX_BASE21919902aa: bounded deletion-set validation moved after source/cleanup locks and snapshot validation, before destructive writes; plain SELECT/no new cluster locks, no broadened writes or writer protocol. Exact source-reader-entry normal create+add regression RED2 then GREEN; lower-bound drift variant RED1/GREEN5 ensures retryable source_changed even when late arrival crosses cleanup limit. Real normal-writer barriers prove post-lock drift retries without waiting on new cluster lock, and post-final-guard membership add waits until commit then may act as a subsequent owner mutation. Final affected SQLite+PG publication/property groups 123 passed, 0 skips/fails/xfail/xpass, 259 inherited warnings, 29.23s; includes 67 actual official restricted PG cases. Full configured two-file Ruff 0/current and 0/baseline, compile/whole-file format pass, touched-production Bandit0 findings/errors; no suppressions/gate changes. Exact commands/evidence/contracts/limitations appended to assigned task-7-report.md. Preserve controller I1 note, keep In Progress for fresh scoped independent re-review. No Task8 or other-task changes.
+Task7complete after scoped independentfix1 re-review task-7-fix1-review.md: I1/P1 ADDRESSED, zero open/newbreakage. Commits21919902aa/e7757f5e7f. Finalchangedpublishergroups123passed0skips incl67realrestrictedPG,55SQLite,1real20exampleproperty; earlierfull210case scope with87PG qualified beforeguardmove andunchangedprerequisites notduplicated. ConfiguredtouchedRuff0baseline/current,compile/fullchangedformat/hooks pass,Bandit0findings/errors. Exactlateclusterarrival and post-lock/post-finalguard interleavings proven; source_changed rollbackpreservesconcurrentstate,no lateclusterlocks/broadwrites. Task5Mappingannotationminor independentlyclosed. No Jobs lifecycle, Task8orproducer enabled by this prerequisite.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Atomic owner publication with immutable replay receipts, generation/authority/UUID fencing, bounded source/reference locks and rollback across both backends. Exactempty and preserving embeddingskips, foreignreference integrity, pruningindependence and ordinarywriter races covered. Allvalidatedreviewfindingsclosed, including post-source-lock deletion-set drift. Finalaffected123tests0skips, inheritedwarningsdocumented; configuredquality/Bandit/hooks pass. Independentscopedre-review clean; subsequent Watchlists/worker/API/finalqualification remain separate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
