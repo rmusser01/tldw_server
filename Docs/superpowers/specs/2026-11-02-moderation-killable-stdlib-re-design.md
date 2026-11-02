@@ -4,6 +4,7 @@ Date: 2026-11-02
 Status: Approved by requester on 2026-11-02; implementation plan review pending
 Task: TASK-15414
 Baseline inspected: `aec70514cd`, following merged Moderation PR #3396
+Review amendments: requester authorized all four plan-review corrections on 2026-11-02; tracked by TASK-15415.
 
 ## Intent and Decisions
 
@@ -79,11 +80,23 @@ the implementation plan. The worker executes existing evaluator algorithms;
 do not create a second moderation semantics implementation.
 
 Supported requests are one complete `evaluate` batch (without service-level
-redaction), `redact`, or `redact_with_count` batch. All rules for that batch
+redaction), `redact`, `redact_with_count`, `supervised_evaluate`, or
+`custom_substitute` batch. All rules for that batch
 execute inside that child, including short-text search/substitution, long-text
 iteration, and nested helper calls. Child-side reconstruction compiles patterns
 with stdlib `re`; there is no ASCII, literal-rule, short-text, overload, or
 worker-error inline matching fallback.
+
+This includes the existing direct `SupervisedPolicyEngine.check_text()` search/
+substitution path and Workflow moderation custom-pattern substitutions. Guardian
+DB reads, governance filtering, result assembly, and notifications remain parent
+responsibilities; the child consumes only bounded rule snapshots and returns
+winning rule indices/spans and optional final redaction. Preserve supervised
+priority, first-in-order ties, early block exit, and notify semantics instead of
+mapping them onto the base evaluator's different ranking. Preserve Workflow
+sequential template/backreference substitution and existing invalid-rule skipping;
+base evaluator replacements remain literal. A template expansion must be sized
+before allocation. These are already-moderated paths, not new LLM-surface coverage.
 
 The parent snapshots supported policy values into bounded plain data. Preserve
 the distinction between `PatternRule` and legacy raw `re.Pattern` entries;
@@ -157,7 +170,12 @@ Use one typed `ModerationExecutionError` with sanitized reason codes such as
 All service evaluation/redaction entry points propagate it after reporting.
 No string/tuple-only method can truthfully represent incomplete redaction as a
 successful ordinary return. Do not invent a matched pattern/span or classify the
-user as having violated a content rule.
+user as having violated a content rule. The outer async operation boundary owns
+reporting when offload admission fails before service invocation. It receives
+validated operation/phase/size metadata before admission and shares an atomic
+report-once guard with nested service calls. Direct synchronous callers remain
+covered by the service boundary. Capacity failure cannot silently bypass admin
+visibility, and normal cancellation is still not an incident.
 
 Existing normal success shapes and `moderation_service.py` imports remain intact.
 `evaluate_action*()` still dispatch through `self.evaluate_text()`; evaluation
@@ -213,10 +231,15 @@ DB-management store, with an explicit metadata-only construction path:
   arbitrary caller context, or raw exception/child stderr;
 - no synthetic content match and no automatic public issue.
 
-For phase `None`, use an explicit phase-unspecified marker in context and create
-separate input/output administrative rows only if required by the existing DB
-phase constraint; neither row asserts a real content violation. The builder must
-avoid attributing an unknown phase to a user's input or output.
+For phase `None`, store exactly one review item with phase `unspecified`; never
+manufacture input/output projections. Extend only the review-item response/model
+and storage constraint to admit this neutral phase for engine incidents. Content
+rule/test phases remain unchanged. A DB-management migration must preserve row
+IDs, idempotency keys, decisions, audit history, undo state, foreign keys, and
+indexes, and be transactional/idempotent under concurrent startup. Run migration
+during lifecycle initialization before traffic, not in the 250 ms incident-write
+path. If preparation is unavailable, preserve the block and degraded-reporting
+behavior; do not return to duplicate records or a falsely attributed phase.
 
 Deduplicate atomically by reporter version, phase marker, reason, operation, and
 UTC five-minute bucket using the existing unique idempotency key. Do not include
@@ -233,6 +256,12 @@ Reporting cannot hold the event loop, retry indefinitely, or undo a block. If th
 store fails, emit a sanitized ERROR event and failure metric, then preserve the
 original block. Durable admin visibility cannot be guaranteed while all stores
 are unavailable; document and test that degraded state explicitly.
+For early async failures, reporting uses independent bounded I/O capacity rather
+than the already-saturated moderation offload path. A busy or stalled reporter
+degrades to the safe operational signal without an unbounded queue or event-loop
+DB wait. Its report-once claim also covers nested service propagation. Actual
+input lengths above the content ceiling must reach that reporting boundary before
+size rejection, rather than failing while constructing metadata outside it.
 
 ## Validation and Rollout
 
@@ -242,10 +271,15 @@ are unavailable; document and test that degraded state explicitly.
 2. Deterministic runner tests with controlled clock/process/pipe doubles: startup
    stalls, partial/oversize IPC, saturation, deadline sharing, crash, malformed
    results, cancellation, slot quarantine, reaping, and lifecycle shutdown.
-3. Real child tests with an outer harness timeout: catastrophic backtracking is
+3. Real child tests with an independently owned process-tree harness: catastrophic backtracking is
    killed, the parent survives and handles a subsequent safe request, async
    heartbeat remains responsive, and no child/pipe/reader is leaked. Never run
-   adversarial patterns in the pytest/application main process.
+   adversarial patterns in the pytest/application main process. The harness must
+   outlive and terminate a stalled probe and all its descendants independently
+   of the supervisor under test: a POSIX process group or Windows kill-on-close
+   Job Object. Prove the harness by deliberately timing out a probe with a live
+   child and checking that neither survives. The pytest thread timeout is only
+   a longer secondary guard, not descendant cleanup authority.
 4. Integration tests for every caller family above: no model invocation on input
    failure, no affected output/save, no fallback retry, terminal stream behavior,
    and bounded cancellation. Assert operational versus content-block distinction.
@@ -282,6 +316,12 @@ Fresh builder check: completed by an independent Python backend/security reviewe
 on 2026-11-02; result: "nothing important left". No blocking questions raised.
 Requester approval of this written design: received on 2026-11-02 ("yes").
 Implementation plan: `Docs/superpowers/plans/2026-11-02-moderation-killable-stdlib-re-implementation-plan.md`.
+Review amendments close runtime coverage/reporting gaps and replace duplicate
+incident projections; accepted ADR-086 rationale remains unchanged. Revised plan
+confirmation remains pending; no runtime implementation has begun.
+Independent follow-up review on 2026-11-02 confirmed all four corrections at the
+planning level with no new amendment-caused P1/P2 issues. Runtime verification
+remains future implementation work.
 
 ## References
 
