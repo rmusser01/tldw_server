@@ -23,6 +23,8 @@ from tldw_Server_API.app.core.testing import is_test_mode
 from .base import ChunkerConfig, ChunkingMethod, ChunkResult
 from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
+from .execution.models import ExecutionHooks
+from .execution.service import ChunkExecutionService
 from .hierarchical.service import HierarchyService
 from .llm_context import _LLM_UNSET
 from .option_utils import _coerce_bool_option
@@ -75,6 +77,14 @@ except _CHUNKER_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - safety fallback
     MetricDefinition = None  # type: ignore
     MetricType = None  # type: ignore
     _METRICS_AVAILABLE = False
+
+def _execution_hooks() -> ExecutionHooks:
+    """Forward each event to the current facade logger and metric function."""
+    return ExecutionHooks(
+        get_logger=lambda: logger,
+        increment_counter=lambda *args, **kwargs: increment_counter(*args, **kwargs),
+    )
+
 
 def _ensure_chunker_metrics_registered() -> None:
     """Register chunker-specific cache metrics once."""
@@ -567,159 +577,9 @@ class Chunker:
             InvalidChunkingMethodError: If method is not supported
             ChunkingError: For other chunking errors
         """
-        # Sanitize and validate input
-        text = self._sanitize_input(text)
-
-        if not text.strip():
-            logger.debug("Empty text provided, returning empty list")
-            return []
-
-        self._enforce_text_size(text, source="chunk_text")
-
-        # Use defaults if not specified
-        options_raw: dict[str, Any] = dict(options)
-        options_raw.pop("align_text_to_source", None)
-        method = self._normalize_method_argument(method) or self.config.default_method.value
-        max_size = max_size if max_size is not None else self.config.default_max_size
-        overlap = overlap if overlap is not None else self.config.default_overlap
-        # Harden overlap to avoid non-progressing loops in strategies
-        language = language or self.config.language
-        method = self._resolve_method(method, language, options_raw)
-        options_raw = self._apply_option_aliases(method, options_raw)
-        overlap = self._override_overlap_for_method(method, overlap, options_raw)
-        try:
-            if isinstance(max_size, int) and isinstance(overlap, int):
-                if overlap < 0:
-                    logger.warning(f"Negative overlap ({overlap}) adjusted to 0")
-                    overlap = 0
-                if max_size <= 0:
-                    # Strategy will raise on invalid max_size; leave as-is here
-                    pass
-                elif overlap >= max_size:
-                    logger.warning(f"Overlap ({overlap}) >= max_size ({max_size}); adjusting to max_size - 1")
-                    overlap = max_size - 1
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Overlap adjustment check failed: {e}")
-
-        # Configuration-only flags (removed before invoking strategy)
-        tokenizer_override = options_raw.get("tokenizer_name")
-        if tokenizer_override is None:
-            tokenizer_override = options_raw.get("tokenizer_name_or_path")
-        if isinstance(tokenizer_override, str):
-            tokenizer_override = tokenizer_override.strip() or None
-        use_per_call_strategy = bool(tokenizer_override) and method == ChunkingMethod.TOKENS.value
-        strategy_options: dict[str, Any] = dict(options_raw)
-        strategy_options.pop("code_mode", None)
-        strategy_options.pop("tokenizer_name", None)
-        strategy_options.pop("tokenizer_name_or_path", None)
-
-        # Check cache if enabled
-        cache_key = None
-        cache_allowed = False
-        cache_reason = "disabled"
-        if self._cache is not None:
-            try:
-                tlen = len(text)
-                min_len = getattr(self.config, 'min_text_length_to_cache', 0)
-                max_len = getattr(self.config, 'max_text_length_to_cache', getattr(self.config, 'cache_max_text_length', 2_000_000))
-                if tlen < int(min_len):
-                    cache_reason = "skipped_min_len"
-                elif tlen > int(max_len):
-                    cache_reason = "skipped_max_len"
-                else:
-                    cache_allowed = True
-                    cache_reason = "allowed"
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                cache_reason = "policy_error"
-        # Attempt get if allowed
-        effective_llm_call, effective_llm_cfg = self._get_effective_llm_hooks()
-        llm_signature = self._get_llm_signature(
-            llm_call_func=effective_llm_call,
-            llm_config=effective_llm_cfg,
+        return ChunkExecutionService(self, _execution_hooks()).chunk_text(
+            text, method, max_size, overlap, language, **options
         )
-        if self._cache is not None and cache_allowed:
-            cache_key = self._get_cache_key(
-                text,
-                method,
-                max_size,
-                overlap,
-                language,
-                options_raw,
-                llm_signature=llm_signature,
-            )
-            cached_result = self._cache.get(cache_key)
-            if cached_result is not None:
-                with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                    increment_counter("chunker_cache_get_total", labels={"result": "hit", "reason": cache_reason})
-                logger.debug("Returning cached result")
-                return cached_result
-            else:
-                with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                    increment_counter("chunker_cache_get_total", labels={"result": "miss", "reason": cache_reason})
-        else:
-            # cache disabled or not allowed by policy
-            with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                increment_counter("chunker_cache_get_total", labels={"result": "skip", "reason": cache_reason})
-
-        strategy_lock = self._strategy_lock if self._strategy_cache_mode == "shared" else nullcontext()
-        try:
-            with strategy_lock:
-                # Get strategy lazily per cache mode; force per-call strategy for tokenizer overrides
-                strategy = self._create_strategy_instance(method) if use_per_call_strategy else self._get_strategy_for_call(method)
-                self._sync_strategy_llm(strategy, llm_call_func=effective_llm_call, llm_config=effective_llm_cfg)
-                # Allow token strategy to switch tokenizer dynamically
-                if method == ChunkingMethod.TOKENS.value and tokenizer_override:
-                    try:
-                        if getattr(strategy, "tokenizer_name", None) != tokenizer_override:
-                            strategy.tokenizer_name = tokenizer_override
-                            if hasattr(strategy, "_tokenizer"):
-                                strategy._tokenizer = None
-                            if hasattr(strategy, "_tokenizer_init_attempted"):
-                                strategy._tokenizer_init_attempted = False
-                    except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                        logger.debug("Failed to update tokenizer override", exc_info=True)
-
-                # Update strategy language if different
-                if language != strategy.language:
-                    self._apply_strategy_language(strategy, language)
-
-                # Perform chunking
-                logger.debug(f"Chunking with method={method}, max_size={max_size}, "
-                            f"overlap={overlap}, language={language}")
-
-                chunks = strategy.chunk(text, max_size, overlap, **strategy_options)
-
-            # Cache result if enabled
-            if self._cache is not None and len(chunks) > 0 and cache_allowed and cache_key is not None:
-                try:
-                    self._cache.put(cache_key, chunks)
-                    with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                        increment_counter(
-                            "chunker_cache_put_total",
-                            labels={"result": "stored", "reason": cache_reason or "allowed"},
-                        )
-                except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                    # Defensive: never fail chunking due to cache policy
-                    with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                        increment_counter(
-                            "chunker_cache_put_total",
-                            labels={"result": "error", "reason": cache_reason or "allowed"},
-                        )
-            elif self._cache is not None and len(chunks) > 0:
-                with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                    increment_counter("chunker_cache_put_total", labels={"result": "skipped", "reason": cache_reason})
-
-            if getattr(self.config, 'verbose_logging', False):
-                logger.info(f"Created {len(chunks)} chunks using {method} method")
-            else:
-                logger.debug(f"Created {len(chunks)} chunks using {method} method")
-            return chunks
-
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Chunking failed: {e}")
-            if isinstance(e, ChunkingError):
-                raise
-            raise ChunkingError(f"Chunking failed: {str(e)}") from e
 
     def chunk_text_with_metadata(self,
                                  text: str,
