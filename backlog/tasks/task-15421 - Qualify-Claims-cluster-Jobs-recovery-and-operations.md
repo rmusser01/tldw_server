@@ -1,7 +1,7 @@
 ---
 id: TASK-15421
 title: Qualify Claims cluster Jobs recovery and operations
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -18,9 +18,9 @@ Cross-backend fault/property/security qualification, rollout/rollback/restore ru
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
-- [ ] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
-- [ ] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
+- [x] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
+- [x] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
+- [x] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -48,19 +48,21 @@ Final whole-branch review at1e1cfe89939a05ea213b6233429480c6b242fee3 returned RE
 Final whole-branch fix wave implements BOTH authorized I1/I2 together from FIX_BASE 1e1cfe89939a05ea213b6233429480c6b242fee3. Test-first behavioral RED reproduced 16 active-prune losses plus actual typed/HTTP fair-share failures on SQLite/official PG; setup/audit-event corrections and one enum implementation typo are disclosed in final-fix-report.md. Focused GREEN49passed0skips111warnings11.84s. Production exactly shared Jobs locked prune selection plus preparation callback typed rejection and existing SQLite/Postgres savepoint rollback; Claims endpoint unchanged. Full affected coverage currently running with all required opt-ins and task-owned55434 endpoint. Compile8pass; configured full-file Ruff0base/0current/0new; touched production Bandit exits1 for only unchanged manager B608 shifted10247->10251, zero new/errors. Preserve parent authorization note and keep In Progress/criteria/plan/ADR untouched; scoped independent rereview remains parent-owned.
 Final I1/I2 affected qualification COMPLETE exit0:1232passed0fail/error/skip/xfail/xpass8669warnings405.39s across38explicit Jobs/Claims modules; all17added production executable lines covered. SQLite and official PG, restricted-owner real fair-share HTTP429/positive replay/status, ordinary prune and legacy BadRequest guards pass. Structured945warning records:7743Deprecation,919Resource,2Pydantic,2Starlette,1eachUser/Config/Requests. ResourceWarning newly observed relative prior fullscope:919distinct unclosed sqlite3.Connection messages, emitted at GC locations not allocation. Three bounded diagnostics then stop: two6pass tracemalloc/GC probes did not reproduce; direct ownership observer partial6bodiespass/2observer cross-thread teardownerrors,107recorded handles/98closed/9open, all66checked snapshot-helper handles closed and all9open allocated unchanged Jobs/migrations.py1379 via existing fixtures/event_stream. No new raw-connect helper; finally-close helper unchanged; cannot retrospectively prove all919origins, explicitly qualified in final-fix-report. No fourth probe/full/root rerun or blanket filter. Final compile8pass/configuredRuff0base=0current/changed-rangeBlack pass; Bandit1unchangedB608/0new/errors,295diagnostic warnings base/current. Stage canonical tracking before all9path applicable hooks, then normal scoped fixcommit. Report .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/final-fix-report.md. Keep In Progress/criteria/plan/ADR unchanged; parent independent scoped rereview/finalization required.
 Final fix self-review and all applicable explicit full9path pre-commit hooks PASS exit0 after staging canonical Task15421 (including preserved parent authorization); YAML/TOML and wizard-filtered Ruff/Black no-applicable skips, separate configured full-file Ruff and changed-range Black already pass. No installed git pre-commit/core.hooksPath, no automatic-hook claim or bypass. Cached diffcheck0, exact9path staged scope, no Claims production endpoint/plan/ledger/ADR changes. Normal scoped local commit follows; final-fix-report.md records final commit/evidence. Qualification remains1232passed0skips with disclosed919ResourceWarning provenance limit and inheritedBandit/root-collection debt; independent parent rereview pending, task stays In Progress.
+Final whole-branch review and its ONE coherent fix wave are complete. Full review checked all23Jobs mutation entries, eight approved corrections, domain/native-storage/owner/API/Watchlists/rollback/restore boundaries and listed16unqualified behaviors. Both Important findings fixed in f42867f628d1597f5fbd66d6a3bb60684563764a; independent scoped re-review reports I1 ADDRESSED and I2 ADDRESSED, no new Critical/Important/Minor breakage. Active bound Jobs survive prune across states/keys/archive settings; real resource fair-share refusal preserves typed429, savepoint rollback, legacy exceptions and replay-first behavior. Own post-fix affected gate1232passed0skips8669warnings,49targetedpass,17of17added executable statements covered. Four production files Bandit one unchanged B608/zero new/zero errors; configured8fileRuff0baseline/current, compile/scopedformat/explicitnormalhooks pass. Earlier full4184pass3legacy skips and explicit storage/config/Backlog scopes are pre-wave context, not falsely refreshed all-code evidence. Newly observed919SQLiteResourceWarnings remain partial-provenance qualification:66checkedhelperhandlesclosed,9sampledopen allocations in unchanged migration1379, two diagnosticthread-affinityerrors; not all919 traced or called inherited/clean. Single rootattempt exit2unchanged Workspaces httpx2collectionblocker/no tests executed. No further root runs, unrelated repairs, publication/rebase/merge/deployment or ADR087 acceptance. All implementation/task/final review gates closed; remove only this completed plan per repo policy, preserve approvedspec/acceptedADR/runbook and branch/worktree. Final non-code tracking/plan cleanup will use canonical checks and applicable explicit hooks before local commit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed Claims Jobs Stage2C cross-backend recovery, fault/property tests, operational runbook and independent task/whole-branch review. Jobs retains execution lifecycle; Claims owns atomic replay-safe output. Qualified real SQLite and official restricted PostgreSQL paths. Final review found and verified fixes for active resource pruning and fair-share HTTPclassification;1232post-fix affected tests pass, no skips, with added-line coverage17/17. Earlier4184full-scope passes and disclosed legacy skips remain contextual, not a refreshed root pass. No new lint/security findings; inherited B608/lint/warning debt,919partially traced SQLiteResourceWarnings and unchanged httpx2root collection blocker remain explicit limits. Local implementation complete, not release/current-dev/remote-CI qualification. No push, PR, merge or deployment.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
