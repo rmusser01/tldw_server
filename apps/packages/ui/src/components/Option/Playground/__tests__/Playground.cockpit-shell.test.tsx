@@ -975,6 +975,7 @@ describe("Playground cockpit shell", () => {
     expect(runtimeRail).not.toHaveTextContent("Ready");
     expect(runtimeRail).not.toHaveTextContent("No chat models configured");
     finishModels([]);
+    // Catalog invocation precedes query settlement and the runtime render.
     await waitFor(() => {
       expect(runtimeRail).toHaveTextContent("Error");
       expect(runtimeRail).toHaveTextContent("No chat models configured");
