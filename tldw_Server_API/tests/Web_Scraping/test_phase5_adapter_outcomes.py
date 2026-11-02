@@ -727,6 +727,76 @@ async def test_standalone_default_method_still_accepts_real_js_advice(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("profile", ["recursive", "sitemap"])
+@pytest.mark.parametrize("stored_form", ["absent", "shorthand", "records"])
+@pytest.mark.parametrize("explicit_form", ["shorthand", "records"])
+async def test_public_crawl_cookie_forms_preserve_stored_explicit_route_precedence(
+    monkeypatch, tmp_path, profile, stored_form, explicit_form
+):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import CookieManager, EnhancedWebScraper
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import crawl
+    from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse
+
+    stored = {"stored_only": "stored-secret", "collision": "stored-c", "sid": "stored-sid"}
+    explicit = {"explicit_only": "explicit-secret", "collision": "explicit-c", "sid": "explicit-sid"}
+
+    def form(values, kind):
+        return [values] if kind == "shorthand" else [{"name": k, "value": v} for k, v in values.items()]
+
+    fixture = _harness()
+    resolve = fixture.dependencies.resolve_plan
+    fixture.dependencies = replace(
+        fixture.dependencies, resolve_plan=lambda *args: replace(resolve(*args), cookies={"sid": "route-sid"})
+    )
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: fixture.dependencies)
+
+    async def allow(*args, **kwargs):
+        return SimpleNamespace(allowed=True)
+
+    fetch = article._fetch_response
+    discovery = []
+
+    async def response(dependencies, request):
+        if request.url.endswith("sitemap.xml"):
+            discovery.append(dict(request.cookies))
+            return FetchResponse(request.url, 200, {}, f"<urlset><url><loc>{URL}</loc></url></urlset>", "httpx")
+        return await fetch(dependencies, request)
+
+    monkeypatch.setattr(crawl, "decide_web_outbound_policy", allow)
+    monkeypatch.setattr(article, "_fetch_response", response)
+    scraper = EnhancedWebScraper(config={})
+    scraper.cookie_manager = CookieManager(tmp_path / "cookies.json")
+    if stored_form != "absent":
+        scraper.cookie_manager.add_cookies("example.com", form(stored, stored_form))
+    scraper.cookie_manager.add_cookies("other.example", [{"unrelated": "not-for-this-job"}])
+    payloads = []
+    submit = scraper.job_queue.submit_page
+
+    async def record(job, **kwargs):
+        payloads.append(job.metadata)
+        return await submit(job, **kwargs)
+
+    monkeypatch.setattr(scraper.job_queue, "submit_page", record)
+    try:
+        if profile == "recursive":
+            result = await scraper.recursive_scrape(URL, max_pages=1, custom_cookies=form(explicit, explicit_form))
+        else:
+            result = await scraper.scrape_sitemap(
+                URL + "/sitemap.xml", max_urls=1, custom_cookies=form(explicit, explicit_form)
+            )
+    finally:
+        await scraper.stop()
+    selected = {**(stored if stored_form != "absent" else {}), **explicit}
+    assert result[0]["extraction_successful"] is True
+    assert fixture.fetch.requests[0].cookies == {**selected, "sid": "route-sid"}
+    assert not discovery or discovery == [selected]
+    assert all("stored_cookies_by_netloc" not in payload for payload in payloads)
+    assert all({c["name"]: c["value"] for c in p["custom_cookies"]} == selected for p in payloads)
+
+
+@pytest.mark.asyncio
 async def test_progress_save_load_remains_plain_snapshot(tmp_path):
     from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
 
