@@ -620,6 +620,7 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options,
+                    owner_user_id=str(user_id),
                     TemplateClassifier=TemplateClassifier,
                     first_url=first_url,
                     first_filename=first_filename,

@@ -269,7 +269,12 @@ async def process_text_for_chunking_json(
             if not media_db:
                 raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                                     detail="Chunking template requested but user database is unavailable.")
-            template_data = media_db.get_chunking_template(name=request_data.options.template_name)
+            owner_user_id = str(getattr(current_user, "id", "") or "").strip()
+            if not owner_user_id:
+                raise HTTPException(status_code=401, detail="Authenticated template owner required.")
+            template_data = media_db.get_chunking_template(
+                name=request_data.options.template_name, owner_user_id=owner_user_id
+            )
             if template_data:
                 logger.info(f"Using chunking template: {request_data.options.template_name}")
                 template_used = True
