@@ -666,9 +666,13 @@ class ScrapingJobQueue(ProcessLocalJobQueue):
     def _canonical_parent(self, callback=None):
         """Recognize only the unreplaced default pair; opaque callbacks stay opaque."""
         parent = self.parent_scraper
+        execute = callback if callback is not None else self._execute_job
+        scrape = getattr(parent, "scrape_article", None)
         if (
-            getattr(callback if callback is not None else self._execute_job, "__func__", None) is _DEFAULT_QUEUE_EXECUTE
-            and getattr(getattr(parent, "scrape_article", None), "__func__", None) is _DEFAULT_ENHANCED_SCRAPE
+            getattr(execute, "__self__", None) is self
+            and getattr(execute, "__func__", None) is _DEFAULT_QUEUE_EXECUTE
+            and getattr(scrape, "__self__", None) is parent
+            and getattr(scrape, "__func__", None) is _DEFAULT_ENHANCED_SCRAPE
         ):
             return parent
         return None
@@ -1805,6 +1809,8 @@ class EnhancedWebScraper:
             backend_setting=lambda _plan: state["route_backend"],
             convert_content=lambda content: content,
             resolve_handler=lambda path: None if path == DEFAULT_HANDLER else handler_resolver(path),
+            http_only=True,
+            http_failure=_failed_scrape_result,
         )
 
         async def run():

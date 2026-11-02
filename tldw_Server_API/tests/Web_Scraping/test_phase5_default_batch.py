@@ -95,6 +95,20 @@ def batch(monkeypatch, tmp_path):
     return state
 
 
+@pytest.fixture
+def browser_outbound(batch, monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser import GuardedArticleBrowser
+
+    calls = []
+
+    async def rendered(self, url, profile, limits):
+        calls.append(url)
+        return HTML
+
+    monkeypatch.setattr(GuardedArticleBrowser, "acquire", rendered)
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_default_batch_stops_at_real_parent_network_limit(batch):
     batch.limits(network_requests=1)
@@ -403,6 +417,128 @@ async def test_default_queue_late_replacement_keeps_original_exception_and_submi
         assert raised.value is failure and failure.__cause__ is cause
         assert seen == [("beautifulsoup", "submitted", None)]
         assert batch.calls == [] and controls.snapshot().page_attempts == 1
+    finally:
+        await batch.scraper.stop()
+
+
+@pytest.mark.asyncio
+async def test_queue_callback_bound_to_another_queue_stays_opaque(batch):
+    delegated = []
+
+    class Parent:
+        async def scrape_article(self, url, method, **kwargs):
+            delegated.append((url, method, kwargs))
+            return {"url": url, "content": "delegated", "extraction_successful": True}
+
+    other = enhanced.ScrapingJobQueue(1, Parent())
+    batch.scraper.job_queue._execute_job = other._execute_job
+    try:
+        report = await batch.scraper._batch_report([BASE + "one"], method="beautifulsoup")
+        assert len(delegated) == 1
+        assert delegated[0][0:2] == (BASE + "one", "beautifulsoup")
+        assert report.articles[0]["content"] == "delegated"
+        assert batch.calls == []
+    finally:
+        await batch.scraper.stop()
+
+
+@pytest.mark.asyncio
+async def test_parent_callback_bound_to_another_scraper_stays_opaque(batch, monkeypatch, tmp_path):
+    other = enhanced.EnhancedWebScraper(config=dict(batch.scraper.config))
+    other.cookie_manager = enhanced.CookieManager(tmp_path / "other-cookies.json")
+    other.deduplicator = enhanced.ContentDeduplicator(tmp_path / "other-dedup.json")
+    delegated = []
+    resolve = other._resolve_scrape_plan
+
+    def observed_resolve(url):
+        delegated.append(url)
+        return resolve(url)
+
+    monkeypatch.setattr(other, "_resolve_scrape_plan", observed_resolve)
+    batch.scraper.scrape_article = other.scrape_article
+    try:
+        report = await batch.scraper._batch_report([BASE + "one"], method="beautifulsoup")
+        assert delegated == [BASE + "one"]
+        assert report.articles[0]["extraction_successful"]
+        assert len(batch.calls) == 1
+        assert batch.contexts[0].snapshot().network_requests == 0
+    finally:
+        await batch.scraper.stop()
+        await other.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["auto", "trafilatura", "beautifulsoup"])
+async def test_enhanced_http_methods_do_not_render_readable_js_phrase(batch, browser_outbound, method):
+    batch.body = HTML.replace("</article>", "<p>Please enable javascript for interactive features.</p></article>")
+    try:
+        report = await batch.scraper._batch_report([BASE + "one"], method=method)
+        assert report.articles[0]["extraction_successful"]
+        assert browser_outbound == []
+        assert len(batch.calls) == batch.contexts[0].snapshot().network_requests == 1
+    finally:
+        await batch.scraper.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [404, 500, 304])
+async def test_enhanced_terminal_http_failure_does_not_render(batch, browser_outbound, status):
+    batch.status = lambda: status
+    try:
+        report = await batch.scraper._batch_report([BASE + "one"], method="beautifulsoup")
+        result = report.articles[0]
+        assert result["extraction_successful"] is False
+        assert result["error"] == f"Article retrieval failed: HTTP {status} (expected terminal 2xx response)"
+        assert browser_outbound == []
+        assert len(batch.calls) == batch.contexts[0].snapshot().page_attempts == 4
+    finally:
+        await batch.scraper.stop()
+
+
+@pytest.mark.asyncio
+async def test_enhanced_http_timeout_keeps_typed_failure_without_browser(batch, browser_outbound):
+    from tldw_Server_API.app.core.exceptions import NetworkError
+
+    def fail(url, kwargs):
+        raise NetworkError("", classification="timeout")
+
+    batch.before_send = fail
+    try:
+        report = await batch.scraper._batch_report([BASE + "one"], method="trafilatura")
+        assert report.articles[0]["extraction_successful"] is False
+        assert report.articles[0]["error_code"] == "extraction_timeout"
+        assert browser_outbound == []
+        assert len(batch.calls) == batch.contexts[0].snapshot().page_attempts == 4
+    finally:
+        await batch.scraper.stop()
+
+
+@pytest.mark.asyncio
+async def test_enhanced_http_parent_stop_does_not_fallback_or_retry(batch, browser_outbound):
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
+
+    def stop(url, kwargs):
+        raise ParentStop("deadline_exhausted")
+
+    batch.before_send = stop
+    try:
+        report = await batch.scraper._batch_report([BASE + "one"])
+        assert report.outcome.stop_reason == "deadline_exhausted"
+        assert browser_outbound == []
+        assert len(batch.calls) == batch.contexts[0].snapshot().page_attempts == 1
+    finally:
+        await batch.scraper.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method, backend", [("playwright", "httpx"), ("beautifulsoup", "playwright")])
+async def test_explicit_browser_method_or_backend_remains_authoritative(batch, browser_outbound, method, backend):
+    batch.scraper.config["web_scraper_default_backend"] = backend
+    try:
+        report = await batch.scraper._batch_report([BASE + "one"], method=method)
+        assert report.articles[0]["extraction_successful"]
+        assert browser_outbound == [BASE + "one"]
+        assert batch.calls == []
     finally:
         await batch.scraper.stop()
 

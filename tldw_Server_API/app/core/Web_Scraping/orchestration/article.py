@@ -162,6 +162,8 @@ class ArticleDependencies:
     discovery_on_success: bool = False
     discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None
     method_intent: str = "auto"
+    http_only: bool = False
+    http_failure: Callable[[str, Exception], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +275,13 @@ def _policy_blocked_result(url: str, decision: Any) -> dict[str, Any]:
 def _failure_result(url: str, failure: ArticleFailure | str) -> dict[str, Any]:
     captured = failure if isinstance(failure, ArticleFailure) else ArticleFailure(failure, "article")
     return {"url": url, **article_failure_result(captured)}
+
+
+def _http_failure_result(dependencies: ArticleDependencies, url: str, error: Exception) -> dict[str, Any]:
+    """Keep HTTP-only compatibility failures within their original result contract."""
+    if dependencies.http_failure is not None:
+        return dependencies.http_failure(url, error)
+    return _failure_result(url, "fetch_error")
 
 
 def _attach_preflight(result: Mapping[str, Any], payload: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -686,6 +695,8 @@ async def _run_article(
                 "scrape_fetch_total",
                 {"backend": fetch_metric_backend, "outcome": "error"},
             )
+            if dependencies.http_only:
+                return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
             _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
         except Exception as exc:  # noqa: BLE001 - browser fallback remains eligible
             _log_failure(dependencies, exc, code="fetch_error", stage="fetch", url=url)
@@ -694,6 +705,8 @@ async def _run_article(
                 "scrape_fetch_total",
                 {"backend": fetch_metric_backend, "outcome": "error"},
             )
+            if dependencies.http_only:
+                return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
             _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
         else:
             _record_histogram(
@@ -702,8 +715,12 @@ async def _run_article(
                 max(0.0, dependencies.clock() - started),
                 {"backend": backend_used},
             )
-            if response.status < 400 and response.text:
-                if dependencies.js_required(response.text, response.headers, url):
+            if dependencies.http_only and not 200 <= response.status < 300:
+                error = ValueError(f"Article retrieval failed: HTTP {response.status} (expected terminal 2xx response)")
+                _record_counter(dependencies, "scrape_fetch_total", {"backend": backend_used, "outcome": "error"})
+                return _attach_preflight(_http_failure_result(dependencies, url, error), preflight_payload)
+            if response.status < 400 and (response.text or dependencies.http_only):
+                if not dependencies.http_only and dependencies.js_required(response.text, response.headers, url):
                     _record_counter(
                         dependencies,
                         "scrape_playwright_fallback_total",
@@ -730,6 +747,8 @@ async def _run_article(
                             "scrape_fetch_total",
                             {"backend": backend_used, "outcome": "error"},
                         )
+                        if dependencies.http_only:
+                            return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
                         _record_counter(
                             dependencies,
                             "scrape_playwright_fallback_total",
@@ -755,6 +774,8 @@ async def _run_article(
                             "scrape_fetch_total",
                             {"backend": backend_used, "outcome": "no_extract"},
                         )
+                        if dependencies.http_only:
+                            return _attach_preflight(final_extraction, preflight_payload)
                         _record_counter(
                             dependencies,
                             "scrape_playwright_fallback_total",
