@@ -131,6 +131,30 @@ increase, retry or production change is used for the repair. Normal hooks,
 Ruff/format and unchanged Bandit findings qualify the delta; independent
 re-review remains pending.
 
+Final simplification after the next review: equal outer/inner subprocess
+deadlines could orphan the grandchild. A bounded, self-cleaning external probe
+independently reproduced that second P2. Rather than adding a cross-platform
+process-tree supervisor, the candidate removes all branch-added synthetic GC
+orchestration and nested subprocess paths. The original four lifecycle cases
+remain; the original real FastAPI/reset/weakref assertions execute in one fixed
+child, owned by `subprocess.run(timeout=30)`. The reviewer accepted this simpler
+approach in principle, subject to immutable source review.
+
+Current final evidence supersedes the earlier 490-case checkpoints: full
+infrastructure shard 489 passed without skips; focused lifecycle tests four
+passed; unfiltered collection 87,594 tests. Only the extra branch-added GC
+parameter was removed; no pre-existing case or assertion was removed. The
+external harness `/tmp/mcp3187_single_child_verification.py` holds an existing
+collector active around the actual public test call (`ambient`, GREEN), removes
+isolation to reproduce the weakref failure (`inline`, expected RED), and blocks
+the sole child to prove the unchanged 30-second timeout kills and reaps it
+(`hung`, GREEN). Run those modes with the project venv active and `PYTHONPATH`
+set to the worktree root. The actual public ambient-GC probe also passes on
+Python 3.12; strong-registry and missing-reset mutations still fail at their
+intended unchanged assertions. Other three repairs are unchanged. Combined
+Bandit retains the same 94 assertion-only low findings; Ruff/format pass.
+Independent source approval remains pending.
+
 ## Stage 4: Publish And Report
 **Goal:** Publish a follow-up PR with accurate evidence and no merge-policy bypass.
 **Success Criteria:** Latest dev incorporated, review evidence and CI status documented, original PR linked to follow-up.
