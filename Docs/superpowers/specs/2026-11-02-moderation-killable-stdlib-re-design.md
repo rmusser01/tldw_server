@@ -1,7 +1,7 @@
 # Moderation: Killable Standard-Library Regex Execution
 
 Date: 2026-11-02
-Status: Draft for approval; not an implementation authorization
+Status: Approved by requester on 2026-11-02; implementation plan review pending
 Task: TASK-15414
 Baseline inspected: `aec70514cd`, following merged Moderation PR #3396
 
@@ -17,8 +17,9 @@ behavior is: block the affected content and surface the failure to an admin.
 This is a deliberate behavior-changing security follow-up, not another strictly
 structural extraction.
 
-Other details below are engineering proposals for approval, not decisions
-previously made by the requester.
+The requester approved this written design on 2026-11-02. Details originally
+introduced as engineering proposals below are accepted planning baselines;
+the attribution distinguishes them from the requester's original requirements.
 
 ## Goals and Non-Goals
 
@@ -263,12 +264,12 @@ cannot spawn a child, enabled moderation fails closed with an admin incident.
 
 ## ADR Check
 
-ADR required: yes. Proposed record:
+ADR required: yes. Accepted record:
 `Docs/ADR/086-moderation-killable-stdlib-regex-execution.md`.
 The security failure contract and parent/child ownership are durable decisions;
 the existing ADR index does not specify this Moderation boundary. Related ADRs:
 021 (lifecycle ownership), 028 (avoid general pickle), and 006 (security gate).
-This draft does not change those accepted records.
+This design does not change those earlier accepted records.
 
 ## Builder Discretion and Approval
 
@@ -279,7 +280,8 @@ dashboard is required if existing review surfaces can display the metadata safel
 
 Fresh builder check: completed by an independent Python backend/security reviewer
 on 2026-11-02; result: "nothing important left". No blocking questions raised.
-Requester approval of this written design: pending.
+Requester approval of this written design: received on 2026-11-02 ("yes").
+Implementation plan: `Docs/superpowers/plans/2026-11-02-moderation-killable-stdlib-re-implementation-plan.md`.
 
 ## References
 
