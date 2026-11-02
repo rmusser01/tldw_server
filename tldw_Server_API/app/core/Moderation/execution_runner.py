@@ -18,7 +18,8 @@ import sys
 import threading
 import time
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +37,9 @@ _owned_scopes: dict[int, int] = {}
 _owned_total = 0
 _quarantined_total = 0
 _instances: weakref.WeakSet = weakref.WeakSet()
+_fork_condition = threading.Condition()
+_active_spawns = 0
+_fork_waiters = 0
 
 
 def _scope_is_owned(scope: ExecutionScope) -> bool:
@@ -100,6 +104,22 @@ class ModerationExecutionRunner:
         if self._clock() >= min(scope.deadline, deadline if deadline is not None else scope.deadline):
             raise ModerationExecutionError("deadline_exceeded")
 
+    @contextmanager
+    def _publishing_spawn(self, scope: ExecutionScope, deadline: float) -> Iterator[None]:
+        global _active_spawns
+        with _fork_condition:
+            while _fork_waiters:
+                self._check_scope(scope, deadline)
+                _fork_condition.wait(0.01)
+            self._check_scope(scope, deadline)
+            _active_spawns += 1
+        try:
+            yield
+        finally:
+            with _fork_condition:
+                _active_spawns -= 1
+                _fork_condition.notify_all()
+
     def execute(self, request: WorkerRequest, scope: ExecutionScope) -> WorkerResponse:
         """Run one framed batch, retaining ownership through every failure race."""
         global _owned_total
@@ -130,16 +150,19 @@ class ModerationExecutionRunner:
             entry_path = Path(__file__).with_name("regex_worker.py").resolve()
             environment = {key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR") if key in os.environ}
             try:
-                entry.process = self._process_factory(
-                    [sys.executable, "-I", "-S", str(entry_path)],
-                    shell=False,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    close_fds=True,
-                    env=environment,
-                    bufsize=0,
-                )
+                # Fork preparation waits through native creation AND publication.
+                # Concurrent admitted spawns remain bounded but are not serialized.
+                with self._publishing_spawn(scope, deadline):
+                    entry.process = self._process_factory(
+                        [sys.executable, "-I", "-S", str(entry_path)],
+                        shell=False,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        close_fds=True,
+                        env=environment,
+                        bufsize=0,
+                    )
             except (OSError, ValueError, subprocess.SubprocessError):
                 raise ModerationExecutionError("worker_unavailable") from None
             finally:
@@ -352,8 +375,27 @@ _runner: ModerationExecutionRunner | None = None
 _singleton_lock = threading.Lock()
 
 
+def _before_fork() -> None:
+    global _fork_waiters
+    _fork_condition.acquire()
+    _fork_waiters += 1
+    while _active_spawns:
+        _fork_condition.wait()
+    # Held across the actual fork: no new descriptor creation can slip in.
+
+
+def _after_fork_parent() -> None:
+    global _fork_waiters
+    _fork_waiters -= 1
+    _fork_condition.notify_all()
+    _fork_condition.release()
+
+
 def _after_fork() -> None:
     global _runner, _singleton_lock, _ownership_lock, _owned_scopes, _owned_total, _quarantined_total
+    global _fork_condition, _active_spawns, _fork_waiters
+    # Never reuse/release locks inherited from a vanished publication owner.
+    _fork_condition, _active_spawns, _fork_waiters = threading.Condition(), 0, 0
     _runner = None
     _singleton_lock = threading.Lock()
     _ownership_lock, _owned_scopes, _owned_total = threading.Lock(), {}, 0
@@ -363,7 +405,7 @@ def _after_fork() -> None:
 
 
 if hasattr(os, "register_at_fork"):
-    os.register_at_fork(after_in_child=_after_fork)
+    os.register_at_fork(before=_before_fork, after_in_parent=_after_fork_parent, after_in_child=_after_fork)
 
 
 def get_execution_runner() -> ModerationExecutionRunner:

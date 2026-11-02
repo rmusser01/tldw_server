@@ -41,6 +41,7 @@ def run(mode: str) -> None:
 
     children = []
     entered = threading.Event()
+    publish = threading.Event()
 
     def spawn(*args, **kwargs):
         if not children and mode in {"nonzero", "posture", "blocked-write"}:
@@ -64,6 +65,8 @@ def run(mode: str) -> None:
             child.wait(timeout=1)
         children.append(child)
         entered.set()
+        if mode == "fork-during-spawn" and len(children) == 1:
+            assert publish.wait(1), "factory publication was not released"
         if mode == "cancel-spawn":
             time.sleep(0.15)
         return child
@@ -161,6 +164,56 @@ def run(mode: str) -> None:
                         await asyncio.sleep(0.01)
 
             asyncio.run(cancel())
+            assert_clean()
+        elif mode == "fork-during-spawn":
+            read_fd, write_fd = os.pipe()
+            fork_requested = threading.Event()
+            results, errors = [], []
+
+            def execute():
+                try:
+                    with execution_scope() as scope:
+                        results.append(owner.execute(safe, scope).result.text)
+                except BaseException as error:  # noqa: BLE001 - propagate probe failure to the main owner.
+                    errors.append(getattr(error, "reason", type(error).__name__))
+
+            def release_publication():
+                assert fork_requested.wait(1)
+                time.sleep(0.1)
+                publish.set()
+
+            execution = threading.Thread(target=execute)
+            publisher = threading.Thread(target=release_publication)
+            execution.start()
+            assert entered.wait(1)
+            publisher.start()
+            fork_requested.set()
+            pid = os.fork()
+            if pid == 0:
+                os.close(write_fd)
+                try:
+                    # The parent must succeed BEFORE this forked API process
+                    # exits, despite descriptors inherited while spawn paused.
+                    assert os.read(read_fd, 1) == b"x"
+                    assert owner._pid == os.getpid()
+                    with execution_scope() as scope:
+                        assert owner.execute(safe, scope).result.text == "hello"
+                    owner.close()
+                except BaseException:  # noqa: BLE001 - fixed child failure status inside outer containment.
+                    os._exit(1)
+                os._exit(0)
+            os.close(read_fd)
+            try:
+                execution.join(3)
+                assert not execution.is_alive()
+                assert results == ["hello"], errors
+            finally:
+                publish.set()
+                os.write(write_fd, b"x")
+                os.close(write_fd)
+                publisher.join(1)
+                execution.join(1)
+                assert os.waitpid(pid, 0)[1] == 0
             assert_clean()
         elif mode == "fork":
             import tldw_Server_API.app.core.Moderation.async_execution as transport

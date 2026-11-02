@@ -78,6 +78,7 @@ class WindowsTree:
             function.argtypes, function.restype = args, result
         self.kernel, self.job = kernel, kernel.CreateJobObjectW(None, None)
         self.process = None
+        self._cleaned = False
         if not self.job:
             raise RuntimeError("job unavailable")
         try:
@@ -122,26 +123,34 @@ class WindowsTree:
             if not resumed:
                 raise RuntimeError("probe resume unavailable")
         except BaseException:
-            self.cleanup(time.monotonic() + 2)
+            while True:
+                try:
+                    if self.cleanup(time.monotonic() + 0.1):
+                        break
+                except BaseException:  # noqa: BLE001 - partial launch keeps its native Job owner until confirmed.
+                    pass
+                time.sleep(0.05)
             raise
 
     def cleanup(self, deadline):
         kernel = self.kernel
-        try:
-            if self.job:
-                kernel.TerminateJobObject(self.job, 1)
-            if self.process is not None and self.process.poll() is None:
-                # Also kills an unassigned, still-suspended setup failure.
-                self.process.kill()
-            while time.monotonic() < deadline:
-                info = Accounting()
-                if not kernel.QueryInformationJobObject(self.job, 1, ctypes.byref(info), ctypes.sizeof(info), None):
+        if self._cleaned:
+            return True
+        if self.job:
+            kernel.TerminateJobObject(self.job, 1)
+        if self.process is not None and self.process.poll() is None:
+            # Also kills an unassigned, still-suspended setup failure.
+            self.process.kill()
+        while time.monotonic() < deadline:
+            info = Accounting()
+            if not kernel.QueryInformationJobObject(self.job, 1, ctypes.byref(info), ctypes.sizeof(info), None):
+                return False
+            if info.Active == 0 and (self.process is None or self.process.poll() is not None):
+                if not kernel.CloseHandle(self.job):
                     return False
-                if info.Active == 0 and (self.process is None or self.process.poll() is not None):
-                    return True
-                time.sleep(0.01)
-            return False
-        finally:
-            if self.job:
-                kernel.CloseHandle(self.job)
                 self.job = None
+                self._cleaned = True
+                return True
+            time.sleep(0.01)
+        # Keep the kill-on-close handle and an independent live owner for retry.
+        return False
