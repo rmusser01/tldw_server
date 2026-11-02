@@ -10,6 +10,9 @@ import {
   Trash2,
   StopCircle
 } from "lucide-react"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { normalizeChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import { PlaygroundEmpty } from "@/components/Option/Playground/PlaygroundEmpty"
@@ -72,6 +75,8 @@ export const ModelPlaygroundChat: React.FC = () => {
   const notification = useAntdNotification()
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const [message, setMessage] = React.useState("")
+  const draftRevision = React.useRef(0)
+  const historySelection = useHistorySelectionContext()
 
   const {
     messages,
@@ -155,12 +160,20 @@ export const ModelPlaygroundChat: React.FC = () => {
       return
     }
 
+    const originalDraft = message
     const submittedMessage = message.trim()
+    const revision = ++draftRevision.current
+    const source = captureChatDraftSource(historySelection?.fence())
     setMessage("")
-    await onSubmit({
+    const result = normalizeChatSubmitResult(await onSubmit({
       message: submittedMessage,
       image: ""
-    })
+    }))
+    if (!compareMode && result.status === "failed" && result.restoreDraft &&
+        draftRevision.current === revision &&
+        (result.restoreDraftIsCurrent ?? source.isCurrent)()) {
+      setMessage(originalDraft)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -467,7 +480,7 @@ export const ModelPlaygroundChat: React.FC = () => {
               <button
                 type="button"
                 aria-label={t("playground:workspace.clearChat", "Clear chat")}
-                onClick={clearChat}
+                onClick={() => { draftRevision.current++; clearChat() }}
                 disabled={messages.length === 0}
                 className="rounded-lg p-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text disabled:opacity-50"
               >
@@ -482,7 +495,7 @@ export const ModelPlaygroundChat: React.FC = () => {
           <textarea
             ref={attachTextarea}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => { draftRevision.current++; setMessage(e.target.value) }}
             onKeyDown={handleKeyDown}
             placeholder={
               compareMode && compareSelectedModels.length > 1
