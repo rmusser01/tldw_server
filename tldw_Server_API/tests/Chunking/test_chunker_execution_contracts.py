@@ -94,9 +94,9 @@ DOCSTRINGS = (
 
 def make_case(**config_options: Any) -> SimpleNamespace:
     """Keep real facade facilities except the potentially external strategy."""
-    config = {"enable_cache": False, "default_max_size": 8, "default_overlap": 0, "language": "en"}
+    config: dict[str, Any] = {"enable_cache": False, "default_max_size": 8, "default_overlap": 0, "language": "en"}
     config.update(config_options)
-    chunker = Chunker(ChunkerConfig(**config))
+    chunker: Any = Chunker(ChunkerConfig(**config))
     events: list[Any] = []
     lock = RecordingLock(events)
     chunker._strategy_lock = lock
@@ -127,7 +127,8 @@ def run_path(case: SimpleNamespace, path: str, /, text: Any = "alpha beta", **kw
 
 
 def output_text(result: Any, path: str) -> str:
-    return result[0].text if path == "metadata" else result[0]
+    text: str = result[0].text if path == "metadata" else result[0]
+    return text
 
 
 def test_public_execution_contracts() -> None:
@@ -199,7 +200,7 @@ def test_size_failure_keeps_path_label_and_identity(facade_case: Any, path: str)
 @pytest.mark.parametrize("path", PATHS)
 def test_option_namespace_survives_all_paths(facade_case: Any, path: str) -> None:
     case = facade_case()
-    values = {name: f"user-{name}" for name in OPTION_NAMES}
+    values: dict[str, Any] = {name: f"user-{name}" for name in OPTION_NAMES}
     payload: list[str] = []
     values["payload"] = payload
 
@@ -220,7 +221,7 @@ def test_path_alias_overlap_tokenizer_order(facade_case: Any, path: str, alignme
     case = facade_case()
     case.chunker._strategies["tokens"] = case.strategy
     case.chunker._strategy_factories["tokens"] = lambda: case.strategy
-    events = []
+    events: list[Any] = []
     original_sync = case.chunker._sync_strategy_llm
     original_language = case.chunker._apply_strategy_language
 
@@ -357,6 +358,7 @@ def test_real_lru_copy_modes(facade_case: Any, copy_on_access: bool) -> None:
 @pytest.mark.parametrize("path", PATHS)
 def test_strategy_failure_regions(facade_case: Any, path: str) -> None:
     case = facade_case()
+    caught: Any
     failure = ValueError("strategy sentinel")
 
     def fail(_path: str, _options: Any) -> None:
@@ -597,7 +599,7 @@ def test_effective_llm_is_obtained_once(facade_case: Any, path: str) -> None:
 
 def test_generator_send_throw_close_and_completion(facade_case: Any) -> None:
     case = facade_case()
-    events = []
+    events: list[Any] = []
 
     def underlying() -> Any:
         try:
@@ -654,7 +656,7 @@ def test_empty_strategy_result_is_not_cached(facade_case: Any) -> None:
 def test_factory_reuse_without_injected_strategy(facade_case: Any, mode: str, path: str) -> None:
     case = facade_case(strategy_cache_mode=mode)
     case.chunker._strategies.clear()
-    instances = []
+    instances: list[RecordingStrategy] = []
 
     def factory() -> RecordingStrategy:
         strategy = RecordingStrategy(case.events, case.lock)

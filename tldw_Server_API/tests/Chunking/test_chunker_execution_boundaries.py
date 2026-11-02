@@ -20,13 +20,14 @@ import pytest
 from tldw_Server_API.app.core.Chunking import Chunker
 from tldw_Server_API.app.core.Chunking import chunker as facade
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig
+from tldw_Server_API.tests.Chunking.test_chunker_execution_contracts import make_case, output_text, run_path
 
 pytestmark = pytest.mark.unit
 ROOT_NAME = "tldw_Server_API.app.core.Chunking"
 PACKAGE_NAME = f"{ROOT_NAME}.execution"
 REPO = Path(__file__).resolve().parents[3]
 PACKAGE = REPO / "tldw_Server_API/app/core/Chunking/execution"
-MODULES = ("execution", "execution.models", "execution.service")
+MODULES = ("execution", "execution.models", "execution.preparation", "execution.strategy", "execution.service")
 
 
 def test_text_facade_delegates_without_extra_binding(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,7 +53,7 @@ def test_text_facade_delegates_without_extra_binding(monkeypatch: pytest.MonkeyP
 
 def test_metadata_facade_returns_service_object(monkeypatch: pytest.MonkeyPatch) -> None:
     chunker = Chunker(ChunkerConfig(enable_cache=False))
-    sentinel_result = [SimpleNamespace(text="metadata sentinel", metadata={"nested": []})]
+    sentinel_result: list[Any] = [SimpleNamespace(text="metadata sentinel", metadata={"nested": []})]
     received = []
 
     class SentinelService:
@@ -72,8 +73,8 @@ def test_metadata_facade_returns_service_object(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_generator_facade_defers_service_creation(monkeypatch: pytest.MonkeyPatch) -> None:
-    chunker = Chunker(ChunkerConfig(enable_cache=False))
-    events = []
+    chunker: Any = Chunker(ChunkerConfig(enable_cache=False))
+    events: list[Any] = []
 
     class SentinelService:
         def __init__(self, context: Any, hooks: Any) -> None:
@@ -122,6 +123,7 @@ def test_execution_modules_are_required_and_one_way(module_suffix: str) -> None:
     path = PACKAGE / (relative.replace(".", "/") + ".py") if relative else PACKAGE / "__init__.py"
     assert path.is_file(), f"required module missing: {module_name}"
     module = importlib.import_module(module_name)
+    assert module.__file__ is not None
     assert Path(module.__file__).resolve() == path.resolve()
     tree = ast.parse(path.read_text(encoding="utf-8"))
     blocked = (f"{ROOT_NAME}.chunker", f"{ROOT_NAME}.process_text", f"{ROOT_NAME}.hierarchical")
@@ -159,7 +161,7 @@ import json
 import sys
 requested = sys.argv[1]
 root_name = 'tldw_Server_API.app.core.Chunking'
-allowed = {root_name, *(root_name + '.' + part for part in ('execution', 'execution.models', 'execution.service'))}
+allowed = {root_name, *(root_name + '.' + part for part in ('execution', 'execution.models', 'execution.preparation', 'execution.strategy', 'execution.service'))}
 assert requested in allowed
 importlib.import_module(requested)
 root = importlib.import_module(root_name)
@@ -183,3 +185,24 @@ print(json.dumps({'requested': requested, 'chunker': root.Chunker.__name__, 'ser
         "chunker": "Chunker",
         "service": "ChunkExecutionService",
     }
+
+
+@pytest.mark.parametrize("path", ["text", "metadata", "generator"])
+def test_all_internal_names_survive_public_wiring(path: str) -> None:
+    case = make_case()
+    values = {
+        "prepared": ["user prepared"],
+        "kind": "user kind",
+        "effective_llm": {"user": "llm"},
+        "ephemeral": "user ephemeral",
+    }
+
+    def emit(_path: str, options: dict[str, Any]) -> None:
+        encoded = json.dumps(options)
+        case.strategy.text_result = [encoded]
+        case.strategy.metadata_result[0].text = encoded
+
+    case.strategy.on_call = emit
+    result = run_path(case, path, **values)
+    assert json.loads(output_text(result, path)) == values
+    assert case.strategy.calls[0][4]["prepared"] is values["prepared"]

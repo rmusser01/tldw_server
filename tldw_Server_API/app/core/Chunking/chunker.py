@@ -77,6 +77,7 @@ except _CHUNKER_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - safety fallback
     MetricType = None  # type: ignore
     _METRICS_AVAILABLE = False
 
+
 def _execution_hooks() -> ExecutionHooks:
     """Forward each event to the current facade logger and metric function."""
     return ExecutionHooks(
