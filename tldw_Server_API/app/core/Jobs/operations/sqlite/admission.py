@@ -210,7 +210,25 @@ def _insert_job(
 
     if resource_creation is None:
         reject_resource_required(command.domain, command.job_type)
-    if ignore_idempotency_conflict:
+    if resource_creation is None and ignore_idempotency_conflict:
+        sql = """
+        INSERT OR IGNORE INTO jobs (
+          uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
+          idempotency_key, payload, result, status, priority, max_retries,
+          expired_lease_policy, quarantine_threshold, retry_count, available_at,
+          created_at, updated_at, request_id, trace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+        """
+    elif resource_creation is None:
+        sql = """
+        INSERT INTO jobs (
+          uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
+          idempotency_key, payload, result, status, priority, max_retries,
+          expired_lease_policy, quarantine_threshold, retry_count, available_at,
+          created_at, updated_at, request_id, trace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+        """
+    elif ignore_idempotency_conflict:
         sql = """
         INSERT OR IGNORE INTO jobs (
           uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
@@ -252,7 +270,7 @@ def _insert_job(
             now_sql,
             command.request_id,
             command.trace_id,
-            *(resource_creation.values() if resource_creation is not None else (None,) * 5),
+            *(resource_creation.values() if resource_creation is not None else ()),
         ),
     )
     if int(getattr(conn, "total_changes", 0)) <= before_changes:

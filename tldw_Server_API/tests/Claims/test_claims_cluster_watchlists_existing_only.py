@@ -370,9 +370,10 @@ def test_best_effort_access_errors_are_sanitized_once(shared_media, monkeypatch,
         assert module.evaluate_published_cluster_watchlists(db, owner_user_id="42") is None
     finally:
         logger.remove(sink)
-    assert len(captured) == 1
+    diagnostics = [record for record in captured if record["name"] == MODULE]
+    assert len(diagnostics) == 1
     assert secret not in str(captured)
-    assert captured[0]["exception"] is None
+    assert all(record["exception"] is None for record in captured)
 
 
 def test_swallowed_notification_insert_error_does_not_log_raw_exception(shared_media, monkeypatch):

@@ -56,12 +56,19 @@ class _RecoveryCursor:
         self.counter_updates: list[tuple[Any, ...]] = []
         self.recovery_select = ""
 
-    def execute(self, sql: Any, params: Any = None) -> None:
+    def execute(self, sql: Any, params: Any = None) -> _RecoveryCursor:
         normalized = " ".join(str(sql).split())
         self.rowcount = 0
         self._rows = []
-        if normalized.startswith("SELECT id, uuid, domain, queue, job_type"):
-            self.recovery_select = normalized
+        if normalized.startswith(
+            (
+                "SELECT id, uuid, domain, queue, job_type",
+                "SELECT id,uuid,domain,queue,job_type",
+                "SELECT * FROM jobs WHERE",
+            )
+        ):
+            if normalized.startswith("SELECT id, uuid, domain, queue, job_type"):
+                self.recovery_select = normalized
             self._rows = [
                 {
                     "id": 1,
@@ -70,6 +77,7 @@ class _RecoveryCursor:
                     "queue": "default",
                     "job_type": "zeta",
                     "owner_user_id": "owner",
+                    "status": "processing",
                     "request_id": None,
                     "trace_id": None,
                     "workflow_capability_version": None,
@@ -84,6 +92,7 @@ class _RecoveryCursor:
                     "queue": "default",
                     "job_type": "alpha",
                     "owner_user_id": "owner",
+                    "status": "processing",
                     "request_id": None,
                     "trace_id": None,
                     "workflow_capability_version": None,
@@ -98,6 +107,7 @@ class _RecoveryCursor:
                     "queue": "default",
                     "job_type": "zeta",
                     "owner_user_id": "owner",
+                    "status": "processing",
                     "request_id": None,
                     "trace_id": None,
                     "workflow_capability_version": None,
@@ -106,14 +116,14 @@ class _RecoveryCursor:
                     "effective_expired_lease_policy": "consume_retry",
                 },
             ]
-            return
+            return self
         if normalized.startswith("UPDATE jobs SET status='queued'"):
             self.rowcount = 1
-            return
+            return self
         if normalized.startswith("INSERT INTO job_counters"):
             self.counter_updates.append(tuple(params or ()))
             self.rowcount = 1
-            return
+            return self
         raise AssertionError(f"unexpected recovery SQL: {normalized}")
 
     def fetchall(self) -> list[dict[str, Any]]:

@@ -47,6 +47,9 @@ def set_user(app, user):
 
 @pytest.fixture
 def manager(tmp_path, monkeypatch):
+    # The real app materializes global configuration during startup, before
+    # ingress. Its base-directory bootstrap is not an owner Media DB open.
+    claims_service.settings.get("CLAIMS_JOBS_QUEUE")
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.setenv("CLAIMS_JOBS_ENABLED", "true")

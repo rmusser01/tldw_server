@@ -1054,7 +1054,7 @@ def test_postgres_archive_index_shape_helper_rejects_wrong_catalog_rows():
 
 
 @pytest.mark.pg_jobs
-def test_postgres_rls_role_gets_only_registry_insert(jobs_pg_dsn, monkeypatch):
+def test_postgres_rls_role_insert_grants_remain_owner_scoped(jobs_pg_dsn, monkeypatch):
     role = f"jobs_registry_{uuid.uuid4().hex[:12]}"
     monkeypatch.setenv("JOBS_PG_RLS_ROLE", role)
     ensure_jobs_rls_policies_pg(jobs_pg_dsn)
@@ -1079,7 +1079,26 @@ def test_postgres_rls_role_gets_only_registry_insert(jobs_pg_dsn, monkeypatch):
                 "SELECT has_table_privilege(%s, 'jobs', 'INSERT')",
                 (role,),
             )
-            assert cur.fetchone()[0] is False
+            assert cur.fetchone()[0] is True
+        with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+            cur.execute(psycopg.sql.SQL("SET LOCAL ROLE {}").format(psycopg.sql.Identifier(role)))
+            cur.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user")
+            assert cur.fetchone() == (False, False)
+            cur.execute("SELECT set_config('app.is_admin','false',true)")
+            cur.execute("SELECT set_config('app.domain_allowlist','claims',true)")
+            cur.execute("SELECT set_config('app.owner_user_id','owner-a',true)")
+            cur.execute(
+                "INSERT INTO jobs(uuid,domain,queue,job_type,owner_user_id,status) "
+                "VALUES (%s,'claims','default','registry-probe','owner-a','queued') RETURNING owner_user_id",
+                (str(uuid.uuid4()),),
+            )
+            assert cur.fetchone()[0] == "owner-a"
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), conn.transaction():
+                cur.execute(
+                    "INSERT INTO jobs(uuid,domain,queue,job_type,owner_user_id,status) "
+                    "VALUES (%s,'claims','default','registry-probe','owner-b','queued')",
+                    (str(uuid.uuid4()),),
+                )
     finally:
         with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
             identifier = psycopg.sql.Identifier(role)

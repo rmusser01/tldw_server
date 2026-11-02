@@ -85,6 +85,28 @@ If `ENABLE_INGESTION_CLAIMS=True`, the embeddings pipeline (`ChromaDB_Library`) 
 
 Exposed via API endpoints to enqueue work per media or in bulk.
 
+## Cluster Rebuild Jobs
+
+`POST /api/v1/claims/clusters/rebuild` retains synchronous HTTP 200 by default.
+Conjunctive `CLAIMS_JOBS_ENABLED` and `CLAIMS_CLUSTER_REBUILD_JOBS_ENABLED` opt
+into shared Jobs type `claims_rebuild_clusters`: 202 returns a UUID-bound
+reference with matching Location, equivalent active work reuses it, and
+conflicting settings/key reuse returns 409 without a queued replacement.
+Only platform administrators can explicitly override `user_id`; foreign
+references additionally require Jobs role/domain authorization. Own status uses
+`/api/v1/jobs/owned/{job_uuid}`; authorized foreign status uses
+`/api/v1/jobs/{job_id}?domain=claims&job_uuid={job_uuid}`. Owner reads do not
+grant control permissions. Optional async keys are digest-only, retained 24
+hours, bounded to 128 aliases; uncertain admission is 503 with no local fallback.
+
+Media migration 27 adds owner publication heads and immutable source-free result
+receipts, not Jobs lifecycle. Receipts survive Jobs pruning; replay preserves
+cluster IDs, while fresh rebuild IDs/links/subscriptions remain unstable.
+See the [operations runbook](../Operations/Claims_Cluster_Rebuild_Jobs.md) for
+configuration, physical drain, missing-owner versus no-embedding outcomes and
+coordinated restore evidence. A false routing flag starts legacy sync, not an
+admission stop.
+
 ## API Endpoints
 
 Base prefix: `/api/v1/claims`
