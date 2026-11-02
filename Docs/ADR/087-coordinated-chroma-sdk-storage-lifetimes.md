@@ -44,4 +44,4 @@ A pre-open stat, a Claims-only mutex, or catching a provider exception after a w
 
 - Keep this record Proposed until the implementation and its compatibility/cost limits have completed review; do not infer human acceptance from its presence.
 - Task 11 must qualify the full touched branch, document SDK/profile support, contention and shutdown-quarantine recovery, and retain disclosed test/lint baseline limitations.
-- Before publication, renumber this private branch's existing Claims ADR-085 to reserved ADR-086 to avoid the now-published unrelated ADR-085; update references without changing accepted rationale. Namespace audit checked current dev and all 38 open PRs on 2026-11-02 before allocating ADR-087.
+- The private Claims resource/publication record is now ADR-086 after an identifier-only repair of the collision with published AuthNZ ADR-085; accepted rationale is unchanged. The refreshed audit checked current dev and all 39 open PRs on 2026-11-02. Recheck private identifiers before any separately authorized publication.

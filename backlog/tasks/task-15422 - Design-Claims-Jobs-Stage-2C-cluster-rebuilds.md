@@ -1,5 +1,5 @@
 ---
-id: TASK-15282
+id: TASK-15422
 title: Design Claims Jobs Stage 2C cluster rebuilds
 status: Done
 labels:
@@ -36,6 +36,7 @@ Requester approved correcting all three validated follow-up review findings befo
 Follow-up corrections drafted in spec and Proposed ADR-085: bounded foreign-reference integrity guard effective under restricted-role PostgreSQL/RLS, permanent claims_cluster_foreign_reference failure with unchanged domain data/head/receipts; existing-only owner/backend-pinned Watchlists access with absent-storage/schema skip and sanitized errors; optional job_uuid precondition on existing Jobs admin detail, UUID-bound cross-owner links, unchanged RBAC and legacy reads. Added explicit implementation regression requirements for every correction. Fresh verification: 165 Backlog library/format/duplicate-ID tests passed, zero skips, 32 warnings (2.16s); log /tmp/claims-stage2c-review-fixes-backlog-20261101.log. Exact task canonical check, official whole-worktree duplicate-ID check and git diff --check passed. Independent focused recheck in progress. Documentation-only: no product/test code or implementation plan, so runtime implementation tests and Bandit are not applicable.
 Fresh independent focused recheck reports nothing important left across all three corrections; reviewer closed. All applicable staged PR-scoped pre-commit hooks passed; normal no-code hook skips only. Hook log /tmp/claims-stage2c-review-fixes-hooks-20261101.log. The design revision and Proposed ADR remain consistent, with no remaining material findings from this recheck. Final review scope is only this task, the existing spec and Proposed ADR-085; no prior-PR closeout, product/test code, implementation plan, push or PR. Commit records the requester-approved design corrections; task stays In Progress awaiting approval of the revised written design, after which writing-plans is next. Bandit remains not applicable to the documentation-only scope.
 Requester explicitly approved the revised written design after commit 92ac607403. Design work is complete; approval covers the engineering proposals and ADR-085 but authorizes implementation planning only. Follow-up planning is tracked separately in TASK-15283. No product implementation or merge is authorized by this closeout.
+Identifier-only repair under TASK-15421 after current dev and all39openPR paginated audit. This Claims record is renumbered to avoid another owners published/open task. Existing status, acceptance, rationale and historical evidence are preserved; current governing Claims ADR is086 after metadata-only move. No production behavior or publication authorization changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -1,5 +1,5 @@
 ---
-id: TASK-15412
+id: TASK-15425
 title: Implement Jobs resource admission and request replay
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15411
+- TASK-15424
 ---
 
 ## Description
@@ -35,6 +35,7 @@ Final controller-corrected same-code combined qualification: RUN_JOBS=1 pytest o
 Pre-independent-review correction at BASE a205a219344e093105af02f78865d464d4d07f19: controller identified two approved-spec integration gaps: conflicts need a bounded authorized reference to their exact locked target, and a valid older active generation may be below a monotonic head counter after fixture-seeded reactivation. Added both-backend exact-target/ref/no-mutation/owner-isolation tests, actual restricted-role reference/non-disclosure checks, older-active/corrupt-above-counter cases, and property accounting based on successful kinds rather than Job presence. Running meaningful RED before production edits. Same Task 2 scope, no lifecycle/reactivation API or metadata mutation; record will remain In Progress.
 Pre-review correction RED/GREEN: 19 expected failures + 2 passing above-counter corruption controls -> 21 passed, 128 deselected, zero skips (/tmp/task15412-correction2-red.log, /tmp/task15412-correction2-green.log). Minimal resource.py fix returns only id/uuid/domain/owner_user_id/job_type/resource from validated exact targets for request_conflict/active_conflict; full Jobs/payload/result/raw errors are not exposed. Removed only active generation==head counter assumption; existing positive generation<=counter, same authority, exact UUID/state/uniqueness guards remain. Same-code full affected RUN_JOBS=1 run of all 19 required+extended files: 460 passed, 0 skipped, 981 warnings, 75.25s (/tmp/task15412-correction2-final.log), including real restricted-role references/non-disclosure and both-backend older-generation fixtures. Four touched Python files compile; Ruff/Black/diff checks pass; touched-production Bandit zero findings/errors (/tmp/bandit_task15412_correction2.json). Report obsolete no-Job conflict claim corrected; exact outcome shape/Task10 integration and evidence appended to task-2-report.md. No Task3 reactivation API or immutable metadata changes; remains In Progress pending controller review.
 Independent Task 2 review at 996a70c7a54cd6ae17d6c0f87cf92b0a0676fd7a: spec compliant and quality Approved, zero Critical/Important findings. Reviewer checked full two-commit range from 078c57767b, correction appendix and actual evidence without rerunning suites. Controller verified final log 460 passed/zero skips and minimal exact-target conflict projection/older-generation correction. Cannot-verify items are explicitly subsequent Tasks 3-10, not Task 2 omissions or rollout authorization. Minor observations retained for final qualification: warning-bearing output (981 warnings) and unchanged manager archive-query B608 (zero new findings/errors, no suppression). Review report: .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-2-review.md. No producer enabled; no push or PR.
+Identifier-only repair under TASK-15421 after current dev and all39openPR paginated audit. This Claims record is renumbered to avoid another owners published/open task. Existing status, acceptance, rationale and historical evidence are preserved; current governing Claims ADR is086 after metadata-only move. No production behavior or publication authorization changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

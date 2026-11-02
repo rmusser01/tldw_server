@@ -115,7 +115,7 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-086](086-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
 | [ADR-087](087-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
 | [ADR-088](088-mcp-certified-completion-lifecycle.md) | Proposed | Certify one bounded native-async completion path and retain ownership through cancellation, abandonment, and shutdown. |
-| [ADR-085](085-jobs-resource-admission-and-domain-publication.md) | Accepted | Keep exclusive resource admission and monotonic authority in shared Jobs, with atomic output fences and replay receipts in domain storage. |
+| [ADR-086](086-jobs-resource-admission-and-domain-publication.md) | Accepted | Keep exclusive resource admission and monotonic authority in shared Jobs, with atomic output fences and replay receipts in domain storage. |
 | [ADR-087](087-coordinated-chroma-sdk-storage-lifetimes.md) | Proposed | Coordinate validation and complete canonical Chroma SDK lifetimes in shared storage sessions; fail closed on unsupported or incomplete existing storage. |
 
 
