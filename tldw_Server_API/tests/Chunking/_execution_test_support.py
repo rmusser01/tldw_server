@@ -17,6 +17,7 @@ class RecordingLock:
         self.events = events
         self._lock = threading.RLock()
         self._local = threading.local()
+        self.on_enter: Callable[[], None] | None = None
 
     @property
     def depth(self) -> int:
@@ -26,6 +27,8 @@ class RecordingLock:
         self._lock.acquire()
         self._local.depth = self.depth + 1
         self.events.append(("lock_enter", self.depth))
+        if self.on_enter is not None:
+            self.on_enter()
         return self
 
     def __exit__(self, *_exc: Any) -> None:
@@ -66,6 +69,7 @@ class RecordingStrategy:
         self.language = "en"
         self.llm_call_func: Any = None
         self.llm_config: Any = None
+        self.tokenizer_error: Exception | None = None
         self.tokenizer_name: Any = "old"
         self._tokenizer: Any = object()
         self._tokenizer_init_attempted = True
@@ -73,6 +77,16 @@ class RecordingStrategy:
         self.metadata_result: Any = [ChunkResult("strategy metadata", ChunkMetadata(0, 0, 4, 1))]
         self.iterator_factory: Callable[[], Any] | None = None
         self.on_call: Callable[[str, dict[str, Any]], Any] | None = None
+
+    @property
+    def tokenizer_name(self) -> Any:
+        return self._tokenizer_name
+
+    @tokenizer_name.setter
+    def tokenizer_name(self, value: Any) -> None:
+        if self.tokenizer_error is not None:
+            raise self.tokenizer_error
+        self._tokenizer_name = value
 
     def _record(self, path: str, text: str, size: Any, overlap: Any, options: dict[str, Any]) -> None:
         self.calls.append((path, text, size, overlap, options))
@@ -90,7 +104,8 @@ class RecordingStrategy:
 
     def chunk_generator(self, text: str, max_size: Any, overlap: Any, **options: Any) -> Iterator[str]:
         self._record("generator", text, max_size, overlap, options)
-        return self.iterator_factory() if self.iterator_factory else iter(self.text_result)
+        iterator: Iterator[str] = self.iterator_factory() if self.iterator_factory else iter(self.text_result)
+        return iterator
 
 
 class FakeExecutionContext:
@@ -99,10 +114,10 @@ class FakeExecutionContext:
     def __init__(self) -> None:
         self.config = ChunkerConfig(enable_cache=False, default_max_size=8, default_overlap=0, language="en")
         self.events: list[Any] = []
-        self._strategy_lock = RecordingLock(self.events)
+        self._strategy_lock: Any = RecordingLock(self.events)
         self._strategy_cache_mode = "shared"
         self._cache: RecordingCache | None = None
-        self.strategy = RecordingStrategy(self.events, self._strategy_lock)
+        self.strategy: Any = RecordingStrategy(self.events, self._strategy_lock)
         self.effective_llm: tuple[Any, Any] = (None, {})
 
     def _sanitize_input(self, text: str, *, suppress_security_log: bool = False) -> str:
@@ -118,7 +133,8 @@ class FakeExecutionContext:
 
     def _resolve_method(self, method: Any, language: Any, options: dict[str, Any] | None = None) -> str:
         self.events.append(("resolve", method, language, options))
-        return method
+        resolved: str = method
+        return resolved
 
     def _apply_option_aliases(self, method: str, options: dict[str, Any]) -> dict[str, Any]:
         self.events.append(("aliases", method))
