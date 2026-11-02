@@ -96,7 +96,7 @@ semantics for legacy `phase=None`/other strings.
 **Goal:** A standalone worker runs existing evaluator semantics with bounded data.
 **Success Criteria:** Benign parity, strict protocol validation, and bounded output; production service remains unchanged.
 **Tests:** New protocol/worker suites plus existing evaluator characterization.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Protocol, Worker, and Output Guard
 
@@ -123,12 +123,19 @@ or `Moderation/`, which mean `tldw_Server_API/app/core/` and its Moderation chil
 - `execute_request(request: WorkerRequest) -> WorkerResponse`; `regex_worker.main() -> int`.
 - `OutputBudget(max_chars: int)` in `execution_models.py`; evaluator redaction entry points gain keyword-only `output_budget: OutputBudget | None = None`. Existing positional/default behavior remains unchanged.
 
-- [ ] **Step 1: Write failing protocol and successful-parity tests.**
+- [x] **Step 1: Write failing protocol and successful-parity tests.**
 
 ```python
 def test_unknown_wire_version_is_rejected():
+    original = snapshot_request(
+        "evaluate", "", ModerationPolicy(), None,
+        EvaluationLimits(100, 10, 1000, None), ExecutionBounds(),
+    )
+    data = json.loads(encode_request(original)[4:])
+    data["version"] = 999
+    payload = json.dumps(data).encode("utf-8")
     with pytest.raises(ModerationExecutionError, match="invalid_response"):
-        decode_request(b'{"version":999}')
+        decode_request(struct.pack(">I", len(payload)) + payload)
 
 def test_requester_defaults_are_fixed():
     bounds = ExecutionBounds()
@@ -150,11 +157,11 @@ against the existing evaluator; assert the expansion case raises `size_exceeded`
 without allocating the oversized joined result. Property-test bounded JSON frames,
 Unicode/control characters, and malformed fields. Reject NaN/infinity and bool-as-int.
 
-- [ ] **Step 2: Run new tests red.**
+- [x] **Step 2: Run new tests red.**
 Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_execution_protocol.py tldw_Server_API/tests/unit/test_moderation_regex_worker.py -q` in the activated venv.
 Expected: missing new modules/interfaces, not an environment or collection failure unrelated to the task.
 
-- [ ] **Step 3: Implement these interfaces.** Use one four-byte big-endian length-prefixed UTF-8 JSON frame and EOF, with exact version/tag/schema validation and strict size checks. Snapshot `.pattern`/integer `.flags` without compiling in the parent, distinguish raw rules, and reconstruct canonical models in the child. Call the existing evaluator, not a copied algorithm. Check output growth during substitution callbacks and list/slice assembly before large joins, preserving literal replacement and zero-length semantics. No callbacks cross IPC.
+- [x] **Step 3: Implement these interfaces.** Use one four-byte big-endian length-prefixed UTF-8 JSON frame and EOF, with exact version/tag/schema validation and strict size checks. Snapshot `.pattern`/integer `.flags` without compiling in the parent, distinguish raw rules, and reconstruct canonical models in the child. Call the existing evaluator, not a copied algorithm. Check output growth during substitution callbacks and list/slice assembly before large joins, preserving literal replacement and zero-length semantics. No callbacks cross IPC.
 
 Launch entry is a fixed trusted file with `sys.executable`, `-I`, and `-S`;
 resolve its installed package root from that file, not cwd/PYTHONPATH. Only the
@@ -178,17 +185,17 @@ expanded length from group spans before `Match.expand()`; do not call the
 Validate helper import isolation and stdlib template parity on supported Python
 versions. All five request variants share byte/rule/output caps and error handling.
 
-- [ ] **Step 4: Run new tests and existing evaluator tests green.**
+- [x] **Step 4: Run new tests and existing evaluator tests green.**
 Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_execution_protocol.py tldw_Server_API/tests/unit/test_moderation_regex_worker.py tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py -q`.
 Expected: all pass, including unchanged benign baseline behavior.
-- [ ] **Step 5: Review the diff and commit** as `feat(moderation): add bounded stdlib regex worker (<implementation task ID>)` with only Task 1 paths and tracking updates.
+- [x] **Step 5: Review the diff and commit** as `feat(moderation): add bounded stdlib regex worker (<implementation task ID>)` with only Task 1 paths and tracking updates.
 
 ## Stage 2: Parent Supervision and Cancellation
 
 **Goal:** A parent can terminate, contain, and reap any admitted worker.
 **Success Criteria:** Deadline/capacity/cancellation failures are typed and bounded; no application-loop blocking.
 **Tests:** Deterministic process doubles plus outer-timeout real-child recovery tests.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 2: Supervisor and Async Orchestration
 
