@@ -1037,8 +1037,10 @@ Preserve the plan-scoped reports/probes/ledger; no completion/merge claim.
 **Task 9 Default Batch Integration Gate (2026-11-02):**
 The real default enhanced batch callback still bypasses canonical parent controls:
 a matching plan/context network limit of one permits two acquisition calls,
-charges zero requests, and reports completion. Fix this before Task 9 acceptance,
-after the active browser fix, with a separate focused commit and review. Bind the
+charges zero requests, and reports completion. Fix this before Task 9 acceptance
+with a separate focused commit and review. If browser startup ordering remains
+blocked after capped attempts, continue this independent repair without accepting
+or weakening the browser finding. Bind the
 default batch/queue path to existing canonical page composition; page attempts
 must be debited once by the actual page owner, not queue and page independently.
 Preserve enhanced instance routing, extraction method/advice, cookies, headers,
