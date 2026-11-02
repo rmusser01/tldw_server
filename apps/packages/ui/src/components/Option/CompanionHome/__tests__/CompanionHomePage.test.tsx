@@ -3,6 +3,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
+import { DEFAULT_COMPANION_HOME_LAYOUT } from "@/store/companion-home-layout"
 
 const mocks = vi.hoisted(() => ({
   fetchCompanionHomeSnapshot: vi.fn(),
@@ -469,6 +470,8 @@ describe("CompanionHomePage", () => {
     ["personalization is unavailable", false, true],
     ["the Companion is turned off", true, false]
   ])("XS-17: folds the setup-blocked cards into one notice when %s", async (_label, available, enabled) => {
+    const layout = createDeferred<typeof DEFAULT_COMPANION_HOME_LAYOUT>()
+    mocks.loadCompanionHomeLayout.mockReturnValueOnce(layout.promise)
     mocks.capabilitiesState.capabilities = { hasPersonalization: available, hasPersona: true }
     mocks.fetchPersonalizationProfile.mockResolvedValue({ enabled })
     mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot({
@@ -482,17 +485,23 @@ describe("CompanionHomePage", () => {
     renderPage()
 
     const notice = await screen.findByTestId("companion-home-waiting-on-setup")
-    for (const title of [
-      "Inbox Preview",
-      "Needs Attention",
-      "Resume Work",
-      "Goals / Focus",
-      "Recent Activity",
-      "Reading Queue"
-    ]) {
-      expect(notice).toHaveTextContent(title)
-      expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument()
-    }
+    expect(screen.getByTestId("companion-home-core-layout-loading")).toBeInTheDocument()
+    expect(notice).toHaveTextContent("Inbox Preview, Needs Attention.")
+    // The setup notice exists before the persisted core layout is available.
+    layout.resolve(DEFAULT_COMPANION_HOME_LAYOUT)
+    await waitFor(() => {
+      for (const title of [
+        "Inbox Preview",
+        "Needs Attention",
+        "Resume Work",
+        "Goals / Focus",
+        "Recent Activity",
+        "Reading Queue"
+      ]) {
+        expect(notice).toHaveTextContent(title)
+        expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument()
+      }
+    })
     expect(screen.queryByText("Registry setup required")).not.toBeInTheDocument()
     expect(screen.getAllByText("Companion setup required")).toHaveLength(1)
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()

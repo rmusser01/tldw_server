@@ -55,6 +55,9 @@ async function selectRunPrompt() {
   fireEvent.mouseDown(combo)
   fireEvent.click(await screen.findByText("Mira question (v2)", { selector: ".ant-select-item-option-content" }))
 }
+async function expectVisibleRunOutput(text: string) {
+  await waitFor(() => expect(screen.getByText(text)).toBeVisible())
+}
 async function configureWizard(kind: "evaluation" | "optimization") {
   await screen.findByText("v2")
   const row = screen.getByText("v2").closest("tr")!
@@ -91,6 +94,51 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client?.clear(); notification.destroy() })
 
 describe("Prompt Studio canonical targets and run contracts", () => {
+  it("waits for visible output when real modal preparation frames are delayed", async () => {
+    const frames = new Map<number, FrameRequestCallback>()
+    let nextFrameId = 0
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
+      const id = --nextFrameId
+      frames.set(id, callback)
+      return id
+    })
+    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(id => {
+      frames.delete(id)
+    })
+    let held = true
+    const releaseFrames = async () => {
+      if (!held) return
+      held = false
+      requestFrame.mockRestore()
+      cancelFrame.mockRestore()
+      await act(async () => {
+        for (const callback of frames.values()) callback(performance.now())
+        frames.clear()
+      })
+    }
+    try {
+      mount("run")
+      // Deliberately deliver the response during the real modal's preparation
+      // phase, before the animation frame that exposes its content.
+      fireEvent.mouseDown(await screen.findByLabelText("Select Prompt to Run Against"))
+      fireEvent.click(await screen.findByText("Mira question (v2)", { selector: ".ant-select-item-option-content" }))
+      fireEvent.click(screen.getByText("Run Tests").closest("button")!)
+      const output = await screen.findByText("Mira Vale directs Rowan.")
+      expect(output).not.toBeVisible()
+      expect(frames.size).toBeGreaterThan(0)
+      let settled = false
+      const visibility = expectVisibleRunOutput("Mira Vale directs Rowan.")
+        .then(() => null, error => error)
+        .finally(() => { settled = true })
+      await act(async () => {})
+      expect(settled).toBe(false)
+      await releaseFrames()
+      expect(await visibility).toBeNull()
+      expect(output).toBeVisible()
+    } finally {
+      await releaseFrames()
+    }
+  })
   it("sends the catalog default target with the exact saved prompt version for a test run", async () => {
     mount("run")
     await selectRunPrompt()
@@ -102,7 +150,7 @@ describe("Prompt Studio canonical targets and run contracts", () => {
   it("displays canonical actual and expected responses, milliseconds, and an ungraded result", async () => {
     mount("run"); await selectRunPrompt()
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }))
-    expect(await screen.findByText("Mira Vale directs Rowan.")).toBeVisible()
+    await expectVisibleRunOutput("Mira Vale directs Rowan.")
     expect(screen.getByText("Dr. Mira Vale")).toBeVisible()
     expect(screen.getByText("0.25s")).toBeVisible()
     expect(screen.getByText("1 ungraded")).toBeVisible()
@@ -160,7 +208,7 @@ describe("Prompt Studio canonical targets and run contracts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }))
     await waitFor(() => expect(posts()).toHaveLength(1))
     expect(posts()[0].body).toMatchObject({ provider: undefined, model: undefined })
-    expect(await screen.findByText("Mira Vale directs Rowan.")).toBeVisible()
+    await expectVisibleRunOutput("Mira Vale directs Rowan.")
   })
   it("keeps an exact canonical answer ungraded and displays zero milliseconds", async () => {
     runData = { results: [{ ...run, actual: { response: "Dr. Mira Vale" }, execution_time_ms: 0 }] }
@@ -179,7 +227,7 @@ describe("Prompt Studio canonical targets and run contracts", () => {
     ] }
     mount("run"); await selectRunPrompt()
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }))
-    expect(await screen.findByText("Reviewed answer")).toBeVisible()
+    await expectVisibleRunOutput("Reviewed answer")
     expect(screen.getByText("Pass")).toBeVisible()
     expect(screen.getByText("Fail")).toBeVisible()
     expect(screen.getByText("Provider timed out")).toBeVisible()

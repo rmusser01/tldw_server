@@ -181,6 +181,9 @@ def test_shared_audit_refuses_stale_per_user_file(storage_scope, monkeypatch, op
     from tldw_Server_API.app.core import config
 
     root, shadow, incoming = storage_scope
+    # Collection can reload config after these consumers cached its settings.
+    monkeypatch.setattr(Audit_DB_Deps, "settings", config.settings)
+    monkeypatch.setattr(data_ops, "app_settings", config.settings)
     monkeypatch.setitem(config.settings, "AUDIT_STORAGE_MODE", "shared")
     monkeypatch.setitem(config.settings, "AUDIT_STORAGE_ROLLBACK", False)
     assert Audit_DB_Deps._resolve_audit_storage_mode() == "shared"  # nosec B101 -- confirm the actual HTTP storage owner.
@@ -220,10 +223,13 @@ def test_authnz_refuses_shared_or_unresolved_pg_database(storage_scope, monkeypa
 
 @pytest.mark.parametrize("dataset", ["media", "chacha", "prompts", "evaluations", "audit"])
 def test_sqlite_dataset_backup_and_restore_still_use_the_recorded_user(storage_scope, monkeypatch, dataset):
+    from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
     from tldw_Server_API.app.core import config
 
     root, target, incoming = storage_scope
     monkeypatch.setenv("TLDW_CONTENT_DB_BACKEND", "sqlite")
+    monkeypatch.setattr(Audit_DB_Deps, "settings", config.settings)
+    monkeypatch.setattr(data_ops, "app_settings", config.settings)
     monkeypatch.setitem(config.settings, "AUDIT_STORAGE_MODE", "per_user")
     monkeypatch.setitem(config.settings, "AUDIT_STORAGE_ROLLBACK", False)
     monkeypatch.setitem(data_ops.DATASET_DB_RESOLVERS, dataset, lambda _owner: target)
