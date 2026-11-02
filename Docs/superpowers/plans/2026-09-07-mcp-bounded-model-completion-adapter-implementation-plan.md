@@ -662,7 +662,7 @@ fingerprint refresh is authorized by that equality alone.
 **Goal**: Request read-only review of an immutable current-dev source artifact and address every finding.
 **Success Criteria**: No unaddressed findings; reviewer explicitly approves the final source.
 **Tests**: Reviewer reproductions and fresh affected regression checks after repairs.
-**Status**: In Progress
+**Status**: Complete
 
 The unrelated-suite delta `618887def3..125038e497` received independent approval
 with no findings. Core review `3ab1ce5..618887def3` found four actionable gaps:
@@ -701,11 +701,40 @@ commit-success/release-failure regression and provisional-schema compatibility.
 Proposed ADR-087 now states this stronger ownership rule. Final source approval
 and publication remain blocked until the regression and fresh review pass.
 
+The token repair's independent re-review approved source
+`69cafe1b17928002cb36b04032e835c8ea8a072c` with no Critical, Important or
+Minor findings. Every accounting cleanup supplies its persisted attempt token;
+runtime UUIDv4 handle validation prevents malformed/absent ownership from
+reaching the trusted legacy repository wildcard. SQLite focused coverage passes
+1,026 tests, including the exact rollback/replacement regression and 37 initially
+failing malformed-handle cases. Final canonical PostgreSQL/full-core checks and
+hosted CI remain verification gates, not waived by source approval.
+
 ### November Stage 4: Publish And Arm
 **Goal**: Publish with an explicit lease and enable only normal gated auto-merge.
 **Success Criteria**: GitHub head matches reviewed source; no unresolved threads; ordinary required gates retained; auto-merge state read back.
 **Tests**: Current dev/head/readiness, required CI and auto-merge readback; no administrative bypass or hand-dispatched required gates.
-**Status**: Not Started
+**Status**: In Progress
+
+Publication may precede hosted E2E verification only while auto-merge stays
+disabled: the normal push is required to produce current-head CI. Close any
+remaining hosted verification in Stage 2 before arming auto-merge. Do not use a
+manual required-workflow dispatch or administrative bypass to replace those gates.
+
+Final local qualification of approved source `69cafe1b17928002cb36b04032e835c8ea8a072c`:
+`4,564 passed, 3 existing parser skips` for full MCP/shared regressions;
+`144 passed, 0 skips` for canonical PostgreSQL; `1,026 passed` for the focused
+owner repair; `87,593 tests collected` unfiltered. Exact required backend steps
+pass: tenant ratchets 74, contracts 1,006 with one existing skip, WebSocket auth
+193, and unit smoke 459 with 33 marker deselections. Docs pass 212 tests;
+Python 3.12 official OpenAPI fingerprint/paths match; scrubbed startup returns
+`/health` 200. Production Bandit scans 49,467 lines with zero findings/errors.
+Fresh uncached mypy compares 320 inherited diagnostics against dev's 322, with
+zero new diagnostics; no globally clean typing result is claimed. Normal hooks
+pass. Base is fetch-verified dev `5937f33065c4b5b5b2d0f731d1914c0651532eb5`.
+The final evidence commit changes only this plan and the parent task; reviewed
+implementation/test blobs must match before the explicit `8cf56d0a71d859f65b14041c08e6f729c82160e1`
+publication lease is used.
 
 ## Acceptance-Criteria Traceability
 
