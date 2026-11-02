@@ -56,12 +56,7 @@ IMPORT_TIME_CONFIG_ALLOWLIST: dict[str, str] = {
         "constant; config reads move to call time under TASK-13950.21"
     ),
 }
-_SCHEMA_MODELS = "imports schema models; TASK-13950.15 moves them to core"
-CHAT_REQUEST_SCHEMAS_CORE_IMPORTERS: dict[str, str] = {
-    "core.Chat.chat_helpers": _SCHEMA_MODELS,
-    "core.Chat.chat_service": _SCHEMA_MODELS,
-    "core.Prompt_Management.prompt_improvement_dispatch": _SCHEMA_MODELS,
-}
+CHAT_REQUEST_SCHEMAS_CORE_IMPORTERS: dict[str, str] = {}
 
 
 def _is_config(name: str) -> bool:
