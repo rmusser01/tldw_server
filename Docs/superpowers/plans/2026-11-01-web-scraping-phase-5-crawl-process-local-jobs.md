@@ -967,17 +967,52 @@ documentation: [Playwright Route](https://playwright.dev/python/docs/api/class-r
 [BrowserContext](https://playwright.dev/python/docs/api/class-browsercontext),
 [Chromium protocol schema](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json).
 
-**Execution Checkpoint (2026-11-01):** Tasks 1-8 are accepted. Task 9 is not
-accepted: review round 1 independently closes sync admission, method intent and
-cookie-form Findings 1/3/4, but browser Finding 2 remains open. Three native
-feasibility probes established that browser-level auto-attach requires flattened
-child-session routing that public Playwright CDPSession cannot address. No fourth
-same-issue attempt or browser workaround was made. A separate connection to the
-same browser changes launch/control security and requires a new design review;
-the helper clarification above does not authorize opening that endpoint. Human
-permission to design/review a private loopback-only control connection is pending.
-Tasks 10-11 and final integration/certification remain unstarted. Preserve the
-plan-scoped reports/probe/ledger for resumption, not a completion/merge claim.
+**Current Human Direction And Minimal Fix (2026-11-02):**
+The user rejected a new browser-control subsystem and reaffirmed no functionality
+loss. The separate CDP connection/debugging-endpoint proposal and its approval
+wait are withdrawn. Do not build that subsystem or repeat the failed browser-level
+flattened-autoattach approach. Continue the approved refactor using existing
+capabilities; do not treat the withdrawn proposal as permission to stop work.
+
+Root-cause trace identifies an enhanced-versus-direct profile binding error:
+Phase 4 deliberately leaves route headers/cookies/proxies ineffective in direct
+capture, whereas the existing enhanced browser path supports those inputs.
+Preserve these as separate compatibility behaviors instead of forcing every call
+through the direct profile or changing standalone defaults. Narrow additive private
+browser profile fields and target cookie normalization remain allowed; use the
+existing guard/acquisition/cleanup owners and preserve analyzer/method precedence.
+Caller cookies retain normal browser domain/path/secure/same-site semantics per
+the Phase 4 contract, not a new manually copied Cookie-header scheme. This does
+not broaden CookieManager's exact-netloc lookup or route/explicit/stored precedence.
+
+A fresh native diagnostic proved that the existing owned page CDP session can
+intercept both HTTP redirect dispatches alongside existing context routing and
+strip custom Authorization/X-Private overrides on an origin change. It made two
+actual HTTP requests, one context-route call and two Fetch request-pause calls,
+preserving final URL and article HTML, with no additional browser control port.
+This is evidence for a smaller implementation path, not full browser certification.
+Use that existing session/request interface for needed per-dispatch header policy;
+extend existing page/frame/context ownership only where actual parity/guard tests
+require it. Do not infer that a page-only test proves every child-target case.
+Retain callback/session bounds, no double request charging, WebSocket/transfer
+guards, deployment-specific proxy admission and actual drain cleanup. Preserve
+proxy support in its existing allowed deployment, never manufacture attestation.
+No new HTTP fetch/fulfill pipeline, debug endpoint, external dependency, alternate
+browser engine or parallel live execution path.
+
+Implement a minimal failing browser-profile regression and fix at the composition
+boundary. Verify cookies, headers, proxies, real allowed/denied redirects and
+relevant frame/worker/subresource cases using native Chromium plus strict fakes.
+Distinguish existing compatibility/security semantics from new guarantees added
+by earlier controller proposals; do not silently waive a real regression. Keep
+the three earlier unsuccessful experiments as evidence, not a reason to retry
+their unsupported interface. The existing-session hypothesis is a reassessment
+after the required architecture discussion, not a fourth flattened-wire attempt.
+
+Tasks 1-8 remain accepted; Task 9 Findings 1/3/4 remain independently addressed.
+Finding 2 is active work and must pass fresh scoped re-review before Task 9
+acceptance. Tasks 10-11 and final integration/certification remain required.
+Preserve the plan-scoped reports/probes/ledger; no completion/merge claim.
 
 **Interfaces:** Consume `execute_crawl`, `execute_batch`, `ProcessLocalJobQueue`,
 and profile resolver. Preserve every existing signature/export/factory in Task 1.
