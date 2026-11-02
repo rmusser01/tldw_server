@@ -1425,6 +1425,26 @@ def _resolve_step_action_name(
     return str(tool_name or "").strip().lower()
 
 
+def _admit_persona_stream_session_id(
+    db: CharactersRAGDB | None,
+    *,
+    session_manager: Any,
+    session_id: str,
+    user_id: str,
+    connection_session_id: str,
+) -> bool:
+    """Admit owned IDs or this connection's server-issued temporary ID."""
+    current = session_manager.get(session_id)
+    if current is not None:
+        return str(current.user_id) == user_id
+    if session_id == connection_session_id:
+        return True
+    if db is None:
+        return False
+    # Lookup errors propagate; they cannot authorize a fresh temporary alias.
+    return db.get_persona_session(session_id, user_id=user_id, include_deleted=False) is not None
+
+
 def _load_persona_policy_rules_for_session(
     db: CharactersRAGDB | None,
     *,
@@ -10434,6 +10454,35 @@ async def persona_stream(
                 msg = {"type": "unknown", "raw": raw}
 
             mtype = msg.get("type") or msg.get("event") or "unknown"
+            admission_session_id = _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
+            try:
+                admitted = await run_quiescent_operation(
+                    asyncio.to_thread(
+                        chacha_operation(independent=True)(_admit_persona_stream_session_id),
+                        persona_scope_db,
+                        session_manager=session_manager,
+                        session_id=admission_session_id,
+                        user_id=authenticated_user_id,
+                        connection_session_id=default_session_id,
+                    )
+                )
+            except (OSError, RuntimeError, ValueError, CharactersRAGDBError) as exc:
+                logger.bind(error_type=type(exc).__name__).warning("Persona session admission lookup failed")
+                await _emit_notice(
+                    session_id=admission_session_id, level="error",
+                    reason_code="SESSION_ADMISSION_FAILED",
+                    client_message_id=_bounded_client_message_id(msg.get("client_message_id")),
+                    message="Session ownership could not be checked. Reconnect and try again.",
+                )
+                continue
+            if not admitted:
+                await _emit_notice(
+                    session_id=admission_session_id, level="error",
+                    reason_code="SESSION_ID_UNAVAILABLE",
+                    client_message_id=_bounded_client_message_id(msg.get("client_message_id")),
+                    message="Connect an owned session or use the temporary session ID offered by this connection.",
+                )
+                continue
             if mtype == "user_message":
                 _start_persona_live_turn(msg=msg, text=msg.get("text") or msg.get("message") or "")
             elif mtype in {"voice_prepare", "voice_stop"}:
