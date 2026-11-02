@@ -1059,6 +1059,28 @@ Identity checkpoint 2fec219ac349cdf9b8bd9f52f0fe685d6da7ba59 supplies Git histor
 **Tests**: Current rules/feedback/checks and remote readback; task stays In Progress until verified merge.
 **Status**: In Progress
 
+### November 2 VZ-Evidence Dev Integration
+
+## Stage 1: Preserve the Approved Tree on Latest Dev
+**Goal**: Replay the reviewed WP2 branch onto authoritative dev b9d77af490c9de5d538b51d532bcb19ad2c7c58a.
+**Success Criteria**: All 42 patches are range-diff equal. The four upstream VZ evidence/task files match dev exactly; all other committed blobs and modes match approved head 29a4ba6877. ADR085 remains governing, with no new architecture decision or WP3 work.
+**Tests**: Full-tree object/mode comparison, disjoint-path and range-diff qualification.
+**Status**: Complete
+
+## Stage 2: Qualify Documentation and Tracking
+**Goal**: Validate the documentation-only integration without rerunning unchanged runtime remediation.
+**Success Criteria**: Docs and canonical task-format tests pass; independent bounded review validates preservation and the final tracking checkpoint. Prior runtime, browser and security evidence applies to identical blobs, not claimed freshly rerun; existing non-green broad-suite limits remain explicit.
+**Tests**: Docs suite including strict MkDocs build, canonical tracking tests, diff check and independent requesting-code-review review. No Python or executable test changes mean no newly touched Bandit scope.
+**Status**: Complete
+
+Qualification: all 212 Docs tests pass without skips, including the actual strict MkDocs build; four canonical task-format tests pass. Full-tree comparison verifies that all four upstream files/modes equal dev and every other committed object/mode equals approved head 29a4ba6877 before this new two-file tracking checkpoint. All 42 replayed patches are range-diff equal; the upstream paths have no overlap with WP2's changed paths. Independent bounded review finds no critical, important or minor findings and confirms ADR085 rationale/publication parity. Its exclusions are accepted: unchanged WP2 implementation and prior live PostgreSQL/browser/security evidence are carried through exact blobs, not re-audited or rerun; VZ runtime/private receipt authenticity is upstream-owned, while documentation integration is checked; unchanged WP3 stays excluded. GitHub/ref/summary/CI gates remain the coordinator's responsibility. No new Python or executable file is touched, so prior qualified Bandit applies to identical runtime blobs rather than a fresh scan. Existing non-green broad-suite limits remain recorded above. Final exact-SHA tracking review and all fresh remote merge gates remain mandatory.
+
+## Stage 3: Publish and Await Fresh Required Gates
+**Goal**: Publish the exact independently approved candidate using a lease against 29a4ba6877 after confirming queue mode, auto-merge state and authoritative refs.
+**Success Criteria**: Preserve the human summary; merge only after latest-dev ancestry, exact-head review and all current required checks pass, using merge-commit with an expected-head SHA and readback. TASK-13001.2 remains In Progress until verified merge.
+**Tests**: Current rules, feedback, exact-head CI and remote readback. Do not cancel unrelated jobs, dispatch required gates or change policy.
+**Status**: In Progress
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
