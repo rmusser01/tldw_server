@@ -239,6 +239,14 @@ def test_native_accounting_authority_is_explicit_and_does_not_exempt_chat_intent
     assert intents in report.policy_tables and intents not in exemptions
 
 
+def test_mcp_cross_user_accounting_authority_is_explicit_not_an_rls_baseline_entry(report):
+    ledger = "provider_usage_reservations"
+    exemptions = load_exemptions(DEFAULT_EXEMPTIONS)
+    assert ledger in report.owned_tables and ledger in exemptions
+    assert ledger not in load_baseline(BASELINE)
+    assert "ADR-087" in exemptions[ledger]
+
+
 _HELPER_POLICY_MODULE = '''
 def build():
     stmts = []

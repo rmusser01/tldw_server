@@ -16,6 +16,7 @@ from loguru import logger
 from .exception_types import (  # noqa: F401 - centralized compatibility exports.
     PersonaArtworkValidationError,
     PromptCatalogError,
+    ProviderUsageReservationError,
 )
 
 if TYPE_CHECKING:
@@ -1144,6 +1145,14 @@ class SchemaReadinessError(RuntimeError):
     Messages are fixed operator-facing reasons, never row data, so transaction
     boundaries that sanitize other failures pass this reason through.
     """
+
+
+class PGUsageSchemaError(SchemaReadinessError, TransactionPassthroughError):
+    """A hard usage-schema failure that must survive transaction translation."""
+
+    def __init__(self) -> None:
+        """Expose a fixed readiness code without native failure data."""
+        super().__init__("AUTHNZ_PG_USAGE_SCHEMA_NOT_READY")
 
 
 def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:

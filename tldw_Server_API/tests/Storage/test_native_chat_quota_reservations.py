@@ -724,7 +724,7 @@ from pathlib import Path
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations
+from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations, get_authnz_migrations
 from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaOwner
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
@@ -774,7 +774,7 @@ async def main():
                 sentinel = await pool.fetchone('SELECT uuid,storage_used_mb FROM users WHERE id = ?', 41)
                 assert sentinel['uuid'] == '22222222222242228222222222222222' and sentinel['storage_used_mb'] == 12
             if os.environ['NATIVE_QUOTA_BACKEND'] == 'sqlite':
-                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == 104
+                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == get_authnz_migrations()[-1].version
                 indexes = await pool.fetchall("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_sessions_created_at', 'idx_org_members_org_user')")
                 assert {row['name'] for row in indexes} == {'idx_sessions_created_at', 'idx_org_members_org_user'}
             if prior == 'preview101':

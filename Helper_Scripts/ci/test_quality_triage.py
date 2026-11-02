@@ -162,12 +162,30 @@ def _is_test_function(node: ast.AST) -> bool:
     )
 
 
+def _pytest_class_names(tree: ast.Module) -> set[str]:
+    """Recognize local contract mixins actually inherited by pytest classes."""
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+    reachable = {name for name in classes if name.startswith("Test")}
+    pending = list(reachable)
+    while pending:
+        for base in classes[pending.pop()].bases:
+            if isinstance(base, ast.Name) and base.id in classes and base.id not in reachable:
+                reachable.add(base.id)
+                pending.append(base.id)
+    return {
+        name
+        for name in reachable
+        if name.startswith("Test") or any(_is_test_function(node) for node in classes[name].body)
+    }
+
+
 def _iter_test_functions(tree: ast.Module):
-    """Yield test functions at module level and inside Test* classes."""
+    """Yield tests at module level and in pytest classes or their contract mixins."""
+    pytest_classes = _pytest_class_names(tree)
     for node in tree.body:
         if _is_test_function(node):
             yield node
-        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+        elif isinstance(node, ast.ClassDef) and node.name in pytest_classes:
             for sub in node.body:
                 if _is_test_function(sub):
                     yield sub
@@ -175,6 +193,7 @@ def _iter_test_functions(tree: ast.Module):
 
 def _module_fake_classes(tree: ast.Module) -> set[str]:
     """Exclude pytest classes and explicitly imported Hypothesis test machines."""
+    pytest_classes = _pytest_class_names(tree)
     hypothesis_bases: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "hypothesis.stateful":
@@ -195,7 +214,7 @@ def _module_fake_classes(tree: ast.Module) -> set[str]:
         node.name
         for node in tree.body
         if isinstance(node, ast.ClassDef)
-        and not node.name.startswith("Test")
+        and node.name not in pytest_classes
         and not any(_expression_name(base) in hypothesis_bases for base in node.bases)
     }
 

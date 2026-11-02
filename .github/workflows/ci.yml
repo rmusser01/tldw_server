@@ -1457,6 +1457,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -3151,6 +3152,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -4681,6 +4683,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -6121,6 +6124,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py
@@ -7552,6 +7556,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_anthropic_native.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_offline_model_inventory.py
           - name: llm-adapters-chat-errors-core
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_core_providers.py

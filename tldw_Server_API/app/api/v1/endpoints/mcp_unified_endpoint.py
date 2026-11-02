@@ -14,7 +14,7 @@ import ipaddress
 import os
 import secrets
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, Security, WebSocket, status
@@ -55,6 +55,7 @@ from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get_jwt_manager
+from tldw_Server_API.app.core.MCP_unified.auth_scope import project_authenticated_execution_scope
 from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
     invalid_request_response,
     mcp_response_to_json,
@@ -66,6 +67,7 @@ from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
 )
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
 from tldw_Server_API.app.core.MCP_unified.protocol import _trusted_compat_claims_metadata
+from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
 from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
@@ -371,6 +373,26 @@ def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     return None
 
 
+def _authenticated_execution_scope(
+    *,
+    principal: AuthPrincipal | None,
+    user: TokenData | None,
+    api_key_info: dict[str, Any] | None,
+) -> AuthenticatedExecutionScope | None:
+    """Resolve active scope only from server-authenticated credential data."""
+
+    try:
+        return project_authenticated_execution_scope(
+            authenticated_user_id=getattr(user, "sub", None),
+            principal_user_id=getattr(principal, "user_id", None),
+            principal_active_org_id=getattr(principal, "active_org_id", None),
+            principal_active_team_id=getattr(principal, "active_team_id", None),
+            api_key_info=api_key_info,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid authenticated scope") from exc
+
+
 @dataclass
 class McpAuthContext:
     """Resolved authentication context for MCP HTTP endpoints."""
@@ -379,6 +401,18 @@ class McpAuthContext:
     principal: Optional[AuthPrincipal]
     api_key_info: Optional[dict[str, Any]]
     raw_api_key: Optional[str]
+    execution_scope: AuthenticatedExecutionScope | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.api_key_info is not None:
+            if not isinstance(self.api_key_info, dict):
+                raise HTTPException(status_code=403, detail="Invalid authenticated scope")
+            self.api_key_info = dict(self.api_key_info)
+        self.execution_scope = _authenticated_execution_scope(
+            principal=self.principal,
+            user=self.user,
+            api_key_info=self.api_key_info,
+        )
 
 
 def _principal_to_token_data(principal: AuthPrincipal) -> Optional[TokenData]:
@@ -687,6 +721,17 @@ async def _attach_api_key_metadata(
                     exc_info=True,
                 )
             api_key_info = None
+
+    if api_key_info is not None and auth.api_key_info is None:
+        if not isinstance(api_key_info, dict):
+            raise HTTPException(status_code=403, detail="Invalid authenticated scope")
+        api_key_info = dict(api_key_info)
+        auth.execution_scope = _authenticated_execution_scope(
+            principal=auth.principal,
+            user=auth.user,
+            api_key_info=api_key_info,
+        )
+        auth.api_key_info = api_key_info
 
     if api_key_info:
         if api_key_info.get("org_id") is not None:
@@ -1032,7 +1077,11 @@ async def mcp_request(
         metadata["safe_config"] = safe_config
 
     resp_obj = await server.handle_http_request(
-        request_plan.request, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+        request_plan.request,
+        client_id=client_id,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
     )
     if request_plan.is_notification:
         return Response(status_code=204)
@@ -1135,7 +1184,11 @@ async def mcp_request_batch(
     server_responses: list[MCPResponse] = []
     if batch_plan.requests:
         handled_responses = await server.handle_http_batch(
-            batch_plan.requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+            batch_plan.requests,
+            client_id=client_id,
+            user_id=derived_user_id,
+            metadata=metadata or None,
+            server_auth_scope=auth.execution_scope,
         )
         if handled_responses:
             server_responses.extend(item for item in handled_responses if item.id is not None)
@@ -1309,7 +1362,12 @@ async def list_tools(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1478,7 +1536,12 @@ async def execute_tool(
 
     derived_user_id = _get_derived_user_id(user)
 
-    response = await server.handle_http_request(mcp_request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        mcp_request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response is None:
         logger.error("MCP server returned no response for tools/call", tool=request.tool_name)
@@ -1576,7 +1639,12 @@ async def list_modules(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1624,7 +1692,16 @@ async def get_modules_health(
         meta["permissions"] = principal.permissions
     _attach_rg_ingress_metadata(meta, http_request)
 
-    response = await server.handle_http_request(request, user_id=principal.principal_id, metadata=meta)
+    response = await server.handle_http_request(
+        request,
+        user_id=principal.principal_id,
+        metadata=meta,
+        server_auth_scope=_authenticated_execution_scope(
+            principal=principal,
+            user=None,
+            api_key_info=None,
+        ),
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1676,7 +1753,12 @@ async def list_resources(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:
@@ -1722,7 +1804,12 @@ async def list_prompts(
         if user.permissions:
             metadata["permissions"] = user.permissions
 
-    response = await server.handle_http_request(request, user_id=derived_user_id, metadata=metadata or None)
+    response = await server.handle_http_request(
+        request,
+        user_id=derived_user_id,
+        metadata=metadata or None,
+        server_auth_scope=auth.execution_scope,
+    )
 
     if response.error:
         if response.error.code == -32001:

@@ -91,6 +91,7 @@ class _DiscoveryAdapter(ExternalMCPTransportAdapter):
 @pytest.fixture
 async def runtime(tmp_path, monkeypatch):
     """Existing canonical temporary AuthNZ storage and local module lifecycle."""
+    # Fixture setup and test overrides share one undo stack through runtime shutdown.
     with monkeypatch.context() as patch:
         path = tmp_path / "users.db"
         patch.setenv("AUTH_MODE", "multi_user")
@@ -116,7 +117,8 @@ async def runtime(tmp_path, monkeypatch):
         try:
             await registry.register_module("external_federation", ExternalFederationModule, config)
             async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
-                yield SimpleNamespace(repo=repo, service=service, registry=registry, app=app, client=client)
+                yield SimpleNamespace(repo=repo, service=service, registry=registry, app=app, client=client,
+                                      patch=patch)
         finally:
             await registry.shutdown_all()
             await reset_db_pool()
@@ -146,9 +148,9 @@ async def test_saved_after_runtime_startup_discovers_existing_stdio_fixture_and_
     assert (await runtime.repo.get_external_server("uat-smoke"))["name"] == "UAT Smoke"  # nosec B101 - pytest behavioral oracle, not a runtime guard.
 
 
-async def test_new_server_discovery_failure_is_attempted_and_sanitized(runtime, monkeypatch):
+async def test_new_server_discovery_failure_is_attempted_and_sanitized(runtime):
     adapter = _DiscoveryAdapter("uat-smoke", fail=True)
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
     await _save(runtime)
     response = await runtime.client.post(f"{BASE}/uat-smoke/refresh-discovery")
     assert response.status_code == 200  # nosec B101 - pytest behavioral oracle, not a runtime guard.
@@ -171,10 +173,10 @@ async def test_unavailable_module_stays_unavailable_without_auto_enabling(runtim
 @pytest.mark.parametrize(("admin", "configure", "owner", "status"), [
     (False, False, 1, 403), (False, False, 2, 404), (True, True, 1, 404),
 ])
-async def test_mutation_and_visibility_denials_do_not_start_discovery(runtime, monkeypatch, admin, configure, owner, status):
+async def test_mutation_and_visibility_denials_do_not_start_discovery(runtime, admin, configure, owner, status):
     def unexpected_adapter(_config):
         raise AssertionError("Denied request must not start a transport")
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", unexpected_adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", unexpected_adapter)
     await _save(runtime, owner=owner)
     runtime.app.dependency_overrides[get_auth_principal] = lambda: _principal(admin=admin, configure=configure)
     server_id = "missing" if admin else "uat-smoke"
@@ -189,10 +191,10 @@ async def test_mutation_and_visibility_denials_do_not_start_discovery(runtime, m
 @pytest.mark.parametrize(("enabled", "source", "superseded"), [
     (False, "managed", None), (True, "legacy", None), (True, "managed", "replacement"),
 ])
-async def test_unavailable_rows_refuse_before_transport(runtime, monkeypatch, enabled, source, superseded):
+async def test_unavailable_rows_refuse_before_transport(runtime, enabled, source, superseded):
     def unexpected_adapter(_config):
         raise AssertionError("Unavailable row must not start a transport")
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", unexpected_adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", unexpected_adapter)
     await _save(runtime, enabled=enabled, source=source, superseded=superseded)
     before = await runtime.repo.get_external_server("uat-smoke")
     response = await runtime.client.post(f"{BASE}/uat-smoke/refresh-discovery")
@@ -201,9 +203,9 @@ async def test_unavailable_rows_refuse_before_transport(runtime, monkeypatch, en
     assert await runtime.repo.get_external_server("uat-smoke") == before  # nosec B101 - Rejected discovery must preserve the managed server row.
 
 
-async def test_same_server_requests_reconcile_serially(runtime, monkeypatch):
+async def test_same_server_requests_reconcile_serially(runtime):
     adapter = _DiscoveryAdapter("uat-smoke", block=True)
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
     await _save(runtime)
     first = asyncio.create_task(runtime.client.post(f"{BASE}/uat-smoke/refresh-discovery"))
     second = None
@@ -222,9 +224,9 @@ async def test_same_server_requests_reconcile_serially(runtime, monkeypatch):
         await asyncio.gather(first, *([second] if second else []), return_exceptions=True)
 
 
-async def test_module_semaphore_blocks_reconciliation_until_admitted(runtime, monkeypatch):
+async def test_module_semaphore_blocks_reconciliation_until_admitted(runtime):
     adapter = _DiscoveryAdapter("uat-smoke")
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
     await _save(runtime)
     module = await runtime.registry.get_module("external_federation")
     await module._semaphore.acquire()
@@ -240,9 +242,9 @@ async def test_module_semaphore_blocks_reconciliation_until_admitted(runtime, mo
     assert response.json()["tool_count"] == 1  # nosec B101 - pytest behavioral oracle, not a runtime guard.
 
 
-async def test_open_module_breaker_refuses_before_new_transport_dispatch(runtime, monkeypatch):
+async def test_open_module_breaker_refuses_before_new_transport_dispatch(runtime):
     adapter = _DiscoveryAdapter("uat-smoke")
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
     await _save(runtime)
     module = await runtime.registry.get_module("external_federation")
     for _ in range(module.config.circuit_breaker_threshold):
@@ -253,9 +255,9 @@ async def test_open_module_breaker_refuses_before_new_transport_dispatch(runtime
     assert await runtime.registry.find_module_for_tool("ext.uat-smoke.echo.search") is None  # nosec B101 - pytest behavioral oracle, not a runtime guard.
 
 
-async def test_module_timeout_preserves_bound_on_semaphore_admission(runtime, monkeypatch):
+async def test_module_timeout_preserves_bound_on_semaphore_admission(runtime):
     adapter = _DiscoveryAdapter("uat-smoke")
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", lambda _config: adapter)
     await _save(runtime)
     module = await runtime.registry.get_module("external_federation")
     module.config.timeout_seconds = 0.02
@@ -268,10 +270,10 @@ async def test_module_timeout_preserves_bound_on_semaphore_admission(runtime, mo
     assert not adapter.entered.is_set()  # nosec B101 - pytest behavioral oracle, not a runtime guard.
 
 
-async def test_malformed_owned_config_is_refused_without_starting_transport(runtime, monkeypatch):
+async def test_malformed_owned_config_is_refused_without_starting_transport(runtime):
     def unexpected_adapter(_config):
         raise AssertionError("Invalid runtime configuration must not start a transport")
-    monkeypatch.setattr(manager_mod, "build_transport_adapter", unexpected_adapter)
+    runtime.patch.setattr(manager_mod, "build_transport_adapter", unexpected_adapter)
     await _save(runtime, config={})
     response = await runtime.client.post(f"{BASE}/uat-smoke/refresh-discovery")
     assert response.status_code == 200  # nosec B101 - pytest behavioral oracle, not a runtime guard.

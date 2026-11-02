@@ -200,6 +200,7 @@ def stub_acp_store(monkeypatch):
 
     monkeypatch.setattr(acp_endpoints, "get_acp_session_store", _get_store)
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner)
+    monkeypatch.setattr(acp_endpoints, "get_existing_runner_client", lambda: runner)
     return store
 
 
@@ -218,6 +219,7 @@ def test_acp_list_sessions_status_schema_includes_tenancy(client_user_only, stub
     session = payload["sessions"][0]
     assert session["status"] == "active"
     assert session["has_websocket"] is True
+    assert session["runtime_available"] is True
     assert session["persona_id"] == "persona-abc"
     assert session["workspace_id"] == "ws-1"
     assert session["workspace_group_id"] == "wsg-2"
