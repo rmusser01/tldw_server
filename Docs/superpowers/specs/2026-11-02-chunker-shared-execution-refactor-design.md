@@ -1,8 +1,19 @@
 # Chunker Shared Execution Subsystem Refactor
 
-Backlog design task: `TASK-15413`
+Backlog design task: `TASK-15414`
 
-Status: Draft; requester selected approach B, but has not approved this design.
+Status: Approved by requester on 2026-11-02, together with ADR-086. Approval
+authorizes implementation planning; execution still requires plan review and
+an execution-method choice.
+
+Planning task: `TASK-15415`.
+
+Implementation plan: [Shared execution plan](../plans/2026-11-02-chunker-shared-execution-refactor.md).
+
+Tracking reconciliation: the live scan found unrelated UserProfiles PR #3404
+using `TASK-15413`. The official backlog-py CLI renumbered only this design
+record to `TASK-15414`, preserving its history and directory. Historical
+mentions of TASK-15413 remain provenance; unrelated records are untouched.
 
 ## Intent
 
@@ -79,9 +90,9 @@ that is equivalent. Leave thin public delegates in `Chunker`. This moves more
 code and needs stronger characterization, but matches the successful existing
 pipeline/service pattern and gives execution a clear owner.
 
-The requester selected B. The layout and contracts below are proposed
-engineering decisions for approval, not additional choices already made by
-the requester.
+The requester selected B, then approved the revised layout and contracts below
+on 2026-11-02 after design review. The remaining builder choices are limited
+to the discretion explicitly recorded later in this document.
 
 ## Ownership And Dependencies
 
@@ -382,14 +393,15 @@ and follows the existing pipeline/service pattern. Repository policy does not
 require a decision to be repository-wide before an ADR is needed.
 
 [ADR-086: Chunker Execution Live-Context Boundary](../../ADR/086-chunker-execution-live-context-boundary.md)
-records this decision with status **Proposed**, not Accepted. Its scope is the
+records this decision with status **Accepted** following requester approval
+on 2026-11-02. Its scope is the
 new execution subsystem; it does not retroactively change the accepted behavior
 or ownership of process_text, hierarchy or other modules. Public, persistence,
 security and concurrency behavior remains unchanged. This supersedes the
 initial draft's ADR-required-no assessment; accepted ADRs are not rewritten.
 ADR-002/059/084 still govern task tracking/tooling/IDs, and ADR-006 governs
-portable Bandit output. Approval of this revised design and the Proposed ADR
-remains with the requester before planning/implementation can proceed.
+portable Bandit output. Implementation planning is authorized; product/test
+edits still wait for review of the resulting plan and an execution choice.
 
 The builder may choose private helper names, precise internal annotations and
 test-file organization within these responsibilities. The hooks container may
@@ -410,6 +422,8 @@ additional public modes, an executor hierarchy or speculative abstractions.
   confirmed that all three revisions address their risks and returned
   "nothing important left". No material planning questions remain from that
   check. The review does not substitute for requester design/ADR approval.
-- Requester approval of this revised document and Proposed ADR-086: pending.
-- Implementation plan and product/test edits: not started and not authorized
-  until design approval.
+- Requester approval of this revised document and ADR-086: received on
+  2026-11-02 after the review found no further actionable issues.
+- Implementation planning: authorized and tracked in TASK-15415.
+- Product/test edits and execution: not started; plan review and an execution
+  method are still required before implementation.
