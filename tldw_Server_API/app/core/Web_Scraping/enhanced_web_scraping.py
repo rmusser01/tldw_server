@@ -1002,7 +1002,7 @@ class EnhancedWebScraper:
         if backend == "curl":
             try:
                 t0 = time.time()
-                html = await asyncio.to_thread(
+                html = await owned_to_thread(
                     self._fetch_html_curl,
                     url,
                     headers=headers,
