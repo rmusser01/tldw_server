@@ -818,6 +818,131 @@ def test_repeated_interrupted_sync_calls_retire_loops_executors_tasks_and_privat
         replacement.close()
 
 
+def test_sync_bridge_rejects_fifth_owner_until_actual_executor_retirement(monkeypatch):
+    import inspect
+    import threading
+    import time
+
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
+    from tldw_Server_API.app.core.Web_Scraping.jobs.admission import QueueRejected
+
+    release = threading.Event()
+    entered = [threading.Event() for _ in range(4)]
+    loops = []
+    create_loop = asyncio.new_event_loop
+
+    def new_loop():
+        loop = create_loop()
+        loops.append(loop)
+        return loop
+
+    def held(index):
+        entered[index].set()
+        assert release.wait(8), "release only after bounded admission assertions"
+
+    async def interrupted(index):
+        task = asyncio.create_task(asyncio.to_thread(held, index))
+        while not entered[index].is_set():
+            await asyncio.sleep(0.001)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return "logical interruption"
+
+    async def unused():
+        return "recovered"
+
+    monkeypatch.setattr(legacy.asyncio, "new_event_loop", new_loop)
+    rejected = unused()
+    try:
+        for index in range(4):
+            assert legacy._run_crawl_sync(interrupted(index)) == "logical interruption"
+        bridges = {t.ident for t in threading.enumerate() if t.name == "crawl-compat-drain"}
+        started = time.monotonic()
+        with pytest.raises(QueueRejected, match="queue_overloaded"):
+            legacy._run_crawl_sync(rejected)
+        assert time.monotonic() - started < 0.5
+        assert inspect.getcoroutinestate(rejected) == inspect.CORO_CLOSED
+        assert len(loops) == 4
+        assert {t.ident for t in threading.enumerate() if t.name == "crawl-compat-drain"} == bridges
+        assert all(not loop.is_closed() for loop in loops)
+    finally:
+        rejected.close()
+        release.set()
+        deadline = time.monotonic() + 3
+        while any(not loop.is_closed() for loop in loops) and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert all(loop.is_closed() for loop in loops)
+    assert legacy._get_sync_crawl_admission().active_count == 0
+    assert legacy._run_crawl_sync(unused()) == "recovered"
+
+
+def test_sync_admission_capacity_seam_cannot_reset_live_lease():
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
+
+    legacy._configure_sync_crawl_capacity(2)
+    gate = legacy._get_sync_crawl_admission()
+    release = gate.acquire()
+    try:
+        assert gate.capacity == 2 and gate.active_count == 1
+        with pytest.raises(RuntimeError, match="active"):
+            legacy._configure_sync_crawl_capacity(4)
+        assert gate.active_count == 1
+    finally:
+        release()
+        legacy._configure_sync_crawl_capacity(4)
+    for invalid in (0, -1, True, 1.5, float("inf")):
+        with pytest.raises(ValueError):
+            legacy._configure_sync_crawl_capacity(invalid)
+
+
+def test_sync_admission_pid_change_never_touches_inherited_lock_or_refunds_child(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
+
+    parent = legacy._get_sync_crawl_admission()
+    release_parent = parent.acquire()
+    pid = legacy.os.getpid()
+    parent._lock.acquire()
+    try:
+        with monkeypatch.context() as child:
+            child.setattr(legacy.os, "getpid", lambda: pid + 1)
+            gate = legacy._get_sync_crawl_admission()
+            assert gate is not parent and gate.active_count == 0 and gate.capacity == 4
+            release_child = gate.acquire()
+            release_parent()
+            assert gate.active_count == 1
+            release_child()
+            assert gate.active_count == 0
+    finally:
+        parent._lock.release()
+        release_parent()
+    assert parent.active_count == 0
+    assert legacy._get_sync_crawl_admission().active_count == 0
+
+
+def test_sync_thread_start_failure_closes_coroutine_and_recovers_capacity(monkeypatch):
+    import inspect
+
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
+
+    error = RuntimeError("thread startup failed")
+
+    def fail(_thread):
+        raise error
+
+    async def unused():
+        return "ok"
+
+    coroutine = unused()
+    with monkeypatch.context() as patch:
+        patch.setattr(legacy.threading.Thread, "start", fail)
+        with pytest.raises(RuntimeError) as raised:
+            legacy._run_crawl_sync(coroutine)
+    assert raised.value is error
+    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
+    assert legacy._get_sync_crawl_admission().active_count == 0
+    assert legacy._run_crawl_sync(unused()) == "ok"
+
+
 @pytest.mark.asyncio
 async def test_instance_stop_does_not_close_browser_ahead_of_owned_callback_drain():
     import threading

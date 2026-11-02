@@ -23,7 +23,7 @@ import json
 import os
 import tempfile
 import threading
-from collections.abc import Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from concurrent.futures import Future
 from contextlib import suppress
 from datetime import datetime
@@ -1166,17 +1166,84 @@ def get_url_depth(url: str) -> int:
     return len(urlparse(url).path.strip("/").split("/"))
 
 
+class _SyncCrawlAdmission:
+    """Process-owned leases for loops and default executors still retiring."""
+
+    def __init__(self, capacity: int = 4) -> None:
+        self.capacity = capacity
+        self.pid = os.getpid()
+        self._lock = threading.Lock()
+        self._active = 0
+
+    @property
+    def active_count(self) -> int:
+        if self.pid != os.getpid():
+            return 0
+        with self._lock:
+            return self._active
+
+    def acquire(self) -> Callable[[], None]:
+        from .jobs.admission import QueueRejected
+
+        with self._lock:
+            if self._active >= self.capacity:
+                raise QueueRejected("queue_overloaded")
+            self._active += 1
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            # An inherited lease cannot touch an inherited lock or child credits.
+            if self.pid != os.getpid():
+                return
+            with self._lock:
+                if not released:
+                    released = True
+                    self._active -= 1
+
+        return release
+
+
+_SYNC_CRAWL_ADMISSION = _SyncCrawlAdmission()
+
+
+def _get_sync_crawl_admission() -> _SyncCrawlAdmission:
+    """Replace inherited state before acquiring any potentially fork-held lock."""
+    global _SYNC_CRAWL_ADMISSION
+    if _SYNC_CRAWL_ADMISSION.pid != os.getpid():
+        _SYNC_CRAWL_ADMISSION = _SyncCrawlAdmission(_SYNC_CRAWL_ADMISSION.capacity)
+    return _SYNC_CRAWL_ADMISSION
+
+
+def _configure_sync_crawl_capacity(capacity: int) -> None:
+    """Trusted test seam; never reset capacity while work is live or draining."""
+    if type(capacity) is not int or capacity <= 0:
+        raise ValueError("sync crawl capacity must be a positive finite integer")
+    gate = _get_sync_crawl_admission()
+    with gate._lock:
+        if gate._active:
+            raise RuntimeError("sync crawl owners are active")
+        gate.capacity = capacity
+
+
 def _run_crawl_sync(coroutine: Coroutine[Any, Any, Any]) -> Any:
     """Return logical completion while a private loop services actual owned drain."""
-    completion = Future()
-    context = contextvars.copy_context()
+    try:
+        release = _get_sync_crawl_admission().acquire()
+    except BaseException:
+        coroutine.close()
+        raise
 
     def run():
+        loop = None
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         except BaseException as error:  # noqa: BLE001 - deliver thread startup failures unchanged
             coroutine.close()
+            if loop is not None:
+                loop.close()
+            release()
             completion.set_exception(error)
             return
 
@@ -1193,17 +1260,20 @@ def _run_crawl_sync(coroutine: Coroutine[Any, Any, Any]) -> Any:
             await loop.shutdown_asyncgens()
             await loop.shutdown_default_executor()
 
-        try:
-            loop.run_until_complete(complete())
-            loop.run_until_complete(drain())
-        finally:
-            loop.close()
+        # Unexpected runtime failure cannot refund capacity ahead of retirement.
+        loop.run_until_complete(complete())
+        loop.run_until_complete(drain())
+        loop.close()
+        release()
 
-    thread = threading.Thread(target=lambda: context.run(run), name="crawl-compat-drain", daemon=True)
     try:
+        completion = Future()
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=lambda: context.run(run), name="crawl-compat-drain", daemon=True)
         thread.start()
     except BaseException:
         coroutine.close()
+        release()
         raise
     return completion.result()
 
