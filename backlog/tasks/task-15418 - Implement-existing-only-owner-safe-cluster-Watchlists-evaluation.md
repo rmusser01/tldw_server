@@ -1,7 +1,7 @@
 ---
 id: TASK-15418
 title: Implement existing-only owner-safe cluster Watchlists evaluation
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -18,9 +18,9 @@ Non-creating Watchlists accessor/evaluation with owner-predicated cluster reads,
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
-- [ ] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
-- [ ] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
+- [x] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
+- [x] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
+- [x] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,19 +32,21 @@ BeginapprovedTask8 afterTask7independentfix1re-reviewclean (21919902aa/e7757f5e7
 Task8 implementation started at clean a4916a15f1d2e5d61b70ad8a840ac0d5b65e0f69 on approved worktree/branch. Following assigned task-8-brief.md, constraints.md and integration notes; TDD first, existing-only backend-pinned adapter, owner-predicated aggregate helpers, narrow notification-log sanitization. Governing ADR-086 Accepted plus ADR-003/058; ADR-087 remains Proposed/vector-only. No new ADR or lifecycle/worker changes. Keep In Progress for controller review.
 Task8 implemented; keep In Progress pending controller independent review. New open_existing borrows/pins validated Media backend, verifies all 5 evaluator tables/21 required columns without bootstrap/repair; pg_catalog avoids ACL-hidden absence. New post-publication evaluator intersects owned subscriptions with owner-predicated clusters before counting/updating/notifying. All 3 aggregate helpers add optional keyword-only owner_user_id with explicit query/write ownership guards, preserving omitted-owner contracts. Narrow claims_notifications insert-catch logging sanitized. Final affected qualification: /tmp/task8-final-qualified.log and .xml, 75 passed (63 new, 18 official restricted-role PostgreSQL), 0 skips/failures/errors, 376 inherited warnings. Scoped compile/format pass; configured whole-file Ruff 12 inherited findings matching a4916a15f1 (0 new); touched-production Bandit /tmp/bandit_task8_final.json: 0 findings/errors, no new suppressions. Full evidence/interfaces/limitations: .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-8-report.md. Task9-only caller wiring/newly_published guard remains intentionally unimplemented; no lifecycle/producer/global-storage work.
 Self-review of assigned production/test diff complete; only assigned 6 Python paths plus this task changed. Normal applicable pre-commit hooks pass (/tmp/task8-hooks.log); yaml/toml and wizard-only Ruff/Black hooks correctly had no applicable files. Independent configured Ruff/scoped-format checks were run separately, not replaced by hook skips. No whole-repo/Jobs/Chroma test reruns, nested agents, producer wiring or external git operations.
+IndependentTask8review task-8-review.md: SpecCompliant/QualityApproved, noCritical/Importantfindings. Controllerreadfullreport/savedqualitysummary/BanditJSON. Task8complete d62f897baabc26285d3cb0abcad20cf173965cbc:75pass0skips incl18officialrestrictedPG,63newcases,12legacycharacterization; configuredRuff12exactlyinherited0new,compile/scopedformat/hooks pass,Bandit0findings/errors. Minor inherited376warning/nosec/lintnoise remainsdisclosed; no newruntime defect. Nonblockingphysicalpartial-columnPGtestdepthimprovement assignedTask11beforefinalqualification; existingeachcolumninventorytests mockmetadata, actualmissingtable/revokedSELECT casesalreadycovered. No Task9caller/worker/producerenabled.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Existing-only backend-pinned Watchlists evaluation with explicit owner predicates at cluster read, member count and count-update boundaries; owned subscriptions never authorize foreign cluster data. Requiredschema missing skips withoutprovisioning, accesserrors sanitized and innernotificationlog leakremoved. Legacyfor_user/unscopedhelpers/deliverysemantics preserved.75tests pass0skips incl18realrestrictedPG; no newlint/securityfindings, normalquality/hooks pass. Independentreview approved; physicalpartial-columnPGcoverage improvement carriedTask11, knowninheritedwarnings disclosed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

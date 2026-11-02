@@ -10,7 +10,7 @@
 
 **Spec:** [Approved Stage 2C design](../specs/2026-11-01-claims-jobs-stage2c-cluster-rebuild-design.md).
 
-**Status:** Approved by the requester on 2026-11-01 after all five validated review corrections. Tasks 1-7 are implemented and independently reviewed. Task 8 is In Progress; Tasks 9-10 remain pending. Task 11 namespace prework is independently reviewed; recovery, operations and whole-branch qualification remain pending. No temporary-copy or replacement-backend design is assumed approved.
+**Status:** Approved by the requester on 2026-11-01 after all five validated review corrections. Tasks 1-8 are implemented and independently reviewed. Task 9 is In Progress; Task 10 remains pending. Task 11 namespace prework is independently reviewed; recovery, operations and whole-branch qualification remain pending. No temporary-copy or replacement-backend design is assumed approved.
 
 **Tracking:** TASK-15423 completed planning; TASK-15422 completed the design. Tasks 1-3 use TASK-15424, TASK-15425 and TASK-15426; Tasks 4-11 use TASK-15414 through TASK-15421 respectively. These identifiers replace the private colliding IDs after a current dev/all39openPR audit; historical commit messages and notes retain their original IDs. Every record is maintained through backlog-py. The requester approved this revised plan and, after clarification of the existing WorkerSDK, explicitly requested continuation. No push, PR or merge is authorized by this execution handoff.
 
@@ -241,7 +241,7 @@ The synchronous `get_owned_job_status` helper wraps its complete manager read wi
 **Goal:** Produce replay-safe cluster output without holding a database write lock during calculation.
 **Success Criteria:** Both backends preserve ownership, previous output on failure, receipt identity and generation ordering; maintenance access never initializes absent storage.
 **Tests:** Tasks 5-8 and current clustering, cluster helpers, Watchlists and Media DB regressions.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 5: Source Snapshots, Cleanup Integrity And Domain Schema
 
@@ -325,7 +325,7 @@ def test_replay_does_not_rebuild(publisher, publication_request):
 
 Add keyword-only `owner_user_id: str | None = None` to `MediaDatabase.get_claim_clusters_by_ids(cluster_ids: list[int]) -> list[dict[str, Any]]`, `get_claim_cluster_member_counts(cluster_ids: list[int]) -> dict[int, int]` and `update_claim_clusters_watchlist_counts(counts: dict[int, int]) -> int` in their aggregate helper definitions. With an owner, each query/update predicates on `claim_clusters.user_id` (joining cluster ownership for membership counts); omission preserves existing legacy callers. The async evaluator always passes the validated owner and treats foreign subscriptions as ineligible, not as permission to read the cluster.
 
-- [ ] **Step 1: Write failing no-provisioning tests.** Existing Media DB with no Watchlists tables remains unchanged after evaluation. Verify full owner/backend pinning, no directory/database/table creation, no constructor/bootstrap call, sanitized access errors, normal notifications when schema exists and unchanged legacy `for_user` behavior.
+- [x] **Step 1: Write failing no-provisioning tests.** Existing Media DB with no Watchlists tables remains unchanged after evaluation. Verify full owner/backend pinning, no directory/database/table creation, no constructor/bootstrap call, sanitized access errors, normal notifications when schema exists and unchanged legacy `for_user` behavior.
 
 Add `test_foreign_cluster_subscription_neither_discloses_nor_mutates` on shared storage with owners A/B: A's legitimately owned Watchlists job has a subscription to B's cluster, admitted through the existing subscription API. Evaluating A must not load B's canonical text or member counts, change B's watchlist count, or produce any notification for B's cluster/text. Mix an A-owned cluster into the same subscription set and assert normal A notification/count behavior. Exercise each owner-scoped aggregate helper directly, including a stale/foreign ID supplied to the update helper; a prefiltered ID list alone is not a storage authorization guard. Cover SQLite shared-layout behavior and the official PostgreSQL restricted-role backend without assuming cluster-table RLS supplies the missing predicate.
 
@@ -337,17 +337,19 @@ def test_missing_watchlists_schema_is_not_initialized(media_db):
     assert media_db.execute_query(query).fetchall() == before
 ```
 
-- [ ] **Step 2: Run RED.** `python -m pytest -q tldw_Server_API/tests/Watchlists/test_watchlists_existing_only.py tldw_Server_API/tests/Claims/test_claims_cluster_watchlists_existing_only.py`.
-- [ ] **Step 3: Implement a non-creating construction path and evaluator.** Reuse existing subscription/count/notification logic only after intersecting owner-scoped subscriptions with owner-scoped cluster rows; owning the Watchlists job does not authorize the referenced cluster. Pass only eligible subscriptions/clusters to member counting, count updates and notification generation. Enforce the owner predicate again in every aggregate storage operation, including the count update, rather than trusting prefiltering or absent cluster RLS. Do not use `_get_watchlists_db` or a `for_user` constructor. Verify every table queried/written by this evaluator, not merely the generic six-table startup sentinel. Skip absent schema; catch access errors once without raw SQL/provider details. No separate delivery worker, retry queue or notification durability protocol is introduced.
-- [ ] **Step 4: Run GREEN and characterization.** Rerun RED command plus `python -m pytest -q tldw_Server_API/tests/Claims/test_claims_watchlist_notifications.py tldw_Server_API/tests/Watchlists/test_watchlists_db_user_scope.py tldw_Server_API/tests/Watchlists/test_watchlist_clusters_api.py tldw_Server_API/tests/DB_Management/test_media_db_claims_cluster_aggregate_ops.py`; include official PostgreSQL owner/backend tests in the new file and preserve existing unscoped helper behavior.
-- [ ] **Step 5: Verify, review and commit.** Invoke evaluation only on `newly_published=True` later in Task 9. A failure cannot invalidate publication or trigger a rebuild; a crash before evaluation can omit it, as documented.
+- [x] **Step 2: Run RED.** `python -m pytest -q tldw_Server_API/tests/Watchlists/test_watchlists_existing_only.py tldw_Server_API/tests/Claims/test_claims_cluster_watchlists_existing_only.py`.
+- [x] **Step 3: Implement a non-creating construction path and evaluator.** Reuse existing subscription/count/notification logic only after intersecting owner-scoped subscriptions with owner-scoped cluster rows; owning the Watchlists job does not authorize the referenced cluster. Pass only eligible subscriptions/clusters to member counting, count updates and notification generation. Enforce the owner predicate again in every aggregate storage operation, including the count update, rather than trusting prefiltering or absent cluster RLS. Do not use `_get_watchlists_db` or a `for_user` constructor. Verify every table queried/written by this evaluator, not merely the generic six-table startup sentinel. Skip absent schema; catch access errors once without raw SQL/provider details. No separate delivery worker, retry queue or notification durability protocol is introduced.
+- [x] **Step 4: Run GREEN and characterization.** Rerun RED command plus `python -m pytest -q tldw_Server_API/tests/Claims/test_claims_watchlist_notifications.py tldw_Server_API/tests/Watchlists/test_watchlists_db_user_scope.py tldw_Server_API/tests/Watchlists/test_watchlist_clusters_api.py tldw_Server_API/tests/DB_Management/test_media_db_claims_cluster_aggregate_ops.py`; include official PostgreSQL owner/backend tests in the new file and preserve existing unscoped helper behavior.
+- [x] **Step 5: Verify, review and commit.** Invoke evaluation only on `newly_published=True` later in Task 9. A failure cannot invalidate publication or trigger a rebuild; a crash before evaluation can omit it, as documented.
+
+**Task 8 evidence (TASK-15418):** Commit `d62f897baa`; independent spec/quality review approved with no Critical/Important findings. Existing-only Watchlists borrows and pins validated caller backend, verifies every evaluator dependency, and distinguishes absent schema from denied access. Owner predicates protect all three cluster aggregate helpers; mixed-owner subscriptions cannot read/count/update/notify foreign clusters. Inner swallowed notification errors are sanitized without delivery redesign. Final scope: 75 passed, zero skips, including 18 actual restricted PostgreSQL cases; configured Ruff has 12 identical inherited findings and zero new, compile/scoped format/hooks pass, Bandit zero findings/errors. Inherited warning/nosec/lint noise remains explicit. Nonblocking physical partial-column PostgreSQL coverage improvement is assigned to Task 11 before final qualification. No worker caller/producer enabled by this prerequisite.
 
 ## Stage 4: Claims Worker And API Adoption
 
 **Goal:** Connect the proven shared/domain APIs without creating a Claims execution system.
 **Success Criteria:** Real WorkerSDK execution and 200/202/409 contracts work with strict ownership and existing-only async dependencies.
 **Tests:** Tasks 9-10 and existing Claims worker/config/API suites.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 9: Immutable Job Contract, Configuration And Worker Handler
 

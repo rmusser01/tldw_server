@@ -1,7 +1,7 @@
 ---
 id: TASK-15419
 title: Integrate cluster rebuild contract and shared Jobs worker
-status: To Do
+status: In Progress
 labels:
 - claims
 - jobs
@@ -28,6 +28,7 @@ Immutable Claims cluster payload, configuration, scoped shared Jobs admission an
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved plan task 9: Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md. ADR required: no additional ADR; accepted Docs/ADR/085-jobs-resource-admission-and-domain-publication.md governs the approved resource/publication boundary with ADR-003 and ADR-058. Execute only in the existing linked worktree/branch, test first, use shared Jobs lifecycle APIs, official backend fixtures, focused verification and touched-code Bandit, normal hooks and scoped commits. Task-ID audit explicitly targeted rmusser01/tldw_server after discovering gh defaults to upstream: fetched dev 61d02ed484a3c80f5423676b959cf14e7b572a62, checked all 37 open PR paginated file lists (223 selected Backlog/ADR records, no truncation) and current branch; highest observed id 15410. Reserved TASK-15411 through TASK-15421 for the eleven reviewable plan tasks. No collision with planning records TASK-15282/TASK-15283 or ADR-085. Preserve unrelated main-checkout changes; no push/PR/merge authorized.
 Active governance/reference update under TASK-15421: current Claims resource/publication ADR086 (metadata-only move from private085); ProposedSDKcoordinationADR087 remains Proposed. Planning/design are TASK15423/TASK15422; completed implementationTasks1/2/3 are TASK15424/TASK15425/TASK15426. Dependencies repaired viaCLI. Earlier note/commit IDs are historical evidence, not current aliases to other owners records. No accepted rationale, runtime behavior, status or verification rewritten.
+BeginapprovedTask9 afterTask8independentlyapproved d62f897baa. Use task-9-brief.md/constraints.md/task-9-integration-notes.md plusreviewedTask2/3/4/5/6/7/8handoffs. ExistingWorkerSDK lifecycle ONLY: scopedadmission, strictstoredcontract, existingownerMediaDBnonadminscope, receiptbeforevectors, authoritybeforedispatch/publication, explicitdict(result), Task8onlynewly_published. Concreteconfigtable/mode/envprecedence innotes. ScopeincludesnarrowJobs/owned_status.py+tests/Jobs/test_jobs_owned_status_api.py explicitstablefailure/reasonallowlist integration mandatedTask4review; no auth/RLSweakening/wildcards/proxy. RealWorkerSDKSQLite+officialrestrictedPG testsfirst, RUN_JOBS=1, configuredquality/Bandit/hooks/scopedcommit, keepInProgressforreview. ADRassessment accepted086+003/058 governs, Proposed087unchanged; no secondworkerloop/newqueue/cancellationstate. No push/PR/merge/maincheckoutchanges.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
