@@ -1767,6 +1767,9 @@ async def test_case_owned_host_policy_refuses_official_host_before_any_request(
     monkeypatch: pytest.MonkeyPatch,
     policy_input: str,
 ) -> None:
+    if policy_input == "EGRESS_ALLOWLIST":
+        # The lists are unioned; isolate the global-list refusal case.
+        monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWLIST", raising=False)
     monkeypatch.setenv(
         policy_input, "example.com" if "ALLOWLIST" in policy_input else "api.openai.com"
     )
