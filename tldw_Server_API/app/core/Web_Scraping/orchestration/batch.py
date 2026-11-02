@@ -215,7 +215,8 @@ async def execute_batch(
             cancellation, reason = cleanup_cancel, "cancelled"
         _collect(children, articles, None)
         # Retained cancellation tracebacks must not own execution capabilities.
-        source = next_job = next_url = execute = make_job = urls = None
+        children.clear()
+        source = next_job = next_url = execute = make_job = urls = queue = handle = None
     values = tuple(articles[key] for key in sorted(articles))
     normal = reason == "frontier_exhausted"
     outcome = context.publish(

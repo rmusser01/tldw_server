@@ -27,6 +27,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Awaitable, Iterable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -638,6 +639,9 @@ class ScrapingJobQueue(ProcessLocalJobQueue):
         """Call the supported live callback using the admitted private snapshot."""
         # Capture a replaced callback at execution; no public job retains credentials.
         callback = self._execute_job
+        parent = self._canonical_parent(callback)
+        if controls is not None and parent is not None:
+            return parent._start_controlled_job(payload, controls)
 
         async def run():
             if controls is not None:
@@ -659,8 +663,21 @@ class ScrapingJobQueue(ProcessLocalJobQueue):
 
         return _owned_adapter_page(run)
 
+    def _canonical_parent(self, callback=None):
+        """Recognize only the unreplaced default pair; opaque callbacks stay opaque."""
+        parent = self.parent_scraper
+        if (
+            getattr(callback if callback is not None else self._execute_job, "__func__", None) is _DEFAULT_QUEUE_EXECUTE
+            and getattr(getattr(parent, "scrape_article", None), "__func__", None) is _DEFAULT_ENHANCED_SCRAPE
+        ):
+            return parent
+        return None
+
     async def submit_page(self, job, *, controls, execute=None):
         """Keep instance rate waits inside accepted ownership before page dispatch."""
+        parent = self._canonical_parent() if execute is None else None
+        if parent is not None:
+            job = replace(job, metadata=parent._controlled_job_options(job.url, job.metadata))
         if execute is None or self.parent_scraper is None:
             return await super().submit_page(job, controls=controls, execute=execute)
         limiter = getattr(self.parent_scraper, "rate_limiter", None)
@@ -894,8 +911,10 @@ class EnhancedWebScraper:
             cookies.update(custom_map)
         return cookies or None
 
-    def _resolve_scrape_plan(self, url: str) -> tuple[dict[str, Any], str, str]:
-        ws_cfg = self.config or {}
+    def _resolve_scrape_plan(
+        self, url: str, *, configuration: Mapping[str, Any] | None = None
+    ) -> tuple[dict[str, Any], str, str]:
+        ws_cfg = (self.config if configuration is None else configuration) or {}
         rules_path = ws_cfg.get("custom_scrapers_yaml_path", _default_rules_path())
         rules = ScraperRouter.load_rules_from_yaml(rules_path)
         ua_mode = str(ws_cfg.get("web_scraper_ua_mode", "fixed") or "fixed")
@@ -1668,21 +1687,23 @@ class EnhancedWebScraper:
                 content=data.get("content") if outcome == "success" else None,
             )
             return self._apply_dedup(url, data)
-        pipeline_trace = data.get("extraction_trace") if isinstance(data.get("extraction_trace"), list) else []
+        data = self._extract_beautifulsoup_html(html, url, data.get("extraction_trace"))
+        self._emit_scrape_metrics(
+            backend=backend_used,
+            outcome="success",
+            elapsed_s=elapsed,
+            content=data["content"],
+        )
+        return self._apply_dedup(url, data)
+
+    @staticmethod
+    def _extract_beautifulsoup_html(html: str, url: str, pipeline_trace=None) -> dict[str, Any]:
+        """Keep the enhanced fallback pure so canonical acquisition can reuse it."""
         soup = BeautifulSoup(html, "html.parser")
-
-        # Extract title
         title_tag = soup.find("title")
-        title = title_tag.get_text(strip=True) if title_tag else "Untitled"
-        if not title:
-            title = "Untitled"
-
-        # Extract content
-        # Remove script and style elements
+        title = (title_tag.get_text(strip=True) if title_tag else "Untitled") or "Untitled"
         for script in soup(["script", "style"]):
             script.decompose()
-
-        # Try to find main content
         content = ""
         for tag in ["main", "article", "div"]:
             elements = soup.find_all(
@@ -1692,40 +1713,145 @@ class EnhancedWebScraper:
             if elements:
                 content = "\n\n".join(elem.get_text(strip=True) for elem in elements)
                 break
-
-        # Fallback to body
         if not content:
             content = soup.get_text(strip=True)
-
-        # Extract metadata
         author_meta = soup.find("meta", {"name": "author"})
-        author = author_meta.get("content", "Unknown") if author_meta else "Unknown"
-
         date_meta = soup.find("meta", {"property": "article:published_time"})
-        date = date_meta.get("content", "") if date_meta else ""
-
-        data = {
+        trace = list(pipeline_trace) if isinstance(pipeline_trace, list) else []
+        trace.append({"strategy": "beautifulsoup", "status": "success", "reason": "fallback_extracted"})
+        log_counter("extraction_strategy_total", labels={"strategy": "beautifulsoup", "status": "success"})
+        return {
             "url": url,
             "title": title,
-            "author": author,
-            "date": date,
+            "author": author_meta.get("content", "Unknown") if author_meta else "Unknown",
+            "date": date_meta.get("content", "") if date_meta else "",
             "content": content,
             "extraction_successful": True,
             "method": "beautifulsoup",
+            "extraction_trace": trace,
+            "extraction_strategy": "beautifulsoup",
+            "extraction_strategy_order": ["beautifulsoup"],
         }
-        trace = list(pipeline_trace)
-        trace.append({"strategy": "beautifulsoup", "status": "success", "reason": "fallback_extracted"})
-        data["extraction_trace"] = trace
-        data["extraction_strategy"] = "beautifulsoup"
-        data.setdefault("extraction_strategy_order", ["beautifulsoup"])
-        log_counter("extraction_strategy_total", labels={"strategy": "beautifulsoup", "status": "success"})
-        self._emit_scrape_metrics(
-            backend=backend_used,
-            outcome="success",
-            elapsed_s=elapsed,
-            content=content,
+
+    def _start_controlled_job(self, payload, controls) -> WorkHandle[PageData]:
+        """Bind this instance's capabilities to one canonical, controlled attempt."""
+        from .orchestration import article
+
+        config = payload.options.get("configuration", self.config)
+        config = article._snapshot_config(config)
+        cookies = article._snapshot_cookies(payload.options["selected_cookies"])
+        method = payload.operation
+        resolver = self._resolve_scrape_plan
+        state = {"method": method, "route_backend": "auto", "default_handler": True}
+        dependencies = article._build_default_dependencies(cookies)
+        advice = dependencies.apply_preflight_advice
+        handler_resolver = dependencies.resolve_handler
+
+        def resolve(url, _config):
+            route, backend, handler = (
+                resolver(url, configuration=config)
+                if getattr(resolver, "__func__", None) is _DEFAULT_ENHANCED_RESOLVE
+                else resolver(url)
+            )
+            plan = article.ArticlePlan.from_routing_plan(route, config, cookies)
+            headers = self._build_plan_headers(
+                plan.ua_profile,
+                dict(plan.headers),
+                payload.options.get("user_agent"),
+                payload.options.get("custom_headers"),
+            )
+            plan = replace(
+                plan,
+                backend=backend,
+                handler=handler or DEFAULT_HANDLER,
+                headers=headers,
+                browser=replace(plan.browser, user_agent=headers["User-Agent"]),
+            )
+            state["route_backend"] = str(getattr(route, "backend", "auto") or "auto")
+            state["default_handler"] = not handler or handler == DEFAULT_HANDLER
+            return plan
+
+        def apply_advice(*args, **kwargs):
+            backend, advised_method, result = advice(*args, **kwargs)
+            state["method"] = (
+                "playwright"
+                if backend == "playwright"
+                else ("trafilatura" if advised_method == "auto" else advised_method)
+            )
+            return backend, advised_method, result
+
+        def extract(html, url, **kwargs):
+            data = self._extract_from_html_with_pipeline(
+                html,
+                url,
+                **kwargs,
+                method_label=state["method"],
+                postprocess_markdown=state["default_handler"],
+                fallback_extractor=self._extract_trafilatura_json,
+            )
+            if (
+                state["method"] == "beautifulsoup"
+                and not data.get("extraction_successful")
+                and kwargs.get("handler") is None
+            ):
+                return self._extract_beautifulsoup_html(html, url, data.get("extraction_trace"))
+            return data
+
+        dependencies = replace(
+            dependencies,
+            resolve_plan=resolve,
+            extract=extract,
+            apply_preflight_advice=apply_advice,
+            backend_setting=lambda _plan: state["route_backend"],
+            convert_content=lambda content: content,
+            resolve_handler=lambda path: None if path == DEFAULT_HANDLER else handler_resolver(path),
         )
-        return self._apply_dedup(url, data)
+
+        async def run():
+            await self.rate_limiter.acquire()
+            controls.check()
+            if method not in {"auto", "trafilatura", "beautifulsoup", "playwright"}:
+                raise ValueError("Unknown scraping method")
+            handle = article.start_page(
+                payload.url,
+                list(cookies),
+                controls=controls,
+                request_context=RuntimeRequestContext(source="enhanced_batch", stage="fetch", user_id=payload.owner),
+                discover=lambda _html, request, final: DiscoveryResult(request, final, ()),
+                configuration={"web_scraper": config},
+                dependencies=dependencies,
+                allow_llm_extraction=payload.options.get("allow_llm_extraction", True),
+                discovery_gate=lambda _result: False,
+                transform=self._apply_dedup,
+                method_intent=method,
+            )
+            physical_work.get().observe(handle.drained)
+            handle.result.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+            try:
+                await asyncio.wait({handle.result})
+                return handle.result.result()
+            except BaseException:
+                handle.cancel()
+                raise
+
+        return _owned_adapter_page(run)
+
+    def _controlled_job_options(self, url: str, options: Mapping[str, Any]) -> dict[str, Any]:
+        """Byte-admit selected execution settings, keeping opaque callback inputs intact."""
+        from .orchestration.crawl import _selected_cookies
+
+        copied = deepcopy(dict(options))
+        if "configuration" not in copied:
+            copied["configuration"] = deepcopy(self.config)
+        if "selected_cookies" not in copied:
+            copied["selected_cookies"] = list(
+                _selected_cookies(
+                    url,
+                    tuple(copied.get("custom_cookies") or ()),
+                    {urlparse(url).netloc: self.cookie_manager.get_cookies(url)},
+                )
+            )
+        return copied
 
     async def _batch_report(
         self,
@@ -1754,6 +1880,12 @@ class EnhancedWebScraper:
             limits=limits,
         )
         metadata = deepcopy({**(options or {}), "allow_llm_extraction": allow_llm_extraction})
+        canonical = isinstance(self.job_queue, ScrapingJobQueue) and self.job_queue._canonical_parent() is self
+        if canonical:
+            metadata["configuration"] = deepcopy(self.config)
+        stored = self.cookie_manager._snapshot() if canonical else {}
+        from .orchestration.crawl import _selected_cookies
+
         owner = str(user_id) if user_id is not None else None
 
         def job(url):
@@ -1763,17 +1895,32 @@ class EnhancedWebScraper:
                 method,
                 user_id=owner,
                 priority=priority,
-                metadata=metadata,
+                metadata={
+                    **metadata,
+                    "selected_cookies": list(
+                        _selected_cookies(
+                            url,
+                            tuple(metadata.get("custom_cookies") or ()),
+                            stored,
+                        )
+                    ),
+                }
+                if canonical
+                else metadata,
             )
 
-        await self.job_queue.start()
-        return await execute_batch(
-            urls,
-            plan=plan,
-            context=CrawlContext(limits, clock=time.monotonic),
-            queue=self.job_queue,
-            make_job=job,
-        )
+        try:
+            await self.job_queue.start()
+            return await execute_batch(
+                urls,
+                plan=plan,
+                context=CrawlContext(limits, clock=time.monotonic),
+                queue=self.job_queue,
+                make_job=job,
+            )
+        finally:
+            # Only admitted handles retain private capabilities through actual drain.
+            self = urls = options = metadata = stored = job = None
 
     async def scrape_multiple(
         self,
@@ -2028,6 +2175,11 @@ class EnhancedWebScraper:
             async with aiofiles.open(filepath) as f:
                 content = await f.read()
                 self._progress[task_name] = json.loads(content)
+
+
+_DEFAULT_QUEUE_EXECUTE = ScrapingJobQueue._execute_job
+_DEFAULT_ENHANCED_SCRAPE = EnhancedWebScraper.scrape_article
+_DEFAULT_ENHANCED_RESOLVE = EnhancedWebScraper._resolve_scrape_plan
 
 
 # Integration with existing system

@@ -21,7 +21,14 @@ def to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]
         error.report = report
         raise error
     if outcome.state == "completed":
-        return _to_plain(report.articles)
+        values = _to_plain(report.articles)
+        if profile == "enhanced_batch":
+            for item in values:
+                if item.get("policy_reason") and item.get("extraction_successful") is False:
+                    for key in ("title", "author", "date", "content"):
+                        if isinstance(item.get(key), str) and item[key] in {"N/A", ""}:
+                            item.pop(key, None)
+        return values
     if (
         profile == "legacy_recursive"
         and outcome.stop_reason == "transport_unavailable"
