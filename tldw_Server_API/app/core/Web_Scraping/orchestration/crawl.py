@@ -352,6 +352,8 @@ def _prepare_page_plan(
     legacy: bool,
     method: Any,
     explicit_agent: Any,
+    enhanced: bool = False,
+    custom_cookies=(),
 ) -> article.ArticlePlan:
     """Compose request headers without changing extraction-method intent."""
     agent = str(
@@ -365,6 +367,8 @@ def _prepare_page_plan(
     )
     if legacy:
         return replace(prepared, backend="playwright", respect_robots=False)
+    if enhanced:
+        prepared = prepared.for_enhanced_browser(custom_cookies)
     return replace(prepared, backend="playwright") if method == "playwright" else prepared
 
 
@@ -565,6 +569,8 @@ async def execute_crawl(
                 legacy=legacy,
                 method=method,
                 explicit_agent=explicit_agent,
+                enhanced=profile.startswith("enhanced_"),
+                custom_cookies=page_cookies,
             )
 
         def discovery_gate(result: Mapping[str, Any]) -> bool:

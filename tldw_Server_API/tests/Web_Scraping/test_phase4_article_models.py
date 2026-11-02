@@ -130,6 +130,8 @@ def test_article_plan_snapshots_lightweight_and_browser_inputs_without_cross_lea
     assert plan.browser.custom_cookies[0]["metadata"]["path"] == ("/",)
     assert isinstance(plan.browser.custom_cookies[0], MappingProxyType)
     assert {field.name for field in fields(DirectBrowserProfile)} == {
+        "extra_headers",
+        "proxies",
         "user_agent",
         "custom_cookies",
         "retries",

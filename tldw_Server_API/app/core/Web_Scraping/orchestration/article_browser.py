@@ -10,13 +10,17 @@ import math
 import threading
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     BrowserTransportDecision,
+    bind_selected_browser_proxy,
     default_browser_transport_decision,
     resolve_browser_transport_decision,
+    selected_browser_proxy,
 )
 from tldw_Server_API.app.core.Web_Scraping.runtime.browser import (
     RuntimeBrowserRoute,
@@ -26,6 +30,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressGuar
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import RuntimeRequestContext
 
 from ..runtime.controls import ParentControls, ParentStop, physical_work
+from .article_browser_dispatch import TransferSessions
 from .article_models import ArticleFailure, ArticleLimits, DirectBrowserProfile
 
 _ROUTE_PATTERN = "**/*"
@@ -57,6 +62,31 @@ _HTML_SERIALIZATION_EXPRESSION = """(maxBytes) => {
   }
   return { ok: true, html };
 }"""
+_DOCUMENT_SERIALIZATION_EXPRESSION = """(maxBytes) => {
+  const serialized = (HTML_SERIALIZER)(maxBytes);
+  if (!serialized.ok) return serialized;
+  let content = "";
+  for (const selector of ["main", "article", '[role="main"]', "#content", ".content"]) {
+    for (const element of document.querySelectorAll(selector)) {
+      const text = element.innerText;
+      if (text.length > content.length) content = text;
+    }
+  }
+  if (!content) content = document.body.innerText;
+  const author = document.querySelector('meta[name="author"]');
+  const date = document.querySelector('meta[property="article:published_time"]');
+  const dom = {title: document.title, author: author ? author.content : "Unknown",
+               date: date ? date.content : "", content};
+  let size = 0;
+  for (const text of Object.values(dom)) {
+    for (const character of text) {
+      const codePoint = character.codePointAt(0);
+      size += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+      if (size > maxBytes) return {ok: false, size};
+    }
+  }
+  return {...serialized, dom};
+}""".replace("HTML_SERIALIZER", _HTML_SERIALIZATION_EXPRESSION)
 
 
 def _strict_capacity(value: object, *, maximum: int, label: str) -> int:
@@ -148,6 +178,42 @@ class _BrowserAcquisitionLease:
             # The task remains strongly owned forever because completion cannot
             # be observed safely enough to release process capacity.
             return "callback"
+        return "admitted"
+
+    def start_callback(self, operation: Coroutine[Any, Any, None], *, allow_closed: bool = False) -> str:
+        """Admit CDP event work before scheduling, sharing the route callback bound."""
+        ready = asyncio.Event()
+
+        async def admitted() -> None:
+            try:
+                await ready.wait()
+                await operation
+            finally:
+                operation.close()
+
+        with self._lock:
+            self._callback_generation += 1
+            if self._sealed or (not self._callback_admission_open and not allow_closed):
+                operation.close()
+                return "closed"
+            if self._active_callbacks >= self._callback_capacity:
+                operation.close()
+                return "capacity"
+            wrapper = admitted()
+            try:
+                task = asyncio.create_task(wrapper, name="article-browser-request-callback")
+            except BaseException:  # noqa: BLE001 - creation failure must not retain an unstarted coroutine
+                wrapper.close()
+                operation.close()
+                return "callback"
+            self._active_callbacks += 1
+            self._tasks[task] = True
+        try:
+            task.add_done_callback(self._task_done)
+        except BaseException:  # noqa: BLE001 - unobservable completion conservatively retains this lease
+            task.cancel()
+            return "callback"
+        ready.set()
         return "admitted"
 
     def start_cleanup(
@@ -343,6 +409,7 @@ class _AcquisitionOutcome:
         self.failure: ArticleFailure | None = None
         self.parent_stop: BaseException | None = None
         self.callback_cancelled = False
+        self.native_browser_disconnected = False
         self._lock = threading.Lock()
 
     def fail(self, stage: str) -> None:
@@ -374,6 +441,9 @@ class _BrowserTransferLedger:
         self._total = 0
         self._terminal = False
         self._parent = parent
+        self._request_lock = threading.Lock()
+        self._request_bytes: dict[tuple[str, str], int] = {}
+        self._finished_requests: set[tuple[str, str]] = set()
 
     def _charge_parent(self, amount: int) -> bool:
         if self._parent is None:
@@ -403,6 +473,54 @@ class _BrowserTransferLedger:
             self._fail(ArticleFailure("browser_error", "capability"))
             return
         self._add(amount)
+
+    @staticmethod
+    def _request_key(session: str, payload: object) -> tuple[str, str]:
+        if not isinstance(payload, Mapping):
+            raise TypeError("invalid CDP event envelope")
+        identifier = payload.get("requestId")
+        if not isinstance(identifier, str) or not identifier or len(identifier) > 1024:
+            raise ValueError("invalid request identifier")
+        return session, identifier
+
+    def on_request_data(self, session: str, payload: object) -> None:
+        try:
+            key = self._request_key(session, payload)
+            amount = self._non_negative_integer(payload.get("encodedDataLength"))
+            if amount == 0:
+                amount = self._non_negative_integer(payload.get("dataLength"))
+            with self._request_lock:
+                if key in self._finished_requests:
+                    return
+                if key not in self._request_bytes and len(self._request_bytes) >= self._lease._callback_capacity:
+                    raise ValueError("request observation capacity")
+                self._request_bytes[key] = self._request_bytes.get(key, 0) + amount
+            self._add(amount)
+        except (TypeError, ValueError, OverflowError):
+            self._fail(ArticleFailure("browser_error", "capability"))
+
+    def on_request_finished(self, session: str, payload: object) -> None:
+        try:
+            key = self._request_key(session, payload)
+            total = self._non_negative_integer(payload.get("encodedDataLength"))
+            with self._request_lock:
+                if key in self._finished_requests:
+                    return
+                charged = self._request_bytes.pop(key, 0)
+                if len(self._finished_requests) >= self._lease._callback_capacity:
+                    self._finished_requests.pop()
+                self._finished_requests.add(key)
+            self._add(max(0, total - charged))
+        except (TypeError, ValueError, OverflowError):
+            self._fail(ArticleFailure("browser_error", "capability"))
+
+    def on_request_failed(self, session: str, payload: object) -> None:
+        try:
+            key = self._request_key(session, payload)
+            with self._request_lock:
+                self._request_bytes.pop(key, None)
+        except (TypeError, ValueError):
+            self._fail(ArticleFailure("browser_error", "capability"))
 
     def on_websocket_frame(self, payload: object) -> None:
         try:
@@ -619,6 +737,33 @@ class _CallbackLifecycle:
     def close_admission(self) -> tuple[asyncio.Task[Any] | None, bool]:
         return self._lease.close_callback_admission()
 
+    def event_handler(
+        self, operation: Callable[[Any], Awaitable[None]], *, allow_closed: bool = False
+    ) -> Callable[[Any], None]:
+        """Own synchronously delivered CDP events without an unbounded task queue."""
+
+        def dispatch(event: Any) -> None:
+            async def invoke() -> None:
+                try:
+                    await operation(event)
+                except ParentStop as exc:
+                    self._outcome.parent_stop = exc
+                    self._lease.ensure_emergency_shutdown(self._shutdown_factory)
+                    self._lease.close_callback_admission()
+                except asyncio.CancelledError:
+                    self._outcome.callback_cancelled = True
+                    self._lease.ensure_emergency_shutdown(self._shutdown_factory)
+                except Exception:  # noqa: BLE001 - event/command failures fail closed
+                    self._outcome.fail("callback")
+                    self._lease.ensure_emergency_shutdown(self._shutdown_factory)
+
+            admission = self._lease.start_callback(invoke(), allow_closed=allow_closed)
+            if admission != "admitted":
+                self._outcome.fail("capacity" if admission == "capacity" else "callback")
+                self._lease.ensure_emergency_shutdown(self._shutdown_factory)
+
+        return dispatch
+
     async def drain(self, grace_s: float) -> bool:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + grace_s
@@ -646,6 +791,147 @@ class _CallbackLifecycle:
 
         self._outcome.fail("callback_drain")
         return True
+
+
+class _BrowserRequestPolicy:
+    """Before-dispatch enhanced policy on this acquisition's browser session."""
+
+    def __init__(
+        self, url: str, headers: Mapping[str, str], browser: GuardedArticleBrowser, outcome: _AcquisitionOutcome
+    ) -> None:
+        self._origin = http_client._url_origin(url)
+        self._headers = {k: v for k, v in headers.items() if k.lower() not in {"cookie", "host", "proxy-authorization"}}
+        self._browser = browser
+        self._outcome = outcome
+        self._requests: dict[str, bool] = {}
+        self._closed = False
+        self._transfer_sessions: TransferSessions | None = None
+        self.page_session: Any = None
+
+    async def install(self, session: Any, lifecycle: _CallbackLifecycle) -> None:
+        request = lifecycle.event_handler(lambda event: self.handle(event, session))
+        abort = lifecycle.event_handler(lambda event: self._abort(session, event["requestId"]), allow_closed=True)
+        session.on("Fetch.requestPaused", lambda event: abort(event) if self._closed else request(event))
+        metadata = lifecycle.event_handler(self._transfer_sessions.created)
+        session.on("Target.targetCreated", lambda event: None if self._closed else metadata(event))
+        await session.send("Target.setDiscoverTargets", {"discover": True})
+        await session.send(
+            "Fetch.enable",
+            {
+                "patterns": [
+                    {"urlPattern": "*", "requestStage": "Request"},
+                    {"urlPattern": "*", "requestStage": "Response"},
+                ]
+            },
+        )
+
+    async def bind(
+        self,
+        session: Any,
+        lifecycle: _CallbackLifecycle,
+        transfer: _BrowserTransferLedger,
+        lease: _BrowserAcquisitionLease,
+    ) -> None:
+        self._lifecycle, self._lease = lifecycle, lease
+        self._root = session
+        self._transfer_sessions = TransferSessions(session, lease, transfer, self._fail)
+        await self.install(session, lifecycle)
+
+    def _fail(self) -> None:
+        self._outcome.fail("capability")
+        self._lease.ensure_emergency_shutdown(self._lifecycle._shutdown_factory)
+
+    async def prepare(self, request: Any) -> None:
+        if self._closed:
+            raise ArticleFailure("browser_error", "callback")
+
+    def close(self) -> None:
+        self._closed = True
+        if self._transfer_sessions is not None:
+            self._transfer_sessions.closed = True
+        self._requests.clear()
+        self._headers.clear()
+
+    async def retire(self) -> None:
+        self._transfer_sessions.retire(native_browser_disconnected=self._outcome.native_browser_disconnected)
+        if self.page_session is not None:
+            await self._detach(self.page_session)
+        await self._detach(self._root)
+
+    @staticmethod
+    async def _detach(session: Any) -> None:
+        # Closing the page/context disposes its native session before detach.
+        from playwright._impl._errors import TargetClosedError
+
+        try:
+            await session.detach()
+        except TargetClosedError:
+            pass
+
+    async def detach(self) -> None:
+        if self._transfer_sessions is not None:
+            await self._transfer_sessions.detach()
+        if self.page_session is not None:
+            await self._detach(self.page_session)
+        await self._detach(self._root)
+
+    async def _abort(self, session: Any, request_id: str) -> None:
+        await session.send("Fetch.failRequest", {"requestId": request_id, "errorReason": "BlockedByClient"})
+
+    async def handle(self, event: Mapping[str, Any], session: Any) -> None:
+        request_id = event["requestId"]
+        request = event["request"]
+        url = _http_policy_url(request["url"])
+        if (
+            not isinstance(request_id, str)
+            or len(request_id) > 1024
+            or url is None
+            or len(url.encode("utf-8")) > 65_536
+        ):
+            raise ArticleFailure("browser_error", "capability")
+        if self._closed or self._outcome.failure is not None:
+            await self._abort(session, request_id)
+            return
+        if "responseStatusCode" in event or "responseErrorReason" in event:
+            if event.get("responseStatusCode") not in {301, 302, 303, 307, 308}:
+                self._requests.pop(request_id, None)
+            await session.send("Fetch.continueRequest", {"requestId": request_id})
+            return
+        if not await self._browser._decision_allowed(url):
+            self._outcome.fail("egress")
+            await self._abort(session, request_id)
+            return
+        if self._closed or self._outcome.failure is not None:
+            await self._abort(session, request_id)
+            return
+        previous = event.get("redirectedRequestId")
+        permitted = self._requests.pop(previous, True)
+        if request_id not in self._requests and len(self._requests) >= 64:
+            self._outcome.fail("capacity")
+            await self._abort(session, request_id)
+            raise ArticleFailure("browser_error", "capacity")
+        same = http_client._url_origin(url) == self._origin
+        permitted = permitted and same
+        self._requests[request_id] = permitted
+        headers = dict(request["headers"])
+        if not permitted:
+            source = f"{self._origin[0]}://{self._origin[1]}:{self._origin[2]}" if self._origin else ""
+            # Cookie was already selected by Chromium's domain/path/secure rules.
+            # Do not synthesize, rescope or remove that browser-owned header.
+            browser_cookies = {k: v for k, v in headers.items() if k.lower() == "cookie"}
+            headers = http_client._strip_sensitive_headers_for_cross_origin(
+                {k: v for k, v in headers.items() if k.lower() != "cookie"}, original_url=source, target_url=url
+            )
+            headers.update(browser_cookies)
+            private = {key.lower() for key in self._headers} - {"user-agent", "accept-encoding"}
+            headers = {k: v for k, v in headers.items() if k.lower() not in private or k.lower() == "cookie"}
+        await self._transfer_sessions.track()
+        if self._closed or self._outcome.failure is not None:
+            await self._abort(session, request_id)
+            return
+        self._browser._reserve_parent("network_requests")
+        params = {"requestId": request_id, "headers": [{"name": k, "value": str(v)} for k, v in headers.items()]}
+        await session.send("Fetch.continueRequest", params)
 
 
 @dataclass(slots=True)
@@ -781,17 +1067,27 @@ class GuardedArticleBrowser:
     async def _install_transfer_accounting(
         session: Any,
         ledger: _BrowserTransferLedger,
+        *,
+        enhanced: bool = False,
     ) -> None:
         on = getattr(session, "on", None)
         send = getattr(session, "send", None)
         if not callable(on) or not callable(send):
             raise ArticleFailure("browser_error", "capability")
         try:
-            for event, handler in (
+            handlers = (
                 ("Network.dataReceived", ledger.on_data_received),
                 ("Network.webSocketFrameReceived", ledger.on_websocket_frame),
                 ("Network.webSocketFrameSent", ledger.on_websocket_frame),
-            ):
+            )
+            if enhanced:
+                handlers = (
+                    ("Network.dataReceived", lambda event: ledger.on_request_data("main", event)),
+                    ("Network.loadingFinished", lambda event: ledger.on_request_finished("main", event)),
+                    ("Network.loadingFailed", lambda event: ledger.on_request_failed("main", event)),
+                    *handlers[1:],
+                )
+            for event, handler in handlers:
                 registered = on(event, handler)
                 if inspect.isawaitable(registered):
                     await registered
@@ -810,6 +1106,13 @@ class GuardedArticleBrowser:
 
     @staticmethod
     async def _serialize_html(session: Any, max_bytes: int) -> str:
+        html, _ = await GuardedArticleBrowser._serialize_document(session, max_bytes)
+        return html
+
+    @staticmethod
+    async def _serialize_document(
+        session: Any, max_bytes: int, *, capture_dom: bool = False
+    ) -> tuple[str, Mapping[str, str] | None]:
         if type(max_bytes) is not int or max_bytes < 0:
             raise ArticleFailure("browser_error", "capability")
         send = getattr(session, "send", None)
@@ -863,7 +1166,7 @@ class GuardedArticleBrowser:
         evaluation_response = await command(
             "Runtime.evaluate",
             {
-                "expression": f"({_HTML_SERIALIZATION_EXPRESSION})({max_bytes})",
+                "expression": f"({(_DOCUMENT_SERIALIZATION_EXPRESSION if capture_dom else _HTML_SERIALIZATION_EXPRESSION)})({max_bytes})",
                 "contextId": context_id,
                 "returnByValue": True,
             },
@@ -876,9 +1179,19 @@ class GuardedArticleBrowser:
             raise ArticleFailure("browser_error", "capability")
         if result["ok"] is True:
             html = result.get("html")
-            if not isinstance(html, str):
+            if not isinstance(html, str) or len(html.encode("utf-8")) > max_bytes:
                 raise ArticleFailure("browser_error", "capability")
-            return html
+            if not capture_dom:
+                return html, None
+            dom = result.get("dom")
+            if (
+                not isinstance(dom, Mapping)
+                or set(dom) != {"title", "author", "date", "content"}
+                or any(not isinstance(value, str) for value in dom.values())
+                or sum(len(value.encode("utf-8")) for value in dom.values()) > max_bytes
+            ):
+                raise ArticleFailure("browser_error", "capability")
+            return html, MappingProxyType(dict(dom))
         if "html" in result:
             raise ArticleFailure("browser_error", "capability")
         try:
@@ -907,7 +1220,13 @@ class GuardedArticleBrowser:
             raise
         except ParentStop:
             raise
-        except Exception:  # noqa: BLE001 - sanitize the browser route boundary
+        except Exception as error:  # noqa: BLE001 - sanitize the browser route boundary
+            if outcome.native_browser_disconnected:
+                from playwright._impl._errors import TargetClosedError
+
+                if isinstance(error, TargetClosedError):
+                    # The owned browser has exited; finish only Playwright's local route future.
+                    await route.fallback()
             outcome.fail("http_route")
             return
         outcome.fail(failure_stage)
@@ -916,6 +1235,7 @@ class GuardedArticleBrowser:
         self,
         route: RuntimeBrowserRoute,
         outcome: _AcquisitionOutcome,
+        request_policy: _BrowserRequestPolicy | None = None,
     ) -> None:
         try:
             request = route.request
@@ -936,8 +1256,14 @@ class GuardedArticleBrowser:
             if not allowed:
                 await self._abort_http(route, outcome, failure_stage="egress")
                 return
+            if request_policy is not None:
+                await request_policy.prepare(request)
+                if outcome.failure is not None or request_policy._closed:
+                    await self._abort_http(route, outcome, failure_stage="callback")
+                    return
             try:
-                self._reserve_parent("network_requests")
+                if request_policy is None:
+                    self._reserve_parent("network_requests")
                 await route.continue_()
             except asyncio.CancelledError:
                 raise
@@ -1069,6 +1395,8 @@ class GuardedArticleBrowser:
     ) -> bool:
         cleanup_failed = False
         by_kind = {owner.kind: owner for owner in resources}
+        if "requests" in by_kind:
+            by_kind["requests"].resource.close()
         emergency_shutdown, shutdown_observable = lifecycle.close_admission()
         if emergency_shutdown is not None:
             if shutdown_observable:
@@ -1079,6 +1407,13 @@ class GuardedArticleBrowser:
             else:
                 emergency_shutdown.cancel()
                 cleanup_failed = True
+        if "requests" in by_kind:
+            owner = by_kind["browser"]
+            browser_close_failed = await _bounded_method(owner, lease=lease, grace_s=self._cleanup_grace_s)
+            cleanup_failed |= browser_close_failed
+            if not browser_close_failed and owner.resource.is_connected() is False:
+                lifecycle._outcome.native_browser_disconnected = True
+                return cleanup_failed | await self._retire_browser_resources(by_kind, lifecycle, lease)
         if context is not None and http_routing_started:
             cleanup_failed |= await _bounded_method(
                 _OwnedResource(context, "unroute_all", "http-routes"),
@@ -1086,8 +1421,10 @@ class GuardedArticleBrowser:
                 grace_s=self._cleanup_grace_s,
                 kwargs={"behavior": "wait"},
             )
-        for kind in ("cdp", "page", "context"):
+        for kind in ("page", "context", "cdp") if "requests" in by_kind else ("cdp", "page", "context"):
             owner = by_kind.get(kind)
+            if kind == "cdp" and "requests" in by_kind:
+                owner = _OwnedResource(by_kind["requests"].resource, "detach", "cdp")
             if owner is not None:
                 cleanup_failed |= await _bounded_method(
                     owner,
@@ -1104,6 +1441,38 @@ class GuardedArticleBrowser:
                     grace_s=self._cleanup_grace_s,
                 )
         return cleanup_failed
+
+    async def _retire_browser_resources(self, owners, lifecycle, lease) -> bool:
+        """Retire local handles only after this acquisition's native browser exits."""
+        failed = False
+
+        async def retire(owner):
+            from playwright._impl._errors import TargetClosedError
+
+            try:
+                await _invoke_method(owner.resource, owner.method_name)
+            except TargetClosedError:
+                if not lifecycle._outcome.native_browser_disconnected:
+                    raise
+
+        for kind in ("requests", "page", "context"):
+            owner = owners.get(kind)
+            if owner is None:
+                continue
+            if kind == "requests":
+                owner = _OwnedResource(owner.resource, "retire", kind)
+            task, retention = lease.start_cleanup(retire(owner), name=f"article-browser-retire-{kind}")
+            if task is None:
+                failed = True
+            elif retention == "unobserved":
+                task.cancel()
+                failed = True
+            else:
+                failed |= await _bounded_retained_task(task, grace_s=self._cleanup_grace_s)
+        failed |= await lifecycle.drain(self._cleanup_grace_s)
+        if "playwright" in owners:
+            failed |= await _bounded_method(owners["playwright"], lease=lease, grace_s=self._cleanup_grace_s)
+        return failed
 
     @staticmethod
     async def _await_teardown(task: asyncio.Task[bool]) -> tuple[bool, bool]:
@@ -1125,6 +1494,7 @@ class GuardedArticleBrowser:
         limits: ArticleLimits | None = None,
     ) -> str:
         """Return rendered HTML after freshly guarding every browser dispatch."""
+        self._rendered_fallback = None
         if limits is None:
             limits = ArticleLimits()
         elif not isinstance(limits, ArticleLimits):
@@ -1140,6 +1510,15 @@ class GuardedArticleBrowser:
                 decision.reason,
                 capability=decision.to_capability_metadata(),
             )
+        try:
+            proxy = selected_browser_proxy(url, profile.proxies)
+        except Exception:  # noqa: BLE001 - proxy policy/configuration errors are sanitized
+            raise ArticleFailure("browser_transport_unavailable", "capability", capability={}) from None
+        decision = bind_selected_browser_proxy(decision, proxy)
+        if not decision.allowed:
+            raise ArticleFailure(
+                "browser_transport_unavailable", decision.reason, capability=decision.to_capability_metadata()
+            )
         for attempt in range(attempts):
             if self._parent is not None:
                 self._parent.check()
@@ -1150,7 +1529,7 @@ class GuardedArticleBrowser:
                 raise ArticleFailure("browser_error", "capacity")
             try:
                 self._reserve_parent("browser_attempts")
-                return await self._acquire_with_lease(url, profile, limits, lease)
+                return await self._acquire_with_lease(url, profile, limits, lease, proxy=proxy)
             except ArticleFailure as failure:
                 if attempt + 1 >= attempts or not self._should_retry(failure):
                     raise
@@ -1169,6 +1548,8 @@ class GuardedArticleBrowser:
         profile: DirectBrowserProfile,
         limits: ArticleLimits,
         lease: _BrowserAcquisitionLease,
+        *,
+        proxy: Mapping[str, str] | None = None,
     ) -> str:
         try:
             available = bool(self._capability_check())
@@ -1184,6 +1565,7 @@ class GuardedArticleBrowser:
         primary_error: BaseException | None = None
         html: str | None = None
         context: Any | None = None
+        requests: _BrowserRequestPolicy | None = None
 
         async def _shutdown_context() -> None:
             if context is None:
@@ -1191,15 +1573,31 @@ class GuardedArticleBrowser:
             await _invoke_method(context, "close")
 
         lifecycle = _CallbackLifecycle(outcome, lease, _shutdown_context)
+        transfer = _BrowserTransferLedger(
+            limit=limits.max_browser_transfer_bytes,
+            outcome=outcome,
+            lease=lease,
+            shutdown_factory=_shutdown_context,
+            parent=self._parent,
+        )
         http_routing_started = False
         stage = "launch"
         try:
             playwright = await self._launcher.start()
             resources.append(_OwnedResource(playwright, "stop", "playwright"))
-            browser = await playwright.chromium.launch(headless=True)
+            browser = await playwright.chromium.launch(
+                headless=True, **({"channel": "chromium"} if profile.extra_headers is not None else {})
+            )
             resources.append(_OwnedResource(browser, "close", "browser"))
+            if profile.extra_headers is not None:
+                guard_session = await browser.new_browser_cdp_session()
+                requests = _BrowserRequestPolicy(url, profile.extra_headers, self, outcome)
+                resources.append(_OwnedResource(requests, "close", "requests"))
+                await requests.bind(guard_session, lifecycle, transfer, lease)
             stage = "context"
             context = await browser.new_context(
+                **({"proxy": dict(proxy)} if proxy is not None else {}),
+                **({"extra_http_headers": dict(profile.extra_headers)} if profile.extra_headers is not None else {}),
                 service_workers="block",
                 user_agent=profile.user_agent,
                 viewport={
@@ -1222,18 +1620,23 @@ class GuardedArticleBrowser:
                 raise ArticleFailure("browser_error", "capability")
 
             stage = "routing"
-            await route(
-                _ROUTE_PATTERN,
-                lifecycle.handler(
-                    lambda intercepted: self._http_handler(intercepted, outcome),
-                    lambda intercepted: self._abort_http(
-                        intercepted,
-                        outcome,
-                        failure_stage="callback",
+
+            async def install_http_routes() -> None:
+                nonlocal http_routing_started
+                await route(
+                    _ROUTE_PATTERN,
+                    lifecycle.handler(
+                        lambda intercepted: self._http_handler(intercepted, outcome, requests),
+                        lambda intercepted: self._abort_http(
+                            intercepted,
+                            outcome,
+                            failure_stage="callback",
+                        ),
                     ),
-                ),
-            )
-            http_routing_started = True
+                )
+                http_routing_started = True
+
+            await install_http_routes()
             await route_web_socket(
                 _ROUTE_PATTERN,
                 lifecycle.handler(
@@ -1265,14 +1668,14 @@ class GuardedArticleBrowser:
             if not callable(getattr(cdp_session, "detach", None)):
                 raise ArticleFailure("browser_error", "capability")
             resources.append(_OwnedResource(cdp_session, "detach", "cdp"))
-            transfer = _BrowserTransferLedger(
-                limit=limits.max_browser_transfer_bytes,
-                outcome=outcome,
-                lease=lease,
-                shutdown_factory=_shutdown_context,
-                parent=self._parent,
-            )
-            await self._install_transfer_accounting(cdp_session, transfer)
+            if requests is None:
+                await self._install_transfer_accounting(cdp_session, transfer)
+            else:
+                requests.page_session = cdp_session
+                info = (await cdp_session.send("Target.getTargetInfo"))["targetInfo"]
+                requests._transfer_sessions.context_id = info["browserContextId"]
+                requests._transfer_sessions.main_target = info["targetId"]
+                await self._install_transfer_accounting(cdp_session, transfer, enhanced=True)
 
             if profile.stealth_enabled:
                 stage = "stealth"
@@ -1301,7 +1704,18 @@ class GuardedArticleBrowser:
             if outcome.failure is not None:
                 raise outcome.failure
             stage = "content"
-            html = await self._serialize_html(cdp_session, limits.max_article_bytes)
+            if requests is not None:
+                await requests._transfer_sessions.acknowledged(
+                    self._parent.cap_timeout(max(self._cleanup_grace_s, profile.timeout_ms / 1000))
+                    if self._parent
+                    else max(self._cleanup_grace_s, profile.timeout_ms / 1000)
+                )
+            if requests is None:
+                html = await self._serialize_html(cdp_session, limits.max_article_bytes)
+            else:
+                html, self._rendered_fallback = await self._serialize_document(
+                    cdp_session, limits.max_article_bytes, capture_dom=True
+                )
             self.final_url = str(getattr(page, "url", url) or url)
         except asyncio.CancelledError as exc:
             primary_error = exc

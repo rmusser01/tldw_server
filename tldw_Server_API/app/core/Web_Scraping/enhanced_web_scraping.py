@@ -1770,7 +1770,7 @@ class EnhancedWebScraper:
                 handler=handler or DEFAULT_HANDLER,
                 headers=headers,
                 browser=replace(plan.browser, user_agent=headers["User-Agent"]),
-            )
+            ).for_enhanced_browser(cookies)
             state["route_backend"] = str(getattr(route, "backend", "auto") or "auto")
             state["default_handler"] = not handler or handler == DEFAULT_HANDLER
             return plan
@@ -1799,6 +1799,25 @@ class EnhancedWebScraper:
                 and kwargs.get("handler") is None
             ):
                 return self._extract_beautifulsoup_html(html, url, data.get("extraction_trace"))
+            snapshot = getattr(dependencies.browser, "_rendered_fallback", None)
+            if (
+                state["method"] == "playwright"
+                and not data.get("extraction_successful")
+                and kwargs.get("handler") is None
+                and snapshot is not None
+            ):
+                trace = list(data.get("extraction_trace") or ())
+                trace.append({"strategy": "playwright", "status": "success", "reason": "fallback_extracted"})
+                log_counter("extraction_strategy_total", labels={"strategy": "playwright", "status": "success"})
+                return {
+                    "url": url,
+                    **snapshot,
+                    "extraction_successful": True,
+                    "method": "playwright",
+                    "extraction_trace": trace,
+                    "extraction_strategy": "playwright",
+                    "extraction_strategy_order": ["playwright"],
+                }
             return data
 
         dependencies = replace(

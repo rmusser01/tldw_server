@@ -5,8 +5,10 @@ from __future__ import annotations
 import configparser
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Any, Literal, cast
+from urllib.parse import unquote, urlsplit
 
 from loguru import logger
 
@@ -37,9 +39,7 @@ BrowserTransportReason = Literal[
     "browser_transport_config_invalid",
 ]
 
-_CONFIGURED_MODES = frozenset(
-    {"auto", "disabled", "url_guarded", "attested_proxy"}
-)
+_CONFIGURED_MODES = frozenset({"auto", "disabled", "url_guarded", "attested_proxy"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +50,11 @@ class BrowserTransportAttestation:
     routes_all_requests: bool
     dns_pinned: bool
     peer_verified: bool
+    proxy_binding: Mapping[str, str] | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.proxy_binding is not None:
+            object.__setattr__(self, "proxy_binding", MappingProxyType(dict(self.proxy_binding)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +66,11 @@ class BrowserTransportDecision:
     effective_mode: EffectiveBrowserTransportMode
     dns_peer_attested: bool
     reason: BrowserTransportReason
+    proxy_binding: Mapping[str, str] | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.proxy_binding is not None:
+            object.__setattr__(self, "proxy_binding", MappingProxyType(dict(self.proxy_binding)))
 
     def to_capability_metadata(self) -> dict[str, str | bool]:
         """Return the fixed safe metadata contract without configuration details."""
@@ -107,6 +117,7 @@ def decide_browser_transport(
                 effective_mode="attested_proxy",
                 dns_peer_attested=True,
                 reason="browser_transport_allowed_attested",
+                proxy_binding=attestation.proxy_binding,
             )
         return BrowserTransportDecision(
             allowed=False,
@@ -194,6 +205,49 @@ def browser_transport_failure_result(
         "extraction_successful": False,
         "capability": decision.to_capability_metadata(),
     }
+
+
+def selected_browser_proxy(url: str, proxies: Mapping[str, str]) -> dict[str, str] | None:
+    """Validate through shared HTTP policy and normalize the selected browser proxy."""
+    if not proxies:
+        return None
+    from tldw_Server_API.app.core import http_client
+
+    snapshot = dict(proxies)
+    http_client.validate_proxies_or_raise(snapshot)
+    selected = http_client._resolve_proxy_for_url(url, snapshot)
+    if not selected:
+        return None
+    parsed = urlsplit(selected if "://" in selected else f"http://{selected}")
+    if parsed.scheme not in {"http", "https", "socks4", "socks5"} or not parsed.hostname:
+        raise ValueError("invalid browser proxy")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError("invalid browser proxy")
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    server = f"{parsed.scheme}://{host}" + (f":{parsed.port}" if parsed.port is not None else "")
+    result = {"server": server}
+    if parsed.username is not None:
+        result["username"] = unquote(parsed.username)
+    if parsed.password is not None:
+        result["password"] = unquote(parsed.password)
+    return result
+
+
+def bind_selected_browser_proxy(
+    decision: BrowserTransportDecision, proxy: Mapping[str, str] | None
+) -> BrowserTransportDecision:
+    """Never treat allowlisting as evidence for a different attested transport."""
+    if decision.allowed and decision.effective_mode == "attested_proxy" and proxy is not None:
+        if decision.proxy_binding is None or dict(decision.proxy_binding) != dict(proxy):
+            return replace(
+                decision,
+                allowed=False,
+                effective_mode="disabled",
+                dns_peer_attested=False,
+                reason="browser_transport_unattested",
+                proxy_binding=None,
+            )
+    return decision
 
 
 def _invalid_browser_transport_decision() -> BrowserTransportDecision:
