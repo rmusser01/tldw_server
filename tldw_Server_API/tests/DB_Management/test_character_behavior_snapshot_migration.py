@@ -1420,6 +1420,7 @@ def test_postgres_backend_wrapper_roundtrips_resume_store_contract() -> None:
     assert state["behavior_snapshot"]["status"] == "valid"
     assert state["behavior_snapshot"]["canonical_json"] == snapshot.canonical_bytes.decode()
     assert state["behavior_snapshot"]["payload"] == snapshot.payload
+    assert state["dictionary_catalog_owner"] == "postgres-store-owner"
     assert not any(
         statement.startswith("select id, version from messages")
         for statement, _params in backend.executed
@@ -1671,8 +1672,10 @@ def test_resume_state_rejects_wrong_owner_and_deleted_conversation(
 def test_postgres_resume_state_owner_filter_is_applied_to_lock_and_read() -> None:
     backend = _PostgresStoreBackend()
     db, wrapper = _postgres_store_db(backend)
+    assert db.owner_user_id == db.client_id == "postgres-store-owner"
+    db.client_id = "later-writer"
 
-    db.conversation_resume_store.get_roleplay_resume_state(
+    state = db.conversation_resume_store.get_roleplay_resume_state(
         backend.conversation_id,
         conn=wrapper,
         lock_for_update=True,
@@ -1683,6 +1686,13 @@ def test_postgres_resume_state_owner_filter_is_applied_to_lock_and_read() -> Non
     assert "client_id = %s" in statements[0]
     assert statements[0].endswith("for update")
     assert "c.client_id = %s" in statements[1]
+    assert backend.executed[0][1] == (
+        backend.conversation_id, "postgres-store-owner", "postgres-store-owner"
+    )
+    assert backend.executed[1][1] == (
+        backend.conversation_id, "postgres-store-owner", "postgres-store-owner"
+    )
+    assert state["dictionary_catalog_owner"] == db.owner_user_id == "postgres-store-owner"
 
 
 def test_postgres_backend_wrapper_caller_owned_message_mutations_advance_once() -> None:
