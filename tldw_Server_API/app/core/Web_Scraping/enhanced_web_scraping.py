@@ -1737,6 +1737,19 @@ class EnhancedWebScraper:
             "extraction_strategy_order": ["beautifulsoup"],
         }
 
+    def _browser_http_fallback(self) -> bool:
+        """Preserve legacy manual-instance fallback only after fresh transport admission."""
+        from .orchestration.article_models import ArticleFailure
+
+        transport = resolve_browser_transport_decision(
+            default_browser_transport_decision, component="enhanced_web_scraper"
+        )
+        if not transport.allowed:
+            raise ArticleFailure(
+                "browser_transport_unavailable", "capability", capability=transport.to_capability_metadata()
+            )
+        return not self._browser
+
     def _start_controlled_job(self, payload, controls) -> WorkHandle[PageData]:
         """Bind this instance's capabilities to one canonical, controlled attempt."""
         from .orchestration import article
@@ -1820,6 +1833,12 @@ class EnhancedWebScraper:
                 }
             return data
 
+        def browser_http_fallback():
+            fallback = self._browser_http_fallback()
+            if fallback:
+                state["method"] = "trafilatura"
+            return fallback
+
         dependencies = replace(
             dependencies,
             resolve_plan=resolve,
@@ -1830,6 +1849,7 @@ class EnhancedWebScraper:
             resolve_handler=lambda path: None if path == DEFAULT_HANDLER else handler_resolver(path),
             http_only=True,
             http_failure=_failed_scrape_result,
+            browser_http_fallback=browser_http_fallback,
         )
 
         async def run():
@@ -2063,6 +2083,7 @@ class EnhancedWebScraper:
                 hooks=CrawlHooks(url_filter=url_filter, on_progress=progress),
                 queue=self.job_queue,
                 transform=self._apply_dedup,
+                browser_http_fallback=self._browser_http_fallback,
             )
         except asyncio.CancelledError:
             self._set_progress(task_id, status="cancelled")

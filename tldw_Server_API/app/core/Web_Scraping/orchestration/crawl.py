@@ -386,6 +386,7 @@ async def execute_crawl(
     seeds: Iterable[str] | None = None,
     queue: ProcessLocalJobQueue | None = None,
     transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+    browser_http_fallback: Callable[[], bool] | None = None,
 ) -> CrawlReport:
     """Snapshot private inputs and compose the sole canonical engine."""
     config = article._snapshot_config(config)
@@ -608,6 +609,7 @@ async def execute_crawl(
             discovery_gate=discovery_gate,
             transform=transform,
             method_intent="trafilatura" if profile == "enhanced_recursive" else "auto",
+            browser_http_fallback=browser_http_fallback,
         )
 
     async def acquire(entry: FrontierEntry) -> WorkHandle[PageData]:

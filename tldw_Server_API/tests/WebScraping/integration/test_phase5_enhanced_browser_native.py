@@ -117,6 +117,11 @@ async def test_native_default_batch_preserves_settings_and_same_page_dom_fallbac
         )
         scraper.cookie_manager = enhanced.CookieManager(tmp_path / "cookies.json")
         scraper.deduplicator = enhanced.ContentDeduplicator(tmp_path / "dedup.json")
+
+        async def close_legacy_capability():
+            pass
+
+        scraper._browser = SimpleNamespace(close=close_legacy_capability)
         scraper.cookie_manager.add_cookies(urlsplit(target).netloc, [{"name": "sid", "value": "stored"}])
         resolve = scraper._resolve_scrape_plan
 
