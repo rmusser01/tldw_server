@@ -4,6 +4,7 @@ test_supervised_policy.py
 Comprehensive tests for SupervisedPolicyEngine using a real SQLite-backed
 GuardianDB (no mocks). Each test gets a fresh database via tmp_path.
 """
+
 from __future__ import annotations
 
 import re
@@ -46,6 +47,32 @@ def _setup_active_relationship(db, guardian="guardian1", dependent="child1"):
     rel = db.create_relationship(guardian, dependent)
     db.accept_relationship(rel.id)
     return rel
+
+
+def test_pure_selection_retains_parent_metadata_and_first_notify_tie(db, engine, monkeypatch):
+    from tldw_Server_API.app.core.Moderation.execution_models import RegexRuleSnapshot
+    from tldw_Server_API.app.core.Moderation.supervised_evaluator import evaluate_supervised
+
+    rel = _setup_active_relationship(db)
+    first = db.create_policy(
+        relationship_id=rel.id,
+        category="first",
+        pattern="late",
+        action="notify",
+        notify_context="snippet",
+        notify_guardian=True,
+    )
+    db.create_policy(relationship_id=rel.id, category="second", pattern="early", action="notify")
+    compiled = engine._get_compiled_policies("child1")
+    batch = evaluate_supervised(
+        "early late",
+        [RegexRuleSnapshot(regex.pattern, int(regex.flags), pol.action, pol.phase) for pol, regex, _gp in compiled],
+        "input",
+    )
+    result = engine.check_text("early late", "child1")
+    assert result.matched_policy_id == compiled[batch.winner_index][0].id
+    assert result.matched_policy_id == first.id
+    assert (result.action, result.notify_guardian, result.context_snippet) == ("notify", True, "early late")
 
 
 # ── 1. No policies -> pass result ────────────────────────────
@@ -834,22 +861,26 @@ class TestBuildModerationPolicyOverlay:
             action="block",
             category="supervised",
         )
-        base = PolicyCompiler().compile_global(
-            PolicyCompilationInput(
-                config=ResolvedModerationConfig(
-                    enabled=True,
-                    input_enabled=False,
-                    output_enabled=True,
-                    input_action="warn",
-                    output_action="block",
-                    redact_replacement="[BASE]",
-                    per_user_overrides=False,
-                    categories_enabled={"base", "supervised"},
-                    pii_enabled=False,
-                ),
-                blocklist_lines=["base-secret -> warn #base"],
+        base = (
+            PolicyCompiler()
+            .compile_global(
+                PolicyCompilationInput(
+                    config=ResolvedModerationConfig(
+                        enabled=True,
+                        input_enabled=False,
+                        output_enabled=True,
+                        input_action="warn",
+                        output_action="block",
+                        redact_replacement="[BASE]",
+                        per_user_overrides=False,
+                        categories_enabled={"base", "supervised"},
+                        pii_enabled=False,
+                    ),
+                    blocklist_lines=["base-secret -> warn #base"],
+                )
             )
-        ).policy
+            .policy
+        )
 
         result = engine.build_moderation_policy_overlay("child1", base)
 
@@ -1284,6 +1315,7 @@ class TestScheduleFiltering:
         rel = _setup_active_relationship(db)
         from datetime import datetime
         from zoneinfo import ZoneInfo
+
         now = datetime.now(ZoneInfo("UTC"))
         day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
         # Pick a day that is NOT today
@@ -1309,6 +1341,7 @@ class TestScheduleFiltering:
         rel = _setup_active_relationship(db)
         from datetime import datetime
         from zoneinfo import ZoneInfo
+
         now = datetime.now(ZoneInfo("UTC"))
         day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
         today_name = day_names[now.weekday()]
@@ -1456,6 +1489,7 @@ class TestGuardianNotificationDispatch:
             SupervisedCheckResult,
             dispatch_guardian_notification,
         )
+
         result = SupervisedCheckResult(
             action="block",
             notify_guardian=True,
@@ -1482,6 +1516,7 @@ class TestGuardianNotificationDispatch:
             SupervisedCheckResult,
             dispatch_guardian_notification,
         )
+
         result = SupervisedCheckResult(action="pass", notify_guardian=True)
         status = dispatch_guardian_notification(result, "child1")
         assert status == "skipped"
@@ -1491,6 +1526,7 @@ class TestGuardianNotificationDispatch:
             SupervisedCheckResult,
             dispatch_guardian_notification,
         )
+
         result = SupervisedCheckResult(action="block", notify_guardian=False)
         status = dispatch_guardian_notification(result, "child1")
         assert status == "skipped"
