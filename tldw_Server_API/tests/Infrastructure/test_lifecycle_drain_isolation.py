@@ -23,6 +23,7 @@ import sys
 import threading
 import weakref
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -38,13 +39,9 @@ ROOT_CONFTEST = Path(__file__).resolve().parents[1] / "conftest.py"
 FIXTURE_NAME = "_reset_main_app_lifecycle_state_between_tests"
 
 
-@pytest.fixture(params=[False, True], ids=["idle-gc", "unrelated-gc-in-progress"])
-def unrelated_collection(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Exercise the lifetime check while an unrelated thread owns cyclic GC."""
-    if not request.param:
-        yield
-        return
-
+@contextmanager
+def _unrelated_collection() -> Iterator[None]:
+    """Own a controlled collector only inside a fresh probe interpreter."""
     entered = threading.Event()
     release = threading.Event()
 
@@ -117,18 +114,15 @@ def _assert_registry_releases_app() -> None:
     assert ref() is None, "the app registry is holding a strong reference"
 
 
-@pytest.mark.unit
-def test_registry_does_not_keep_apps_alive(unrelated_collection: None) -> None:
-    """Tracking apps must not turn every test app into a permanent leak."""
-    # gc.collect() does not run a second collection while another thread owns
-    # GC. A fresh interpreter makes this assertion about the registry rather
-    # than unrelated suite finalizers, without retrying or weakening collection.
+def _run_isolated_probe(probe: str) -> None:
+    """Keep both lifetime assertions and synthetic GC out of ambient pytest GC."""
     result = subprocess.run(  # nosec B603 # Fixed local Python probe, no shell or untrusted command.
         [
             sys.executable,
             "-c",
-            "import runpy, sys; runpy.run_path(sys.argv[1])['_assert_registry_releases_app']()",
+            "import runpy, sys; runpy.run_path(sys.argv[1])[sys.argv[2]]()",
             str(Path(__file__).resolve()),
+            probe,
         ],
         capture_output=True,
         text=True,
@@ -136,6 +130,23 @@ def test_registry_does_not_keep_apps_alive(unrelated_collection: None) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr  # nosec B101 # Propagate the child lifetime assertions to pytest.
+
+
+def _assert_probe_with_existing_collection() -> None:
+    """The same driver must work when its caller already owns cyclic GC."""
+    with _unrelated_collection():
+        _run_isolated_probe("_assert_registry_releases_app")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "probe",
+    ["_assert_registry_releases_app", "_assert_probe_with_existing_collection"],
+    ids=["idle-gc", "already-active-parent-gc"],
+)
+def test_registry_does_not_keep_apps_alive(probe: str) -> None:
+    """Tracking apps must not turn every test app into a permanent leak."""
+    _run_isolated_probe(probe)
 
 
 @pytest.mark.unit

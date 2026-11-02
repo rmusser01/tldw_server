@@ -106,6 +106,31 @@ errors; production scan scope is empty because production is unchanged. Existing
 whole-file AuthNZ formatting drift is verified against HEAD and left untouched;
 changed-line Black passes. No new ADR is required for test-only fixture repairs.
 
+Independent review of source `957dc3605c` found one Important issue and no other
+Critical/Important/Minor findings: the synthetic concurrent-GC fixture still
+starts its own collector in the ambient pytest process. If another collector is
+already active, that new collection returns before reaching its sentinel, so
+fixture setup fails. Reviewer reproductions on Python 3.14 and 3.12 confirm the
+race. Source approval is blocked until the synthetic orchestration also moves
+into a fresh process and the shared probe driver is exercised with an already
+active outer collector. Preserve all assertions, time bounds and cleanup; rerun
+focused regressions, mutations and the complete infrastructure shard, then
+request an immutable delta review.
+
+The P2 reproduces independently before repair. The ambient pytest GC fixture is
+removed: controlled synthetic collection now runs only in a fresh child, and
+both pytest entry points and the child already owning GC share the same isolated
+probe driver. Both public cases pass with an additional already-active outer
+collector. Strong-registry, missing-reset and removed-isolation mutations fail
+at their intended assertions. Project focused tests pass five cases; the full
+infrastructure shard passes 490 with zero skips again. Direct probe calls also
+pass on Python 3.12.12; two supplementary root-fixture command attempts failed
+environment setup (duplicate plugin command, then missing diagnostic-venv httpx)
+and are not claimed as a Python 3.12 pytest pass. No package installation, timeout
+increase, retry or production change is used for the repair. Normal hooks,
+Ruff/format and unchanged Bandit findings qualify the delta; independent
+re-review remains pending.
+
 ## Stage 4: Publish And Report
 **Goal:** Publish a follow-up PR with accurate evidence and no merge-policy bypass.
 **Success Criteria:** Latest dev incorporated, review evidence and CI status documented, original PR linked to follow-up.
