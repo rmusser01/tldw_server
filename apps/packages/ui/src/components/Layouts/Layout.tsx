@@ -779,7 +779,7 @@ function RootLayoutShell({
   )
   return (
     <HistorySelectionProvider
-      key={location.pathname === "/chat" ? "chat" : "sidebar"}
+      key={["/chat", "/model-playground"].includes(location.pathname) ? "chat" : "sidebar"}
       storageKey="tldw-h1-playground-reference"
       onCapture={(capture) => {
         const display = formatSelectedHistory(capture)

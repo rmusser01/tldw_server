@@ -869,7 +869,7 @@ function RootLayoutShell({
       </NotificationRuntimeOwner>
     </DemoModeProvider>
   );
-  return location.pathname === "/chat" ? (
+  return ["/chat", "/model-playground"].includes(location.pathname) ? (
     <HistorySelectionProvider
       storageKey="tldw-h1-playground-reference"
       onCapture={(capture) => {
