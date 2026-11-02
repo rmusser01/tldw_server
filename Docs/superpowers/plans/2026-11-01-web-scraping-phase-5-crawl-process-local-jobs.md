@@ -866,6 +866,54 @@ tradeoff. Complete an instance-capability audit before further composition so
 remaining rate, method, policy, headers, cookies, dedup and progress requirements
 are handled together rather than discovered only after switching each wrapper.
 
+**Task 9 Review-Fix Rulings (2026-11-01):**
+
+- Bound synchronous bridge owners with one private process-owned immediate
+  admission gate, default capacity 4 (matching the canonical extractor's existing
+  default, but a separate lease to avoid nested extraction deadlock). Acquire
+  before thread/loop dispatch; no queued waiters or per-invocation fresh allowance.
+  Excess admission uses the existing sanitized `queue_overloaded` typed failure
+  and closes any unstarted coroutine. Hold the lease through actual loop, async
+  generator and default-executor retirement, not logical result delivery. An
+  internal test seam may set a validated positive finite capacity before work;
+  it must not reset live/draining capacity. Handle PID/fork changes without using
+  inherited locks or refunding a child's capacity from a parent lease. No new
+  ThreadPoolExecutor or extraction-manager lifecycle. Cover held-work exhaustion,
+  prompt rejection without new thread/loop, startup failure, and recovery after
+  actual drain. This is the approved bounded-overload correction, not permission
+  to abandon work or unlock checkpoints early.
+- Preserve enhanced browser inputs through additive private immutable
+  `DirectBrowserProfile` fields for scoped extra headers and validated selected
+  proxy configuration, plus target-normalized merged cookies. Defaults leave
+  standalone capture unchanged. Compose stored < explicit < route article cookies;
+  route-only and ordinary name/value records must be valid browser cookies for
+  the admitted URL. Apply secrets at the guarded request boundary, not as
+  unrestricted context-wide headers: cross-boundary redirects/subresources must
+  not inherit or reacquire original secrets. Existing proxy validation, egress,
+  browser transport attestation, transfer bounds and WebSocket guards remain
+  authoritative. No wrapper imports in lower layers, raw browser fallback, or
+  public request/profile signature removal. Strict guarded-browser boundary tests
+  must check actual cookies/headers/proxy and redirects, not only HTTP fixtures.
+  Extend `orchestration/article_models.py` and `article_browser.py` narrowly for
+  this capability; report a concrete attestation gap rather than bypassing it.
+- Carry a trusted private extraction-method intent through `start_page` and
+  article dependencies/preparation into real preflight advice, independently of
+  backend intent. Default remains `auto`; enhanced recursive preserves its prior
+  explicit `trafilatura` intent and advice attachment. Do not force a backend to
+  simulate a method or change standalone/analyzer precedence. Test the public
+  recursive path with real advice and JS-positive analysis plus HTTP/browser
+  acquisition fakes, including explicit route/config backend combinations.
+- Normalize both existing enhanced cookie forms (name/value records and shorthand
+  mappings) before stored/explicit/route precedence, while preserving exact-netloc
+  selection, byte admission and redirect stripping. Do not fix the loss by
+  broadening credential scope. Cover public crawl and sitemap with both stored
+  and explicit shorthand and a colliding route cookie.
+
+These repair review Findings 1-4 under the no-functionality-loss and bounded-work
+requirements. The cost of a wrong ruling is private ownership/profile rework;
+the independent scoped re-review must verify all four and new breakage. Decompose
+`execute_crawl` rather than grow it past the 300-line new-function ceiling.
+
 **Interfaces:** Consume `execute_crawl`, `execute_batch`, `ProcessLocalJobQueue`,
 and profile resolver. Preserve every existing signature/export/factory in Task 1.
 `to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]]`
