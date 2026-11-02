@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
 
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers
@@ -230,6 +231,8 @@ class DirectBrowserProfile:
     stealth_wait_ms: int
     viewport_width: int = 1280
     viewport_height: int = 720
+    extra_headers: Mapping[str, str] | None = field(default=None, repr=False)
+    proxies: Mapping[str, str] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "user_agent", str(self.user_agent or ""))
@@ -251,6 +254,9 @@ class DirectBrowserProfile:
         )
         object.__setattr__(self, "viewport_width", _positive_integer_or_default(self.viewport_width, 1280))
         object.__setattr__(self, "viewport_height", _positive_integer_or_default(self.viewport_height, 720))
+        if self.extra_headers is not None:
+            object.__setattr__(self, "extra_headers", _freeze_mapping(self.extra_headers))
+        object.__setattr__(self, "proxies", _freeze_mapping(self.proxies))
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,7 +312,32 @@ class ArticlePlan:
             headers=headers,
             cookies={},
             llm_settings=None,
-            browser=replace(self.browser, custom_cookies=(), user_agent=headers.get("User-Agent", "")),
+            browser=replace(
+                self.browser,
+                custom_cookies=(),
+                user_agent=headers.get("User-Agent", ""),
+                extra_headers=None,
+                proxies={},
+            ),
+        )
+
+    def for_enhanced_browser(self, custom_cookies: Sequence[Mapping[str, Any]]) -> ArticlePlan:
+        """Bind enhanced settings without changing the standalone direct profile."""
+        merged = {str(c["name"]): dict(c) for c in custom_cookies if "name" in c and "value" in c}
+        merged.update({str(k): {"name": str(k), "value": str(v)} for k, v in self.cookies.items()})
+        parsed = urlsplit(self.url)
+        target = f"{parsed.scheme}://{parsed.netloc}/"
+        for cookie in merged.values():
+            if "url" not in cookie:
+                if cookie.get("domain"):
+                    cookie.setdefault("path", "/")
+                else:
+                    cookie["url"] = target
+        return replace(
+            self,
+            browser=replace(
+                self.browser, custom_cookies=tuple(merged.values()), extra_headers=self.headers, proxies=self.proxies
+            ),
         )
 
     @property
