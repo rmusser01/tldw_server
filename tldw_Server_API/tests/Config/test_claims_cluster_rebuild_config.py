@@ -75,3 +75,27 @@ def test_loader_config_defaults_and_environment(monkeypatch):
     assert claims_jobs.claims_cluster_rebuild_limits(loaded).vector_width == 23
     monkeypatch.setenv("CLAIMS_CLUSTER_REBUILD_MAX_VECTOR_WIDTH", "11")
     assert claims_jobs.claims_cluster_rebuild_limits(config.load_settings()).vector_width == 11
+
+
+@pytest.mark.parametrize("threshold", [True, "NaN", "Infinity", "-0.1", "1.1"])
+def test_effective_embedding_threshold_fails_closed_before_admission(monkeypatch, threshold):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.Claims_Extraction import claims_service
+
+    monkeypatch.setitem(claims_service.settings, "CLAIMS_CLUSTER_SIMILARITY_THRESHOLD", threshold)
+    with pytest.raises(HTTPException) as error:
+        claims_service.admit_claim_cluster_rebuild(
+            min_size=2,
+            method="embeddings",
+            similarity_threshold=None,
+            user_id=None,
+            request_key=None,
+            principal=AuthPrincipal(kind="user", user_id=1, permissions=["claims.admin"]),
+            current_user=SimpleNamespace(id=1),
+            job_manager=None,
+        )
+    assert error.value.status_code == 422

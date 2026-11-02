@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -23,6 +24,24 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_schemas import (  # noqa:
     FVAClaimResult,
     FVAEvidenceItem,
 )
+
+
+class ClaimsClusterRebuildAccepted(BaseModel):
+    """Immutable reference to accepted work; status remains Jobs-owned."""
+
+    job_id: int = Field(gt=0, strict=True)
+    job_uuid: UUID
+    status_url: str
+    reused: bool
+
+
+class ClaimsClusterRebuildConflict(BaseModel):
+    """An authorized identity for the work conflicting with this request."""
+
+    code: Literal["claims_cluster_active_conflict", "claims_cluster_request_conflict"]
+    job_id: int = Field(gt=0, strict=True)
+    job_uuid: UUID
+    status_url: str
 
 
 def _default_offset_pagination_aliases(response):
