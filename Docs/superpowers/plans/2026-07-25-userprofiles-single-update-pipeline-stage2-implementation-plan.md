@@ -1129,7 +1129,30 @@ Additional local qualification: all 24 GitHub cases pass under CI's allowlist, a
 **Goal**: Publish only the independently approved exact head after authoritative-ref and unarmed queue checks.
 **Success Criteria**: Preserve the human Change summary verbatim, carry unchanged-content approvals and require fresh exact-head CI before merge. Retry requests for an older head must not be exercised after publication. TASK-13001.2 remains In Progress until verified merge.
 **Tests**: Current rules, feedback, exact-head checks and expected-head merge/readback. No manual required-gate dispatch or tracking-only CI invalidation.
-**Status**: In Progress
+**Status**: Complete
+
+Verified WP2 merge closeout (2026-11-02): PR #2821 merged at 05:10:16 UTC as
+`3ab1ce5d3a49d5a7fd130e8939d55d7639e5a373`. Its verified parents are authoritative
+dev `db97dbc7330bbeddc854e6f44a869fb1803a372a` and independently approved exact
+head `21dee5349e81d1a821097592f33ea9b4ab4c873f`. GitHub merged-state/commit and
+authoritative remote-dev readbacks agree. All eight current required checks
+succeeded on that head from the required integration: backend, security,
+coverage, frontend, e2e, container, E2E Critical and trusted frontend license.
+Rules, latest-dev ancestry, all 30 resolved inline threads, absence of
+changes-requested reviews, verbatim human summary and unarmed merge state were
+verified before the expected-head merge commit. Exact-head approval is recorded
+at https://github.com/rmusser01/tldw_server/pull/2821#issuecomment-6568777659.
+
+The advisory shared-UI coverage 1/16 failure remains explicit: one failed test
+with 1927 passed; the local affected file passed 19/19, not the full shard.
+Its root cause remains unresolved; evidence is at
+https://github.com/rmusser01/tldw_server/pull/2821#issuecomment-6569225730.
+Earlier root httpx2 collection, frontend-control and missing-Go WebSocket limits
+are not converted to green. No CI retry, gate/settings/policy change or unrelated
+product fix was made. This closes WP2's historical publication checkpoints;
+TASK-13001.2 is finalized through backlog-py. ADR085 and all WP3 work remain
+unchanged. This post-merge closeout changes only the plan and task record; no
+Python/executable file is touched and no new Bandit scope is introduced.
 
 ## Work Package 3: Typed Pipeline and Effects
 
