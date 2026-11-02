@@ -10,7 +10,7 @@
 
 **Spec:** `Docs/superpowers/specs/2026-11-02-moderation-killable-stdlib-re-design.md` (approved 2026-11-02; four review corrections authorized the same day).
 
-**Tracking:** TASK-15415 (planning); TASK-15414 (approved design).
+**Tracking:** TASK-15417 (implementation); TASK-15415 (planning); TASK-15414 (approved design).
 
 ## Global Constraints
 
@@ -96,7 +96,7 @@ semantics for legacy `phase=None`/other strings.
 **Goal:** A standalone worker runs existing evaluator semantics with bounded data.
 **Success Criteria:** Benign parity, strict protocol validation, and bounded output; production service remains unchanged.
 **Tests:** New protocol/worker suites plus existing evaluator characterization.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Protocol, Worker, and Output Guard
 
@@ -553,8 +553,9 @@ were checked against the current source; new names are defined above. No product
 code has been written while preparing this plan.
 
 Execution handoff: subagent-driven, preserving the requester's earlier choice.
-Plan review/confirmation is pending. Each stage is Not Started; do not mark tests
-or runtime guarantees passed based on this document.
+Revised plan approved on 2026-11-02; subagent-driven implementation authorized.
+Stage statuses and the plan-owned SDD ledger track execution; do not mark tests
+or runtime guarantees passed based on this document alone.
 
 ## Review Corrections
 

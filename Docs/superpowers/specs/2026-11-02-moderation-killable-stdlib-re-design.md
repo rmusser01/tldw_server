@@ -1,7 +1,7 @@
 # Moderation: Killable Standard-Library Regex Execution
 
 Date: 2026-11-02
-Status: Approved by requester on 2026-11-02; implementation plan review pending
+Status: Approved by requester on 2026-11-02; revised implementation plan approved and execution authorized
 Task: TASK-15414
 Baseline inspected: `aec70514cd`, following merged Moderation PR #3396
 Review amendments: requester authorized all four plan-review corrections on 2026-11-02; tracked by TASK-15415.
@@ -318,7 +318,7 @@ Requester approval of this written design: received on 2026-11-02 ("yes").
 Implementation plan: `Docs/superpowers/plans/2026-11-02-moderation-killable-stdlib-re-implementation-plan.md`.
 Review amendments close runtime coverage/reporting gaps and replace duplicate
 incident projections; accepted ADR-086 rationale remains unchanged. Revised plan
-confirmation remains pending; no runtime implementation has begun.
+confirmation was received on 2026-11-02; implementation is tracked by TASK-15417.
 Independent follow-up review on 2026-11-02 confirmed all four corrections at the
 planning level with no new amendment-caused P1/P2 issues. Runtime verification
 remains future implementation work.
