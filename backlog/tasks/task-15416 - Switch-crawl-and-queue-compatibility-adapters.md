@@ -1,7 +1,7 @@
 ---
 id: TASK-15416
 title: Switch crawl and queue compatibility adapters
-status: To Do
+status: In Progress
 labels:
 - web-scraping
 - phase5
@@ -24,6 +24,7 @@ Execute Task 9 of the approved Phase 5 plan as an independently reviewable unit.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Parent TASK-15407. Plan Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md, Task 9. ADR assessment: no new ADR; existing ADR-085 governs. Use backlog-py; no product edits outside this task scope without controller ruling. Implementation and review evidence will be linked from the plan-scoped SDD ledger.
+Tasks1-8 independently accepted. Begin Task9 one-time legacy/enhanced adapter cutover. Mandatory preflight: preserve explicit parent_scraper/_execute_job callback and submitter context (baseline-notes.md); verify synchronous interrupted crawl retains actual-work and checkpoint ownership beyond logical return then releases after physical exit. Do not use bare asyncio.run as drain proof. Preserve trusted-local resume paths, signatures/exports/progress snapshots, filters/cookies/dedup/extra fields and established transport failure lists. Resolve wrapper size debt by decomposition/cutover, not ceiling bump. No service/central Jobs migration or dual execution.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
