@@ -846,6 +846,26 @@ loss gap; the cost of a wrong ruling is private hook/ordering rework, not a new
 public contract. Raise any further concrete private-composition gap before
 silently dropping existing instance behavior such as rate limiting.
 
+The enhanced adapter may snapshot CookieManager's stored lists once into private
+credentials under `stored_cookies_by_netloc`, selecting by the exact existing
+`urlparse(target).netloc` lookup for each admitted page or discovery request.
+Do not flatten a seed's stored cookies across hosts/ports. Preserve the established
+precedence: stored cookies, then explicit cookies, then applicable route cookies
+for article acquisition (discovery keeps its characterized behavior). Canonical
+redirect credential stripping remains authoritative; this is not permission to
+reattach secrets on a cross-boundary redirect. Snapshot data is neither public
+metadata nor checkpoint/config/provenance; each normalized queued payload contains
+only its selected execution cookies and remains byte-admitted, never the whole jar.
+Retain selected secrets only through actual work/drain and clear private graphs.
+Add exact-host/port/external-child selection, precedence, snapshot-mutation,
+redirect-stripping and projection/checkpoint secrecy tests. A private snapshot
+helper on CookieManager is permitted without changing its existing public API.
+This preserves an existing instance credential source; wrong scope selection would
+cost private composition rework and is a security review blocker, not an accepted
+tradeoff. Complete an instance-capability audit before further composition so
+remaining rate, method, policy, headers, cookies, dedup and progress requirements
+are handled together rather than discovered only after switching each wrapper.
+
 **Interfaces:** Consume `execute_crawl`, `execute_batch`, `ProcessLocalJobQueue`,
 and profile resolver. Preserve every existing signature/export/factory in Task 1.
 `to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]]`
