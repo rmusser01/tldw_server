@@ -73,3 +73,29 @@ stopping only owned competing jobs, the unchanged command passed 65/65. That
 does not establish harmlessness or full-suite correctness. CI uses Node 20,
 which was not executed locally. No compiled Go runner/RPC integration was
 claimed. Exact-head remote CI and the human-summary gate still govern merge.
+
+## Published-Head UI10 Follow-Up
+
+**Status**: Locally Qualified; Independent Review and CI Pending
+Published-head CI job125454102604 ran 2,359 tests: 2,358 passed and the Playground
+no-usable-model assertion failed at line972 while the UI still showed Checking
+model readiness. Its wait observes the fetch call, not settled query rendering.
+Controlled delayed-response RED reproduces the same checking rail; the same
+real query/render path becomes GREEN when the three original rail assertions
+are awaited together. Commit6da9b1c868 changes only that observation point,
+preserving all227 original assertions and restoring the original immediate
+response fixture after diagnosis. The temporary barrier is released in finally;
+no global scheduler or final state is mocked. Final Node22 V8 full-file66/66
+passes; targeted ESLint has zeroerrors/fourbaselinewarnings. No precise remote
+event-loop, harmlessness, Node20 or full-suite correctness claim is made.
+Independent bounded review and new-head CI remain mandatory. Do not change
+runtime, mocks to force a result, timeouts, skips or policy. The separate UI7
+Tailwind install failure occurred before tests and is not repaired by such a
+test synchronization change.
+
+The requester subsequently waived the human-written Change summary for PR3404
+only; that waiver is recorded in its body. All actual required gates remain.
+
+Report and controlled RED/GREEN artifacts:
+/private/tmp/userprofiles15413-playground-ui10-report.md and
+/private/tmp/userprofiles15413-playground-*.
