@@ -87,11 +87,11 @@ all 490 cases with zero skips. Independent combined review remains required.
 **Goal:** Verify the combined repair and close every review finding.
 **Success Criteria:** Relevant full shard regressions, static checks and Bandit qualify the touched scope; independent review has no remaining findings.
 **Tests:** Full MCP in-app, infrastructure/metrics/monitoring and relevant audio/AuthNZ groups with CI plugins; required ratchets, collection, normal hooks, Bandit on touched production scope and differential test diagnostics.
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Inspect each worker delta and run combined regressions; record every failure/skip explicitly.
 - [x] Run normal format/lint/security hooks and Bandit; fix new findings.
-- [ ] Commit an immutable candidate and request a read-only independent review; repair all validated findings.
+- [x] Commit an immutable candidate and request a read-only independent review; repair all validated findings.
 
 Integration evidence: MCP in-app 4,339 passed with three existing optional parser
 skips; infrastructure/metrics/monitoring 490 passed without skips; canonical
@@ -155,12 +155,31 @@ intended unchanged assertions. Other three repairs are unchanged. Combined
 Bandit retains the same 94 assertion-only low findings; Ruff/format pass.
 Independent source approval remains pending.
 
+Final independent re-review explicitly approves source
+`bd7cbcaba746856a786a6ca4dcaf470d6abe2895` with zero Critical, Important or
+Minor findings. Both lifecycle P2 findings are closed. The reviewer independently
+exercised the actual public test under an already-active collector on Python
+3.14 and 3.12, the intended mutations, and the unchanged 30-second sole-child
+timeout/reaping proof. The other three previously approved repairs are unchanged.
+All four repair child tasks are source-complete. Final committed-diff ratchets
+pass 50 tests. Hosted CI and the human Change summary remain separate landing
+gates, not waived by source approval.
+
 ## Stage 4: Publish And Report
 **Goal:** Publish a follow-up PR with accurate evidence and no merge-policy bypass.
 **Success Criteria:** Latest dev incorporated, review evidence and CI status documented, original PR linked to follow-up.
 **Tests:** Git head/base equality, clean tracked worktree, remote PR/check readback.
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] Update tasks and plan, commit with normal hooks, publish follow-up against `dev`.
+- [x] Update tasks and plan, commit with normal hooks, publish follow-up against `dev`.
 - [ ] Read normal hosted CI and repair any new validated failure; do not hand-dispatch required gates.
 - [ ] Report follow-up status and the human Change summary gate; do not extend the old per-PR waiver silently.
+
+Draft follow-up: [PR #3406](https://github.com/rmusser01/tldw_server/pull/3406),
+based on current dev `b2b7d5d2b04256458fe6f33e02a36019e2c46795`. Source approval
+applies to `bd7cbcaba746856a786a6ca4dcaf470d6abe2895`; the final evidence update
+changes only this plan and task records, and source/test blobs must remain
+identical before publication. Normal hosted qualification and the new PR's
+human-written Change summary are pending. Auto-merge is disabled; the original
+PR #3187 waiver does not transfer. Historical red checks on the merged commit
+are not relabeled as successful.
