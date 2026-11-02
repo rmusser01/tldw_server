@@ -75,7 +75,7 @@ export type TldwChatMeta =
 export type ChatSubmitResult =
   | { status: "submitted" }
   // Only a refusal before any input admission may restore the composer.
-  | { status: "failed"; errorMessage: string; restoreDraft?: true }
+  | { status: "failed"; errorMessage: string; restoreDraft?: true; restoreDraftIsCurrent?: () => boolean }
   | { status: "skipped"; reason: string };
 
 // A detached reply owns request locks, but does not make any saved row active.
