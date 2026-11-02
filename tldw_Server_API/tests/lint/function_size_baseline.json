@@ -180,7 +180,6 @@
   "tldw_Server_API.app.core.Watchlists.pipeline:run_watchlist_job": {"lines": 1189, "params": 6, "reason": null},
   "tldw_Server_API.app.core.WebSearch.Web_Search:aggregate_results": {"lines": 315, "params": 4, "reason": null},
   "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs:aggregate_results": {"lines": 316, "params": 4, "reason": null},
-  "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping:EnhancedWebScraper.recursive_scrape": {"lines": 638, "params": 14, "reason": null},
   "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts:run_multi_voice_tts_adapter": {"lines": 372, "params": 2, "reason": null},
   "tldw_Server_API.app.core.Workflows.adapters.integration.messaging:run_kanban_adapter": {"lines": 483, "params": 2, "reason": null},
   "tldw_Server_API.app.core.Workflows.adapters.integration.webhook:run_webhook_adapter": {"lines": 484, "params": 2, "reason": null},

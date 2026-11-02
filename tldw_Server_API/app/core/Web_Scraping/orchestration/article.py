@@ -1230,10 +1230,13 @@ def start_page(
     configuration: Mapping[str, Any] | None = None,
     discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None,
     prepare_plan: Callable[[ArticlePlan], ArticlePlan] | None = None,
+    transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> WorkHandle[PageData]:
     """Start one canonical page attempt with private discovery and physical drain."""
     loop = asyncio.get_running_loop()
     owner = PhysicalWork()
+    if transform is not None:
+        owner.drained.add_done_callback(lambda _done, callback=transform: None)
     parent = PageControls(controls)
     cookies = _snapshot_cookies(custom_cookies)
     configuration = _snapshot_config(configuration) if configuration is not None else None
@@ -1281,6 +1284,7 @@ def start_page(
             if isinstance(dependencies.policy_checker, DefaultWebOutboundPolicyChecker):
                 dependencies = replace(dependencies, policy_checker=DefaultWebOutboundPolicyChecker(parent=parent))
             sidecar = DiscoveryResult(url, url, ())
+            document = None
 
             def acquired(document: str, request_url: str, final_url: str) -> None:
                 nonlocal sidecar
@@ -1288,20 +1292,36 @@ def start_page(
                 sidecar = discover(document, request_url, final_url)
                 parent.check()
 
+            def deferred_acquired(html: str, request_url: str, final_url: str) -> None:
+                nonlocal document
+                document = (html, request_url, final_url)
+
             dependencies = replace(
                 dependencies,
                 parent=parent,
                 request_context=request_context,
                 supplied_plan=plan,
-                acquired=acquired,
-                discovery_on_success=discovery_on_success,
-                discovery_gate=discovery_gate,
+                acquired=acquired if transform is None else deferred_acquired,
+                discovery_on_success=discovery_on_success if transform is None else False,
+                discovery_gate=discovery_gate if transform is None else None,
             )
             timeout = preflight_facade._execution_timeout(parent.cap_timeout(None))
             try:
                 async with timeout:
                     result = await _run_article(url, cookies, allow_llm_extraction, dependencies=dependencies)
                     parent.check()
+                    if transform is not None:
+                        original = result
+                        result = transform(url, result)
+                        if "preflight_analysis" in original:
+                            result.setdefault("preflight_analysis", original["preflight_analysis"])
+                        parent.check()
+                        if (
+                            document is not None
+                            and (not discovery_on_success or result.get("extraction_successful"))
+                            and (discovery_gate is None or discovery_gate(result))
+                        ):
+                            acquired(*document)
                     return PageData(result, sidecar)
             except TimeoutError:
                 if timeout.expired():

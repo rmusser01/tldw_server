@@ -23,11 +23,10 @@ from tldw_Server_API.app.core.Web_Scraping.contracts import (
     enhanced_failure_to_public_dict,
     extraction_result_to_public_dict,
     preflight_result_to_public_dict,
-    search_result_to_public_dict,
     search_request_to_legacy_kwargs,
+    search_result_to_public_dict,
     search_results_to_public_dict,
 )
-
 
 INITIALIZED_WEBSEARCH_KEYS = {
     "search_engine",
@@ -94,6 +93,7 @@ def test_runtime_failure_exposes_sanitized_public_message_and_policy_fields() ->
 def test_contract_package_import_boundary_stays_stdlib_only() -> None:
     allowed_roots = {
         "__future__",
+        "asyncio",
         "collections",
         "copy",
         "dataclasses",
@@ -104,6 +104,7 @@ def test_contract_package_import_boundary_stays_stdlib_only() -> None:
     allowed_relative_modules = {
         "conversion",
         "errors",
+        "execution",
         "requests",
         "results",
         "statuses",
