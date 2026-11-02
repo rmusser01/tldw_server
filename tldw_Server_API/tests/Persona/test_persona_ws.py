@@ -129,6 +129,9 @@ def _recv_until(client, predicate, timeout=8.0):
 def _mock_persona_auth(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+
     async def _fake_resolve(*args, **kwargs):
         return "1", True, True
 
@@ -1908,9 +1911,12 @@ def test_persona_tool_result_surfaces_workspace_trust_source_hard_deny(tmp_path,
             assert evt_result.get("path_scope", {}).get("workspace_id") == "workspace-missing"
 
 
-def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
+@pytest.mark.parametrize("parent_deleted", [False, True])
+def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch, parent_deleted):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    tool_name = "notes.search" if parent_deleted else "knowledge.search"
 
     base = tmp_path / "user_db_mcp_retry"
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base))
@@ -1930,7 +1936,7 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
         _ = db.replace_persona_policy_rules(
             persona_id=persona_id,
             user_id="1",
-            rules=[{"rule_kind": "mcp_tool", "rule_name": "knowledge.search", "allowed": True}],
+            rules=[{"rule_kind": "mcp_tool", "rule_name": tool_name, "allowed": True}],
         )
         _ = db.create_persona_session(
             {
@@ -1947,17 +1953,17 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
         db.close_connection()
 
     manager = SessionManager()
-    manager.create(user_id="1", persona_id="research_assistant", resume_session_id="sess_policy_retry_mcp")
+    manager.create(user_id="1", persona_id="research_assistant", resume_session_id="sess_policy_retry_mcp", persisted=True)
     manager.update_preferences(
         session_id="sess_policy_retry_mcp",
         user_id="1",
         preferences={
             "pending_retry_approvals": {
-                "plan_policy_retry_mcp|0|knowledge.search": {
+                f"plan_policy_retry_mcp|0|{tool_name}": {
                     "plan_id": "plan_policy_retry_mcp",
                     "step_idx": 0,
                     "step_type": "mcp_tool",
-                    "tool": "knowledge.search",
+                    "tool": tool_name,
                     "args": {"query": "retry me"},
                     "why": "Retry after approval",
                     "description": "Retry knowledge search",
@@ -1982,6 +1988,13 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
 
+    if parent_deleted:
+        db = CharactersRAGDB(str(db_path), client_id="persona-ws-retry-deletion")
+        try:
+            db.update_persona_session(session_id="sess_policy_retry_mcp", user_id="1", update_data={"deleted": True})
+        finally:
+            db.close_connection()
+
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
@@ -1993,7 +2006,7 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
                         "plan_id": "plan_policy_retry_mcp",
                         "step_idx": 0,
                         "step_type": "mcp_tool",
-                        "tool": "knowledge.search",
+                        "tool": tool_name,
                         "args": {"query": "tampered retry args"},
                         "why": "tampered why",
                         "description": "tampered description",
@@ -2001,8 +2014,14 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
                 )
             )
 
+            if parent_deleted:
+                outcome = _recv_until(ws, lambda event: event.get("event") == "tool_call" or event.get("reason_code") == "SESSION_NOT_FOUND")
+                assert outcome.get("reason_code") == "SESSION_NOT_FOUND"  # nosec B101 -- Reject before tool admission.
+                assert fake_server.calls == []  # nosec B101 -- Retained approval cannot execute after parent deletion.
+                return
+
             evt_call = _recv_until(ws, lambda d: d.get("event") == "tool_call")
-            assert evt_call.get("tool") == "knowledge.search"
+            assert evt_call.get("tool") == tool_name  # nosec B101 -- The original tool assertion is retained for both lifecycle variants.
             assert evt_call.get("step_idx") == 0
             assert evt_call.get("plan_id") == "plan_policy_retry_mcp"
 

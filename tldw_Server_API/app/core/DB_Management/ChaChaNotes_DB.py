@@ -1347,8 +1347,8 @@ class CharactersRAGDB:
             semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
-    _CURRENT_SCHEMA_VERSION = 84  # Notes semantic index lifecycle
-    _POSTGRES_SCHEMA_VERSION = 89
+    _CURRENT_SCHEMA_VERSION = 85  # Bounded durable Persona transcripts
+    _POSTGRES_SCHEMA_VERSION = 90
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -8821,6 +8821,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import PersonaTranscriptStore
+        self.persona_transcript_store = PersonaTranscriptStore(self)
         self.shared_workspace_chat_store = SharedWorkspaceChatStore(self)
 
         if self.backend_type != BackendType.SQLITE:
@@ -9866,6 +9868,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (81, "_migrate_from_v81_to_v82_sqlite"),
             (82, "_migrate_from_v82_to_v83_sqlite"),
             (83, "_migrate_from_v83_to_v84_sqlite"),
+            (84, "_migrate_from_v84_to_v85_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -15590,6 +15593,63 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if isinstance(exc, SchemaError):
                 raise
             raise SchemaError(f"Notes semantic v83 SQLite migration failed: {exc}") from exc
+
+    def _migrate_from_v84_to_v85_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Install transcripts atomically through the existing migration transaction."""
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import persona_transcript_schema_sql
+
+        if self._get_db_version(conn) != 84:
+            raise SchemaError("Persona transcript migration requires SQLite version 84.")
+        conn.execute(persona_transcript_schema_sql())
+        conn.execute(
+            "CREATE INDEX persona_transcript_owner_activity ON persona_session_transcripts(user_id,last_activity) WHERE turn_count>0"
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
+            verify_persona_transcript_sqlite,
+        )
+
+        verify_persona_transcript_sqlite(conn)
+        result = conn.execute(
+            "UPDATE db_schema_version SET version=85 WHERE schema_name=? AND version=84",
+            (self._SCHEMA_NAME,),
+        )
+        if result.rowcount != 1 or self._get_db_version(conn) != 85:
+            raise SchemaError("Persona transcript SQLite version transition failed.")
+
+    def _migrate_from_v89_to_v90_postgres(self, conn: Any) -> None:
+        """Install transcripts and forced owner/parent RLS before publishing the version."""
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
+            persona_transcript_rls_sql,
+            persona_transcript_schema_sql,
+        )
+
+        if self._get_schema_version_postgres(conn) != 89:
+            raise SchemaError("Persona transcript migration requires PostgreSQL version 89.")
+        for statement in (
+            persona_transcript_schema_sql(),
+            "CREATE INDEX persona_transcript_owner_activity ON persona_session_transcripts(user_id,last_activity) WHERE turn_count>0",
+            *persona_transcript_rls_sql(),
+        ):
+            self.backend.execute(statement, connection=conn)
+        self._verify_persona_transcript_schema_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version=90 WHERE schema_name=%s AND version=89",
+            (self._SCHEMA_NAME,),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 90:
+            raise SchemaError("Persona transcript PostgreSQL version transition failed.")
+
+    def _verify_persona_transcript_schema_postgres(self, conn: Any) -> None:
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
+            verify_persona_transcript_postgres,
+        )
+
+        verify_persona_transcript_postgres(
+            self.backend,
+            getattr(conn, "_connection", conn),
+            self._normalize_postgres_catalog_expression,
+        )
 
     def _migrate_from_v83_to_v84_sqlite(self, conn: sqlite3.Connection) -> None:
         """Add durable semantic operation and resolved-model authority."""
@@ -22376,6 +22436,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._ensure_persona_live_voice_session_summaries_table()
         self._ensure_conversation_settings_table()
         if legacy_target == target_version:
+            if target_version >= 85:
+                from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
+                    verify_persona_transcript_sqlite,
+                )
+                verify_persona_transcript_sqlite(conn)
             return
         with TransactionContextManager(self):
             current_db_version = self._get_db_version(conn)
@@ -27080,6 +27145,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._ensure_note_semantic_schema_postgres(conn)
         if current_version >= 89:
             self._verify_dictionary_schema_postgres(conn)
+        if current_version >= 90:
+            self._verify_persona_transcript_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -27213,6 +27280,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 89 and current_version < 89:
                     self._migrate_from_v88_to_v89_postgres(conn)
                     current_version = 89
+                if target_version >= 90 and current_version < 90:
+                    self._migrate_from_v89_to_v90_postgres(conn)
+                    current_version = 90
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -27709,6 +27779,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v88_to_v89_postgres(conn)
                 self._runtime_schema_version = 89
                 current_version = 89
+            if target_version >= 90 and current_version < 90:
+                self._migrate_from_v89_to_v90_postgres(conn)
+                self._runtime_schema_version = 90
+                current_version = 90
 
             self._ensure_note_semantic_schema_postgres(conn)
 
@@ -47755,6 +47829,11 @@ for _keyword_store_method in (
         _keyword_store_method,
         _delegate_store_method("keyword_store", _keyword_store_method),
     )
+
+
+for _persona_transcript_method in ("validate_persona_transcript_session", "get_persona_transcript", "list_persona_transcript_counts", "append_persona_transcript_turn"):
+    setattr(CharactersRAGDB, _persona_transcript_method,
+            _delegate_store_method("persona_transcript_store", _persona_transcript_method))
 
 
 for _persona_state_store_method in (

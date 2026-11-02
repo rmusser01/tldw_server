@@ -74,6 +74,26 @@ def test_persona_sessions_list_and_detail_roundtrip(monkeypatch, persona_db: Cha
     fastapi_app.dependency_overrides.clear()
 
 
+def test_legacy_runtime_transcript_preserves_detail_and_export_limit(monkeypatch, persona_db):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
+    try:
+        with _client_for_user(1, persona_db) as client:
+            created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
+            session_id = created.json()["session_id"]
+            turns = [manager.append_turn(session_id=session_id, user_id="1", persona_id="research_assistant",
+                                         role="user", content=str(index)) for index in range(3)]
+            detail = client.get(f"/api/v1/persona/sessions/{session_id}?limit_turns=1")
+            exported = client.get(f"/api/v1/persona/sessions/{session_id}/export?limit_turns=1")
+            assert detail.status_code == exported.status_code == 200  # nosec B101
+            assert detail.json()["turn_count"] == 3  # nosec B101
+            assert detail.json()["turns"] == turns[-1:]  # nosec B101
+            assert [turn["turn_id"] for turn in exported.json()["turns"]] == [turns[-1]["turn_id"]]  # nosec B101
+    finally:
+        fastapi_app.dependency_overrides.clear()
+
+
 def test_materialized_session_reads_memory_top_k_from_settings_attributes(monkeypatch, persona_db: CharactersRAGDB):
     class AttributeSettings:
         PERSONA_MEMORY_TOP_K = "6"
@@ -227,7 +247,7 @@ def test_persona_session_export_is_user_scoped(monkeypatch, persona_db: Characte
     fastapi_app.dependency_overrides.clear()
 
 
-def test_persona_session_export_requires_live_snapshot(monkeypatch, persona_db: CharactersRAGDB):
+def test_persona_session_export_refuses_unrecoverable_legacy_snapshot(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
@@ -256,7 +276,7 @@ def test_persona_session_export_requires_live_snapshot(monkeypatch, persona_db: 
     with _client_for_user(1, persona_db) as client:
         resp = client.get("/api/v1/persona/sessions/sess_export_not_live/export")
         assert resp.status_code == 409
-        assert "active live sessions" in resp.json()["detail"]
+        assert "No retained transcript" in resp.json()["detail"]  # nosec B101 -- Assert truthful refusal for a legacy session with no retained transcript.
 
     fastapi_app.dependency_overrides.clear()
 

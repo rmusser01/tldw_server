@@ -120,5 +120,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 
 | [ADR-083](083-data-table-completion-before-publication.md) | Proposed | Complete exact-attempt Data Tables Jobs before replayable owner/version-guarded Media publication. |
 | [ADR-084](084-configured-searx-egress-policy.md) | Accepted | Reuse exact server-configured origin scope for Searx while preserving ordinary URL capture policy. |
+| [ADR-085](085-bounded-durable-persona-session-transcripts.md) | Accepted | Retain bounded owned Persona turns across process restart without changing Chat or semantic-memory persistence. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
