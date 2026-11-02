@@ -1025,6 +1025,7 @@ async def test_capture_rechecks_key_state_after_lock(
     )
 
 
+@pytest.mark.unit
 def test_the_lifecycle_reason_rule_lives_in_domain() -> None:
     from tldw_Server_API.app.core.Admin_Webhooks import delivery, domain
     assert (

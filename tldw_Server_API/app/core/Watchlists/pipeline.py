@@ -973,7 +973,7 @@ async def run_watchlist_job(
                     if status // 100 != 2:
                         # error path — track consecutive errors and apply backoff
                         source_status = f"error:{status}"
-                        source_error = res.get("error") or f"HTTP {status}"
+                        source_error = _safe_source_error_text(res.get("error") or f"HTTP {status}")
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                             prev_errors = int(getattr(src, "consec_errors", 0) or 0)
                             new_errors = prev_errors + 1

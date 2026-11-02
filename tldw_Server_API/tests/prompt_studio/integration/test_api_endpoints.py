@@ -227,7 +227,7 @@ def test_db():
 def auth_headers():
     """Create authentication headers for testing."""
     return {
-        "Authorization": "Bearer test-token",
+        "X-API-KEY": get_auth_settings().SINGLE_USER_API_KEY,
         "Content-Type": "application/json"
     }
 

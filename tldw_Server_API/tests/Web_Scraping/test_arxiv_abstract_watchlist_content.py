@@ -210,7 +210,7 @@ def test_blocking_policy_denial_prevents_abstract_acquisition(monkeypatch, redir
     denied = redirect or URL
     fetch, policy_urls = _install_blocking(monkeypatch, _html(), denied=denied, redirect=redirect)
     result = fetchers.fetch_site_article(URL)
-    assert not result["content"]  # nosec B101 # pytest behavioral oracle, not production authorization
+    assert result is None  # nosec B101 # pytest behavioral oracle, not production authorization
     assert policy_urls == ([URL, redirect] if redirect else [URL])  # nosec B101 # pytest behavioral oracle, not production authorization
     assert len(fetch.requests) == (1 if redirect else 0)  # nosec B101 # pytest behavioral oracle, not production authorization
 
