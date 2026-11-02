@@ -1,11 +1,11 @@
 # ADR-086: Chunker Execution Live-Context Boundary
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-11-02
 **Backfilled from:** not backfilled
-**Decision owner:** Requester + Codex collaboration; detailed boundary awaiting requester approval
-**Related task:** TASK-15413
-**Related spec/plan:** [Shared execution design](../superpowers/specs/2026-11-02-chunker-shared-execution-refactor-design.md); implementation plan not started
+**Decision owner:** Requester + Codex collaboration; explicitly approved 2026-11-02
+**Related task:** TASK-15414 (renumbered from TASK-15413), TASK-15415
+**Related spec/plan:** [Shared execution design](../superpowers/specs/2026-11-02-chunker-shared-execution-refactor-design.md), [implementation plan](../superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md)
 
 ## Decision
 
@@ -13,9 +13,10 @@ Route Chunker's three public execution methods through an internal execution
 service whose dependencies point toward neutral helpers and a live context,
 not back toward the Chunker facade or sibling pipelines.
 
-This is a proposed decision. The requester selected the internal-subsystem
-approach B and authorized adding this record; the revised design and detailed
-boundary are not yet approved for implementation.
+The requester selected the internal-subsystem approach B, authorized this
+record and explicitly approved the revised design and detailed boundary on
+2026-11-02 after review. Planning is authorized; implementation execution
+still requires review of its plan and an execution-method choice.
 
 ## Context
 
@@ -63,9 +64,8 @@ record is made at design time, not a backfill or a rewrite of an accepted ADR.
 
 ## Follow-up
 
-Obtain requester approval of the revised design and this Proposed ADR before
-planning implementation. Keep its status Proposed until that approval is
-explicit. The later implementation task/plan and PR should link this decision
+Requester approval was received on 2026-11-02 and this record was marked
+Accepted. The implementation task/plan and PR should link this decision
 and the detailed compatibility/verification contracts in the specification.
 If the accepted durable boundary later changes, use a new ADR and supersession
 metadata rather than rewriting accepted rationale.
