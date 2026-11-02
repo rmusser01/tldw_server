@@ -205,3 +205,127 @@ def test_raising_cleanup_owner_survives_invoker_hard_exit(tmp_path):
     if os.name != "posix":
         pytest.skip("POSIX process-group ownership evidence")
     validate_cleanup_recovery(tmp_path, failure="raise", disconnect=True)
+
+
+@pytest.fixture
+def posix_cleanup_boundary(monkeypatch):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.tests.helpers import moderation_probe_controller as controller
+
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, delay):
+            self.now += delay
+
+    clock = Clock()
+    tree = object.__new__(controller.PosixTree)
+    tree.process = SimpleNamespace(returncode=7, poll=lambda: 7)
+    tree.pgid = 12345
+    monkeypatch.setattr(controller, "time", clock)
+    monkeypatch.setattr(controller, "sys", SimpleNamespace(platform="darwin"))
+    return controller, tree, clock
+
+
+def test_signal_zero_transient_eperm_retries_until_native_absence(posix_cleanup_boundary, monkeypatch):
+    from types import SimpleNamespace
+
+    controller, tree, clock = posix_cleanup_boundary
+    signals = []
+
+    def killpg(pgid, sig):
+        assert pgid == 12345
+        signals.append(sig)
+        if sig == 0:
+            if clock.now == 0:
+                raise PermissionError(1, "uncertain liveness")
+            raise ProcessLookupError(3, "absent")
+
+    monkeypatch.setattr(controller, "os", SimpleNamespace(killpg=killpg))
+    assert controller._settle_tree(tree, [], 2.0) is True
+    assert 0 < clock.now < 2.0
+    assert signals == [controller.signal.SIGKILL, 0, 0]
+
+
+def test_signal_zero_persistent_eperm_uses_budget_and_retains_tree(posix_cleanup_boundary, monkeypatch):
+    from types import SimpleNamespace
+
+    controller, tree, clock = posix_cleanup_boundary
+    owner = tree.process
+    absent = False
+
+    def killpg(pgid, sig):
+        assert pgid == 12345
+        if absent:
+            raise ProcessLookupError(3, "absent")
+        if sig == 0:
+            raise PermissionError(1, "uncertain liveness")
+
+    monkeypatch.setattr(controller, "os", SimpleNamespace(killpg=killpg))
+    assert controller._settle_tree(tree, [], 2.0) is False
+    assert 2.0 <= clock.now < 2.01
+    assert tree.process is owner
+    absent = True
+    assert controller._settle_tree(tree, [], clock.now + 0.1) is True
+    assert tree.process is owner
+
+
+def test_sigkill_eperm_is_not_treated_as_liveness_uncertainty(posix_cleanup_boundary, monkeypatch):
+    from types import SimpleNamespace
+
+    controller, tree, clock = posix_cleanup_boundary
+
+    def killpg(pgid, sig):
+        assert (pgid, sig) == (12345, controller.signal.SIGKILL)
+        raise PermissionError(1, "kill denied")
+
+    monkeypatch.setattr(controller, "os", SimpleNamespace(killpg=killpg))
+    with pytest.raises(PermissionError):
+        tree.cleanup(2.0)
+    assert clock.now == 0
+
+
+def test_signal_zero_other_permission_errors_are_not_retried(posix_cleanup_boundary, monkeypatch):
+    from types import SimpleNamespace
+
+    controller, tree, clock = posix_cleanup_boundary
+
+    def killpg(pgid, sig):
+        assert pgid == 12345
+        if sig == 0:
+            raise PermissionError(13, "other denial")
+
+    monkeypatch.setattr(controller, "os", SimpleNamespace(killpg=killpg))
+    with pytest.raises(PermissionError) as error:
+        tree.cleanup(2.0)
+    assert error.value.errno == 13
+    assert clock.now == 0
+
+
+@pytest.mark.parametrize("reader_finishes", [True, False])
+def test_native_absence_still_requires_reader_completion(posix_cleanup_boundary, monkeypatch, reader_finishes):
+    from types import SimpleNamespace
+
+    controller, tree, clock = posix_cleanup_boundary
+
+    def killpg(pgid, sig):
+        assert pgid == 12345
+        raise ProcessLookupError(3, "absent")
+
+    class Reader:
+        alive = True
+
+        def is_alive(self):
+            return self.alive
+
+        def join(self, timeout):
+            assert timeout == 2.0
+            clock.sleep(0.02 if reader_finishes else timeout)
+            self.alive = not reader_finishes
+
+    monkeypatch.setattr(controller, "os", SimpleNamespace(killpg=killpg))
+    assert controller._settle_tree(tree, [Reader()], 2.0) is reader_finishes

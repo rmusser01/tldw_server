@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import signal
@@ -54,6 +55,10 @@ class PosixTree:
                 os.killpg(self.pgid, 0)
             except ProcessLookupError:
                 return self.process.poll() is not None
+            except PermissionError as exc:
+                if exc.errno != errno.EPERM:
+                    raise
+                # A just-killed group can be uninspectable; only absence confirms cleanup.
             time.sleep(0.01)
         return False
 
