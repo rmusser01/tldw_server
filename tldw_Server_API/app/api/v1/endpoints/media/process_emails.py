@@ -439,6 +439,7 @@ async def process_emails_endpoint(
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options_dict,
+                    owner_user_id=getattr(current_user, "id", None),
                     TemplateClassifier=TemplateClassifier,
                     first_url=None,
                     first_filename=first_filename,

@@ -33,7 +33,7 @@ class _ExplodingDB:
 
 
 class _ApplyTemplateDB:
-    def get_chunking_template(self, *, name):
+    def get_chunking_template(self, *, name, owner_user_id):
         return {
             "name": name,
             "description": "demo",

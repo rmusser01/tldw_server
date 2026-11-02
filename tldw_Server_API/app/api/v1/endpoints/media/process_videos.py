@@ -330,6 +330,7 @@ async def process_videos_endpoint(
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options_dict,
+                    owner_user_id=getattr(current_user, "id", None),
                     TemplateClassifier=TemplateClassifier,
                     first_url=first_url,
                     first_filename=first_filename,
