@@ -906,6 +906,20 @@ trips, extra fields, cookies/deduplication, and no new internal wrapper imports.
 `tldw_Server_API/app/api/v1/schemas/media_request_models.py`; create tests
 `Services/test_phase5_crawl_outcomes.py`, `Web_Scraping/test_phase5_ingestion_outcomes.py`.
 
+**Task 10 Execution Ruling (Controller Decision, 2026-11-01):**
+Resolve Task 4 deferred lifecycle finding M3 while this service is owned: once
+shutdown enters the serialized service boundary, its service-owned operation
+includes waiting for already-owned startup and then stopping/draining resources.
+Cancellation of the request waiter still propagates to that waiter but must not
+abandon the shutdown transition before a cleanup task exists. Preserve failed-stop
+retry, no duplicate startup/cleanup, ordinary authorized automatic initialization,
+verified-admin remote control, and physical stopping until actual drain. Add a
+barrier regression with canceled startup waiter, entered shutdown, canceled
+shutdown waiter, eventual startup release, exactly one actual stop and truthful
+drain/reinitialization state. This closes the previously reviewed transition gap
+without a new lifecycle API. Cost if wrong: narrow task/lock ownership rework;
+do not cancel startup or release resources early merely to make teardown return.
+
 **Interfaces:** Services consume `CrawlReport` before list reduction.
 `public_crawl_outcome(outcome: CrawlOutcome) -> dict[str, Any]` in
 `jobs/projections.py` returns exactly state/stop_reason/has_partial_results.
