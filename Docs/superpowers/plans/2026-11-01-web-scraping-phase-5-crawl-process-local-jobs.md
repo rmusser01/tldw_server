@@ -1009,6 +1009,26 @@ the three earlier unsuccessful experiments as evidence, not a reason to retry
 their unsupported interface. The existing-session hypothesis is a reassessment
 after the required architecture discussion, not a fourth flattened-wire attempt.
 
+Further causal controls permit retaining the enhanced adapter's existing initial
+context-header setup where first-popup parity requires it. This is not permission
+for unrestricted credential forwarding: before-dispatch guards must still strip
+private headers on cross-origin requests and preserve stripping across redirects
+back to the original origin. Keep one explicit policy writer, avoid route-level
+credential reinjection/replay, and prove initial popup plus redirected child
+requests natively. Direct capture must continue to ignore route headers; do not
+apply the enhanced setup to it. Normal browser cookies remain separate from this
+header policy. Earlier blanket context-header wording was too broad for the
+existing enhanced behavior; the ban on unguarded secrets remains unchanged.
+
+Native mixed-page controls also distinguish the installed headless shell's stall
+from adapter logic: bare acquisition completes, simple interception stalls, while
+the installed full Chromium completes the same modes. A focused, verified launch
+selection of the supported full-Chromium headless channel for enhanced acquisition
+is permitted, using the same browser package/launcher and documented installation.
+Do not add another engine, download, connection or subsystem, change direct defaults,
+silently add an asset dependency, or weaken waits/assertions. Keep the diagnostic
+comparison and add the corresponding regression before changing the launch option.
+
 Tasks 1-8 remain accepted; Task 9 Findings 1/3/4 remain independently addressed.
 Finding 2 is active work and must pass fresh scoped re-review before Task 9
 acceptance. Tasks 10-11 and final integration/certification remain required.
