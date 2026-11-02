@@ -95,6 +95,33 @@ if (!openApiGuardSourcePath) {
 }
 
 describe("server capabilities docs-info merge", () => {
+  it("refreshes the V6 cache before deciding Companion router availability", async () => {
+    cacheState.values.set("__tldwServerCapabilitiesCacheV6", {
+      key: buildChatSurfaceScopeKeyFromConfig({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }),
+      fetchedAt: Date.now(), capabilities: { hasPersonalization: true }
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: { "/api/v1/companion/check-ins": {} } })
+    mocks.bgRequest.mockResolvedValue({})
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+    expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(1)
+    expect(capabilities.hasCompanion).toBe(true)
+  })
+
+  it.each([false, true])("tracks the Companion router independently from Personalization (present=%s)", async (present) => {
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: {
+      "/api/v1/persona/session": {},
+      "/api/v1/personalization/profile": {},
+      ...(present ? { "/api/v1/companion/check-ins": {} } : {})
+    } })
+    mocks.bgRequest.mockResolvedValue({ capabilities: { persona: true, personalization: true } })
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+    expect(capabilities.hasCompanion).toBe(present)
+    expect(capabilities.hasPersonalization).toBe(true)
+    expect(capabilities.hasPersona).toBe(true)
+  })
+
   beforeEach(() => {
     vi.resetModules()
     vi.useRealTimers()

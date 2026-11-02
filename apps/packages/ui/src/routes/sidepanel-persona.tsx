@@ -1026,7 +1026,7 @@ const SidepanelPersona = ({
     !capsLoading &&
     capabilities &&
     (!capabilities.hasPersona ||
-      (isCompanionMode && !capabilities.hasPersonalization))
+      (isCompanionMode && (!capabilities.hasPersonalization || !capabilities.hasCompanion)))
 
   const selectedPersonaName =
     selectedCatalogPersona?.name || t("sidepanel:persona.unnamedPersona", "Unnamed persona")
@@ -2033,7 +2033,7 @@ const SidepanelPersona = ({
             sendUserMessage()
           }}
         />
-        {capabilities?.hasPersonalization ? (
+        {capabilities?.hasPersonalization && capabilities?.hasCompanion ? (
           <Button
             data-testid="persona-save-checkin-button"
             disabled={!canSaveCompanionCheckIn}
@@ -2399,7 +2399,7 @@ const SidepanelPersona = ({
             }
             description={
               isCompanionMode
-                ? "This server does not currently advertise persona support for companion conversation."
+                ? "Companion conversation is unavailable on this server. Review the server's enabled features, then reconnect."
                 : t(
                     "sidepanel:persona.unavailableDescription",
                     "This server does not currently advertise persona support."

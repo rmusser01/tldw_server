@@ -22,11 +22,11 @@ const mocks = vi.hoisted(() => ({
     | "unconfigured",
   hasCompletedFirstRun: true,
   capabilitiesState: {
-    capabilities: { hasPersona: true, hasPersonalization: true },
+    capabilities: { hasPersona: true, hasPersonalization: true, hasCompanion: true },
     loading: false
   } as {
     capabilities:
-      | { hasPersona: boolean; hasPersonalization?: boolean }
+      | { hasCompanion?: boolean; hasPersona: boolean; hasPersonalization?: boolean }
       | null
     loading: boolean
   },
@@ -307,6 +307,23 @@ const getSentPayloads = (ws: MockWebSocket) =>
   ws.send.mock.calls.map(([payload]) => JSON.parse(String(payload)))
 
 describe("SidepanelPersona", () => {
+  it("keeps Persona usable but omits check-in when the Companion router is absent", async () => {
+    mocks.capabilitiesState.capabilities = { hasPersona: true, hasPersonalization: true, hasCompanion: false }
+    render(<SidepanelPersona />)
+    expect((await screen.findByPlaceholderText("Ask Persona...")).isConnected).toBe(true)
+    expect((screen.getByRole("button", { name: "Connect" })).isConnected).toBe(true)
+    expect(screen.queryByRole("button", { name: "Save check-in" })).toBeNull()
+  })
+
+  it("refuses Companion mode and prompts when the Companion router is absent", async () => {
+    mocks.capabilitiesState.capabilities = { hasPersona: true, hasPersonalization: true, hasCompanion: false }
+    render(<SidepanelPersona mode="companion" />)
+    expect((await screen.findByText("Companion unavailable")).isConnected).toBe(true)
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Save check-in" })).toBeNull()
+    expect(mocks.fetchCompanionConversationPrompts).not.toHaveBeenCalled()
+  })
+
   const originalWebSocket = globalThis.WebSocket
   const originalResizeObserver = globalThis.ResizeObserver
 
@@ -339,7 +356,7 @@ describe("SidepanelPersona", () => {
     mocks.hasCompletedFirstRun = true
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
-      hasPersonalization: true
+      hasPersonalization: true, hasCompanion: true
     }
     mocks.capabilitiesState.loading = false
     mocks.navigate.mockReset()
@@ -438,7 +455,7 @@ describe("SidepanelPersona", () => {
   it("shows unavailable state when persona capability is missing", () => {
     mocks.capabilitiesState.capabilities = {
       hasPersona: false,
-      hasPersonalization: true
+      hasPersonalization: true, hasCompanion: true
     }
     render(<SidepanelPersona />)
 
@@ -505,7 +522,7 @@ describe("SidepanelPersona", () => {
       hasPersona: true,
       hasPersonalization: true,
       hasAudio: true,
-      hasMcp: true
+      hasMcp: true, hasCompanion: true
     } as any
     usePersonaVisualRuntimeStore.setState({
       runtimeDiagnostics: {
@@ -586,7 +603,7 @@ describe("SidepanelPersona", () => {
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
       hasPersonalization: true,
-      hasMcp: true
+      hasMcp: true, hasCompanion: true
     } as any
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
@@ -4775,7 +4792,7 @@ describe("SidepanelPersona", () => {
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
       hasPersonalization: true,
-      hasAudio: true
+      hasAudio: true, hasCompanion: true
     } as any
     mocks.fetchWithAuth.mockImplementation((path: string) => {
       if (path.includes("/persona/catalog")) {
@@ -4870,7 +4887,7 @@ describe("SidepanelPersona", () => {
       mocks.capabilitiesState.capabilities = {
         hasPersona: true,
         hasPersonalization: true,
-        hasAudio: true
+        hasAudio: true, hasCompanion: true
       } as any
       mocks.fetchWithAuth.mockImplementation((path: string) => {
         if (path.includes("/persona/catalog")) {

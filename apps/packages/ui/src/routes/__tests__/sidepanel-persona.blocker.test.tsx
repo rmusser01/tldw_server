@@ -25,7 +25,7 @@ vi.mock("@/hooks/useConnectionState", () => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
-    capabilities: { hasPersona: true, hasPersonalization: true },
+    capabilities: { hasPersona: true, hasPersonalization: true, hasCompanion: true },
     loading: false
   })
 }))

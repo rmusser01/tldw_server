@@ -180,7 +180,7 @@ export interface UsePersonaLiveSessionDeps {
   setPendingPlan: React.Dispatch<React.SetStateAction<PendingPlan | null>>
   pendingPlan: PendingPlan | null
   /** Capabilities */
-  capabilities: { hasPersonalization?: boolean; hasAudio?: boolean } | null
+  capabilities: { hasPersonalization?: boolean; hasCompanion?: boolean; hasAudio?: boolean } | null
   capsLoading: boolean
   /** Route bootstrap */
   routeBootstrapSessionId?: string | null
@@ -303,7 +303,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
 
   // ── Companion prompts loader ──
   React.useEffect(() => {
-    if (!isCompanionMode || capsLoading || !capabilities?.hasPersonalization) {
+    if (!isCompanionMode || capsLoading || !capabilities?.hasPersonalization || !capabilities?.hasCompanion) {
       setCompanionPrompts([])
       return
     }
@@ -344,7 +344,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       cancelled = true
       window.clearTimeout(timeoutId)
     }
-  }, [capabilities?.hasPersonalization, capsLoading, input, isCompanionMode])
+  }, [capabilities?.hasPersonalization, capabilities?.hasCompanion, capsLoading, input, isCompanionMode])
 
   // ── Session preferences applicator ──
   const applySessionPreferences = React.useCallback(
@@ -874,7 +874,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   const canSend = connected && Boolean(sessionId) && Boolean(input.trim())
   const canSaveCompanionCheckIn =
     Boolean(input.trim()) &&
-    Boolean(capabilities?.hasPersonalization) &&
+    Boolean(capabilities?.hasPersonalization && capabilities?.hasCompanion) &&
     !savingCompanionCheckIn
 
   // ── sendUserMessage ──
@@ -1183,7 +1183,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     if (
       !trimmed ||
       savingCompanionCheckIn ||
-      !capabilities?.hasPersonalization
+      (!capabilities?.hasPersonalization || !capabilities?.hasCompanion)
     )
       return
     setSavingCompanionCheckIn(true)
@@ -1222,6 +1222,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   }, [
     appendLog,
     capabilities?.hasPersonalization,
+    capabilities?.hasCompanion,
     input,
     isCompanionMode,
     savingCompanionCheckIn,
