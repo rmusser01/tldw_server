@@ -736,6 +736,17 @@ The final evidence commit changes only this plan and the parent task; reviewed
 implementation/test blobs must match before the explicit `8cf56d0a71d859f65b14041c08e6f729c82160e1`
 publication lease is used.
 
+Published candidate `7bd90cb034840c60a8623a21ea579f1f1aafd5bc` started normal
+hosted CI with auto-merge disabled. The shard-coverage guard found the new offline
+model-inventory regression unassigned. A workflow-only correction adds it to the
+existing adapter endpoint shard in all five definitions (six execution matrices
+through the Windows release alias), without changing the guard, ignore list or
+baseline. The exact guard is RED before and GREEN after; the affected shard
+passes all eight tests. `TASK-2294.3.2.1` is reopened for independent delta review.
+Hosted onboarding is green; UX smoke and the remaining hosted gates are pending.
+Any next publication must use the verified current remote head as its lease,
+not the historical pre-rebase lease above.
+
 ## Acceptance-Criteria Traceability
 
 | Criterion | Primary implementation | Required evidence |
