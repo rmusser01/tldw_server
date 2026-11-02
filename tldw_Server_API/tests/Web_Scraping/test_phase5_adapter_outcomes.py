@@ -868,3 +868,43 @@ async def test_sync_adapter_is_materialized_inside_an_existing_event_loop(profil
     result = fixture.run_sync()
     assert isinstance(result, list) and result[0]["content"] == "kept article"
     assert asyncio.get_running_loop() is caller
+
+
+@pytest.mark.asyncio
+async def test_native_curl_callback_keeps_queue_lease_until_actual_thread_exit(monkeypatch):
+    import threading
+
+    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper, ScrapingJob
+
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    scraper = EnhancedWebScraper(config={})
+
+    def held(*args, **kwargs):
+        entered.set()
+        try:
+            assert release.wait(5), "test must release the actual curl worker"
+            return "<html>kept</html>"
+        finally:
+            exited.set()
+
+    async def scrape(url, *args, **kwargs):
+        await scraper._fetch_html(url, headers={}, cookies={}, backend="curl", impersonate=None, proxies=None)
+        return {"url": url, "content": "kept", "extraction_successful": True}
+
+    monkeypatch.setattr(scraper, "_fetch_html_curl", held)
+    monkeypatch.setattr(scraper, "scrape_article", scrape)
+    await scraper.job_queue.start()
+    result = await scraper.job_queue.add_job(ScrapingJob("curl", URL, "auto"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        await scraper.job_queue.cancel_job("curl")
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert result.done() and not exited.is_set()
+        assert scraper.job_queue.get_status()["live_jobs"] == 1
+        assert scraper.job_queue.get_status()["payload_bytes"] > 0
+    finally:
+        release.set()
+        assert await asyncio.to_thread(exited.wait, 2)
+        await scraper.stop()
+    assert scraper.job_queue.get_status()["live_jobs"] == 0
