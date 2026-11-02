@@ -708,3 +708,74 @@ def test_session_detail_with_pending_plan_rejects_other_owner(persona_db, pendin
     sid, _ = pending_plan_session
     with _client_for_user(2, persona_db) as other:
         assert other.get(f"/api/v1/persona/sessions/{sid}").status_code == 404
+
+
+def test_cold_foreign_resume_cannot_occupy_owner_session(monkeypatch, persona_db, tmp_path):
+    """A cold process must preserve the legitimate owner's separate SQLite session."""
+    owner = materialize_persona_session(
+        persona_db,
+        session_manager=SessionManager(),
+        user_id="1",
+        persona_id="research_assistant",
+    )
+    session_id = owner.session_id
+    original = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
+    other_db = CharactersRAGDB(str(tmp_path / "other_user.db"), client_id="cold-resume-other")
+    cold_manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: cold_manager)
+    try:
+        with _client_for_user(2, other_db) as client:
+            refused = client.post(
+                "/api/v1/persona/session",
+                json={
+                    "persona_id": "research_assistant",
+                    "resume_session_id": session_id,
+                },
+            )
+        assert refused.status_code == 403  # nosec B101 -- A foreign cold ID cannot become an owned session.
+        assert other_db.get_persona_session(session_id, user_id="2", include_deleted=False) is None  # nosec B101
+        assert cold_manager.get(session_id) is None  # nosec B101 -- Refusal must precede global manager occupation.
+        with _client_for_user(1, persona_db) as client:
+            resumed = client.post(
+                "/api/v1/persona/session",
+                json={
+                    "persona_id": "research_assistant",
+                    "resume_session_id": session_id,
+                },
+            )
+        assert resumed.status_code == 200 and resumed.json()["session_id"] == session_id  # nosec B101
+        assert persona_db.get_persona_session(session_id, user_id="1", include_deleted=False) == original  # nosec B101
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        other_db.close_connection()
+
+
+@pytest.mark.parametrize("saved_runtime", [False, True])
+def test_resume_without_owned_parent_cannot_create_from_supplied_id(persona_db, saved_runtime):
+    manager = SessionManager()
+    session_id = "unowned-cold-resume-id"
+    if saved_runtime:
+        manager.create(user_id="1", persona_id="research_assistant", resume_session_id=session_id, persisted=True)
+    with pytest.raises(PermissionError):
+        materialize_persona_session(
+            persona_db,
+            session_manager=manager,
+            user_id="1",
+            persona_id="research_assistant",
+            resume_session_id=session_id,
+        )
+    assert persona_db.get_persona_session(session_id, user_id="1", include_deleted=False) is None  # nosec B101
+
+
+def test_existing_owned_unpersisted_scaffold_can_materialize(persona_db):
+    manager = SessionManager()
+    pending = manager.create(user_id="1", persona_id="research_assistant", resume_session_id="owned-temporary-id")
+    materialized = materialize_persona_session(
+        persona_db,
+        session_manager=manager,
+        user_id="1",
+        persona_id="research_assistant",
+        resume_session_id=pending.session_id,
+    )
+    assert materialized.session_id == pending.session_id and materialized.created_new_session  # nosec B101
+    assert manager.get(pending.session_id) is pending and pending.persisted  # nosec B101
