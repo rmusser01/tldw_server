@@ -310,3 +310,23 @@ Decision: preserve the closing browser timestamp locally, and keep normal active
 
 
 IA causal source repair qualification: baseline heartbeat1failed/3deselected1.052s outer; full module UI4passed0.606s/WebUI4passed0.688s. State persistence and active payload/sink stay the same; only unload publication is removed. Scoped configured ESLint0errors/0warnings/noignored/new0; both semantic scopes24baseline/24current inherited dependencies,touched0/new0, not whole-project types. Source/caller reviewCLEAR. TS-only Banditnotapplicable; no architecture decision changed. Final staged review/hooks/local commit/build and saved-only live validation remain.
+
+
+Current IA-repaired candidate: aff493c12cc19b8c91a9ae75d2cdc50b52086113 / build5PhalACIXX9GNEN9Znjor, local and unpublished. Normal4pathhooks passed1.477s; committed patch exactly reviewed. Buildpassed82.873s/7806stableinputs/token-sync/unchanged600KiBbudget/zero restorationerrors/originalownerspreserved. Inherited typecheck skip; scopedchecks retain their limits. Backendf8 unchanged. Saved-only native validation on retainedroot725942042 and reportIDs1-3 is next, with no recreation/download/model replay. Domain UX and remaining S06 variants/modes are still open.
+
+
+## Domain reports: composed SQLite Single functional pass
+
+The aff493/5Phal saved-only run passed25.516s outer/24.68s pytest. It reuses the three actual prior reports/downloads without regeneration or export replay. Actual new-document reload, all saved titles, empty-run no-write recovery, canonical evidence identities/facts/publication dates and full before/after preservation pass. Each preset has2included/2sources/0alerts; CTI retains its explicit no-alert caveat. Four normal active telemetry POSTs are200/acceptedtrue; unload no longer dispatches a POST. Normal Logout, all request cohorts, natural Chrome27904 release/no signals, final readiness and complete API shutdown pass. Original canonical/owners remain preserved; original DOM untouched/unverified. Earlier failures remain failed; this is composed functional qualification, not a retroactive whole-run pass.
+
+Shared report-controls UX is still pending. Exact root16777232/725942042 retains only its current fixture/image until that answer; then dispose it under ownership/no-handle guards. Remaining Persona/Companion and three deployment-mode cohorts keep S06 open42/43. No tracking-only commit/publication.
+
+
+## Profile / Companion shipped-route preflight
+
+Current /companion is CompanionHomeShell, not the unmounted legacy CompanionPage. Use the actual Home opt-in/layout and its advertised /companion/conversation handoff, whose shared route offers Save check-in. Do not invent acceptance for the legacy manual-goal form or qualify its unused controls. Persona remains actual /persona ProfilePanel plus typed Live.
+
+The advertised conversation child route is absent from the current Next pages/redirect/rewrite manifest. Exact aff493/5Phal frontend-only HTTP diagnostic returns404 in0.977s, with natural frontend release0.005s/noerrors; no API, browser or model started and original owners preserved. First add a normal persistent page-route regression and capture red, then the minimal SSR-disabled Next shim for the existing shared option-companion-conversation route. This restores an advertised handoff; no backend, auth, dependency or architecture rule changes. Scoped checks, source/staged review, normal hooks/local commit/build and actual route/live validation remain.
+
+
+S06 Companion route causal repair: exact aff493/5Phal advertised child URL returned HTTP404 in0.977s frontend-only/no API/browser/model, natural release/original owners preserved. Normal missing-page contract red1failed1.113outer; minimal existing-house SSR-disabled wrapper for shared option-companion-conversation added, green1passed0.670outer. Connected metadata causal test red1failed2deselected0.611outer showed sidepanel-only declaration despite ALL_TARGETS registry/Home WebUI link; aligned web/options/sidepanel/default_self_hosted/requiresBackend/manual smoke and truthful rationale, parent canonical grouping preserved. Fresh observed complete metadata module UI3passed0.661outer; WebUI metadata+page4passed0.711outer. Expanded four-TS-path configured ESLint0errors0warnings/noignored; real four-root semantic109dependency diagnostics/touched0, not matched-baseline/new0 or wholeproject qualification. TS-only Bandit not applicable; no backend/auth/schema/dependency/ADR change. Source review and exact six-path staged review/normal hooks/local commit/build/live mounted qualification remain. Shared report UX pending; S06open42/43. No publication.
