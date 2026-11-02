@@ -967,6 +967,18 @@ documentation: [Playwright Route](https://playwright.dev/python/docs/api/class-r
 [BrowserContext](https://playwright.dev/python/docs/api/class-browsercontext),
 [Chromium protocol schema](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json).
 
+**Execution Checkpoint (2026-11-01):** Tasks 1-8 are accepted. Task 9 is not
+accepted: review round 1 independently closes sync admission, method intent and
+cookie-form Findings 1/3/4, but browser Finding 2 remains open. Three native
+feasibility probes established that browser-level auto-attach requires flattened
+child-session routing that public Playwright CDPSession cannot address. No fourth
+same-issue attempt or browser workaround was made. A separate connection to the
+same browser changes launch/control security and requires a new design review;
+the helper clarification above does not authorize opening that endpoint. Human
+permission to design/review a private loopback-only control connection is pending.
+Tasks 10-11 and final integration/certification remain unstarted. Preserve the
+plan-scoped reports/probe/ledger for resumption, not a completion/merge claim.
+
 **Interfaces:** Consume `execute_crawl`, `execute_batch`, `ProcessLocalJobQueue`,
 and profile resolver. Preserve every existing signature/export/factory in Task 1.
 `to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]]`
