@@ -270,7 +270,7 @@ installed-path launch, no imported `regex`, and event-loop heartbeat. Run
 **Goal:** Execution failure reporting is visible without retaining affected content.
 **Success Criteria:** Independent of optional capture, atomically deduplicated, lock-bounded, and accurately rendered.
 **Tests:** Backend report/store/privacy tests and shared review UI tests.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Operational Incident Reporting
 
@@ -282,6 +282,9 @@ installed-path launch, no imported `regex`, and event-loop heartbeat. Run
 `app/services/startup_moderation_workers.py` for pre-traffic schema preparation.
 Create `tests/unit/test_moderation_review_phase_migration.py` and extend
 `tests/unit/test_moderation_async_execution.py`.
+Isolate the real preparation/shutdown test in
+`tests/Services/test_lifecycle_worker_catalog.py` with its own temporary review DB
+and restore the reporter admission state after shutdown.
 Modify the existing shared UI files under
 `apps/packages/ui/src/components/Option/ModerationReview/`:
 `review-utils.ts`, `ReviewQueueList.tsx`, `ReviewItemDetail.tsx`, and
@@ -323,7 +326,7 @@ emit a rate-limited sanitized ERROR, and preserve the block; never spawn additio
 threads or release a still-running reporter's slot. Lifecycle owns its bounded
 shutdown. Sync service reporting already runs outside async event-loop execution.
 
-- [ ] **Step 1: Write failing backend and renderer tests.**
+- [x] **Step 1: Write failing backend and renderer tests.**
 
 ```python
 def test_failure_excerpt_is_constant():
@@ -352,11 +355,11 @@ failure; and safe idempotent concurrent initialization. Contract tests accept
 `unspecified` only for engine review items, not rule/test request phases.
 Explicitly reject neutral-phase records with missing/null source/category fields;
 SQL CHECK three-valued NULL behavior must not admit ordinary content records.
-- [ ] **Step 2: Run backend suite red and new UI tests red.**
+- [x] **Step 2: Run backend suite red and new UI tests red.**
 Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_execution_incidents.py -q`.
 Run `pnpm --dir apps/packages/ui exec vitest run src/components/Option/ModerationReview/__tests__/ExecutionIncident.test.tsx`.
 Expected: missing reporter/operational renderer behavior, not dependency failures.
-- [ ] **Step 3: Implement reporting and narrow UI presentation.** Metadata is an explicit allowlist; never pass `policy.to_dict()`, exception traceback, raw stderr, snippets, or arbitrary context. Dedup key is reporter version, operation, actual phase marker, reason, and five-minute UTC bucket. Report at most once per failed top-level service operation; nested propagation must not duplicate metrics/incidents.
+- [x] **Step 3: Implement reporting and narrow UI presentation.** Metadata is an explicit allowlist; never pass `policy.to_dict()`, exception traceback, raw stderr, snippets, or arbitrary context. Dedup key is reporter version, operation, actual phase marker, reason, and five-minute UTC bucket. Report at most once per failed top-level service operation; nested propagation must not duplicate metrics/incidents.
 
 For unspecified phase, write exactly one item with phase `unspecified`, one
 idempotency key, and one normal decision/audit history. The DB-management owner
@@ -380,7 +383,7 @@ Test single/bulk decision, undo, audit, and refresh against the same item ID.
 Document rolling-upgrade/rollback requirements: old phase-restricted response
 validators must not serve neutral-phase records. Quiesce incompatible workers
 before activation; do not silently drop or relabel incidents during rollback.
-- [ ] **Step 4: Run backend and UI suites green.**
+- [x] **Step 4: Run backend and UI suites green.**
 Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_execution_incidents.py tldw_Server_API/tests/unit/test_moderation_async_execution.py tldw_Server_API/tests/unit/test_moderation_review_phase_migration.py tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py -q` and
 `pnpm --dir apps/packages/ui exec vitest run src/components/Option/ModerationReview/__tests__`.
 Also run `pnpm --dir apps/packages/ui exec vitest run src/services/__tests__/moderation.service.contract.test.ts`.
@@ -388,14 +391,23 @@ Activate the venv and run the existing `bun run generate` in
 `apps/packages/api-types`, then `make openapi-drift-check` from the repo root;
 review the canonical artifact diff and retain only contract-related changes.
 Expected: existing capture/review behavior unchanged and operational incidents correctly distinguished.
-- [ ] **Step 5: Review and commit** as `feat(moderation): surface sanitized execution incidents (<implementation task ID>)`.
+- [x] **Step 5: Review and commit** as `feat(moderation): surface sanitized execution incidents (<implementation task ID>)`.
+
+Task3 spec and quality review approved at `278926972d`. Reporting/migration/UI
+checks passed; the unchanged containment preflight was explicitly deselected
+after three failures, then diagnosed as transient signal-zero EPERM after a
+successful kill. Task2 owns the bounded correction and renewed containment gate
+before activation; this status does not claim a fully green backend manifest.
+That correction passed native containment/heartbeat plus62 other focused cases
+and independent scoped review at `3676070739`; historical failures remain in
+the implementation evidence.
 
 ## Stage 4: Atomic Service and Caller Activation
 
 **Goal:** All current moderation callers use isolated execution without fail-open fallback or event-loop blocking.
 **Success Criteria:** Sync API compatibility, correct override dispatch, awaited streaming transforms, terminal failure propagation, and no affected success/save.
 **Tests:** Cross-surface failures plus existing moderation, streaming, Workflow and Audio regressions.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 4: Activate Facade, Async Callers, and Stream Stop
 
