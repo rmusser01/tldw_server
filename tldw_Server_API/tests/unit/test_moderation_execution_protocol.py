@@ -13,6 +13,10 @@ from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.Moderation.execution_models import (
     ExecutionBounds,
     FailureMetadata,
+    RegexRuleSnapshot,
+    SubstitutionBatchResult,
+    SubstitutionRuleSnapshot,
+    SupervisedBatchResult,
     WorkerResponse,
     execution_scope,
 )
@@ -22,8 +26,10 @@ from tldw_Server_API.app.core.Moderation.execution_protocol import (
     encode_request,
     encode_response,
     snapshot_request,
+    snapshot_substitution_request,
+    snapshot_supervised_request,
 )
-from tldw_Server_API.app.core.Moderation.models import ModerationPolicy, PatternRule
+from tldw_Server_API.app.core.Moderation.models import ModerationEvaluationResult, ModerationPolicy, PatternRule
 from tldw_Server_API.app.core.Moderation.policy_evaluator import EvaluationLimits
 
 
@@ -44,8 +50,294 @@ def frame(data):
 
 
 def test_unknown_wire_version_is_rejected():
+    original = snapshot_request(
+        "evaluate",
+        "",
+        ModerationPolicy(),
+        None,
+        EvaluationLimits(100, 10, 1000, None),
+        ExecutionBounds(),
+    )
+    data = json.loads(encode_request(original)[4:])
+    assert decode_request(frame(data)) == original
+    data["version"] = 999
     with pytest.raises(ModerationExecutionError, match="invalid_response"):
-        decode_request(b'{"version":999}')
+        decode_request(frame(data))
+
+
+_OPERATIONS = ("evaluate", "redact", "redact_with_count", "supervised_evaluate", "custom_substitute")
+_NON_INTEGER = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.floats(),
+    st.text(max_size=8),
+    st.lists(st.integers(min_value=0, max_value=3), max_size=2),
+    st.dictionaries(st.text(max_size=3), st.integers(min_value=0, max_value=3), max_size=2),
+)
+
+
+def schema_request(operation, text="aa", phase=None):
+    """Start every generated mutation at a valid bounded operation-specific schema."""
+    bounds = ExecutionBounds(max_input_chars=64, max_output_chars=64, max_rules=4)
+    if operation == "supervised_evaluate":
+        return snapshot_supervised_request(text, [RegexRuleSnapshot("a", 0, "warn", "both")] * 2, phase, bounds)
+    if operation == "custom_substitute":
+        return snapshot_substitution_request(text, [SubstitutionRuleSnapshot("a", 0, "a")] * 2, phase, bounds)
+    policy = ModerationPolicy(enabled=True, block_patterns=[re.compile("a"), PatternRule(re.compile("b"))])
+    return snapshot_request(operation, text, policy, phase, EvaluationLimits(100, 10, 1000, None), bounds)
+
+
+def schema_response(original):
+    """A valid result shape for each variant, independent of regex execution."""
+    results = {
+        "evaluate": ModerationEvaluationResult(action="warn", matched_pattern="a", match_span=(0, 1)),
+        "redact": "",
+        "redact_with_count": ("", 0),
+        "supervised_evaluate": SupervisedBatchResult(0, (0, 1), None),
+        "custom_substitute": SubstitutionBatchResult("", 0, ()),
+    }
+    response = WorkerResponse(original.operation, results[original.operation])
+    assert decode_response(encode_response(response), original) == response
+    return json.loads(encode_response(response)[4:])
+
+
+def invalid_integer(low, high):
+    return st.one_of(
+        _NON_INTEGER,
+        st.integers(min_value=low - 20, max_value=low - 1),
+        st.integers(min_value=high + 1, max_value=high + 20),
+    )
+
+
+@pytest.mark.parametrize("operation", _OPERATIONS)
+@given(text=st.text(max_size=40), phase=st.one_of(st.none(), st.text(max_size=10)))
+def test_schema_aware_bounded_unicode_requests_round_trip(operation, text, phase):
+    original = schema_request(operation, text, phase)
+    encoded = encode_request(original)
+    assert len(encoded) <= original.bounds.max_request_bytes
+    assert decode_request(encoded) == original
+
+
+@pytest.mark.parametrize("operation", _OPERATIONS)
+@pytest.mark.parametrize("field", ["version", "tag", "operation", "text", "phase", "rule_flags", "bounds_integer"])
+@given(data=st.data())
+def test_schema_aware_request_field_mutations_are_rejected(operation, field, data):
+    original = schema_request(operation)
+    payload = json.loads(encode_request(original)[4:])
+    if field == "version":
+        payload[field] = data.draw(invalid_integer(1, 1))
+    elif field in {"tag", "operation"}:
+        excluded = {"request"} if field == "tag" else set(_OPERATIONS)
+        payload[field] = data.draw(
+            st.one_of(
+                _NON_INTEGER.filter(lambda value: type(value) is not str),
+                st.text(max_size=12).filter(lambda value: value not in excluded),
+            )
+        )
+    elif field == "text":
+        payload[field] = data.draw(
+            st.one_of(
+                _NON_INTEGER.filter(lambda value: type(value) is not str),
+                st.text(min_size=65, max_size=70),
+            )
+        )
+    elif field == "phase":
+        payload[field] = data.draw(_NON_INTEGER.filter(lambda value: value is not None and type(value) is not str))
+    elif field == "rule_flags":
+        rules = payload["policy"].get("rules", payload["policy"].get("block_patterns"))
+        rules[0]["flags"] = data.draw(invalid_integer(0, 511))
+    else:
+        bound = data.draw(st.sampled_from(["max_workers", "max_rules", "max_input_chars", "max_output_chars"]))
+        payload["bounds"][bound] = data.draw(invalid_integer(1, getattr(ExecutionBounds(), bound)))
+    with pytest.raises(ModerationExecutionError):
+        decode_request(frame(payload))
+
+
+@pytest.mark.parametrize("operation", _OPERATIONS)
+@pytest.mark.parametrize("target", ["envelope", "policy", "rule"])
+@pytest.mark.parametrize("change", ["missing", "extra"])
+@given(data=st.data())
+def test_schema_aware_request_key_mutations_are_rejected(operation, target, change, data):
+    payload = json.loads(encode_request(schema_request(operation))[4:])
+    obj = payload
+    if target == "policy":
+        obj = payload["policy"]
+    elif target == "rule":
+        obj = payload["policy"].get("rules", payload["policy"].get("block_patterns"))[0]
+    if change == "missing":
+        del obj[data.draw(st.sampled_from(sorted(obj)))]
+    else:
+        obj["unexpected_field"] = data.draw(st.text(max_size=12))
+    with pytest.raises(ModerationExecutionError):
+        decode_request(frame(payload))
+
+
+@pytest.mark.parametrize("operation", _OPERATIONS)
+@pytest.mark.parametrize("field", ["version", "tag", "operation", "reason", "resource_limits"])
+@given(data=st.data())
+def test_schema_aware_response_envelope_mutations_are_rejected(operation, field, data):
+    original = schema_request(operation)
+    payload = schema_response(original)
+    if field == "version":
+        payload[field] = data.draw(invalid_integer(1, 1))
+    elif field == "tag":
+        payload[field] = data.draw(st.text(max_size=12).filter(lambda value: value != "response"))
+    elif field == "operation":
+        payload[field] = data.draw(st.sampled_from([value for value in _OPERATIONS if value != operation]))
+    elif field == "reason":
+        payload[field] = data.draw(st.text(max_size=12))
+    else:
+        payload[field] = {"address_space": False, "cpu": True, "core": data.draw(_NON_INTEGER)}
+        # A posture flag must be a boolean, not an integer or other JSON value.
+        if type(payload[field]["core"]) is bool:
+            payload[field]["core"] = int(payload[field]["core"])
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(frame(payload), original)
+
+
+@pytest.mark.parametrize(
+    "operation,target",
+    [
+        *[(operation, "envelope") for operation in _OPERATIONS],
+        *[(operation, "result") for operation in ("evaluate", "supervised_evaluate", "custom_substitute")],
+    ],
+)
+@pytest.mark.parametrize("change", ["missing", "extra"])
+@given(data=st.data())
+def test_schema_aware_response_key_mutations_are_rejected(operation, target, change, data):
+    original = schema_request(operation)
+    payload = schema_response(original)
+    obj = payload if target == "envelope" else payload["result"]
+    if change == "missing":
+        del obj[data.draw(st.sampled_from(sorted(obj)))]
+    else:
+        obj["unexpected_field"] = data.draw(st.text(max_size=12))
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(frame(payload), original)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@given(data=st.data())
+def test_schema_aware_nonfinite_request_and_response_numbers_are_rejected(value, data):
+    original = schema_request(data.draw(st.sampled_from(_OPERATIONS[:3])))
+    payload = json.loads(encode_request(original)[4:])
+    payload["limits"][data.draw(st.sampled_from(sorted(payload["limits"])))] = value
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_request(frame(payload))
+    original = schema_request(data.draw(st.sampled_from(("redact_with_count", "custom_substitute"))))
+    payload = schema_response(original)
+    if original.operation == "redact_with_count":
+        payload["result"][1] = value
+    else:
+        payload["result"]["count"] = value
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(frame(payload), original)
+
+
+@pytest.mark.parametrize("operation", ["redact_with_count", "custom_substitute"])
+@given(
+    length=st.integers(min_value=0, max_value=30),
+    ceiling=st.integers(min_value=1, max_value=32),
+    rule_count=st.integers(min_value=0, max_value=4),
+    data=st.data(),
+)
+def test_schema_aware_count_types_and_conservative_bound(operation, length, ceiling, rule_count, data):
+    original = schema_request(operation, "a" * length)
+    policy = dict(original.policy)
+    key = "rules" if operation == "custom_substitute" else "block_patterns"
+    policy[key] = [policy[key][0]] * rule_count
+    original = replace(original, policy=policy, bounds=replace(original.bounds, max_output_chars=ceiling))
+    original = decode_request(encode_request(original))
+    payload = schema_response(original)
+    maximum = rule_count * (2 * max(length, ceiling) + 1)
+    # Both endpoints and generated interior counts are admitted by the wire bound.
+    for count in (0, maximum, data.draw(st.integers(min_value=0, max_value=maximum))):
+        if operation == "custom_substitute":
+            payload["result"].update(text="", count=count)
+        else:
+            payload["result"] = ["", count]
+        assert decode_response(frame(payload), original).result is not None
+    bad_count = data.draw(invalid_integer(0, maximum))
+    if operation == "custom_substitute":
+        payload["result"]["count"] = bad_count
+    else:
+        payload["result"][1] = bad_count
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(frame(payload), original)
+
+
+@pytest.mark.parametrize("operation", ["evaluate", "supervised_evaluate"])
+@given(length=st.integers(min_value=1, max_value=32), data=st.data())
+def test_schema_aware_span_types_and_boundaries(operation, length, data):
+    original = schema_request(operation, "a" * length)
+    payload = schema_response(original)
+    start = data.draw(st.integers(min_value=0, max_value=length))
+    end = data.draw(st.integers(min_value=start, max_value=length))
+    for span in ([0, 0], [0, length], [length, length], [start, end]):
+        payload["result"]["match_span"] = span
+        assert decode_response(frame(payload), original).result.match_span == tuple(span)
+    bad_span = data.draw(
+        st.one_of(
+            st.tuples(invalid_integer(0, length), st.just(length)).map(list),
+            st.tuples(st.just(start), invalid_integer(start, length)).map(list),
+            st.lists(st.integers(min_value=0, max_value=length), min_size=3, max_size=4),
+            st.sampled_from([[], [0], "span", 0, True, {}]),
+        )
+    )
+    payload["result"]["match_span"] = bad_span
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(frame(payload), original)
+
+
+@pytest.mark.parametrize("operation", ["supervised_evaluate", "custom_substitute"])
+@given(rule_count=st.integers(min_value=1, max_value=4), data=st.data())
+def test_schema_aware_rule_index_types_and_boundaries(operation, rule_count, data):
+    original = schema_request(operation)
+    original = replace(original, policy={"rules": [original.policy["rules"][0]] * rule_count})
+    payload = schema_response(original)
+    for index in (0, rule_count - 1, data.draw(st.integers(min_value=0, max_value=rule_count - 1))):
+        if operation == "supervised_evaluate":
+            payload["result"]["winner_index"] = index
+        else:
+            payload["result"]["skipped_rule_indices"] = [index]
+        assert decode_response(frame(payload), original).result is not None
+    bad_index = data.draw(invalid_integer(0, rule_count - 1))
+    if operation == "supervised_evaluate":
+        payload["result"]["winner_index"] = bad_index
+    else:
+        payload["result"]["skipped_rule_indices"] = [bad_index]
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(frame(payload), original)
+    if operation == "custom_substitute":
+        index = data.draw(st.integers(min_value=0, max_value=rule_count - 1))
+        for skipped in (
+            [index, index],
+            [rule_count - 1, 0],
+            data.draw(_NON_INTEGER.filter(lambda v: type(v) is not list)),
+        ):
+            payload["result"]["skipped_rule_indices"] = skipped
+            with pytest.raises(ModerationExecutionError, match="invalid_response"):
+                decode_response(frame(payload), original)
+
+
+@pytest.mark.parametrize("operation", ["supervised_evaluate", "custom_substitute"])
+@given(index=st.one_of(st.integers(min_value=0, max_value=8), st.booleans()))
+def test_schema_aware_empty_rule_snapshots_reject_returned_indices(operation, index):
+    original = replace(schema_request(operation), policy={"rules": []})
+    result = (
+        SupervisedBatchResult(None, None, None)
+        if operation == "supervised_evaluate"
+        else SubstitutionBatchResult("", 0, ())
+    )
+    response = WorkerResponse(operation, result)
+    assert decode_response(encode_response(response), original) == response
+    payload = json.loads(encode_response(response)[4:])
+    if operation == "supervised_evaluate":
+        payload["result"].update(winner_index=index, match_span=[0, 0])
+    else:
+        payload["result"]["skipped_rule_indices"] = [index]
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(frame(payload), original)
 
 
 def test_requester_defaults_are_fixed():

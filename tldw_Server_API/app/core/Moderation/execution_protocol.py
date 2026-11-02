@@ -276,7 +276,13 @@ def _span(value: object, request: WorkerRequest) -> tuple[int, int] | None:
 
 def _count(value: object, request: WorkerRequest) -> None:
     rules = request.policy.get("rules", request.policy.get("block_patterns", []))
-    _integer(value, 0, len(rules) * (max(len(request.text), request.bounds.max_output_chars) + 1))
+    # On n characters, non-overlapping nonempty matches consume at least one
+    # character each (at most n); empty matches visit each boundary at most once
+    # (at most n+1). An empty match may precede a nonempty one at the same start,
+    # so the combined bound is 2*n+1, attained by '|a' on 'a'*n. Each rule sees
+    # either the original input or an output capped by max_output_chars.
+    max_input_chars = max(len(request.text), request.bounds.max_output_chars)
+    _integer(value, 0, len(rules) * (2 * max_input_chars + 1))
 
 
 def decode_response(frame: bytes, request: WorkerRequest) -> WorkerResponse:

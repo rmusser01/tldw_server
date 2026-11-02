@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.Moderation import regex_worker
@@ -73,6 +75,110 @@ def test_zero_length_and_raw_count_limits_keep_legacy_behavior(raw_count, scan):
         assert regex_worker.execute_request(request).reason == "worker_crashed"
     else:
         assert regex_worker.execute_request(request).result == expected
+
+
+@pytest.mark.parametrize("operation", ["redact_with_count", "custom_substitute"])
+def test_mixed_empty_nonempty_count_three_round_trips(operation):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import decode_request, encode_response
+
+    bounds = ExecutionBounds(max_output_chars=1)
+    if operation == "redact_with_count":
+        policy = ModerationPolicy(enabled=True, redact_replacement="", block_patterns=[re.compile("|a")])
+        request = snapshot_request(operation, "a", policy, None, LIMITS, bounds)
+        expected = PolicyEvaluator().redact_text_with_count("a", policy, None, LIMITS)
+    else:
+        request = snapshot_substitution_request("a", [SubstitutionRuleSnapshot("|a", 0, "")], None, bounds)
+        expected = re.subn("|a", "", "a")
+    assert expected == ("", 3)
+    request = decode_request(encode_request(request))
+    response = regex_worker.execute_request(request)
+    assert response.reason is None
+    actual = response.result if operation == "redact_with_count" else (response.result.text, response.result.count)
+    assert actual == expected
+    assert decode_response(encode_response(response), request) == response
+
+
+@pytest.mark.parametrize("operation", ["redact_with_count", "custom_substitute"])
+@given(length=st.integers(min_value=0, max_value=20), rule_count=st.integers(min_value=1, max_value=4))
+def test_mixed_match_counts_preserve_benign_sequential_parity(operation, length, rule_count):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import decode_request, encode_response
+
+    text = "a" * length
+    bounds = ExecutionBounds(max_output_chars=1)
+    if operation == "redact_with_count":
+        policy = ModerationPolicy(enabled=True, redact_replacement="", block_patterns=[re.compile("|a")] * rule_count)
+        request = snapshot_request(operation, text, policy, None, LIMITS, bounds)
+        expected = PolicyEvaluator().redact_text_with_count(text, policy, None, LIMITS)
+    else:
+        request = snapshot_substitution_request(
+            text,
+            [SubstitutionRuleSnapshot("|a", 0, "")] * rule_count,
+            None,
+            bounds,
+        )
+        expected_text, expected_count = text, 0
+        for _ in range(rule_count):
+            expected_text, count = re.subn("|a", "", expected_text)
+            expected_count += count
+        expected = expected_text, expected_count
+    request = decode_request(encode_request(request))
+    response = regex_worker.execute_request(request)
+    assert response.reason is None
+    actual = response.result if operation == "redact_with_count" else (response.result.text, response.result.count)
+    assert actual == expected
+    assert decode_response(encode_response(response), request) == response
+
+
+@pytest.mark.parametrize("operation", ["redact_with_count", "custom_substitute"])
+def test_count_round_trip_accounts_for_larger_intermediate_input(operation):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import encode_response
+
+    bounds = ExecutionBounds(max_output_chars=4)
+    if operation == "redact_with_count":
+        policy = ModerationPolicy(
+            enabled=True,
+            redact_replacement="",
+            block_patterns=[
+                PatternRule(re.compile("a"), replacement="aaaa"),
+                re.compile("|a"),
+            ],
+        )
+        request = snapshot_request(operation, "a", policy, None, LIMITS, bounds)
+        expected = PolicyEvaluator().redact_text_with_count("a", policy, None, LIMITS)
+    else:
+        request = snapshot_substitution_request(
+            "a",
+            [
+                SubstitutionRuleSnapshot("a", 0, "aaaa"),
+                SubstitutionRuleSnapshot("|a", 0, ""),
+            ],
+            None,
+            bounds,
+        )
+        expected = ("", 10)
+    assert expected == ("", 10)
+    response = regex_worker.execute_request(request)
+    assert response.reason is None
+    actual = response.result if operation == "redact_with_count" else (response.result.text, response.result.count)
+    assert actual == expected
+    assert decode_response(encode_response(response), request) == response
+
+
+@given(length=st.integers(min_value=1, max_value=20), rule_count=st.integers(min_value=1, max_value=4))
+def test_custom_identity_template_attains_mixed_match_bound_for_every_rule(length, rule_count):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import encode_response
+
+    text = "a" * length
+    request = snapshot_substitution_request(
+        text,
+        [SubstitutionRuleSnapshot("|a", 0, r"\g<0>")] * rule_count,
+        None,
+        ExecutionBounds(max_output_chars=length),
+    )
+    response = regex_worker.execute_request(request)
+    assert response.reason is None
+    assert (response.result.text, response.result.count) == (text, rule_count * (2 * length + 1))
+    assert decode_response(encode_response(response), request) == response
 
 
 def test_supervised_priority_first_tie_early_block_and_notify_are_preserved():
