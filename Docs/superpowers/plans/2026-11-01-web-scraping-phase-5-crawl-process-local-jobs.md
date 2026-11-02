@@ -1034,6 +1034,25 @@ Finding 2 is active work and must pass fresh scoped re-review before Task 9
 acceptance. Tasks 10-11 and final integration/certification remain required.
 Preserve the plan-scoped reports/probes/ledger; no completion/merge claim.
 
+**Task 9 Default Batch Integration Gate (2026-11-02):**
+The real default enhanced batch callback still bypasses canonical parent controls:
+a matching plan/context network limit of one permits two acquisition calls,
+charges zero requests, and reports completion. Fix this before Task 9 acceptance,
+after the active browser fix, with a separate focused commit and review. Bind the
+default batch/queue path to existing canonical page composition; page attempts
+must be debited once by the actual page owner, not queue and page independently.
+Preserve enhanced instance routing, extraction method/advice, cookies, headers,
+proxy, rate limiting, deduplication, context, retry and result ordering. Trusted
+duck-typed parents and replaced `_execute_job` callbacks remain supported; do not
+silently delete callback behavior or claim their opaque work is canonical.
+Use real default adapter/acquisition integration tests with only outbound I/O
+faked: request and transfer budgets, analyzer stop without fail-open/fallback,
+exact page-attempt counts including retry, cancellation and physical drain.
+Retain private payload byte admission and callback/credential references only
+through actual drain. No additional queue, execution engine, background subsystem
+or shadow requests. This repairs the approved governance boundary, not scope for
+new functionality. Cost if wrong: narrow adapter/composition rework.
+
 **Interfaces:** Consume `execute_crawl`, `execute_batch`, `ProcessLocalJobQueue`,
 and profile resolver. Preserve every existing signature/export/factory in Task 1.
 `to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]]`
