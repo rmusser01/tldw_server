@@ -310,12 +310,18 @@ def _selected_cookies(
     url: str, explicit: tuple[Mapping[str, Any], ...], stored: Mapping[str, Any]
 ) -> tuple[Mapping[str, Any], ...]:
     """Use the existing exact netloc lookup, never flatten or normalize jar scope."""
-    selected = stored.get(urlsplit(url).netloc)
-    if not selected:
-        return explicit
-    merged = {str(item["name"]): str(item.get("value", "")) for item in selected if item.get("name")}
-    merged.update({str(item["name"]): str(item.get("value", "")) for item in explicit if item.get("name")})
-    return tuple({"name": name, "value": value} for name, value in merged.items())
+    merged: dict[str, dict[str, Any]] = {}
+    for source in (stored.get(urlsplit(url).netloc) or (), explicit):
+        for item in source:
+            if not isinstance(item, Mapping):
+                continue
+            if "name" in item and "value" in item:
+                name, value = str(item["name"]), str(item["value"])
+                merged[name] = {**item, "name": name, "value": value}
+            else:
+                for name, value in item.items():
+                    merged[str(name)] = {"name": str(name), "value": str(value)}
+    return tuple(merged.values())
 
 
 def _queued_crawl_page(
