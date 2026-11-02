@@ -115,6 +115,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-086](086-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
 | [ADR-087](087-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
 | [ADR-088](088-mcp-certified-completion-lifecycle.md) | Proposed | Certify one bounded native-async completion path and retain ownership through cancellation, abandonment, and shutdown. |
-| [ADR-086](086-chunker-execution-live-context-boundary.md) | Proposed | Delegate Chunker's three execution paths to an internal service with neutral helpers and a live context, without importing the facade or sibling pipelines. |
+| [ADR-086](086-chunker-execution-live-context-boundary.md) | Accepted | Delegate Chunker's three execution paths to an internal service with neutral helpers and a live context, without importing the facade or sibling pipelines. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
