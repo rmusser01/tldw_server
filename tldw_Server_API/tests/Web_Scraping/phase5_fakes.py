@@ -8,7 +8,7 @@ import json
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from html import escape
 from pathlib import Path
@@ -310,6 +310,79 @@ class Phase5Harness:
             patch.setattr(enhanced, "afetch", async_fetch)
             patch.setattr(enhanced, "decide_web_outbound_policy", async_policy)
             patch.setattr(enhanced, "decide_web_outbound_policy_sync", self._policy)
+            from tldw_Server_API.app.core.Web_Scraping.orchestration import article, crawl
+            from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse
+            from tldw_Server_API.tests.Web_Scraping.test_phase4_article_orchestration import (
+                _allowed_target,
+                _harness,
+                _plan,
+            )
+
+            patch.setattr(crawl, "decide_web_outbound_policy", async_policy)
+            patch.setattr(crawl, "resolve_browser_transport_decision", legacy.resolve_browser_transport_decision)
+
+            class Browser:
+                async def acquire(inner, url, profile, limits):
+                    return await acquire(SimpleNamespace(_profile=profile), url)
+
+            class Fetch:
+                def fetch(inner, request):
+                    response = self._response(request.url, headers=dict(request.headers), cookies=dict(request.cookies))
+                    response.close()
+                    return FetchResponse(
+                        url=request.url,
+                        status=200,
+                        text=response.text,
+                        headers={},
+                        backend="httpx",
+                    )
+
+            class Executor:
+                async def run(inner, func, *args, **kwargs):
+                    return await execute(func, *args, **kwargs)
+
+            async def target(url, **kwargs):
+                context = kwargs.get("request_context")
+                return replace(
+                    _allowed_target(url),
+                    decision=self._policy(
+                        url,
+                        source=getattr(context, "source", "article"),
+                        stage=getattr(context, "stage", "pre_fetch"),
+                        **kwargs,
+                    ),
+                )
+
+            def dependencies(cookies):
+                fixture = _harness()
+
+                def plan(*_args):
+                    value = _plan()
+                    return replace(value, browser=replace(value.browser, custom_cookies=cookies))
+
+                return replace(
+                    fixture.dependencies,
+                    browser=Browser(),
+                    fetch_client=Fetch(),
+                    executor=Executor(),
+                    evaluate_target=target,
+                    resolve_plan=plan,
+                    convert_content=lambda value: value,
+                    extract=lambda _html, url, **kwargs: self._page_sync(
+                        url,
+                        custom_cookies=[dict(item) for item in cookies],
+                        **kwargs,
+                    ),
+                )
+
+            patch.setattr(article, "_build_default_dependencies", dependencies)
+
+            async def response(_dependencies, request):
+                value = self._response(request.url, headers=dict(request.headers), cookies=dict(request.cookies))
+                value.close()
+                return FetchResponse(url=request.url, status=200, text=value.text, headers={}, backend="httpx")
+
+            patch.setattr(article, "_fetch_response", response)
             if self.profile.startswith("enhanced"):
                 self.scraper = enhanced.EnhancedWebScraper(config={"max_concurrent": 1, **self.config})
                 patch.setattr(self.scraper, "scrape_article", self._page_async)
@@ -320,6 +393,15 @@ class Phase5Harness:
                     return await add_job(job)
 
                 patch.setattr(self.scraper.job_queue, "add_job", submit)
+                submit_page = self.scraper.job_queue.submit_page
+
+                async def submit_owned(job: Any, **kwargs: Any) -> Any:
+                    if not (self.profile.endswith("sitemap") and job.url == self.sitemap_url):
+                        self.jobs.append(job)
+                    return await submit_page(job, **kwargs)
+
+                patch.setattr(self.scraper.job_queue, "submit_page", submit_owned)
+                patch.setattr(self.scraper, "_apply_dedup", lambda _url, data: data)
             try:
                 yield
             finally:

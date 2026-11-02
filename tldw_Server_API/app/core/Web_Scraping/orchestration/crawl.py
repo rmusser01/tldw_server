@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -15,6 +16,8 @@ from uuid import uuid4
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_gauge, log_histogram
 from tldw_Server_API.app.core.testing import is_truthy
 
 from ..browser_transport import (
@@ -80,6 +83,19 @@ def _segments(url: str) -> int:
     return len([part for part in urlsplit(url).path.split("/") if part])
 
 
+def _observe(function: Callable, *args: Any, **kwargs: Any) -> None:
+    """Keep optional legacy crawl telemetry from changing traversal outcomes."""
+    with contextlib.suppress(AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError):
+        function(*args, **kwargs)
+
+
+def _skip(reason: str, strategy: str, entry: FrontierEntry) -> TraversalDecision:
+    """Emit stable bounded reasons without placing targets in metric labels."""
+    _observe(log_counter, "webscraping.crawl.urls_skipped", labels={"reason": reason})
+    logger.debug("Skip URL [{}:{} depth={}]: {}", strategy, reason, entry.depth, redact_url_for_log(entry.url))
+    return TraversalDecision(False, reason="filtered")
+
+
 class ProfileTraversalPolicy:
     """Compose existing filters/scorers and governed robots outside the engine."""
 
@@ -97,6 +113,7 @@ class ProfileTraversalPolicy:
         self.hooks, self.controls = hooks, controls
         self._fetch_document = fetch_document
         self._prepared = False
+        self.active_entry = None
 
     def _prepare(self) -> None:
         """Prepare only after engine admission has bounded the request seed."""
@@ -228,25 +245,28 @@ class ProfileTraversalPolicy:
             return TraversalDecision(ordering_score=self.order.score(entry.url) if self.enhanced else 0)
         if phase == "discovery":
             if self.enhanced:
-                if (
-                    not self.filters.apply(entry.url)
-                    or max(0, _segments(entry.url) - self.base_depth) > self.plan.options["max_depth"]
-                ):
-                    return TraversalDecision(False, reason="filtered")
+                strategy = str(self.plan.options["crawl_strategy"])
+                if not self.filters.apply(entry.url):
+                    return _skip("filter_chain", strategy, entry)
+                if max(0, _segments(entry.url) - self.base_depth) > self.plan.options["max_depth"]:
+                    return _skip("path_depth", strategy, entry)
                 decision = await self._policy(
                     entry.url, robots=self.respect, source="recursive_scrape_candidate", stage="discovery"
                 )
                 if not decision.allowed:
-                    return TraversalDecision(False, reason="filtered")
+                    reason = (
+                        "robots" if str(decision.metadata.get("policy_reason", "")).startswith("robots_") else "policy"
+                    )
+                    return _skip(reason, strategy, entry)
                 relevance = self.scorer.score(entry.url)
                 if relevance < self.plan.options["score_threshold"]:
-                    return TraversalDecision(False, reason="filtered")
+                    return _skip("below_threshold", strategy, entry)
                 if self.plan.profile == "enhanced_url_level":
                     # Historical URL Level counts '/' as one split component.
                     if len(urlsplit(entry.url).path.strip("/").split("/")) > self.plan.options.get("level", 3):
                         return TraversalDecision(False, reason="filtered")
                 if self.hooks.url_filter and not self.hooks.url_filter(entry.url):
-                    return TraversalDecision(False, reason="filtered")
+                    return _skip("custom_filter", strategy, entry)
                 return TraversalDecision(relevance_score=relevance, ordering_score=self.order.score(entry.url))
             if self.plan.profile == "legacy_recursive":
                 allowed = (
@@ -263,10 +283,13 @@ class ProfileTraversalPolicy:
             if not decision.allowed:
                 return decision
         if phase == "visit" and self.enhanced:
+            self.active_entry = entry
             relevance, ordering = self.scorer.score(entry.url), self.order.score(entry.url)
             strategy = str(self.plan.options["crawl_strategy"])
             if strategy in {"best_first", "best-first", "bestfirst"}:
                 strategy, ordering = "best_first", entry.score
+            _observe(log_gauge, "webscraping.crawl.depth", float(entry.depth))
+            _observe(log_histogram, "webscraping.crawl.score", relevance, labels={"stage": "visit"})
             return TraversalDecision(
                 relevance_score=relevance,
                 ordering_score=ordering,
@@ -281,6 +304,18 @@ class ProfileTraversalPolicy:
                 },
             )
         return TraversalDecision()
+
+
+def _selected_cookies(
+    url: str, explicit: tuple[Mapping[str, Any], ...], stored: Mapping[str, Any]
+) -> tuple[Mapping[str, Any], ...]:
+    """Use the existing exact netloc lookup, never flatten or normalize jar scope."""
+    selected = stored.get(urlsplit(url).netloc)
+    if not selected:
+        return explicit
+    merged = {str(item["name"]): str(item.get("value", "")) for item in selected if item.get("name")}
+    merged.update({str(item["name"]): str(item.get("value", "")) for item in explicit if item.get("name")})
+    return tuple({"name": name, "value": value} for name, value in merged.items())
 
 
 def _queued_crawl_page(
@@ -317,8 +352,9 @@ async def execute_crawl(
     hooks: CrawlHooks | None = None,
     seeds: Iterable[str] | None = None,
     queue: ProcessLocalJobQueue | None = None,
+    transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
 ) -> CrawlReport:
-    """Snapshot private inputs and compose the sole engine, without wrapper cutover."""
+    """Snapshot private inputs and compose the sole canonical engine."""
     config = article._snapshot_config(config)
     private = deepcopy(dict(credentials))
     plan = resolve_crawl_plan(
@@ -327,6 +363,8 @@ async def execute_crawl(
     context = CrawlContext(limits, clock=time.monotonic)
     hooks = hooks or CrawlHooks()
     cookies = article._snapshot_cookies(private.get("custom_cookies"))
+    stored = private.get("stored_cookies_by_netloc") or {}
+    requested_agent = private.get("user_agent") or (private.get("custom_headers") or {}).get("User-Agent")
     header_copy = dict(private.get("custom_headers") or {})
     default_agent = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
@@ -382,7 +420,7 @@ async def execute_crawl(
         current_headers = dict(headers)
         current_cookies = {
             str(item["name"]): str(item.get("value", ""))
-            for item in cookies
+            for item in _selected_cookies(url, cookies, stored)
             if item.get("name")
             and (
                 not item.get("domain")
@@ -432,6 +470,17 @@ async def execute_crawl(
 
     def progress(snapshot: Mapping[str, Any]) -> None:
         nonlocal committed
+        if profile in {"enhanced_recursive", "enhanced_url_level"}:
+            _observe(log_gauge, "webscraping.crawl.queue_size", float(snapshot["queue_size"]))
+            if snapshot["pages_scraped"] > committed and policy.active_entry is not None:
+                entry = policy.active_entry
+                logger.debug(
+                    "Accept URL [{} depth={}]: {}",
+                    plan.options["crawl_strategy"],
+                    entry.depth,
+                    redact_url_for_log(entry.url),
+                )
+                _observe(log_counter, "webscraping.crawl.pages_crawled")
         committed = snapshot["pages_scraped"]
         if hooks.on_progress:
             hooks.on_progress(snapshot)
@@ -439,7 +488,7 @@ async def execute_crawl(
     def start_entry(entry: FrontierEntry, execution: Mapping[str, Any] | None = None) -> WorkHandle[PageData]:
         """Return ownership before canonical routing, acquisition or extraction."""
         page_config, page_headers, page_cookies = (
-            (config, headers, cookies)
+            (config, headers, _selected_cookies(entry.url, cookies, stored))
             if execution is None
             else (execution["configuration"], execution["custom_headers"], execution["custom_cookies"])
         )
@@ -479,11 +528,20 @@ async def execute_crawl(
             snapshot_headers: Mapping[str, str] = MappingProxyType(dict(page_headers)),
             legacy: bool = profile == "legacy_recursive",
             method: Any = plan.options.get("method"),
+            explicit_agent: Any = requested_agent if execution is None else execution.get("user_agent"),
         ) -> article.ArticlePlan:
+            agent = str(
+                explicit_agent
+                or (
+                    snapshot_headers["User-Agent"]
+                    if legacy
+                    else page_plan.headers.get("User-Agent") or snapshot_headers["User-Agent"]
+                )
+            )
             prepared = replace(
                 page_plan,
-                headers={**dict(page_plan.headers), **snapshot_headers},
-                browser=replace(page_plan.browser, user_agent=snapshot_headers["User-Agent"]),
+                headers={**dict(page_plan.headers), **snapshot_headers, "User-Agent": agent},
+                browser=replace(page_plan.browser, user_agent=agent),
             )
             if legacy:
                 return replace(prepared, backend="playwright", respect_robots=False)
@@ -502,7 +560,14 @@ async def execute_crawl(
             return True
 
         def links(document: str, request_url: str, final_url: str) -> DiscoveryResult:
-            return discover(document, request_url=request_url, final_url=final_url, plan=plan, controls=context)
+            found = discover(document, request_url=request_url, final_url=final_url, plan=plan, controls=context)
+            if profile in {"enhanced_recursive", "enhanced_url_level"}:
+                identities = set()
+                for link in found.links:
+                    if link.url in identities:
+                        _skip("duplicate", str(plan.options["crawl_strategy"]), entry)
+                    identities.add(link.url)
+            return found
 
         return article.start_page(
             entry.url,
@@ -515,6 +580,7 @@ async def execute_crawl(
             allow_llm_extraction=plan.options["allow_llm_extraction"],
             discovery_on_success=profile in {"enhanced_recursive", "enhanced_url_level"},
             discovery_gate=discovery_gate,
+            transform=transform,
         )
 
     async def acquire(entry: FrontierEntry) -> WorkHandle[PageData]:
@@ -534,7 +600,8 @@ async def execute_crawl(
                     {
                         "configuration": config,
                         "custom_headers": headers,
-                        "custom_cookies": cookies,
+                        "user_agent": requested_agent,
+                        "custom_cookies": _selected_cookies(url, cookies, stored),
                         "crawl_options": plan.options,
                     }
                 ),
@@ -566,6 +633,9 @@ async def execute_crawl(
         # Exception tracebacks can outlive this owner. Physical handles and the
         # engine's drain retainer, not completed coroutine frames, own live state.
         private.clear()
+        transform = None
+        stored = None
+        requested_agent = None
         config = headers = header_copy = credentials = options = cookies = hooks = policy = acquire = fetch_document = (
             None
         )

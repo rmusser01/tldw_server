@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
-    JobStatus,
     ScrapingJob,
     ScrapingJobQueue,
 )
@@ -26,30 +27,47 @@ def test_get_service_status_when_scraper_is_unavailable():
 
 
 @pytest.mark.unit
-def test_scraping_job_queue_completed_retention_evicts_oldest_entries():
+@pytest.mark.asyncio
+async def test_scraping_job_queue_completed_retention_evicts_oldest_entries():
     queue = ScrapingJobQueue(completed_retention=2)
+
+    async def execute(job):
+        return {"url": job.url, "extraction_successful": True}
+
+    queue._execute_job = execute
+    await queue.start()
 
     for job_id in ("job-1", "job-2", "job-3"):
         job = ScrapingJob(job_id=job_id, url=f"https://example.com/{job_id}", method="auto")
-        job.status = JobStatus.COMPLETED
-        queue._record_completed_job(job)
+        await (await queue.add_job(job))
 
-    assert len(queue._completed_jobs) == 2
-    assert "job-1" not in queue._completed_jobs
+    assert queue.get_status()["completed_jobs"] == 2
     assert queue.get_job("job-1") is None
     assert queue.get_job("job-2") is not None
     assert queue.get_job("job-3") is not None
+    await queue.stop()
 
 
 @pytest.mark.unit
-def test_scraping_job_queue_zero_completed_retention_discards_completed_jobs():
+@pytest.mark.asyncio
+async def test_scraping_job_queue_zero_completed_retention_discards_completed_jobs():
     queue = ScrapingJobQueue(completed_retention=0)
     job = ScrapingJob(job_id="job-1", url="https://example.com/1", method="auto")
-    job.status = JobStatus.COMPLETED
 
-    queue._record_completed_job(job)
+    async def execute(job):
+        return {"url": job.url, "extraction_successful": True}
 
-    assert queue._completed_jobs == {}
+    queue._execute_job = execute
+    await queue.start()
+    await (await queue.add_job(job))
+    # Public delivery can precede drain; stop settles the final ownership state.
+    await queue.stop()
+    for _ in range(100):
+        if not queue.get_status()["live_jobs"]:
+            break
+        await asyncio.sleep(0)
+
+    assert queue.get_status()["completed_jobs"] == 0
     assert queue.get_job("job-1") is None
 
 

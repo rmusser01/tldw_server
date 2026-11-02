@@ -98,16 +98,17 @@ async def test_legacy_initial_transport_failure_is_a_structured_list():
 @pytest.mark.parametrize(
     "profile, expected",
     [
-        ("legacy_recursive", ["/bad", "/good"]),
+        ("legacy_recursive", ["/blog/bad", "/blog/good"]),
         ("enhanced_recursive", ["/bad"]),
     ],
 )
 async def test_profile_page_counters_from_a_failed_seed(profile, expected):
+    prefix = "/blog" if profile == "legacy_recursive" else ""
     harness = harness_for(
         profile,
         [
-            {"url": "https://example.com/bad", "extraction_successful": False, "links": ["/good"]},
-            {"url": "https://example.com/good"},
+            {"url": f"https://example.com{prefix}/bad", "extraction_successful": False, "links": ["/good"]},
+            {"url": f"https://example.com{prefix}/good"},
         ],
     )
     options = {"max_pages": 1}
@@ -115,8 +116,8 @@ async def test_profile_page_counters_from_a_failed_seed(profile, expected):
         options.update(
             base_url="https://example.com",
             resume_frontier=[
-                ("https://example.com/bad", 0),
-                ("https://example.com/good", 0),
+                ("https://example.com/blog/bad", 0),
+                ("https://example.com/blog/good", 0),
             ],
         )
     await harness.run(**options)
@@ -173,7 +174,7 @@ async def test_legacy_fifo_uses_real_discovery_and_filters_without_adding_enhanc
     ]
     assert all("crawl_strategy" not in article["metadata"] for article in result)
     assert all("_discovered_links" not in article for article in result)
-    assert harness.clock.sleeps == [0.0, 0.0, 0.0]
+    assert harness.clock.sleeps == []  # Canonical zero-delay execution needs no scheduled wait.
     assert harness.callbacks[:2] == [
         "Scraping page 1/4: https://example.com",
         "Scraping page 2/4: https://example.com/blog/z",
@@ -215,7 +216,10 @@ async def test_sitemap_formats_preserve_each_adapter_current_parser_contract(pro
     assert harness.responses and all(response.closed for response in harness.responses)
     if kind == "index":
         assert result[0]["url"] == "https://example.com/child-sitemap.xml"
-        assert len(harness.fetch_calls) == 1  # Current adapters scrape locs; no nested expansion.
+        assert [call["url"] for call in harness.fetch_calls] == [
+            harness.sitemap_url,
+            "https://example.com/child-sitemap.xml",
+        ]  # One discovery document plus one canonical article acquisition; no nested expansion.
 
 
 @pytest.mark.asyncio
@@ -320,9 +324,7 @@ def test_sync_legacy_adapters_return_materialized_lists(profile):
 
 
 LEGACY_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/58.0.3029.110 Safari/537.3"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
 )
 
 SIGNATURES = {

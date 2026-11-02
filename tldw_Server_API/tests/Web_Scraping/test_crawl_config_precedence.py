@@ -5,10 +5,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-import tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib as extractor_mod
 import tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping as enhanced_core_mod
-import tldw_Server_API.app.services.web_scraping_service as legacy_svc_mod
 import tldw_Server_API.app.services.enhanced_web_scraping_service as enhanced_svc_mod
+import tldw_Server_API.app.services.web_scraping_service as legacy_svc_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ScrapeMethod
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
     EnhancedWebScraper,
@@ -190,9 +189,7 @@ async def test_explicit_max_pages_100_is_treated_as_request_override(monkeypatch
 
 
 @pytest.mark.unit
-def test_process_web_scraping_endpoint_omitted_max_pages_forwards_none(
-    client_user_only, monkeypatch
-):
+def test_process_web_scraping_endpoint_omitted_max_pages_forwards_none(client_user_only, monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.media as media_mod
 
     captured = {}
@@ -291,97 +288,32 @@ async def test_scraping_job_queue_propagates_analysis_intent_to_article_scrape()
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_sitemap_crawl_retains_analysis_intent_for_scrape_multiple(monkeypatch):
-    captured: dict[str, object] = {}
-    scraper = EnhancedWebScraper(config={})
+async def test_sitemap_crawl_retains_analysis_intent_for_page_execution(monkeypatch):
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import make_harness
 
-    async def fake_policy(url, **kwargs):
-        return enhanced_core_mod.WebOutboundPolicyDecision(
-            allowed=True,
-            mode="strict",
-            reason="allowed",
-            stage=kwargs["stage"],
-            source=kwargs["source"],
-        )
-
-    class DummyResponse:
-        text = "<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'><url><loc>https://example.com/a</loc></url></urlset>"
-
-        async def aclose(self):
-            return None
-
-    async def fake_afetch(**_kwargs):
-        return DummyResponse()
-
-    async def fake_scrape_multiple(_urls, **kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(enhanced_core_mod, "decide_web_outbound_policy", fake_policy)
-    monkeypatch.setattr(enhanced_core_mod, "afetch", fake_afetch)
-    monkeypatch.setattr(scraper, "scrape_multiple", fake_scrape_multiple)
-
-    await scraper.scrape_sitemap(
-        "https://example.com/sitemap.xml",
-        allow_llm_extraction=False,
-    )
-
-    assert captured["allow_llm_extraction"] is False
+    fixture = make_harness(profile="enhanced_sitemap", outcomes=[{"url": "https://example.com/a"}])
+    await fixture.run(allow_llm_extraction=False)
+    assert [call["kwargs"]["allow_llm_extraction"] for call in fixture.calls] == [False]
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("analysis_intent", [False, True])
 def test_url_level_scraper_explicitly_forwards_analysis_intent(monkeypatch, analysis_intent):
-    captured: list[object] = []
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import make_harness
 
-    def fake_scrape_article_blocking(_url, *, allow_llm_extraction=None):
-        captured.append(allow_llm_extraction)
-        return {"url": _url, "extraction_successful": True}
-
-    monkeypatch.setattr(extractor_mod, "collect_internal_links", lambda _url: {"https://example.com/article"})
-    monkeypatch.setattr(extractor_mod, "scrape_article_blocking", fake_scrape_article_blocking)
-
-    extractor_mod.scrape_by_url_level(
-        "https://example.com",
-        1,
-        allow_llm_extraction=analysis_intent,
-    )
-
-    assert captured == [analysis_intent]
+    fixture = make_harness(profile="legacy_url_level", outcomes=[{"url": "https://example.com/article"}])
+    fixture.run_sync(level=1, allow_llm_extraction=analysis_intent)
+    assert [call["kwargs"]["allow_llm_extraction"] for call in fixture.calls] == [analysis_intent]
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("analysis_intent", [False, True])
 def test_sitemap_scraper_explicitly_forwards_analysis_intent(monkeypatch, analysis_intent):
-    captured: list[object] = []
-    sitemap = """
-    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-      <url><loc>https://example.com/article</loc></url>
-    </urlset>
-    """
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import make_harness
 
-    def fake_scrape_article_blocking(_url, *, allow_llm_extraction=None):
-        captured.append(allow_llm_extraction)
-        return {"url": _url, "extraction_successful": True}
-
-    monkeypatch.setattr(
-        extractor_mod,
-        "decide_web_outbound_policy_sync",
-        lambda *_args, **_kwargs: SimpleNamespace(allowed=True),
-    )
-    monkeypatch.setattr(
-        extractor_mod,
-        "http_fetch",
-        lambda **_kwargs: {"status": 200, "text": sitemap},
-    )
-    monkeypatch.setattr(extractor_mod, "scrape_article_blocking", fake_scrape_article_blocking)
-
-    extractor_mod.scrape_from_sitemap(
-        "https://example.com/sitemap.xml",
-        allow_llm_extraction=analysis_intent,
-    )
-
-    assert captured == [analysis_intent]
+    fixture = make_harness(profile="legacy_sitemap", outcomes=[{"url": "https://example.com/article"}])
+    fixture.run_sync(allow_llm_extraction=analysis_intent)
+    assert [call["kwargs"]["allow_llm_extraction"] for call in fixture.calls] == [analysis_intent]
 
 
 @pytest.mark.unit

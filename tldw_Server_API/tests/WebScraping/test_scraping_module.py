@@ -287,7 +287,9 @@ async def test_sitemap_scrape_blocks_on_async_policy_before_fetch(monkeypatch):
     async def fake_afetch(*args, **kwargs):
         return DummyResp()
 
-    monkeypatch.setattr(ews, "decide_web_outbound_policy", fake_policy, raising=False)
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import crawl
+
+    monkeypatch.setattr(crawl, "decide_web_outbound_policy", fake_policy)
     monkeypatch.setattr(ews, "decide_web_outbound_policy_sync", fake_sync_policy, raising=False)
     monkeypatch.setattr(ews, "afetch", fake_afetch, raising=False)
 
