@@ -1,8 +1,8 @@
 """Durable, conservative admission and settlement for bounded MCP completions.
 
-Every admission reads its canonical snapshot under the same scope lock used by
-settlement. Unresolved reservations carry forward without age filtering. Legacy
-Chat does not take these locks and is not atomically coordinated by this API.
+Admission and settlement take the native user lock before the billing-scope
+lock, then read canonical usage. Unresolved reservations carry forward without
+age filtering. Legacy Chat does not take these locks and is not atomically coordinated by this API.
 Cost units are caller-frozen integer nanodollars; no prices or content are stored.
 """
 
@@ -222,6 +222,13 @@ class ProviderUsageReservationsRepo:
                 scope.value,
             )
 
+    async def _lock_authorities(self, conn: Any, user_id: int, scope: BillingScope) -> None:
+        """Serialize native user admission before taking the shared billing lock."""
+        user_scope = BillingScope("user", user_id)
+        await self._lock(conn, user_scope)
+        if scope != user_scope:
+            await self._lock(conn, scope)
+
     def _now(self) -> datetime | str:
         now = datetime.now(timezone.utc)
         return now if self._pg() else now.isoformat()
@@ -236,7 +243,9 @@ class ProviderUsageReservationsRepo:
         row = await self._get(conn, execution_id)
         if row is None:
             raise ProviderUsageReservationError("reservation_not_found")
-        await self._lock(conn, BillingScope(row["billing_scope_type"], row["billing_scope_id"]))
+        await self._lock_authorities(
+            conn, row["user_id"], BillingScope(row["billing_scope_type"], row["billing_scope_id"])
+        )
         # The first read establishes immutable scope only; re-read state after locking.
         row = await self._get(conn, execution_id)
         if row is None:
@@ -282,17 +291,27 @@ class ProviderUsageReservationsRepo:
         reservation: ProviderUsageReservation,
         *,
         snapshot_reader: SnapshotReader,
+        on_reserved: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
-        """Commit exposure only after locked, fail-closed quota reads."""
+        """Commit exposure and synchronously notify its owner before transaction exit.
+
+        The trusted callback acknowledges this invocation's insert, not commit.
+        It permits safe pre-dispatch cleanup after uncertain transaction exit.
+        Duplicate executions never invoke it.
+        """
         if type(reservation) is not ProviderUsageReservation or not callable(snapshot_reader):
             raise ProviderUsageReservationError("invalid_reservation")
+        if on_reserved is not None and not callable(on_reserved):
+            raise ProviderUsageReservationError("invalid_reservation")
         async with self._transaction() as conn:
-            await self._lock(conn, reservation.billing_scope)
+            await self._lock_authorities(conn, reservation.user_id, reservation.billing_scope)
             if await self._get(conn, reservation.execution_id) is not None:
                 raise ProviderUsageReservationError("duplicate_execution")
             snapshot = None
             try:
                 snapshot = await snapshot_reader(conn)
+            except ProviderUsageReservationError:
+                raise
             except Exception:  # noqa: BLE001 - required snapshot callback fails closed
                 snapshot = None
             if type(snapshot) is not ReservationQuotaSnapshot:
@@ -346,6 +365,8 @@ class ProviderUsageReservationsRepo:
             )
             if not inserted:
                 raise ProviderUsageReservationError("duplicate_execution")
+            if on_reserved is not None:
+                on_reserved()
             row = cast(dict[str, Any], await self._get(conn, reservation.execution_id))
         return row
 

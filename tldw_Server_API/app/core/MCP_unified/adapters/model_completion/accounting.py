@@ -12,6 +12,7 @@ from typing import Any, cast
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, await_cancellation_safe_cleanup
+from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import _TransactionBoundPool
 from tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo import (
     MAX_INT,
     BillingScope,
@@ -21,7 +22,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo impo
     ReservationActuals,
     ReservationQuotaSnapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
+from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import COST_UNITS_PER_USD, AuthnzUsageRepo
 from tldw_Server_API.app.core.Billing.enforcement import BillingEnforcer
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
@@ -161,7 +162,9 @@ class ModelCompletionAccounting:
             credential_source,
         )
 
-    async def _user_quota_refused(self, reservation: ProviderUsageReservation) -> bool:
+    async def _user_quota_refused(
+        self, reservation: ProviderUsageReservation, conn: Any, quota_pool: DatabasePool | None
+    ) -> bool:
         """Use native profile precedence and counters, never an ambient caller identity.
 
         MCP's required accounting remains fail-closed, so use the uncached
@@ -173,8 +176,10 @@ class ModelCompletionAccounting:
 
         if not quota_resolver.usage_quotas_enabled():
             return False
-        pool = await self._quota_pool_factory() if self._quota_pool_factory is not None else self._usage.db_pool
-        usage = AuthnzUsageRepo(pool)
+        postgres = self._usage._is_postgres_backend()
+        if quota_pool is not None and (quota_pool.pool is not None) != postgres:
+            raise ValueError("Native quotas require the admission backend")
+        pool = cast(DatabasePool, _TransactionBoundPool(conn, postgres=postgres))
         now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         for key, since, tokens in (
             ("limits.llm_tokens_per_month", now.replace(day=1), True),
@@ -185,18 +190,15 @@ class ModelCompletionAccounting:
             if limit is None:
                 continue
             bound = Decimal(str(limit))
-            raw = (
-                await usage.sum_user_llm_tokens_since(user_id=reservation.user_id, since=since)
+            used_tokens, used_costs = await self._usage.read_user_llm_exposure(conn, reservation.user_id, since)
+            exposure = (
+                Decimal(_count(used_tokens + reservation.reserved_input_tokens + reservation.reserved_output_tokens))
                 if tokens
-                else await usage.sum_user_llm_cost_since(user_id=reservation.user_id, since=since)
+                else Decimal(_count(used_costs + reservation.reserved_cost_units)) / COST_UNITS_PER_USD
             )
-            used = Decimal(str(raw))
-            if not bound.is_finite() or not used.is_finite() or used < 0:
+            if not bound.is_finite() or bound < 0:
                 raise ValueError("Invalid native quota accounting")
-            if tokens:
-                if used + reservation.reserved_input_tokens + reservation.reserved_output_tokens > bound:
-                    return True
-            elif used >= bound:
+            if bound == 0 or exposure > bound:
                 return True
         return False
 
@@ -218,6 +220,8 @@ class ModelCompletionAccounting:
             raise_detached_error(ModelCompletionFailure("invalid_model_request", ModelFailureDomain.REQUEST))
 
         async def snapshot_reader(conn: Any) -> ReservationQuotaSnapshot:
+            if await self._user_quota_refused(reservation, conn, quota_pool):
+                raise ProviderUsageReservationError("quota_exceeded")
             hosted_limit = None
             if reservation.credential_source != "user":
                 hosted_limit = await self._billing.get_mcp_token_limit(
@@ -240,24 +244,26 @@ class ModelCompletionAccounting:
             )
 
         quota_failed = False
-        quota_refused = False
+        quota_pool: DatabasePool | None = None
         try:
-            quota_refused = await self._user_quota_refused(reservation)
+            if self._quota_pool_factory is not None:
+                quota_pool = await self._quota_pool_factory()
         except Exception:  # noqa: BLE001 - keep required quota-service failures content-free
             quota_failed = True
         if quota_failed:
             raise_detached_error(
                 ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
             )
-        if quota_refused:
-            raise_detached_error(ModelCompletionFailure("model_quota_exceeded", ModelFailureDomain.REQUEST))
-
-        durable_accepted = False
+        durable_owned = False
         governor_handle = None
         failure = None
+
+        def on_reserved() -> None:
+            nonlocal durable_owned
+            durable_owned = True
+
         try:
-            await self._reservations.reserve(reservation, snapshot_reader=snapshot_reader)
-            durable_accepted = True
+            await self._reservations.reserve(reservation, snapshot_reader=snapshot_reader, on_reserved=on_reserved)
             total_tokens = _count(reservation.reserved_input_tokens + reservation.reserved_output_tokens)
             decision, governor_handle = await self._governor.reserve(
                 RGRequest(
@@ -279,9 +285,10 @@ class ModelCompletionAccounting:
             else:
                 return AccountingReservation(reservation, governor_handle, self._owner)
         except asyncio.CancelledError:
-            # A cancelled commit can have completed before propagation. The
-            # opaque server execution ID permits conservative pre-dispatch cleanup.
-            await await_cancellation_safe_cleanup(self._release_pre_dispatch(reservation.execution_id, governor_handle))
+            if durable_owned:
+                await await_cancellation_safe_cleanup(
+                    self._release_pre_dispatch(reservation.execution_id, governor_handle)
+                )
             raise
         except ProviderUsageReservationError as exc:
             domain = (
@@ -294,7 +301,7 @@ class ModelCompletionAccounting:
             )
         except Exception:  # noqa: BLE001 - detach arbitrary required-service failures at the public boundary
             failure = ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
-        if durable_accepted:
+        if durable_owned:
             await await_cancellation_safe_cleanup(self._release_pre_dispatch(reservation.execution_id, governor_handle))
         raise_detached_error(
             failure or ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)

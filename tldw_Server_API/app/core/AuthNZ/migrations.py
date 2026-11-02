@@ -6782,6 +6782,10 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
         "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_scope "
         "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_user_state "
+        "ON provider_usage_reservations(user_id, state)"
+    )
     reservation_columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
     if "credential_source" not in reservation_columns:
         conn.execute(

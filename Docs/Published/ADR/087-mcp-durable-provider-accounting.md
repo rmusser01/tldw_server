@@ -9,7 +9,7 @@
 
 ## Decision
 
-Bounded MCP completions reserve worst-case token and integer cost exposure durably before dispatch. Admission and settlement serialize on the explicit authenticated billing scope. Admission reads uncached canonical actual usage under that lock, adds all outstanding reservations, and fails closed on unavailable accounting state.
+Bounded MCP completions reserve worst-case token and integer cost exposure durably before dispatch. Admission and settlement take the durable invocation-user lock first, then the explicit authenticated billing-scope lock when distinct. Admission reads uncached canonical actual usage under those locks, adds all outstanding reservations, and fails closed on unavailable accounting state.
 
 ## Context
 
@@ -34,6 +34,13 @@ Resource Governor release and bounded actual reconciliation reduce the associate
 Only the handle that inserted a durable daily-ledger row owns its downward settlement. Same-operation governor admission serializes through handle publication; durable replay after cache expiry or in another governor cannot acquire refund ownership over an earlier charge. Operation locks are removed after their final owner or waiter exits.
 
 Completion concurrency uses the governor's existing `jobs` lease category. DB-backed Billing limit reads use the admission transaction connection, never a nested pool acquisition. Pre-dispatch cleanup attempts governor release even if durable storage is unavailable. Local release/dispatch markers make those boundaries mutually exclusive, and the durable state fence prevents refunds after dispatch begins. Failed release cannot authorize later dispatch on a refunded governor handle.
+
+A trusted synchronous insertion notification transfers pre-dispatch cleanup
+ownership before the repository exits its transaction. It acknowledges only this
+attempt's successful insert, not commit. A commit-success/connection-release
+failure therefore cannot strand an ownerless reservation. Rollback still permits
+safe best-effort cleanup; duplicate attempts and cancelled duplicate waiters never
+receive ownership or refund another invocation's row.
 
 Hosted subscription limits apply only when the usage-quota master switch is enabled and a Billing repository is wired, following the host's Billing activation contract. OSS or inactive hosted Billing does not impose implicit free-plan limits. Explicit MCP operator bounds and durable usage/reservation recording remain mandatory for this certified execution path. Activation failures still fail closed rather than impersonating an inactive deployment.
 
@@ -60,14 +67,17 @@ same scope lock. Explicit MCP operator ceilings and Resource Governor limits
 still cover every source, including own-key work; the exemption cannot weaken
 those safety bounds or let own-key exposure consume a hosted allowance.
 
-Before durable admission, operator-paid work checks the explicit invocation
+Within durable admission, operator-paid work checks the explicit invocation
 user's current native profile precedence and monthly-token/daily-cost/monthly-cost
-limits (ADR-064). These reads use the uncached resolver and canonical own-key-aware
-counters on the canonical quota pool, not an ambient prechecked/nested-call
-context. A required lookup/counter failure remains fail-closed and content-free
-for this bounded MCP path; legacy Chat's fail-open wrappers are unchanged. The
-native user check does not promise a transaction spanning legacy Chat or multiple
-MCP billing scopes; durable scope-level MCP ceilings remain the atomic authority.
+limits (ADR-064). The uncached resolver borrows the owning transaction connection,
+not an ambient prechecked context or an additional pool slot. Period-bound paid
+actuals, all unresolved paid MCP exposure across billing scopes, and the proposed
+worst case are counted together. Reconciled reservations are not counted twice;
+unresolved exposure never ages out. Admission and settlement share the fixed
+user-first lock order so a concurrent settlement cannot disappear between usage
+and reservation reads. A required lookup/counter failure remains fail-closed and
+content-free. Legacy Chat's fail-open wrappers remain unchanged and do not join
+this transaction/lock protocol; no atomic coordination with legacy Chat is claimed.
 
 The canonical usage row determines which completed calls and billing period are counted. Its legacy floating-point USD columns remain compatible, but strict MCP cost enforcement reads the exact integer actual cost from the reservation audit row committed in the same transaction. A missing or inconsistent settlement fails closed instead of reconstructing MCP costs from lossy floats.
 

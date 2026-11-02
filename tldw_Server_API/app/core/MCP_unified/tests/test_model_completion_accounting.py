@@ -41,13 +41,15 @@ def accounting(monkeypatch):
         state = None
         actuals = None
 
-        async def reserve(self, reservation, *, snapshot_reader):
+        async def reserve(self, reservation, *, snapshot_reader, on_reserved=None):
             if self.failure:
                 raise self.failure
             self.snapshot = await snapshot_reader("locked-connection")
             self.row = reservation
             self.state = "reserved"
             events.append("durable_reserved")
+            if on_reserved is not None:
+                on_reserved()
 
         async def mark_dispatched(self, execution_id):
             self.state = "dispatched"

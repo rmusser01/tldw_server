@@ -114,6 +114,17 @@ def test_migration_105_registered():
     assert migrations.get_authnz_migrations()[-1].version == 105
 
 
+def test_migration_105_restores_native_user_exposure_index_on_provisional_schema():
+    with sqlite3.connect(":memory:") as conn:
+        migrations.migration_105_create_provider_usage_reservations(conn)
+        conn.execute("DROP INDEX IF EXISTS idx_provider_usage_reservations_user_state")
+        migrations.migration_105_create_provider_usage_reservations(conn)
+        assert [row[2] for row in conn.execute("PRAGMA index_info(idx_provider_usage_reservations_user_state)")] == [
+            "user_id",
+            "state",
+        ]
+
+
 def test_migration_105_supports_reduced_legacy_schema_without_optional_usage_table():
     with sqlite3.connect(":memory:") as conn:
         migrations.migration_105_create_provider_usage_reservations(conn)
@@ -226,6 +237,38 @@ def test_migration_fails_for_duplicate_canonical_execution_ids(tmp_path):
 
 class ReservationContract:
     """The same state, arithmetic, rollback and race assertions on both backends."""
+
+    @pytest.mark.asyncio
+    async def test_native_user_exposure_index_covers_identity_and_state(self, reservation_pool):
+        async with reservation_pool.transaction() as conn:
+            if reservation_pool.pool is None:
+                columns = await rows(
+                    reservation_pool, conn, "PRAGMA index_info(idx_provider_usage_reservations_user_state)"
+                )
+            else:
+                columns = await rows(
+                    reservation_pool,
+                    conn,
+                    "SELECT a.attname AS name FROM pg_index AS i "
+                    "JOIN pg_class AS c ON c.oid = i.indexrelid "
+                    "CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, position) "
+                    "JOIN pg_attribute AS a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
+                    "WHERE c.relname = 'idx_provider_usage_reservations_user_state' ORDER BY k.position",
+                )
+        assert [column["name"] for column in columns] == ["user_id", "state"]
+
+    @pytest.mark.asyncio
+    async def test_reservation_callback_belongs_only_to_own_insert(self, reservation_pool):
+        mod = api()
+        repo = mod.ProviderUsageReservationsRepo(reservation_pool)
+        item = reservation()
+        ownership = []
+        await repo.reserve(item, snapshot_reader=unlimited, on_reserved=lambda: ownership.append("inserted"))
+        with pytest.raises(mod.ProviderUsageReservationError) as error:
+            await repo.reserve(item, snapshot_reader=unlimited, on_reserved=lambda: ownership.append("duplicate"))
+        assert error.value.code == "duplicate_execution"
+        assert ownership == ["inserted"]
+        assert (await repo.get(item.execution_id))["state"] == "reserved"
 
     @pytest.mark.asyncio
     async def test_shared_scope_admission_counts_other_users_and_keeps_unrelated_scopes_separate(

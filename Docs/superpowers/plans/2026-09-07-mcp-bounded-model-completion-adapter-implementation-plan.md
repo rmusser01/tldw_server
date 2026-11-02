@@ -680,6 +680,16 @@ task types, and distinct local variables address the new diagnostics without
 adding ignores, changing validation, or widening the certified execution path.
 The existing nonblocking diagnostics are not a globally clean mypy result.
 
+The type-only checkpoint `125038e497..e04fb78df8` received a separate independent
+review of all 15 casts and the unchanged runtime guards, with no findings.
+Review repairs amend proposed ADR-087 (native user exposure, fixed user-first
+lock order, transaction-bound profile reads and insertion ownership) and
+ADR-088 (trusted native-ready dispatch fence). Accepted decisions are unchanged.
+The three unrelated-suite child tasks are complete with independent approval;
+the 19-case Admin Webhooks module also passes on canonical PostgreSQL, closing
+the final three availability skips. Fresh final source review remains required
+after the four core repairs are committed.
+
 ### November Stage 4: Publish And Arm
 **Goal**: Publish with an explicit lease and enable only normal gated auto-merge.
 **Success Criteria**: GitHub head matches reviewed source; no unresolved threads; ordinary required gates retained; auto-merge state read back.

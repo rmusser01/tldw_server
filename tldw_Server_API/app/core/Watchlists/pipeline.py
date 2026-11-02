@@ -67,7 +67,7 @@ from tldw_Server_API.app.core.Watchlists.fetchers import (
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters, normalize_filters
 
 try:
-    import bleach as _bleach  # type: ignore
+    import bleach as _bleach  # type: ignore[import-untyped]
 except ImportError:  # pragma: no cover
     _bleach = None  # type: ignore[assignment]
 

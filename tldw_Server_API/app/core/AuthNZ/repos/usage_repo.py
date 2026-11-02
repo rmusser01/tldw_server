@@ -35,6 +35,26 @@ def _accounting_aggregate(value: Any) -> int:
     return _accounting_count(value)
 
 
+def _accounting_totals(rows: list[dict[str, Any]]) -> tuple[int, int]:
+    """Read exact MCP settlement costs and conservatively round legacy costs."""
+    tokens = costs = 0
+    for row in rows:
+        count = 0 if row["total_tokens"] is None else row["total_tokens"]
+        tokens = _accounting_count(tokens + _accounting_count(count))
+        if row["operation"] == "mcp_model_completion":
+            if row["reservation_state"] != "reconciled":
+                raise ValueError("MCP usage lacks atomic settlement")
+            units = _accounting_count(row["actual_cost_units"])
+        else:
+            raw_cost = 0 if row["total_cost_usd"] is None else row["total_cost_usd"]
+            cost = Decimal(str(raw_cost))
+            if not cost.is_finite() or cost < 0:
+                raise ValueError("Invalid accounting cost")
+            units = int((cost * COST_UNITS_PER_USD).to_integral_value(rounding=ROUND_CEILING))
+        costs = _accounting_count(costs + _accounting_count(units))
+    return tokens, costs
+
+
 def _scope_usage_parts(scope: BillingScope) -> tuple[str, str, str, tuple[int, ...]]:
     if type(scope.value) is not int or scope.value <= 0 or scope.kind not in {"user", "team", "org"}:
         raise ValueError("Invalid accounting scope")
@@ -207,21 +227,50 @@ class AuthnzUsageRepo:
                 "actual_cost_units",
             ),
         )
-        tokens = costs = 0
-        for row in rows:
-            count = 0 if row["total_tokens"] is None else row["total_tokens"]
-            tokens = _accounting_count(tokens + _accounting_count(count))
-            if row["operation"] == "mcp_model_completion":
-                if row["reservation_state"] != "reconciled":
-                    raise ValueError("MCP usage lacks atomic settlement")
-                units = _accounting_count(row["actual_cost_units"])
-            else:
-                raw_cost = 0 if row["total_cost_usd"] is None else row["total_cost_usd"]
-                cost = Decimal(str(raw_cost))
-                if not cost.is_finite() or cost < 0:
-                    raise ValueError("Invalid accounting cost")
-                units = int((cost * COST_UNITS_PER_USD).to_integral_value(rounding=ROUND_CEILING))
-            costs = _accounting_count(costs + _accounting_count(units))
+        return _accounting_totals(rows)
+
+    async def read_user_llm_exposure(self, conn: Any, user_id: int, since: datetime) -> tuple[int, int]:
+        """Count native paid usage plus unresolved MCP exposure across all scopes.
+
+        The caller holds the durable user lock also taken by MCP settlement.
+        Completed usage is period-bound; unresolved exposure never ages out.
+        Legacy Chat remains outside this reservation-lock protocol.
+        """
+        if _accounting_count(user_id) == 0:
+            raise ValueError("Invalid accounting user")
+        is_pg = self._is_postgres_backend()
+        time_filter = "l.ts >= ?" if is_pg else "datetime(l.ts) >= datetime(?)"
+        bound = _strip_tzinfo(since) if is_pg else _strip_tzinfo(since).isoformat(" ", timespec="seconds")
+        # Only the two fixed timestamp predicates vary; all values remain bound.
+        sql = (
+            "SELECT l.total_tokens, l.total_cost_usd, l.operation, "  # nosec B608
+            """r.state AS reservation_state, r.actual_cost_units
+               FROM llm_usage_log AS l
+               LEFT JOIN provider_usage_reservations AS r
+                 ON l.operation = 'mcp_model_completion' AND r.execution_id = l.request_id
+               WHERE l.user_id = ? AND """
+            + time_filter
+            + " AND COALESCE(l.operation, '') <> 'embeddings' AND COALESCE(l.credential_source, '') <> 'user'"
+        )
+        rows = await fetch_all(conn, is_pg, sql, (user_id, bound), ())
+        tokens, costs = _accounting_totals(rows)
+        unresolved = await fetch_all(
+            conn,
+            is_pg,
+            """SELECT reserved_input_tokens, reserved_output_tokens, reserved_cost_units
+               FROM provider_usage_reservations
+               WHERE user_id = ? AND state IN ('reserved', 'dispatched', 'ambiguous')
+                 AND COALESCE(credential_source, '') <> 'user'""",
+            (user_id,),
+            (),
+        )
+        for row in unresolved:
+            tokens = _accounting_count(
+                tokens
+                + _accounting_count(row["reserved_input_tokens"])
+                + _accounting_count(row["reserved_output_tokens"])
+            )
+            costs = _accounting_count(costs + _accounting_count(row["reserved_cost_units"]))
         return tokens, costs
 
     async def read_org_token_exposure(self, conn: Any, org_id: int, month_start: datetime) -> int:

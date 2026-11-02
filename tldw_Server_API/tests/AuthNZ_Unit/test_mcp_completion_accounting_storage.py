@@ -1,12 +1,14 @@
 """End-to-end admission and settlement contracts on real accounting storage."""
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.repos import usage_repo
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import execute, fetch_all
 from tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo import (
     MAX_INT,
@@ -28,6 +30,8 @@ from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
     ModelInvocationIdentity,
 )
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
+from tldw_Server_API.app.core.Usage import quota_resolver
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.tests.AuthNZ_Unit.test_provider_usage_reservations_repo import (
     reservation_pool as reservation_pool,
 )
@@ -36,6 +40,19 @@ from tldw_Server_API.tests.AuthNZ_Unit.test_provider_usage_reservations_repo imp
 )
 
 pytestmark = pytest.mark.unit
+NATIVE_LIMITS = (
+    ("limits.llm_tokens_per_month", 47),
+    ("limits.llm_cost_per_day_usd", 0.000000104),
+    ("limits.llm_cost_per_month_usd", 0.000000104),
+)
+
+
+async def native_limit(pool, monkeypatch, key, value):
+    """Exercise persisted native profile precedence without a quota-reader stub."""
+    monkeypatch.setattr(quota_resolver, "usage_quotas_enabled", lambda: True)
+    repo = UserProfileOverridesRepo(pool)
+    await repo.ensure_tables()
+    await repo.upsert_override(user_id=1, key=key, value=value, updated_by=None)
 
 
 def make_service(pool, *, token_limit=47, usage=None, governor=None):
@@ -104,6 +121,343 @@ async def canonical_rows(pool):
 
 class AccountingStorageContract:
     """Run the identical composed lifecycle against SQLite and PostgreSQL."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,allowance", NATIVE_LIMITS)
+    @pytest.mark.parametrize("different_scope", [False, True])
+    async def test_native_positive_allowance_counts_ambiguous_paid_exposure(
+        self, reservation_pool, monkeypatch, key, allowance, different_scope
+    ):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        service = make_service(reservation_pool, token_limit=10000)
+        first = ModelInvocationIdentity(1, None, 12, str(uuid4()))
+        handle = await service.reserve(request(), first, credential_source="server_default")
+        await service.mark_dispatched(handle)
+        assert await service.retain_ambiguous(handle)
+        next_scope = 13 if different_scope else 12
+        second = ModelInvocationIdentity(1, None, next_scope, str(uuid4()))
+        with pytest.raises(ModelCompletionFailure) as error:
+            await service.reserve(request(), second, credential_source="server_default")
+        assert error.value.code == "model_quota_exceeded"
+        assert await ProviderUsageReservationsRepo(reservation_pool).get(second.execution_id) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "key,allowance",
+        [
+            ("limits.llm_tokens_per_month", 46),
+            ("limits.llm_cost_per_day_usd", 0.000000103),
+            ("limits.llm_cost_per_month_usd", 0.000000103),
+        ],
+    )
+    async def test_native_admission_includes_proposed_worst_case(self, reservation_pool, monkeypatch, key, allowance):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        service = make_service(reservation_pool, token_limit=10000)
+        invocation = identity()
+        with pytest.raises(ModelCompletionFailure) as error:
+            await service.reserve(request(), invocation, credential_source="server_default")
+        assert error.value.code == "model_quota_exceeded"
+        assert await ProviderUsageReservationsRepo(reservation_pool).get(invocation.execution_id) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,allowance", NATIVE_LIMITS)
+    async def test_concurrent_native_admission_different_scopes_has_one_winner(
+        self, reservation_pool, monkeypatch, key, allowance
+    ):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        service = make_service(reservation_pool, token_limit=10000)
+        entered, release = asyncio.Event(), asyncio.Event()
+        original_read = service._usage.read_provider_scope_usage
+        block_once = True
+
+        async def held_scope_read(*args, **kwargs):
+            nonlocal block_once
+            if block_once:
+                block_once = False
+                entered.set()
+                await release.wait()
+            return await original_read(*args, **kwargs)
+
+        monkeypatch.setattr(service._usage, "read_provider_scope_usage", held_scope_read)
+        first = asyncio.create_task(service.reserve(request(), ModelInvocationIdentity(1, None, 12, str(uuid4()))))
+        second = None
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            second = asyncio.create_task(service.reserve(request(), ModelInvocationIdentity(1, 5, None, str(uuid4()))))
+            await asyncio.sleep(0.05)
+        finally:
+            release.set()
+            results = await asyncio.gather(first, *([second] if second else []), return_exceptions=True)
+        assert sum(isinstance(result, ModelCompletionFailure) for result in results) == 1
+        failures = [result for result in results if isinstance(result, ModelCompletionFailure)]
+        assert failures[0].code == "model_quota_exceeded"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,allowance", NATIVE_LIMITS)
+    async def test_native_settlement_cannot_move_exposure_between_snapshot_reads(
+        self, reservation_pool, monkeypatch, key, allowance
+    ):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        service = make_service(reservation_pool, token_limit=10000)
+        first = await service.reserve(request(), ModelInvocationIdentity(1, None, 12, str(uuid4())))
+        await service.mark_dispatched(first)
+        read_complete, continue_read = asyncio.Event(), asyncio.Event()
+        original_fetch = usage_repo.fetch_all
+        hold_once = True
+
+        async def paused_actuals(conn, postgres, sql, args, columns):
+            nonlocal hold_once
+            result = await original_fetch(conn, postgres, sql, args, columns)
+            if hold_once and "WHERE l.user_id = ?" in sql:
+                hold_once = False
+                read_complete.set()
+                await continue_read.wait()
+            return result
+
+        monkeypatch.setattr(usage_repo, "fetch_all", paused_actuals)
+        admission = asyncio.create_task(service.reserve(request(), ModelInvocationIdentity(1, 5, None, str(uuid4()))))
+        settlement = None
+        try:
+            await asyncio.wait_for(read_complete.wait(), 5)
+            settlement = asyncio.create_task(service.reconcile(first, input_tokens=6, output_tokens=4))
+            await asyncio.sleep(0.05)
+            assert not settlement.done()
+        finally:
+            continue_read.set()
+            outcomes = await asyncio.gather(admission, *([settlement] if settlement else []), return_exceptions=True)
+        assert isinstance(outcomes[0], ModelCompletionFailure)
+        assert outcomes[0].code == "model_quota_exceeded"
+        assert outcomes[1] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,allowance", NATIVE_LIMITS)
+    @pytest.mark.parametrize("source", ["user", "user_unmetered"])
+    @pytest.mark.parametrize("settlement", ["ambiguous", "reconciled"])
+    async def test_native_exposure_preserves_own_key_exclusion(
+        self, reservation_pool, monkeypatch, key, allowance, source, settlement
+    ):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        service = make_service(reservation_pool, token_limit=10000)
+        handle = await service.reserve(request(), identity(), credential_source=source)
+        await service.mark_dispatched(handle)
+        if settlement == "ambiguous":
+            assert await service.retain_ambiguous(handle)
+        else:
+            assert await service.reconcile(handle, input_tokens=6, output_tokens=4)
+        if source == "user":
+            paid = await service.reserve(request(), identity(), credential_source="server_default")
+            await service.release_before_dispatch(paid)
+        else:
+            with pytest.raises(ModelCompletionFailure) as error:
+                await service.reserve(request(), identity(), credential_source="server_default")
+            assert error.value.code == "model_quota_exceeded"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "key,allowance",
+        [
+            ("limits.llm_tokens_per_month", 57),
+            ("limits.llm_cost_per_day_usd", 0.000000128),
+            ("limits.llm_cost_per_month_usd", 0.000000128),
+        ],
+    )
+    async def test_native_reconciliation_counts_actuals_without_reservation_double_count(
+        self, reservation_pool, monkeypatch, key, allowance
+    ):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        service = make_service(reservation_pool, token_limit=10000)
+        first = await service.reserve(request(), identity(), credential_source="server_default")
+        await service.mark_dispatched(first)
+        assert await service.reconcile(first, input_tokens=6, output_tokens=4)
+        second = await service.reserve(request(), identity(), credential_source="server_default")
+        with pytest.raises(ModelCompletionFailure) as error:
+            await service.reserve(request(), identity(), credential_source="server_default")
+        assert error.value.code == "model_quota_exceeded"
+        await service.release_before_dispatch(second)
+        after_release = await service.reserve(request(), identity(), credential_source="server_default")
+        await service.release_before_dispatch(after_release)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,allowance", NATIVE_LIMITS)
+    async def test_native_exposure_excludes_other_users_and_embeddings(
+        self, reservation_pool, monkeypatch, key, allowance
+    ):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        other = ProviderUsageReservation(
+            str(uuid4()), 2, None, 12, BillingScope("org", 12), "openai", "fixed", 47, 0, 104, "server_default"
+        )
+
+        async def unlimited(_conn):
+            return ReservationQuotaSnapshot(0, None, 0, None)
+
+        await ProviderUsageReservationsRepo(reservation_pool).reserve(other, snapshot_reader=unlimited)
+        async with reservation_pool.transaction() as conn:
+            await execute(
+                conn,
+                reservation_pool.pool is not None,
+                "INSERT INTO llm_usage_log (user_id, operation, total_tokens, total_cost_usd) "
+                "VALUES (1, 'embeddings', 1000000, 0.000000001)",
+                (),
+            )
+        service = make_service(reservation_pool, token_limit=2000000)
+        own = await service.reserve(request(), identity(), credential_source="server_default")
+        await service.release_before_dispatch(own)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,allowance", NATIVE_LIMITS)
+    async def test_native_period_actuals_expire_but_unresolved_exposure_carries_forward(
+        self, reservation_pool, monkeypatch, key, allowance
+    ):
+        await native_limit(reservation_pool, monkeypatch, key, allowance)
+        service = make_service(reservation_pool, token_limit=10000)
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        since = today if key == "limits.llm_cost_per_day_usd" else today.replace(day=1)
+        old = since - timedelta(seconds=1)
+        timestamp = old.replace(tzinfo=None) if reservation_pool.pool is not None else old.isoformat()
+        async with reservation_pool.transaction() as conn:
+            await execute(
+                conn,
+                reservation_pool.pool is not None,
+                "INSERT INTO llm_usage_log (ts, user_id, operation, total_tokens, total_cost_usd) "
+                "VALUES (?, 1, 'chat', 47, 0.000000104)",
+                (timestamp,),
+            )
+        handle = await service.reserve(request(), identity(), credential_source="server_default")
+        async with reservation_pool.transaction() as conn:
+            await execute(
+                conn,
+                reservation_pool.pool is not None,
+                "UPDATE provider_usage_reservations SET created_at = ? WHERE execution_id = ?",
+                (old if reservation_pool.pool is not None else old.isoformat(), handle.reservation.execution_id),
+            )
+        with pytest.raises(ModelCompletionFailure) as error:
+            await service.reserve(request(), identity(), credential_source="server_default")
+        assert error.value.code == "model_quota_exceeded"
+
+    @pytest.mark.asyncio
+    async def test_native_profile_reads_borrow_the_admission_transaction(self, reservation_pool, monkeypatch):
+        await native_limit(reservation_pool, monkeypatch, "limits.llm_tokens_per_month", 47)
+        service = make_service(reservation_pool, token_limit=10000)
+        transaction = reservation_pool.transaction
+        resolve_limit = quota_resolver.uncached_user_quota
+        held_connection = None
+        observations = []
+
+        @asynccontextmanager
+        async def observed_transaction():
+            nonlocal held_connection
+            async with transaction() as conn:
+                held_connection = conn
+                try:
+                    yield conn
+                finally:
+                    held_connection = None
+
+        async def observed_limit(*args, db_pool, **kwargs):
+            async with db_pool.acquire() as conn:
+                observations.append(conn is held_connection)
+            return await resolve_limit(*args, db_pool=db_pool, **kwargs)
+
+        async def canonical_pool():
+            assert held_connection is None
+            return reservation_pool
+
+        monkeypatch.setattr(reservation_pool, "transaction", observed_transaction)
+        monkeypatch.setattr(quota_resolver, "uncached_user_quota", observed_limit)
+        service._quota_pool_factory = canonical_pool
+        await service.reserve(request(), identity(), credential_source="server_default")
+        assert observations == [True, True, True]
+
+    @pytest.mark.asyncio
+    async def test_admission_commit_then_release_failure_releases_owned_exposure(self, reservation_pool, monkeypatch):
+        service = make_service(reservation_pool)
+        invocation = identity()
+        transaction = reservation_pool.transaction
+        fail_release = True
+
+        @asynccontextmanager
+        async def committed_then_failed_release():
+            nonlocal fail_release
+            async with transaction() as conn:
+                yield conn
+            if fail_release:
+                fail_release = False
+                raise OSError("private connection-release failure")
+
+        if reservation_pool.pool is None:
+            monkeypatch.setattr(reservation_pool, "transaction", committed_then_failed_release)
+        else:
+            native_pool = reservation_pool.pool
+
+            class ReleaseFailurePool:
+                """Fail release after the native commit through DatabasePool's real wrapper."""
+
+                def __getattr__(self, name):
+                    return getattr(native_pool, name)
+
+                @asynccontextmanager
+                async def acquire(self, *args, **kwargs):
+                    nonlocal fail_release
+                    async with native_pool.acquire(*args, **kwargs) as conn:
+                        yield conn
+                    if fail_release:
+                        fail_release = False
+                        raise OSError("private connection-release failure")
+
+            monkeypatch.setattr(reservation_pool, "pool", ReleaseFailurePool())
+        with pytest.raises(ModelCompletionFailure) as error:
+            await service.reserve(request(), invocation)
+        repo = ProviderUsageReservationsRepo(reservation_pool)
+        assert (await repo.get(invocation.execution_id))["state"] == "released"
+        assert await repo.outstanding(BillingScope("user", 1)) == {"tokens": 0, "cost_units": 0}
+        assert error.value.code == "accounting_unavailable"
+        assert error.value.__context__ is None and error.value.__cause__ is None
+
+    @pytest.mark.asyncio
+    async def test_duplicate_admission_never_attempts_release_of_existing_row(self, reservation_pool, monkeypatch):
+        service = make_service(reservation_pool)
+        invocation = identity()
+        await service.reserve(request(), invocation)
+        releases = []
+
+        async def forbidden_release(execution_id):
+            releases.append(execution_id)
+            raise AssertionError("Duplicate does not own the existing reservation")
+
+        monkeypatch.setattr(service._reservations, "release_before_dispatch", forbidden_release)
+        with pytest.raises(ModelCompletionFailure):
+            await service.reserve(request(), invocation)
+        assert releases == []
+        assert (await ProviderUsageReservationsRepo(reservation_pool).get(invocation.execution_id))[
+            "state"
+        ] == "reserved"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_duplicate_cannot_release_another_invocations_row(self, reservation_pool, monkeypatch):
+        service = make_service(reservation_pool)
+        invocation = identity()
+        await service.reserve(request(), invocation)
+        entered = asyncio.Event()
+        original_get = service._reservations._get
+        block_once = True
+
+        async def blocked_duplicate_read(conn, execution_id):
+            nonlocal block_once
+            if block_once:
+                block_once = False
+                entered.set()
+                await asyncio.Event().wait()
+            return await original_get(conn, execution_id)
+
+        monkeypatch.setattr(service._reservations, "_get", blocked_duplicate_read)
+        admission = asyncio.create_task(service.reserve(request(), invocation))
+        await asyncio.wait_for(entered.wait(), 5)
+        admission.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(admission, 5)
+        assert (await ProviderUsageReservationsRepo(reservation_pool).get(invocation.execution_id))[
+            "state"
+        ] == "reserved"
 
     @pytest.mark.asyncio
     async def test_hosted_limit_excludes_own_key_pending_and_settled_usage(self, reservation_pool, monkeypatch):

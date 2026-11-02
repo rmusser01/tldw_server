@@ -2055,6 +2055,11 @@ _CREATE_USAGE_TABLES = [
         "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)",
         (),
     ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_user_state "
+        "ON provider_usage_reservations(user_id, state)",
+        (),
+    ),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)", ()),

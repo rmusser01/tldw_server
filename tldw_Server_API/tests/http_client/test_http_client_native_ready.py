@@ -67,7 +67,7 @@ async def test_native_ready_rejects_unsafe_direct_callers_before_admission(monke
             "retry": None if unsafe == "implicit_retry" else hc.RetryPolicy(attempts=2 if unsafe == "retry" else 1),
             "on_native_ready": ready,
         }
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as rejected:
             if entry == "json":
                 await hc.afetch_json(max_bytes=100, allow_redirects=False, **kwargs)
             else:
@@ -81,6 +81,12 @@ async def test_native_ready_rejects_unsafe_direct_callers_before_admission(monke
                     await stream.__anext__()
                 finally:
                     await stream.aclose()
+    expected = (
+        "Native-ready callbacks require HTTPX"
+        if unsafe == "implicit_client" and entry in {"json", "stream"}
+        else "Native-ready callbacks require explicit single-attempt HTTPX"
+    )
+    assert str(rejected.value) == expected
     assert events == []
 
 
@@ -97,7 +103,7 @@ async def test_native_ready_json_rejects_unbounded_or_redirecting_calls(unsafe):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(send)) as client:
         kwargs = {} if unsafe == "implicit_redirects" else {"allow_redirects": unsafe == "redirects"}
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as rejected:
             await hc.afetch_json(
                 method="POST",
                 url=URL,
@@ -107,6 +113,7 @@ async def test_native_ready_json_rejects_unbounded_or_redirecting_calls(unsafe):
                 on_native_ready=ready,
                 **kwargs,
             )
+    assert str(rejected.value) == "Native-ready callbacks require bounded JSON without redirects"
     assert events == []
 
 
@@ -128,7 +135,7 @@ async def test_native_ready_never_runs_on_egress_denial(monkeypatch, denied_chec
 
     monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate)
     async with httpx.AsyncClient(transport=httpx.MockTransport(send)) as client:
-        with pytest.raises(EgressPolicyError):
+        with pytest.raises(EgressPolicyError) as denied:
             await hc.afetch_json(
                 method="POST",
                 url=URL,
@@ -138,19 +145,21 @@ async def test_native_ready_never_runs_on_egress_denial(monkeypatch, denied_chec
                 retry=hc.RetryPolicy(attempts=1),
                 on_native_ready=ready,
             )
+    assert str(denied.value) == "denied"
     assert events == ["egress"] * denied_check
 
 
 @pytest.mark.parametrize("error_type", [NetworkError, httpx.ConnectError])
 async def test_native_ready_callback_error_is_not_retried_or_sent(monkeypatch, error_type):
     events = []
+    original_error = error_type("private")
 
     async def validate(*args, **kwargs):
         pass
 
     async def ready():
         events.append("ready")
-        raise error_type("private")
+        raise original_error
 
     async def send(request):
         events.append("send")
@@ -158,7 +167,7 @@ async def test_native_ready_callback_error_is_not_retried_or_sent(monkeypatch, e
 
     monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate)
     async with httpx.AsyncClient(transport=httpx.MockTransport(send)) as client:
-        with pytest.raises(error_type):
+        with pytest.raises(error_type) as failed:
             await hc.afetch_json(
                 method="POST",
                 url=URL,
@@ -168,6 +177,7 @@ async def test_native_ready_callback_error_is_not_retried_or_sent(monkeypatch, e
                 retry=hc.RetryPolicy(attempts=1),
                 on_native_ready=ready,
             )
+    assert failed.value is original_error
     assert events == ["ready"]
 
 
@@ -187,7 +197,7 @@ async def test_native_ready_single_attempt_cannot_change_during_egress(monkeypat
 
     monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate)
     async with httpx.AsyncClient(transport=httpx.MockTransport(send)) as client:
-        await hc.afetch_json(
+        result = await hc.afetch_json(
             method="GET",
             url=URL,
             client=client,
@@ -196,6 +206,7 @@ async def test_native_ready_single_attempt_cannot_change_during_egress(monkeypat
             retry=retry,
             on_native_ready=ready,
         )
+    assert result == {}
     assert events == ["ready", "send"]
 
 
