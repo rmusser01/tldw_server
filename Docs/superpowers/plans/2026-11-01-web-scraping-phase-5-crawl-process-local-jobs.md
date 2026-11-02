@@ -397,7 +397,7 @@ history, and no removal of intentionally requested public article/raw content.
 **Goal:** Connect actual acquisition to parent controls, then build traversal/checkpoints/batches behind injected capabilities.
 **Success Criteria:** No budget bypass, lost in-flight page, orphan child, or duplicate discovery fetch.
 **Tests:** Tasks 5-8 unit/property/transport/checkpoint suites with existing Phase 3/4 regressions.
-**Status:** In Progress (Tasks 5-7 independently reviewed; Task 8 bounded production).
+**Status:** Complete (Tasks 5-8 independently reviewed; bounded production and cancellation fixes accepted).
 
 ### Task 5: Integrate Parent Controls With Canonical Acquisition
 
@@ -787,7 +787,7 @@ These expose required private execution binding without changing public wrapper
 signatures or adding unbounded callback/admission registries. The cost of a wrong
 ruling is private glue/entry rework before Task 9 adapter cutover.
 
-- [ ] **Step 1: Write multi-window and partial-admission ownership tests.**
+- [x] **Step 1: Write multi-window and partial-admission ownership tests.**
 
 ```python
 async def test_batch_larger_than_window_preserves_order(batch_harness):
@@ -807,17 +807,17 @@ Add queue pressure with own work (await completion, then attempt), pressure with
 own work (immediate overload), input generator consumption bound, parent deadline
 during wait, oversized next payload, per-page failures, ordinary waiter detachment,
 explicit crawl cancellation, and full-queue retry reservation reuse.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_batch_window.py tldw_Server_API/tests/Web_Scraping/test_phase5_owned_crawl_jobs.py -q`.** Expected: bounded producer/composer missing.
-- [ ] **Step 3: Implement the producer window and owned-child cleanup without lock-held waits or polling loops.** On abort stop production, cancel unfinished owned jobs and observe subscriptions under separate cleanup allowance. Preserve completed partials; retain physical drain leases/handles beyond logical return.
-- [ ] **Step 4: Rerun Task 8 and queue lifecycle tests.** Expected: bounded materialization across windows, stable input order, no orphan or unrelated cancellation.
-- [ ] **Step 5: Commit explicit paths and child task:** `feat(web-scraping): bound batch production and own child cleanup`.
+- [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_batch_window.py tldw_Server_API/tests/Web_Scraping/test_phase5_owned_crawl_jobs.py -q`.** RED evidence recorded in the Task 8 report; independent review's two cancellation regressions also reproduced before fixes.
+- [x] **Step 3: Implement the producer window and owned-child cleanup without lock-held waits or polling loops.** On abort stop production, cancel unfinished owned jobs and observe subscriptions under separate cleanup allowance. Preserve completed partials; retain physical drain leases/handles beyond logical return.
+- [x] **Step 4: Rerun Task 8 and queue lifecycle tests.** Final 403 covering tests and 780 Phase 5 tests pass. Fresh scoped re-review closes I1 stop-aware waits and I2 composed child-local cancellation; scoped Bandit/lint/format/compile clean. Earlier six size debts and inventory/consumer/environment gates remain Task 11 obligations; no recursive-throughput parity claim.
+- [x] **Step 5: Commit explicit paths and child task:** `e1a4fa97c9`, `a19f6302f4`, with controller stop-signal ruling `f64b72aa91`; full task and fix-range reviews recorded in the plan-scoped SDD ledger.
 
 ## Stage 4: Compatibility Cutovers And Certification
 
 **Goal:** Switch wrappers/services once, propagate outcomes, and certify real consumers.
 **Success Criteria:** Public parity except approved safety fixes; report/receipt fidelity and architecture guards pass.
 **Tests:** Tasks 9-11 full compatibility, security, browser/lifecycle and affected-consumer coverage.
-**Status:** Not Started.
+**Status:** In Progress (Task 9 compatibility adapters; service and certification gates remain).
 
 ### Task 9: Switch Legacy And Enhanced Adapters
 
