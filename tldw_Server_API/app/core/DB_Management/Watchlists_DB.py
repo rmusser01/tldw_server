@@ -477,6 +477,27 @@ _WATCHLISTS_REQUIRED_TABLES = (
     "deleted_jobs",
 )
 
+# Complete read/write dependencies of published-cluster Watchlists evaluation,
+# including the notification insert's readback (not the generic startup sentinel).
+_CLUSTER_WATCHLIST_COLUMNS = {
+    "watchlist_clusters": {"job_id", "cluster_id", "created_at"},
+    "scrape_jobs": {"id", "user_id"},
+    "claim_clusters": {"id", "user_id", "canonical_claim_text", "updated_at", "watchlist_count"},
+    "claim_cluster_membership": {"cluster_id"},
+    "claims_notifications": {
+        "id",
+        "user_id",
+        "kind",
+        "target_user_id",
+        "target_review_group",
+        "resource_type",
+        "resource_id",
+        "payload_json",
+        "created_at",
+        "delivered_at",
+    },
+}
+
 
 @_decorate_watchlists_public_operations
 class WatchlistsDatabase:
@@ -508,6 +529,54 @@ class WatchlistsDatabase:
     @classmethod
     def for_user(cls, user_id: int | str) -> WatchlistsDatabase:
         return cls(user_id=user_id)
+
+    @classmethod
+    def open_existing(
+        cls,
+        *,
+        user_id: str,
+        backend: DatabaseBackend,
+    ) -> WatchlistsDatabase | None:
+        """Borrow validated Media storage without creating or repairing schema.
+
+        Only missing evaluator tables/columns mean absence. Access/storage errors
+        propagate to the caller's best-effort boundary. The caller retains backend
+        ownership; this handle never resolves global routing or closes storage.
+        """
+        for table, required in _CLUSTER_WATCHLIST_COLUMNS.items():
+            if backend.backend_type == BackendType.POSTGRESQL:
+                # information_schema hides inaccessible tables/columns, conflating
+                # permission denial with absence. pg_catalog does not filter ACLs.
+                columns = backend.execute(
+                    "SELECT a.attname AS name FROM pg_catalog.pg_attribute a "
+                    "JOIN pg_catalog.pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relname = ? "
+                    "AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped",
+                    (table,),
+                ).rows
+            else:
+                columns = backend.get_table_info(table)
+            if not required.issubset({column["name"] for column in columns}):
+                return None
+
+        # Resolve actual read privileges without loading any rows or claim text.
+        for table, required in _CLUSTER_WATCHLIST_COLUMNS.items():
+            identifiers = ", ".join(backend.escape_identifier(column) for column in sorted(required))
+            probe = "SELECT {columns} FROM {table} WHERE 1 = 0"
+            backend.execute(
+                probe.replace("{columns}", identifiers).replace("{table}", backend.escape_identifier(table))
+            )
+
+        instance = cls.__new__(cls)
+        instance.user_id = user_id
+        instance._local = threading.local()
+        instance._backend = backend
+        instance._backend_refresh_suspended = False
+        # All properties, decorated operations and transactions share this pin:
+        # _refresh_backend_if_needed returns _backend without resolving globals.
+        instance._uses_shared_content_backend = False
+        return instance
 
     @property
     def backend(self) -> DatabaseBackend:
