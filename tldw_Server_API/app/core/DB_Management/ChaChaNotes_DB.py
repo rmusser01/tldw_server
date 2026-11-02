@@ -1348,7 +1348,7 @@ class CharactersRAGDB:
         ) -> bool: ...
 
     _CURRENT_SCHEMA_VERSION = 85  # Bounded durable Persona transcripts
-    _POSTGRES_SCHEMA_VERSION = 90
+    _POSTGRES_SCHEMA_VERSION = 91
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -19380,6 +19380,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 78:
             raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
 
+    def _verify_skill_registry_schema_postgres(self, conn: Any) -> None:
+        """Verify the registered Skill tenant boundary without request DDL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import (
+            verify_postgres_skill_registry,
+        )
+
+        verify_postgres_skill_registry(
+            self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
+        )
+
+    def _migrate_from_v90_to_v91_postgres(self, conn: Any) -> None:
+        """Preserve unowned legacy rows before publishing forced registry isolation."""
+        if self._get_schema_version_postgres(conn) != 90:
+            raise SchemaError("Skill registry PostgreSQL owner migration requires schema version90.")
+        from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import (
+            postgres_skill_registry_statements,
+        )
+
+        for statement in postgres_skill_registry_statements():
+            self.backend.execute(statement, connection=conn)
+        self._verify_skill_registry_schema_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 90",
+            (91, self._SCHEMA_NAME),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 91:
+            raise SchemaError("Skill registry PostgreSQL owner migration failed version verification.")
+
     def _verify_dictionary_schema_postgres(self, conn: Any) -> None:
         """Validate registered shared catalog ownership without request DDL."""
         from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import verify_postgres_dictionary_schema
@@ -27147,6 +27176,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._verify_dictionary_schema_postgres(conn)
         if current_version >= 90:
             self._verify_persona_transcript_schema_postgres(conn)
+        if current_version >= 91:
+            self._verify_skill_registry_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -27222,7 +27253,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -27283,6 +27314,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 90 and current_version < 90:
                     self._migrate_from_v89_to_v90_postgres(conn)
                     current_version = 90
+                if target_version >= 91 and current_version < 91:
+                    self._migrate_from_v90_to_v91_postgres(conn)
+                    current_version = 91
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -27783,6 +27817,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v89_to_v90_postgres(conn)
                 self._runtime_schema_version = 90
                 current_version = 90
+            if target_version >= 91 and current_version < 91:
+                self._migrate_from_v90_to_v91_postgres(conn)
+                self._runtime_schema_version = 91
+                current_version = 91
 
             self._ensure_note_semantic_schema_postgres(conn)
 
@@ -28533,7 +28571,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def history_skills_may_be_visible(self) -> bool:
         """Read potential model-visible registry state without creating/syncing tables."""
         with self.transaction() as conn:
-            if not self.backend.table_exists("skill_registry", connection=conn):
+            if self.backend_type == BackendType.POSTGRESQL:
+                self._verify_skill_registry_schema_postgres(conn)
+            elif not self.backend.table_exists("skill_registry", connection=conn):
                 return False
             row = conn.execute(
                 "SELECT 1 FROM skill_registry WHERE deleted = FALSE "
@@ -28586,33 +28626,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return
 
         if self.backend_type == BackendType.POSTGRESQL:
-            self.backend.execute(
-                """
-                CREATE TABLE IF NOT EXISTS skill_registry (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,
-                    description TEXT,
-                    argument_hint TEXT,
-                    disable_model_invocation BOOLEAN DEFAULT FALSE,
-                    user_invocable BOOLEAN DEFAULT TRUE,
-                    allowed_tools TEXT,
-                    model TEXT,
-                    context TEXT DEFAULT 'inline',
-                    directory_path TEXT NOT NULL,
-                    last_modified TIMESTAMP NOT NULL DEFAULT NOW(),
-                    file_hash TEXT,
-                    uuid TEXT UNIQUE NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    deleted BOOLEAN DEFAULT FALSE,
-                    version INTEGER NOT NULL DEFAULT 1
-                )
-                """
-            )
-            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_name ON skill_registry(name)")
-            self.backend.execute(
-                "CREATE INDEX IF NOT EXISTS idx_skill_user_invocable ON skill_registry(user_invocable)"
-            )
-            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_deleted ON skill_registry(deleted)")
+            with self.transaction() as conn:
+                self._verify_skill_registry_schema_postgres(conn)
             return
 
         raise NotImplementedError(
