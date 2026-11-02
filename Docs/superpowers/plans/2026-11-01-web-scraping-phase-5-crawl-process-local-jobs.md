@@ -1082,6 +1082,20 @@ capacity recovered only after its actual exit. This proof must pass before the
 owner-order fix is adopted. No startup hook or new subsystem is needed for this
 integration repair. Cost if wrong: narrow cleanup/route completion rework.
 
+**Legacy Browser Availability Parity (B5):**
+Retain the enhanced wrapper's supported uninitialized-browser HTTP/trafilatura
+fallback. The old public `scrape_article(method="playwright")` with no initialized
+instance browser performs the transport-admission check, then can succeed with
+one HTTP request; the new default batch must not replace that working case with
+repeated failed browser launches. Preserve the same policy/advice/metadata and
+single canonical page-attempt ownership. A transport or policy denial,
+`ParentStop`, cancellation or exhausted budget must never become a fallback.
+Do not require another installed dependency or new browser startup for a case
+that previously worked through HTTP. Test both that legacy availability case and
+the initialized native-browser path; do not remove the native parity/security
+tests to obtain a green result. This is a verified compatibility repair, not a
+new extraction mode or startup hook.
+
 The real default enhanced batch callback still bypasses canonical parent controls:
 a matching plan/context network limit of one permits two acquisition calls,
 charges zero requests, and reports completion. Fix this before Task 9 acceptance

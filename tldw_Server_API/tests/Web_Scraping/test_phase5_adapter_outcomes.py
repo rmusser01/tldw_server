@@ -709,6 +709,11 @@ async def test_public_recursive_preserves_explicit_method_with_real_js_advice(
     monkeypatch.setattr(article, "_fetch_response", held_fetch)
     monkeypatch.setattr(fixture.browser, "acquire", held_browser)
     scraper = EnhancedWebScraper(config=config)
+
+    async def close_legacy_capability():
+        pass
+
+    scraper._browser = SimpleNamespace(close=close_legacy_capability)
     task = asyncio.create_task(scraper.recursive_scrape(URL, max_pages=1))
     try:
         await asyncio.wait_for(entered.wait(), 2)

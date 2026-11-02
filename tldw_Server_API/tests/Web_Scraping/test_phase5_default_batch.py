@@ -101,6 +101,11 @@ def browser_outbound(batch, monkeypatch):
 
     calls = []
 
+    async def close():
+        pass
+
+    batch.scraper._browser = SimpleNamespace(close=close)
+
     async def rendered(self, url, profile, limits):
         calls.append(url)
         return HTML

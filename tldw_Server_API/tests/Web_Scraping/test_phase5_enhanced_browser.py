@@ -230,6 +230,13 @@ async def test_public_recursive_binds_enhanced_browser_settings(monkeypatch, tmp
     )
     monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: fixture.dependencies)
     scraper = EnhancedWebScraper(config={})
+
+    async def close_legacy_capability():
+        pass
+
+    from types import SimpleNamespace
+
+    scraper._browser = SimpleNamespace(close=close_legacy_capability)
     scraper.cookie_manager = CookieManager(tmp_path / "cookies.json")
     scraper.cookie_manager.add_cookies("example.com", [{"name": "sid", "value": "stored"}])
     try:

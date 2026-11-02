@@ -164,6 +164,7 @@ class ArticleDependencies:
     method_intent: str = "auto"
     http_only: bool = False
     http_failure: Callable[[str, Exception], dict[str, Any]] | None = None
+    browser_http_fallback: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +177,7 @@ class _PreparedArticle:
     cookies: Mapping[str, str]
     policy_config: Mapping[str, Any]
     preflight_payload: dict[str, Any] | None
+    http_only: bool = False
 
 
 class _RedirectPolicyBlocked(Exception):
@@ -662,6 +664,7 @@ async def _run_article(
     cookies = prepared.cookies
     policy_config = prepared.policy_config
     preflight_payload = prepared.preflight_payload
+    http_only = dependencies.http_only or prepared.http_only
 
     if advised_backend != _PLAYWRIGHT and advised_method != _PLAYWRIGHT:
         started = dependencies.clock()
@@ -695,7 +698,7 @@ async def _run_article(
                 "scrape_fetch_total",
                 {"backend": fetch_metric_backend, "outcome": "error"},
             )
-            if dependencies.http_only:
+            if http_only:
                 return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
             _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
         except Exception as exc:  # noqa: BLE001 - browser fallback remains eligible
@@ -705,7 +708,7 @@ async def _run_article(
                 "scrape_fetch_total",
                 {"backend": fetch_metric_backend, "outcome": "error"},
             )
-            if dependencies.http_only:
+            if http_only:
                 return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
             _record_counter(dependencies, "scrape_playwright_fallback_total", {"reason": "error"})
         else:
@@ -715,12 +718,12 @@ async def _run_article(
                 max(0.0, dependencies.clock() - started),
                 {"backend": backend_used},
             )
-            if dependencies.http_only and not 200 <= response.status < 300:
+            if http_only and not 200 <= response.status < 300:
                 error = ValueError(f"Article retrieval failed: HTTP {response.status} (expected terminal 2xx response)")
                 _record_counter(dependencies, "scrape_fetch_total", {"backend": backend_used, "outcome": "error"})
                 return _attach_preflight(_http_failure_result(dependencies, url, error), preflight_payload)
-            if response.status < 400 and (response.text or dependencies.http_only):
-                if not dependencies.http_only and dependencies.js_required(response.text, response.headers, url):
+            if response.status < 400 and (response.text or http_only):
+                if not http_only and dependencies.js_required(response.text, response.headers, url):
                     _record_counter(
                         dependencies,
                         "scrape_playwright_fallback_total",
@@ -747,7 +750,7 @@ async def _run_article(
                             "scrape_fetch_total",
                             {"backend": backend_used, "outcome": "error"},
                         )
-                        if dependencies.http_only:
+                        if http_only:
                             return _attach_preflight(_http_failure_result(dependencies, url, exc), preflight_payload)
                         _record_counter(
                             dependencies,
@@ -774,7 +777,7 @@ async def _run_article(
                             "scrape_fetch_total",
                             {"backend": backend_used, "outcome": "no_extract"},
                         )
-                        if dependencies.http_only:
+                        if http_only:
                             return _attach_preflight(final_extraction, preflight_payload)
                         _record_counter(
                             dependencies,
@@ -985,6 +988,18 @@ async def _prepare_article(
     except Exception as exc:  # noqa: BLE001 - payload creation is optional observability
         _log_failure(dependencies, exc, code="fetch_error", stage="preflight_payload", url=url)
 
+    fallback = False
+    if (advised_backend == _PLAYWRIGHT or advised_method == _PLAYWRIGHT) and dependencies.browser_http_fallback:
+        if dependencies.parent is not None:
+            dependencies.parent.check()
+        try:
+            fallback = dependencies.browser_http_fallback()
+        except ArticleFailure as failure:
+            return _attach_preflight(_failure_result(url, failure), preflight_payload)
+        if fallback:
+            advised_backend, advised_method = "httpx", "trafilatura"
+            plan = replace(plan, proxies={}, impersonate=None)
+
     cookies: dict[str, str] = {}
     for cookie in custom_cookies or ():
         if isinstance(cookie, Mapping) and "name" in cookie and "value" in cookie:
@@ -997,6 +1012,7 @@ async def _prepare_article(
         cookies=MappingProxyType(cookies),
         policy_config=policy_config,
         preflight_payload=preflight_payload,
+        http_only=fallback,
     )
 
 
@@ -1255,6 +1271,7 @@ def start_page(
     transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
     method_intent: str = "auto",
     dependencies: ArticleDependencies | None = None,
+    browser_http_fallback: Callable[[], bool] | None = None,
 ) -> WorkHandle[PageData]:
     """Start one canonical page attempt with private discovery and physical drain."""
     loop = asyncio.get_running_loop()
@@ -1275,6 +1292,8 @@ def start_page(
             finally:
                 reservation.close()
             dependencies = supplied_dependencies or _build_default_dependencies(cookies)
+            if browser_http_fallback is not None:
+                dependencies = replace(dependencies, browser_http_fallback=browser_http_fallback)
             if configuration is not None:
                 dependencies = replace(dependencies, load_config=lambda: configuration)
             if prepare_plan is not None:
