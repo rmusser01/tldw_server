@@ -1,7 +1,7 @@
 ---
 id: TASK-15420
 title: Implement opt-in cluster Jobs API and authorized status links
-status: To Do
+status: In Progress
 labels:
 - claims
 - jobs
@@ -28,6 +28,7 @@ Lazy authenticated routing preserves synchronous 200; opt-in 202/conflict contra
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved plan task 10: Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md. ADR required: no additional ADR; accepted Docs/ADR/085-jobs-resource-admission-and-domain-publication.md governs the approved resource/publication boundary with ADR-003 and ADR-058. Execute only in the existing linked worktree/branch, test first, use shared Jobs lifecycle APIs, official backend fixtures, focused verification and touched-code Bandit, normal hooks and scoped commits. Task-ID audit explicitly targeted rmusser01/tldw_server after discovering gh defaults to upstream: fetched dev 61d02ed484a3c80f5423676b959cf14e7b572a62, checked all 37 open PR paginated file lists (223 selected Backlog/ADR records, no truncation) and current branch; highest observed id 15410. Reserved TASK-15411 through TASK-15421 for the eleven reviewable plan tasks. No collision with planning records TASK-15282/TASK-15283 or ADR-085. Preserve unrelated main-checkout changes; no push/PR/merge authorized.
 Active governance/reference update under TASK-15421: current Claims resource/publication ADR086 (metadata-only move from private085); ProposedSDKcoordinationADR087 remains Proposed. Planning/design are TASK15423/TASK15422; completed implementationTasks1/2/3 are TASK15424/TASK15425/TASK15426. Dependencies repaired viaCLI. Earlier note/commit IDs are historical evidence, not current aliases to other owners records. No accepted rationale, runtime behavior, status or verification rewritten.
+BeginapprovedTask10afterTask9fix1independentreviewclean (556b226a29/57cda37a2f). Use task-10-brief.md/constraints/task-10-integration-notes +reviewedTask4/9handoffs. Capture routingonce, asyncbranchNOcreatingMediaDB dependency/lazyJobsmanagerAFTERClaimsowner/Jobsforeignlinkauth; explicitanyuser_idretainsplatform-adminrestrictionincluding self. ExistingQueryvalidationretained; exactvalidthresholdsemanticallyignored. DirectTask9enqueue neversecond-readsflags orlocalfallback, stabletyped202/409/200/OpenAPI/Location/quotamapping/sanitized503. Asyncingresseveryattempt inclreplay; disabledlegacy200/cleanupunchanged. Jobsowner/domaincontext insideactualexecutingthread, officialrestrictedPGendpointproof/restoreaftererrors. Routeavailabilitybeforeadmission. Testfirst/scopedquality/Bandit/hooks/commit, keepInProgressforreview. ADRassessment accepted086+003/058 governs,087Proposedunchanged,no newlifecycle/statusproxy. No push/PR/merge/maincheckout changes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

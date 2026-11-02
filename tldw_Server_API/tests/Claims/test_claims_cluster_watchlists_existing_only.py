@@ -200,6 +200,97 @@ def test_postgres_missing_watchlists_schema_is_not_initialized(request):
         db.close_connection()
 
 
+def test_postgres_physical_missing_evaluator_column_preserves_schema_and_data(pg_restricted_backend, monkeypatch):
+    """A real dropped column must not trigger schema repair or evaluation writes."""
+    backend = pg_restricted_backend
+    db = MediaDatabase(db_path=":memory:", client_id="42", backend=backend)
+
+    def snapshot():
+        tables = db.execute_query(
+            "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+        ).fetchall()
+        schema_queries = (
+            "SELECT * FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+            "SELECT * FROM pg_catalog.pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname",
+            "SELECT c.relname, a.attnum, a.attname, a.attisdropped, a.attnotnull, "
+            "pg_catalog.format_type(a.atttypid, a.atttypmod) AS type, "
+            "pg_catalog.pg_get_expr(d.adbin, d.adrelid) AS default_expr "
+            "FROM pg_catalog.pg_attribute a "
+            "JOIN pg_catalog.pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum "
+            "WHERE n.nspname = 'public' AND a.attnum > 0 ORDER BY c.relname, a.attnum",
+            "SELECT c.relname, k.conname, pg_catalog.pg_get_constraintdef(k.oid) AS definition "
+            "FROM pg_catalog.pg_constraint k "
+            "JOIN pg_catalog.pg_class c ON c.oid = k.conrelid "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' ORDER BY c.relname, k.conname",
+        )
+        schema = [[dict(row) for row in db.execute_query(query).fetchall()] for query in schema_queries]
+        data = {}
+        for table in tables:
+            name = table["tablename"]
+            identifier = backend.escape_identifier(name)
+            rows = db.execute_query(
+                f"SELECT row_to_json(t)::text AS row_json FROM public.{identifier} AS t ORDER BY row_json"
+            ).fetchall()
+            data[name] = [row["row_json"] for row in rows]
+        return schema, data
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("incomplete evaluator schema must not reach count or notification operations")
+
+    try:
+        with scoped_context(user_id=42, is_admin=False):
+            cluster = _seed_cluster(db, 42, "Subscribed physical-column claim")
+            watch = WatchlistsDatabase(user_id="42", backend=backend)
+            job = _job(watch)
+            watch.add_watchlist_cluster(job.id, cluster)
+            db.update_claim_clusters_watchlist_counts({cluster: 17})
+            notification = db.insert_claim_notification(user_id="42", kind="sentinel", payload_json='{"keep":true}')
+            assert notification["payload_json"] == '{"keep":true}'
+            role = db.execute_query(
+                "SELECT current_user AS role, session_user AS session_role, rolsuper, rolbypassrls "
+                "FROM pg_roles WHERE rolname = current_user"
+            ).fetchone()
+            assert role["role"] == role["session_role"]
+            assert not role["rolsuper"] and not role["rolbypassrls"]
+            assert db.execute_query(
+                "SELECT relowner = current_user::regrole AS owned "
+                "FROM pg_catalog.pg_class WHERE oid = 'public.watchlist_clusters'::regclass"
+            ).fetchone()["owned"]
+            assert {row["name"] for row in backend.get_table_info("watchlist_clusters")} == {
+                "job_id",
+                "cluster_id",
+                "created_at",
+            }
+            # Deliberate fixture damage precedes the baseline, never the operation under test.
+            backend.execute("ALTER TABLE public.watchlist_clusters DROP COLUMN created_at")
+            assert {row["name"] for row in backend.get_table_info("watchlist_clusters")} == {"job_id", "cluster_id"}
+            before = snapshot()
+            assert [json.loads(row) for row in before[1]["watchlist_clusters"]] == [
+                {"job_id": job.id, "cluster_id": cluster}
+            ]
+            assert json.loads(before[1]["claim_clusters"][0])["watchlist_count"] == 17
+            assert len(before[1]["claims_notifications"]) == 1
+            _forbid_bootstrap(monkeypatch)
+            for name in (
+                "get_claim_cluster_member_counts",
+                "update_claim_clusters_watchlist_counts",
+                "get_latest_claim_notification",
+                "insert_claim_notification",
+            ):
+                monkeypatch.setattr(db, name, forbidden)
+            monkeypatch.setattr(WatchlistsDatabase, "list_watchlist_cluster_counts", forbidden)
+            monkeypatch.setattr(importlib.import_module(MODULE), "record_watchlist_cluster_notifications", forbidden)
+            assert WatchlistsDatabase.open_existing(user_id="42", backend=backend) is None
+            assert snapshot() == before
+            assert _evaluate(db) is None
+            assert snapshot() == before
+    finally:
+        db.close_connection()
+
+
 def test_postgres_permission_denial_is_not_schema_absence(request):
     backend = request.getfixturevalue("pg_restricted_backend")
     db = MediaDatabase(db_path=":memory:", client_id="42", backend=backend)
