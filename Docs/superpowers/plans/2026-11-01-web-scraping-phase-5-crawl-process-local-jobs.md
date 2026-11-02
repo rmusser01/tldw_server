@@ -914,6 +914,59 @@ requirements. The cost of a wrong ruling is private ownership/profile rework;
 the independent scoped re-review must verify all four and new breakage. Decompose
 `execute_crawl` rather than grow it past the 300-line new-function ceiling.
 
+**Task 9 Browser Execution Clarification (Review Finding 2):**
+The installed Playwright route API is insufficient for per-redirect credential
+rewriting. A private owned Chromium CDP Fetch interception collaborator is allowed
+under the existing browser acquisition/callback/transfer lifecycle, not a second
+HTTP transport. It must intercept each HTTP dispatch before network continuation,
+including redirects, subresources and relevant child targets. Preserve the final
+URL/document and normal browser execution: no auxiliary fetch/fulfill pipeline,
+duplicate requests or global secret headers. Coordinate or replace overlapping
+Playwright HTTP routing so two interceptors cannot deadlock or double-charge work.
+Keep existing WebSocket and transfer accounting and service-worker blocking.
+Child targets must be guarded before execution/dispatch; a main-page session alone
+does not certify cross-process frames/workers/popups. Unsupported interception
+fails closed with a sanitized capability failure, never a truncated success.
+
+Reuse the existing callback capacity (64 by default, validated maximum 1024) for
+live interception callbacks; additionally cap retained target/session ownership at
+64 per acquisition. Exhaustion closes admission and preserves physical drain.
+Bound retained redirect/request metadata under parent network/URL/byte limits;
+do not add an unbounded session, request or command-future registry. Teardown must
+stop interception admission, settle/abort paused requests, own pending callbacks
+and detach sessions without allowing a late continuation or early lease release.
+A focused `orchestration/article_browser_dispatch.py` helper and narrow structural
+runtime browser port extensions are permitted to keep existing files/functions
+cohesive and below their ceilings. First prove the native interception behavior in
+small local Chromium tests before committing a broad implementation; after three
+failed same-issue attempts stop and reassess. Required native cases include allowed
+redirect chains, cross-host/port secret stripping without reattachment, denied
+redirect with zero destination requests, and guarded child-resource dispatch.
+Strict fake callback/cancellation/capacity tests complement, not replace, these.
+
+Selected proxies keep the existing deployment distinction. `url_guarded` remains
+the explicitly unattested single-user/compat profile: validated configured proxy
+use must not be mislabeled DNS/peer-attested or silently removed. For an explicitly
+selected proxy under `attested_proxy`, extend the in-process attestation/decision
+with an optional hidden immutable binding to the canonical selected proxy config;
+only the trusted governed transport supplies evidence. A different or absent
+binding fails closed as existing `browser_transport_unavailable`; allowlisting
+alone is not evidence. No selected-proxy metadata, credentials or binding goes
+into public capability output/logs/checkpoints. Preserve zero-argument providers,
+existing constructors via defaulted additive fields and the no-explicit-proxy
+decision contract. Normalize/validate selected proxy configuration using existing
+shared HTTP policy before browser dispatch. Cover matching, mismatching, absent,
+invalid and legacy/unattested cases; do not weaken strict/public-capture policy.
+`browser_transport.py` is a narrowly authorized additional fix path for this
+binding. This refines the existing attestation rule, not permission to invent an
+attestation or bypass it. Any inability to establish native interception or proxy
+binding is an explicit unresolved blocker, not a waived safety/functionality loss.
+
+Primary references checked with installed Playwright source and official protocol
+documentation: [Playwright Route](https://playwright.dev/python/docs/api/class-route),
+[BrowserContext](https://playwright.dev/python/docs/api/class-browsercontext),
+[Chromium protocol schema](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json).
+
 **Interfaces:** Consume `execute_crawl`, `execute_batch`, `ProcessLocalJobQueue`,
 and profile resolver. Preserve every existing signature/export/factory in Task 1.
 `to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]]`
