@@ -113,6 +113,13 @@ describe("moderation service contract", () => {
     )
   })
 
+  it("retains the neutral phase and same ID in operational review responses", async () => {
+    const item = { id: "engine-1", phase: "unspecified", source_type: "moderation_engine", category: "moderation_engine_failure" }
+    mocks.bgRequest.mockResolvedValue(item)
+    expect(await getModerationReviewItem("engine-1")).toEqual(item)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/moderation/review/items/engine-1" }))
+  })
+
   it("addresses review item detail decision undo bulk and audit endpoints", async () => {
     mocks.bgRequest.mockResolvedValue({})
 

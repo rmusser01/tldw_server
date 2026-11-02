@@ -49,12 +49,7 @@ def test_review_store_creates_schema_and_idempotent_items(tmp_path):
     assert second["excerpt"] == "before [REDACTED] after"
 
     with sqlite3.connect(db_path) as conn:
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
     assert {
         "moderation_review_items",
         "moderation_review_decisions",
@@ -65,18 +60,22 @@ def test_review_store_creates_schema_and_idempotent_items(tmp_path):
 @pytest.mark.unit
 def test_review_store_filters_paginates_decides_undoes_and_audits(tmp_path):
     store = ModerationReviewStore(tmp_path / "moderation_review.db")
-    item_a = store.upsert_item(_item_payload(
-        idempotency_key="a",
-        category="pii",
-        severity="high",
-        created_at="2026-05-12T20:00:00Z",
-    ))
-    item_b = store.upsert_item(_item_payload(
-        idempotency_key="b",
-        category="toxicity",
-        severity="medium",
-        created_at="2026-05-12T20:01:00Z",
-    ))
+    item_a = store.upsert_item(
+        _item_payload(
+            idempotency_key="a",
+            category="pii",
+            severity="high",
+            created_at="2026-05-12T20:00:00Z",
+        )
+    )
+    item_b = store.upsert_item(
+        _item_payload(
+            idempotency_key="b",
+            category="toxicity",
+            severity="medium",
+            created_at="2026-05-12T20:01:00Z",
+        )
+    )
 
     page_1 = store.list_items(filters={"status": "needs_review"}, limit=1)
     assert [item["id"] for item in page_1["items"]] == [item_b["id"]]
@@ -137,3 +136,32 @@ def test_review_store_redacts_content_but_keeps_audit_and_metadata(tmp_path):
 
     audit = store.list_audit(item_id=item["id"], limit=10)
     assert audit["events"][0]["action"] == "content.redacted"
+
+
+@pytest.mark.unit
+def test_neutral_incident_single_bulk_decision_undo_audit_and_refresh_share_id(tmp_path):
+    from tldw_Server_API.app.core.Moderation.review_service import ModerationReviewService
+
+    store = ModerationReviewStore(tmp_path / "review.db")
+    service = ModerationReviewService(store)
+    item = store.upsert_item(
+        _item_payload(
+            phase="unspecified",
+            source_type="moderation_engine",
+            category="moderation_engine_failure",
+            matches=[],
+            effective_policy={},
+            recommended_action="escalate",
+        )
+    )
+    identity = item["id"]
+    single = service.record_decision(identity, action="escalate", actor_id="ops", reason="investigate")
+    assert single["item"]["id"] == identity
+    service.undo_decision(identity, undo_token=single["undo_token"], actor_id="ops")
+    bulk = service.bulk_decision(item_ids=[identity], action="dismiss", actor_id="ops")
+    assert bulk["ok_count"] == 1
+    assert bulk["results"][0]["item"]["id"] == identity
+    service.undo_decision(identity, undo_token=bulk["results"][0]["undo_token"], actor_id="ops")
+    assert service.list_items()["items"][0]["id"] == identity
+    assert len(service.get_item(identity)["decision_history"]) == 2
+    assert {event["item_id"] for event in service.list_audit()["events"]} == {identity}

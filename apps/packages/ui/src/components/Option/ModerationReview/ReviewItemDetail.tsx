@@ -8,6 +8,9 @@ import {
   getReviewItemSourceLabel,
   getReviewItemUserLabel,
   getSafeFieldWarnings,
+  executionIncidentMetadata,
+  isExecutionIncident,
+  reviewPhaseLabel,
   REVIEW_STATUS_LABELS,
   SEVERITY_LABELS
 } from "./review-utils"
@@ -44,17 +47,18 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
   }
 
   const safeWarnings = getSafeFieldWarnings(item)
+  const operational = isExecutionIncident(item)
   const isContentRedacted = Boolean(item.content_redacted_at) || item.excerpt === "[content redacted]"
 
   return (
-    <article className="space-y-4 rounded-lg border border-border bg-surface p-4" aria-labelledby="review-detail-title">
+    <article className="min-w-0 space-y-4 break-words rounded-lg border border-border bg-surface p-4" aria-labelledby="review-detail-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id="review-detail-title" className="text-lg font-semibold text-text">
-            Review item detail
+            {operational ? "Moderation execution failure" : "Review item detail"}
           </h2>
           <p className="mt-1 text-sm text-text-muted">
-            {getReviewItemSourceLabel(item)} · {getReviewItemUserLabel(item)}
+            {operational ? "Operational incident" : `${getReviewItemSourceLabel(item)} · ${getReviewItemUserLabel(item)}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
@@ -65,10 +69,24 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
             {item.severity ? SEVERITY_LABELS[item.severity] : "Unknown severity"}
           </span>
           <span className="rounded-full border border-border bg-surface2 px-2 py-1 text-text-muted">
-            {item.phase}
+            {reviewPhaseLabel(item.phase)}
           </span>
         </div>
       </div>
+
+      {operational && (
+        <section aria-label="Execution incident">
+          <p className="text-sm text-text-muted">Operational failure, not a user-policy violation. Review does not change enforcement or replay content.</p>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+            {Object.entries(executionIncidentMetadata(item)).map(([key, value]) => (
+              <div key={key} className="min-w-0">
+                <dt className="text-xs font-medium text-text-muted">{{ reason: "Reason", operation: "Operation", correlation_id: "Correlation ID" }[key]}</dt>
+                <dd className="mt-1 break-all text-text">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
 
       {safeWarnings.length > 0 && (
         <div className="rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900 dark:border-yellow-900/50 dark:bg-yellow-950/30 dark:text-yellow-200">
@@ -103,7 +121,7 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
       <dl className="grid gap-3 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-text-muted">Category</dt>
-          <dd className="mt-1 text-text">{item.category || "Uncategorized"}</dd>
+          <dd className="mt-1 text-text">{operational ? "Operational failure" : item.category || "Uncategorized"}</dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-text-muted">Created</dt>
@@ -119,7 +137,7 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
         </div>
       </dl>
 
-      <section>
+      {!operational && <section>
         <h3 className="text-sm font-semibold text-text">Matches</h3>
         <div className="mt-2 space-y-2">
           {(item.matches || []).length === 0 && <div className="text-sm text-text-muted">No match metadata available.</div>}
@@ -134,9 +152,9 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
             </div>
           ))}
         </div>
-      </section>
+      </section>}
 
-      <details className="rounded-md border border-border bg-surface p-3">
+      {!operational && <details className="rounded-md border border-border bg-surface p-3">
         <summary className="cursor-pointer text-sm font-semibold text-text">Context and effective policy</summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <div>
@@ -148,7 +166,7 @@ export const ReviewItemDetail: React.FC<ReviewItemDetailProps> = ({ item, loadin
             <JsonPreview value={item.effective_policy || {}} />
           </div>
         </div>
-      </details>
+      </details>}
 
       <AuditTimeline decisions={item.decision_history || []} />
     </article>
