@@ -1,5 +1,5 @@
 ---
-id: TASK-15413
+id: TASK-15416
 title: Triage post-merge CI failures for Moderation PR 3396
 status: Done
 labels:
@@ -30,6 +30,7 @@ Diagnostic report written at Docs/superpowers/reviews/moderation-backend/2026-11
 Residual Python sidecar independently reconciled all161 failed nodes/27shards. Confirmed93 Slides cases split92endpoint-denial signatures and1cancellation timeout;3Streaming header mismatches; ACP/OCR/DB doubles and domain-specific assertions cataloged. None of inspected residual owning/test paths changed base-to-PR; not treated as proof all failures baseline. Existing Admin webhook fixture correction b2f24ab377 also on current dev, with 48-case CI-env validation recorded in TASK-13001.2 but not rerun here. Source scope check confirms no changes under app/tests/WebUI/workflows. Canonical task check, full duplicate-id check and whitespace checks passed; documentation-only Bandit not applicable. Awaiting report commit and final metadata ratchet for completion.
 Self-review and independent domain classifications completed. Verified existing GitHub/Admin/UX correction commits are ancestors of current branch. Report preserves root-cause uncertainty for remaining161-case inventory and does not infer blanket baseline status from unchanged paths.
 Report committed at4f063adbc3. Final metadata CI ratchet passed4cases; report table independently reconciles27shards/161nodes; canonical task and duplicate-id checks pass. Git diff against origin/dev confirms zero application/test/frontend/workflow changes. Targeted diagnostic runs:2expectedfails under CI allowlist,2pass isolated and24GitHubmodule cases pass under CIenv. No claim of full CI recovery; unresolved cross-domain signatures routed in report to existing CI maintenance. Regex hardening design is awaiting explicit caller behavior for timeout/budget exhaustion; no implementation started.
+Renumbered from TASK-15413 before implementation because open PR 3404 now independently owns that ID. Allocation audit 2026-11-02: origin/dev max 15412, open first-100-file max 15413, paginated large-PR max 13950, existing local max 15415. Only local unpublished triage tracking is renamed; no CI/runtime behavior changes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
