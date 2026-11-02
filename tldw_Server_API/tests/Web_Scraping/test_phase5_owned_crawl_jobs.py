@@ -15,6 +15,252 @@ from tldw_Server_API.tests.Web_Scraping.phase5_queue_fakes import Executor, job,
 pytestmark = pytest.mark.asyncio
 
 
+async def test_context_cancel_wakes_queued_page_wait_without_releasing_owned_drain(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.jobs.admission import QueueRejected
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.batch import queued_page
+
+    executor = Executor()
+    queue = ProcessLocalJobQueue(execute=Executor(), max_concurrent=1, limits=QueueLimits(max_pending=1, max_live=1))
+    context = CrawlContext(CrawlLimits(), clock=lambda: 0)
+    overloaded = asyncio.Event()
+    submit = queue.submit_page
+
+    async def observe(item, **kwargs):
+        try:
+            return await submit(item, **kwargs)
+        except QueueRejected:
+            overloaded.set()
+            raise
+
+    class Callback:
+        def __call__(self, payload, controls):
+            return executor(payload, controls)
+
+    monkeypatch.setattr(queue, "submit_page", observe)
+    callback = Callback()
+    retained = weakref.ref(callback)
+    await queue.start()
+    first = await queued_page(
+        FrontierEntry("first", None, 0, 0, 0),
+        context=context,
+        queue=queue,
+        make_job=job,
+        execute=callback,
+    )
+    del callback
+    attempt = await executor.started.get()
+    attempt.result.set_result(page())
+    await first.result
+    task = asyncio.create_task(
+        queued_page(
+            FrontierEntry("later", None, 0, 1, 0),
+            context=context,
+            queue=queue,
+            make_job=job,
+            owned=(first,),
+        )
+    )
+    try:
+        await asyncio.wait_for(overloaded.wait(), 1)
+        context.cancel()
+        done, _ = await asyncio.wait((task,), timeout=1)
+        assert task in done, "context cancellation remained asleep on held physical drain"
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert attempt.cancellations == 1 and not first.drained.done()
+        assert queue.get_status()["live_jobs"] == 1 and queue.get_status()["payload_bytes"] > 0
+        assert len(executor.attempts) == 1 and retained() is not None
+        assert not context.stop_signal().cancelled()
+    finally:
+        task.cancel()
+        attempt.finish()
+        await asyncio.gather(task, return_exceptions=True)
+        await first.drained
+        await settle(queue)
+        await queue.stop()
+    gc.collect()
+    assert retained() is None
+
+
+@pytest.mark.parametrize(
+    ("profile", "owner_stop"),
+    [
+        ("enhanced_batch", None),
+        ("legacy_recursive", None),
+        ("enhanced_recursive", None),
+        ("legacy_url_level", None),
+        ("enhanced_url_level", None),
+        ("legacy_sitemap", None),
+        ("enhanced_sitemap", None),
+        ("enhanced_batch", "task"),
+        ("enhanced_batch", "context"),
+        ("enhanced_batch", "deadline"),
+        ("enhanced_batch", "budget"),
+    ],
+)
+async def test_production_crawl_child_cancel_retains_failure_and_continues_while_sibling_drains(
+    monkeypatch, profile, owner_stop
+):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Web_Scraping.contracts.requests import CrawlRequest
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import crawl
+    from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse
+    from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
+
+    owned, unrelated = Executor(), Executor()
+    contexts, admitted = [], {}
+    now = [0]
+    original_context = crawl.CrawlContext
+
+    def make_context(*args, **kwargs):
+        kwargs["clock"] = lambda: now[0]
+        result = original_context(*args, **kwargs)
+        contexts.append(result)
+        return result
+
+    async def allow(*args, **kwargs):
+        return SimpleNamespace(allowed=True)
+
+    def start(url, cookies, *, controls, **kwargs):
+        return owned(SimpleNamespace(job_id=url, url=url), controls)
+
+    monkeypatch.setattr(crawl, "CrawlContext", make_context)
+    monkeypatch.setattr(crawl, "decide_web_outbound_policy", allow)
+    monkeypatch.setattr(
+        crawl, "resolve_browser_transport_decision", lambda *args, **kwargs: SimpleNamespace(allowed=True)
+    )
+    monkeypatch.setattr(crawl.article, "start_page", start)
+    queue = ProcessLocalJobQueue(execute=unrelated, max_concurrent=4)
+    submit = queue.submit_page
+
+    async def record(item, **kwargs):
+        result = await submit(item, **kwargs)
+        admitted[item.url] = item.job_id
+        return result
+
+    monkeypatch.setattr(queue, "submit_page", record)
+    await queue.start()
+    other_future = await queue.add_job(job("unrelated"))
+    other = await unrelated.started.get()
+    first_url, second_url, third_url = (f"https://example.com/{name}" for name in ("first", "second", "third"))
+    first_article = {
+        "url": first_url,
+        "title": "first",
+        "content": "first data",
+        "extraction_successful": True,
+        "custom_extra": {"rank": 7},
+        "metadata": {"nested": {"labels": ["kept"]}},
+    }
+    third_article = {"url": third_url, "title": "third", "content": "third data", "extraction_successful": True}
+
+    async def document(dependencies, request):
+        return FetchResponse(
+            url=request.url,
+            status=200,
+            headers={},
+            backend="httpx",
+            text='<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            + "".join(f"<url><loc>{url}</loc></url>" for url in (first_url, second_url, third_url))
+            + "</urlset>",
+        )
+
+    monkeypatch.setattr(crawl.article, "_fetch_response", document)
+    task = asyncio.create_task(
+        crawl.execute_crawl(
+            CrawlRequest("https://example.com/sitemap.xml" if profile.endswith("sitemap") else first_url),
+            profile=profile,
+            options={"delay": 0},
+            supplied=frozenset({"delay"}),
+            config={},
+            credentials={},
+            queue=queue,
+            seeds=None if profile.endswith("sitemap") else iter((first_url, second_url, third_url)),
+        )
+    )
+    next_start = None
+    try:
+        first = await asyncio.wait_for(owned.started.get(), 1)
+        first.result.set_result(page(**first_article))
+        second = await asyncio.wait_for(owned.started.get(), 1)
+        assert second.payload.url == second_url and not first.drained.done()
+        await queue.cancel_job(admitted[second_url])
+        if owner_stop is not None:
+            if owner_stop == "task":
+                task.cancel()
+            elif owner_stop == "context":
+                contexts[0].cancel()
+            else:
+                with pytest.raises(ParentStop):
+                    if owner_stop == "deadline":
+                        now[0] = 2000
+                        contexts[0].check()
+                    else:
+                        contexts[0].reserve("page_attempts", 1000)
+            done, _ = await asyncio.wait((task,), timeout=1)
+            assert task in done, "owning stop was swallowed as a child-local failure"
+            if owner_stop in {"task", "context"}:
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                stopped = task.result()
+                assert stopped.outcome.stop_reason == f"{owner_stop}_exhausted"
+                assert stopped.outcome.state == "partial" and stopped.articles == (first_article,)
+            await turn()
+            assert len(owned.attempts) == 2 and first.cancellations == second.cancellations == 1
+            assert other.cancellations == 0 and not first.drained.done() and not second.drained.done()
+            assert queue.get_status()["live_jobs"] == 3
+            return
+        next_start = asyncio.create_task(owned.started.get())
+        done, _ = await asyncio.wait((task, next_start), timeout=1, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            task.result()
+        assert next_start in done, "third input was lost after child-only cancellation"
+        third = next_start.result()
+        contexts[0].check()
+        assert third.payload.url == third_url
+        assert first.cancellations == other.cancellations == 0 and second.cancellations == 1
+        assert not first.drained.done() and not second.drained.done()
+        assert queue.get_status()["live_jobs"] == 4 and queue.get_status()["payload_bytes"] > 0
+        third.finish(page(**third_article))
+        report = await task
+        by_url = {item["url"]: item for item in report.articles}
+        recursive = profile in {"legacy_recursive", "enhanced_recursive", "enhanced_url_level"}
+        if recursive:
+            assert second_url not in by_url and len(report.articles) == 2
+        else:
+            assert by_url[second_url] == {"url": second_url, "error": "Job cancelled", "extraction_successful": False}
+            assert len(report.articles) == 3
+        assert by_url[first_url]["content"] == "first data" and by_url[third_url]["content"] == "third data"
+        assert by_url[first_url]["custom_extra"] == {"rank": 7}
+        assert by_url[first_url]["metadata"]["nested"] == {"labels": ["kept"]}
+        if profile != "legacy_url_level":
+            assert [item["url"] for item in report.articles] == (
+                [first_url, third_url] if recursive else [first_url, second_url, third_url]
+            )
+        if profile == "enhanced_batch":
+            assert report.articles == (
+                first_article,
+                {"url": second_url, "error": "Job cancelled", "extraction_successful": False},
+                third_article,
+            )
+        assert report.outcome.state == "completed" and not report.outcome.has_partial_results
+        assert contexts[0].snapshot().page_attempts == 3
+        assert first.cancellations == other.cancellations == 0
+    finally:
+        task.cancel()
+        if next_start is not None:
+            next_start.cancel()
+            await asyncio.gather(next_start, return_exceptions=True)
+        for attempt in owned.attempts:
+            attempt.finish()
+        other.finish()
+        await asyncio.gather(task, other_future, return_exceptions=True)
+        await settle(queue)
+        await turn()
+        await queue.stop()
+
+
 async def test_execute_binding_is_captured_at_admission_and_isolated_from_default_and_other_crawls():
     default, first, second = Executor(), Executor(), Executor()
     queue = ProcessLocalJobQueue(execute=default)

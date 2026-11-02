@@ -44,7 +44,7 @@ from ..scoring import (
     PathDepthScorer,
 )
 from . import article
-from .batch import queued_page
+from .batch import _wait_owned, queued_page
 from .crawl_context import CrawlContext
 
 _EXCLUDES = [
@@ -281,6 +281,27 @@ class ProfileTraversalPolicy:
                 },
             )
         return TraversalDecision()
+
+
+def _queued_crawl_page(
+    handle: WorkHandle[PageData], *, entry: FrontierEntry, context: CrawlContext
+) -> WorkHandle[PageData]:
+    """Translate only child-local cancellation, preserving owner stop and drain."""
+
+    async def result() -> PageData:
+        # Parent check after notification wins over a concurrent child cancellation.
+        # Owning-task cancellation is still handled by the engine's shielded await.
+        await _wait_owned({handle.result}, context)
+        if handle.result.cancelled():
+            return PageData(
+                {"url": entry.url, "error": "Job cancelled", "extraction_successful": False},
+                DiscoveryResult(entry.url, entry.url, ()),
+            )
+        return handle.result.result()
+
+    task = asyncio.create_task(result())
+    task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+    return WorkHandle(task, handle.drained, handle.cancel)
 
 
 async def execute_crawl(
@@ -529,7 +550,7 @@ async def execute_crawl(
             entry, context=context, queue=queue, make_job=make_job, execute=execute, owned=queued_handles
         )
         queued_handles.append(handle)
-        return handle
+        return _queued_crawl_page(handle, entry=entry, context=context)
 
     try:
         return await run_crawl(
