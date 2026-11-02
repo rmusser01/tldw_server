@@ -61,6 +61,7 @@ export type ServerCapabilities = {
   hasPersona: boolean
   hasPersonaLiveControl: boolean
   hasPersonalization: boolean
+  hasCompanion: boolean
   hasGuardian: boolean
   hasSelfMonitoring: boolean
   ffmpegAvailable: boolean | null
@@ -114,6 +115,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasPersona: false,
   hasPersonaLiveControl: false,
   hasPersonalization: false,
+  hasCompanion: false,
   hasGuardian: false,
   hasSelfMonitoring: false,
   ffmpegAvailable: null,
@@ -227,7 +229,7 @@ type IngestionSourceCapabilitiesResponse = {
 }
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV6"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV7"
 
 type CapabilitiesCachePayload = {
   key: string
@@ -906,6 +908,7 @@ const computeCapabilities = (
       has("/api/v1/persona/stream") ||
       hasPersonaLiveControl,
     hasPersonaLiveControl,
+    hasCompanion: has("/api/v1/companion/check-ins"),
     hasPersonalization:
       has("/api/v1/personalization/profile") ||
       has("/api/v1/personalization/opt-in") ||

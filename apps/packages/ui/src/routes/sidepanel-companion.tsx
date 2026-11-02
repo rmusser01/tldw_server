@@ -5,6 +5,7 @@ import { MessageSquare } from "lucide-react"
 
 import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
 import { CompanionHomeShell } from "@/components/Option/CompanionHome"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHeaderSimple"
 import {
   isCompanionConsentRequiredError,
@@ -20,12 +21,14 @@ import {
 
 const SidepanelCompanion = () => {
   const { t } = useTranslation(["option", "sidepanel"])
+  const { capabilities, loading: capsLoading } = useServerCapabilities()
+  const captureAvailable = !capsLoading && Boolean(capabilities?.hasPersonalization && capabilities?.hasCompanion)
   const [banner, setBanner] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const lastHandledCaptureIdRef = React.useRef<string | null>(null)
 
   const handleCapture = React.useCallback(async (capture: PendingCompanionCapture) => {
-    if (!capture.id || lastHandledCaptureIdRef.current === capture.id) {
+    if (!captureAvailable || !capture.id || lastHandledCaptureIdRef.current === capture.id) {
       return
     }
     lastHandledCaptureIdRef.current = capture.id
@@ -51,14 +54,15 @@ const SidepanelCompanion = () => {
       setError("Failed to save selection to companion.")
       lastHandledCaptureIdRef.current = null
     }
-  }, [])
+  }, [captureAvailable])
 
   const retryPendingCapture = React.useCallback(() => {
+    if (!captureAvailable) return
     const pending = readPendingCompanionCapture()
     if (pending) {
       void handleCapture(pending)
     }
-  }, [handleCapture])
+  }, [captureAvailable, handleCapture])
 
   React.useEffect(() => {
     retryPendingCapture()

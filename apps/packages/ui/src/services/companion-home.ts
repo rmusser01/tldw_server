@@ -353,12 +353,13 @@ const normalizeNoteEntries = (payload: unknown): NormalizedNoteEntry[] => {
 }
 
 export const fetchCompanionHomeSnapshot = async (
-  surface: CompanionHomeSurface
+  surface: CompanionHomeSurface,
+  { companionAvailable = true }: { companionAvailable?: boolean } = {}
 ): Promise<CompanionHomeSnapshot> => {
-  const degradedSources: CompanionHomeDegradedSource[] = []
+  const degradedSources: CompanionHomeDegradedSource[] = companionAvailable ? [] : ["workspace"]
 
   const [workspaceResult, readingResult, notesResult] = await Promise.allSettled([
-    fetchCompanionWorkspaceSnapshot(),
+    companionAvailable ? fetchCompanionWorkspaceSnapshot() : Promise.resolve(null),
     tldwClient.getReadingList({
       page: 1,
       size: 25,
