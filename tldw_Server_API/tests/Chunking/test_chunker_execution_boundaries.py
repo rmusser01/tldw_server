@@ -71,6 +71,33 @@ def test_metadata_facade_returns_service_object(monkeypatch: pytest.MonkeyPatch)
     assert received == [(("raw", "words", 4, 0, "en"), {"align_text_to_source": None, "context": "user context"})]
 
 
+def test_generator_facade_defers_service_creation(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker(ChunkerConfig(enable_cache=False))
+    events = []
+
+    class SentinelService:
+        def __init__(self, context: Any, hooks: Any) -> None:
+            assert context is chunker
+            events.append("construct")
+
+        def iter_chunks(self, *args: Any, **kwargs: Any) -> Any:
+            events.append((args, kwargs))
+            yield "delegated generator"
+            return "must not propagate"
+
+    monkeypatch.setattr(facade, "ChunkExecutionService", SentinelService)
+    generator = chunker.chunk_text_generator("raw", "words", 4, 0, "en", kind="user kind")
+    assert events == []
+    assert next(generator) == "delegated generator"
+    with pytest.raises(StopIteration) as caught:
+        next(generator)
+    assert caught.value.value is None
+    assert events == ["construct", (("raw", "words", 4, 0, "en"), {"kind": "user kind"})]
+    events.clear()
+    chunker.chunk_text_generator(42).close()
+    assert events == []
+
+
 def test_hooks_resolve_replacement_during_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     chunker = Chunker(ChunkerConfig(enable_cache=False))
     assert callable(getattr(facade, "_execution_hooks", None)), "missing forwarding hook factory"

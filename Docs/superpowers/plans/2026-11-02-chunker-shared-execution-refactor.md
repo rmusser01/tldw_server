@@ -311,13 +311,15 @@ git commit -m "refactor: extract Chunker metadata execution"
 
 **Goal:** Delegate generator execution without changing when work or failures happen.
 **Success Criteria:** Generator protocol/timing is preserved and a paused consumer never retains the shared lock.
-**Status:** Not Started
+**Status:** Complete
+
+**Evidence:** RED10 failed35 passed; GREEN327 focused execution/concurrency/integration cases,770 warnings,6.45s. Full Chunking945 passed/1 established skip,2366 warnings,40.95s. All three moved bodies are normalized-AST identical; retained methods/public declarations/source docstrings unchanged. Paused-generator competitor returns real chunks, protocol/setup/iteration/close boundaries covered; old assertions unchanged. Ruff/Black/compileall/mypy3files and production/test Bandit pass. Logs `/tmp/chunker_execution_task4_*`.
 
 **Files:** Modify `execution/service.py`, `chunk_text_generator` in `chunker.py`, and execution component/boundary tests. Add new lifecycle cases to the execution contracts module without editing its frozen expectations. Tracking only elsewhere.
 
 **Interfaces:** Consume the same context/hooks. Produce lazy `ChunkExecutionService.iter_chunks` with the fixed signature. Public `chunk_text_generator` remains a generator using a plain `yield from` statement; do not return an iterator from an eager wrapper or propagate a new completion value.
 
-- [ ] **Step 1: Write failing active-wiring/lifecycle tests.** `test_generator_facade_defers_service_creation` asserts zero constructor calls until first advance, then actual yielded text. `test_generator_delegates_send_throw_close` controls each underlying protocol operation and asserts yielded values, cleanup and outer completion `None`. `test_generator_shared_selection_and_lock_regions` requires ephemeral factory selection even with an injected strategy, locked iterator creation and unlocked first/next/throw/close operations. Include callable/noncallable/missing `chunk_generator`, eager fallback, setup-versus-iteration failure and an unstarted close control.
+- [x] **Step 1: Write failing active-wiring/lifecycle tests.** `test_generator_facade_defers_service_creation` asserts zero constructor calls until first advance, then actual yielded text. `test_generator_delegates_send_throw_close` controls each underlying protocol operation and asserts yielded values, cleanup and outer completion `None`. `test_generator_shared_selection_and_lock_regions` requires ephemeral factory selection even with an injected strategy, locked iterator creation and unlocked first/next/throw/close operations. Include callable/noncallable/missing `chunk_generator`, eager fallback, setup-versus-iteration failure and an unstarted close control.
 
 ```python
 assert events == []  # after generator creation
@@ -327,11 +329,11 @@ generator.close()
 assert events == [("factory", 1), ("iterator_created", 1), ("next", 0), ("throw", 0), ("close", 0)]
 ```
 
-- [ ] **Step 2: Capture RED from the absent iterator entry or bypassed lazy delegate.** Run the relevant execution component/boundary tests; reject a RED caused only by a test-fixture mistake or optional provider initialization.
-- [ ] **Step 3: Move and wire the generator body.** Construct the service inside the public generator body, not in facade initialization or a default argument. Preserve sanitize/size/default sequencing, lack of an eager empty return, LLM-hook lookup and `ephemeral` calculation before lock entry. Construct the iterator or eager fallback under the lock; delegate via `yield from` outside it. Do not add a generic exception handler, result caching, prefetch or a state-restoration scope around iteration.
-- [ ] **Step 4: Add `test_paused_generator_allows_competing_call` and live-state controls.** Use events with bounded waits/joins and `finally` cleanup. Assert a competing text call returns actual expected chunks while the first generator remains paused. Check helpers/config/LLM override changes after generator creation, cross-thread first advancement, and no work when closing an unstarted generator. Keep the existing thread-safety test assertions unchanged.
-- [ ] **Step 5: Run GREEN.** Run execution tests plus `test_thread_safety.py`, `test_streaming_overlap.py`, process_text and hierarchy contracts, then full Chunking and scoped static/type/Bandit checks. Require no lock leak, new skip or exception-translation change.
-- [ ] **Step 6: Commit the lazy migration and tracking.**
+- [x] **Step 2: Capture RED from the absent iterator entry or bypassed lazy delegate.** Run the relevant execution component/boundary tests; reject a RED caused only by a test-fixture mistake or optional provider initialization.
+- [x] **Step 3: Move and wire the generator body.** Construct the service inside the public generator body, not in facade initialization or a default argument. Preserve sanitize/size/default sequencing, lack of an eager empty return, LLM-hook lookup and `ephemeral` calculation before lock entry. Construct the iterator or eager fallback under the lock; delegate via `yield from` outside it. Do not add a generic exception handler, result caching, prefetch or a state-restoration scope around iteration.
+- [x] **Step 4: Add `test_paused_generator_allows_competing_call` and live-state controls.** Use events with bounded waits/joins and `finally` cleanup. Assert a competing text call returns actual expected chunks while the first generator remains paused. Check helpers/config/LLM override changes after generator creation, cross-thread first advancement, and no work when closing an unstarted generator. Keep the existing thread-safety test assertions unchanged.
+- [x] **Step 5: Run GREEN.** Run execution tests plus `test_thread_safety.py`, `test_streaming_overlap.py`, process_text and hierarchy contracts, then full Chunking and scoped static/type/Bandit checks. Require no lock leak, new skip or exception-translation change.
+- [x] **Step 6: Commit the lazy migration and tracking.**
 
 ```bash
 git add -- tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py tldw_Server_API/tests/Chunking/test_chunker_execution_components.py tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md
