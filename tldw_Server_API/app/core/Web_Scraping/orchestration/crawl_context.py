@@ -24,6 +24,12 @@ from ..runtime.controls import (
 )
 
 
+def _complete_stop(signal: asyncio.Future[None]) -> None:
+    """Settle the shared notification only on its owning event loop."""
+    if not signal.done():
+        signal.set_result(None)
+
+
 class CrawlContext:
     """One execution owner; cumulative usage, stop, start, and publish share a lock."""
 
@@ -39,6 +45,39 @@ class CrawlContext:
         self._successful_result_present = False
         self._accounting_complete = True
         self._handles: dict[int, WorkHandle[Any]] = {}
+        self._stop_loop: asyncio.AbstractEventLoop | None = None
+        self._stop_future: asyncio.Future[None] | None = None
+        self._stop_notified = False
+
+    def stop_signal(self) -> asyncio.Future[None]:
+        """Lazily bind one shared stop notification, never a drain/capacity grant.
+
+        Consumers observe this future without cancelling it. Construction and
+        stops before first binding remain valid outside a running event loop.
+        """
+        loop = asyncio.get_running_loop()
+        with self._lock:
+            if self._stop_future is None:
+                self._stop_loop = loop
+                self._stop_future = loop.create_future()
+            elif self._stop_loop is not loop:
+                raise RuntimeError("crawl stop signal belongs to a different event loop")
+            if self._cancelled or self._stop_reason is not None:
+                self._notify_stop_locked()
+            return self._stop_future
+
+    def _notify_stop_locked(self) -> None:
+        """Hand off a latched stop once; no waiter list or cross-thread mutation."""
+        if self._stop_future is None or self._stop_notified:
+            return
+        self._stop_notified = True
+        try:
+            self._stop_loop.call_soon_threadsafe(_complete_stop, self._stop_future)
+        except RuntimeError:
+            # A closed owner loop has no live waiters; cancellation still latches
+            # and performs its normal ownership fan-out outside this lock.
+            if not self._stop_loop.is_closed():
+                raise
 
     def _check_locked(self) -> None:
         if self._cancelled:
@@ -48,6 +87,7 @@ class CrawlContext:
         if self._stop_reason is None and self._clock() >= self._deadline:
             self._stop_reason = "deadline_exhausted"
         if self._stop_reason is not None:
+            self._notify_stop_locked()
             raise ParentStop(self._stop_reason)
 
     def check(self) -> None:
@@ -68,6 +108,7 @@ class CrawlContext:
     def _charge_locked(self, counter: Counter, amount: int) -> None:
         if self._counts[counter] + amount > getattr(self._limits, counter):
             self._stop_reason = "budget_exhausted"
+            self._notify_stop_locked()
             raise ParentStop(self._stop_reason)
         self._counts[counter] += amount
 
@@ -90,6 +131,7 @@ class CrawlContext:
             remaining = self._deadline - self._clock()
             if remaining <= 0:
                 self._stop_reason = "deadline_exhausted"
+                self._notify_stop_locked()
                 raise ParentStop(self._stop_reason)
             return remaining if requested is None else min(requested, remaining)
 
@@ -99,6 +141,7 @@ class CrawlContext:
             if self._cancelled:
                 return
             self._cancelled = True
+            self._notify_stop_locked()
             handles = tuple(self._handles.values())
         self._cancel_handles(handles)
 

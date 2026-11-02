@@ -1,6 +1,8 @@
 """Bounded lazy production against the real queue, without network or LLMs."""
 
 import asyncio
+import gc
+import weakref
 
 import pytest
 
@@ -15,6 +17,67 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
 from tldw_Server_API.tests.Web_Scraping.phase5_queue_fakes import Executor, job, page, settle, turn
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_context_cancel_wakes_collected_batch_drain_wait_into_bounded_cleanup(monkeypatch):
+    plan, context, executor, queue = setup_batch(workers=1)
+    drain_wait, cleanup_entered = asyncio.Event(), asyncio.Event()
+    progress, cleanup = batch._progress, batch._cleanup
+
+    async def observe_progress(children, context):
+        if all(child.collected for child in children.values()):
+            drain_wait.set()
+        return await progress(children, context)
+
+    async def observe_cleanup(*args, **kwargs):
+        cleanup_entered.set()
+        return await cleanup(*args, **kwargs)
+
+    class Callback:
+        def __call__(self, payload, controls):
+            return executor(payload, controls)
+
+    monkeypatch.setattr(batch, "_progress", observe_progress)
+    monkeypatch.setattr(batch, "_cleanup", observe_cleanup)
+    callback = Callback()
+    retained = weakref.ref(callback)
+    await queue.start()
+    task = asyncio.create_task(
+        batch.execute_batch(
+            ["first", "later"],
+            plan=plan,
+            context=context,
+            queue=queue,
+            make_job=lambda url: job(url, max_retries=0),
+            execute=callback,
+        )
+    )
+    del callback
+    attempt = await started(executor)
+    try:
+        attempt.result.set_result(page(content="collected before cancel"))
+        await asyncio.wait_for(drain_wait.wait(), 1)
+        context.cancel()
+        await asyncio.wait_for(cleanup_entered.wait(), 1)
+        assert not attempt.drained.done() and queue.get_status()["payload_bytes"] > 0
+        assert queue.get_status()["live_jobs"] == 1 and retained() is not None
+        done, _ = await asyncio.wait((task,), timeout=3)
+        assert task in done, "logical cleanup exceeded its aggregate allowance"
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        assert caught.value.report.articles[0]["content"] == "collected before cancel"
+        assert caught.value.report.outcome.stop_reason == "cancelled"
+        assert len(executor.attempts) == 1 and attempt.cancellations == 1
+        assert not attempt.drained.done() and retained() is not None
+        assert not context.stop_signal().cancelled()
+    finally:
+        task.cancel()
+        attempt.finish()
+        await asyncio.gather(task, return_exceptions=True)
+        await settle(queue)
+        await queue.stop()
+    gc.collect()
+    assert retained() is None
 
 
 def setup_batch(*, workers=5, limits=None, queue_limits=None):

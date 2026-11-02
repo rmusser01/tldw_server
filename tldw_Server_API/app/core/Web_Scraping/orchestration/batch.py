@@ -39,12 +39,7 @@ async def queued_page(
         except QueueRejected as error:
             if error.code != "queue_overloaded" or not draining:
                 raise
-            done, _ = await asyncio.wait(
-                draining, timeout=context.cap_timeout(None), return_when=asyncio.FIRST_COMPLETED
-            )
-            context.check()
-            if not done:
-                raise ParentStop("deadline_exhausted") from None
+            done = await _wait_owned(draining, context)
             draining.difference_update(done)
     context.attach(handle)
     return handle
@@ -83,13 +78,22 @@ def _collect(children: dict[int, _Child], articles: dict[int, dict[str, Any]], c
         child.collected = True
 
 
-async def _progress(children: dict[int, _Child], context: CrawlContext) -> None:
-    """Wait only on accepted owned progress, never on a competing queue occupant."""
-    futures = {child.handle.drained if child.collected else child.handle.result for child in children.values()}
-    done, _ = await asyncio.wait(futures, timeout=context.cap_timeout(None), return_when=asyncio.FIRST_COMPLETED)
+async def _wait_owned(futures: set[asyncio.Future], context: CrawlContext) -> set[asyncio.Future]:
+    """Wake on owned progress or parent stop; neither cancel futures nor infer drain."""
+    stop = context.stop_signal()
+    done, _ = await asyncio.wait(
+        futures | {stop}, timeout=context.cap_timeout(None), return_when=asyncio.FIRST_COMPLETED
+    )
     context.check()
     if not done:
         raise ParentStop("deadline_exhausted")
+    return done - {stop}
+
+
+async def _progress(children: dict[int, _Child], context: CrawlContext) -> None:
+    """Wait only on accepted owned progress, never on a competing queue occupant."""
+    futures = {child.handle.drained if child.collected else child.handle.result for child in children.values()}
+    await _wait_owned(futures, context)
 
 
 def _cancel_children(children: dict[int, _Child]) -> None:

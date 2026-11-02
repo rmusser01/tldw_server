@@ -32,6 +32,91 @@ async def test_scoped_owned_handles_snapshot_prunes_only_actual_drain(ctx):
     assert snapshot == (handle,)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["cancel", "budget", "bytes", "deadline", "cap_deadline"])
+@pytest.mark.parametrize("before_binding", [False, True])
+async def test_stop_signal_notifies_owner_loop_for_thread_safe_latched_stop(reason, before_binding):
+    now = [0]
+    context = CrawlContext(CrawlLimits(page_attempts=1, transfer_bytes=1), clock=lambda: now[0])
+    loop = asyncio.get_running_loop()
+    signal = None if before_binding else context.stop_signal()
+
+    def stop():
+        if reason == "cancel":
+            context.cancel()
+            return
+        with pytest.raises(ParentStop):
+            if reason == "budget":
+                context.reserve("page_attempts", 2)
+            elif reason == "bytes":
+                context.charge_bytes(2)
+            else:
+                now[0] = 2000
+                context.cap_timeout(None) if reason == "cap_deadline" else context.check()
+
+    await asyncio.to_thread(stop)
+    notified = context.stop_signal()
+    if signal is not None:
+        assert notified is signal
+    assert notified.get_loop() is loop
+    await asyncio.wait_for(asyncio.shield(notified), 1)
+    assert notified.result() is None and not notified.cancelled()
+
+
+def test_stop_signal_preserves_construction_outside_loop_and_rejects_second_owner_loop():
+    context = CrawlContext(CrawlLimits(), clock=lambda: 0)
+
+    async def first():
+        signal = context.stop_signal()
+        assert context.stop_signal() is signal
+        context.cancel()
+        await asyncio.shield(signal)
+
+    asyncio.run(first())
+
+    async def other():
+        with pytest.raises(RuntimeError, match="event loop"):
+            context.stop_signal()
+
+    asyncio.run(other())
+
+
+@pytest.mark.asyncio
+async def test_detached_stop_waiter_does_not_cancel_shared_notification(ctx):
+    signal = ctx.stop_signal()
+    waiter = asyncio.ensure_future(asyncio.shield(signal))
+    waiter.cancel()
+    await asyncio.gather(waiter, return_exceptions=True)
+    assert not signal.done()
+    await asyncio.to_thread(ctx.cancel)
+    await asyncio.wait_for(asyncio.shield(signal), 1)
+    assert signal.result() is None and not signal.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_stop_signal_notifies_if_clock_expires_between_timeout_checks():
+    times = iter((0, 0, 2000))
+    context = CrawlContext(CrawlLimits(), clock=lambda: next(times))
+    signal = context.stop_signal()
+    with pytest.raises(ParentStop, match="deadline_exhausted"):
+        context.cap_timeout(None)
+    await asyncio.wait_for(asyncio.shield(signal), 1)
+    assert signal.result() is None
+
+
+def test_late_stop_after_owner_loop_closes_still_latches_without_cross_thread_future_mutation():
+    context = CrawlContext(CrawlLimits(), clock=lambda: 0)
+
+    async def bind():
+        return context.stop_signal()
+
+    signal = asyncio.run(bind())
+    context.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        context.check()
+    assert not signal.done()
+
+
 pytestmark = pytest.mark.unit
 
 COUNTERS = (
