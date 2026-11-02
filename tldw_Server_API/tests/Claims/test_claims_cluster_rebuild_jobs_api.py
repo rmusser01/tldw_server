@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionRejectio
 from tldw_Server_API.app.core.Jobs.resource_contracts import ResourceAdmission
 from tldw_Server_API.tests.Jobs.conftest import jobs_pg_dsn as jobs_pg_dsn
 from tldw_Server_API.tests.Jobs.test_jobs_owned_status_api import context_values, principal
+from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import snapshot, sql
 
 pytestmark = pytest.mark.integration
 PATH = "/api/v1/claims/clusters/rebuild"
@@ -306,13 +307,14 @@ def test_jobs_rejections_are_not_false_conflicts(manager, monkeypatch, reason, s
 
 
 @pytest.mark.parametrize("lost_ack", [False, True])
-def test_unavailable_or_lost_ack_is_sanitized_503_never_fallback(manager, monkeypatch, lost_ack):
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
+def test_unavailable_or_lost_ack_is_sanitized_503_never_fallback(manager, monkeypatch, lost_ack, error_type):
     real = manager.admit_resource_job
 
     def unavailable(*args, **kwargs):
         if lost_ack:
             real(*args, **kwargs)
-        raise RuntimeError("secret key or database path")
+        raise error_type("secret key or database path")
 
     monkeypatch.setattr(manager, "admit_resource_job", unavailable)
     with TestClient(build_app()) as client:
@@ -381,6 +383,65 @@ def test_real_jobs_quota_mapping(manager, monkeypatch, quota):
         response = client.post(PATH, params={"method": "exact"})
     assert response.status_code == 429, response.text
     assert "job_uuid" not in response.text
+
+
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
+def fair_share_managers(request, manager, monkeypatch):
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    if request.param == "sqlite":
+        return manager, manager
+
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg
+    from tldw_Server_API.tests.Jobs.test_jobs_rls_postgres import _dsn_or_skip
+
+    dsn = request.getfixturevalue("jobs_pg_dsn")
+    system = JobManager(backend="postgres", db_url=dsn)
+    _, restricted = _dsn_or_skip(monkeypatch)
+    ensure_jobs_rls_policies_pg(dsn)
+    # Keep the official system observer separate from the restricted owner login.
+    monkeypatch.delenv("JOBS_PG_RLS_ROLE")
+    owner = JobManager(backend="postgres", db_url=restricted)
+    with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="claims", owner_user_id="1"):
+        role = sql(owner, "SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user", rows=True)
+        assert role == [{"rolsuper": False, "rolbypassrls": False}]
+    monkeypatch.setattr(claims, "get_job_manager", lambda: owner)
+    return owner, system
+
+
+def test_real_fair_share_http_refusal_is_quota_without_mutation(fair_share_managers, monkeypatch):
+    _, system = fair_share_managers
+    monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+    system.create_job(domain="other-domain", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+    before = snapshot(system)
+    with TestClient(build_app()) as client:
+        response = client.post(PATH, params={"method": "exact"})
+    assert response.status_code == 429, response.text
+    assert response.json() == {"detail": "Jobs admission quota exceeded"}
+    assert snapshot(system) == before
+
+
+def test_real_fair_share_http_replay_and_reuse_precede_limit(fair_share_managers, monkeypatch):
+    _, system = fair_share_managers
+    monkeypatch.setenv("JOBS_MAX_PER_USER", "2")
+    system.create_job(domain="other-domain", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+    with TestClient(build_app()) as client:
+        first = client.post(PATH, params={"method": "exact"}, headers={"Idempotency-Key": "fair-share"})
+        assert first.status_code == 202, first.text
+        assert client.get(first.json()["status_url"]).status_code == 200
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+        before = snapshot(system)
+        for headers in ({}, {"Idempotency-Key": "fair-share"}):
+            reused = client.post(PATH, params={"method": "exact"}, headers=headers)
+            assert reused.status_code == 202, reused.text
+            assert reused.json() == {**first.json(), "reused": True}
+        assert snapshot(system) == before
+        assert system.cancel_job(first.json()["job_id"])
+        terminal = snapshot(system)
+        replay = client.post(PATH, params={"method": "exact"}, headers={"Idempotency-Key": "fair-share"})
+        assert replay.status_code == 202, replay.text
+        assert replay.json() == {**first.json(), "reused": True}
+        assert snapshot(system) == terminal
 
 
 def test_type_registration_unavailable_fails_before_create(manager, monkeypatch):

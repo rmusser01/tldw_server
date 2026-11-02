@@ -401,6 +401,10 @@ class ResourceMutation:
                     # A batch can reactivate only one logical Job in each slot.
                     reservations[scope] = row["uuid"]
                 if self.pruning:
+                    # Active resource work keeps its lifecycle identity even
+                    # without a retained request key or archival storage.
+                    if row["status"] in ("queued", "processing"):
+                        continue
                     self.store.execute(
                         f"DELETE FROM job_resource_request_receipts WHERE {self.store.scope_where} AND expires_at<={p}",  # nosec B608 - fixed predicate/placeholders; values bound.
                         (*self.store.scope_values(scope), self.store.timestamp(self.clock())),

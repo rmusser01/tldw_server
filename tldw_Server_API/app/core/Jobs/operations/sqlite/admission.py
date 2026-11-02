@@ -291,7 +291,7 @@ def create_job_admission(
     begin_immediate: bool = False,
     pre_admission_lookup: Callable[[sqlite3.Connection], dict[str, Any] | None] | None = None,
     resource_request: ResourceAdmissionRequest | None = None,
-    prepare_command: Callable[[CreateJobCommand], CreateJobCommand] | None = None,
+    prepare_command: Callable[[CreateJobCommand], CreateJobCommand | AdmissionResult] | None = None,
 ) -> AdmissionResult | ResourceAdmission:
     """Create or replay a queued job admission inside a SQLite transaction."""
 
@@ -320,7 +320,11 @@ def create_job_admission(
             if isinstance(decision, ResourceAdmission):
                 return decision
             resource_creation = decision
-            command = prepare_command(command)
+            prepared = prepare_command(command)
+            if isinstance(prepared, AdmissionResult):
+                store.execute("ROLLBACK TO SAVEPOINT jobs_resource_admission")
+                return ResourceAdmission("rejected", None, prepared)
+            command = prepared
             payload_json = json.dumps(command.payload)
         if pre_admission_lookup is not None:
             existing = pre_admission_lookup(conn)

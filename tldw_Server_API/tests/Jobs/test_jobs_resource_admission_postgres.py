@@ -102,7 +102,6 @@ def test_restricted_owner_scope_admits_and_replays_from_unset_context(jobs_pg_ds
 def test_restricted_fair_share_counts_other_domains_without_widening_admission(jobs_pg_dsn, monkeypatch):
     import psycopg
 
-    from tldw_Server_API.app.core.exceptions import BadRequestError
     from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg
     from tldw_Server_API.tests.Jobs.test_jobs_rls_postgres import _dsn_or_skip
 
@@ -120,8 +119,9 @@ def test_restricted_fair_share_counts_other_domains_without_widening_admission(j
         with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="claims", owner_user_id="1"):
             before = snapshot(manager)
             assert sql(manager, "SELECT * FROM jobs", rows=True) == []
-            with pytest.raises(BadRequestError, match="maximum concurrent job limit"):
-                manager.admit_resource_job(make_command(), request=make_request())
+            refused = manager.admit_resource_job(make_command(), request=make_request())
+            assert refused.kind == "rejected"
+            assert refused.rejection.admission_rejection_reason.value == "fair_share_limit"
             assert snapshot(manager) == before
             assert manager._count_active_jobs_for_user("1") == 1
             assert manager._count_active_jobs_for_user("2") == 0

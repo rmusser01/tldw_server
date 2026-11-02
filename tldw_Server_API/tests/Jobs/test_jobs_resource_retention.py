@@ -10,6 +10,54 @@ resource_scenario_fixture = lifecycle.resource_scenario
 
 
 @pytest.mark.parametrize("archived", [False, True])
+@pytest.mark.parametrize("status", ["queued", "processing"])
+@pytest.mark.parametrize("key_state", ["keyless", "expired", "retained"])
+def test_pruning_retains_active_resource_identity(resource_scenario, monkeypatch, archived, status, key_state):
+    s = resource_scenario
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", str(archived).lower())
+    job = s.admit(key=None if key_state == "keyless" else "active-key")
+    if status == "processing":
+        assert s.acquire()["uuid"] == job["uuid"]
+    if key_state == "expired":
+        sql(s.manager, "UPDATE job_resource_request_receipts SET expires_at='2000-01-01'")
+    # Exercise the public admin cutoff, not a zero-day approximation.
+    sql(s.manager, "UPDATE jobs SET created_at='2000-01-01',updated_at='2000-01-01' WHERE uuid=?", (job["uuid"],))
+    before = snapshot(s.manager)
+    assert s.manager.prune_jobs(older_than_days=1, statuses=[status], domain="claims") == 0
+    after = snapshot(s.manager)
+    for table in ("jobs", "jobs_archive", "job_resource_heads", "job_counters"):
+        assert after[table] == before[table], table
+    assert [event for event in after["job_events"] if event["job_id"] == job["id"]] == before["job_events"]
+    audit = [event for event in after["job_events"] if event["job_id"] is None]
+    assert all(event["event_type"] == "jobs.pruned" and event["attrs_json"]["deleted"] == 0 for event in audit)
+    reused = s.manager.admit_resource_job(make_command(), request=make_request(key=None))
+    assert reused.kind == "active_reused"
+    assert reused.job["uuid"] == job["uuid"]
+    changed = make_command(payload={**make_command().payload, "min_size": 3})
+    conflict = s.manager.admit_resource_job(changed, request=make_request(changed, key=None))
+    assert conflict.kind == "active_conflict"
+    assert conflict.job["uuid"] == job["uuid"]
+    final = snapshot(s.manager)
+    for table in ("jobs", "jobs_archive", "job_resource_heads", "job_counters", "job_events"):
+        assert final[table] == after[table], table
+
+
+@pytest.mark.parametrize("archived", [False, True])
+@pytest.mark.parametrize("status", ["queued", "processing"])
+def test_pruning_active_opted_out_jobs_keeps_legacy_behavior(manager, monkeypatch, archived, status):
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", str(archived).lower())
+    job = manager.create_job(domain="chatbooks", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+    if status == "processing":
+        acquired = manager.acquire_next_job(domain="chatbooks", queue="default", worker_id="worker", lease_seconds=300)
+        assert acquired["uuid"] == job["uuid"]
+    sql(manager, "UPDATE jobs SET created_at='2000-01-01',updated_at='2000-01-01' WHERE uuid=?", (job["uuid"],))
+    assert manager.prune_jobs(older_than_days=1, statuses=[status], domain="chatbooks") == 1
+    assert sql(manager, "SELECT * FROM jobs WHERE uuid=?", (job["uuid"],), rows=True) == []
+    assert len(sql(manager, "SELECT * FROM jobs_archive WHERE uuid=?", (job["uuid"],), rows=True)) == int(archived)
+    assert sql(manager, "SELECT * FROM job_resource_heads", rows=True) == []
+
+
+@pytest.mark.parametrize("archived", [False, True])
 @pytest.mark.parametrize(
     "changes",
     [
@@ -42,12 +90,19 @@ def test_resource_payload_replacement_preserves_admitted_contract(resource_scena
     assert after["job_resource_request_receipts"] == before["job_resource_request_receipts"]
 
 
-def test_unexpired_request_receipt_keeps_exact_target(resource_scenario, monkeypatch):
+@pytest.mark.parametrize("archived", [False, True])
+def test_unexpired_request_receipt_keeps_exact_target(resource_scenario, monkeypatch, archived):
     s = resource_scenario
     job = s.admit(key="retained-key")
     assert s.manager.cancel_job(job["id"])
-    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "false")
-    s.manager.prune_jobs(older_than_days=0, domain="claims")
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", str(archived).lower())
+    before = snapshot(s.manager)
+    assert s.manager.prune_jobs(older_than_days=0, domain="claims") == 0
+    after = snapshot(s.manager)
+    assert [event for event in after["job_events"] if event["job_id"] == job["id"]] == before["job_events"]
+    assert {table: rows for table, rows in after.items() if table != "job_events"} == {
+        table: rows for table, rows in before.items() if table != "job_events"
+    }
     replay = s.manager.admit_resource_job(make_command(), request=make_request(key="retained-key"))
     assert replay.kind == "request_replayed"
     assert replay.job["uuid"] == job["uuid"]

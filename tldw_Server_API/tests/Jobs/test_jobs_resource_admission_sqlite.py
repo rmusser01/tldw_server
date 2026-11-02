@@ -105,6 +105,49 @@ def manager(tmp_path, monkeypatch):
 
 
 class ResourceAdmissionCases:
+
+    def test_real_fair_share_refusal_is_typed_without_mutation(self, manager, monkeypatch):
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+        manager.create_job(domain="other-domain", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+        before = snapshot(manager)
+        result = manager.admit_resource_job(make_command(), request=make_request())
+        assert result.kind == "rejected"
+        assert result.job is None
+        assert result.rejection.admission_rejection_reason.value == "fair_share_limit"
+        assert snapshot(manager) == before
+
+    @pytest.mark.parametrize("facade", ["admit_job", "create_job"])
+    def test_real_fair_share_legacy_facade_still_raises(self, manager, monkeypatch, facade):
+        from tldw_Server_API.app.core.exceptions import BadRequestError
+
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+        manager.create_job(domain="claims", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+        before = snapshot(manager)
+        with pytest.raises(BadRequestError, match="maximum concurrent job limit"):
+            getattr(manager, facade)(
+                domain="claims", queue="default", job_type="ordinary", payload={}, owner_user_id="1"
+            )
+        assert snapshot(manager) == before
+
+    def test_replay_and_active_reuse_precede_tightened_fair_share(self, manager, monkeypatch):
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "2")
+        manager.create_job(domain="other-domain", queue="default", job_type="ordinary", payload={}, owner_user_id="1")
+        first = manager.admit_resource_job(make_command(), request=make_request())
+        assert first.kind == "created"
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+        before = snapshot(manager)
+        for key, kind in [("request-1", "request_replayed"), (None, "active_reused")]:
+            reused = manager.admit_resource_job(make_command(), request=make_request(key=key))
+            assert reused.kind == kind
+            assert reused.job["uuid"] == first.job["uuid"]
+        assert snapshot(manager) == before
+        assert manager.cancel_job(first.job["id"])
+        terminal = snapshot(manager)
+        replay = manager.admit_resource_job(make_command(), request=make_request())
+        assert replay.kind == "request_replayed"
+        assert replay.job["uuid"] == first.job["uuid"]
+        assert snapshot(manager) == terminal
+
     @pytest.mark.parametrize("target", ["active", "retained_active", "retained_archive", "retained_with_successor"])
     def test_conflict_returns_only_exact_authorized_reference_without_mutation(self, manager, target):
         first = manager.admit_resource_job(make_command(), request=make_request())

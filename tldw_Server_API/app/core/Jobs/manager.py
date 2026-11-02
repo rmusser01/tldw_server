@@ -3613,6 +3613,8 @@ class JobManager:
                 scheduler = _get_fair_share()
                 active_count = self._count_active_jobs_for_user(owner_user_id)
                 if not fair_share_exempt and not scheduler.can_submit(owner_user_id, active_count):
+                    if resource_request is not None:
+                        return AdmissionResult.rejected(AdmissionRejectionReason.FAIR_SHARE_LIMIT)
                     raise BadRequestError(
                         f"User {owner_user_id} has reached the maximum concurrent job limit "
                         f"({scheduler.max_per_user})"
@@ -3748,9 +3750,11 @@ class JobManager:
         """
         command, request = validate_resource_command(command, request)
 
-        def prepare(candidate: CreateJobCommand) -> CreateJobCommand:
+        def prepare(candidate: CreateJobCommand) -> CreateJobCommand | AdmissionResult:
             prepared = self._prepare_job_admission(candidate, resource_request=request)
             if isinstance(prepared, AdmissionResult):
+                if prepared.outcome is OperationOutcome.ADMISSION_REJECTED:
+                    return prepared
                 raise RuntimeError("unexpected resource preparation replay")
             if not prepared.trace_id:
                 prepared = replace(prepared, trace_id=str(_uuid.uuid4()))
