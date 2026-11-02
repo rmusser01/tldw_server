@@ -11,7 +11,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, cast
 
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.Billing.enforcement import get_billing_enforcer
 from tldw_Server_API.app.core.config import get_config_section
 from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import TrustedProviderEndpoint
 from tldw_Server_API.app.core.MCP_unified.adapters.model_completion.accounting import (
     CompletionAccountingPolicy,
     ModelCompletionAccounting,
@@ -236,7 +237,7 @@ def build_tldw_model_completion_port(
             if server_config_snapshot is not None
             else copy.deepcopy(load_server_config_snapshot())
         )
-        endpoint = _trusted_endpoint_from_snapshot("openai", config, authoritative=True)
+        endpoint = cast(TrustedProviderEndpoint, _trusted_endpoint_from_snapshot("openai", config, authoritative=True))
         transport_policy = OpenAITransportPolicy(
             captured.provider, captured.model, endpoint, captured.run_timeout_seconds, policy["output_token_field"]
         )
@@ -245,7 +246,8 @@ def build_tldw_model_completion_port(
         if transport_factory is not None and not callable(transport_factory):
             raise ValueError("Invalid completion transport factory")
         transport = (OpenAICompletionTransport if transport_factory is None else transport_factory)(transport_policy)
-        pool = _LazyAuthNZPool()
+        # Only transaction-bound repository operations use this context-local facade.
+        pool = cast(DatabasePool, _LazyAuthNZPool())
         accounting = ModelCompletionAccounting(
             policy=accounting_policy,
             quota_pool_factory=get_db_pool if usage is None else None,

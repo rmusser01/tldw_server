@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field, fields
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from loguru import logger
 
@@ -54,7 +54,7 @@ def _trusted_failure(error: Exception) -> ModelCompletionFailure:
 class _Invocation:
     """Invocation-local ownership, independent of a caller's later work."""
 
-    task: asyncio.Task | None = None
+    task: asyncio.Task[ModelCompletionResult] | None = None
     child: asyncio.Task | None = None
     reservation: Any = None
     dispatch_attempted: bool = False
@@ -150,7 +150,7 @@ class ModelCompletionAdapter:
         self._unhealthy = not healthy
         return healthy
 
-    def _own(self, task: asyncio.Task, invocation: _Invocation) -> asyncio.Task:
+    def _own(self, task: asyncio.Task[_T], invocation: _Invocation) -> asyncio.Task[_T]:
         self._owned.add(task)
         invocation.work.add(task)
         if invocation.abandoned:
@@ -191,7 +191,7 @@ class ModelCompletionAdapter:
             raise cancellation
         return task.result()
 
-    def _operation(self, operation: Awaitable[_T], invocation: _Invocation, name: str) -> asyncio.Task[_T]:
+    def _operation(self, operation: Coroutine[Any, Any, _T], invocation: _Invocation, name: str) -> asyncio.Task[_T]:
         return self._own(asyncio.create_task(operation, name=name), invocation)
 
     def _guard(self, invocation: _Invocation) -> None:
@@ -270,7 +270,7 @@ class ModelCompletionAdapter:
 
     async def _supervise_runtime_shutdown(self, runtime: Any) -> None:
         """Retain ownership until fresh public lifecycle proof certifies teardown."""
-        supervisor = asyncio.current_task()
+        supervisor = cast(asyncio.Task[None], asyncio.current_task())
         loop = asyncio.get_running_loop()
         warned = False
         while True:

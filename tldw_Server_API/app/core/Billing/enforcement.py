@@ -4,6 +4,7 @@ enforcement.py
 Billing limit enforcement that integrates with the Resource Governor system.
 Provides dependencies for checking and enforcing subscription limits.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -420,14 +421,16 @@ class BillingEnforcer:
             month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
             from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 
-            missing_schema_errors = (sqlite3.OperationalError,)
+            missing_schema_errors: tuple[type[Exception], ...] = (sqlite3.OperationalError,)
             if asyncpg is not None:
                 missing_schema_errors += (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError)
             try:
                 async with pool.acquire() as conn:
                     return await AuthnzUsageRepo(pool).read_org_token_exposure(conn, org_id, month_start)
             except missing_schema_errors as exc:
-                if not any(name in str(exc) for name in ("billing_org_id", "provider_usage_reservations", "credential_source")):
+                if not any(
+                    name in str(exc) for name in ("billing_org_id", "provider_usage_reservations", "credential_source")
+                ):
                     raise
                 # Only legacy Billing readers may fall back to pre-MCP schema.
             try:

@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -391,6 +391,8 @@ class ModelCompletionAccounting:
         )
         if not trusted_counts:
             input_tokens, output_tokens = reservation.reserved_input_tokens, reservation.reserved_output_tokens
+        input_tokens = cast(int, input_tokens)
+        output_tokens = cast(int, output_tokens)
         input_cost = _count(input_tokens * self._policy.input_cost_units_per_token)
         actuals = ReservationActuals(
             input_tokens, output_tokens, _count(input_cost + output_tokens * self._policy.output_cost_units_per_token)

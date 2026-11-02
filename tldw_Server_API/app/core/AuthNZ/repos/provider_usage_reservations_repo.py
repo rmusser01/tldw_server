@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar, cast
 from uuid import RFC_4122, UUID
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
@@ -69,7 +69,7 @@ def _execution_id(value: Any) -> str:
             pass
     if not valid:
         raise ProviderUsageReservationError("invalid_reservation")
-    return value
+    return cast(str, value)
 
 
 @dataclass(frozen=True)
@@ -120,8 +120,8 @@ class ProviderUsageReservation:
         )
         if self.billing_scope != expected:
             raise ProviderUsageReservationError("invalid_reservation")
-        for value in (self.provider, self.model):
-            if type(value) is not str or not value.strip():
+        for label in (self.provider, self.model):
+            if type(label) is not str or not label.strip():
                 raise ProviderUsageReservationError("invalid_reservation")
         _sum(self.reserved_input_tokens, self.reserved_output_tokens)
         _integer(self.reserved_cost_units)
@@ -146,9 +146,9 @@ class ReservationQuotaSnapshot:
     def __post_init__(self) -> None:
         for value in (self.used_tokens, self.used_cost_units, self.hosted_used_tokens):
             _integer(value, code="snapshot_unavailable")
-        for value in (self.token_limit, self.cost_limit, self.hosted_token_limit):
-            if value is not None:
-                _integer(value, code="snapshot_unavailable")
+        for limit in (self.token_limit, self.cost_limit, self.hosted_token_limit):
+            if limit is not None:
+                _integer(limit, code="snapshot_unavailable")
 
 
 @dataclass(frozen=True)
@@ -346,7 +346,7 @@ class ProviderUsageReservationsRepo:
             )
             if not inserted:
                 raise ProviderUsageReservationError("duplicate_execution")
-            row = await self._get(conn, reservation.execution_id)
+            row = cast(dict[str, Any], await self._get(conn, reservation.execution_id))
         return row
 
     async def _transition(self, execution_id: str, source: str, target: str) -> dict[str, Any]:
@@ -367,7 +367,7 @@ class ProviderUsageReservationsRepo:
                     now if target == "released" else None,
                     execution_id,
                 )
-                row = await self._get(conn, execution_id)
+                row = cast(dict[str, Any], await self._get(conn, execution_id))
         return row
 
     @_repository_errors
@@ -429,7 +429,7 @@ class ProviderUsageReservationsRepo:
                     now,
                     execution_id,
                 )
-                row = await self._get(conn, execution_id)
+                row = cast(dict[str, Any], await self._get(conn, execution_id))
         return row
 
     @_repository_errors

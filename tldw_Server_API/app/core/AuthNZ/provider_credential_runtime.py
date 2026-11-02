@@ -6,7 +6,7 @@ import asyncio
 import copy
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, NoReturn, Protocol
+from typing import Any, NoReturn, Protocol, TypeGuard
 
 from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
@@ -323,7 +323,7 @@ def is_runtime_issued_provider_call_credentials(
     value: object,
     *,
     provider: str | None = None,
-) -> bool:
+) -> TypeGuard[ProviderCallCredentials]:
     """Return whether *value* is an authentic runtime-issued credential handle."""
 
     if type(value) is not ProviderCallCredentials:
@@ -521,7 +521,7 @@ class ProviderCredentialRuntime:
         if self._authoritative_scope is not None:
             generation = self._generations.get(provider_norm, 0) + 1
             self._generations[provider_norm] = generation
-            task = self._own_lifecycle(
+            authoritative_task = self._own_lifecycle(
                 asyncio.create_task(
                     self._resolve_entry(
                         provider_norm,
@@ -531,11 +531,11 @@ class ProviderCredentialRuntime:
                     )
                 )
             )
-            self._authoritative_tasks.add(task)
-            task.add_done_callback(self._forget_authoritative_task)
-            entry = await self._await_owned(task)
+            self._authoritative_tasks.add(authoritative_task)
+            authoritative_task.add_done_callback(self._forget_authoritative_task)
+            authoritative_entry = await self._await_owned(authoritative_task)
             self._ensure_open()
-            return self._new_handle(provider_norm, entry)
+            return self._new_handle(provider_norm, authoritative_entry)
         if force_refresh:
             override_snapshot = self._capture_override_snapshot(provider_norm, model)
             return await self._refresh(provider_norm, model, override_snapshot)

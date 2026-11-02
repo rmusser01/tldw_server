@@ -994,7 +994,7 @@ class MCPServer:
             try:
                 import yaml  # type: ignore
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                yaml = None  # type: ignore
+                yaml = None
 
             modules_to_load = []
 

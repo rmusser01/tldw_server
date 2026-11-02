@@ -6,7 +6,7 @@ import asyncio
 import math
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn, TypeVar, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -153,7 +153,7 @@ def snapshot_model_completion_request(request: object) -> ModelCompletionRequest
         invalid = True
     if invalid:
         _fail("model_request_invalid", ModelFailureDomain.REQUEST)
-    return snapshot
+    return cast(ModelCompletionRequest, snapshot)
 
 
 def _credential_headers(credentials: object, policy: OpenAITransportPolicy) -> dict[str, str]:
@@ -287,7 +287,7 @@ class OpenAICompletionTransport:
                 response_rejected = True
                 _fail("model_response_rejected", ModelFailureDomain.REQUEST)
 
-        client = None
+        client: httpx.AsyncClient | None = None
         failure = None
         cancellation = None
         result = None
@@ -297,7 +297,7 @@ class OpenAICompletionTransport:
             """Record cleanup failure inside owned work, before cancellation wins."""
             nonlocal failure
             try:
-                await client.aclose()
+                await cast(httpx.AsyncClient, client).aclose()
                 # Deliver a native self-cancel even if aclose returned without yielding.
                 await asyncio.sleep(0)
             except asyncio.CancelledError:
@@ -338,7 +338,7 @@ class OpenAICompletionTransport:
                     json=payload,
                     timeout=float(self._policy.timeout_seconds),
                     max_bytes=request.max_provider_response_bytes,
-                    configured_endpoint=credentials.trusted_endpoint.scope,
+                    configured_endpoint=cast(TrustedProviderEndpoint, credentials.trusted_endpoint).scope,
                     allow_redirects=False,
                     retry=hc.RetryPolicy(attempts=1),
                     sensitive_observability=True,
@@ -385,4 +385,4 @@ class OpenAICompletionTransport:
             raise cancellation
         if failure is not None:
             raise_detached_error(failure)
-        return result
+        return cast(normalization.NormalizedModelCompletion, result)

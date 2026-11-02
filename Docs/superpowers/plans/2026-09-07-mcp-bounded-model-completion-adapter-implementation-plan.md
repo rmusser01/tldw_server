@@ -620,7 +620,7 @@ on 2026-11-02. Child tasks track shared HTTP/model-inventory fixtures
 (`TASK-2294.3.2.1`), backend contract failures (`TASK-2294.3.2.2`), ACP integration
 (`TASK-2294.3.2.3`), and the real-cockpit Playwright flake
 (`TASK-2294.3.2.4`). Workers have disjoint write sets; no global egress relaxation,
-baseline increases, suppressed test collection or unreported baseline exclusions
+test-quality/RLS baseline increases, suppressed test collection or unreported baseline exclusions
 are permitted. The 175-case pinned-head CI inventory is the starting checklist,
 not evidence that all those failures persist after the rebase. Current-dev fixes
 must be verified and retained rather than needlessly rewritten.
@@ -646,11 +646,15 @@ The RSS Watchlists error-persistence
 path now uses the existing credential sanitizer; its preserved redaction test
 reproduced the bug before the one-line repair.
 
-The frontend scenario has not run: incomplete local dependencies exhausted the
-three-attempt bootstrap limit. All processes and worktree dependency links were
-cleaned up. A dependency-resolution audit now passes, but another launch requires
-explicit approval. Do not claim a flake fix or re-arm auto-merge while this is
-unverified. OpenAPI export also remains under investigation: the same JSON is
+The frontend scenario has not run locally: incomplete dependencies exhausted the
+three-attempt bootstrap limit; all processes and dependency links were cleaned up.
+Read-only CI artifact inspection subsequently proved the failure was a missing
+second-turn test precondition, not a follow-up settlement race. Dev ancestor
+`f4d75bda1f507fb6adcb90d8c71f0f2ee3403e2e` already moves the follow-up outside
+Stop recovery and asserts both user turns; this rebase retains that fix. No extra
+UI/wait-helper patch is justified. Current-head E2E success still requires fresh
+normal CI; no additional local bootstrap attempt is authorized or needed for this
+diagnosis. OpenAPI export remains under investigation: the same JSON is
 produced on this branch, pinned dev, and the fingerprint-source commit; no blind
 fingerprint refresh is authorized by that equality alone.
 
@@ -659,6 +663,22 @@ fingerprint refresh is authorized by that equality alone.
 **Success Criteria**: No unaddressed findings; reviewer explicitly approves the final source.
 **Tests**: Reviewer reproductions and fresh affected regression checks after repairs.
 **Status**: In Progress
+
+The unrelated-suite delta `618887def3..125038e497` received independent approval
+with no findings. Core review `3ab1ce5..618887def3` found four actionable gaps:
+native per-user quotas omit unresolved paid exposure; known-unsent transport
+preflight failures retain shared capacity; a committed reservation can lose
+insertion ownership on transaction-release failure; absent fallback credentials
+receive request-domain failure. Each requires a focused failing regression,
+minimal repair, and fresh independent review. Accounting/repository and
+transport/adapter repair workers have disjoint ownership. Do not infer that
+reviewer comments or earlier passing gates qualify these newly added scenarios.
+
+Static validation also identified 35 new mypy diagnostics against the same-
+environment 322-diagnostic dev baseline. Runtime-proven narrowing, generic owned
+task types, and distinct local variables address the new diagnostics without
+adding ignores, changing validation, or widening the certified execution path.
+The existing nonblocking diagnostics are not a globally clean mypy result.
 
 ### November Stage 4: Publish And Arm
 **Goal**: Publish with an explicit lease and enable only normal gated auto-merge.

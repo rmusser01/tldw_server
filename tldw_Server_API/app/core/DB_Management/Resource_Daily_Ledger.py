@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -262,7 +262,8 @@ class ResourceDailyLedger:
         day = str(day_utc or self._to_day_utc(entry.occurred_at))
         is_pg = await self._using_postgres_backend()
         increase = False
-        async with self.db_pool.transaction() as conn:
+        async with cast(DatabasePool, self.db_pool).transaction() as conn:
+            params: tuple[date | str, str, str, str, str]
             if is_pg:
                 await conn.execute(
                     "SELECT pg_advisory_xact_lock($1)",
