@@ -23,7 +23,7 @@ gate dispatch or workflow/policy changes. Each change has RED/GREEN evidence.
 **Tests**: Affected files and adjacent scopes, lint, compile, diff, and applicable
 touched-scope Bandit. Use official fixture-managed PostgreSQL if needed, never
 concurrent suites sharing fixed databases.
-**Status**: Complete (fresh dev integration qualified below)
+**Status**: Complete (dev integration and subsequent VN fixture repair qualified below)
 
 ## Stage 3: Independent Review and Publication
 **Goal**: Publish a coherent, independently reviewed follow-up patch.
@@ -206,3 +206,43 @@ only: no runtime, workflow, dependency, schema or policy delta from dev.
 Logs /private/tmp/userprofiles15413-devb2b7-* and the retained range-diff record
 support this qualification. Final bounded integration/record review and fresh
 published-head CI remain before merge; Task15413 stays In Progress.
+
+## VN Resolver Fixture Qualification
+
+Published376's eight actual required checks succeeded, but a newly completed
+nonrequired AuthNZ shard failed six VN resolver org/team/user cases across
+SQLite and PostgreSQL (534 other passes, 42404 warnings). The conservative
+merge guard stopped before sending any merge request; PR3404 remains open.
+Local org/SQLite RED and a private exception-type/stack-only diagnostic identify
+two fixture membership calls missing the current mandatory context argument.
+The test and relevant runtime inputs match dev b2b7; that does not make the
+failure harmless or waive it.
+
+Source a941e4f50815af3285508823beabd769fc58e9f1 changes only the embedded
+STORAGE_SCRIPT: import the existing trusted-context types, construct one
+BOOTSTRAP fixture context and supply it to the two existing membership calls.
+Outer AST is otherwise identical, REGISTRATION_SCRIPT is byte-identical, and
+all 18 outer and seven embedded Storage assertions, cases, results, mocks and
+private-environment controls remain unchanged. No runtime shim, raw-write
+bypass, new trusted reason, policy, dependency, workflow or timeout change.
+
+Separate overlapping runs, not an aggregate suite: same org/SQLite case
+RED1fail -> GREEN1pass (12 warnings each); full SQLite selection35pass/
+38deselected/148warnings; adjacent non-PG controls28pass/2deselected/120warnings.
+Controller-owned official fixture run of all12 resolver cases passes with no
+skips: six SQLite plus six actual PostgreSQL cases, 61deselected/366warnings,
+42.54seconds, exit0. Existing configured cluster was inspected privately;
+official fixtures own isolated databases, with no container lifecycle action.
+
+Outer Ruff/compile/diff pass. Embedded Ruff retains exactly 3I001+7BLE001, not
+a clean embedded-lint claim. Unfiltered Bandit baseline/current outer18B101
+and embedded8B101 contexts match exactly, zero new findings or scan errors.
+Fulltree quality5364 baseline unchanged and shard870/5364/fourignored/
+baseline44/new0 pass. Herschel independently approves exact a941 source with
+zero Critical/Important/Minor findings; no unchanged whole-PR review restart.
+Logs /private/tmp/userprofiles15413-vn-fixture-* and
+/private/tmp/userprofiles15413-vn-resolver-backends.log retain warnings and
+limits. Prior broad-suite/Skills/OAuth limits remain explicit. Task15413 stays
+In Progress until final closeout. Final records require bounded exact-head
+review, then authorized source publication and fresh automatic required gates;
+376's successful checks do not qualify the new candidate.
