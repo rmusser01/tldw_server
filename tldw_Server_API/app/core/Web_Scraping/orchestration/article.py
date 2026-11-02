@@ -1233,6 +1233,7 @@ def start_page(
     prepare_plan: Callable[[ArticlePlan], ArticlePlan] | None = None,
     transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
     method_intent: str = "auto",
+    dependencies: ArticleDependencies | None = None,
 ) -> WorkHandle[PageData]:
     """Start one canonical page attempt with private discovery and physical drain."""
     loop = asyncio.get_running_loop()
@@ -1242,6 +1243,7 @@ def start_page(
     parent = PageControls(controls)
     cookies = _snapshot_cookies(custom_cookies)
     configuration = _snapshot_config(configuration) if configuration is not None else None
+    supplied_dependencies = dependencies
 
     async def run() -> PageData:
         token = physical_work.set(owner)
@@ -1251,7 +1253,7 @@ def start_page(
                 reservation.commit()
             finally:
                 reservation.close()
-            dependencies = _build_default_dependencies(cookies)
+            dependencies = supplied_dependencies or _build_default_dependencies(cookies)
             if configuration is not None:
                 dependencies = replace(dependencies, load_config=lambda: configuration)
             if prepare_plan is not None:
