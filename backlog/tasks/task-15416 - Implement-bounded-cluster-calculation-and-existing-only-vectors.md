@@ -1,7 +1,7 @@
 ---
 id: TASK-15416
 title: Implement bounded cluster calculation and existing-only vectors
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -18,9 +18,9 @@ Preserve exact/embedding algorithm semantics with resource limits and non-creati
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
-- [ ] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
-- [ ] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
+- [x] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
+- [x] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
+- [x] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -40,19 +40,21 @@ Independent Task6review at edf9fdc6ca returnedIssues/Needsfixes. FiveImportant f
 Task6 FIX ROUND1/3 at FIX_BASE edf9fdc6ca1b647c4797ba84ee6e5d7e92012eaf. Controller accepts all five Important findings plus adapter warning in assigned task-6-review.md. Implement test-first physical identity/symlink rejection and fork PID fencing, aggregate bounded preflight/SQL/streamed structural metadata validation, and safe existing default empty/buffered/mixed-store reads. Investigate actual SDK queue create/upsert/update/delete semantics; no writer retuning, copies/backend/dependency switch, weakened no-provisioning or Jobs lifecycle. Preserve parent ADR087/index/plan unstaged; Task remains In Progress. Full round evidence will append to assigned task-6-report.md.
 Proposed ADR-087 updated during fix1 to record physical identity/PID fencing, aggregate validation limits, and bounded never-persisted logical log reads with checkpoint/metadata coverage. Normal default buffering is not corruption and no writer retuning, copy, new persisted backend or missing-file repair is authorized. Runtime qualification and independent scoped re-review remain pending; this governance edit does not claim acceptance.
 Task6 FIX ROUND1/3 implementation complete for re-review at FIX_BASE edf9fdc6ca1b647c4797ba84ee6e5d7e92012eaf. All five accepted Important findings plus adapter Minor addressed: canonical non-aliased/dangling-root rejection; PID fences before inherited sessions/cache/close; aggregate SQL/element/metadata/opcode/log/result ceilings with held-epoch snapshot reuse and pre-SDK read-mode pin against same-thread writers; default empty/buffered/mixed 1.5.5 stores via immutable checkpoint+metadata-proven existing-log reads (native SDK only for complete materialized target); non-executing typed stack/mapping metadata validation. No retuning writers, copies, persisted backend, dependency or lifecycle changes. DB helper split chroma_existing_state.py and chroma_read_validation.py stays in adapter ownership; full scope/contracts/limits/exact RED/GREEN appended to assigned task-6-report.md. Final production /tmp/task6_round1_final.log: 215 passed, 1 inherited skip, 15 xfailed, 2 xpassed, 487 warnings, 20.92s; 58 new round cases no skips. Last test-only build_from_config completion: /tmp/task6_round1_adapter_final.log 1 passed, 45 deselected, 15 inherited warnings, no EmbeddingFunction interface deprecation. Configured whole-file Ruff baseline/current 0/0, compile and format pass; final Bandit zero findings/errors. Native fork/spawn and default thresholds100/999/1001 for l2/cosine/ip exercised, logical operation property uses isolated real stores. Parent Proposed ADR087/index/plan and latest task notes preserved; no parent docs staged. Task stays In Progress for independent re-review; normal staged hooks and scoped incremental commit now follow.
+Task6 complete after scoped independent fix1 re-review: task-6-fix1-review.md verdicts all five Important findings and adapter Minor ADDRESSED, no new Critical/Important/Minor fix breakage. Runtime commits edf9fdc6ca and e3ba2dd187ecf768332f94a4b34d87ca4c943c1f. Controller read full report and review, confirmed saved final evidence/Bandit, and accepts qualified current1.5.5 default-store behavior. Platform/history/throughput/quarantine qualifications remain explicit Task11 runbook inputs, not open Task6 defects. Proposed ADR087 remains Proposed; accepted Jobs/domain boundary unchanged. No Task7 production enabled by this prerequisite.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented bounded exact/embedding calculation and shared coordinated existing-only vector reads. Real-SDK/process/fork/default-buffer and structural-validation regressions close every validated Task6 review finding. Final production scope:215 passed,1 inherited skip,15 xfailed,2 xpassed; later adapter test removes new interface warning. Configured touched Ruff baseline/current0/0, compile/format/normalhooks pass; Bandit0findings/errors. Known SDK/profile/Windows/operational limits documented. Independently re-reviewed clean; subsequent publication/worker tasks remain separate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

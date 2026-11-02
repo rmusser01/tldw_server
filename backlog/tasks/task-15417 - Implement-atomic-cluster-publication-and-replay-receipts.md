@@ -1,7 +1,7 @@
 ---
 id: TASK-15417
 title: Implement atomic cluster publication and replay receipts
-status: To Do
+status: In Progress
 labels:
 - claims
 - jobs
@@ -27,6 +27,7 @@ Atomic owner-scoped publication, source recheck, replay receipts and monotonic a
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved plan task 7: Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md. ADR required: no additional ADR; accepted Docs/ADR/085-jobs-resource-admission-and-domain-publication.md governs the approved resource/publication boundary with ADR-003 and ADR-058. Execute only in the existing linked worktree/branch, test first, use shared Jobs lifecycle APIs, official backend fixtures, focused verification and touched-code Bandit, normal hooks and scoped commits. Task-ID audit explicitly targeted rmusser01/tldw_server after discovering gh defaults to upstream: fetched dev 61d02ed484a3c80f5423676b959cf14e7b572a62, checked all 37 open PR paginated file lists (223 selected Backlog/ADR records, no truncation) and current branch; highest observed id 15410. Reserved TASK-15411 through TASK-15421 for the eleven reviewable plan tasks. No collision with planning records TASK-15282/TASK-15283 or ADR-085. Preserve unrelated main-checkout changes; no push/PR/merge authorized.
+Begin approved Task7 atomic publication after Task6 fix1 independent re-review passed in e3ba2dd187. Use task-7-brief.md, constraints.md, task-5-interfaces.md and task-7-integration-notes.md. One Media DB transaction, head-before-cleanupcluster/Media/Claims locks, immutable receipt replay and generation fencing; no Jobs lifecycle in Claims. Close carried Task5 Mapping annotation minor while preserving defensive copy/explicit JSON conversion. Official restricted PostgreSQL fixture and SQLite tests, faults/barriers/properties test-first, configured quality/Bandit/hooks/scoped commit, independent task review before completion. ADR assessment: existing accepted Jobs/domain ADR085 governs; metadata renumber of private Claims ADR deferred to Task11 collision cleanup, no change to accepted rationale or new publication architecture. No push/PR/merge.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
