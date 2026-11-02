@@ -137,7 +137,7 @@ export interface ModerationReviewMatch {
 export interface ModerationReviewItem {
   id: string
   status: ModerationReviewStatus
-  phase: "input" | "output"
+  phase: "input" | "output" | "unspecified"
   source_type?: string | null
   source_id?: string | null
   user_id?: string | null

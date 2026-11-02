@@ -1,4 +1,4 @@
-"""Bounded cancellable transport only; Task3 owns public failure reporting."""
+"""Bounded cancellable transport with a mandatory metadata reporting boundary."""
 
 from __future__ import annotations
 
@@ -11,13 +11,30 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from tldw_Server_API.app.core.exception_types import ModerationExecutionError
-from tldw_Server_API.app.core.Moderation.execution_models import ExecutionScope
+from tldw_Server_API.app.core.Moderation.execution_models import ExecutionScope, FailureMetadata, execution_scope
 from tldw_Server_API.app.core.Moderation.execution_runner import _scope_is_owned
 
 T = TypeVar("T")
 _lock = threading.Lock()
 _active = 0
 _closed = False
+
+
+async def run_moderation_async(call: Callable[[], T], *, metadata: FailureMetadata) -> T:
+    """Establish the shared reporting boundary before size/offload admission."""
+    from tldw_Server_API.app.core.Moderation.execution_incidents import report_execution_failure_async
+
+    if type(metadata) is not FailureMetadata:
+        raise ValueError("invalid moderation failure metadata")
+    metadata = FailureMetadata(metadata.operation, metadata.phase, metadata.input_chars)
+    with execution_scope() as scope:
+        try:
+            if metadata.input_chars > 1_000_000:
+                raise ModerationExecutionError("size_exceeded")
+            return await _run_moderation_offload(call, scope=scope)
+        except ModerationExecutionError as error:
+            await report_execution_failure_async(error, metadata=metadata, scope=scope)
+            raise
 
 
 def _after_fork() -> None:

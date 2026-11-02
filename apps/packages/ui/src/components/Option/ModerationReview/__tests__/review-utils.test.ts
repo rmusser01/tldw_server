@@ -5,6 +5,9 @@ import {
   decisionRequiresReason,
   formatReviewDate,
   getReviewItemSourceLabel,
+  reviewPhaseLabel,
+  isExecutionIncident,
+  executionIncidentMetadata,
   isPermissionDeniedError,
   sortReviewItems
 } from "../review-utils"
@@ -28,6 +31,13 @@ const item = {
 }
 
 describe("moderation review utils", () => {
+  it("distinguishes neutral operational incidents and allowlists displayed context", () => {
+    const incident = { ...item, phase: "unspecified" as const, source_type: "moderation_engine", category: "moderation_engine_failure", context: { reason: "size_exceeded", secret: "hidden" } }
+    expect(reviewPhaseLabel(incident.phase)).toBe("Unspecified")
+    expect(isExecutionIncident(incident)).toBe(true)
+    expect(isExecutionIncident(item)).toBe(false)
+    expect(executionIncidentMetadata(incident)).toEqual({ reason: "size_exceeded" })
+  })
   it("formats source and timestamps for dense queue rows", () => {
     expect(getReviewItemSourceLabel(item)).toBe("chat: conversation-7")
     expect(formatReviewDate(item.created_at)).toContain("2026")

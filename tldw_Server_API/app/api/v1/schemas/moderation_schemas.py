@@ -3,7 +3,7 @@
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tldw_Server_API.app.core.Moderation.classification_models import (
     ModerationClassificationRequest as ModerationClassificationRequest,
@@ -16,9 +16,9 @@ class ModerationOverrideRule(BaseModel):
     id: str = Field(..., min_length=1, description="Stable rule identifier")
     pattern: str = Field(..., min_length=1, description="Literal phrase or regex source")
     is_regex: bool = Field(False, description="Whether pattern should be treated as regex")
-    action: Literal['block', 'warn'] = Field(..., description="Per-rule moderation action")
-    phase: Literal['input', 'output', 'both'] = Field(
-        'both',
+    action: Literal["block", "warn"] = Field(..., description="Per-rule moderation action")
+    phase: Literal["input", "output", "both"] = Field(
+        "both",
         description="Which moderation phase this rule should apply to",
     )
 
@@ -27,8 +27,10 @@ class ModerationUserOverride(BaseModel):
     enabled: Optional[bool] = Field(None, description="Enable moderation for this user")
     input_enabled: Optional[bool] = Field(None, description="Enable input moderation for this user")
     output_enabled: Optional[bool] = Field(None, description="Enable output moderation for this user")
-    input_action: Optional[Literal['block', 'redact', 'warn']] = Field(None, description="Action for input violations")
-    output_action: Optional[Literal['block', 'redact', 'warn']] = Field(None, description="Action for output violations")
+    input_action: Optional[Literal["block", "redact", "warn"]] = Field(None, description="Action for input violations")
+    output_action: Optional[Literal["block", "redact", "warn"]] = Field(
+        None, description="Action for output violations"
+    )
     redact_replacement: Optional[str] = Field(None, description="Replacement text for redaction")
     categories_enabled: Optional[list[str]] = Field(
         None,
@@ -51,7 +53,7 @@ class ModerationUserOverride(BaseModel):
             return [str(item).strip() for item in v if str(item).strip()]
         return v
 
-    @field_validator('redact_replacement')
+    @field_validator("redact_replacement")
     @classmethod
     def _non_empty(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and len(v.strip()) == 0:
@@ -108,7 +110,7 @@ class BlocklistLintRequest(BaseModel):
     lines: Optional[list[str]] = None
     line: Optional[str] = None
 
-    @field_validator('line')
+    @field_validator("line")
     @classmethod
     def _ensure_any(cls, v, info):
         # Validation occurs after both fields parsed; check neither set later in endpoint
@@ -119,8 +121,8 @@ class BlocklistLintItem(BaseModel):
     index: int
     line: str
     ok: bool
-    pattern_type: Optional[Literal['literal', 'regex', 'comment', 'empty']] = None
-    action: Optional[Literal['block', 'redact', 'warn']] = None
+    pattern_type: Optional[Literal["literal", "regex", "comment", "empty"]] = None
+    action: Optional[Literal["block", "redact", "warn"]] = None
     replacement: Optional[str] = None
     categories: Optional[list[str]] = None
     error: Optional[str] = None
@@ -148,13 +150,13 @@ class ModerationTestRequest(BaseModel):
         False,
         description="Apply guardian-supervised policy overlay using live-chat simulation rules",
     )
-    phase: Literal['input', 'output'] = Field('input', description="Moderation phase to test")
+    phase: Literal["input", "output"] = Field("input", description="Moderation phase to test")
     text: str = Field(..., description="Sample text to test against moderation policy")
 
 
 class ModerationTestResponse(BaseModel):
     flagged: bool
-    action: Literal['block', 'redact', 'warn', 'notify', 'pass']
+    action: Literal["block", "redact", "warn", "notify", "pass"]
     sample: Optional[str] = None
     redacted_text: Optional[str] = None
     effective: dict[str, Any]
@@ -163,7 +165,9 @@ class ModerationTestResponse(BaseModel):
 
 class ModerationSettingsResponse(BaseModel):
     pii_enabled: Optional[bool] = Field(None, description="Runtime override for pii_enabled or None if not overridden")
-    categories_enabled: Optional[list[str]] = Field(None, description="Runtime override for categories_enabled or None if not overridden")
+    categories_enabled: Optional[list[str]] = Field(
+        None, description="Runtime override for categories_enabled or None if not overridden"
+    )
     effective: dict[str, Any] = Field(..., description="Effective settings after merge with config")
 
 
@@ -211,7 +215,7 @@ class ModerationReviewDecisionHistoryEntry(BaseModel):
 class ModerationReviewItem(BaseModel):
     id: str
     status: ModerationReviewStatus
-    phase: Literal["input", "output"]
+    phase: Literal["input", "output", "unspecified"]
     source_type: str | None = None
     source_id: str | None = None
     user_id: str | None = None
@@ -229,6 +233,14 @@ class ModerationReviewItem(BaseModel):
     retention_expires_at: str | None = None
     content_redacted_at: str | None = None
     decision_history: list[ModerationReviewDecisionHistoryEntry] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def reserve_neutral_phase(self) -> "ModerationReviewItem":
+        if self.phase == "unspecified" and (
+            self.source_type != "moderation_engine" or self.category != "moderation_engine_failure"
+        ):
+            raise ValueError("unspecified phase is reserved for moderation engine failures")
+        return self
 
 
 class ModerationReviewListResponse(BaseModel):

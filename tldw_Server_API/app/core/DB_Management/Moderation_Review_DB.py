@@ -7,6 +7,8 @@ import os
 import secrets
 import sqlite3
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -15,7 +17,6 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
-
 _ACTION_STATUS = {
     "approve": "approved",
     "block": "blocked",
@@ -23,6 +24,14 @@ _ACTION_STATUS = {
     "dismiss": "dismissed",
     "escalate": "escalated",
 }
+
+_PHASE_CONSTRAINT = """CHECK (
+                        phase IN ('input', 'output', 'unspecified')
+                        AND (phase != 'unspecified' OR (
+                            source_type IS 'moderation_engine'
+                            AND category IS 'moderation_engine_failure'
+                        ))
+                    )"""
 
 
 def _utc_now() -> str:
@@ -88,22 +97,38 @@ class ModerationReviewStore:
         db_path: str | os.PathLike[str] | None = None,
         *,
         undo_ttl_seconds: int = 15 * 60,
+        busy_timeout_ms: int | None = None,
     ) -> None:
         self.db_path = Path(db_path) if db_path is not None else default_review_db_path()
         self.undo_ttl_seconds = int(undo_ttl_seconds)
+        if busy_timeout_ms is not None and (type(busy_timeout_ms) is not int or busy_timeout_ms < 0):
+            raise ValueError("invalid review busy timeout")
+        self.busy_timeout_ms = busy_timeout_ms
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        if busy_timeout_ms is None:
+            self._ensure_schema()
+        else:
+            # Incident traffic must never start a table rebuild under its budget.
+            with self._connect() as conn:
+                row = conn.execute("SELECT sql FROM sqlite_master WHERE name='moderation_review_items'").fetchone()
+                if row is None or _PHASE_CONSTRAINT not in row[0]:
+                    raise RuntimeError("moderation incident schema not prepared")
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        configure_sqlite_connection(conn)
-        return conn
+    @contextmanager
+    def _connect(self, *, foreign_keys: bool = True) -> Iterator[sqlite3.Connection]:
+        timeout_ms = 5000 if self.busy_timeout_ms is None else self.busy_timeout_ms
+        conn = sqlite3.connect(str(self.db_path), timeout=timeout_ms / 1000)
+        try:
+            conn.row_factory = sqlite3.Row
+            configure_sqlite_connection(conn, busy_timeout_ms=timeout_ms, foreign_keys=foreign_keys)
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS moderation_review_items (
                     id TEXT PRIMARY KEY,
                     idempotency_key TEXT UNIQUE NOT NULL,
@@ -168,18 +193,43 @@ class ModerationReviewStore:
                     ON moderation_review_audit_events(created_at DESC, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_moderation_review_audit_item
                     ON moderation_review_audit_events(item_id, created_at DESC);
-                """
-            )
+                """)
             self._ensure_column(conn, "moderation_review_decisions", "undo_token_hash", "TEXT")
             self._ensure_column(conn, "moderation_review_decisions", "undo_expires_at", "TEXT")
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_moderation_review_decisions_undo_hash
                     ON moderation_review_decisions(undo_token_hash)
                     WHERE undo_token_hash IS NOT NULL
-                """
-            )
+                """)
             conn.commit()
+        # Disable FK actions only on this owned migration connection, before
+        # BEGIN. Children keep their original references while the table swaps.
+        with self._connect(foreign_keys=False) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._migrate_phase_constraint(conn)
+            if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise RuntimeError("moderation review migration foreign key failure")
+
+    def _migrate_phase_constraint(self, conn: sqlite3.Connection) -> None:
+        """Rebuild the old CHECK atomically without changing any row or lease."""
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='moderation_review_items'").fetchone()[0]
+        if _PHASE_CONSTRAINT in sql:
+            return
+        old = "CHECK (phase IN ('input', 'output'))"
+        if old not in sql:
+            raise RuntimeError("unsupported moderation review schema")
+        objects = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE tbl_name='moderation_review_items' AND type IN ('index','trigger') AND sql IS NOT NULL"
+        ).fetchall()
+        new_sql = sql.replace("moderation_review_items", "moderation_review_items_phase_new", 1).replace(
+            old, _PHASE_CONSTRAINT, 1
+        )
+        conn.execute(new_sql)
+        conn.execute("INSERT INTO moderation_review_items_phase_new SELECT * FROM moderation_review_items")
+        conn.execute("DROP TABLE moderation_review_items")
+        conn.execute("ALTER TABLE moderation_review_items_phase_new RENAME TO moderation_review_items")
+        for row in objects:
+            conn.execute(row[0])
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
         rows = conn.execute(f"PRAGMA table_info({table})").fetchall()  # nosec B608
@@ -233,10 +283,7 @@ class ModerationReviewStore:
         expires_at = _parse_utc(row["undo_expires_at"])
         undone_at = row["undone_at"]
         undo_eligible = bool(
-            row["undo_token_hash"]
-            and not undone_at
-            and expires_at is not None
-            and expires_at >= _utc_now_dt()
+            row["undo_token_hash"] and not undone_at and expires_at is not None and expires_at >= _utc_now_dt()
         )
         return {
             "id": row["id"],
@@ -252,7 +299,9 @@ class ModerationReviewStore:
             "redaction_state": "redacted" if content_redacted_at else "not_redacted",
         }
 
-    def _list_decision_history(self, conn: sqlite3.Connection, item_id: str, *, content_redacted_at: str | None) -> list[dict[str, Any]]:
+    def _list_decision_history(
+        self, conn: sqlite3.Connection, item_id: str, *, content_redacted_at: str | None
+    ) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT * FROM moderation_review_decisions
@@ -261,10 +310,7 @@ class ModerationReviewStore:
             """,
             (item_id,),
         ).fetchall()
-        return [
-            self._row_to_decision_history(row, content_redacted_at=content_redacted_at)
-            for row in rows
-        ]
+        return [self._row_to_decision_history(row, content_redacted_at=content_redacted_at) for row in rows]
 
     def _row_to_audit(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -307,6 +353,14 @@ class ModerationReviewStore:
 
     def upsert_item(self, payload: dict[str, Any], *, actor_id: str | None = None) -> dict[str, Any]:
         """Insert a sanitized review item or return the existing idempotent row."""
+        if payload.get("phase") not in {"input", "output", "unspecified"} or (
+            payload.get("phase") == "unspecified"
+            and (
+                payload.get("source_type") != "moderation_engine"
+                or payload.get("category") != "moderation_engine_failure"
+            )
+        ):
+            raise ValueError("invalid moderation review phase")
         now = _utc_now()
         item_id = str(payload.get("id") or uuid.uuid4())
         idempotency_key = str(payload["idempotency_key"])
@@ -534,7 +588,9 @@ class ModerationReviewStore:
                 """,
                 (item_id, decision_row["decided_at"], decision_row["decided_at"], decision_row["id"]),
             ).fetchone()
-            if int(later_count["count"] if later_count else 0) > 0 or str(current_item["status"]) != str(decision_row["status"]):
+            if int(later_count["count"] if later_count else 0) > 0 or str(current_item["status"]) != str(
+                decision_row["status"]
+            ):
                 raise ValueError("undo token superseded")
             previous_status = str(decision_row["previous_status"])
             conn.execute(
@@ -591,10 +647,12 @@ class ModerationReviewStore:
             """,
             (
                 "[content redacted]",
-                _json_dumps({
-                    "redacted": True,
-                    "message": "Context removed from moderation review item",
-                }),
+                _json_dumps(
+                    {
+                        "redacted": True,
+                        "message": "Context removed from moderation review item",
+                    }
+                ),
                 _json_dumps(redacted_matches),
                 _json_dumps(safe_fields),
                 redacted_at,
