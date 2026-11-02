@@ -1850,7 +1850,8 @@ def _open_persona_ws_db(user_id: str) -> CharactersRAGDB | None:
         return None
     try:
         db_path = DatabasePaths.get_chacha_db_path(uid)
-        return CharactersRAGDB(db_path=str(db_path), client_id=f"persona_ws_{uid}")
+        # PostgreSQL uses client_id as the tenant key.
+        return CharactersRAGDB(db_path=str(db_path), client_id=str(uid))
     except (OSError, RuntimeError, ValueError, CharactersRAGDBError) as exc:
         logger.debug("persona ws scope DB init skipped: {}", exc)
         return None
