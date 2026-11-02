@@ -3271,8 +3271,13 @@ describe("VisualPackEditor", () => {
         "POST /api/v1/persona/profiles/persona-1/visual-packs/pack-1/candidates/candidate-1/review"
       )
     )
-    // The request being sent does not mean AntD's loading buttons are ready.
     expect(await screen.findByText("Candidate accepted.")).toBeInTheDocument()
+    // The accepted notice can commit before AntD clears its internal click gate.
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("persona-visual-candidate-reject-candidate-1")
+      ).not.toHaveClass("ant-btn-loading")
+    )
     fireEvent.click(screen.getByTestId("persona-visual-candidate-reject-candidate-1"))
     await waitFor(() =>
       expect(
