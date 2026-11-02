@@ -1081,6 +1081,28 @@ Qualification: all 212 Docs tests pass without skips, including the actual stric
 **Tests**: Current rules, feedback, exact-head CI and remote readback. Do not cancel unrelated jobs, dispatch required gates or change policy.
 **Status**: In Progress
 
+### November 2 Native-Quota Fixture Integration
+
+## Stage 1: Diagnose Current-Head Storage Failures
+**Goal**: Trace gap-verified-8 job125059650783's 19 native-quota failures without relaxing the serving boundary.
+**Success Criteria**: Reproduce the SQLite bulk-current failure and identify the first failing managed write using safe diagnostic frames, not raw subprocess output.
+**Tests**: Existing bulk-current SQLite regression is RED; a private diagnostic identifies ProfileUserWriteRejected at the fixture org_members INSERT before quota assertions. Remote shard: 19 failed / 936 passed.
+**Status**: Complete
+
+## Stage 2: Qualify Test-Only Fixture Repair
+**Goal**: Seed ordinary memberships through MembershipWriter and retain intentional legacy NULL/inactive membership states via explicit test-only capability writes.
+**Success Criteria**: All existing quota/rollback expected results and cases remain intact on SQLite and official fixture-managed PostgreSQL; no runtime, workflow, dependency, policy or WP3 changes. ADR085 governs unchanged, so no new ADR is needed.
+**Tests**: Full native-quota file; managed-boundary tests; unchanged-baseline test-quality enforcement; canonical task tests; touched-test Bandit, Ruff, compile and diff checks; independent bounded remediation review.
+**Status**: Complete
+
+Local qualification: the existing bulk-current SQLite case is RED before the fixture repair and GREEN after it. All 52 native-quota cases pass without skips, including 25 live PostgreSQL cases through the official isolated fixtures with the dedicated review DSN. Guard and canonical tracking tests pass 218/218. Full-tree test-quality enforcement passes with its baseline unchanged; the shard guard remains 869 shards, 5349 files, four ignored, baseline44 and zero new uncovered. Ruff, compile and diff checks pass. The outer test AST excluding SCRIPT, all six original SCRIPT assertions and all result payloads are unchanged. Touched-file Bandit reports six existing B101 assertions only; separately scanning the embedded SCRIPT exactly preserves prior finding contexts: six LOW B101, one LOW B106 fixture hash and one MEDIUM B608 dynamic fixture SELECT, with no new finding or scan error. Fresh bare pytest is not green: exit2 during collection after 85849 items and 12 collection skips because unchanged Workspaces/test_workspaces_api.py imports unavailable httpx2. Prior broader frontend and WebSocket limits remain explicit above. Logs are /private/tmp/pr2821-gap8-{red,green-focused,native-full,guard-tracking,root-pytest,quality,shards}.log. Independent bounded remediation review finds no critical, important or minor findings and approves the content for publication, not merge. Accepted exclusions: unchanged whole-PR runtime/WP3, full-repository and broader frontend/WebSocket correctness, and unrelated remote failures are not re-audited; fresh coordinator verification evidence is used rather than duplicating suites; authoritative refs/rules/summary/feedback/CI remain the coordinator's responsibility. The reviewer confirms unchanged executable assertions, cases, payloads and mocks, correct managed setup and explicit legacy-state fixture writes. Final committed-SHA qualification remains required; no runtime or gate changes and no remote retry have occurred.
+
+## Stage 3: Publish Reviewed Candidate and Await Fresh Gates
+**Goal**: Publish the independently reviewed test-only repair after verifying authoritative refs and unarmed merge state.
+**Success Criteria**: Human Change summary preserved verbatim; latest-dev ancestry, exact reviewed head, feedback and all fresh required gates pass before expected-head merge commit. Prior failed-run retry permissions do not authorize retries of another head or run. TASK-13001.2 remains In Progress until verified merge.
+**Tests**: Current branch rules, exact-head CI and GitHub readback. No required-gate dispatch or tracking-only CI invalidation.
+**Status**: In Progress
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
