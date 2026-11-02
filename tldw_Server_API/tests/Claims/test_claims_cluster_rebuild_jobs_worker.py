@@ -236,8 +236,17 @@ async def test_invalid_stored_metadata_rejected_before_storage(manager, monkeypa
 
 @pytest.mark.parametrize("method", [EXACT, EMBEDDINGS])
 @pytest.mark.parametrize("reactivate", [False, True])
-async def test_committed_receipt_replays_before_vectors_and_notifications(manager, db, monkeypatch, method, reactivate):
-    seed(db)
+@pytest.mark.parametrize(
+    "close_error", [None, ConnectionError, ValueError], ids=["normal-close", "transient-close", "permanent-close"]
+)
+async def test_committed_receipt_replays_before_vectors_and_notifications(
+    manager, db, monkeypatch, method, reactivate, close_error, inject_close_failure
+):
+    _, claim = seed(db)
+    if method.method == "embeddings":
+        with scoped_context(user_id=42, is_admin=False):
+            cluster = db.create_claim_cluster(user_id="42", representative_claim_id=claim)
+            db.add_claim_to_cluster(cluster_id=cluster["id"], claim_id=claim)
     calls = []
 
     @contextmanager
@@ -254,6 +263,7 @@ async def test_committed_receipt_replays_before_vectors_and_notifications(manage
     before = output(db)
     receipt = db.execute_query("SELECT * FROM claims_cluster_publication_receipts").fetchone()
     assert receipt is not None
+    receipt = dict(receipt)
     if reactivate:
         # Reacquire the delayed retry, then terminalize before explicit control.
         assert manager.retry_now_jobs(job_id=job["id"], only_failed=False) == 1
@@ -273,12 +283,136 @@ async def test_committed_receipt_replays_before_vectors_and_notifications(manage
     monkeypatch.setattr(
         handlers, "calculate_claim_cluster_rebuild", lambda *a, **k: pytest.fail("receipt recalculated"), raising=False
     )
+    if close_error is not None:
+        inject_close_failure(close_error)
     await run_worker(manager)
     stored = manager.get_job(job["id"])
     assert stored["status"] == "completed", stored
     assert output(db) == before
+    assert dict(db.execute_query("SELECT * FROM claims_cluster_publication_receipts").fetchone()) == receipt
+    assert stored["result"] == {
+        key: receipt[key]
+        for key in (
+            "clusters_created",
+            "claims_assigned",
+            "claims_skipped",
+            "method",
+            "outcome",
+            "reason",
+            "similarity_threshold",
+        )
+    }
     assert stored["result"]["outcome"] == ("ok" if method.method == "exact" else "skipped")
     assert calls == []
+
+
+@pytest.fixture
+def inject_close_failure(manager, monkeypatch):
+    """Fault real session teardown and prove both scopes restore on its thread."""
+    original_session = handlers.managed_media_database
+    original_rebuild = handlers._rebuild_claim_clusters
+    restored = []
+
+    def install(error_type):
+        @contextmanager
+        def close_failure(**kwargs):
+            assert jobs_context() == (False, "claims", "42")
+            assert get_scope().user_id == 42 and not get_scope().is_admin
+            try:
+                with original_session(**kwargs) as opened:
+                    yield opened
+            finally:
+                raise error_type("secret storage close detail")
+
+        def scoped_rebuild(job):
+            with manager.scoped_rls_context(is_admin=False, domain_allowlist="other", owner_user_id="99"):
+                with scoped_context(user_id=99, is_admin=False, team_ids=[9]):
+                    prior = get_scope()
+                    try:
+                        return original_rebuild(job)
+                    except ClaimsJobError as exc:
+                        assert str(exc) == "Claims cluster rebuild failed."
+                        assert exc.__suppress_context__
+                        raise
+                    finally:
+                        assert jobs_context() == (False, "other", "99")
+                        assert get_scope() == prior
+                        restored.append(threading.get_ident())
+
+        monkeypatch.setattr(handlers, "managed_media_database", close_failure)
+        monkeypatch.setattr(handlers, "_rebuild_claim_clusters", scoped_rebuild)
+
+    yield install
+    if restored:
+        assert all(thread_id != threading.get_ident() for thread_id in restored)
+
+
+@pytest.mark.parametrize("method", [EXACT, EMBEDDINGS])
+@pytest.mark.parametrize("close_error", [ConnectionError, ValueError])
+async def test_new_publication_survives_media_teardown_failure(
+    manager, db, monkeypatch, method, close_error, inject_close_failure
+):
+    seed(db)
+
+    @contextmanager
+    def absent(**kwargs):
+        yield None
+
+    monkeypatch.setattr(handlers, "open_claim_cluster_vector_reader", absent)
+    inject_close_failure(close_error)
+    job = enqueue(manager, settings=method).job
+    await run_worker(manager)
+    stored = manager.get_job(job["id"])
+    assert stored["status"] == "completed", stored
+    assert stored["result"]["outcome"] == ("ok" if method.method == "exact" else "skipped")
+    assert db.execute_query("SELECT count(*) AS n FROM claims_cluster_publication_receipts").fetchone()["n"] == 1
+
+
+@pytest.mark.parametrize("phase", ["receipt-read", "before-publication", "receiptless-superseded"])
+@pytest.mark.parametrize("close_error", [ConnectionError, ValueError])
+async def test_no_committed_result_does_not_hide_teardown_failure(
+    manager, db, monkeypatch, phase, close_error, inject_close_failure
+):
+    from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import ClusterPublicationResult
+
+    seed(db)
+
+    def fail(*args, **kwargs):
+        raise close_error("secret storage read detail")
+
+    if phase == "receipt-read":
+        monkeypatch.setattr(MediaDatabase, "load_claim_cluster_publication", fail)
+    elif phase == "before-publication":
+        monkeypatch.setattr(handlers, "calculate_claim_cluster_rebuild", fail)
+    else:
+        monkeypatch.setattr(
+            MediaDatabase,
+            "publish_claim_cluster_rebuild",
+            lambda *a, **k: ClusterPublicationResult(
+                {
+                    "outcome": "skipped",
+                    "reason": "superseded",
+                    "method": "exact",
+                    "clusters_created": 0,
+                    "claims_assigned": 0,
+                    "claims_skipped": 0,
+                    "similarity_threshold": None,
+                },
+                False,
+            ),
+        )
+    inject_close_failure(close_error)
+    job = enqueue(manager).job
+    await run_worker(manager)
+    stored = manager.get_job(job["id"])
+    assert stored["status"] == ("queued" if close_error is ConnectionError else "failed")
+    assert stored["error_code"] == (
+        "claims_cluster_storage_unavailable" if close_error is ConnectionError else "claims_cluster_failed"
+    )
+    assert "secret" not in json.dumps(stored)
+    assert stored["result"] is None
+    assert db.execute_query("SELECT * FROM claims_cluster_publication_receipts").fetchall() == []
+    assert output(db) == []
 
 
 @pytest.mark.parametrize(

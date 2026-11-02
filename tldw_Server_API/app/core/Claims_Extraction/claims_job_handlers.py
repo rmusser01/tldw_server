@@ -548,7 +548,7 @@ def _rebuild_claim_clusters(job: dict[str, Any]) -> dict[str, Any]:
     )
     is_postgres = media_db_runtime_defaults.postgres_content_mode
     opened = False
-    publication = None
+    committed_result: dict[str, Any] | None = None
     try:
         manager = jobs_manager_from_env()
         with manager.scoped_rls_context(is_admin=False, domain_allowlist="claims", owner_user_id=owner):
@@ -569,7 +569,8 @@ def _rebuild_claim_clusters(job: dict[str, Any]) -> dict[str, Any]:
                     opened = True
                     publication = db.load_claim_cluster_publication(identity=identity)
                     if publication is not None:
-                        return dict(publication.result)
+                        committed_result = dict(publication.result)
+                        return committed_result
                     snapshot = db.read_claim_cluster_source(
                         owner_user_id=owner,
                         claim_limit=limits.exact_claims if effective.method == "exact" else limits.embedding_claims,
@@ -601,13 +602,15 @@ def _rebuild_claim_clusters(job: dict[str, Any]) -> dict[str, Any]:
                     publication = db.publish_claim_cluster_rebuild(
                         identity=identity, settings=effective, snapshot=snapshot, calculation=calculation, limits=limits
                     )
+                    result = dict(publication.result)
                     if publication.newly_published:
+                        committed_result = result
                         evaluate_published_cluster_watchlists(db, owner_user_id=owner)
-                    return dict(publication.result)
+                    return result
     except Exception as exc:
-        if publication is not None and publication.newly_published:
+        if committed_result is not None:
             logger.warning("Published cluster post-commit processing failed")
-            return dict(publication.result)
+            return committed_result
         if isinstance(exc, ClaimsJobError):
             raise
         if not is_postgres and not opened and isinstance(exc, FileNotFoundError):
