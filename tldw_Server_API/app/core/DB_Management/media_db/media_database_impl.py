@@ -101,6 +101,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_ops 
     list_claim_cluster_members,
     list_claim_clusters,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_rebuild_publication import (
+    load_claim_cluster_publication,
+    publish_claim_cluster_rebuild,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_rebuild_snapshot import (
     read_claim_cluster_source,
 )
@@ -2183,6 +2187,8 @@ class MediaDatabase:
     get_claims_review_metrics_window_rows = get_claims_review_metrics_window_rows
     lock_claims_review_metrics_owner = lock_claims_review_metrics_owner
     read_claim_cluster_source = read_claim_cluster_source
+    load_claim_cluster_publication = load_claim_cluster_publication
+    publish_claim_cluster_rebuild = publish_claim_cluster_rebuild
     get_claims_review_latency_stats = get_claims_review_latency_stats
     get_claim_clusters_by_ids = get_claim_clusters_by_ids
     get_claim_cluster_member_counts = get_claim_cluster_member_counts
