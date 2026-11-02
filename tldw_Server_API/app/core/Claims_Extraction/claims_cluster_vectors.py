@@ -8,6 +8,7 @@ from typing import Any
 
 from chromadb.errors import ChromaError, NotFoundError
 
+from tldw_Server_API.app.core.DB_Management.chroma_read_validation import ChromaPreflightLimits
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import ClusterRebuildStorageError
 from tldw_Server_API.app.core.Embeddings.chroma_storage import ChromaStorageError
@@ -22,7 +23,7 @@ def _translate(exc: BaseException) -> ClusterRebuildStorageError:
 
 @contextmanager
 def open_claim_cluster_vector_reader(
-    *, owner_user_id: str, embedding_config: Mapping[str, Any]
+    *, owner_user_id: str, embedding_config: Mapping[str, Any], preflight_limits: ChromaPreflightLimits | None = None
 ) -> Iterator[Callable[[tuple[str, ...]], Mapping[str, Sequence[float]]] | None]:
     """Yield a bounded callback inside one coordinated read/SDK lifetime.
 
@@ -37,6 +38,8 @@ def open_claim_cluster_vector_reader(
         path = DatabasePaths.resolve_user_chroma_directory(owner_user_id, base_dir_override=base)
     except ValueError as exc:
         raise ClusterRebuildStorageError("claims_cluster_vector_configuration", retryable=False) from exc
+    except OSError as exc:
+        raise _translate(exc) from exc
     try:
         path.stat()
     except FileNotFoundError:
@@ -46,7 +49,9 @@ def open_claim_cluster_vector_reader(
         raise _translate(exc) from exc
     manager = None
     try:
-        manager = ChromaDBManager(owner_user_id, dict(embedding_config), existing_only=True)
+        manager = ChromaDBManager(
+            owner_user_id, dict(embedding_config), existing_only=True, preflight_limits=preflight_limits
+        )
         with manager.storage_access():
             try:
                 collection = manager.get_existing_collection_strict(f"claims_for_{owner_user_id}")

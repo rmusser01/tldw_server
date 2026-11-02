@@ -6,18 +6,17 @@ unsupported, never missing embeddings. This does not migrate or repair storage.
 
 from __future__ import annotations
 
-import hashlib
-import json
-
-# Only genops is used: it inspects opcodes without loading/executing a pickle.
-import pickletools  # nosec B403
-import sqlite3
 import stat
 import struct
-from contextlib import closing
 from pathlib import Path
-from uuid import UUID
 
+from tldw_Server_API.app.core.DB_Management.chroma_read_validation import (
+    ChromaPreflightLimits as ChromaPreflightLimits,
+)
+from tldw_Server_API.app.core.DB_Management.chroma_read_validation import (
+    ReadBudget,
+    read_metadata,
+)
 from tldw_Server_API.app.core.Embeddings.chroma_storage import ChromaStorageError
 
 # Complete sqlite_master signature from the real Rust 1.5.5 fresh-store profile,
@@ -47,22 +46,6 @@ _MIGRATIONS_155 = {
     "embeddings_queue": ("d3755dfd232be8e8301f4d7fcfb3a486", "8fbfe4ffb3e57f1d8bfdc58510a82e85"),
 }
 _INDEX_FILES = ("header.bin", "data_level0.bin", "length.bin", "link_lists.bin", "index_metadata.pickle")
-_DATA_PICKLE_OPS = frozenset(
-    (
-        "PROTO",
-        "EMPTY_DICT",
-        "MARK",
-        "BINUNICODE",
-        "NONE",
-        "BININT",
-        "BININT1",
-        "BININT2",
-        "LONG1",
-        "SETITEM",
-        "SETITEMS",
-        "STOP",
-    )
-)
 
 
 def _invalid() -> ChromaStorageError:
@@ -76,25 +59,33 @@ def _regular_file(path: Path) -> int:
     return info.st_size
 
 
-def _validate_index(path: Path, *, dimension: int) -> None:
+def _validate_index(path: Path, *, dimension: int, budget: ReadBudget | None = None, persisted: bool = True) -> None:
     """Reject absent/partial files before the SDK can recreate or overwrite them."""
     if not stat.S_ISDIR(path.lstat().st_mode):
         raise _invalid()
-    sizes = {name: _regular_file(path / name) for name in _INDEX_FILES}
-    if sizes["header.bin"] != 100 or any(size <= 0 for size in sizes.values()):
+    budget = budget or ReadBudget(ChromaPreflightLimits())
+    names = _INDEX_FILES if persisted else _INDEX_FILES[:-1]
+    sizes = {name: _regular_file(path / name) for name in names}
+    if sizes["header.bin"] != 100:
         raise _invalid()
     # Persisted local HNSW v1 uses little-endian u32 + twelve 64-bit fields.
     # Check the complete file extents before a loader can reinterpret them.
     header = struct.unpack("<I12Q", (path / "header.bin").read_bytes())
     version, offset, capacity, count, stride, label_offset, data_offset = header[:7]
-    if (version, offset) != (1, 0) or not 0 < count <= capacity:
+    if (version, offset) != (1, 0) or not 0 <= count <= capacity or capacity <= 0:
         raise _invalid()
+    budget.charge("elements", count)
     if data_offset != 4 + 4 * header[9] or label_offset != data_offset + 4 * dimension or stride != label_offset + 8:
         raise _invalid()
+    # Resizing reserves memory capacity, but persistent files may cover only
+    # the written slots. Their paired allocation must agree and cover count.
+    allocated = sizes["data_level0.bin"] // stride
     if (
         not 0 < header[8] == header[10] <= header[9]
-        or sizes["data_level0.bin"] != capacity * stride
-        or sizes["length.bin"] != capacity * 4
+        or sizes["data_level0.bin"] % stride
+        or sizes["length.bin"] != allocated * 4
+        or not 0 < allocated <= capacity
+        or allocated < count
     ):
         raise _invalid()
     upper_stride = 4 + 4 * header[8]
@@ -111,17 +102,15 @@ def _validate_index(path: Path, *, dimension: int) -> None:
             links.seek(length, 1)
         if remaining:
             raise _invalid()
-    if sizes["index_metadata.pickle"] > 33_554_432:
-        raise _invalid()
-    # Inspect data-only Rust metadata without executing pickle globals/reducers.
-    data = (path / "index_metadata.pickle").read_bytes()
-    operations = list(pickletools.genops(data))
-    if not operations or operations[-1][0].name != "STOP" or operations[-1][2] != len(data) - 1:
-        raise _invalid()
-    if any(op.name not in _DATA_PICKLE_OPS for op, _, _ in operations):
-        raise _invalid()
-    keys = {arg for op, arg, _ in operations if op.name == "BINUNICODE"}
-    if not {"dimensionality", "total_elements_added", "id_to_label", "label_to_id", "id_to_seq_id"} <= keys:
+    if persisted:
+        read_metadata(
+            path / "index_metadata.pickle",
+            size=sizes["index_metadata.pickle"],
+            count=count,
+            dimension=dimension,
+            budget=budget,
+        )
+    elif count != 0 or (path / "index_metadata.pickle").exists():
         raise _invalid()
 
 
@@ -132,117 +121,8 @@ def validate_existing_chroma(path: Path, *, collection_name: str | None = None) 
     A missing SQLite file in an existing directory is corruption, not absence.
     All persisted vector segments are checked: SDK startup owns the whole store.
     """
-    import chromadb
+    from tldw_Server_API.app.core.DB_Management.chroma_existing_state import preflight_existing_chroma
 
-    if chromadb.__version__ != "1.5.5":
-        raise ChromaStorageError("vector_unsupported_sdk", retryable=False)
-    try:
-        _regular_file(path / "chroma.sqlite3")
-        # A quiescent supported store has no recovery/WAL sidecars. Immutable
-        # validation avoids even SQLite's read-only WAL shared-memory creation.
-        for suffix in ("-wal", "-shm", "-journal"):
-            try:
-                (path / f"chroma.sqlite3{suffix}").lstat()
-            except FileNotFoundError:
-                continue
-            raise _invalid()
-        with closing(
-            sqlite3.connect((path / "chroma.sqlite3").as_uri() + "?mode=ro&immutable=1", uri=True, timeout=1)
-        ) as db:
-            db.execute("PRAGMA query_only=ON")
-            shape = db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name").fetchall()
-            signature = hashlib.sha256(json.dumps(shape, separators=(",", ":")).encode()).hexdigest()
-            if signature != _SCHEMA_155:
-                raise _invalid()
-            migrations = db.execute("SELECT dir,version,sql,hash FROM migrations ORDER BY dir,version").fetchall()
-            expected = {
-                (directory, i + 1): digest
-                for directory, hashes in _MIGRATIONS_155.items()
-                for i, digest in enumerate(hashes)
-            }
-            if len(migrations) != len(expected):
-                raise _invalid()
-            for directory, version, sql, digest in migrations:
-                md5 = hashlib.md5(sql.encode(), usedforsecurity=False).hexdigest()
-                if expected.get((directory, version)) != md5 or digest != md5:
-                    raise _invalid()
-            if db.execute("SELECT id FROM tenants WHERE id = 'default_tenant'").fetchall() != [("default_tenant",)]:
-                raise _invalid()
-            if db.execute(
-                "SELECT id FROM databases WHERE name = 'default_database' AND tenant_id = 'default_tenant'"
-            ).fetchall() != [("00000000-0000-0000-0000-000000000000",)]:
-                raise _invalid()
-            # Rust appends an acquire_write row on each SDK startup; this is
-            # not a singleton default record and must survive repeated opens.
-            if (
-                not db.execute("SELECT 1 FROM acquire_write LIMIT 1").fetchone()
-                or db.execute("SELECT 1 FROM acquire_write WHERE id <= 0 OR lock_status != 1 LIMIT 1").fetchone()
-            ):
-                raise _invalid()
-            configs = db.execute("SELECT id,config_json_str FROM embeddings_queue_config").fetchall()
-            if len(configs) != 1 or configs[0][0] != 1:
-                raise _invalid()
-            config = json.loads(configs[0][1])
-            if (
-                not isinstance(config, dict)
-                or type(config.get("automatically_purge")) is not bool
-                or config.get("_type") != "EmbeddingsQueueConfigurationInternal"
-            ):
-                raise _invalid()
-            for collection_id, dimension, database_id in db.execute("SELECT id,dimension,database_id FROM collections"):
-                if str(UUID(collection_id)) != collection_id or (
-                    dimension is not None and (type(dimension) is not int or dimension <= 0)
-                ):
-                    raise _invalid()
-                if not db.execute(
-                    "SELECT 1 FROM databases d JOIN tenants t ON t.id = d.tenant_id WHERE d.id = ?", (database_id,)
-                ).fetchone():
-                    raise _invalid()
-                if db.execute(
-                    "SELECT scope FROM segments WHERE collection = ? ORDER BY scope", (collection_id,)
-                ).fetchall() != [("METADATA",), ("VECTOR",)]:
-                    raise _invalid()
-            for segment_id, segment_type, scope, collection_id in db.execute(
-                "SELECT id,type,scope,collection FROM segments"
-            ):
-                if (
-                    str(UUID(segment_id)) != segment_id
-                    or not db.execute("SELECT 1 FROM collections WHERE id = ?", (collection_id,)).fetchone()
-                ):
-                    raise _invalid()
-                if scope == "VECTOR" and segment_type == "urn:chroma:segment/vector/hnsw-local-persisted":
-                    (dimension,) = db.execute(
-                        "SELECT dimension FROM collections WHERE id = ?", (collection_id,)
-                    ).fetchone()
-                    if dimension is None:
-                        raise _invalid()
-                    _validate_index(path / segment_id, dimension=dimension)
-                elif (scope, segment_type) != ("METADATA", "urn:chroma:segment/metadata/sqlite"):
-                    raise _invalid()
-            if collection_name is None:
-                return None
-            rows = db.execute(
-                "SELECT id,dimension FROM collections WHERE name = ? AND database_id = ?",
-                (collection_name, "00000000-0000-0000-0000-000000000000"),
-            ).fetchall()
-            if not rows:
-                return None
-            collection_id, dimension = rows[0]
-            if dimension is not None and dimension > 4096:
-                raise ChromaStorageError("resource_limit", retryable=False)
-            if str(UUID(collection_id)) != collection_id or (
-                dimension is not None and (type(dimension) is not int or dimension <= 0)
-            ):
-                raise _invalid()
-            segments = db.execute(
-                "SELECT scope FROM segments WHERE collection = ? ORDER BY scope", (collection_id,)
-            ).fetchall()
-            if segments != [("METADATA",), ("VECTOR",)]:
-                raise _invalid()
-            return collection_id
-    except (FileNotFoundError, ValueError, TypeError, sqlite3.DatabaseError) as exc:
-        if isinstance(exc, sqlite3.OperationalError) and ("locked" in str(exc) or "unable to open" in str(exc)):
-            raise ChromaStorageError("vector_access", retryable=True) from exc
-        raise _invalid() from exc
-    except OSError as exc:
-        raise ChromaStorageError("vector_access", retryable=True) from exc
+    snapshot = preflight_existing_chroma(path, limits=ChromaPreflightLimits())
+    state = snapshot.collections.get(collection_name)
+    return state.collection_id if state is not None else None

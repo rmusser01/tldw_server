@@ -50,9 +50,13 @@ class StorageSession:
     def __init__(self, path: Path, *, timeout: float = 5.0) -> None:
         if not math.isfinite(timeout) or not 0 < timeout <= 60:
             raise ValueError("Chroma storage lock timeout must be finite in (0, 60]")
-        self.path = path
+        if path.is_symlink():
+            raise ChromaStorageError("vector_path_alias", retryable=False)
+        self.path = path.resolve()
         self.timeout = timeout
-        self.lock_path = path.parent.parent / f".chroma-{path.parent.name}.lock"
+        self.lock_path = self.path.parent.parent / f".chroma-{self.path.parent.name}.lock"
+        self._pid = os.getpid()
+        self.epoch = 0
         self._thread_lock = threading.RLock()
         self._depth = 0
         self._fd: int | None = None
@@ -62,6 +66,7 @@ class StorageSession:
         self._shutdown_failed = False
 
     def __enter__(self) -> StorageSession:
+        self.check_process()
         deadline = time.monotonic() + self.timeout
         if not self._thread_lock.acquire(timeout=self.timeout):
             raise ChromaStorageError("vector_busy", retryable=True)
@@ -89,6 +94,7 @@ class StorageSession:
                         raise ChromaStorageError("vector_busy", retryable=True) from exc
                     time.sleep(min(0.02, remaining))
             self._depth = 1
+            self.epoch += 1
             return self
         except (OSError, ChromaStorageError):
             if self._fd is not None:
@@ -98,6 +104,7 @@ class StorageSession:
             raise
 
     def __exit__(self, *exc: Any) -> None:
+        self.check_process()
         self._depth -= 1
         try:
             if not self._depth:
@@ -127,16 +134,30 @@ class StorageSession:
 
     def client(self, factory, *, existing_only: bool):
         """Lazily open an SDK only inside the coordinated lifetime."""
+        self.check_process()
         if not self._depth:
             raise RuntimeError("Chroma SDK access requires a storage session")
-        if self.sdk is not None and self._mode != existing_only:
-            raise ChromaStorageError("vector_mixed_access", retryable=False)
+        self.require_mode(existing_only)
         if self.sdk is None:
             self.sdk = factory() if existing_only else self._open_persistent(factory)
             self._mode = existing_only
             if not existing_only:
                 self._stop = lambda: _stop_client(self.sdk)
         return self.sdk
+
+    def check_process(self) -> None:
+        """Never acquire/unlock inherited mutexes, SDKs or flock descriptions."""
+        if os.getpid() != self._pid:
+            raise ChromaStorageError("vector_forked_handle", retryable=True)
+
+    def require_mode(self, existing_only: bool) -> None:
+        """Pin mode even before SDK creation, so cached read proofs stay valid."""
+        self.check_process()
+        if not self._depth:
+            raise RuntimeError("Chroma access mode requires a held session")
+        if self._mode is not None and self._mode != existing_only:
+            raise ChromaStorageError("vector_mixed_access", retryable=False)
+        self._mode = existing_only
 
     def _open_persistent(self, factory):
         """Retain partial SDK startup for shutdown before leaving the lock.
@@ -254,16 +275,32 @@ class GuardedCollection:
 class ExistingClient:
     """Narrow no-create ABI adapter, never a fallback to a writer or stub."""
 
-    def __init__(self, session: StorageSession) -> None:
+    def __init__(self, session: StorageSession, *, limits=None) -> None:
+        from tldw_Server_API.app.core.DB_Management.chroma_read_validation import ChromaPreflightLimits
+
         self.session = session
+        self.limits = limits or ChromaPreflightLimits()
+        self._snapshot = None
+        self._snapshot_epoch = -1
         self.closed = False
 
     def validate(self, name: str | None = None) -> str | None:
-        from tldw_Server_API.app.core.DB_Management.chroma_existing import validate_existing_chroma
+        from tldw_Server_API.app.core.DB_Management.chroma_existing_state import preflight_existing_chroma
 
+        self.session.check_process()
         if self.closed:
             raise ChromaStorageError("vector_closed", retryable=True)
-        return validate_existing_chroma(self.session.path, collection_name=name)
+        if not self.session._depth:
+            raise RuntimeError("Existing validation requires a held storage session")
+        self.session.require_mode(True)
+        if self._snapshot_epoch != self.session.epoch:
+            self._snapshot = preflight_existing_chroma(self.session.path, limits=self.limits)
+            self._snapshot_epoch = self.session.epoch
+        self._snapshot.check_identity()
+        state = self._snapshot.collections.get(name)
+        if state is not None and state.dimension is not None and state.dimension > self.limits.vector_width:
+            raise ChromaStorageError("resource_limit", retryable=False)
+        return state.collection_id if state is not None else None
 
     def _factory(self):
         import inspect
@@ -301,6 +338,8 @@ class ExistingCollection:
         self.id = collection_id
 
     def get(self, *, ids, include):
+        from tldw_Server_API.app.core.DB_Management.chroma_existing_state import read_logical_vectors
+
         try:
             validate_ids(list(ids))
         except (DuplicateIDError, ValueError) as exc:
@@ -308,6 +347,14 @@ class ExistingCollection:
         with self._guard.session:
             if self._guard.validate(self.name) != self.id:
                 raise ChromaStorageError("vector_source_changed", retryable=True)
+            snapshot = self._guard._snapshot
+            state = snapshot.collections[self.name]
+            if state.kind != "materialized":
+                mapping = read_logical_vectors(snapshot, state)
+                returned_ids = [key for key in ids if key in mapping]
+                vectors = [mapping[key] for key in returned_ids]
+                snapshot.budget.charge("returned_components", sum(len(vector) for vector in vectors))
+                return {"ids": returned_ids, "embeddings": vectors}
             client = self._guard.session.client(self._guard._factory, existing_only=True)
             collection = client.get_collection(self.name, "default_tenant", "default_database")
             if str(collection.id) != self.id:
@@ -315,4 +362,6 @@ class ExistingCollection:
             response = client.get(
                 self.id, ids=list(ids), include=include, tenant="default_tenant", database="default_database"
             )
+            if response.embeddings is not None:
+                snapshot.budget.charge("returned_components", sum(len(vector) for vector in response.embeddings))
             return {"ids": response.ids, "embeddings": response.embeddings}

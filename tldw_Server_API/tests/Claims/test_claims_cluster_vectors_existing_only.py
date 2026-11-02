@@ -301,12 +301,12 @@ def test_existing_only_never_uses_forced_stub_or_fallback(config, seeded, monkey
 
 
 def test_access_errors_are_retryable_not_no_embeddings(config, seeded, monkeypatch):
-    from tldw_Server_API.app.core.DB_Management import chroma_existing
+    from tldw_Server_API.app.core.DB_Management import chroma_read_validation
 
     def denied(*args, **kwargs):
         raise PermissionError("sensitive location")
 
-    monkeypatch.setattr(chroma_existing.sqlite3, "connect", denied)
+    monkeypatch.setattr(chroma_read_validation.sqlite3, "connect", denied)
     with pytest.raises(ClusterRebuildStorageError) as caught:
         with open_reader(config):
             pytest.fail("access failure became no_embeddings")
@@ -495,6 +495,20 @@ def test_writer_preserves_public_embedding_adapter_without_retaining_sdk(config)
     from chromadb.api.types import EmbeddingFunction
 
     class FixedEmbedding(EmbeddingFunction):
+        def __init__(self):
+            pass
+
+        @staticmethod
+        def name():
+            return "task6-fixed"
+
+        def get_config(self):
+            return {}
+
+        @staticmethod
+        def build_from_config(config):
+            return FixedEmbedding()
+
         def __call__(self, input):
             return [np.array([1.0, 0.0], dtype=np.float32) for _ in input]
 

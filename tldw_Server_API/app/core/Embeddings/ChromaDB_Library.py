@@ -43,6 +43,7 @@ _CHROMA_NONCRITICAL_EXCEPTIONS = (
     ChromaError,
 )
 _CHROMA_SEGMENT_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.5, 1.0)
+_CHROMA_PROCESS_PID = os.getpid()
 
 
 def _is_transient_chroma_segment_error(error: BaseException) -> bool:
@@ -276,6 +277,7 @@ class ChromaDBManager:
         client: Optional[Any] = None,
         client_factory: Optional[Callable[[Path, dict[str, Any]], Any]] = None,
         existing_only: bool = False,
+        preflight_limits: Any = None,
     ):
         """
         Initializes the ChromaDBManager for a specific user.
@@ -284,6 +286,9 @@ class ChromaDBManager:
             user_id (str): The ID of the user for whom this ChromaDB instance is.
             user_embedding_config (Dict[str, Any]): The global application configuration dictionary.
         """
+        if os.getpid() != _CHROMA_PROCESS_PID:
+            raise ChromaStorageError("vector_forked_handle", retryable=True)
+        self._manager_pid = os.getpid()
         if not user_embedding_config:
             logger.error("Initialization failed: user_embedding_config cannot be empty for ChromaDBManager.")
             raise ValueError("user_embedding_config cannot be empty for ChromaDBManager.")
@@ -343,7 +348,7 @@ class ChromaDBManager:
             # stat(), not exists(): permission failures are not absence.
             self.user_chroma_path.stat()
             self._lock = _storage_session_for_path(self.user_chroma_path, chroma_client_settings_config)
-            self.client = ExistingClient(self._lock)
+            self.client = ExistingClient(self._lock, limits=preflight_limits)
             with self._lock:
                 self.client.validate()
         elif client is not None:
@@ -397,6 +402,7 @@ class ChromaDBManager:
                 path = self.user_chroma_path
                 # Never hold the global cache mutex while waiting on a store.
                 with session:
+                    session.require_mode(False)
                     path.mkdir(parents=True, exist_ok=True)
                     with _PERSISTENT_CLIENTS_LOCK:
                         cached_state = _PERSISTENT_CLIENTS.get(cache_key)
@@ -444,6 +450,8 @@ class ChromaDBManager:
     # Resource management helpers
     def close(self) -> None:
         """Close underlying ChromaDB client and release file descriptors."""
+        if os.getpid() != getattr(self, "_manager_pid", _CHROMA_PROCESS_PID):
+            raise ChromaStorageError("vector_forked_handle", retryable=True)
         with self._lock:
             client = getattr(self, "client", None)
             if client is None:
@@ -1951,6 +1959,8 @@ _STORAGE_SESSIONS: WeakValueDictionary[str, StorageSession] = WeakValueDictionar
 
 def _storage_session_for_path(path: Path, config: dict[str, Any]) -> StorageSession:
     """Cache only inert per-store coordination, with no blocking under mutex."""
+    if os.getpid() != _CHROMA_PROCESS_PID:
+        raise ChromaStorageError("vector_forked_handle", retryable=True)
     key = _persistent_client_cache_key(path)
     with _PERSISTENT_CLIENTS_LOCK:
         session = _STORAGE_SESSIONS.get(key)
