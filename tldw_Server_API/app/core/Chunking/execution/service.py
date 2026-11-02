@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from contextlib import nullcontext, suppress
 from typing import Any
 
@@ -360,3 +361,105 @@ class ChunkExecutionService:
         else:
             self.hooks.get_logger().debug(f"Created {len(results)} chunks with metadata using {method} method")
         return results
+
+    def iter_chunks(
+        self,
+        text: str,
+        method: str | None = None,
+        max_size: int | None = None,
+        overlap: int | None = None,
+        language: str | None = None,
+        **options: Any,
+    ) -> Generator[str, None, None]:
+        """
+        Memory-efficient generator for chunking large texts.
+
+        Args:
+            text: Text to chunk
+            method: Chunking method (uses default if not specified)
+            max_size: Maximum chunk size (uses default if not specified)
+            overlap: Overlap between chunks (uses default if not specified)
+            language: Language of the text (uses default if not specified)
+            **options: Additional method-specific options
+
+        Yields:
+            Individual text chunks
+        """
+        # Sanitize input
+        text = self.context._sanitize_input(text)
+        self.context._enforce_text_size(text, source="chunk_text_generator")
+
+        # Use defaults if not specified
+        options_raw: dict[str, Any] = dict(options)
+        method = self.context._normalize_method_argument(method) or self.context.config.default_method.value
+        max_size = max_size if max_size is not None else self.context.config.default_max_size
+        overlap = overlap if overlap is not None else self.context.config.default_overlap
+        language = language or self.context.config.language
+        method = self.context._resolve_method(method, language, options_raw)
+        options_raw = self.context._apply_option_aliases(method, options_raw)
+        overlap = self.context._override_overlap_for_method(method, overlap, options_raw)
+        # Align overlap handling with primary chunk_text path
+        try:
+            if isinstance(max_size, int) and isinstance(overlap, int):
+                if overlap < 0:
+                    self.hooks.get_logger().warning(f"Negative overlap ({overlap}) adjusted to 0")
+                    overlap = 0
+                if max_size <= 0:
+                    pass
+                elif overlap >= max_size:
+                    self.hooks.get_logger().warning(
+                        f"Overlap ({overlap}) >= max_size ({max_size}); adjusting to max_size - 1"
+                    )
+                    overlap = max_size - 1
+        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
+            pass
+
+        tokenizer_override = options_raw.get("tokenizer_name")
+        if tokenizer_override is None:
+            tokenizer_override = options_raw.get("tokenizer_name_or_path")
+        if isinstance(tokenizer_override, str):
+            tokenizer_override = tokenizer_override.strip() or None
+        use_per_call_strategy = bool(tokenizer_override) and method == ChunkingMethod.TOKENS.value
+        strategy_options: dict[str, Any] = dict(options_raw)
+        strategy_options.pop("code_mode", None)
+        strategy_options.pop("tokenizer_name", None)
+        strategy_options.pop("tokenizer_name_or_path", None)
+
+        effective_llm_call, effective_llm_cfg = self.context._get_effective_llm_hooks()
+        use_ephemeral_strategy = self.context._strategy_cache_mode == "shared"
+        strategy_lock = self.context._strategy_lock if self.context._strategy_cache_mode == "shared" else nullcontext()
+        with strategy_lock:
+            # A yielded generator must not keep the shared strategy locked across
+            # consumer-controlled pauses, so shared mode uses a per-call instance here.
+            strategy = (
+                self.context._create_strategy_instance(method)
+                if (use_per_call_strategy or use_ephemeral_strategy)
+                else self.context._get_strategy_for_call(method)
+            )
+            self.context._sync_strategy_llm(strategy, llm_call_func=effective_llm_call, llm_config=effective_llm_cfg)
+            if method == ChunkingMethod.TOKENS.value and tokenizer_override:
+                try:
+                    if getattr(strategy, "tokenizer_name", None) != tokenizer_override:
+                        strategy.tokenizer_name = tokenizer_override
+                        if hasattr(strategy, "_tokenizer"):
+                            strategy._tokenizer = None
+                        if hasattr(strategy, "_tokenizer_init_attempted"):
+                            strategy._tokenizer_init_attempted = False
+                except _CHUNKER_NONCRITICAL_EXCEPTIONS:
+                    self.hooks.get_logger().debug("Failed to update tokenizer override", exc_info=True)
+
+            # Update strategy language if different
+            if language != strategy.language:
+                self.context._apply_strategy_language(strategy, language)
+
+            # Use generator method when available, otherwise fall back to eager chunking
+            chunk_gen = getattr(strategy, "chunk_generator", None)
+            if callable(chunk_gen):
+                chunk_iter = chunk_gen(text, max_size, overlap, **strategy_options)
+            else:
+                self.hooks.get_logger().debug(
+                    f"{strategy.__class__.__name__} lacks chunk_generator; falling back to chunk()"
+                )
+                chunk_iter = iter(strategy.chunk(text, max_size, overlap, **strategy_options))
+
+        yield from chunk_iter

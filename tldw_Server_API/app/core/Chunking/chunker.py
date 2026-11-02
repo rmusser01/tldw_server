@@ -630,76 +630,9 @@ class Chunker:
         Yields:
             Individual text chunks
         """
-        # Sanitize input
-        text = self._sanitize_input(text)
-        self._enforce_text_size(text, source="chunk_text_generator")
-
-        # Use defaults if not specified
-        options_raw: dict[str, Any] = dict(options)
-        method = self._normalize_method_argument(method) or self.config.default_method.value
-        max_size = max_size if max_size is not None else self.config.default_max_size
-        overlap = overlap if overlap is not None else self.config.default_overlap
-        language = language or self.config.language
-        method = self._resolve_method(method, language, options_raw)
-        options_raw = self._apply_option_aliases(method, options_raw)
-        overlap = self._override_overlap_for_method(method, overlap, options_raw)
-        # Align overlap handling with primary chunk_text path
-        try:
-            if isinstance(max_size, int) and isinstance(overlap, int):
-                if overlap < 0:
-                    logger.warning(f"Negative overlap ({overlap}) adjusted to 0")
-                    overlap = 0
-                if max_size <= 0:
-                    pass
-                elif overlap >= max_size:
-                    logger.warning(f"Overlap ({overlap}) >= max_size ({max_size}); adjusting to max_size - 1")
-                    overlap = max_size - 1
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-            pass
-
-        tokenizer_override = options_raw.get("tokenizer_name")
-        if tokenizer_override is None:
-            tokenizer_override = options_raw.get("tokenizer_name_or_path")
-        if isinstance(tokenizer_override, str):
-            tokenizer_override = tokenizer_override.strip() or None
-        use_per_call_strategy = bool(tokenizer_override) and method == ChunkingMethod.TOKENS.value
-        strategy_options: dict[str, Any] = dict(options_raw)
-        strategy_options.pop("code_mode", None)
-        strategy_options.pop("tokenizer_name", None)
-        strategy_options.pop("tokenizer_name_or_path", None)
-
-        effective_llm_call, effective_llm_cfg = self._get_effective_llm_hooks()
-        use_ephemeral_strategy = self._strategy_cache_mode == "shared"
-        strategy_lock = self._strategy_lock if self._strategy_cache_mode == "shared" else nullcontext()
-        with strategy_lock:
-            # A yielded generator must not keep the shared strategy locked across
-            # consumer-controlled pauses, so shared mode uses a per-call instance here.
-            strategy = self._create_strategy_instance(method) if (use_per_call_strategy or use_ephemeral_strategy) else self._get_strategy_for_call(method)
-            self._sync_strategy_llm(strategy, llm_call_func=effective_llm_call, llm_config=effective_llm_cfg)
-            if method == ChunkingMethod.TOKENS.value and tokenizer_override:
-                try:
-                    if getattr(strategy, "tokenizer_name", None) != tokenizer_override:
-                        strategy.tokenizer_name = tokenizer_override
-                        if hasattr(strategy, "_tokenizer"):
-                            strategy._tokenizer = None
-                        if hasattr(strategy, "_tokenizer_init_attempted"):
-                            strategy._tokenizer_init_attempted = False
-                except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                    logger.debug("Failed to update tokenizer override", exc_info=True)
-
-            # Update strategy language if different
-            if language != strategy.language:
-                self._apply_strategy_language(strategy, language)
-
-            # Use generator method when available, otherwise fall back to eager chunking
-            chunk_gen = getattr(strategy, 'chunk_generator', None)
-            if callable(chunk_gen):
-                chunk_iter = chunk_gen(text, max_size, overlap, **strategy_options)
-            else:
-                logger.debug(f"{strategy.__class__.__name__} lacks chunk_generator; falling back to chunk()")
-                chunk_iter = iter(strategy.chunk(text, max_size, overlap, **strategy_options))
-
-        yield from chunk_iter
+        yield from ChunkExecutionService(self, _execution_hooks()).iter_chunks(
+            text, method, max_size, overlap, language, **options
+        )
 
     def get_available_methods(self) -> list[str]:
         """

@@ -708,3 +708,35 @@ def test_alignment_offset_and_assignment_failures_are_per_item(facade_case: Any)
     result = case.chunker.chunk_text_with_metadata("abcd", align_text_to_source=True)
     assert result is case.strategy.metadata_result
     assert (broken.text, read_only.text, valid.text) == ("kept", "read only", "bc")
+
+
+def test_paused_generator_allows_competing_call(facade_case: Any) -> None:
+    case = facade_case()
+    ephemeral = RecordingStrategy(case.events, case.lock)
+    ephemeral.text_result = ["paused first", "paused second"]
+    case.chunker._strategy_factories["words"] = lambda: ephemeral
+    case.strategy.text_result = ["competing result"]
+    generator = case.chunker.chunk_text_generator("source")
+    assert next(generator) == "paused first"
+    completed = threading.Event()
+    results = []
+    errors = []
+
+    def compete() -> None:
+        try:
+            results.extend(case.chunker.chunk_text("other source"))
+        except (RuntimeError, ValueError, TypeError, ChunkingError) as error:
+            errors.append(error)
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=compete)
+    thread.start()
+    try:
+        assert completed.wait(5), "competing call blocked by paused generator"
+        assert results == ["competing result"] and errors == []
+        assert list(generator) == ["paused second"]
+    finally:
+        generator.close()
+        thread.join(5)
+    assert not thread.is_alive() and case.lock.depth == 0

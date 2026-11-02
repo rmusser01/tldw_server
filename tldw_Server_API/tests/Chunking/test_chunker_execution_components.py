@@ -187,3 +187,104 @@ def test_metadata_success_logging_stays_outside_translation() -> None:
         service.chunk_text_with_metadata("source")
     assert caught.value is failure
     assert context.strategy.calls[0][0] == "metadata"
+
+
+def test_generator_delegates_send_throw_close() -> None:
+    context = FakeExecutionContext()
+    operations = []
+
+    class Iterator:
+        def __iter__(self) -> Any:
+            return self
+
+        def __next__(self) -> str:
+            operations.append(("next", context._strategy_lock.depth))
+            return "first"
+
+        def send(self, value: Any) -> str:
+            operations.append(("send", value, context._strategy_lock.depth))
+            return "sent"
+
+        def throw(self, error: Any) -> str:
+            operations.append(("throw", str(error), context._strategy_lock.depth))
+            return "recovered"
+
+        def close(self) -> None:
+            operations.append(("close", context._strategy_lock.depth))
+
+    context.strategy.iterator_factory = Iterator
+    generator = make_service(context).iter_chunks("source")
+    assert operations == [] and context.events == []
+    assert next(generator) == "first"
+    assert generator.send("value") == "sent"
+    assert generator.throw(ValueError("controlled")) == "recovered"
+    generator.close()
+    assert operations == [("next", 0), ("send", "value", 0), ("throw", "controlled", 0), ("close", 0)]
+
+
+@pytest.mark.parametrize("mode", ["shared", "thread", "call"])
+def test_generator_shared_selection_and_lock_regions(mode: str) -> None:
+    context = FakeExecutionContext()
+    context._strategy_cache_mode = mode
+    created = []
+
+    def iterator_factory() -> Any:
+        created.append(context._strategy_lock.depth)
+        return iter(["yielded"])
+
+    context.strategy.iterator_factory = iterator_factory
+    generator = make_service(context).iter_chunks("source")
+    assert context.events == []
+    assert list(generator) == ["yielded"]
+    assert created == [1 if mode == "shared" else 0]
+    assert ("create" if mode == "shared" else "lookup", 1 if mode == "shared" else 0) in context.events
+    assert context._cache is None and context._strategy_lock.depth == 0
+
+
+@pytest.mark.parametrize("attribute", ["missing", None, "not callable"])
+def test_generator_fallback_is_eager_only_during_locked_setup(attribute: Any) -> None:
+    context = FakeExecutionContext()
+    calls = []
+
+    def chunk(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append(context._strategy_lock.depth)
+        return ["fallback"]
+
+    strategy = SimpleNamespace(language="en", chunk=chunk)
+    if attribute != "missing":
+        strategy.chunk_generator = attribute
+    context.strategy = strategy
+    generator = make_service(context).iter_chunks("source")
+    assert calls == []
+    assert next(generator) == "fallback" and calls == [1]
+    with pytest.raises(StopIteration) as caught:
+        next(generator)
+    assert caught.value.value is None and context._strategy_lock.depth == 0
+
+
+@pytest.mark.parametrize("when", ["setup", "iteration"])
+def test_generator_failures_are_raw_at_original_time(when: str) -> None:
+    context = FakeExecutionContext()
+    failure = ValueError("iterator sentinel")
+    seen = []
+
+    def during_iteration() -> Any:
+        seen.append(context._strategy_lock.depth)
+        yield "first"
+        raise failure
+
+    def factory() -> Any:
+        if when == "setup":
+            seen.append(context._strategy_lock.depth)
+            raise failure
+        return during_iteration()
+
+    context.strategy.iterator_factory = factory
+    generator = make_service(context).iter_chunks("source")
+    assert seen == []
+    if when == "iteration":
+        assert next(generator) == "first"
+    with pytest.raises(ValueError) as caught:
+        next(generator)
+    assert caught.value is failure and seen == [1 if when == "setup" else 0]
+    assert context._strategy_lock.depth == 0
