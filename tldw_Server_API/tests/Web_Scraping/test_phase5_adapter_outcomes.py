@@ -693,10 +693,31 @@ async def test_public_recursive_preserves_explicit_method_with_real_js_advice(
         public_preflight_payload=facade.public_preflight_payload,
     )
     monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: fixture.dependencies)
+    entered, release = asyncio.Event(), asyncio.Event()
+    fetch, browser = article._fetch_response, fixture.browser.acquire
+
+    async def held_fetch(*args):
+        entered.set()
+        await release.wait()
+        return await fetch(*args)
+
+    async def held_browser(*args):
+        entered.set()
+        await release.wait()
+        return await browser(*args)
+
+    monkeypatch.setattr(article, "_fetch_response", held_fetch)
+    monkeypatch.setattr(fixture.browser, "acquire", held_browser)
     scraper = EnhancedWebScraper(config=config)
+    task = asyncio.create_task(scraper.recursive_scrape(URL, max_pages=1))
     try:
-        result = await scraper.recursive_scrape(URL, max_pages=1)
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not task.done()
+        release.set()
+        result = await task
     finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
         await scraper.stop()
     assert result[0]["preflight_analysis"]["advice"] == {
         "backend": expected_backend,
