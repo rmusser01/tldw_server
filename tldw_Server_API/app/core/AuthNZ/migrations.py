@@ -6745,6 +6745,7 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
                 AND substr(execution_id, 19, 1) = '-' AND substr(execution_id, 24, 1) = '-'
                 AND substr(execution_id, 15, 1) = '4' AND substr(execution_id, 20, 1) IN ('8', '9', 'a', 'b')
             ),
+            insertion_owner TEXT,
             user_id INTEGER NOT NULL CHECK (typeof(user_id) = 'integer' AND user_id > 0),
             active_team_id INTEGER CHECK (active_team_id IS NULL OR (typeof(active_team_id) = 'integer' AND active_team_id > 0)),
             active_organization_id INTEGER CHECK (active_organization_id IS NULL OR (typeof(active_organization_id) = 'integer' AND active_organization_id > 0)),
@@ -6787,6 +6788,8 @@ def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -
         "ON provider_usage_reservations(user_id, state)"
     )
     reservation_columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
+    if "insertion_owner" not in reservation_columns:
+        conn.execute("ALTER TABLE provider_usage_reservations ADD COLUMN insertion_owner TEXT")
     if "credential_source" not in reservation_columns:
         conn.execute(
             "ALTER TABLE provider_usage_reservations ADD COLUMN credential_source TEXT "

@@ -35,12 +35,16 @@ Only the handle that inserted a durable daily-ledger row owns its downward settl
 
 Completion concurrency uses the governor's existing `jobs` lease category. DB-backed Billing limit reads use the admission transaction connection, never a nested pool acquisition. Pre-dispatch cleanup attempts governor release even if durable storage is unavailable. Local release/dispatch markers make those boundaries mutually exclusive, and the durable state fence prevents refunds after dispatch begins. Failed release cannot authorize later dispatch on a refunded governor handle.
 
-A trusted synchronous insertion notification transfers pre-dispatch cleanup
-ownership before the repository exits its transaction. It acknowledges only this
-attempt's successful insert, not commit. A commit-success/connection-release
-failure therefore cannot strand an ownerless reservation. Rollback still permits
-safe best-effort cleanup; duplicate attempts and cancelled duplicate waiters never
-receive ownership or refund another invocation's row.
+A separate opaque, server-generated per-attempt owner token is persisted with
+each new reservation. A trusted synchronous insertion notification acknowledges
+this attempt's insert before transaction exit, not commit. Pre-dispatch cleanup
+must match both execution ID and that durable owner token. If this insert rolls
+back and a waiting attempt reuses the execution ID, stale cleanup cannot refund
+the replacement. A commit-success/connection-release failure still permits cleanup
+of this attempt's committed row. Duplicate attempts and cancelled duplicate
+waiters never acquire insertion ownership. Legacy provisional rows without an
+owner token do not grant cleanup ownership to a new attempt; no token is inferred
+from an execution ID, a callback acknowledgement, or an uncertain outcome.
 
 Hosted subscription limits apply only when the usage-quota master switch is enabled and a Billing repository is wired, following the host's Billing activation contract. OSS or inactive hosted Billing does not impose implicit free-plan limits. Explicit MCP operator bounds and durable usage/reservation recording remain mandatory for this certified execution path. Activation failures still fail closed rather than impersonating an inactive deployment.
 

@@ -13,6 +13,42 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("schema_path", ["new", "provisional"])
+async def test_pg_reservation_owner_is_nullable_on_both_bootstrap_paths(schema_path):
+    statements = []
+
+    class RecordingPool:
+        pool = object()
+
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
+        async def execute(self, sql, *_params):
+            statements.append(sql)
+
+    assert await ensure_usage_tables_pg(RecordingPool())
+    columns = []
+    for sql in statements:
+        if "provider_usage_reservations" not in sql:
+            continue
+        statement = sqlglot.parse_one(sql, read="postgres")
+        statement_type = exp.Create if schema_path == "new" else exp.Alter
+        if isinstance(statement, statement_type):
+            columns.extend(column for column in statement.find_all(exp.ColumnDef) if column.name == "insertion_owner")
+    assert len(columns) == 1
+    column = columns[0].copy()
+    if schema_path == "provisional":
+        assert column.args.get("exists") is True
+    column.set("exists", False)
+    table = exp.Create(this=exp.Schema(this=exp.to_table("owner_values"), expressions=[column]), kind="TABLE")
+    with sqlite3.connect(":memory:") as connection:
+        connection.execute(table.sql(dialect="sqlite"))
+        assert connection.execute("PRAGMA table_info(owner_values)").fetchone()[2:5] == ("TEXT", 0, None)
+        connection.execute("INSERT INTO owner_values DEFAULT VALUES")
+        assert connection.execute("SELECT insertion_owner FROM owner_values").fetchall() == [(None,)]
+
+
+@pytest.mark.parametrize("schema_path", ["new", "provisional"])
 async def test_pg_reservation_source_is_nullable_and_rejects_unknown_provenance(
     schema_path: str,
 ) -> None:
@@ -38,11 +74,7 @@ async def test_pg_reservation_source_is_nullable_and_rejects_unknown_provenance(
         statement_type = exp.Create if schema_path == "new" else exp.Alter
         if not isinstance(statement, statement_type):
             continue
-        columns.extend(
-            column
-            for column in statement.find_all(exp.ColumnDef)
-            if column.name == "credential_source"
-        )
+        columns.extend(column for column in statement.find_all(exp.ColumnDef) if column.name == "credential_source")
     assert len(columns) == 1, f"missing credential_source DDL for {schema_path} reservations"
     column = columns[0]
     if schema_path == "provisional":

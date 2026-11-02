@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, ParamSpec, TypeVar, cast
-from uuid import RFC_4122, UUID
+from uuid import RFC_4122, UUID, uuid4
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import execute, fetch_all
@@ -235,7 +235,7 @@ class ProviderUsageReservationsRepo:
 
     async def _get(self, conn: Any, execution_id: str) -> dict[str, Any] | None:
         result = await self._rows(
-            conn, "SELECT * FROM provider_usage_reservations " "WHERE execution_id = ?", execution_id
+            conn, "SELECT * FROM provider_usage_reservations WHERE execution_id = ?", execution_id
         )
         return result[0] if result else None
 
@@ -292,17 +292,19 @@ class ProviderUsageReservationsRepo:
         *,
         snapshot_reader: SnapshotReader,
         on_reserved: Callable[[], None] | None = None,
+        insertion_owner: str | None = None,
     ) -> dict[str, Any]:
         """Commit exposure and synchronously notify its owner before transaction exit.
 
         The trusted callback acknowledges this invocation's insert, not commit.
-        It permits safe pre-dispatch cleanup after uncertain transaction exit.
+        Cleanup after uncertain transaction exit must match insertion_owner.
         Duplicate executions never invoke it.
         """
         if type(reservation) is not ProviderUsageReservation or not callable(snapshot_reader):
             raise ProviderUsageReservationError("invalid_reservation")
         if on_reserved is not None and not callable(on_reserved):
             raise ProviderUsageReservationError("invalid_reservation")
+        insertion_owner = str(uuid4()) if insertion_owner is None else _execution_id(insertion_owner)
         async with self._transaction() as conn:
             await self._lock_authorities(conn, reservation.user_id, reservation.billing_scope)
             if await self._get(conn, reservation.execution_id) is not None:
@@ -342,13 +344,14 @@ class ProviderUsageReservationsRepo:
             inserted = await self._rows(
                 conn,
                 """INSERT INTO provider_usage_reservations
-                (execution_id, user_id, active_team_id, active_organization_id,
+                (execution_id, insertion_owner, user_id, active_team_id, active_organization_id,
                  billing_scope_type, billing_scope_id, provider, model,
                  reserved_input_tokens, reserved_output_tokens, reserved_cost_units, credential_source,
                  state, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
                 ON CONFLICT (execution_id) DO NOTHING RETURNING execution_id""",
                 reservation.execution_id,
+                insertion_owner,
                 reservation.user_id,
                 reservation.active_team_id,
                 reservation.active_organization_id,
@@ -370,10 +373,16 @@ class ProviderUsageReservationsRepo:
             row = cast(dict[str, Any], await self._get(conn, reservation.execution_id))
         return row
 
-    async def _transition(self, execution_id: str, source: str, target: str) -> dict[str, Any]:
+    async def _transition(
+        self, execution_id: str, source: str, target: str, *, insertion_owner: str | None = None
+    ) -> dict[str, Any]:
         _execution_id(execution_id)
+        if insertion_owner is not None:
+            _execution_id(insertion_owner)
         async with self._transaction() as conn:
             row = await self._locked_row(conn, execution_id)
+            if insertion_owner is not None and row["insertion_owner"] != insertion_owner:
+                raise ProviderUsageReservationError("invalid_transition")
             if row["state"] != target:
                 if row["state"] != source:
                     raise ProviderUsageReservationError("invalid_transition")
@@ -381,12 +390,15 @@ class ProviderUsageReservationsRepo:
                 await self._execute(
                     conn,
                     "UPDATE provider_usage_reservations SET state = ?, updated_at = ?, "
-                    "dispatched_at = ?, resolved_at = ? WHERE execution_id = ?",
+                    "dispatched_at = ?, resolved_at = ? WHERE execution_id = ? "
+                    "AND (CAST(? AS TEXT) IS NULL OR insertion_owner = ?)",
                     target,
                     now,
                     now if target == "dispatched" else row["dispatched_at"],
                     now if target == "released" else None,
                     execution_id,
+                    insertion_owner,
+                    insertion_owner,
                 )
                 row = cast(dict[str, Any], await self._get(conn, execution_id))
         return row
@@ -397,9 +409,12 @@ class ProviderUsageReservationsRepo:
         return await self._transition(execution_id, "reserved", "dispatched")
 
     @_repository_errors
-    async def release_before_dispatch(self, execution_id: str) -> dict[str, Any]:
-        """Release only exposure known never to have been dispatched."""
-        return await self._transition(execution_id, "reserved", "released")
+    async def release_before_dispatch(self, execution_id: str, *, insertion_owner: str | None = None) -> dict[str, Any]:
+        """Release unused exposure; accounting callers must supply their insert owner.
+
+        Omitting the owner preserves the trusted legacy internal API.
+        """
+        return await self._transition(execution_id, "reserved", "released", insertion_owner=insertion_owner)
 
     @_repository_errors
     async def retain_ambiguous(self, execution_id: str) -> dict[str, Any]:

@@ -4,9 +4,11 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.repos import usage_repo
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import execute, fetch_all
@@ -458,6 +460,110 @@ class AccountingStorageContract:
         assert (await ProviderUsageReservationsRepo(reservation_pool).get(invocation.execution_id))[
             "state"
         ] == "reserved"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_insert_rollback_cleanup_cannot_release_replacement(self, reservation_pool, monkeypatch):
+        first_service = make_service(reservation_pool)
+        replacement_service = make_service(reservation_pool)
+        invocation = identity()
+        inserted, cleanup_entered, finish_cleanup = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        original_get = first_service._reservations._get
+        original_cleanup = first_service._release_pre_dispatch
+        acknowledged_owners = []
+
+        async def paused_insert_reread(conn, execution_id):
+            row = await original_get(conn, execution_id)
+            if row is not None and not inserted.is_set():
+                acknowledged_owners.append(row["insertion_owner"])
+                inserted.set()
+                await asyncio.Event().wait()
+            return row
+
+        async def paused_cleanup(*args, **kwargs):
+            cleanup_entered.set()
+            await finish_cleanup.wait()
+            return await original_cleanup(*args, **kwargs)
+
+        monkeypatch.setattr(first_service._reservations, "_get", paused_insert_reread)
+        monkeypatch.setattr(first_service, "_release_pre_dispatch", paused_cleanup)
+        admission = asyncio.create_task(first_service.reserve(request(), invocation))
+        repo = ProviderUsageReservationsRepo(reservation_pool)
+        try:
+            await asyncio.wait_for(inserted.wait(), 5)
+            admission.cancel()
+            await asyncio.wait_for(cleanup_entered.wait(), 5)
+            # Cleanup is outside the transaction: A's acknowledged insert rolled back.
+            assert await repo.get(invocation.execution_id) is None
+            replacement = await asyncio.wait_for(replacement_service.reserve(request(), invocation), 5)
+            replacement_owner = (await repo.get(invocation.execution_id))["insertion_owner"]
+        finally:
+            finish_cleanup.set()
+            if not admission.done():
+                admission.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(admission, 5)
+        assert (await repo.get(invocation.execution_id))["state"] == "reserved"
+        assert acknowledged_owners[0] != replacement_owner
+        for owner in (*acknowledged_owners, replacement_owner):
+            assert str(UUID(owner)) == owner and UUID(owner).version == 4
+            assert owner != invocation.execution_id
+        assert await repo.outstanding(BillingScope("user", 1)) == {"tokens": 47, "cost_units": 104}
+        await replacement_service.mark_dispatched(replacement)
+        assert (await repo.get(invocation.execution_id))["state"] == "dispatched"
+
+    @pytest.mark.asyncio
+    async def test_normal_handle_release_owner_mismatch_retains_exposure_and_governor(self, reservation_pool):
+        governor = MemoryResourceGovernor(
+            policies={
+                "mcp.fixed": {
+                    "requests": {"rpm": 1000},
+                    "tokens": {"per_min": 100000},
+                    "jobs": {"max_concurrent": 1, "ttl_sec": 90},
+                    "scopes": ["user"],
+                }
+            }
+        )
+        service = make_service(reservation_pool, token_limit=1000, governor=governor)
+        handle = await service.reserve(request(), identity())
+        repo = ProviderUsageReservationsRepo(reservation_pool)
+        owner = (await repo.get(handle.reservation.execution_id))["insertion_owner"]
+        wrong_owner = str(uuid4())
+        foreign_handle = replace(handle, _insertion_owner=wrong_owner)
+        messages = []
+        sink = logger.add(messages.append, format="{message}")
+        try:
+            with pytest.raises(ModelCompletionFailure, match="accounting_unavailable") as error:
+                await service.release_before_dispatch(foreign_handle)
+            assert (await repo.get(handle.reservation.execution_id))["state"] == "reserved"
+            assert await repo.outstanding(BillingScope("user", 1)) == {"tokens": 47, "cost_units": 104}
+            # The explicit ownership fence must not refund the live concurrency lease.
+            with pytest.raises(ModelCompletionFailure, match="model_quota_exceeded"):
+                await service.reserve(request(), identity())
+            for token in (owner, wrong_owner):
+                assert token not in "".join(messages)
+                assert token not in repr(error.value)
+                assert token not in repr(foreign_handle)
+            assert error.value.__context__ is None and error.value.__cause__ is None
+        finally:
+            logger.remove(sink)
+        await service.release_before_dispatch(handle)
+
+    @pytest.mark.asyncio
+    async def test_none_handle_owner_cannot_enter_legacy_wildcard_release(self, reservation_pool, monkeypatch):
+        service = make_service(reservation_pool)
+        handle = await service.reserve(request(), identity())
+        invalid_handle = replace(handle, _insertion_owner=None)
+        release = AsyncMock(wraps=service._reservations.release_before_dispatch)
+        refund = AsyncMock(wraps=service._governor.release)
+        monkeypatch.setattr(service._reservations, "release_before_dispatch", release)
+        monkeypatch.setattr(service._governor, "release", refund)
+        with pytest.raises(ModelCompletionFailure, match="invalid_accounting_handle"):
+            await service.release_before_dispatch(invalid_handle)
+        assert release.call_count == refund.call_count == 0
+        repo = ProviderUsageReservationsRepo(reservation_pool)
+        assert (await repo.get(handle.reservation.execution_id))["state"] == "reserved"
+        assert await repo.outstanding(BillingScope("user", 1)) == {"tokens": 47, "cost_units": 104}
+        await service.release_before_dispatch(handle)
 
     @pytest.mark.asyncio
     async def test_hosted_limit_excludes_own_key_pending_and_settled_usage(self, reservation_pool, monkeypatch):

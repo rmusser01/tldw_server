@@ -2006,6 +2006,7 @@ _CREATE_USAGE_TABLES = [
         """
         CREATE TABLE IF NOT EXISTS provider_usage_reservations (
             execution_id TEXT PRIMARY KEY CHECK (execution_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+            insertion_owner TEXT,
             user_id BIGINT NOT NULL CHECK (user_id > 0),
             active_team_id BIGINT CHECK (active_team_id IS NULL OR active_team_id > 0),
             active_organization_id BIGINT CHECK (active_organization_id IS NULL OR active_organization_id > 0),
@@ -2042,6 +2043,10 @@ _CREATE_USAGE_TABLES = [
             CHECK ((state IN ('reserved', 'released') AND dispatched_at IS NULL) OR (state NOT IN ('reserved', 'released') AND dispatched_at IS NOT NULL))
         )
         """,
+        (),
+    ),
+    (
+        "ALTER TABLE provider_usage_reservations ADD COLUMN IF NOT EXISTS insertion_owner TEXT",
         (),
     ),
     (

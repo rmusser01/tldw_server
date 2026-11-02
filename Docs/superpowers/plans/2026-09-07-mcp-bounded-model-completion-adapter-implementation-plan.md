@@ -690,6 +690,17 @@ the 19-case Admin Webhooks module also passes on canonical PostgreSQL, closing
 the final three availability skips. Fresh final source review remains required
 after the four core repairs are committed.
 
+The next independent review confirmed the native quota, native-ready dispatch,
+and missing-credential fixes, but found a rollback/reinsertion race in insertion
+cleanup: acknowledgement alone is not durable attempt ownership. Require a
+server-generated per-attempt token persisted with the insert and checked together
+with execution ID on every accounting pre-dispatch cleanup. A deterministic
+SQLite/PostgreSQL interleaving must roll A back, admit B under the same execution
+ID before A cleans up, then prove B stays reserved and can dispatch. Preserve the
+commit-success/release-failure regression and provisional-schema compatibility.
+Proposed ADR-087 now states this stronger ownership rule. Final source approval
+and publication remain blocked until the regression and fresh review pass.
+
 ### November Stage 4: Publish And Arm
 **Goal**: Publish with an explicit lease and enable only normal gated auto-merge.
 **Success Criteria**: GitHub head matches reviewed source; no unresolved threads; ordinary required gates retained; auto-merge state read back.

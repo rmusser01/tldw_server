@@ -138,6 +138,27 @@ def test_migration_105_supports_reduced_legacy_schema_without_optional_usage_tab
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'llm_usage_log'").fetchone() is None
 
 
+def test_migration_105_adds_nullable_owner_without_claiming_provisional_rows():
+    with sqlite3.connect(":memory:") as conn:
+        migrations.migration_105_create_provider_usage_reservations(conn)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
+        if "insertion_owner" in columns:
+            conn.execute("ALTER TABLE provider_usage_reservations DROP COLUMN insertion_owner")
+        execution_id = str(uuid4())
+        conn.execute(
+            "INSERT INTO provider_usage_reservations "
+            "(execution_id, user_id, billing_scope_type, billing_scope_id, provider, model, "
+            "reserved_input_tokens, reserved_output_tokens, reserved_cost_units, state, created_at, updated_at) "
+            "VALUES (?, 1, 'user', 1, 'openai', 'fixed', 10, 20, 50, 'reserved', 'old', 'old')",
+            (execution_id,),
+        )
+        migrations.migration_105_create_provider_usage_reservations(conn)
+        migrations.migration_105_create_provider_usage_reservations(conn)
+        assert conn.execute(
+            "SELECT execution_id, insertion_owner, state FROM provider_usage_reservations"
+        ).fetchall() == [(execution_id, None, "reserved")]
+
+
 def test_published_user_usage_index_precedes_mcp_reservation_upgrade(tmp_path):
     path = tmp_path / "published-099.db"
     migrations.apply_authnz_migrations(path, target_version=99)
@@ -196,6 +217,7 @@ def test_migration_additive_idempotent_and_minimal(tmp_path):
         columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
         assert columns == {
             "execution_id",
+            "insertion_owner",
             "user_id",
             "active_team_id",
             "active_organization_id",
@@ -225,7 +247,7 @@ def test_migration_fails_for_duplicate_canonical_execution_ids(tmp_path):
     migrations.apply_authnz_migrations(path, target_version=98)
     with sqlite3.connect(path) as conn:
         conn.executemany(
-            "INSERT INTO llm_usage_log (operation, request_id) " "VALUES ('mcp_model_completion', ?)",
+            "INSERT INTO llm_usage_log (operation, request_id) VALUES ('mcp_model_completion', ?)",
             [("duplicate",), ("duplicate",)],
         )
     with pytest.raises(sqlite3.IntegrityError):
@@ -269,6 +291,47 @@ class ReservationContract:
         assert error.value.code == "duplicate_execution"
         assert ownership == ["inserted"]
         assert (await repo.get(item.execution_id))["state"] == "reserved"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("state", ["reserved", "released", "dispatched", "ambiguous"])
+    async def test_release_requires_matching_insertion_owner_before_state_replay(self, reservation_pool, state):
+        mod = api()
+        repo = mod.ProviderUsageReservationsRepo(reservation_pool)
+        item, owner = reservation(), str(uuid4())
+        await repo.reserve(item, snapshot_reader=unlimited, insertion_owner=owner)
+        if state == "released":
+            await repo.release_before_dispatch(item.execution_id, insertion_owner=owner)
+        elif state in {"dispatched", "ambiguous"}:
+            await repo.mark_dispatched(item.execution_id)
+            if state == "ambiguous":
+                await repo.retain_ambiguous(item.execution_id)
+        with pytest.raises(mod.ProviderUsageReservationError) as error:
+            await repo.release_before_dispatch(item.execution_id, insertion_owner=str(uuid4()))
+        assert error.value.code == "invalid_transition"
+        assert (await repo.get(item.execution_id))["state"] == state
+        if state in {"reserved", "released"}:
+            assert (await repo.release_before_dispatch(item.execution_id, insertion_owner=owner))["state"] == "released"
+        else:
+            with pytest.raises(mod.ProviderUsageReservationError, match="invalid_transition"):
+                await repo.release_before_dispatch(item.execution_id, insertion_owner=owner)
+
+    @pytest.mark.asyncio
+    async def test_fenced_cleanup_cannot_claim_legacy_null_owner(self, reservation_pool):
+        mod = api()
+        repo = mod.ProviderUsageReservationsRepo(reservation_pool)
+        item = reservation()
+        await repo.reserve(item, snapshot_reader=unlimited)
+        async with reservation_pool.transaction() as conn:
+            await execute(
+                reservation_pool,
+                conn,
+                "UPDATE provider_usage_reservations SET insertion_owner = NULL WHERE execution_id = ?",
+                item.execution_id,
+            )
+        with pytest.raises(mod.ProviderUsageReservationError, match="invalid_transition"):
+            await repo.release_before_dispatch(item.execution_id, insertion_owner=str(uuid4()))
+        assert (await repo.get(item.execution_id))["state"] == "reserved"
+        assert (await repo.release_before_dispatch(item.execution_id))["state"] == "released"
 
     @pytest.mark.asyncio
     async def test_shared_scope_admission_counts_other_users_and_keeps_unrelated_scopes_separate(
@@ -425,9 +488,7 @@ class ReservationContract:
         if state == "ambiguous":
             await repo.retain_ambiguous(item.execution_id)
         async with pool.transaction() as conn:
-            await execute(
-                pool, conn, "UPDATE provider_usage_reservations " "SET created_at = '2000-01-01T00:00:00+00:00'"
-            )
+            await execute(pool, conn, "UPDATE provider_usage_reservations SET created_at = '2000-01-01T00:00:00+00:00'")
 
         async def read(_conn):
             return mod.ReservationQuotaSnapshot(0, 59, 0, None)

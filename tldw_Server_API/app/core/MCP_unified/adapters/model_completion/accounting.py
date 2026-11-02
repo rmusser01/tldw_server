@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
+from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
 
@@ -83,6 +84,7 @@ class AccountingReservation:
     reservation: ProviderUsageReservation
     governor_handle: str
     _owner: object = field(repr=False)
+    _insertion_owner: str = field(repr=False)
     _dispatch: _DispatchBoundary = field(default_factory=_DispatchBoundary, repr=False, compare=False)
 
 
@@ -119,7 +121,16 @@ class ModelCompletionAccounting:
         return self._policy
 
     def _handle(self, handle: AccountingReservation) -> ProviderUsageReservation:
-        if type(handle) is not AccountingReservation or handle._owner is not self._owner:
+        valid_owner = False
+        if type(handle) is AccountingReservation and handle._owner is self._owner:
+            owner = getattr(handle, "_insertion_owner", None)
+            if type(owner) is str:
+                try:
+                    parsed = UUID(owner)
+                    valid_owner = str(parsed) == owner and parsed.version == 4 and parsed.variant == RFC_4122
+                except ValueError:
+                    pass
+        if not valid_owner:
             raise ModelCompletionFailure("invalid_accounting_handle", ModelFailureDomain.REQUEST)
         return handle.reservation
 
@@ -254,16 +265,22 @@ class ModelCompletionAccounting:
             raise_detached_error(
                 ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
             )
-        durable_owned = False
+        insertion_owner = str(uuid4())
+        insert_acknowledged = False
         governor_handle = None
         failure = None
 
         def on_reserved() -> None:
-            nonlocal durable_owned
-            durable_owned = True
+            nonlocal insert_acknowledged
+            insert_acknowledged = True
 
         try:
-            await self._reservations.reserve(reservation, snapshot_reader=snapshot_reader, on_reserved=on_reserved)
+            await self._reservations.reserve(
+                reservation,
+                snapshot_reader=snapshot_reader,
+                on_reserved=on_reserved,
+                insertion_owner=insertion_owner,
+            )
             total_tokens = _count(reservation.reserved_input_tokens + reservation.reserved_output_tokens)
             decision, governor_handle = await self._governor.reserve(
                 RGRequest(
@@ -283,11 +300,13 @@ class ModelCompletionAccounting:
             elif type(governor_handle) is not str or not governor_handle:
                 failure = ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
             else:
-                return AccountingReservation(reservation, governor_handle, self._owner)
+                return AccountingReservation(reservation, governor_handle, self._owner, insertion_owner)
         except asyncio.CancelledError:
-            if durable_owned:
+            if insert_acknowledged:
                 await await_cancellation_safe_cleanup(
-                    self._release_pre_dispatch(reservation.execution_id, governor_handle)
+                    self._release_pre_dispatch(
+                        reservation.execution_id, governor_handle, insertion_owner=insertion_owner
+                    )
                 )
             raise
         except ProviderUsageReservationError as exc:
@@ -301,8 +320,10 @@ class ModelCompletionAccounting:
             )
         except Exception:  # noqa: BLE001 - detach arbitrary required-service failures at the public boundary
             failure = ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
-        if durable_owned:
-            await await_cancellation_safe_cleanup(self._release_pre_dispatch(reservation.execution_id, governor_handle))
+        if insert_acknowledged:
+            await await_cancellation_safe_cleanup(
+                self._release_pre_dispatch(reservation.execution_id, governor_handle, insertion_owner=insertion_owner)
+            )
         raise_detached_error(
             failure or ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
         )
@@ -312,12 +333,14 @@ class ModelCompletionAccounting:
         execution_id: str,
         governor_handle: str | None,
         dispatch: _DispatchBoundary | None = None,
+        *,
+        insertion_owner: str,
     ) -> bool:
         released = False
         can_release_governor = True
         operation_logger = logger.bind(operation="mcp_model_completion.pre_dispatch_cleanup")
         try:
-            await self._reservations.release_before_dispatch(execution_id)
+            await self._reservations.release_before_dispatch(execution_id, insertion_owner=insertion_owner)
             released = True
         except ProviderUsageReservationError as exc:
             can_release_governor = exc.code != "invalid_transition"
@@ -358,7 +381,12 @@ class ModelCompletionAccounting:
             raise ModelCompletionFailure("invalid_accounting_state", ModelFailureDomain.REQUEST)
         handle._dispatch.release_started = True
         released = await await_cancellation_safe_cleanup(
-            self._release_pre_dispatch(reservation.execution_id, handle.governor_handle, handle._dispatch)
+            self._release_pre_dispatch(
+                reservation.execution_id,
+                handle.governor_handle,
+                handle._dispatch,
+                insertion_owner=handle._insertion_owner,
+            )
         )
         if not released:
             raise_detached_error(

@@ -1,8 +1,9 @@
 """Admission and conservative settlement contracts for bounded completions."""
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -41,11 +42,12 @@ def accounting(monkeypatch):
         state = None
         actuals = None
 
-        async def reserve(self, reservation, *, snapshot_reader, on_reserved=None):
+        async def reserve(self, reservation, *, snapshot_reader, on_reserved=None, insertion_owner=None):
             if self.failure:
                 raise self.failure
             self.snapshot = await snapshot_reader("locked-connection")
             self.row = reservation
+            self.insertion_owner = insertion_owner
             self.state = "reserved"
             events.append("durable_reserved")
             if on_reserved is not None:
@@ -54,7 +56,13 @@ def accounting(monkeypatch):
         async def mark_dispatched(self, execution_id):
             self.state = "dispatched"
 
-        async def release_before_dispatch(self, execution_id):
+        async def release_before_dispatch(self, execution_id, *, insertion_owner):
+            from tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo import (
+                ProviderUsageReservationError,
+            )
+
+            if insertion_owner is None or insertion_owner != self.insertion_owner:
+                raise ProviderUsageReservationError("invalid_transition")
             if self.release_failure:
                 raise self.release_failure
             self.state = "released"
@@ -198,6 +206,42 @@ async def test_release_is_explicitly_pre_dispatch_and_releases_governor(accounti
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_owner",
+    [
+        pytest.param(None, id="none"),
+        pytest.param("", id="empty"),
+        pytest.param("private-malformed-owner", id="malformed"),
+        pytest.param(True, id="boolean"),
+        pytest.param("00000000-0000-1000-8000-000000000000", id="uuid1"),
+        pytest.param("00000000-0000-4000-0000-000000000000", id="wrong-variant"),
+        pytest.param("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", id="uppercase"),
+        pytest.param("00000000000040008000000000000000", id="unhyphenated"),
+        pytest.param(UUID("00000000-0000-4000-8000-000000000000"), id="uuid-object"),
+    ],
+)
+@pytest.mark.parametrize("operation", ["release_before_dispatch", "mark_dispatched", "retain_ambiguous", "reconcile"])
+async def test_invalid_handle_insertion_owner_has_no_repository_or_governor_effects(
+    accounting, mocker, invalid_owner, operation
+):
+    handle = await accounting.service.reserve(request(), identity())
+    invalid_handle = replace(handle, _insertion_owner=invalid_owner)
+    effects = [
+        mocker.spy(accounting.repo, name)
+        for name in ("release_before_dispatch", "mark_dispatched", "retain_ambiguous", "reconcile")
+    ] + [mocker.spy(accounting.governor, name) for name in ("release", "commit")]
+    accounting.events.clear()
+    with pytest.raises(ModelCompletionFailure, match="invalid_accounting_handle") as error:
+        await getattr(accounting.service, operation)(invalid_handle)
+    assert all(effect.call_count == 0 for effect in effects)
+    assert accounting.repo.state == "reserved"
+    assert accounting.events == []
+    assert error.value.__context__ is None and error.value.__cause__ is None
+    if type(invalid_owner) is str and invalid_owner:
+        assert invalid_owner not in str(error.value)
+
+
+@pytest.mark.asyncio
 async def test_release_attempts_governor_cleanup_when_durable_storage_fails(accounting):
     handle = await accounting.service.reserve(request(), identity())
     accounting.repo.release_failure = RuntimeError("private-storage-data")
@@ -223,7 +267,7 @@ async def test_degraded_release_racing_dispatch_blocks_new_dispatch(accounting, 
     handle = await accounting.service.reserve(request(), identity())
     entered, proceed = asyncio.Event(), asyncio.Event()
 
-    async def delayed_failure(execution_id):
+    async def delayed_failure(execution_id, *, insertion_owner):
         entered.set()
         await proceed.wait()
         raise RuntimeError("private-storage-data")
@@ -256,10 +300,10 @@ async def test_repeated_cancellation_waits_for_pre_dispatch_release(accounting, 
     entered, proceed = asyncio.Event(), asyncio.Event()
     original = accounting.repo.release_before_dispatch
 
-    async def delayed_release(execution_id):
+    async def delayed_release(execution_id, *, insertion_owner):
         entered.set()
         await proceed.wait()
-        await original(execution_id)
+        await original(execution_id, insertion_owner=insertion_owner)
 
     monkeypatch.setattr(accounting.repo, "release_before_dispatch", delayed_release)
     task = asyncio.create_task(accounting.service.release_before_dispatch(handle))
