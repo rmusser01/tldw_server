@@ -7,6 +7,7 @@ import {
 import { buildPersonaWebSocketUrl } from "@/services/persona-stream"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { toAllowedPath } from "@/services/tldw/path-utils"
 import { downloadBlob } from "@/utils/download-blob"
 
 import type { PersonaGardenTabKey } from "@/utils/persona-garden-route"
@@ -107,6 +108,7 @@ const formatMemoryResultsLabel = (count: number) => `Memory results: ${count}`
 // ── Deps interface ──
 
 export interface UsePersonaLiveSessionDeps {
+  historyScope: string | null
   isCompanionMode: boolean
   selectedPersonaId: string
   setSelectedPersonaId: React.Dispatch<React.SetStateAction<string>>
@@ -190,6 +192,7 @@ export interface UsePersonaLiveSessionDeps {
 
 export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   const {
+    historyScope,
     isCompanionMode,
     selectedPersonaId,
     setSelectedPersonaId,
@@ -999,10 +1002,59 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   )
 
   // ── loadSessionHistory ──
+  const historyOwnerRef = React.useRef<string | null>(null)
   const clearResumeSelection = React.useCallback(() => {
     setResumeSessionId("")
     setSessionHistory([])
   }, [])
+
+  React.useEffect(() => {
+    const personaId = isCompanionMode ? DEFAULT_PERSONA_ID : selectedPersonaId
+    const owner = historyScope ? JSON.stringify([historyScope, personaId, isCompanionMode]) : null
+    if (!owner) {
+      setSessionHistory([])
+      if (historyOwnerRef.current) setResumeSessionId("")
+      return
+    }
+    if (historyOwnerRef.current && historyOwnerRef.current !== owner) clearResumeSelection()
+    historyOwnerRef.current = owner
+    if (connected || connecting || wsRef.current) return
+
+    setSessionHistory([])
+    const controller = new AbortController()
+    const stopWatching = watchChatAccountChanges((invalidated) => {
+      if (!invalidated) return
+      controller.abort()
+      clearResumeSelection()
+      setError("Saved conversations could not be loaded. Reload this page to retry.")
+    })
+    const attempt = connectAttemptRef.current
+    const current = () => !controller.signal.aborted && mountedRef.current &&
+      connectAttemptRef.current === attempt
+    void (async () => {
+      try {
+        const response = await tldwClient.fetchWithAuth(
+          toAllowedPath(
+            "/api/v1/persona/sessions?persona_id=" + encodeURIComponent(personaId) +
+              (isCompanionMode ? "&surface=companion.conversation" : "") + "&limit=50"
+          ),
+          { method: "GET", signal: controller.signal }
+        )
+        if (!current()) return
+        if (!response?.ok) throw new Error("Saved conversations unavailable")
+        const sessions = await response.json()
+        if (!current()) return
+        if (!Array.isArray(sessions)) throw new Error("Invalid saved conversations")
+        setSessionHistory(sessions)
+      } catch {
+        if (current()) setError("Saved conversations could not be loaded. Reload this page to retry.")
+      }
+    })()
+    return () => {
+      controller.abort()
+      stopWatching()
+    }
+  }, [clearResumeSelection, connected, connecting, historyScope, isCompanionMode, selectedPersonaId, setError, wsRef])
 
   const loadSessionHistory = React.useCallback(async () => {
     if (!sessionId) return

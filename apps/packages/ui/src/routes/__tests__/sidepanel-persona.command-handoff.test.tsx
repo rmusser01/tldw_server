@@ -24,7 +24,7 @@ vi.mock("@/services/companion", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    getConfig: vi.fn(),
+    getConfig: vi.fn().mockResolvedValue(null),
     fetchWithAuth: vi.fn()
   }
 }))
