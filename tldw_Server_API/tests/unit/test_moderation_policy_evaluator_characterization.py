@@ -701,6 +701,19 @@ def test_replacement_lookup_regex_error_remains_inside_rule_boundary():
     ) == ("secret", 0)
 
 
+@pytest.mark.parametrize("scan", [1, 100])
+def test_optional_output_budget_checks_growth_before_oversized_join(scan):
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation.execution_models import OutputBudget
+    from tldw_Server_API.app.core.Moderation.policy_evaluator import EvaluationLimits, PolicyEvaluator
+
+    policy = _policy(_rule("a", replacement="x" * 100), _rule("x+", replacement="small"))
+    limits = EvaluationLimits(scan, 0, 1000, None)
+    # Later shrinking rules must not hide an oversized intermediate allocation.
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        PolicyEvaluator().redact_text_with_count("aa", policy, None, limits, output_budget=OutputBudget(150))
+
+
 def test_service_evaluation_and_redaction_do_not_mutate_inputs():
     categories = {"confidential"}
     rule = _rule(
