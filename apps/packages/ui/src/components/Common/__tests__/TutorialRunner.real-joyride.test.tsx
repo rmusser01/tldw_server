@@ -8,7 +8,7 @@
 import React from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { TutorialRunner } from "../TutorialRunner"
 import { useTutorialStore } from "@/store/tutorials"
@@ -71,8 +71,68 @@ const clickPrimary = () => {
   fireEvent.click(primary)
 }
 
+const pendingTimeouts = new Map<string, { completion: Promise<void>; complete: () => void }>()
+const suiteSetTimeout = globalThis.setTimeout
+const suiteClearTimeout = globalThis.clearTimeout
+
+const ownRealTimeouts = () => {
+  const realSetTimeout = globalThis.setTimeout
+  const realClearTimeout = globalThis.clearTimeout
+  vi.spyOn(globalThis, "setTimeout").mockImplementation((
+    (callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+      if (typeof callback !== "function") return realSetTimeout(callback, delay, ...args)
+      let complete: () => void
+      const completion = new Promise<void>((resolve) => { complete = resolve })
+      const handle = realSetTimeout(function (this: unknown, ...callbackArgs: unknown[]) {
+        try {
+          Reflect.apply(callback, this, callbackArgs)
+        } finally {
+          pendingTimeouts.delete(String(handle))
+          complete()
+        }
+      }, delay, ...args)
+      // Native handles and their public numeric IDs must cancel the same work.
+      pendingTimeouts.set(String(handle), { completion, complete })
+      return handle
+    }
+  ) as typeof setTimeout)
+  vi.spyOn(globalThis, "clearTimeout").mockImplementation((handle) => {
+    realClearTimeout(handle)
+    const owned = pendingTimeouts.get(String(handle))
+    pendingTimeouts.delete(String(handle))
+    owned?.complete()
+  })
+}
+
+const endTourAndDrain = async () => {
+  act(() => {
+    useTutorialStore.getState().endTutorial()
+  })
+  cleanup()
+  // Keep the environment alive until callback/microtask descendants settle.
+  do {
+    await Promise.all([...pendingTimeouts.values()].map(({ completion }) => completion))
+    await new Promise<void>((resolve) => {
+      const { port1, port2 } = new MessageChannel()
+      port1.onmessage = () => {
+        port1.close()
+        port2.close()
+        resolve()
+      }
+      port2.postMessage(null)
+    })
+  } while (pendingTimeouts.size > 0)
+}
+
 describe("TutorialRunner with the real react-joyride", { timeout: 30_000 }, () => {
+  afterAll(() => {
+    expect(globalThis.setTimeout).toBe(suiteSetTimeout)
+    expect(globalThis.clearTimeout).toBe(suiteClearTimeout)
+  })
+
   beforeEach(() => {
+    expect(pendingTimeouts.size).toBe(0)
+    ownRealTimeouts()
     localStorage.clear()
     useTutorialStore.setState({
       completedTutorials: [],
@@ -88,12 +148,40 @@ describe("TutorialRunner with the real react-joyride", { timeout: 30_000 }, () =
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
   })
 
-  afterEach(() => {
-    act(() => {
-      useTutorialStore.getState().endTutorial()
+  afterEach(async () => {
+    try {
+      await endTourAndDrain()
+      expect(pendingTimeouts.size).toBe(0)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it("drains teardown work chained through real timers and microtasks", async () => {
+    defineTutorial("owned-teardown", [step("a")])
+    renderTour(<div data-testid="a">A</div>)
+    startTour("owned-teardown")
+    expect(await screen.findByText("Content a")).toBeInTheDocument()
+
+    const completed: string[] = []
+    const token = {}
+    const cancelled = setTimeout(() => completed.push("cancelled"), 0)
+    clearTimeout(Number(cancelled))
+    queueMicrotask(() => {
+      const handle = setTimeout(function (this: unknown, value: string, argument: object) {
+        completed.push(this === handle && argument === token ? value : "wrong invocation")
+        Promise.resolve().then(() => Promise.resolve()).then(() => {
+          setTimeout(() => completed.push("nested"), 0)
+        })
+      }, 0, "first", token)
     })
-    cleanup()
-    vi.restoreAllMocks()
+
+    await endTourAndDrain()
+
+    expect(completed).toEqual(["first", "nested"])
+    expect(pendingTimeouts.size).toBe(0)
+    expect(screen.queryByText("Content a")).not.toBeInTheDocument()
+    expect(useTutorialStore.getState().activeRun).toBeNull()
   })
 
   it("skips a step whose target never mounts and still records completion (NO-N1)", async () => {
