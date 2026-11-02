@@ -659,6 +659,74 @@ async def test_article_stored_explicit_route_cookie_precedence(monkeypatch, agen
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "route_backend, config_backend, expected_backend",
+    [
+        ("httpx", "auto", "httpx"),
+        ("auto", "httpx", "httpx"),
+        ("httpx", "playwright", "httpx"),
+        ("playwright", "httpx", "playwright"),
+    ],
+)
+async def test_public_recursive_preserves_explicit_method_with_real_js_advice(
+    monkeypatch, route_backend, config_backend, expected_backend
+):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
+    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
+    from tldw_Server_API.app.core.Web_Scraping.preflight import facade
+
+    analysis = {"results": {"js": {"status": "success", "js_required": True}}}
+    config = {
+        "web_scraper_default_backend": config_backend,
+        "web_scraper_preflight_analyzers": True,
+        "web_scraper_preflight_include_results": True,
+    }
+    fixture = _harness(preflight=PreflightResult(analysis=analysis))
+    route = SimpleNamespace(url=URL, domain="example.com", backend=route_backend)
+    fixture.dependencies = replace(
+        fixture.dependencies,
+        resolve_plan=lambda _url, values: article.ArticlePlan.from_routing_plan(route, values),
+        backend_setting=lambda _plan: route_backend,
+        apply_preflight_advice=facade.apply_preflight_advice,
+        public_preflight_payload=facade.public_preflight_payload,
+    )
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: fixture.dependencies)
+    scraper = EnhancedWebScraper(config=config)
+    try:
+        result = await scraper.recursive_scrape(URL, max_pages=1)
+    finally:
+        await scraper.stop()
+    assert result[0]["preflight_analysis"]["advice"] == {
+        "backend": expected_backend,
+        "method": "trafilatura",
+        "notes": [],
+    }
+    assert bool(fixture.browser.calls) is (expected_backend == "playwright")
+    assert bool(fixture.fetch.requests) is (expected_backend != "playwright")
+
+
+@pytest.mark.asyncio
+async def test_standalone_default_method_still_accepts_real_js_advice(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
+    from tldw_Server_API.app.core.Web_Scraping.preflight import facade
+
+    fixture = _harness(
+        preflight=PreflightResult(analysis={"results": {"js": {"status": "success", "js_required": True}}})
+    )
+    fixture.dependencies = replace(
+        fixture.dependencies,
+        apply_preflight_advice=facade.apply_preflight_advice,
+        public_preflight_payload=facade.public_preflight_payload,
+    )
+    monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: fixture.dependencies)
+    result = await article.scrape_article(URL)
+    assert result["preflight_analysis"]["advice"]["method"] == "playwright"
+    assert len(fixture.browser.calls) == 1 and fixture.fetch.requests == []
+
+
+@pytest.mark.asyncio
 async def test_progress_save_load_remains_plain_snapshot(tmp_path):
     from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
 

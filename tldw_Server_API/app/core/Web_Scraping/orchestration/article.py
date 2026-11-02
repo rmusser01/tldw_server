@@ -161,6 +161,7 @@ class ArticleDependencies:
     acquired: Callable[[str, str, str], None] | None = None
     discovery_on_success: bool = False
     discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None
+    method_intent: str = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -938,7 +939,7 @@ async def _prepare_article(
         advised_backend, advised_method, advised_result = dependencies.apply_preflight_advice(
             preflight_result,
             backend=backend,
-            method=_AUTO_BACKEND,
+            method=dependencies.method_intent,
             backend_setting=backend_setting,
         )
     except asyncio.CancelledError:
@@ -947,7 +948,7 @@ async def _prepare_article(
         raise
     except Exception as exc:  # noqa: BLE001 - failed advice retains the snapshotted route
         _log_failure(dependencies, exc, code="fetch_error", stage="preflight_advice", url=url)
-        advised_backend, advised_method, advised_result = backend, _AUTO_BACKEND, None
+        advised_backend, advised_method, advised_result = backend, dependencies.method_intent, None
 
     if not automatic_backend:
         advised_backend = backend
@@ -1231,6 +1232,7 @@ def start_page(
     discovery_gate: Callable[[Mapping[str, Any]], bool] | None = None,
     prepare_plan: Callable[[ArticlePlan], ArticlePlan] | None = None,
     transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+    method_intent: str = "auto",
 ) -> WorkHandle[PageData]:
     """Start one canonical page attempt with private discovery and physical drain."""
     loop = asyncio.get_running_loop()
@@ -1304,6 +1306,7 @@ def start_page(
                 acquired=acquired if transform is None else deferred_acquired,
                 discovery_on_success=discovery_on_success if transform is None else False,
                 discovery_gate=discovery_gate if transform is None else None,
+                method_intent=method_intent,
             )
             timeout = preflight_facade._execution_timeout(parent.cap_timeout(None))
             try:
