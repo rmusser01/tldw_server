@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from ..base import ChunkerConfig
 from ..llm_context import _LLM_UNSET
@@ -28,6 +28,24 @@ class ExecutionHooks:
 
     get_logger: Callable[[], Any]
     increment_counter: Callable[..., Any]
+
+
+ExecutionKind = Literal["text", "metadata", "generator"]
+
+
+@dataclass(frozen=True)
+class PreparedExecution:
+    """Resolved per-call values; option dictionaries retain shallow identities."""
+
+    method: Any
+    max_size: Any
+    overlap: Any
+    language: Any
+    tokenizer_override: Any
+    options_raw: dict[str, Any]
+    strategy_options: dict[str, Any]
+    use_per_call_strategy: bool
+    align_text_to_source: bool
 
 
 class ExecutionContext(Protocol):
