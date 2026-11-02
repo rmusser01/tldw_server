@@ -23,7 +23,7 @@ gate dispatch or workflow/policy changes. Each change has RED/GREEN evidence.
 **Tests**: Affected files and adjacent scopes, lint, compile, diff, and applicable
 touched-scope Bandit. Use official fixture-managed PostgreSQL if needed, never
 concurrent suites sharing fixed databases.
-**Status**: In Progress (new published-head CI repairs below)
+**Status**: Complete (fresh dev integration qualified below)
 
 ## Stage 3: Independent Review and Publication
 **Goal**: Publish a coherent, independently reviewed follow-up patch.
@@ -167,3 +167,42 @@ Detailed integration rulings and intended scopes are recorded in this plan's
 ignored SDD dev-b2b7-integration-notes.md. Task15413 stays In Progress and its
 new verification acceptance remains open. This checkpoint is not publication,
 merge approval, or a claim that unrelated Skills/OAuth failures are harmless.
+
+## Dev b2b7 Qualification
+
+Rebased onto authoritative b2b7d5d2b04256458fe6f33e02a36019e2c46795 with a
+pre-rebase backup ref, other-ref updates disabled and auto-merge/queue unarmed.
+Five previous patches replay equal, two replay contextually and the duplicate
+webhook marker disappears because it is upstream. Workspace and regeneration
+files now exactly match dev. Upstream's real Python ACP transport, common
+Slides fixture and explicit connection-startup budget are preserved; our loader-
+order and discriminating owner/settings assertions remain.
+
+Fresh integration exposed one new refusal-control interaction: upstream's common
+fixture adds an official-host workflow allowlist, which unions with the global
+allowlist. Original control failed1/175; sourceb5e480aaaeb79fbdd9e9eb4ef3059b66619b0779
+isolates only the global-list case by removing that additive test input.
+The same hostile-policy command then passes175/175, retaining refusal and
+zero-request assertions. No production policy or shared fixture is changed.
+
+Separate fresh runs, not an aggregate full suite:366four-file Python controls
+pass (2635warnings);175Slides/owner controls pass (362warnings);2official PG
+benchmark cases pass (16warnings);32regeneration cases pass (77warnings), with
+16actual PG parametrizations and16SQLite cases. No skips. PG runs are serial,
+required-PG/no-Docker, using only official UUID temporary-database fixtures.
+Ruff/compile/diff pass. Fulltree quality5364 uses the new upstream scanner with
+unchanged baseline; shard870/5364/fourignored/baseline44/new0 passes.
+
+Unfiltered Bandit versus exact b2b7 test blobs reports621->636B101 assertions,
+unchanged4B105/3B106/2B608 contexts and zero scan errors. No new non-assertion
+finding. Original broad-suite and unresolved Skills/OAuth limits still apply;
+none is declared harmless or silently excluded.
+
+Tree/mode checks preserve137/142upstream paths exactly; only five test paths
+combine both sides. All28844other pre-rebase entries, including all eight
+reviewed UI artifacts, match their reviewed objects/modes before this final
+two-record checkpoint. Candidate changes remain tests, test setup and tracking
+only: no runtime, workflow, dependency, schema or policy delta from dev.
+Logs /private/tmp/userprofiles15413-devb2b7-* and the retained range-diff record
+support this qualification. Final bounded integration/record review and fresh
+published-head CI remain before merge; Task15413 stays In Progress.
