@@ -630,12 +630,19 @@ CI/published-doc guards `979 passed, 5 existing skips`; Persona/size/HTTP guards
 `167 passed`; strict-scope integration `72 passed`; native authority bootstrap
 `5 passed`. Required backend contract command: `1,006 passed, 1 existing skip`;
 unit smoke: `459 passed, 33 deselected`. The separate WebSocket matrix has eight
-ACP fixture failures assigned to the ACP child task, not an accepted exclusion.
+ACP fixture failures repaired by an owned real stdio stub-agent fixture. The
+combined ACP and exact required WebSocket group passes `333 passed, 0 skips`;
+all original authentication and authorization assertions remain unchanged.
 Shared mock-host/catalog fixtures pass 393 original cases; the final adapter
 suite passes 60, including a fresh-process regression keeping unit inventory
 offline when live-network tests are explicitly enabled. Backend contract repairs
 pass 243 cases with three canonical PostgreSQL availability skips; parent-owned
-PostgreSQL verification is in progress. The RSS Watchlists error-persistence
+PostgreSQL verification passes all 88 database-contract cases without skips,
+including all 22 previously skipped cases. The full MCP PostgreSQL parity gate
+passes all 94 cases without skips. Unfiltered root collection now succeeds with
+87,418 tests. Bandit scans all 49,270 lines of branch-touched production Python
+and the changed scanner with zero findings and zero scan errors.
+The RSS Watchlists error-persistence
 path now uses the existing credential sanitizer; its preserved redaction test
 reproduced the bug before the one-line repair.
 
@@ -651,7 +658,7 @@ fingerprint refresh is authorized by that equality alone.
 **Goal**: Request read-only review of an immutable current-dev source artifact and address every finding.
 **Success Criteria**: No unaddressed findings; reviewer explicitly approves the final source.
 **Tests**: Reviewer reproductions and fresh affected regression checks after repairs.
-**Status**: Not Started
+**Status**: In Progress
 
 ### November Stage 4: Publish And Arm
 **Goal**: Publish with an explicit lease and enable only normal gated auto-merge.

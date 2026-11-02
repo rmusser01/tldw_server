@@ -36,6 +36,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import sys
 import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -46,6 +47,7 @@ from types import SimpleNamespace
 
 import anyio
 import pytest
+from anyio.from_thread import start_blocking_portal
 from fastapi import FastAPI, WebSocket
 from fastapi.routing import APIWebSocketRoute
 from fastapi.testclient import TestClient
@@ -55,6 +57,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
 from tldw_Server_API.app.core import config
+from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig
+from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.helpers.app_main_state import reload_app_main, restore_app_main, snapshot_app_main
@@ -244,8 +248,35 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
         _reset_auth_singletons()
 
 
+@pytest.fixture(scope="module")
+def acp_runner(full_app: SimpleNamespace) -> Iterator[ACPRunnerClient]:
+    """Own a real stub-agent transport independently of each WebSocket's event loop."""
+    runner = ACPRunnerClient(
+        ACPRunnerConfig(
+            command=sys.executable,
+            args=[str(Path(__file__).resolve().parents[3] / "Helper_Scripts" / "acp_stub_agent.py")],
+        )
+    )
+    with start_blocking_portal() as portal:
+        try:
+            portal.call(runner.start)
+            yield runner
+        finally:
+            portal.call(runner.shutdown)
+
+
 @pytest.fixture()
-def env(full_app: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def env(
+    full_app: SimpleNamespace, acp_runner: ACPRunnerClient, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    from tldw_Server_API.app.api.v1.endpoints import acp_multiplex
+
+    async def _get_matrix_runner() -> ACPRunnerClient:
+        if not acp_runner.is_running:
+            raise RuntimeError("WebSocket auth matrix ACP runner stopped")
+        return acp_runner
+
+    monkeypatch.setattr(acp_multiplex, "get_runner_client", _get_matrix_runner)
     for key, value in full_app.environ.items():
         monkeypatch.setenv(key, value)
     _reset_auth_singletons()

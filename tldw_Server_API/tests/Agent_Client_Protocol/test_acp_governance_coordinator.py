@@ -4,6 +4,7 @@ import asyncio
 import importlib.machinery
 import sys
 import types
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -757,9 +758,14 @@ async def test_prompt_shadow_rollout_deny_is_not_blocked(monkeypatch):
 
     monkeypatch.setattr(client, "check_prompt_governance", _fake_check_prompt_governance, raising=False)
 
-    async def _fake_call(method: str, payload: dict[str, Any], *, timeout_sec: float | None = None) -> ACPMessage:
+    async def _fake_call(
+        method: str, payload: dict[str, Any], *, timeout_sec: float | None = None,
+        on_response_received: Callable[[], None] | None = None,
+    ) -> ACPMessage:
         assert method == "session/prompt"
         assert payload["sessionId"] == "session-shadow"
+        assert on_response_received is not None
+        on_response_received()
         return ACPMessage(jsonrpc="2.0", id="acp-shadow", result={"stopReason": "end"})
 
     client._client = SimpleNamespace(call=_fake_call, rpc_timeout_sec=60)
