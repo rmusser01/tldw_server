@@ -631,9 +631,12 @@ class Chunker:
         Yields:
             Individual text chunks
         """
-        yield from ChunkExecutionService(self, _execution_hooks()).iter_chunks(
+        chunk_iter = ChunkExecutionService(self, _execution_hooks()).iter_chunks(
             text, method, max_size, overlap, language, **options
         )
+        # The inner iterator owns the input; do not retain a replaced source here.
+        del text
+        yield from chunk_iter
 
     def get_available_methods(self) -> list[str]:
         """
