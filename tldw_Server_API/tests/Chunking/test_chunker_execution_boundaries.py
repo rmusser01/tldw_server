@@ -50,6 +50,27 @@ def test_text_facade_delegates_without_extra_binding(monkeypatch: pytest.MonkeyP
     assert received[0][1]["path"] is payload
 
 
+def test_metadata_facade_returns_service_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker(ChunkerConfig(enable_cache=False))
+    sentinel_result = [SimpleNamespace(text="metadata sentinel", metadata={"nested": []})]
+    received = []
+
+    class SentinelService:
+        def __init__(self, context: Any, hooks: Any) -> None:
+            assert context is chunker
+
+        def chunk_text_with_metadata(self, *args: Any, **kwargs: Any) -> Any:
+            received.append((args, kwargs))
+            return sentinel_result
+
+    monkeypatch.setattr(facade, "ChunkExecutionService", SentinelService)
+    result = chunker.chunk_text_with_metadata(
+        "raw", "words", 4, 0, "en", align_text_to_source=None, context="user context"
+    )
+    assert result is sentinel_result and result[0] is sentinel_result[0]
+    assert received == [(("raw", "words", 4, 0, "en"), {"align_text_to_source": None, "context": "user context"})]
+
+
 def test_hooks_resolve_replacement_during_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     chunker = Chunker(ChunkerConfig(enable_cache=False))
     assert callable(getattr(facade, "_execution_hooks", None)), "missing forwarding hook factory"

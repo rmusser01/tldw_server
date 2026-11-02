@@ -279,13 +279,15 @@ git commit -m "refactor: extract Chunker text execution"
 
 **Goal:** Delegate metadata execution while preserving direct strategy results and alignment.
 **Success Criteria:** Same metadata/list identities, mutation, error regions and no result-cache calls.
-**Status:** Not Started
+**Status:** Complete
+
+**Evidence:** Metadata wiring/component RED15 failed20 passed; GREEN305 focused integration cases,680 warnings,6.38s. Full Chunking934 passed/1 established skip,2296 warnings,43.58s. Both moved bodies are normalized-AST identical; retained methods, public signatures and original source docstrings unchanged. Ruff/Black/compileall/mypy3files and production/test Bandit pass. Logs `/tmp/chunker_execution_task3_*`.
 
 **Files:** Modify `execution/service.py`, the `chunk_text_with_metadata` body in `chunker.py`, and the two component/boundary test modules; tracking only elsewhere.
 
 **Interfaces:** Consume the Task 2 context/hooks/constructor. Produce `ChunkExecutionService.chunk_text_with_metadata` with the fixed mirrored signature. Do not route through `chunk_text` or introduce shared request preparation yet.
 
-- [ ] **Step 1: Write `test_metadata_facade_returns_service_object` and `test_metadata_service_keeps_alignment_regions`.** For controlled results, assert the exact list/item/metadata identities and source-sliced `item.text`. Include out-of-range/boolean offsets, missing/raising metadata attributes, a non-list result, false/None alignment and an early empty-input control. For each case also assert no result-cache access and unchanged errors/events.
+- [x] **Step 1: Write `test_metadata_facade_returns_service_object` and `test_metadata_service_keeps_alignment_regions`.** For controlled results, assert the exact list/item/metadata identities and source-sliced `item.text`. Include out-of-range/boolean offsets, missing/raising metadata attributes, a non-list result, false/None alignment and an early empty-input control. For each case also assert no result-cache access and unchanged errors/events.
 
 ```python
 assert result is strategy_result
@@ -295,10 +297,10 @@ assert result[0].text == sanitized_source[clamped_start:clamped_end]
 assert cache_events == []
 ```
 
-- [ ] **Step 2: Capture wiring/component RED.** Run the execution component and boundary modules; require failure because the service metadata entry is absent or the public method bypasses it. Frozen baseline tests must not be changed.
-- [ ] **Step 3: Move the metadata body, then wire its public delegate.** Keep raw alignment extraction/coercion before resolution, conditional strategy-option reinsertion and tokens-only ephemeral selection. Hold the lock only through direct `strategy.chunk_with_metadata`; leave per-item alignment and success logging outside the execution catch region. Add no copies, conversion, repairs or validation. Keep all retained context helpers on the facade.
-- [ ] **Step 4: Run GREEN and regressions.** Run all execution modules, `test_process_text_components.py`, `test_process_text_refactor_equivalence.py`, `test_hierarchy_refactor_contracts.py` and `test_streaming_overlap.py` under `tldw_Server_API/tests/Chunking/`, then full Chunking. Require zero failures/new skips; run scoped static/type/Bandit checks.
-- [ ] **Step 5: Commit the metadata migration and tracking.**
+- [x] **Step 2: Capture wiring/component RED.** Run the execution component and boundary modules; require failure because the service metadata entry is absent or the public method bypasses it. Frozen baseline tests must not be changed.
+- [x] **Step 3: Move the metadata body, then wire its public delegate.** Keep raw alignment extraction/coercion before resolution, conditional strategy-option reinsertion and tokens-only ephemeral selection. Hold the lock only through direct `strategy.chunk_with_metadata`; leave per-item alignment and success logging outside the execution catch region. Add no copies, conversion, repairs or validation. Keep all retained context helpers on the facade.
+- [x] **Step 4: Run GREEN and regressions.** Run all execution modules, `test_process_text_components.py`, `test_process_text_refactor_equivalence.py`, `test_hierarchy_refactor_contracts.py` and `test_streaming_overlap.py` under `tldw_Server_API/tests/Chunking/`, then full Chunking. Require zero failures/new skips; run scoped static/type/Bandit checks.
+- [x] **Step 5: Commit the metadata migration and tracking.**
 
 ```bash
 git add -- tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_chunker_execution_components.py tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md

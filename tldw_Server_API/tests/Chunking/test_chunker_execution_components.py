@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Chunking.base import ChunkMetadata, ChunkResult
 from tldw_Server_API.tests.Chunking._execution_test_support import FakeExecutionContext, RecordingCache
 
 pytestmark = pytest.mark.unit
@@ -114,3 +115,75 @@ def test_grouped_counter_failure_retains_baseline_error() -> None:
     with pytest.raises(TypeError):
         service.chunk_text("source")
     assert context.strategy.calls == []
+
+
+@pytest.mark.parametrize("alignment", [None, False, True])
+@pytest.mark.parametrize("result_kind", ["list", "tuple", "missing", "raising"])
+def test_metadata_service_keeps_alignment_regions(alignment: Any, result_kind: str) -> None:
+    context = FakeExecutionContext()
+    cache = RecordingCache()
+    context._cache = cache
+    metadata = ChunkMetadata(0, -2, 99, 1)
+    item: Any = ChunkResult("normalized", metadata)
+    if result_kind == "missing":
+        item = SimpleNamespace(text="normalized")
+    elif result_kind == "raising":
+
+        class RaisingItem:
+            text = "normalized"
+
+            @property
+            def metadata(self) -> Any:
+                raise ValueError("metadata sentinel")
+
+        item = RaisingItem()
+    original = (item,) if result_kind == "tuple" else [item]
+    context.strategy.metadata_result = original
+    service = make_service(context)
+    result = service.chunk_text_with_metadata("source", align_text_to_source=alignment)
+    assert result is original and result[0] is item
+    assert item.text == ("source" if alignment and result_kind == "list" else "normalized")
+    if result_kind in {"list", "tuple"}:
+        assert item.metadata is metadata and (metadata.start_char, metadata.end_char) == (-2, 99)
+    assert cache.events == [] and context._strategy_lock.depth == 0
+    assert service.chunk_text_with_metadata("  ") == []
+
+
+def test_metadata_alignment_mutates_after_lock_release() -> None:
+    context = FakeExecutionContext()
+    mutations = []
+
+    class Item:
+        metadata = ChunkMetadata(0, True, 4, 1)
+        _text = "normalized"
+
+        @property
+        def text(self) -> str:
+            return self._text
+
+        @text.setter
+        def text(self, value: str) -> None:
+            mutations.append((value, context._strategy_lock.depth))
+            self._text = value
+
+    item = Item()
+    context.strategy.metadata_result = [item]
+    result = make_service(context).chunk_text_with_metadata("source", align_text_to_source=True)
+    assert result[0] is item and item.text == "our"
+    assert mutations == [("our", 0)]
+
+
+def test_metadata_success_logging_stays_outside_translation() -> None:
+    context = FakeExecutionContext()
+    service = make_service(context)
+    failure = ValueError("success logging sentinel")
+
+    def fail(*_args: Any, **_kwargs: Any) -> None:
+        raise failure
+
+    models = importlib.import_module(f"{PACKAGE}.models")
+    service.hooks = models.ExecutionHooks(get_logger=lambda: SimpleNamespace(debug=fail), increment_counter=fail)
+    with pytest.raises(ValueError) as caught:
+        service.chunk_text_with_metadata("source")
+    assert caught.value is failure
+    assert context.strategy.calls[0][0] == "metadata"
