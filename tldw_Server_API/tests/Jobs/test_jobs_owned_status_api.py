@@ -179,6 +179,58 @@ def test_owned_projection_drops_untrusted_values(manager):
     assert status.result == {}
 
 
+@pytest.mark.parametrize(
+    "code",
+    [
+        "claims_cluster_corruption",
+        "claims_cluster_resource_limit",
+        "claims_cluster_configuration",
+        "claims_cluster_attempt_inactive",
+        "claims_cluster_storage_unavailable",
+        "claims_cluster_failed",
+        "claims_cluster_vector_access",
+        "claims_cluster_vector_busy",
+        "claims_cluster_vector_closed",
+        "claims_cluster_vector_configuration",
+        "claims_cluster_vector_corruption",
+        "claims_cluster_vector_forked_handle",
+        "claims_cluster_vector_invalid_request",
+        "claims_cluster_vector_lock_unsupported",
+        "claims_cluster_vector_log_coverage",
+        "claims_cluster_vector_mixed_access",
+        "claims_cluster_vector_path_alias",
+        "claims_cluster_vector_read_only",
+        "claims_cluster_vector_shutdown",
+        "claims_cluster_vector_source_changed",
+        "claims_cluster_vector_unsupported_sdk",
+        "claims_cluster_arbitrary_secret",
+    ],
+)
+def test_owned_projection_actual_cluster_failure_vocabulary_is_closed(manager, code):
+    from tldw_Server_API.app.core.Jobs.owned_status import get_owned_job_status
+
+    job = admit(manager)
+    sql(manager, "UPDATE jobs SET error_code=?, last_error='secret' WHERE id=?", (code, job["id"]))
+    status = get_owned_job_status(manager, job_uuid=job["uuid"], owner_user_id="1")
+    assert status.failure_code == (None if code == "claims_cluster_arbitrary_secret" else code)
+    assert "secret" not in status.model_dump_json()
+
+
+def test_owned_projection_superseded_reason_is_explicit(manager):
+    from tldw_Server_API.app.core.Jobs.owned_status import get_owned_job_status
+
+    job = admit(manager)
+    sql(
+        manager,
+        "UPDATE jobs SET result=? WHERE id=?",
+        (json.dumps({"outcome": "skipped", "reason": "superseded", "secret": "secret"}), job["id"]),
+    )
+    assert get_owned_job_status(manager, job_uuid=job["uuid"], owner_user_id="1").result == {
+        "outcome": "skipped",
+        "reason": "superseded",
+    }
+
+
 def test_owned_status_preserves_canonical_quarantined_state(manager):
     job = admit(manager)
     sql(manager, "UPDATE jobs SET status='quarantined' WHERE id=?", (job["id"],))
