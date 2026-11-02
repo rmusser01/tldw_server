@@ -133,6 +133,25 @@ state as needed. Its constructor does not validate/coerce values. A frozen
 dataclass does not imply deep copying or freezing its dictionaries. Preserve
 existing shallow copies, option values and observable hook call order.
 
+### Keep User Options Separate From Internal Parameters
+
+User strategy options are data, not internal calling parameters. Pass them to
+preparation/strategy helpers as one explicit mapping argument; do not expand
+them with `**options` beside internal arguments such as an execution kind,
+context or hooks. Service construction receives only internal wiring, not
+expanded user options. An execution entry may receive expanded options only
+when its parameter-binding rules mirror the existing public method; otherwise
+it also receives an explicit mapping. Do not create newly reserved option
+names or use internal parameter names as implicit filters.
+
+For example, `mode`, `context`, `hooks`, `source`, `path`, `request`, `strategy`
+and `options` currently reach an injected strategy unchanged on all three
+paths. An internal `mode="text"` parameter must neither consume a user-supplied
+`mode` nor collide with it as a duplicate keyword. The only removals/coercions
+are the baseline path-specific rules described below. Preserve their existing
+mapping copies and value identities; "explicit mapping" does not authorize
+deep copying, freezing values or passing unknown options to new validators.
+
 ## Public Facade And Live Hooks
 
 Preserve the three declarations, annotations and defaults exactly; add no
@@ -266,6 +285,10 @@ Freeze:
 - Complete independent structural signatures and generator-function identity.
 - Empty/non-string/oversized input, sanitized source and exact size labels.
 - Default/alias/overlap handling and each path's exact forwarded options.
+- User option names overlapping internal helper parameters, on all three
+  paths. Include the example names above and the actual plumbing parameter
+  names chosen during implementation; assert returned output and the exact
+  strategy option values, not just that no `TypeError` was raised.
 - Tokenizer overrides, reset flags and mutable LLM/language call ordering.
 - Cache hit/miss/skip/store, key/signature inputs, copy modes, uncached paths
   and failures on both sides of the execution catch boundary.
@@ -290,6 +313,38 @@ package eagerly exports the facade; redesigning that bootstrap is out of scope.
 The boundary prohibits facade imports in the new subsystem itself, not the
 root package's pre-existing initialization. Boundary tests must fail when
 required modules are absent rather than skipping them.
+
+### Cold-Import Gate
+
+The future implementation must add fresh-interpreter smoke tests in addition
+to static boundary tests and ordinary in-process integration tests. A warmed
+test process can already contain the facade and conceal initialization-order
+problems introduced by the root package's eager facade export.
+
+Run each requested entry point in its own subprocess using the active Python
+interpreter and the repository's isolated test configuration/import path:
+
+- The root `tldw_Server_API.app.core.Chunking` package first, then the execution
+  package and its modules.
+- Each execution entry point first in a separate subprocess: `execution`,
+  `execution.models`, `execution.preparation`, `execution.strategy` and
+  `execution.service`, all under the same full Chunking package prefix.
+
+After the requested import, import the root and execution service and assert
+that their required `Chunker` and `ChunkExecutionService` exports resolve.
+Requesting a submodule first still runs Python's real parent-package bootstrap;
+do not fake away that behavior, preload the facade, stub modules in
+`sys.modules`, or simulate a cold import by deleting modules in a warmed
+interpreter. Do not require `Chunker` to be absent after bootstrap.
+
+Capture exit status/stdout/stderr, bound subprocess waits, and fail on missing
+modules/exports, exceptions or hangs. Do not skip or retry failed cold imports.
+The smoke tests perform imports/export checks only: they do not call providers,
+download tokenizers/models or initialize application services. Root bootstrap
+redesign remains out of scope; an inherited failure still uses the separate
+baseline-correction gate rather than silently changing initialization.
+
+### Full Verification
 
 Run full Chunking, targeted process_text/hierarchy/file regressions, static
 typing on the new subsystem, scoped Ruff/Black/compileall, test-quality and
@@ -321,12 +376,20 @@ paragraph or treat design approval as authority to merge without the gates.
 
 ## ADR Assessment And Builder Discretion
 
-ADR required: **no** for this proposal. It is a local implementation
-decomposition following the existing pipeline/service and live-context pattern,
-with unchanged public, persistence, security and concurrency rules. It adds no
-new repository-wide architecture policy or dependency. ADR-002/059/084 govern
-task tracking/tooling/IDs, and ADR-006 governs portable Bandit output. Reassess
-before introducing a genuinely new durable rule; do not rewrite accepted ADRs.
+ADR required: **yes**. The proposed one-way execution-module dependency
+boundary is a durable module-boundary rule, even though it is local to Chunker
+and follows the existing pipeline/service pattern. Repository policy does not
+require a decision to be repository-wide before an ADR is needed.
+
+[ADR-086: Chunker Execution Live-Context Boundary](../../ADR/086-chunker-execution-live-context-boundary.md)
+records this decision with status **Proposed**, not Accepted. Its scope is the
+new execution subsystem; it does not retroactively change the accepted behavior
+or ownership of process_text, hierarchy or other modules. Public, persistence,
+security and concurrency behavior remains unchanged. This supersedes the
+initial draft's ADR-required-no assessment; accepted ADRs are not rewritten.
+ADR-002/059/084 still govern task tracking/tooling/IDs, and ADR-006 governs
+portable Bandit output. Approval of this revised design and the Proposed ADR
+remains with the requester before planning/implementation can proceed.
 
 The builder may choose private helper names, precise internal annotations and
 test-file organization within these responsibilities. The hooks container may
@@ -339,11 +402,14 @@ additional public modes, an executor hierarchy or speculative abstractions.
 
 - Approach B: selected by requester.
 - Current production/test baseline: verified as recorded above.
-- Independent builder check: completed on 2026-11-02; a fresh reviewer read
-  the draft and relevant source/tests and returned "nothing important left".
-  There are no unresolved material planning questions from that check. The
-  final bootstrap clarification above only makes the existing import scope
-  explicit; it does not authorize a package-initialization redesign.
-- Requester approval of this document: pending.
+- Original independent builder check: completed on 2026-11-02 and returned
+  "nothing important left" for the initial draft. A subsequent design review
+  identified option-namespace, ADR-recording and cold-import verification gaps;
+  the requester authorized correcting all three.
+- Bounded independent follow-up check: completed on 2026-11-02; the reviewer
+  confirmed that all three revisions address their risks and returned
+  "nothing important left". No material planning questions remain from that
+  check. The review does not substitute for requester design/ADR approval.
+- Requester approval of this revised document and Proposed ADR-086: pending.
 - Implementation plan and product/test edits: not started and not authorized
   until design approval.
