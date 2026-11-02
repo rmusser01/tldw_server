@@ -27,7 +27,6 @@ from .execution.models import ExecutionHooks
 from .execution.service import ChunkExecutionService
 from .hierarchical.service import HierarchyService
 from .llm_context import _LLM_UNSET
-from .option_utils import _coerce_bool_option
 from .process_text import ProcessTextPipeline, TelemetryHooks
 from .security_logger import get_security_logger
 from .strategies.fixed_size import FixedSizeChunkingStrategy
@@ -606,105 +605,9 @@ class Chunker:
             when supported, or `align_text_to_source=True` to force source slicing for
             transforming strategies.
         """
-        # Sanitize input
-        text = self._sanitize_input(text)
-        if not text.strip():
-            logger.debug("Empty text provided, returning empty list")
-            return []
-        self._enforce_text_size(text, source="chunk_text_with_metadata")
-
-        # Use defaults if not specified
-        options_raw: dict[str, Any] = dict(options)
-        align_text_to_source_opt = options_raw.pop("align_text_to_source", None)
-        align_text_to_source = _coerce_bool_option(align_text_to_source_opt, False)
-        method = self._normalize_method_argument(method) or self.config.default_method.value
-        max_size = max_size if max_size is not None else self.config.default_max_size
-        overlap = overlap if overlap is not None else self.config.default_overlap
-        language = language or self.config.language
-        method = self._resolve_method(method, language, options_raw)
-        options_raw = self._apply_option_aliases(method, options_raw)
-        overlap = self._override_overlap_for_method(method, overlap, options_raw)
-        # Harden overlap to avoid non-progressing loops in strategies
-        try:
-            if isinstance(max_size, int) and isinstance(overlap, int):
-                if overlap < 0:
-                    logger.warning(f"Negative overlap ({overlap}) adjusted to 0")
-                    overlap = 0
-                if max_size <= 0:
-                    # Strategy will raise on invalid max_size; leave as-is here
-                    pass
-                elif overlap >= max_size:
-                    logger.warning(f"Overlap ({overlap}) >= max_size ({max_size}); adjusting to max_size - 1")
-                    overlap = max_size - 1
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-            pass
-
-        tokenizer_override = options_raw.get("tokenizer_name")
-        if tokenizer_override is None:
-            tokenizer_override = options_raw.get("tokenizer_name_or_path")
-        if isinstance(tokenizer_override, str):
-            tokenizer_override = tokenizer_override.strip() or None
-        use_per_call_strategy = bool(tokenizer_override) and method == ChunkingMethod.TOKENS.value
-        strategy_options: dict[str, Any] = dict(options_raw)
-        if align_text_to_source_opt is not None:
-            # Allow strategies to opt into/out of source-aligned text
-            strategy_options["align_text_to_source"] = align_text_to_source
-        strategy_options.pop("code_mode", None)
-        strategy_options.pop("tokenizer_name", None)
-        strategy_options.pop("tokenizer_name_or_path", None)
-
-        effective_llm_call, effective_llm_cfg = self._get_effective_llm_hooks()
-        strategy_lock = self._strategy_lock if self._strategy_cache_mode == "shared" else nullcontext()
-        try:
-            with strategy_lock:
-                # Get strategy lazily (supports factory registration); force per-call strategy for tokenizer overrides
-                strategy = self._create_strategy_instance(method) if use_per_call_strategy else self._get_strategy_for_call(method)
-                self._sync_strategy_llm(strategy, llm_call_func=effective_llm_call, llm_config=effective_llm_cfg)
-                if method == ChunkingMethod.TOKENS.value and tokenizer_override:
-                    try:
-                        if getattr(strategy, "tokenizer_name", None) != tokenizer_override:
-                            strategy.tokenizer_name = tokenizer_override
-                            if hasattr(strategy, "_tokenizer"):
-                                strategy._tokenizer = None
-                            if hasattr(strategy, "_tokenizer_init_attempted"):
-                                strategy._tokenizer_init_attempted = False
-                    except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                        logger.debug("Failed to update tokenizer override", exc_info=True)
-
-                # Update strategy language if different
-                if language != strategy.language:
-                    self._apply_strategy_language(strategy, language)
-
-                # Get chunks with metadata
-                results = strategy.chunk_with_metadata(text, max_size, overlap, **strategy_options)
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Chunking with metadata failed: {e}")
-            if isinstance(e, ChunkingError):
-                raise
-            raise ChunkingError(f"Chunking failed: {str(e)}") from e
-
-        # Optionally align emitted text with the source span (opt-in)
-        if align_text_to_source and isinstance(results, list):
-            text_len = len(text)
-            for item in results:
-                try:
-                    metadata = getattr(item, "metadata", None)
-                    if metadata is None:
-                        continue
-                    start_char = getattr(metadata, "start_char", None)
-                    end_char = getattr(metadata, "end_char", None)
-                    if not isinstance(start_char, int) or not isinstance(end_char, int):
-                        continue
-                    start_char = max(0, min(start_char, text_len))
-                    end_char = max(start_char, min(end_char, text_len))
-                    item.text = text[start_char:end_char]
-                except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                    continue
-        if getattr(self.config, 'verbose_logging', False):
-            logger.info(f"Created {len(results)} chunks with metadata using {method} method")
-        else:
-            logger.debug(f"Created {len(results)} chunks with metadata using {method} method")
-        return results
+        return ChunkExecutionService(self, _execution_hooks()).chunk_text_with_metadata(
+            text, method, max_size, overlap, language, **options
+        )
 
     def chunk_text_generator(self,
                            text: str,
