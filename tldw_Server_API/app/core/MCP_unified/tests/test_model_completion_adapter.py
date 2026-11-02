@@ -183,7 +183,12 @@ def harness():
         received = None
         child_name = None
 
-        async def complete(self, request, credentials, *, on_receipt=None):
+        def validate_credentials(self, credentials):
+            pass
+
+        async def complete(self, request, credentials, *, on_receipt=None, on_native_ready=None):
+            if on_native_ready is not None:
+                await on_native_ready()
             events.append("transport")
             self.calls += 1
             self.received = request
@@ -1055,7 +1060,8 @@ async def test_native_usage_self_cancel_after_paid_receipt_is_not_public_cancell
     native.phase = "usage"
     native.usage_cancel_kind = cancel_kind
 
-    async def transport(request, credentials, *, on_receipt=None):
+    async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         h.transport.calls += 1
         if on_receipt is not None:
             on_receipt("valid content")
@@ -1242,7 +1248,8 @@ async def test_native_usage_cleanup_keeps_paid_receipt_or_first_native_cancel(
     native.error = RuntimeError(PRIVATE)
 
     # The transport receives a real issued handle, not the harness's text sentinel.
-    async def transport(request, credentials, *, on_receipt=None):
+    async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         h.transport.calls += 1
         if on_receipt is not None:
             on_receipt("valid content")
@@ -1375,7 +1382,8 @@ async def test_false_ancillary_outcome_emits_static_warning(harness, boundary, m
 async def test_provider_receipt_after_original_deadline_never_caches_content(harness):
     h = harness
 
-    async def late_transport(request, credentials, *, on_receipt=None):
+    async def late_transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         # Starve the timer callback: receipt time must still be checked locally.
         time.sleep(1.05)
         if on_receipt is not None:
@@ -1395,7 +1403,8 @@ async def test_provider_receipt_after_original_deadline_never_caches_content(har
 async def test_transport_type_error_never_retries_without_receipt_callback(harness):
     h = harness
 
-    async def broken_transport(request, credentials, *, on_receipt=None):
+    async def broken_transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         h.transport.calls += 1
         raise TypeError(PRIVATE)
 
@@ -1417,7 +1426,8 @@ async def test_native_cancel_at_receipt_wins_cached_result_or_late_error(harness
     h = harness
     call = None
 
-    async def transport(request, credentials, *, on_receipt=None):
+    async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         call.cancel("receipt-cancel")
         if outcome == "error":
             raise RuntimeError(PRIVATE)
@@ -1440,7 +1450,8 @@ async def test_shutdown_suppresses_cached_paid_result_while_native_usage_pending
     h, native = harness, native_runtime
     native.phase = "usage"
 
-    async def transport(request, credentials, *, on_receipt=None):
+    async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         if on_receipt is not None:
             on_receipt("valid content")
         return NormalizedModelCompletion("valid content", 3, 4)
@@ -1580,7 +1591,8 @@ async def test_terminal_lifecycle_self_cancel_is_quarantined_from_public_caller(
     native.phase = "usage"
     fault.kind = fault_kind
 
-    async def transport(request, credentials, *, on_receipt=None):
+    async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         h.transport.calls += 1
         if on_receipt is not None:
             on_receipt("valid content")
@@ -1658,7 +1670,8 @@ async def test_task_self_cancel_cannot_skip_or_restart_lifecycle_backoff(
     native.phase = "usage" if outcome == "paid" else "resolution"
     fault.kind = fault_kind
 
-    async def transport(request, credentials, *, on_receipt=None):
+    async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         h.transport.calls += 1
         if on_receipt is not None:
             on_receipt("valid content")
@@ -1735,7 +1748,8 @@ async def test_postclose_lifecycle_fault_preserves_receipt_and_requires_positive
     native.phase = "usage"
     fault.kind = fault_kind
 
-    async def transport(request, credentials, *, on_receipt=None):
+    async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
+        await on_native_ready()
         h.transport.calls += 1
         if on_receipt is not None:
             on_receipt("valid content")

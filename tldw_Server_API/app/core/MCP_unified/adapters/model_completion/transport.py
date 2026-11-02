@@ -254,12 +254,17 @@ class OpenAICompletionTransport:
         """Return frozen flags, latched uncertified on pin or cleanup failure."""
         return self._capabilities
 
+    def validate_credentials(self, credentials: ProviderCallCredentials) -> None:
+        """Reject invalid or absent runtime credentials before accounting admission."""
+        _credential_headers(credentials, self._policy)
+
     async def complete(
         self,
         request: ModelCompletionRequest,
         credentials: ProviderCallCredentials,
         *,
         on_receipt: Callable[[str], None] | None = None,
+        on_native_ready: Callable[[], Awaitable[None]] | None = None,
     ) -> normalization.NormalizedModelCompletion:
         """Normalize once, notify a trusted synchronous sink, then close owned state."""
         if not self._capabilities.native_async_cancellation:
@@ -292,6 +297,22 @@ class OpenAICompletionTransport:
         cancellation = None
         result = None
         phase = "client"
+        dispatch_failure = None
+
+        async def native_ready() -> None:
+            """Only this trusted phase may establish durable dispatch provenance."""
+            nonlocal phase, dispatch_failure
+            phase = "dispatch"
+            try:
+                await cast(Callable[[], Awaitable[None]], on_native_ready)()
+            except Exception as error:  # noqa: BLE001 - detach private accounting failures
+                dispatch_failure = (
+                    ModelCompletionFailure(error.code, error.domain)
+                    if type(error) is ModelCompletionFailure
+                    else ModelCompletionFailure("model_completion_failed", ModelFailureDomain.REQUEST)
+                )
+                raise_detached_error(dispatch_failure)
+            phase = "fetch"
 
         async def close_client() -> None:
             """Record cleanup failure inside owned work, before cancellation wins."""
@@ -329,6 +350,9 @@ class OpenAICompletionTransport:
             ):
                 raise ValueError("Ambient credential state is forbidden")
             phase = "fetch"
+            native_ready_kwargs: dict[str, Any] = (
+                {"on_native_ready": native_ready} if on_native_ready is not None else {}
+            )
             envelope = await _await_owned_operation(
                 self._fetch_json(
                     method="POST",
@@ -344,6 +368,7 @@ class OpenAICompletionTransport:
                     sensitive_observability=True,
                     require_json_ct=True,
                     on_response=on_response,
+                    **native_ready_kwargs,
                 ),
                 cancel_on_cancellation=True,
             )
@@ -363,6 +388,8 @@ class OpenAICompletionTransport:
                 )
             elif phase == "headers":
                 failure = ModelCompletionFailure("model_credentials_invalid", ModelFailureDomain.CREDENTIAL_SCOPE)
+            elif phase == "dispatch":
+                failure = dispatch_failure
             elif phase == "normalize":
                 failure = ModelCompletionFailure("invalid_model_output", ModelFailureDomain.REQUEST)
             elif response_received:

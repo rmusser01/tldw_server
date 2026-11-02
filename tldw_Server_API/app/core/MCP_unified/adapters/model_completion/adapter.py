@@ -310,9 +310,13 @@ class ModelCompletionAdapter:
         credentials: Any,
     ) -> ModelCompletionResult:
         self._guard(invocation)
-        invocation.dispatch_attempted = True
-        await self._accounting.mark_dispatched(invocation.reservation)
-        self._guard(invocation)
+
+        async def native_ready() -> None:
+            """Fence only after trusted native preflight, before any request send."""
+            self._guard(invocation)
+            invocation.dispatch_attempted = True
+            await self._accounting.mark_dispatched(invocation.reservation)
+            self._guard(invocation)
 
         def cache_receipt(content: str) -> None:
             """Capture timely immutable output before transport cleanup can await."""
@@ -320,7 +324,9 @@ class ModelCompletionAdapter:
             if asyncio.get_running_loop().time() <= invocation.run_deadline and invocation.result is None:
                 invocation.result = ModelCompletionResult(content)
 
-        normalized = await self._transport.complete(request, credentials, on_receipt=cache_receipt)
+        normalized = await self._transport.complete(
+            request, credentials, on_receipt=cache_receipt, on_native_ready=native_ready
+        )
         self._guard(invocation)
         if invocation.result is None:
             cache_receipt(normalized.content)
@@ -385,6 +391,7 @@ class ModelCompletionAdapter:
             if failure is not None:
                 raise_detached_error(failure)
             self._guard(invocation)
+            self._transport.validate_credentials(credentials)
             invocation.reservation = await self._accounting.reserve(
                 request, identity, credential_source=getattr(credentials, "credential_source", None)
             )

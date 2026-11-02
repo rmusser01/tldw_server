@@ -1324,3 +1324,77 @@ async def test_real_egress_denylist_is_request_local_and_configured_scope_cannot
         assert harness.clients[0].is_closed
         assert harness.body.reads == 0
         assert os.environ["WORKFLOWS_EGRESS_ALLOWED_PORTS"] == "80,443,8080"
+
+
+@pytest.mark.asyncio
+async def test_native_ready_runs_after_egress_before_single_http_request(credentials, isolate_network):
+    harness = Harness()
+    ready = []
+
+    async def native_ready():
+        assert len(isolate_network) == 2
+        assert len(harness.clients) == 1
+        assert harness.requests == []
+        ready.append(True)
+
+    result = await harness.transport().complete(_request(), await credentials(), on_native_ready=native_ready)
+    assert result.content == " answer\nline "
+    assert ready == [True]
+    assert len(harness.requests) == 1
+    assert harness.clients[0].is_closed and harness.body.closed
+
+
+@pytest.mark.asyncio
+async def test_native_ready_failure_preserves_accounting_provenance_without_send(credentials):
+    harness = Harness()
+
+    async def native_ready():
+        error = ModelCompletionFailure("accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
+        error.__cause__ = RuntimeError(PRIVATE)
+        raise error
+
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await harness.transport().complete(_request(), await credentials(), on_native_ready=native_ready)
+    _assert_failure(caught.value, "accounting_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE)
+    assert harness.requests == []
+    assert harness.clients[0].is_closed
+
+
+@pytest.mark.asyncio
+async def test_native_ready_private_failure_does_not_infer_shared_provenance(credentials):
+    harness = Harness()
+
+    async def native_ready():
+        raise RuntimeError(PRIVATE)
+
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await harness.transport().complete(_request(), await credentials(), on_native_ready=native_ready)
+    _assert_failure(caught.value, "model_completion_failed", ModelFailureDomain.REQUEST)
+    assert harness.requests == []
+    assert harness.clients[0].is_closed
+
+
+@pytest.mark.asyncio
+async def test_native_ready_cancellation_closes_client_without_send(credentials):
+    harness = Harness()
+    entered = asyncio.Event()
+
+    async def native_ready():
+        entered.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(
+        harness.transport().complete(_request(), await credentials(), on_native_ready=native_ready)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        task.cancel("dispatch-cancel")
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        assert caught.value.args == ("dispatch-cancel",)
+        assert harness.requests == []
+        assert harness.clients[0].is_closed
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

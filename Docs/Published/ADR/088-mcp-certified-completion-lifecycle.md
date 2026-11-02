@@ -11,6 +11,16 @@
 
 Certify only the native-async, single-attempt OpenAI completion path. Capture the provider, model, endpoint, native output-token field, and timeouts from operator configuration. Generate credential headers from an authoritative per-call runtime. Send one non-streaming, one-choice request with no tools, redirects, retries, or fallback.
 
+Keep exposure reserved while credential validation, fresh-client certification,
+and egress preflight run. The certified HTTPX path awaits a trusted internal
+native-ready callback after preflight and immediately before its single request
+attempt. That callback establishes the durable dispatch fence and rechecks
+cancellation. Known-unsent preflight failures can therefore release capacity;
+after the fence, uncertain outcomes remain conservative. Callback failure or
+cancellation cannot send or retry the request. The hook is not part of the public
+completion port; absent hooks preserve existing HTTP-client behavior without
+adding a keyword to legacy adapter calls.
+
 The managed adapter owns each completion child through termination. Run timeout and cancellation cleanup have separate deadlines. A child that outlives cleanup is abandoned permanently, remains referenced, leaves conservative durable exposure, and makes the adapter unhealthy. Late results cannot publish output or reconcile an ambiguous reservation. Shutdown stops admission and drains owned work. Only an explicit health check may restore readiness after retained work terminates and the full capability contract is revalidated.
 
 ## Context

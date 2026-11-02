@@ -20,7 +20,11 @@ from loguru import logger
 from tldw_Server_API.app.core import http_client as hc
 from tldw_Server_API.app.core.AuthNZ import byok_runtime, user_provider_secrets
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    AuthoritativeProviderScope,
+    ProviderCredentialRuntime,
+    is_runtime_issued_provider_call_credentials,
+)
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import fetch_all
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo import (
@@ -31,6 +35,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
 from tldw_Server_API.app.core.Billing import enforcement
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
 from tldw_Server_API.app.core.MCP_unified.adapters.model_completion import factory, normalization
 from tldw_Server_API.app.core.MCP_unified.adapters.model_completion.transport import OpenAICompletionTransport
 from tldw_Server_API.app.core.MCP_unified.auth_scope import project_authenticated_execution_scope
@@ -176,6 +181,7 @@ class FakeProvider:
 @pytest_asyncio.fixture
 async def composed(reservation_pool, monkeypatch, caplog, asyncio_diagnostics):
     """Default lazy repos, real encrypted credentials, billing and frozen governor."""
+    native_egress_validation = hc._avalidate_egress_or_raise
     state = await seed_scope_state(reservation_pool)
     pool = reservation_pool
     logs, validations, ports = [], [], []
@@ -245,6 +251,7 @@ async def composed(reservation_pool, monkeypatch, caplog, asyncio_diagnostics):
         validations=validations,
         caplog=caplog,
         diagnostics=asyncio_diagnostics,
+        native_egress_validation=native_egress_validation,
     )
     try:
         yield env
@@ -1001,6 +1008,7 @@ async def test_invalid_request_or_identity_is_neutral_without_provider_io(compos
         ("429", "model_response_rejected", ModelFailureDomain.REQUEST),
         ("500", "model_response_rejected", ModelFailureDomain.REQUEST),
         ("connection", "model_transport_unavailable", ModelFailureDomain.SHARED_INFRASTRUCTURE),
+        ("egress_after_send", "model_egress_denied", ModelFailureDomain.REQUEST),
     ],
 )
 async def test_only_explicit_shared_transport_failure_is_breaker_eligible(composed, outcome, code, domain):
@@ -1024,6 +1032,8 @@ async def test_only_explicit_shared_transport_failure_is_breaker_eligible(compos
         env.provider.body_factory = lambda: Body([PRIVATE.encode()])
     elif outcome == "connection":
         env.provider.error = httpx.ConnectError(PRIVATE)
+    elif outcome == "egress_after_send":
+        env.provider.error = EgressPolicyError(PRIVATE)
     else:
         env.provider.status = int(outcome)
     port = env.build()
@@ -1034,6 +1044,11 @@ async def test_only_explicit_shared_transport_failure_is_breaker_eligible(compos
     row = await assert_safe_surfaces(env, invocation)
     assert row["state"] == "ambiguous"
     assert await usage_rows(env.pool, invocation.execution_id) == []
+    assert await ProviderUsageReservationsRepo(env.pool).outstanding(BillingScope("org", env.state["org"])) == {
+        "tokens": row["reserved_input_tokens"] + row["reserved_output_tokens"],
+        "cost_units": row["reserved_cost_units"],
+    }
+    assert any(bucket.tokens < bucket.capacity for bucket in port._accounting._governor._buckets.values())
 
 
 async def test_paid_receipt_survives_atomic_usage_write_failure_without_retry(composed, monkeypatch):
@@ -1073,6 +1088,7 @@ async def test_paid_receipt_survives_atomic_usage_write_failure_without_retry(co
         ("admission_before_write", None, 0, 0),
         ("admission_after_commit", "released", 0, 0),
         ("governor", "released", 0, 0),
+        ("egress", "released", 0, 0),
         ("dispatch_before_commit", "reserved", 0, 0),
         ("dispatch_after_commit", "ambiguous", 0, 0),
         ("provider_before_response", "ambiguous", 1, 0),
@@ -1105,6 +1121,8 @@ async def test_caller_cancellation_preserves_boundary_exposure_and_drains_owned_
         )
     elif boundary == "governor":
         gate_method(monkeypatch, type(port._accounting._governor), "reserve", gate)
+    elif boundary == "egress":
+        gate_method(monkeypatch, hc, "_avalidate_egress_or_raise", gate)
     elif boundary.startswith("dispatch_"):
         gate_method(
             monkeypatch,
@@ -1278,3 +1296,132 @@ async def test_authoritative_store_unavailable_never_falls_back(composed, monkey
     assert env.provider.requests == []
     assert env.validations == []
     assert await assert_safe_surfaces(env, invocation) is None
+
+
+@pytest.mark.parametrize("preflight", ["late_pins", "ambient_credentials", "egress"])
+async def test_known_unsent_native_preflight_refunds_storage_and_governor(composed, monkeypatch, preflight):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    port = env.build()
+    assert port.is_healthy()
+    if preflight == "late_pins":
+        class PinnedClient(httpx.AsyncClient):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._tldw_cert_pinning = hc._parse_pins_from_env()
+
+        env.provider.client_class = PinnedClient
+        monkeypatch.setenv("HTTP_CERT_PINS", "fixed.example=" + "b" * 64)
+        code, domain = "model_transport_uncertified", ModelFailureDomain.SHARED_INFRASTRUCTURE
+    elif preflight == "ambient_credentials":
+        class AmbientClient(httpx.AsyncClient):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.headers["Authorization"] = "Bearer " + KEYS["server"]
+
+        env.provider.client_class = AmbientClient
+        code, domain = "model_credentials_invalid", ModelFailureDomain.CREDENTIAL_SCOPE
+    else:
+        assert env.native_egress_validation.__module__ == hc.__name__
+        monkeypatch.setattr(hc, "_avalidate_egress_or_raise", env.native_egress_validation)
+        monkeypatch.setenv("WORKFLOWS_EGRESS_DENYLIST", "fixed.example")
+        monkeypatch.setenv("EGRESS_DENYLIST", "fixed.example")
+        monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "fixed.example")
+        monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")
+        code, domain = "model_egress_denied", ModelFailureDomain.REQUEST
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await port.complete(request(), invocation)
+    assert_failure(caught.value, code, domain)
+    await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+    assert env.provider.requests == []
+    row = await assert_safe_surfaces(env, invocation)
+    assert row["state"] == "released"
+    assert await ProviderUsageReservationsRepo(env.pool).outstanding(BillingScope("org", env.state["org"])) == {
+        "tokens": 0, "cost_units": 0,
+    }
+    governor = port._accounting._governor
+    assert governor._buckets, "the test must exercise real governor admission"
+    assert all(bucket.tokens == pytest.approx(bucket.capacity) for bucket in governor._buckets.values())
+    assert not governor._handles
+    assert not any(governor._leases.values())
+    assert not port._owned and not port._retained
+    assert await usage_rows(env.pool, invocation.execution_id) == []
+
+
+async def test_real_missing_key_is_credential_scope_before_accounting(composed):
+    env = composed
+    invocation = identity_from_context(env.context())
+    config = {"openai_api": {"api_base_url": BASE}}
+    # Genuine authoritative absence at user, team, org and frozen server fallback.
+    runtime = ProviderCredentialRuntime(
+        user_id=invocation.user_id,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        authoritative_scope=AuthoritativeProviderScope(
+            invocation.user_id, invocation.active_team_id, invocation.active_organization_id
+        ),
+        server_config_snapshot=config,
+    )
+    try:
+        handle = await runtime.resolve("openai", model="fixed")
+        assert is_runtime_issued_provider_call_credentials(handle, provider="openai")
+        assert (handle.api_key, handle.credential_source) == (None, "none")
+    finally:
+        await runtime.close()
+        await runtime.wait_for_shutdown_completion()
+    port = env.build(server_config=config)
+    with pytest.raises(ModelCompletionFailure) as caught:
+        await port.complete(request(), invocation)
+    assert_failure(caught.value, "model_credentials_invalid", ModelFailureDomain.CREDENTIAL_SCOPE)
+    await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+    assert await assert_safe_surfaces(env, invocation) is None
+    assert env.provider.requests == env.provider.clients == env.validations == []
+    assert not port._accounting._governor._handles
+    assert not port._accounting._governor._buckets
+    assert not port._owned and not port._retained
+
+
+async def test_cancelled_noncooperative_egress_remains_owned_and_cannot_dispatch_late(composed, monkeypatch):
+    env = composed
+    await seed_keys(env)
+    invocation = identity_from_context(env.context())
+    env.provider.execution_id = invocation.execution_id
+    port = env.build(port_settings=settings(run_timeout_seconds=1, cancellation_cleanup_seconds=1))
+    gate = Gate()
+
+    async def slow_egress(*args, **kwargs):
+        gate.entered.set()
+        try:
+            await gate.release.wait()
+        except asyncio.CancelledError:
+            await gate.release.wait()
+
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", slow_egress)
+    call = asyncio.create_task(port.complete(request(), invocation))
+    try:
+        await asyncio.wait_for(gate.entered.wait(), 3)
+        call.cancel("preflight-cancel")
+        with pytest.raises(asyncio.CancelledError, match="preflight-cancel"):
+            await asyncio.wait_for(call, 3)
+        assert port._retained and not port.is_healthy()
+        assert env.provider.requests == []
+        row = await ProviderUsageReservationsRepo(env.pool).get(invocation.execution_id)
+        assert row["state"] == "reserved"
+        gate.release.set()
+        await asyncio.wait_for(port.wait_for_shutdown_completion(), 5)
+        row = await assert_safe_surfaces(env, invocation)
+        assert row["state"] == "released"
+        assert await ProviderUsageReservationsRepo(env.pool).outstanding(BillingScope("org", env.state["org"])) == {
+            "tokens": 0, "cost_units": 0,
+        }
+        assert env.provider.requests == []
+        assert not port._owned and not port._retained
+        governor = port._accounting._governor
+        assert not governor._handles and not any(governor._leases.values())
+        assert all(bucket.tokens == pytest.approx(bucket.capacity) for bucket in governor._buckets.values())
+        assert port.is_healthy()
+    finally:
+        await drain_call(port, call, gate)
