@@ -742,8 +742,15 @@ model-inventory regression unassigned. A workflow-only correction adds it to the
 existing adapter endpoint shard in all five definitions (six execution matrices
 through the Windows release alias), without changing the guard, ignore list or
 baseline. The exact guard is RED before and GREEN after; the affected shard
-passes all eight tests. `TASK-2294.3.2.1` is reopened for independent delta review.
-Hosted onboarding is green; UX smoke and the remaining hosted gates are pending.
+passes all eight tests. Independent review of `7bd90cb..184108f81b` reports no
+Critical, Important or Minor findings and approves the six-matrix execution
+mapping. `TASK-2294.3.2.1` is complete again.
+Hosted Frontend UX Gates run `41508229967` passes onboarding and UX smoke. Its
+exact real-cockpit gate records six passed, zero skipped, zero unexpected and
+zero flaky tests. The reviewer independently checked the failed artifacts,
+retained dev fix and fresh hosted result; no additional UI/wait-helper patch is
+justified. `TASK-2294.3.2.4` is complete. Core and frontend source/test blobs are
+unchanged by the workflow repair. Updated-head normal CI remains pending.
 Any next publication must use the verified current remote head as its lease,
 not the historical pre-rebase lease above.
 
