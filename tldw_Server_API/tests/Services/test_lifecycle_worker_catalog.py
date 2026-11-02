@@ -36,6 +36,28 @@ async def _wait_for_stop(stop_event: asyncio.Event) -> None:
     await stop_event.wait()
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_moderation_provider_is_registered_lazy_and_closes_admission(monkeypatch):
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
+    from tldw_Server_API.app.services.startup_moderation_workers import provide_moderation_worker_specs
+    from tldw_Server_API.app.services.startup_worker_groups import startup_worker_spec_providers
+
+    assert provide_moderation_worker_specs in startup_worker_spec_providers()
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+    monkeypatch.setattr(async_execution, "_closed", False)
+    specs = provide_moderation_worker_specs(_context())
+    assert len(specs) == 1
+    assert not owner._closed
+    assert owner._reaper is None
+    callback = specs[0].shutdown_callback_factory(_context())
+    await callback()
+    assert owner._closed
+    assert async_execution._closed
+
+
 def _worker_spec(name: str, **overrides: Any) -> WorkerSpec:
     values: dict[str, Any] = {
         "name": name,

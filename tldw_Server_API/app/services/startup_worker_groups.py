@@ -45,6 +45,9 @@ def startup_worker_spec_providers() -> tuple[SpecProvider, ...]:
     from tldw_Server_API.app.services.startup_maintenance_schedulers import (
         provide_maintenance_scheduler_worker_specs,
     )
+    from tldw_Server_API.app.services.startup_moderation_workers import (
+        provide_moderation_worker_specs,
+    )
     from tldw_Server_API.app.services.startup_notifications_abtest_workers import (
         provide_notifications_abtest_worker_specs,
     )
@@ -71,6 +74,7 @@ def startup_worker_spec_providers() -> tuple[SpecProvider, ...]:
     )
 
     return (
+        provide_moderation_worker_specs,
         provide_primary_jobs_worker_specs,
         provide_study_privilege_jobs_worker_specs,
         provide_content_jobs_worker_specs,
