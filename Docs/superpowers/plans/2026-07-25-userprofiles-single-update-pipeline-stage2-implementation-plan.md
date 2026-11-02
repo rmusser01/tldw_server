@@ -1103,6 +1103,30 @@ Local qualification: the existing bulk-current SQLite case is RED before the fix
 **Tests**: Current branch rules, exact-head CI and GitHub readback. No required-gate dispatch or tracking-only CI invalidation.
 **Status**: In Progress
 
+### November 2 Admin-Webhook Fixture Isolation
+
+## Stage 1: Reproduce Exact Current-Head Failures
+**Goal**: Diagnose admin-watchlists-webhooks job125078441728 without weakening production egress policy.
+**Success Criteria**: Reproduce the same five failures under CI's WORKFLOWS_EGRESS_ALLOWLIST and identify rejection before the intended test branch.
+**Tests**: Existing service suite is RED: five failures / 19 passes with CI allowlist; remote shard has five failures / 43 passes. Host-policy rejection precedes both dispatch filtering and private-address checks.
+**Status**: Complete
+
+## Stage 2: Qualify Fixture-Local Environment Isolation
+**Goal**: Own the unit fixture's allow/deny inputs and host profile while retaining private-address blocking and all original assertions.
+**Success Criteria**: Tests pass under the inherited CI allowlist and hostile external egress inputs; adjacent shard tests and explicit test-owned deny/private/DNS-rebinding cases remain effective. No runtime, workflow, dependency, trusted-policy or WP3 changes. Existing ADR085 governs unchanged; no new ADR is required.
+**Tests**: Admin webhook service and full admin-watchlists-webhooks shard; quality and shard ratchets; Ruff, compile, canonical tracking, touched-test Bandit; independent bounded review. Existing root-suite and broader frontend/WebSocket limits stay explicit rather than waived.
+**Status**: Complete
+
+Local qualification: the exact five CI failures reproduce with the inherited CI allowlist, then all 24 service cases pass after fixture isolation. All 24 also pass with hostile inherited global/workflow allow/deny lists, strict host profile and private blocking disabled externally; the fixture retains private blocking and per-test overrides. The complete 48-case admin-watchlists-webhooks shard passes under CI's allowlist with no skips. Every original test body, assertion and mock has identical AST. Ruff, compile, diff, full-tree quality enforcement with unchanged baseline, canonical task checks (four passed) and shard guard (869 shards/5349 files/four ignored/baseline44/zero new) pass. Touched-test Bandit finding contexts exactly match the original: 72 LOW B101 plus three LOW B105 and five LOW B106 fixture secrets, zero new/errors. Fresh bare pytest remains non-green: exit2 on unchanged Workspaces missing httpx2 after 85849 collected and 12 collection skips. Independent bounded review finds no critical, important or minor findings and approves content publication, not merge. The reviewer confirms identical original AST and Bandit contexts, real private/DNS/rebinding/redirect/denylist checks, and 128 in-memory fixture checks of later overrides and restoration of present/absent values, including exceptional exits. Accepted exclusions: unchanged WP2/WP3 and broader runtime behavior; explicitly non-green root/frontend/WebSocket correctness; unrelated E2E capacity and UI9 causality; duplicate expensive PostgreSQL/broad suites; and coordinator-owned remote refs, queue, human summary, retry authorization and exact-head CI. Final committed-SHA scope qualification is still required. No runtime policy or workflow changes were made.
+
+Separate non-green frontend controls: the current-head UI9 CI failure is VisualPackEditor.test.tsx:3282 (second candidate-review request absent); its identical-input prior shard passed 1505 tests with one existing skip. Fresh affected-file control passes 66/66; full configured UI9 with coverage/default two workers/default+blob reporters exits1, 1501 passed/four failed/one skipped, 171 files passed/two failed. VisualPackEditor passes all 66 inside this full control. Four different local failures are useSpeechHistory's B04 malformed-owned-array test (line135) and useComposerVariantPreference's cross-tab storage update, unrelated-key and invalid-value cases (lines242/260/277, StorageEvent storageArea type errors). Local Node22.16/Bun1.3.5 differs from CI Node20.20.2/Bun1.3.2; these controls neither reproduce nor explain the CI assertion and do not prove harmlessness. E2E Critical failed before tests with browser-download ENOSPC; no retry occurred. Source review approval does not waive any fresh required gate. Logs: /private/tmp/pr2821-webhooks-*.log and /private/tmp/pr2821-ui9-{focused,shard}.log. No local test/server processes remain.
+
+## Stage 3: Publish and Requalify Required CI
+**Goal**: Publish only the independently approved exact head after authoritative-ref and unarmed queue checks.
+**Success Criteria**: Preserve the human Change summary verbatim, carry unchanged-content approvals and require fresh exact-head CI before merge. Retry requests for an older head must not be exercised after publication. TASK-13001.2 remains In Progress until verified merge.
+**Tests**: Current rules, feedback, exact-head checks and expected-head merge/readback. No manual required-gate dispatch or tracking-only CI invalidation.
+**Status**: In Progress
+
 ## Work Package 3: Typed Pipeline and Effects
 
 ### Task 9: Replace open payload contracts with frozen discriminated types
