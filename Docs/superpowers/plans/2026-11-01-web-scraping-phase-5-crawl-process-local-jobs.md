@@ -1035,6 +1035,33 @@ acceptance. Tasks 10-11 and final integration/certification remain required.
 Preserve the plan-scoped reports/probes/ledger; no completion/merge claim.
 
 **Task 9 Default Batch Integration Gate (2026-11-02):**
+**Latest Integration Ruling (2026-11-02, Supersedes Page-Only Guard Setup):**
+Use Chromium's existing browser-scope Fetch interception through the already
+owned browser connection, installed before context/page network activity. Native
+diagnostics passed six popup redirect cases, preserving initial credentials,
+stripping them across and back from another origin, and rejecting denied targets
+before destination I/O. The late page-target attachment was the wrong integration
+boundary; no Playwright startup hook or additional connection is justified by
+this reproduced bug. Reuse the existing acquisition lease, bounded callbacks,
+policy decisions and cleanup. Remove failed target-startup machinery that is no
+longer needed for dispatch; keep only independently necessary bounded transfer
+observation. Preserve direct versus enhanced input semantics and every existing
+browser, cookie, proxy and analyzer capability. A browser-scope interceptor must
+only operate on the browser owned by this acquisition, not a shared foreign owner.
+
+Account for CDP cumulative `Network.loadingFinished.encodedDataLength` without
+double counting chunks: first-navigation `dataReceived` events can be incomplete.
+Do not wait for a renderer-dependent Network-enable acknowledgement while
+holding the request that allows its navigation to proceed. Keep native commands
+owned through acknowledgement or disposal. Native streaming stop, aggregate
+limits, failure/cancellation, capacity, actual drain, cookies/headers/proxy and
+frame/worker/popup regression gates remain required; diagnostic success alone
+does not certify the product. No auxiliary HTTP fetch/fulfill pipeline or new
+control subsystem. Test existing launch defaults again after eliminating the
+unnecessary startup coordination; retain a changed launch selection only if
+current causal evidence still requires it. Cost if wrong: narrow existing-owner
+interception/accounting rework, not a new architecture.
+
 The real default enhanced batch callback still bypasses canonical parent controls:
 a matching plan/context network limit of one permits two acquisition calls,
 charges zero requests, and reports completion. Fix this before Task 9 acceptance
