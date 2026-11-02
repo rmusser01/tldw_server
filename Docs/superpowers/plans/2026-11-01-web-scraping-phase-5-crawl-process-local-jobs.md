@@ -825,6 +825,27 @@ explicit crawl cancellation, and full-queue retry reservation reuse.
 `contracts/conversion.py`; extend `Web_Scraping/test_phase5_profile_contracts.py`;
 create `Web_Scraping/test_phase5_adapter_outcomes.py`.
 
+**Task 9 Execution Ruling (Controller Decision, 2026-11-01):**
+The cutover may add a trusted optional private article-result transform
+`Callable[[str, dict[str, Any]], dict[str, Any]] | None` to crawl composition
+and the private `article.start_page` path. It runs exactly once per completed
+canonical page attempt, after final extraction/content conversion, before queue
+retry classification, engine success/result commit and checkpoint state. With a
+transform present, defer same-document discovery until after that transform and
+apply the existing success/depth/cap gates to the transformed result. A duplicate
+must not consume unused discovery/candidate budgets or trigger extraction fallback
+merely because its compatibility mapping is unsuccessful. Keep no-transform
+standalone behavior unchanged. Preserve established duplicate mappings and analyzer
+attachment, non-secret successful extra fields, instance deduplicator state and
+retry behavior. The callable is a composition capability, never a plan option,
+credential, checkpoint field or global registry. Retain only actual-work ownership,
+forward cancellation/physical drain, and release private graphs after drain.
+Add duplicate/no-expansion, duplicate-only interruption partial/checkpoint,
+per-attempt retry and callback-lifetime tests. This closes a proven no-functionality-
+loss gap; the cost of a wrong ruling is private hook/ordering rework, not a new
+public contract. Raise any further concrete private-composition gap before
+silently dropping existing instance behavior such as rate limiting.
+
 **Interfaces:** Consume `execute_crawl`, `execute_batch`, `ProcessLocalJobQueue`,
 and profile resolver. Preserve every existing signature/export/factory in Task 1.
 `to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]]`
