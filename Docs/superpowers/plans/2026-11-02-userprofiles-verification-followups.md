@@ -246,3 +246,48 @@ limits. Prior broad-suite/Skills/OAuth limits remain explicit. Task15413 stays
 In Progress until final closeout. Final records require bounded exact-head
 review, then authorized source publication and fresh automatic required gates;
 376's successful checks do not qualify the new candidate.
+
+## Plugin Discovery and Audio Patch Ownership Qualification
+
+Two later nonrequired shards on published376 exposed separate fixture defects:
+platform MCP had4303passes/3skips/36missing-mocker setup errors/1765warnings;
+media audio had1failure/4316passes/37skips/1xfail/1xpass/6319warnings. Both
+relevant test/runtime inputs match dev b2b7, not newly introduced product code.
+This neither excuses those failures nor changes any actual required gate.
+
+Source9960d3eb6082053dec42ea5fb96e33f3ebe1f46f changes exactly two lines of
+test setup: explicitly register the already-declared pytest_mock root plugin
+when CI disables autoload, and patch the Parakeet adapter class rather than its
+cached instance. Instance monkeypatch undo had restored a bound method as a
+direct instance attribute, shadowing the later auth test's class replacement
+and reaching its original Whisper-refusal assertion. A safe method-owner/
+exception-type/stack-only diagnostic and ordered RED reproduce that mechanism.
+All eight audio assertions, parameterizations, refusal/private-path/zero-call/
+minutes controls and accounting/victim files remain exact. No product, schema,
+dependency, workflow, timeout, skip, policy or global registry reset changes.
+
+Separate overlapping local evidence, not a sum/full shard: disabled-autoload
+MCP RED36errors -> fullfileGREEN63pass/4warnings; ordinary discovery63pass/
+2warnings. Ordered audio RED1fail/15pass -> GREEN16pass/93warnings. Exact
+registration-removed and ownership-reverted negative controls reproduce both
+failures and were restored before final controls. A private teardown oracle
+also rejects instance method shadowing without invoking ASR. Both complete
+affected audio files23pass/360warnings; final ordinary combined three-file
+control86pass/360warnings, no skips. Python3.14.3/local pytest-mock3.15.1 is not
+claimed identical to CI Python3.12/pytest-mock3.17. No PG/model/download/network
+or full-shard execution was performed.
+
+Ruff/compile/diff pass. Unfiltered Bandit ignoring nosec is byte-identical:
+eight existing LOW B101 test assertions, zero scan errors/new findings, root
+setup zero findings. Quality5364 baseline unchanged and shard870/5364/
+fourignored/baseline44/new0 pass. Warning inventories retain dependency/INI/
+Starlette/Pydantic/Python deprecations, not a warning-free claim. Reports
+plugin-audio-* in this plan's ignored SDD workspace and logs
+/private/tmp/userprofiles15413-plugin-audio-* retain exact commands and limits.
+Hume independently approves exact source9960d3 for spec and quality with zero
+Critical/Important/Minor findings; approved VN source/records are unchanged and
+carry their existing reviews. The later full-suite aggregate failed only its
+Check Python3.12 shard result step, not a new executable test. Final exact-head
+record review, authorized source publication and fresh automatic required checks
+remain. Task15413 is In Progress; prior broad-suite/Skills/OAuth limitations
+remain explicit. No merge, CI retry/dispatch or old-head check transfer.
