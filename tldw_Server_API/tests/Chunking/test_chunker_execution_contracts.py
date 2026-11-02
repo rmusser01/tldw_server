@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import gc
 import inspect
 import json
 import threading
+import weakref
 from collections.abc import Callable, Generator
 from types import SimpleNamespace
 from typing import Any, get_type_hints
@@ -742,3 +744,24 @@ def test_paused_generator_allows_competing_call(facade_case: Any) -> None:
         generator.close()
         thread.join(5)
     assert not thread.is_alive() and case.lock.depth == 0
+
+
+@pytest.mark.parametrize("mode", ["shared", "thread", "call"])
+def test_paused_generator_releases_replaced_source_buffer(mode: str) -> None:
+    class ReferenceableText(str):
+        pass
+
+    chunker = Chunker(ChunkerConfig(enable_cache=False, strategy_cache_mode=mode))
+    source = ReferenceableText("alpha \u202e beta")
+    original = weakref.ref(source)
+    generator = chunker.chunk_text_generator(source, method="words", max_size=1, overlap=0)
+    del source
+    gc.collect()
+    assert original() is not None  # Creating a generator still defers sanitization.
+    try:
+        assert next(generator) == "alpha"
+        gc.collect()
+        assert original() is None, "paused wrapper retained the replaced input buffer"
+        assert list(generator) == ["beta"]
+    finally:
+        generator.close()
