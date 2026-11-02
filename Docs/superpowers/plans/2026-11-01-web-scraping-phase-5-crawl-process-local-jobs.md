@@ -773,6 +773,15 @@ receives the bound controls and calls `start_page` once for each physical job at
   composition must not publish a second outcome or mark a frontier result
   successful before its actual atomic commit. Reuse the existing acquisition and
   profile-conversion logic, not a second scraping pipeline.
+- Add a private lazy owner-loop `CrawlContext.stop_signal() -> asyncio.Future[None]`
+  for cancellation and latched parent-stop notification. It is shared/observed,
+  not canceled by consumer waits; thread-safe publication uses the existing owner
+  lock and loop handoff. Construction outside a running loop must remain valid.
+  Execution/admission progress waits include this signal as well as owned result
+  or drain progress and the remaining execution timeout, so context cancellation
+  can promptly enter bounded cleanup even when physical drain remains held.
+  This notification never means work drained or grants new capacity. Do not poll
+  the context, create an unbounded waiter registry, or serialize the signal.
 
 These expose required private execution binding without changing public wrapper
 signatures or adding unbounded callback/admission registries. The cost of a wrong
