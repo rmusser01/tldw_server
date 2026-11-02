@@ -390,17 +390,6 @@ def publish_claim_cluster_rebuild(
             owner_user_id=identity.owner_user_id,
             limit=limits.cleanup_references,
         )
-        # Cleanup must describe exactly the deletion set. Do not acquire new
-        # cluster locks after Claims locks; retry if a cluster arrived meanwhile.
-        checked_clusters = self._fetchall_with_connection(
-            conn,
-            "SELECT id FROM claim_clusters WHERE user_id = ? ORDER BY id LIMIT ?",
-            (identity.owner_user_id, limits.cleanup_references + 1),
-        )
-        _check_bound(len(checked_clusters), limits.cleanup_references)
-        cluster_ids = tuple(int(row["id"]) for row in clusters)
-        if tuple(int(row["id"]) for row in checked_clusters) != cluster_ids:
-            raise ClusterRebuildStorageError("claims_cluster_source_changed", retryable=True)
         current = read_claim_cluster_source_on_connection(
             self,
             conn,
@@ -410,6 +399,17 @@ def publish_claim_cluster_rebuild(
             lock=True,
         )
         if current != snapshot:
+            raise ClusterRebuildStorageError("claims_cluster_source_changed", retryable=True)
+        # Source and cleanup locks must be held before validating the deletion
+        # set: a new cluster can otherwise assign a source row without digest drift.
+        # Do not acquire new cluster locks after Claims locks; retry on arrival.
+        checked_clusters = self._fetchall_with_connection(
+            conn,
+            "SELECT id FROM claim_clusters WHERE user_id = ? ORDER BY id LIMIT ?",
+            (identity.owner_user_id, limits.cleanup_references + 1),
+        )
+        cluster_ids = tuple(int(row["id"]) for row in clusters)
+        if tuple(int(row["id"]) for row in checked_clusters) != cluster_ids:
             raise ClusterRebuildStorageError("claims_cluster_source_changed", retryable=True)
         if calculation.outcome == "ok":
             _replace_output(

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import ClusterRebuildStorageError
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
@@ -238,3 +239,153 @@ def test_new_cleanup_cluster_between_lock_enumerations_retries_without_partial_c
         assert state(db) == before[0]
     finally:
         other.close_connection()
+
+
+@pytest.mark.parametrize("cleanup_limit", [1, 50_000])
+def test_cluster_arrival_at_source_lock_entry_retries_and_preserves_committed_writer(db, monkeypatch, cleanup_limit):
+    req = request(db)
+    req["limits"] = replace(req["limits"], cleanup_references=cleanup_limit)
+    if cleanup_limit == 1:
+        db.create_claim_cluster(user_id="42")
+    claim = req["snapshot"].rows[0].claim_id
+    module = importlib.import_module(PUBLICATION)
+    read = module.read_claim_cluster_source_on_connection
+    other = MediaDatabase(db_path=":memory:", client_id="42", backend=db.backend, existing_only=True)
+    committed = []
+
+    def create_and_assign_before_source_locks(*args, **kwargs):
+        cluster = other.create_claim_cluster(user_id="42", representative_claim_id=claim)
+        other.add_claim_to_cluster(cluster_id=cluster["id"], claim_id=claim)
+        committed.append(state(other))
+        result = read(*args, **kwargs)
+        assert result == req["snapshot"]  # Assignment changes are not source digest changes.
+        return result
+
+    monkeypatch.setattr(module, "read_claim_cluster_source_on_connection", create_and_assign_before_source_locks)
+    try:
+        with pytest.raises(ClusterRebuildStorageError) as caught:
+            db.publish_claim_cluster_rebuild(**req)
+        assert (caught.value.code, caught.value.retryable) == ("claims_cluster_source_changed", True)
+        assert state(db) == committed[0]
+        assert db.load_claim_cluster_publication(identity=req["identity"]) is None
+    finally:
+        other.close_connection()
+
+
+def test_cluster_arrival_after_source_locks_retries_without_waiting_on_new_cluster_lock(db, monkeypatch):
+    req = request(db)
+    claim = req["snapshot"].rows[0].claim_id
+    module = importlib.import_module(PUBLICATION)
+    read = module.read_claim_cluster_source_on_connection
+    other = MediaDatabase(db_path=":memory:", client_id="42", backend=db.backend, existing_only=True)
+    fetch = other._fetchone_with_connection
+    adding = threading.Event()
+    pids = []
+    futures = []
+
+    def record_destination_lock(conn, query, params=None):
+        if "FROM claim_clusters" in query and "FOR UPDATE" in query:
+            pids.append(conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"])
+            adding.set()
+        return fetch(conn, query, params)
+
+    def create_and_assign():
+        with scoped_context(user_id=42, is_admin=False):
+            cluster = other.create_claim_cluster(user_id="42", representative_claim_id=claim)
+            other.add_claim_to_cluster(cluster_id=cluster["id"], claim_id=claim)
+            return cluster["id"]
+
+    monkeypatch.setattr(other, "_fetchone_with_connection", record_destination_lock)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+
+        def create_after_source_locks(*args, **kwargs):
+            result = read(*args, **kwargs)
+            args[1].execute("SET LOCAL lock_timeout = '1s'")
+            futures.append(pool.submit(create_and_assign))
+            assert adding.wait(5)
+            wait_blocked(args[1], pids[0])
+            assert not futures[0].done()
+            return result
+
+        monkeypatch.setattr(module, "read_claim_cluster_source_on_connection", create_after_source_locks)
+        try:
+            with pytest.raises(ClusterRebuildStorageError) as caught:
+                db.publish_claim_cluster_rebuild(**req)
+            assert (caught.value.code, caught.value.retryable) == ("claims_cluster_source_changed", True)
+        finally:
+            cluster_id = futures[0].result(timeout=5) if futures else None
+            other.close_connection()
+
+    assert [
+        tuple(row) for row in db.execute_query("SELECT id, representative_claim_id FROM claim_clusters").fetchall()
+    ] == [(cluster_id, claim)]
+    assert [
+        tuple(row) for row in db.execute_query("SELECT cluster_id, claim_id FROM claim_cluster_membership").fetchall()
+    ] == [(cluster_id, claim)]
+    assert db.execute_query("SELECT claim_cluster_id FROM Claims WHERE id = ?", (claim,)).fetchone()[0] == cluster_id
+    assert not db.execute_query("SELECT * FROM claims_cluster_publication_heads").fetchall()
+    assert not db.execute_query("SELECT * FROM claims_cluster_publication_receipts").fetchall()
+
+
+def test_membership_writer_after_final_guard_waits_until_publication_commit(db, monkeypatch):
+    req = request(db)
+    claim = req["snapshot"].rows[0].claim_id
+    other = MediaDatabase(db_path=":memory:", client_id="42", backend=db.backend, existing_only=True)
+    fetch = other._fetchone_with_connection
+    execute = db._execute_with_connection
+    adding = threading.Event()
+    pids = []
+    arrivals = []
+    futures = []
+
+    def record_destination_lock(conn, query, params=None):
+        if "FROM claim_clusters" in query and "FOR UPDATE" in query:
+            pids.append(conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"])
+            adding.set()
+        return fetch(conn, query, params)
+
+    def create_and_assign():
+        with scoped_context(user_id=42, is_admin=False):
+            cluster = other.create_claim_cluster(user_id="42", representative_claim_id=claim)
+            arrivals.append(cluster["id"])
+            other.add_claim_to_cluster(cluster_id=cluster["id"], claim_id=claim)
+
+    monkeypatch.setattr(other, "_fetchone_with_connection", record_destination_lock)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+
+        def pause_before_commit(conn, sql, params=None):
+            result = execute(conn, sql, params)
+            if sql.startswith("INSERT INTO claims_cluster_publication_receipts"):
+                futures.append(pool.submit(create_and_assign))
+                assert adding.wait(5)
+                wait_blocked(conn, pids[0])
+                assert not futures[0].done()
+                assigned = db._fetchone_with_connection(
+                    conn, "SELECT claim_cluster_id FROM Claims WHERE id = ?", (claim,)
+                )
+                assert assigned["claim_cluster_id"] != arrivals[0]
+                assert (
+                    db._fetchall_with_connection(
+                        conn, "SELECT claim_id FROM claim_cluster_membership WHERE cluster_id = ?", (arrivals[0],)
+                    )
+                    == []
+                )
+            return result
+
+        monkeypatch.setattr(db, "_execute_with_connection", pause_before_commit)
+        try:
+            result = db.publish_claim_cluster_rebuild(**req)
+            assert result.newly_published and result.result["claims_assigned"] == 1
+            futures[0].result(timeout=5)
+            assert (
+                db.execute_query("SELECT claim_cluster_id FROM Claims WHERE id = ?", (claim,)).fetchone()[0]
+                == arrivals[0]
+            )
+            assert tuple(
+                db.execute_query(
+                    "SELECT cluster_id, claim_id FROM claim_cluster_membership WHERE cluster_id = ?", (arrivals[0],)
+                ).fetchone()
+            ) == (arrivals[0], claim)
+            assert db.load_claim_cluster_publication(identity=req["identity"]).result == result.result
+        finally:
+            other.close_connection()
