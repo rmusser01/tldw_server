@@ -28,6 +28,7 @@ from .models import JobPriority, JobStatus, QueueLimits, QueueStopReport, Scrapi
 from .projections import History
 
 TERMINAL = frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED})
+PageExecutor = Callable[[JobPayload, ParentControls | None], WorkHandle[PageData]]
 
 
 def _observe(future: asyncio.Future) -> None:
@@ -64,6 +65,7 @@ class _Entry:
     completion: asyncio.Future | None
     drained: asyncio.Future
     cancelled: asyncio.Future
+    execute: PageExecutor | None
     subscribers: list[tuple[str, asyncio.Future]] = field(default_factory=list)
     handle: WorkHandle[PageData] | None = None
     started: bool = False
@@ -114,7 +116,14 @@ class ProcessLocalJobQueue:
             self._state = "running"
             self._pump()
 
-    def _admit(self, job: ScrapingJob, controls: ParentControls | None, kind: str) -> tuple[_Entry, asyncio.Future]:
+    @property
+    def producer_window(self) -> int:
+        """Read-only production bound; neither an admission grant nor a waiter."""
+        return min(self.max_concurrent, self._limits.max_pending, self._limits.max_live)
+
+    def _admit(
+        self, job: ScrapingJob, controls: ParentControls | None, kind: str, execute: PageExecutor | None = None
+    ) -> tuple[_Entry, asyncio.Future]:
         loop = self._bind_loop()
         if self._state in {"stopping", "stopped"}:
             raise QueueRejected("queue_stopping")
@@ -140,6 +149,7 @@ class ProcessLocalJobQueue:
             completion,
             drained,
             cancelled,
+            self._execute if execute is None else execute,
             [(kind, subscriber)],
         )
         self._history.remove(job.job_id)
@@ -153,9 +163,11 @@ class ProcessLocalJobQueue:
         _, subscriber = self._admit(job, None, "article")
         return subscriber
 
-    async def submit_page(self, job: ScrapingJob, *, controls: ParentControls) -> WorkHandle[PageData]:
+    async def submit_page(
+        self, job: ScrapingJob, *, controls: ParentControls, execute: PageExecutor | None = None
+    ) -> WorkHandle[PageData]:
         """Atomically subscribe to live page/discovery and this job's own drain."""
-        entry, subscriber = self._admit(job, controls, "page")
+        entry, subscriber = self._admit(job, controls, "page", execute)
         loop = self._bind_loop()
         drained = loop.create_future()
         drained.add_done_callback(_observe)
@@ -203,9 +215,9 @@ class ProcessLocalJobQueue:
                 return
             if entry.controls is not None:
                 entry.controls.check()
-            if entry.payload is None:
+            if entry.payload is None or entry.execute is None:
                 raise RuntimeError("execution payload already released")
-            entry.handle = self._execute(entry.payload, entry.controls)
+            entry.handle = entry.execute(entry.payload, entry.controls)
             entry.handle.result.add_done_callback(_observe)
             entry.handle.drained.add_done_callback(_observe)
             await asyncio.wait((entry.handle.result, entry.cancelled), return_when=asyncio.FIRST_COMPLETED)
@@ -298,7 +310,12 @@ class ProcessLocalJobQueue:
                 logger.warning("queue_cancel_callback_failed")
 
     def _cancel_entry(self, entry: _Entry, *, shutdown: bool = False) -> None:
-        if self._entries.get(entry.job.job_id) is not entry or entry.job.status in TERMINAL:
+        if self._entries.get(entry.job.job_id) is not entry:
+            return
+        if entry.job.status in TERMINAL:
+            # Explicit ownership can still interrupt physical work after logical
+            # delivery, without rewriting the already committed public outcome.
+            self._cancel_handle(entry)
             return
         self._terminal(entry, JobStatus.CANCELLED, shutdown=shutdown)
         self._cancel_handle(entry)
@@ -315,6 +332,7 @@ class ProcessLocalJobQueue:
         entry.payload = None
         entry.controls = None
         entry.context = None
+        entry.execute = None
         if not entry.drained.done():
             entry.drained.set_result(None)
         if self._state == "stopping" and not self._entries:
