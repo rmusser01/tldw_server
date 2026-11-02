@@ -23,7 +23,7 @@ gate dispatch or workflow/policy changes. Each change has RED/GREEN evidence.
 **Tests**: Affected files and adjacent scopes, lint, compile, diff, and applicable
 touched-scope Bandit. Use official fixture-managed PostgreSQL if needed, never
 concurrent suites sharing fixed databases.
-**Status**: Complete
+**Status**: In Progress (new published-head CI repairs below)
 
 ## Stage 3: Independent Review and Publication
 **Goal**: Publish a coherent, independently reviewed follow-up patch.
@@ -76,7 +76,7 @@ claimed. Exact-head remote CI and the human-summary gate still govern merge.
 
 ## Published-Head UI10 Follow-Up
 
-**Status**: Locally Qualified; Independent Review and CI Pending
+**Status**: Independently Approved and Published in 4d1649; Later CI Requires Further Repairs
 Published-head CI job125454102604 ran 2,359 tests: 2,358 passed and the Playground
 no-usable-model assertion failed at line972 while the UI still showed Checking
 model readiness. Its wait observes the fetch call, not settled query rendering.
@@ -99,3 +99,71 @@ only; that waiver is recorded in its body. All actual required gates remain.
 Report and controlled RED/GREEN artifacts:
 /private/tmp/userprofiles15413-playground-ui10-report.md and
 /private/tmp/userprofiles15413-playground-*.
+
+## Further Exact-Head CI Repairs
+
+Published4d1649 remains blocked: required frontend unit shards report a
+VisualPack candidate-review count failure and an uncaught real Joyride/Popper
+callback after environment disposal. Broad backend shards also report Skills
+collection lifetime, Slides policy, DB fixture/status/session-setting and
+Embeddings OAuth failures. These are not waived by earlier gates or review.
+Evidence: PR3404 comment6586881626 and retained per-job diagnostic logs.
+
+Local sourcec37c4fa351 adds the missing direct unit marker to the existing
+webhook lifecycle test. The enforcing catalog RED becomes GREEN without any
+test-body or assertion change. Final non-PG controls119pass/threePGdeselected;
+an earlier file command inadvertently selected threePGcases, all skipped, and
+does not constitute PG verification. Bandit90B101 plus1B105 is unchanged, with
+zero scan errors. Python output retains1746 warnings, not a pristine-output claim.
+
+Local source6d6196d5bf fixes a reproduced pending-owned-timeout invariant in
+the real Joyride suite. File-local pass-through real timer ownership drains
+callbacks and promise descendants before restoring APIs; no cancellation sweep,
+fake clock, fixed sleep, private-field filter or shared setup change. All five
+original scenarios are byte-identical; one chained-work/restoration regression
+is added. Drain-disabled negative control fails; final threefile46/46 Node22
+controls, focused TypeScript baseline/current0/0, ESLint and diff checks pass.
+This is not a local reproduction or closure of the exact CI exception/Node20.
+Independent Newton approves exact6d source with zero Critical/Important and one
+Minor inherited-warning observation; no new source defect. Report:
+repair-4d-review.md in this plan's ignored SDD workspace.
+
+Further narrow repairs remain under TDD: VisualPack render readiness and
+validated backend fixtures. Three fake-PostgreSQL resume cases reproduce an
+omitted construction-time owner; Slides official-host policy reproduces the
+inherited CI allowlist; malformed regeneration returns its documented400 before
+writes rather than stale409/422 expectations; the official PostgreSQL benchmark
+fixture reproduces losing session SETs on deliberately secure pool RESET ALL.
+Use a test-owned startup budget, not weaker pool resets or service defaults.
+Separate Skills90/90, real-Joyride5/5 and OAuth focused/collection controls pass
+locally but do not explain or dismiss the remote failures. No speculative
+runtime fix, source exclusion, dependency install, CI retry or policy change.
+
+These sources are not yet published. Task15413 stays In Progress; affected
+verification/review acceptance is reopened until new-head evidence is recorded.
+Only successful actual required gates, fresh refs/rules/feedback and exact-head
+review permit merge. Existing whole-branch approvals carry unchanged content;
+new remediation receives bounded independent review.
+
+## Fresh Dev Integration
+
+The source batch through3b213e79ff is independently approved for its original
+base. Backend controls222selectedpass and separate official PostgreSQL runs
+2benchmark/16regeneration pass without skips; warning-bearing evidence remains
+explicit (366/45/70 local and16/45 PG warnings), not pristine or full-suite proof.
+Source reviews have no Critical/Important finding; inherited evidence-noise
+Minor observations remain recorded rather than expanded into unrelated cleanup.
+
+Authoritative dev advanced tob2b7d5d2b04256458fe6f33e02a36019e2c46795 from
+mergedPR3187:142paths, shared HTTP/AuthNZ/accounting changes and overlapping
+fixture repairs. Before publication, qualify the combined test boundaries,
+preserve upstream runtime/workflows and stronger real-ACP/shared-Slides/startup-
+budget fixtures, and drop only demonstrably superseded patch portions. Preserve
+all discriminating assertions and byte-identical reviewed UI. Fresh affected
+Python/PG/security/ratchet and bounded integration/records review are required;
+old-base success is not fresh qualification. No manual CI retry or bypass.
+
+Detailed integration rulings and intended scopes are recorded in this plan's
+ignored SDD dev-b2b7-integration-notes.md. Task15413 stays In Progress and its
+new verification acceptance remains open. This checkpoint is not publication,
+merge approval, or a claim that unrelated Skills/OAuth failures are harmless.
