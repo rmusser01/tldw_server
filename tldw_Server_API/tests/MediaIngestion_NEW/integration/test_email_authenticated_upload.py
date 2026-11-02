@@ -5,6 +5,10 @@ from secrets import token_urlsafe
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
@@ -20,6 +24,9 @@ from tldw_Server_API.tests.MediaIngestion_NEW.integration.test_email_offline_ing
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 # Register the shared fixture locally, including when its source module is also collected.
 authenticated_email = _authenticated_email
+_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 async def _upload(env, key: str | None, number: int, *, headers: dict[str, str] | None = None):
@@ -94,10 +101,10 @@ async def test_exhausted_org_storage_quota_rejects_before_persistence(authentica
     env = authenticated_email
     alice = env.users[0]
     org_repo = AuthnzOrgsTeamsRepo(env.pool)
-    org = await org_repo.create_organization(
+    org = await org_repo.create_organization_with_owner_membership(
+        context=_MEMBERSHIP_CONTEXT,
         name="Synthetic Upload Quota", owner_user_id=alice.id, slug="synthetic-upload-quota"
     )
-    await org_repo.add_org_member(org_id=org["id"], user_id=alice.id, role="owner")
     await AuthnzStorageQuotasRepo(env.pool).upsert_org_quota(org["id"], quota_mb=0)
     write_key = await env.manager.create_api_key(user_id=alice.id, name="quota-write", scope="write")
     before = await _count(env, alice)
@@ -112,10 +119,10 @@ async def test_org_scoped_upload_is_searchable_with_same_credentials(authenticat
     env = authenticated_email
     alice = env.users[0]
     org_repo = AuthnzOrgsTeamsRepo(env.pool)
-    org = await org_repo.create_organization(
+    org = await org_repo.create_organization_with_owner_membership(
+        context=_MEMBERSHIP_CONTEXT,
         name="Synthetic Allowed Upload", owner_user_id=alice.id, slug="synthetic-allowed-upload"
     )
-    await org_repo.add_org_member(org_id=org["id"], user_id=alice.id, role="owner")
     quota_repo = AuthnzStorageQuotasRepo(env.pool)
     await quota_repo.upsert_org_quota(org["id"], quota_mb=1024)
     await quota_repo.update_org_used_mb(org["id"], 900)
@@ -150,16 +157,16 @@ async def test_same_message_in_two_orgs_uses_selected_org_for_quota_and_search(a
     quota_repo = AuthnzStorageQuotasRepo(env.pool)
     orgs = []
     for label in ("first", "second"):
-        org = await org_repo.create_organization(
+        org = await org_repo.create_organization_with_owner_membership(
+            context=_MEMBERSHIP_CONTEXT,
             name=f"Synthetic {label} email organization",
             owner_user_id=alice.id,
             slug=f"synthetic-{label}-email-org",
         )
-        await org_repo.add_org_member(org_id=org["id"], user_id=alice.id, role="owner")
         orgs.append(org)
     first, second = orgs
     first_team = await org_repo.create_team(org_id=first["id"], name="Synthetic first-org team")
-    await org_repo.add_team_member(team_id=first_team["id"], user_id=alice.id, role="member")
+    await org_repo.add_team_member(team_id=first_team["id"], user_id=alice.id, role="member", context=_MEMBERSHIP_CONTEXT)
     await quota_repo.upsert_org_quota(first["id"], quota_mb=1024)
     await quota_repo.upsert_org_quota(second["id"], quota_mb=0)
     key = await env.manager.create_api_key(user_id=alice.id, name="two-org-write", scope="write")
@@ -198,12 +205,12 @@ async def test_same_message_in_two_orgs_uses_selected_org_for_quota_and_search(a
 async def test_upload_rejects_unjoined_org_selection(authenticated_email):
     env = authenticated_email
     alice, bob = env.users
-    org = await AuthnzOrgsTeamsRepo(env.pool).create_organization(
+    org = await AuthnzOrgsTeamsRepo(env.pool).create_organization_with_owner_membership(
+        context=_MEMBERSHIP_CONTEXT,
         name="Synthetic Bob-only email organization",
         owner_user_id=bob.id,
         slug="synthetic-bob-only-email-org",
     )
-    await AuthnzOrgsTeamsRepo(env.pool).add_org_member(org_id=org["id"], user_id=bob.id, role="owner")
     write_key = await env.manager.create_api_key(user_id=alice.id, name="org-selection-write", scope="write")
     response = await _upload(
         env,
@@ -221,12 +228,12 @@ async def test_org_scoped_key_cannot_select_another_joined_org(authenticated_ema
     org_repo = AuthnzOrgsTeamsRepo(env.pool)
     orgs = []
     for label in ("key-first", "key-second"):
-        org = await org_repo.create_organization(
+        org = await org_repo.create_organization_with_owner_membership(
+            context=_MEMBERSHIP_CONTEXT,
             name=f"Synthetic {label} organization",
             owner_user_id=alice.id,
             slug=f"synthetic-{label}-organization",
         )
-        await org_repo.add_org_member(org_id=org["id"], user_id=alice.id, role="owner")
         orgs.append(org)
     key = await env.manager.create_virtual_key(
         user_id=alice.id,
@@ -251,12 +258,12 @@ async def test_active_org_jwt_upload_matches_default_search_tenant(authenticated
     org_repo = AuthnzOrgsTeamsRepo(env.pool)
     orgs = []
     for label in ("jwt-first", "jwt-second"):
-        org = await org_repo.create_organization(
+        org = await org_repo.create_organization_with_owner_membership(
+            context=_MEMBERSHIP_CONTEXT,
             name=f"Synthetic {label} organization",
             owner_user_id=alice.id,
             slug=f"synthetic-{label}-organization",
         )
-        await org_repo.add_org_member(org_id=org["id"], user_id=alice.id, role="owner")
         orgs.append(org)
     await AuthnzStorageQuotasRepo(env.pool).upsert_org_quota(orgs[0]["id"], quota_mb=0)
     await AuthnzStorageQuotasRepo(env.pool).upsert_org_quota(orgs[1]["id"], quota_mb=1024)

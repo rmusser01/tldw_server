@@ -3428,6 +3428,7 @@ test.describe('/chat cockpit real-server parity', () => {
         page.removeListener('request', observeAutomaticTurn);
       }
     }
+    // Ordinary single exchanges intentionally have no history-review control.
     const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
     selectedPrompt = 'Reply with one short sentence to verify the saved-history regeneration gate.';
     await page.getByTestId('chat-input').fill(selectedPrompt);
@@ -3446,6 +3447,8 @@ test.describe('/chat cockpit real-server parity', () => {
     const canonical = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
     expect(canonical.status).toBe(200);
     const originals = canonical.body.messages;
+    expect(originals.filter(row => row.sender === 'user').map(row => row.content))
+      .toEqual([prompt, selectedPrompt]);
     const question = originals.find(row => row.sender === 'user' && row.content === selectedPrompt)!;
     const answer = originals.find(row => row.sender === 'assistant' && row.parent_message_id === question.id)!;
     const answerId = answer.id;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 import pytest
 
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
@@ -128,13 +129,17 @@ async def test_repo_list_requests_scopes_by_org_ids(tmp_path):
     )
     org_row = await pool.fetchone("SELECT id FROM organizations WHERE slug = ?", "scoped-org")
     org_id = int(org_row["id"])
-    await pool.execute(
-        "INSERT INTO org_members (org_id, user_id, role, status) VALUES (?, ?, ?, ?)",
-        org_id,
-        subject_id,
-        "member",
-        "active",
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
     )
+
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            "INSERT INTO org_members (org_id, user_id, role, status) VALUES (?, ?, ?, ?)",
+            (org_id, subject_id, "member", "active"),
+            backend="sqlite",
+        )
 
     await repo.create_or_get_request(
         client_request_id="dsr-org-1",

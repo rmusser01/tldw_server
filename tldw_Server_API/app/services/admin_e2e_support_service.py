@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 import os
 import secrets
+import shutil
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
@@ -15,6 +15,10 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -41,6 +45,9 @@ _ORG_SLUG = "admin-e2e"
 _SEEDED_ALERT_MESSAGE = "CPU high"
 
 _SEEDED_PRINCIPALS: dict[str, dict[str, Any]] = {}
+_E2E_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 def _seed_fixtures_payload(*, alerts: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -280,21 +287,31 @@ async def _ensure_org(
     orgs_repo: AuthnzOrgsTeamsRepo,
     owner_user_id: int,
 ) -> dict[str, Any]:
-    rows, _ = await orgs_repo.list_organizations(limit=50, offset=0, q=_ORG_SLUG, with_total=False)
-    for row in rows:
-        if str(row.get("slug") or "").strip().lower() == _ORG_SLUG:
-            return row
+    """Reuse a matching fixture or recreate it when its owner pointer is stale."""
+    existing = None
+    for field, expected in (("slug", _ORG_SLUG), ("name", _ORG_NAME)):
+        rows, _ = await orgs_repo.list_organizations(limit=50, offset=0, q=expected, with_total=False)
+        for row in rows:
+            value = str(row.get(field) or "").strip()
+            if (value.lower() if field == "slug" else value) == expected:
+                existing = row
+                break
+        if existing is not None:
+            break
+    if existing is not None:
+        if existing.get("owner_user_id") == owner_user_id:
+            return existing
+        await orgs_repo.delete_organization_with_provider_secrets(
+            org_id=int(existing["id"]),
+            context=_E2E_MEMBERSHIP_CONTEXT,
+        )
 
-    rows, _ = await orgs_repo.list_organizations(limit=50, offset=0, q=_ORG_NAME, with_total=False)
-    for row in rows:
-        if str(row.get("name") or "").strip() == _ORG_NAME:
-            return row
-
-    return await orgs_repo.create_organization(
+    return await orgs_repo.create_organization_with_owner_membership(
         name=_ORG_NAME,
         slug=_ORG_SLUG,
         owner_user_id=owner_user_id,
         metadata={"created_by": "admin_e2e_support"},
+        context=_E2E_MEMBERSHIP_CONTEXT,
     )
 
 
@@ -569,13 +586,21 @@ async def seed_admin_e2e_scenario(scenario: str) -> dict[str, Any]:
         role="user",
     )
 
-    org = await _ensure_org(orgs_repo=orgs_repo, owner_user_id=int(admin_user["id"]))
+    org = await _ensure_org(orgs_repo=orgs_repo, owner_user_id=int(owner_user["id"]))
     org_id = int(org["id"])
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(admin_user["id"]), role="admin")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(owner_user["id"]), role="owner")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(super_admin_user["id"]), role="admin")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(member_user["id"]), role="member")
-    await orgs_repo.add_org_member(org_id=org_id, user_id=int(requester_user["id"]), role="member")
+    for user, role in (
+        (admin_user, "admin"),
+        (owner_user, "owner"),
+        (super_admin_user, "admin"),
+        (member_user, "member"),
+        (requester_user, "member"),
+    ):
+        await orgs_repo.add_org_member(
+            org_id=org_id,
+            user_id=int(user["id"]),
+            role=role,
+            context=_E2E_MEMBERSHIP_CONTEXT,
+        )
 
     if scenario == "dsr_jwt_admin":
         await _seed_dsr_subject_store_data_async(user_id=int(requester_user["id"]))

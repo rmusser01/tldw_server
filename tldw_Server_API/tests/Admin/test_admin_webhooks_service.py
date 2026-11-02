@@ -151,6 +151,18 @@ def webhook_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"w"))
 
 
+@pytest.fixture(autouse=True)
+def webhook_egress_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise delivery and private-IP policy independently of the runner's host lists."""
+    for name in (
+        "EGRESS_ALLOWLIST", "EGRESS_DENYLIST",
+        "WORKFLOWS_EGRESS_ALLOWLIST", "WORKFLOWS_EGRESS_DENYLIST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+
+
 @pytest.mark.unit
 async def test_create_webhook_generates_secret(svc: AdminWebhooksService):
     async def _return_inserted_row(_query: str, params: tuple[object, ...]) -> dict[str, object]:

@@ -5,7 +5,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -13,25 +12,27 @@ async def _setup_isolated_authnz(monkeypatch, db_path: Path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("AUTH_MODE", "single_user")
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
     reset_settings()
     await reset_db_pool()
     ensure_authnz_tables(db_path)
+    return await ensure_test_user(await get_db_pool(), "admin", role="admin")
 
 
-def _admin_app():
+def _admin_app(actor_user_id: int):
     mod = import_module("tldw_Server_API.app.main")
-    app = getattr(mod, "app")
+    app = mod.app
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
     async def _principal_override(request: Request) -> AuthPrincipal:  # type: ignore[override]
         principal = AuthPrincipal(
             kind="user",
-            user_id=1,
+            user_id=actor_user_id,
             api_key_id=None,
             subject="admin",
             token_type="access",  # nosec B106
@@ -69,9 +70,9 @@ async def test_admin_create_team_conflict_returns_409(monkeypatch, tmp_path):
     base_dir = tmp_path / "admin_conflict_team"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
-    await _setup_isolated_authnz(monkeypatch, db_path)
+    actor_user_id = await _setup_isolated_authnz(monkeypatch, db_path)
 
-    app, dep = _admin_app()
+    app, dep = _admin_app(actor_user_id)
     _reset_app_lifecycle(app)
     try:
         transport = ASGITransport(app=app)
@@ -95,9 +96,9 @@ async def test_admin_create_role_conflict_returns_409(monkeypatch, tmp_path):
     base_dir = tmp_path / "admin_conflict_role"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
-    await _setup_isolated_authnz(monkeypatch, db_path)
+    actor_user_id = await _setup_isolated_authnz(monkeypatch, db_path)
 
-    app, dep = _admin_app()
+    app, dep = _admin_app(actor_user_id)
     _reset_app_lifecycle(app)
     try:
         transport = ASGITransport(app=app)
@@ -115,9 +116,9 @@ async def test_admin_create_permission_conflict_returns_409(monkeypatch, tmp_pat
     base_dir = tmp_path / "admin_conflict_perm"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
-    await _setup_isolated_authnz(monkeypatch, db_path)
+    actor_user_id = await _setup_isolated_authnz(monkeypatch, db_path)
 
-    app, dep = _admin_app()
+    app, dep = _admin_app(actor_user_id)
     _reset_app_lifecycle(app)
     try:
         transport = ASGITransport(app=app)

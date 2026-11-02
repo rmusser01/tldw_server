@@ -120,22 +120,22 @@ class _UserCredentialRepo(AuthnzUserProviderSecretsRepo):
 
 
 class _SharedCredentialRepo(AuthnzOrgProviderSecretsRepo):
-    def __init__(self, rows: dict[tuple[str, int], dict[str, Any]]) -> None:
-        self.rows = rows
+    def __init__(self, db_pool: Any) -> None:
+        super().__init__(db_pool=db_pool)
         self.calls: list[tuple[str, int, str]] = []
         self.touches: list[tuple[str, int, str]] = []
 
-    async def fetch_secret(
+    async def fetch_authorized_secret_for_user(
         self,
         scope_type: str,
         scope_id: int,
+        user_id: int,
         provider: str,
-        *,
-        include_revoked: bool = False,
     ) -> dict[str, Any] | None:
-        assert include_revoked is True
         self.calls.append((scope_type, scope_id, provider))
-        return self.rows.get((scope_type, scope_id))
+        return await super().fetch_authorized_secret_for_user(
+            scope_type, scope_id, user_id, provider,
+        )
 
     async def touch_last_used(
         self,
@@ -372,6 +372,10 @@ async def recipient_security_harness(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> RecipientSecurityHarness:
+    from tldw_Server_API.app.core.AuthNZ.migrations import (
+        migration_037_create_org_provider_secrets,
+    )
+
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     sharing_db.execute(
         "INSERT OR IGNORE INTO users (id, username, email, password_hash) VALUES (?, ?, ?, ?)",
@@ -381,7 +385,21 @@ async def recipient_security_harness(
         "INSERT OR IGNORE INTO team_members (team_id, user_id, status) VALUES (?, ?, 'active')",
         (TEAM_ID, MEMBER_ID),
     )
+    sharing_db.execute(
+        "INSERT OR IGNORE INTO organizations (id, name, slug, owner_user_id) VALUES (?, ?, ?, ?)",
+        (ORG_ID, "Credential org", "credential-org", OWNER_ID),
+    )
+    sharing_db.execute(
+        "INSERT OR IGNORE INTO org_members (org_id, user_id, status) "
+        "SELECT org_id, ?, 'active' FROM teams WHERE id = ?",
+        (MEMBER_ID, TEAM_ID),
+    )
+    sharing_db.execute(
+        "INSERT OR IGNORE INTO org_members (org_id, user_id, status) VALUES (?, ?, 'active')",
+        (ORG_ID, MEMBER_ID),
+    )
     sharing_db.commit()
+    migration_037_create_org_provider_secrets(sharing_db)
     share = await repo.create_share(
         workspace_id=WORKSPACE_ID,
         owner_user_id=OWNER_ID,
@@ -501,18 +519,17 @@ async def recipient_security_harness(
             OWNER_ID: _credential_row("owner-private-key", "owner-private-project"),
         }
     )
-    shared_credential_repo = _SharedCredentialRepo(
-        {
-            ("team", TEAM_ID): _credential_row(
-                "recipient-team-key",
-                "recipient-team-project",
-            ),
-            ("org", ORG_ID): _credential_row(
-                "recipient-org-key",
-                "recipient-org-project",
-            ),
-        }
-    )
+    shared_credential_repo = _SharedCredentialRepo(repo.db_pool)
+    for scope_type, scope_id, api_key, project_id in (
+        ("team", TEAM_ID, "recipient-team-key", "recipient-team-project"),
+        ("org", ORG_ID, "recipient-org-key", "recipient-org-project"),
+    ):
+        row = _credential_row(api_key, project_id)
+        await repo.db_pool.execute(
+            "INSERT INTO org_provider_secrets (scope_type, scope_id, provider, encrypted_blob) "
+            "VALUES (?, ?, ?, ?)",
+            (scope_type, scope_id, "openai", row["encrypted_blob"]),
+        )
 
     async def get_user_credential_repo() -> _UserCredentialRepo:
         return user_credential_repo
@@ -694,7 +711,10 @@ async def test_production_credential_resolver_preserves_recipient_precedence_and
         org_ids=[ORG_ID],
         trusted_base_url_override=False,
     )
-    del harness.shared_credential_repo.rows[("team", TEAM_ID)]
+    await harness.shared_credential_repo.db_pool.execute(
+        "DELETE FROM org_provider_secrets WHERE scope_type = ? AND scope_id = ?",
+        ("team", TEAM_ID),
+    )
     org_credentials = await byok_runtime.resolve_byok_credentials(
         "openai",
         user_id=MEMBER_ID,
@@ -727,6 +747,22 @@ async def test_production_credential_resolver_preserves_recipient_precedence_and
         ("team", TEAM_ID, "openai"),
         ("org", ORG_ID, "openai"),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type, scope_id", [("team", TEAM_ID), ("org", ORG_ID)])
+async def test_shared_credential_fixture_rechecks_persisted_membership(
+    recipient_security_harness: RecipientSecurityHarness,
+    scope_type: str,
+    scope_id: int,
+) -> None:
+    harness = recipient_security_harness
+    fetch = harness.shared_credential_repo.fetch_authorized_secret_for_user
+    assert await fetch(scope_type, scope_id, NONMEMBER_ID, "openai") is None
+    assert await fetch(scope_type, scope_id, MEMBER_ID, "openai") is not None
+    harness.sharing_db.execute("DELETE FROM org_members WHERE user_id = ?", (MEMBER_ID,))
+    harness.sharing_db.commit()
+    assert await fetch(scope_type, scope_id, MEMBER_ID, "openai") is None
 
 
 def test_nonmember_and_missing_share_are_neutral_before_owner_data(
