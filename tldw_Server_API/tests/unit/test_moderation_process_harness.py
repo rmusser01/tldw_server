@@ -121,9 +121,12 @@ def test_probe_output_is_bounded_and_nonzero_exit_preserved():
 
 def test_unconfirmed_controller_is_not_killed_or_replaced(monkeypatch):
     import io
+    import runpy
     import threading
 
     from tldw_Server_API.tests.helpers import moderation_process_harness as harness
+
+    run = runpy.run_path(harness.__file__)["run_isolated_probe"]
 
     released = threading.Event()
 
@@ -151,10 +154,54 @@ def test_unconfirmed_controller_is_not_killed_or_replaced(monkeypatch):
     monkeypatch.setattr(harness.subprocess, "Popen", lambda *a, **k: controller)
     try:
         with pytest.raises((RuntimeError, subprocess.TimeoutExpired)):
-            harness.run_isolated_probe([sys.executable], timeout_s=0.01)
+            run([sys.executable], timeout_s=0.01)
         assert not controller.killed
         with pytest.raises(RuntimeError, match="capacity"):
-            harness.run_isolated_probe([sys.executable], timeout_s=0.01)
+            run([sys.executable], timeout_s=0.01)
     finally:
         released.set()
         time.sleep(0.05)
+
+
+@pytest.mark.parametrize("reply", [b'{"containment":false,"returncode":126,"stdout":"","stderr":""}\n', b""])
+def test_dead_unconfirmed_controller_does_not_reopen_admission(monkeypatch, reply):
+    import io
+    import runpy
+
+    from tldw_Server_API.tests.helpers import moderation_process_harness as harness
+
+    run = runpy.run_path(harness.__file__)["run_isolated_probe"]
+
+    class FailedController:
+        def __init__(self):
+            self.stdin, self.stdout = io.BytesIO(), io.BytesIO(reply)
+            self.returncode = 126
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(harness.subprocess, "Popen", lambda *a, **k: FailedController())
+    with pytest.raises(RuntimeError, match="containment"):
+        run([sys.executable], timeout_s=0.01)
+    with pytest.raises(RuntimeError, match="capacity"):
+        run([sys.executable], timeout_s=0.01)
+
+
+@pytest.mark.parametrize("failure", ["false", "raise"])
+def test_failed_cleanup_retains_live_owner_until_native_confirmation(tmp_path, failure):
+    from tldw_Server_API.tests.helpers.moderation_cleanup_probe import validate_cleanup_recovery
+
+    if os.name != "posix":
+        pytest.skip("POSIX process-group ownership evidence")
+    validate_cleanup_recovery(tmp_path, failure=failure)
+
+
+def test_raising_cleanup_owner_survives_invoker_hard_exit(tmp_path):
+    from tldw_Server_API.tests.helpers.moderation_cleanup_probe import validate_cleanup_recovery
+
+    if os.name != "posix":
+        pytest.skip("POSIX process-group ownership evidence")
+    validate_cleanup_recovery(tmp_path, failure="raise", disconnect=True)

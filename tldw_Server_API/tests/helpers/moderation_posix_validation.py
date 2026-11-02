@@ -64,8 +64,23 @@ def main() -> None:
                 invoker.kill()
                 invoker.wait(timeout=2)
         print("CONTAINMENT_PROVEN", sys.platform, sys.version.split()[0], flush=True)
+        cleanup_checks = runpy.run_path(str(Path(__file__).with_name("moderation_cleanup_probe.py")))
+        for failure, disconnect in (("false", False), ("raise", False), ("raise", True)):
+            case = Path(directory) / f"cleanup-{failure}-{disconnect}"
+            case.mkdir()
+            cleanup_checks["validate_cleanup_recovery"](case, failure=failure, disconnect=disconnect)
+            print("CLEANUP_OWNER_PROVEN", failure, "invoker_loss" if disconnect else "recovery", flush=True)
         probe = Path(__file__).with_name("moderation_supervisor_probe.py")
-        for mode in ("pathological", "heartbeat", "cancel-spawn", "fork", "nonzero", "posture", "blocked-write"):
+        for mode in (
+            "fork-during-spawn",
+            "pathological",
+            "heartbeat",
+            "cancel-spawn",
+            "fork",
+            "nonzero",
+            "posture",
+            "blocked-write",
+        ):
             result = run_isolated_probe([sys.executable, "-I", "-S", str(probe), mode])
             assert result.returncode == 0, (mode, result.returncode, result.stderr)
             print(result.stdout.decode("ascii").strip(), flush=True)

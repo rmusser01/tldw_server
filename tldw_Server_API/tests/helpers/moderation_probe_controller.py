@@ -58,6 +58,43 @@ class PosixTree:
         return False
 
 
+def _settle_tree(tree, readers, deadline: float) -> bool:
+    """Never let a cleanup exception discard the only native tree owner."""
+    try:
+        if tree.cleanup(deadline) is not True:
+            return False
+        for reader in readers:
+            if reader.is_alive():
+                reader.join(max(0, deadline - time.monotonic()))
+        return all(not reader.is_alive() for reader in readers)
+    except BaseException:  # noqa: BLE001 - retain the live owner and retry; never disclose cleanup errors.
+        return False
+
+
+def _emit_result(contained: bool, code: int, buffers: list[bytearray]) -> None:
+    try:
+        frame = (
+            json.dumps(
+                {
+                    "containment": contained,
+                    "returncode": code,
+                    "stdout": base64.b64encode(buffers[0]).decode("ascii") if contained else "",
+                    "stderr": base64.b64encode(buffers[1]).decode("ascii") if contained else "",
+                }
+            ).encode("ascii")
+            + b"\n"
+        )
+        view = memoryview(frame)
+        while view:
+            written = os.write(sys.stdout.fileno(), view[:65536])
+            if not written:
+                return
+            view = view[written:]
+    except (OSError, ValueError):
+        # The invoker may have exited; cleanup ownership is independent of it.
+        pass
+
+
 def main() -> int:
     timeout = min(10.0, float(sys.argv[1]))
     deadline = time.monotonic() + timeout
@@ -102,8 +139,8 @@ def main() -> int:
 
         for stream, buffer in zip((tree.process.stdout, tree.process.stderr), buffers, strict=True):
             thread = threading.Thread(target=read, args=(stream, buffer), daemon=True)
-            thread.start()
             readers.append(thread)
+            thread.start()
         while True:
             if lost.is_set() or overflow.is_set():
                 code = 125
@@ -120,26 +157,25 @@ def main() -> int:
         code = 126
     finally:
         if tree is not None:
-            end = time.monotonic() + 2
-            contained = tree.cleanup(end)
-            for reader in readers:
-                reader.join(max(0, end - time.monotonic()))
-            contained = contained and all(not reader.is_alive() for reader in readers)
+            contained = _settle_tree(tree, readers, time.monotonic() + 2)
+            if not contained:
+                # Report failure once, but remain an actual independent owner.
+                # One quarantined loop, no replacement process/helper per retry.
+                code = 126
+                _emit_result(False, code, buffers)
+                while not contained:
+                    time.sleep(0.05)
+                    contained = _settle_tree(tree, readers, time.monotonic() + 0.1)
             if overflow.is_set():
                 code = 125
-        if not lost.is_set():
-            sys.stdout.buffer.write(
-                json.dumps(
-                    {
-                        "containment": contained,
-                        "returncode": code,
-                        "stdout": base64.b64encode(buffers[0]).decode("ascii"),
-                        "stderr": base64.b64encode(buffers[1]).decode("ascii"),
-                    }
-                ).encode("ascii")
-            )
-            sys.stdout.buffer.flush()
-    return 0 if contained else 126
+        else:
+            # Constructors must clean partial launches before raising. No tree
+            # was published and setup failed; signal that distinct process exit.
+            contained = True
+        # Send final confirmation even after control EOF: a surviving result
+        # reader needs it to retire quarantine. A gone invoker gets no output.
+        _emit_result(contained, code, buffers)
+    return 0 if tree is not None else 126
 
 
 if __name__ == "__main__":

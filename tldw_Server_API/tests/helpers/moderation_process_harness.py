@@ -43,6 +43,7 @@ def run_isolated_probe(
             close_fds=True,
             start_new_session=sys.platform != "win32",
             shell=False,
+            bufsize=0,
         )
     except BaseException:
         _admission.release()
@@ -52,6 +53,10 @@ def run_isolated_probe(
     lock = threading.Lock()
     finished = {"reader": False, "caller": False}
     read_failed = threading.Event()
+    available = threading.Event()
+    refused = threading.Event()
+    confirmed = threading.Event()
+    final_result = []
 
     def finish(owner: str) -> None:
         global _pending_controller
@@ -62,21 +67,68 @@ def run_isolated_probe(
                 _admission.release()
 
     def read() -> None:
+        pending = bytearray()
+
+        def status(line: bytes) -> None:
+            try:
+                result = json.loads(line)
+                if (
+                    type(result) is not dict
+                    or set(result) != {"containment", "returncode", "stdout", "stderr"}
+                    or type(result["containment"]) is not bool
+                    or type(result["returncode"]) is not int
+                    or type(result["stdout"]) is not str
+                    or type(result["stderr"]) is not str
+                    or final_result
+                ):
+                    raise ValueError
+                if result["containment"]:
+                    stdout = base64.b64decode(result["stdout"], validate=True)
+                    stderr = base64.b64decode(result["stderr"], validate=True)
+                    if max(len(stdout), len(stderr)) > 65536:
+                        raise ValueError
+                    final_result.append(subprocess.CompletedProcess(list(argv), result["returncode"], stdout, stderr))
+                    confirmed.set()
+                else:
+                    if refused.is_set() or result["stdout"] or result["stderr"]:
+                        raise ValueError
+                    refused.set()
+            except (ValueError, TypeError, UnicodeError):
+                read_failed.set()
+                confirmed.clear()
+            available.set()
+
         try:
             while len(captured) <= 200000:
-                part = process.stdout.read(min(65536, 200001 - len(captured)))
+                part = process.stdout.read(min(16384, 200001 - len(captured)))
                 if not part:
                     break
                 captured.extend(part)
+                pending.extend(part)
+                while b"\n" in pending:
+                    line, _, remainder = pending.partition(b"\n")
+                    pending[:] = remainder
+                    status(bytes(line))
+            if pending or len(captured) > 200000:
+                read_failed.set()
+                confirmed.clear()
+                available.set()
         except (OSError, ValueError):
             read_failed.set()
+            confirmed.clear()
+            available.set()
             process.stdin.close()
         finally:
             process.stdout.close()
             # This one bounded reader remains the owner even if the invoker's
             # wait gives up. Never kill a controller with an unconfirmed tree.
             process.wait()
-            finish("reader")
+            # A native exit is NOT evidence that descendants were cleaned.
+            # Our controller stays alive/reaps after false or raising cleanup;
+            # a broken controller without a final ACK permanently quarantines.
+            if confirmed.is_set() and not read_failed.is_set():
+                finish("reader")
+            available.set()
 
     reader = threading.Thread(target=read, name="probe-controller-result", daemon=True)
     try:
@@ -87,27 +139,20 @@ def run_isolated_probe(
             process.stdout.close()
             try:
                 process.wait(timeout=2)
-                finish("reader")
             except subprocess.TimeoutExpired:
                 # No more controllers can be admitted; ownership is retained.
                 pass
             raise RuntimeError("probe controller reader unavailable") from None
-        try:
-            process.wait(timeout=timeout_s + 2)
-        except subprocess.TimeoutExpired:
+        if not available.wait(timeout_s + 2):
             raise RuntimeError("probe containment unconfirmed") from None
+        if refused.is_set():
+            raise RuntimeError("probe containment cleanup unconfirmed")
+        if not confirmed.is_set():
+            raise RuntimeError("probe containment unconfirmed")
         reader.join(0.1)
         if reader.is_alive() or read_failed.is_set() or process.returncode != 0 or len(captured) > 200000:
             raise RuntimeError("probe containment controller failed")
-        result = json.loads(captured)
-        if result["containment"] is not True:
-            raise RuntimeError("probe containment unavailable")
-        return subprocess.CompletedProcess(
-            list(argv),
-            result["returncode"],
-            base64.b64decode(result["stdout"]),
-            base64.b64decode(result["stderr"]),
-        )
+        return final_result[0]
     finally:
         process.stdin.close()
         finish("caller")

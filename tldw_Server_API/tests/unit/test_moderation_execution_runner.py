@@ -403,3 +403,18 @@ def test_independent_real_child_ownership_probes(mode):
     probe = Path(__file__).resolve().parents[1] / "helpers" / "moderation_supervisor_probe.py"
     result = run_isolated_probe([sys.executable, "-I", "-S", str(probe), mode])
     assert result.returncode == 0, result.stderr
+
+
+def test_fork_during_spawn_waits_for_descriptor_publication():
+    import os
+    import sys
+    from pathlib import Path
+
+    from tldw_Server_API.tests.helpers.moderation_process_harness import run_isolated_probe
+
+    if os.name != "posix":
+        pytest.skip("fork is POSIX only")
+    probe = Path(__file__).resolve().parents[1] / "helpers" / "moderation_supervisor_probe.py"
+    result = run_isolated_probe([sys.executable, "-I", "-S", str(probe), "fork-during-spawn"])
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(b"OK fork-during-spawn")
