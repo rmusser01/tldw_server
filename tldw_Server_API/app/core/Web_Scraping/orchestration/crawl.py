@@ -339,6 +339,29 @@ def _queued_crawl_page(
     return WorkHandle(task, handle.drained, handle.cancel)
 
 
+def _prepare_page_plan(
+    page_plan: article.ArticlePlan,
+    *,
+    headers: Mapping[str, str],
+    legacy: bool,
+    method: Any,
+    explicit_agent: Any,
+) -> article.ArticlePlan:
+    """Compose request headers without changing extraction-method intent."""
+    agent = str(
+        explicit_agent
+        or (headers["User-Agent"] if legacy else page_plan.headers.get("User-Agent") or headers["User-Agent"])
+    )
+    prepared = replace(
+        page_plan,
+        headers={**dict(page_plan.headers), **headers, "User-Agent": agent},
+        browser=replace(page_plan.browser, user_agent=agent),
+    )
+    if legacy:
+        return replace(prepared, backend="playwright", respect_robots=False)
+    return replace(prepared, backend="playwright") if method == "playwright" else prepared
+
+
 async def execute_crawl(
     request: CrawlRequest,
     *,
@@ -530,22 +553,13 @@ async def execute_crawl(
             method: Any = plan.options.get("method"),
             explicit_agent: Any = requested_agent if execution is None else execution.get("user_agent"),
         ) -> article.ArticlePlan:
-            agent = str(
-                explicit_agent
-                or (
-                    snapshot_headers["User-Agent"]
-                    if legacy
-                    else page_plan.headers.get("User-Agent") or snapshot_headers["User-Agent"]
-                )
-            )
-            prepared = replace(
+            return _prepare_page_plan(
                 page_plan,
-                headers={**dict(page_plan.headers), **snapshot_headers, "User-Agent": agent},
-                browser=replace(page_plan.browser, user_agent=agent),
+                headers=snapshot_headers,
+                legacy=legacy,
+                method=method,
+                explicit_agent=explicit_agent,
             )
-            if legacy:
-                return replace(prepared, backend="playwright", respect_robots=False)
-            return replace(prepared, backend="playwright") if method == "playwright" else prepared
 
         def discovery_gate(result: Mapping[str, Any]) -> bool:
             recursive = profile in {"legacy_recursive", "enhanced_recursive", "enhanced_url_level"}
@@ -576,11 +590,12 @@ async def execute_crawl(
             request_context=RuntimeRequestContext(source=profile, stage="fetch", user_id=request.context.user_id),
             discover=links,
             prepare_plan=prepare_plan,
-            configuration=page_config,
+            configuration=page_config if "web_scraper" in page_config else {"web_scraper": page_config},
             allow_llm_extraction=plan.options["allow_llm_extraction"],
             discovery_on_success=profile in {"enhanced_recursive", "enhanced_url_level"},
             discovery_gate=discovery_gate,
             transform=transform,
+            method_intent="trafilatura" if profile == "enhanced_recursive" else "auto",
         )
 
     async def acquire(entry: FrontierEntry) -> WorkHandle[PageData]:
