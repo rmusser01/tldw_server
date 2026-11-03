@@ -1599,9 +1599,11 @@ TEST_MODE_UNSET_SUITES = (
     TEST_MODE_UNSET_SENTINEL,
 )
 _TEST_MODE_FLAGS = ("TEST_MODE", "TESTING", "TLDW_TEST_MODE")
-_NARROWING_ARGS = ("-k", "-m", "--deselect", "--ignore", "--co", "--collect-only", "--lf", "--last-failed")
+_NARROWING_ARGS = ("-k", "-m", "--deselect", "--ignore", "--lf", "--last-failed")
+_NARROWING_EXACT = ("--co", "--collect-only")  # exact: --cov and --confcutdir do not narrow
 _SHELL_SEPARATORS = {"||", "&&", "|", ";"}
-_SWALLOWING_WORDS = {"||", "+e", "exit"}
+# "|" too: the step has no pipefail, so `| tee log` would hide pytest's exit code.
+_SWALLOWING_WORDS = {"||", "|", "+e", "exit"}
 
 
 def _test_mode_unset_problems(workflow: dict[str, Any]) -> list[str]:
@@ -1621,13 +1623,13 @@ def _test_mode_unset_problems(workflow: dict[str, Any]) -> list[str]:
         if str(env.get(name)) != "1":
             problems.append(f"step does not set {name}=1")
     scopes = {"workflow": workflow.get("env", {}), "job": job.get("env", {}), "step": env}
-    problems += [f"{scope} env sets {flag}" for scope, values in scopes.items() for flag in _TEST_MODE_FLAGS if flag in values]
+    problems += [f"{scope} env sets {flag}" for scope, values in scopes.items() for flag in (*_TEST_MODE_FLAGS, "PYTEST_ADDOPTS") if flag in values]
     words = shlex.split(step.get("run", "").replace("\\\n", " "), comments=True)
     if "pytest" not in words:
         return problems + ["step does not invoke pytest"]
     args = words[words.index("pytest") + 1 :]
     args = args[: next((i for i, word in enumerate(args) if word in _SHELL_SEPARATORS), len(args))]
-    problems += [f"step narrows the run with {arg}" for arg in args if arg.startswith(_NARROWING_ARGS)]
+    problems += [f"step narrows the run with {arg}" for arg in args if arg.startswith(_NARROWING_ARGS) or arg in _NARROWING_EXACT]
     problems += [f"step can swallow a failure with {word}" for word in words if word in _SWALLOWING_WORDS]
     problems += [f"step does not run {suite}" for suite in TEST_MODE_UNSET_SUITES if suite not in args]
     if TEST_MODE_UNSET_SENTINEL in args and args[-1] != TEST_MODE_UNSET_SENTINEL:
@@ -1650,6 +1652,14 @@ def test_root_conftest_drops_the_test_flags_under_the_unset_switch():
 
 
 @pytest.mark.unit
+def test_test_mode_unset_contract_accepts_coverage_flags():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/security-required.yml").read_text())
+    step = next(s for s in workflow["jobs"]["security-required"]["steps"] if s.get("name") == TEST_MODE_UNSET_STEP)
+    step["run"] = step["run"].replace("pytest -q", "pytest --cov=tldw_Server_API --confcutdir=. -q")
+    assert _test_mode_unset_problems(workflow) == []  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
@@ -1660,6 +1670,11 @@ def test_root_conftest_drops_the_test_flags_under_the_unset_switch():
         ("deselect", "step narrows the run with --deselect=tldw_Server_API/tests/Security/test_csrf_binding.py"),
         ("ignore", "step narrows the run with --ignore=tldw_Server_API/tests/Security"),
         ("or-true", "step can swallow a failure with ||"),
+        ("pipe-tee", "step can swallow a failure with |"),
+        ("addopts-step", "step env sets PYTEST_ADDOPTS"),
+        ("addopts-job", "job env sets PYTEST_ADDOPTS"),
+        ("addopts-workflow", "workflow env sets PYTEST_ADDOPTS"),
+        ("collect-only", "step narrows the run with --collect-only"),
         ("set-plus-e", "step can swallow a failure with +e"),
         ("no-pytest", "step does not invoke pytest"),
         ("set-test-mode", "step env sets TEST_MODE"),
@@ -1682,6 +1697,11 @@ def test_test_mode_unset_contract_fails_when_the_step_changes(mutation: str, exp
         "narrow-m": lambda: step.update(run=step["run"].replace("pytest -q", 'pytest -m "not slow" -q')),
         "deselect": lambda: step.update(run=step["run"].replace("pytest -q", "pytest --deselect=tldw_Server_API/tests/Security/test_csrf_binding.py -q")),
         "ignore": lambda: step.update(run=step["run"].replace("pytest -q", "pytest --ignore=tldw_Server_API/tests/Security -q")),
+        "pipe-tee": lambda: step.update(run=step["run"].rstrip() + " | tee pytest.log\n"),
+        "addopts-step": lambda: step["env"].update(PYTEST_ADDOPTS="--ignore=tldw_Server_API/tests/Security"),
+        "addopts-job": lambda: job.setdefault("env", {}).update(PYTEST_ADDOPTS="-k x"),
+        "addopts-workflow": lambda: workflow.setdefault("env", {}).update(PYTEST_ADDOPTS="-k x"),
+        "collect-only": lambda: step.update(run=step["run"].replace("pytest -q", "pytest --collect-only -q")),
         "or-true": lambda: step.update(run=step["run"].rstrip() + " || true\n"),
         "set-plus-e": lambda: step.update(run="set +e\n" + step["run"]),
         "no-pytest": lambda: step.update(run="echo skipped\n"),
