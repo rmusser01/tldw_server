@@ -56,6 +56,12 @@ SECURITY_FUNCTIONS: frozenset[str] = frozenset(
     {
         "api/v1/endpoints/evaluations/evaluations_auth.py:get_eval_request_user",
         "core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py:_raise_if_url_blocked",
+        "core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py:process_single_video",
+        "core/Ingestion_Media_Processing/Audio/Audio_Files.py:_validate_outbound_url",
+        "core/Evaluations/webhook_manager.py:WebhookManager._deliver_webhook",
+        "core/Utils/egress.py:evaluate_url_policy",
+        "core/http_client.py:_validate_egress_or_raise",
+        "services/workflows_webhook_dlq_service.py:_host_allowed",
         # TASK-13950.19 Task 4 deletes the test-key arm and re-adds MCPServer._single_user_compat_auth_via.
     }
 )

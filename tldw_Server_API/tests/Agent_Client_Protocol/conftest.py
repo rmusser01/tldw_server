@@ -110,6 +110,5 @@ def mcp_dns_rebinding(monkeypatch, mcp_http_egress):
 
     monkeypatch.setattr(hardening, "_resolved_hostname_addresses", lambda _host: ("93.184.216.34",))
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["127.0.0.1"])
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
     for name in ("TESTING", "TEST_MODE", "TLDW_TEST_MODE"):
         monkeypatch.delenv(name, raising=False)

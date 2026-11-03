@@ -562,8 +562,18 @@ class TestWebhookEndpoints:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_webhook_delivery_on_evaluation(self, async_api_client, auth_headers, webhook_receiver_server):
+    async def test_webhook_delivery_on_evaluation(
+        self, async_api_client, auth_headers, webhook_receiver_server, monkeypatch
+    ):
         """Test webhook delivery using a real local receiver (no mocks)."""
+        from tldw_Server_API.app.core.Evaluations import webhook_manager as _wm
+
+        # The receiver is a loopback server, which the delivery-time SSRF check refuses by
+        # design; stub only that resolver so the real delivery path still runs.
+        async def _loopback_target(url):
+            return url, {}
+
+        monkeypatch.setattr(_wm.webhook_validator, "resolve_safe_delivery_target_async", _loopback_target)
         from tldw_Server_API.app.core.Evaluations.webhook_manager import webhook_manager, WebhookEvent
         import asyncio
 

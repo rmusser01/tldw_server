@@ -134,12 +134,7 @@ from tldw_Server_API.app.core.Logging.stt_observability_context import (
 from tldw_Server_API.app.core.Logging.stt_observability_context import (
     get_opaque_stt_endpoint_id,
 )
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled,
-    is_explicit_pytest_runtime,
-    is_test_mode,
-    is_truthy,
-)
+from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.egress import ConfiguredEndpointScope  # noqa: E402
 
 
@@ -1968,37 +1963,16 @@ def _validate_egress_or_raise(
         sensitive_observability
     )
 
-    # In test environments, avoid DNS-based private IP checks for hostnames
-    # (they can hang or be environment-dependent). For literal IPs we still
-    # enforce the default private IP policy so security-focused tests remain
-    # accurate.
-    block_override: bool | None = None
     host = ""
     with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         host = ((_urlparse(url).hostname or "").strip())
-    if is_explicit_pytest_runtime() or env_flag_enabled("TESTING") or is_test_mode():
-        try:
-            parsed = _urlparse(url)
-            host = (parsed.hostname or "").strip()
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-            host = ""
-        is_ip = False
-        if host:
-            try:
-                import ipaddress as _ipaddr
-                _ipaddr.ip_address(host)
-                is_ip = True
-            except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                is_ip = False
-        if not is_ip:
-            block_override = False
 
     cache_host = _normalize_dns_pin_host(host)
     pinned_ips: tuple[str, ...] | None = None
     if dns_pin_cache is not None and cache_host:
         pinned_ips = dns_pin_cache.get(cache_host)
 
-    policy_kwargs: dict[str, Any] = {"block_private_override": block_override}
+    policy_kwargs: dict[str, Any] = {}
     if deadline is not None:
         if time.monotonic() >= deadline:
             raise NetworkError("TimeoutError")

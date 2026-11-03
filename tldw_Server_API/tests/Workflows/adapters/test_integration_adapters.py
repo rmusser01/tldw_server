@@ -27,6 +27,14 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _hostnames_resolve_to_a_public_address(monkeypatch):
+    """Egress runs for real; made-up hostnames resolve to a public address, no DNS."""
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["93.184.216.34"])
+
+
 # ==============================================================================
 # Webhook Adapter Tests
 # ==============================================================================
@@ -1114,6 +1122,12 @@ _GITHUB_ISSUES_URL = "https://api.github.com/repos/owner/repo/issues"
 _GITHUB_TEST_TOKEN = "ghp" + "_test_token"
 
 
+def _requested_url(request) -> str:
+    """The URL the caller asked for: egress pins the connection to an IP and keeps the name in Host."""
+    host = request.headers.get("host", "").split(":")[0]
+    return str(request.url.copy_with(host=host)) if host else str(request.url)
+
+
 def _route_github_through_mock_transport(monkeypatch, handler):
     """Send the adapter's POST through the real ``apost`` over a MockTransport.
 
@@ -1148,10 +1162,6 @@ def _resolve_api_github_com_to(monkeypatch, ip):
     """Make the egress check resolve hostnames to ``ip``, as it does outside pytest."""
     from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Security import egress
-
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: [ip])
 
 
@@ -1284,7 +1294,7 @@ async def test_github_create_issue_does_not_follow_redirects(monkeypatch):
     requests: list[str] = []
 
     def handler(request):
-        requests.append(str(request.url))
+        requests.append(_requested_url(request))
         return httpx.Response(307, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
 
     result = await _create_issue(monkeypatch, handler)

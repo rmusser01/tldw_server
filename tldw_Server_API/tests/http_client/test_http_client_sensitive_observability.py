@@ -537,10 +537,6 @@ def test_sensitive_egress_dns_failure_redacts_full_loguru_record_and_resets_cont
 
     def fail_dns(*_args: object, **_kwargs: object) -> list[object]:
         raise OSError("deterministic resolver failure")
-
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setattr(egress.socket, "getaddrinfo", fail_dns)
     sink_id = logger.add(
@@ -1020,10 +1016,6 @@ async def test_sensitive_async_egress_failure_redacts_and_resets_context(
 
     def fail_dns(*_args: object, **_kwargs: object) -> list[object]:
         raise OSError("deterministic resolver failure")
-
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setattr(egress.socket, "getaddrinfo", fail_dns)
     sink_id = logger.add(

@@ -8,6 +8,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _hostnames_resolve_to_a_public_address(monkeypatch):
+    """Egress runs for real; made-up hostnames resolve to a public address, no DNS."""
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["93.184.216.34"])
+
+
+@pytest.fixture(autouse=True)
 def github_egress_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Own host-policy inputs before individual tests apply their denylist overrides."""
     for name in ("EGRESS_ALLOWLIST", "EGRESS_DENYLIST", "WORKFLOWS_EGRESS_DENYLIST"):
@@ -345,6 +353,12 @@ _ALPHA_TREE = {
 _ALPHA_BLOB = {"content": base64.b64encode(b"# Alpha\n\nBody\n").decode("ascii"), "encoding": "base64"}
 
 
+def _requested_url(request) -> str:
+    """The URL the caller asked for: egress pins the connection to an IP and keeps the name in Host."""
+    host = request.headers.get("host", "").split(":")[0]
+    return str(request.url.copy_with(host=host)) if host else str(request.url)
+
+
 def _route_github_api_through_mock_transport(monkeypatch, handler):
     """Send every GitHub API GET through the real ``stream_response`` over a MockTransport.
 
@@ -393,7 +407,7 @@ def _serve(routes, seen):
 
     def handler(request):
         seen.append(request)
-        return routes[str(request.url)]
+        return routes[_requested_url(request)]
 
     return handler
 
@@ -415,7 +429,7 @@ def test_remote_github_sync_fetches_through_http_client(monkeypatch):
     assert failures == {}
     assert items["alpha.md"]["text"] == "# Alpha\n\nBody\n"
     assert items["alpha.md"]["raw_metadata"]["repo_blob_sha"] == "sha-alpha"
-    assert [str(r.url) for r in seen] == [_REPO_API_URL, _TREE_URL, _BLOB_URL]
+    assert [_requested_url(r) for r in seen] == [_REPO_API_URL, _TREE_URL, _BLOB_URL]
     for request in seen:
         assert request.headers["Authorization"] == "Bearer token-123"
         assert request.headers["Accept"] == "application/vnd.github+json"
@@ -439,7 +453,7 @@ def test_remote_github_sync_follows_a_redirect_within_api_github_com(monkeypatch
     items, failures = _sync_remote(monkeypatch, _serve(routes, seen))
 
     assert (items, failures) == ({}, {})
-    assert [str(r.url) for r in seen] == [_REPO_API_URL, moved, _TREE_URL]
+    assert [_requested_url(r) for r in seen] == [_REPO_API_URL, moved, _TREE_URL]
     assert seen[1].headers["Authorization"] == "Bearer token-123"
 
 
@@ -460,7 +474,7 @@ def test_remote_github_sync_refuses_a_redirect_off_api_github_com(monkeypatch, l
     with pytest.raises(git_repository.GitHubAPIError, match="GitHub API HTTPS URLs"):
         _sync_remote(monkeypatch, _serve(routes, seen))
 
-    assert [str(r.url) for r in seen] == [_REPO_API_URL]
+    assert [_requested_url(r) for r in seen] == [_REPO_API_URL]
 
 
 @pytest.mark.unit
@@ -486,9 +500,6 @@ def test_remote_github_sync_refuses_api_host_resolving_to_metadata(monkeypatch):
     from tldw_Server_API.app.core.Security import egress
 
     # Outside pytest the egress check resolves hostnames; make it do so here.
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["169.254.169.254"])
     seen: list[httpx.Request] = []
 
@@ -536,7 +547,7 @@ def test_remote_github_blob_fetch_failure_is_recorded_not_raised(monkeypatch, fa
 
     def handler(request):
         seen.append(request)
-        url = str(request.url)
+        url = _requested_url(request)
         if url == _REPO_API_URL:
             return httpx.Response(200, json={"default_branch": "main"})
         if url == _TREE_URL:

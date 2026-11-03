@@ -270,13 +270,6 @@ def lan_egress(monkeypatch):
 
     seen: list[httpx.Request] = []
     dns: dict[str, list[str]] = {}
-
-    real_env_flag_enabled = http_client.env_flag_enabled
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
-    monkeypatch.setattr(
-        http_client, "env_flag_enabled", lambda name: name != "TESTING" and real_env_flag_enabled(name)
-    )
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: list(dns.get(host, [])))
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")

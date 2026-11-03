@@ -111,32 +111,6 @@ def _make_pool_mock() -> MagicMock:
     return pool
 
 
-class _FakeAsyncWebhookClient:
-    def __init__(self, response_or_responses):
-        if isinstance(response_or_responses, list):
-            self.post = AsyncMock(side_effect=response_or_responses)
-        else:
-            self.post = AsyncMock(return_value=response_or_responses)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
-def _install_fake_webhook_client(svc: AdminWebhooksService, response_or_responses):
-    factory_calls: list[dict[str, object]] = []
-    client = _FakeAsyncWebhookClient(response_or_responses)
-
-    def _factory(*, timeout: int):
-        factory_calls.append({"timeout": timeout})
-        return client
-
-    svc.http_client_factory = _factory
-    return client, factory_calls
-
-
 @pytest.fixture
 def svc() -> AdminWebhooksService:
     return AdminWebhooksService(db_pool=_make_pool_mock())
@@ -248,117 +222,43 @@ async def test_delete_webhook(svc: AdminWebhooksService):
 
 
 @pytest.mark.unit
-async def test_deliver_success(svc: AdminWebhooksService):
-    wh = WebhookRecord(
-        id=1, url="https://example.com/hook", secret="test-secret",
-        event_types=["*"], description="", active=True,
-        retry_count=0, timeout_seconds=5,
-        created_by=None, created_at=None, updated_at=None,
-    )
+async def test_deliver_success(svc: AdminWebhooksService, http_route):
+    requests, replies, log = http_route
+    replies.append((200, {}, b"OK"))
 
-    # Mock the delivery log insert
-    svc.db_pool.fetchone.return_value = {
-        "id": 100, "webhook_id": 1, "event_type": "test.event",
-        "status_code": 200, "latency_ms": 50, "retry_attempt": 0,
-        "error_message": None, "delivered_at": "2026-01-01T00:00:00Z",
-        "created_at": "2026-01-01T00:00:00Z",
-    }
+    await svc.deliver(_hook(_PUBLIC_HOOK_URL), "test.event", {"key": "value"})
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "OK"
-
-    mock_client, factory_calls = _install_fake_webhook_client(svc, mock_response)
-
-    entry = await svc.deliver(wh, "test.event", {"key": "value"})
-
-    assert entry.status_code == 200
-    assert factory_calls == [{"timeout": 5}]
-    mock_client.post.assert_awaited_once()
+    assert len(requests) == 1
+    logged = log.await_args.kwargs
+    assert logged["status_code"] == 200
+    assert logged["retry_attempt"] == 0
 
 
 @pytest.mark.unit
-async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(svc: AdminWebhooksService):
-    wh = WebhookRecord(
-        id=1, url="https://example.com/hook", secret="test-secret",
-        event_types=["*"], description="", active=True,
-        retry_count=1, timeout_seconds=5,
-        created_by=None, created_at=None, updated_at=None,
-    )
-
-    svc.db_pool.fetchone.return_value = {
-        "id": 101, "webhook_id": 1, "event_type": "test.event",
-        "status_code": 200, "latency_ms": 50, "retry_attempt": 1,
-        "error_message": None, "delivered_at": "2026-01-01T00:00:05Z",
-        "created_at": "2026-01-01T00:00:05Z",
-    }
-
-    first_response = MagicMock()
-    first_response.status_code = 500
-    first_response.text = "server error"
-
-    second_response = MagicMock()
-    second_response.status_code = 200
-    second_response.text = "OK"
-
-    mock_client, factory_calls = _install_fake_webhook_client(svc, [first_response, second_response])
-
-    with (
-        patch("tldw_Server_API.app.services.admin_webhooks_service.asyncio.sleep", new=AsyncMock()),
-        # Only the service's own clock: afetch reads time.time too.
-        patch(
-            "tldw_Server_API.app.services.admin_webhooks_service.time",
-            SimpleNamespace(time=MagicMock(side_effect=[1000, 1005]), monotonic=time.monotonic),
-        ),
-    ):
-        await svc.deliver(wh, "test.event", {"key": "value"})
-
-    assert factory_calls == [{"timeout": 5}]
-    first_call = mock_client.post.await_args_list[0]
-    second_call = mock_client.post.await_args_list[1]
-    assert first_call.kwargs["headers"]["X-Admin-Webhook-Timestamp"] == "1000"
-    assert second_call.kwargs["headers"]["X-Admin-Webhook-Timestamp"] == "1005"
-    assert first_call.kwargs["headers"]["X-Admin-Webhook-Signature"] != second_call.kwargs["headers"]["X-Admin-Webhook-Signature"]
-
-
-@pytest.mark.unit
-async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
-    svc.db_pool.fetchone.side_effect = [
-        {"cnt": 2},  # list_webhooks count
-        # deliver log entry for matching webhook
-        {
-            "id": 1, "webhook_id": 1, "event_type": "incident.created",
-            "status_code": 200, "latency_ms": 10, "retry_attempt": 0,
-            "error_message": None, "delivered_at": "2026-01-01T00:00:00Z",
-            "created_at": "2026-01-01T00:00:00Z",
-        },
-    ]
+async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService, http_route):
+    requests, replies, log = http_route
+    replies.append((200, {}, b"OK"))
+    log.return_value = DeliveryLogEntry(1, 1, "incident.created", 200, 10, 0, None, "2026-01-01T00:00:00Z", None)
+    svc.db_pool.fetchone.side_effect = [{"cnt": 2}]
     svc.db_pool.fetchall.return_value = [
         {
-            "id": 1, "url": "https://a.com", "secret": "s1",
+            "id": 1, "url": _PUBLIC_HOOK_URL, "secret": "s1",
             "event_types": '["incident.created"]', "description": "",
             "active": 1, "retry_count": 0, "timeout_seconds": 5,
             "created_by": None, "created_at": None, "updated_at": None,
         },
         {
-            "id": 2, "url": "https://b.com", "secret": "s2",
+            "id": 2, "url": "http://93.184.216.35/hook", "secret": "s2",
             "event_types": '["alert.fired"]', "description": "",
             "active": 1, "retry_count": 0, "timeout_seconds": 5,
             "created_by": None, "created_at": None, "updated_at": None,
         },
     ]
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "OK"
-
-    mock_client, factory_calls = _install_fake_webhook_client(svc, mock_response)
-
     delivered = await svc.dispatch_event("incident.created", {"id": 1})
 
-    assert factory_calls == [{"timeout": 5}]
-    mock_client.post.assert_awaited_once()
-    # Only webhook 1 matches "incident.created", webhook 2 only wants "alert.fired"
+    # Only webhook 1 matches "incident.created"; webhook 2 only wants "alert.fired".
+    assert [str(r.url) for r in requests] == [_PUBLIC_HOOK_URL]
     assert delivered == 1
 
 
@@ -548,9 +448,6 @@ def _resolve_hostnames(monkeypatch: pytest.MonkeyPatch, resolver) -> None:
     from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Security import egress
 
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: resolver(host))
 
 

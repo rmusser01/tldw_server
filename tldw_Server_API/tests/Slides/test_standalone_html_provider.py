@@ -1685,7 +1685,6 @@ def production_egress(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
 
     answers: dict[str, list[str]] = {}
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
     for name in ("TESTING", "TEST_MODE", "TLDW_TEST_MODE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(
