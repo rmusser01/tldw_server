@@ -817,7 +817,7 @@ explicit crawl cancellation, and full-queue retry reservation reuse.
 **Goal:** Switch wrappers/services once, propagate outcomes, and certify real consumers.
 **Success Criteria:** Public parity except approved safety fixes; report/receipt fidelity and architecture guards pass.
 **Tests:** Tasks 9-11 full compatibility, security, browser/lifecycle and affected-consumer coverage.
-**Status:** In Progress (Task 9 compatibility adapters; service and certification gates remain).
+**Status:** In Progress (Task 9 independently accepted; Task 10 service outcomes and Task 11 certification remain).
 
 ### Task 9: Switch Legacy And Enhanced Adapters
 
@@ -1136,7 +1136,7 @@ otherwise raises `CrawlInterrupted(report)` on non-normal non-cancelled exits.
 Never invent metadata-only articles. Enhanced service internals get reports before
 public adapter conversion. Keep progress `save_progress/load_progress` as snapshots.
 
-- [ ] **Step 1: Write before/after cutover regression assertions.**
+- [x] **Step 1: Write before/after cutover regression assertions.**
 
 ```python
 async def test_midcrawl_transport_failure_remains_failure_list(harness):
@@ -1155,10 +1155,10 @@ async def test_ambiguous_incomplete_list_raises_with_partials(harness):
 Also cover pre-admission failures, sync calls without nested event loop errors,
 constructor/export identity, queue retries/status/retention, progress load round
 trips, extra fields, cookies/deduplication, and no new internal wrapper imports.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py -q`.** Expected: old ambiguous success/callback behavior fails, established failure list still passes.
-- [ ] **Step 3: Switch adapters to canonical composition and re-export moved queue values through lossless shims.** Delete only now-unreachable private implementations with proven coverage. Keep unrelated cookie/dedup/extraction utilities in place. No dual-run flag or shadow requests.
-- [ ] **Step 4: Run Task 1/9 plus `python -m pytest tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py tldw_Server_API/tests/Web_Scraping/test_recursive_crawl.py tldw_Server_API/tests/Web_Scraping/test_recursive_crawl_semantics.py tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py -q`.** Expected: pass with documented approved differences only.
-- [ ] **Step 5: Commit a standalone rollback boundary:** `refactor(web-scraping): switch crawl and queue compatibility adapters` plus child task. Before reverting, quiesce/drain and preserve versioned checkpoints; old code must not read new files as legacy data. Use the new reader or a separately tested export, never silent downgrade.
+- [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py -q`.** Expected: old ambiguous success/callback behavior fails, established failure list still passes.
+- [x] **Step 3: Switch adapters to canonical composition and re-export moved queue values through lossless shims.** Delete only now-unreachable private implementations with proven coverage. Keep unrelated cookie/dedup/extraction utilities in place. No dual-run flag or shadow requests.
+- [x] **Step 4: Run Task 1/9 plus `python -m pytest tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py tldw_Server_API/tests/Web_Scraping/test_recursive_crawl.py tldw_Server_API/tests/Web_Scraping/test_recursive_crawl_semantics.py tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py -q`.** Expected: pass with documented approved differences only.
+- [x] **Step 5: Commit a standalone rollback boundary:** `refactor(web-scraping): switch crawl and queue compatibility adapters` plus child task. Before reverting, quiesce/drain and preserve versioned checkpoints; old code must not read new files as legacy data. Use the new reader or a separately tested export, never silent downgrade.
 
 ### Task 10: Carry Outcomes Through Services And Ingestion
 
