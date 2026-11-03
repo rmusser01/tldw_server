@@ -160,13 +160,17 @@ class MutableRepository(ReadOnlyRepository):
         uncheck_dod: Sequence[int] | None = None,
         dependencies: Sequence[str] | None = None,
         labels: Sequence[str] | None = None,
+        references: Sequence[str] | None = None,
         status: str | None = None,
         on_status_change: bool | None = None,
+        remove_preamble: bool = False,
     ) -> TaskRecord:
         """Edit a task in place, normalizing the file first.
 
         ``append_notes`` may be one text or several, appended in order. Indexes in
-        check/uncheck refer to criteria after removals and additions.
+        check/uncheck refer to criteria after removals and additions. ``references``
+        replaces the references list. ``remove_preamble`` drops the body text above
+        the first ``## `` heading, and refuses when that text holds a section.
         """
         _reject_on_status_change(on_status_change)
         if title is not None and not title.strip():
@@ -184,6 +188,9 @@ class MutableRepository(ReadOnlyRepository):
         except ValueError as exc:
             raise TaskMutationError(f"{task.path.name}: {exc}") from exc
         parsed = parse_task_markdown(source)
+        if remove_preamble:
+            source = _remove_preamble(source, parsed)
+            parsed = parse_task_markdown(source)
         if description is not None:
             source = _replace_section(source, parsed, "DESCRIPTION", _normalize_block(description))
             parsed = parse_task_markdown(source)
@@ -219,6 +226,8 @@ class MutableRepository(ReadOnlyRepository):
             updates["dependencies"] = normalized_dependencies
         if labels is not None:
             updates["labels"] = list(labels)
+        if references is not None:
+            updates["references"] = list(references)
         if title is not None:
             updates["title"] = title
         if updates:
@@ -241,6 +250,7 @@ class MutableRepository(ReadOnlyRepository):
         Takes a path because two files can share an id, which ``edit_task`` cannot tell apart. The
         file keeps its directory and its file-name tail, and is normalized like every edit. Refuses
         an id that any task file in backlog/tasks, backlog/completed or backlog/archive/tasks holds.
+        A subtask id (``P.n``) also sets ``parent_task_id`` to ``P``.
         ``note`` may be one text or several, each appended as its own block, like ``append_notes``.
         """
         candidate = self.project.root / Path(path)
@@ -261,7 +271,11 @@ class MutableRepository(ReadOnlyRepository):
         parsed = parse_task_markdown(source)
         for text in [note] if isinstance(note, str) else note or ():
             source, parsed = _append_notes(source, parsed, text)
-        source = _replace_frontmatter_values(source, parsed, {"id": normalized_id})
+        updates: dict[str, object] = {"id": normalized_id}
+        parent = normalized_id.rpartition(".")[0]
+        if parent:  # a subtask id names its parent; keep parent_task_id in step (TASK-13962)
+            updates["parent_task_id"] = parent
+        source = _replace_frontmatter_values(source, parsed, updates)
         parse_task_markdown(source)
         tail = current_path.name.split(" - ", 1)[1] if " - " in current_path.name else "Task.md"
         target = _mutation_path(current_path.parent, current_path.parent / f"{normalized_id.lower()} - {tail}")
@@ -420,6 +434,18 @@ def _append_notes(source: str, parsed: ParsedTaskMarkdown, text: str) -> tuple[s
     notes_content = appended if not existing_content else f"{existing_content}\n{appended}"
     source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", notes_content)
     return source, parse_task_markdown(source)
+
+
+def _remove_preamble(source: str, parsed: ParsedTaskMarkdown) -> str:
+    """Drop the body text above the first ``## `` heading; one blank line then separates it from the frontmatter."""
+    match = re.search(r"^## ", parsed.body, re.MULTILINE)
+    if match is None:
+        raise TaskMutationError("Cannot remove the preamble: the task has no section heading")
+    if re.search(r"^<!-- [A-Z0-9_ :-]+:(?:BEGIN|END) -->", parsed.body[: match.start()], re.MULTILINE):
+        raise TaskMutationError("Cannot remove the preamble: it holds a section marker")
+    head = source[: len(source) - len(parsed.body)]
+    newline = head[len(head.rstrip("\r\n")):] or "\n"
+    return f"{head}{newline}{parsed.body[match.start():]}"
 
 
 def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:

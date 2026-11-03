@@ -33,6 +33,10 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option(
     "--dep", "--depends-on", "dependencies", multiple=True, help="Comma-separated dependency task ids; on edit, replaces them."
 )
+@click.option(
+    "--ref", "references", multiple=True, help="(edit) One reference (URL, path or task id) per flag; replaces them."
+)
+@click.option("--remove-preamble", is_flag=True, help="Drop the body text above the first section heading (edit).")
 @click.option("--ac", "add_ac", multiple=True, help="Add an acceptance criterion (repeatable).")
 @click.option("--remove-ac", multiple=True, type=int, help="Remove acceptance criterion by 1-based index (edit).")
 @click.option("--notes", default=None, help="Implementation notes; on edit, replaces them.")
@@ -56,6 +60,8 @@ def task_command(
     description: str | None,
     labels: tuple[str, ...],
     dependencies: tuple[str, ...],
+    references: tuple[str, ...],
+    remove_preamble: bool,
     add_ac: tuple[str, ...],
     remove_ac: tuple[int, ...],
     notes: str | None,
@@ -110,6 +116,8 @@ def task_command(
             final_summary=final_summary,
             dependencies=_split_csv(dependencies) if dependencies else None,
             labels=_split_csv(labels) if labels else None,
+            references=list(references) if references else None,
+            remove_preamble=remove_preamble,
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
