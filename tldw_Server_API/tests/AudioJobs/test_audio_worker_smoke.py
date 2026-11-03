@@ -982,14 +982,30 @@ async def test_audio_analyze_error_reply_on_the_last_attempt_keeps_the_transcrip
 
 
 @pytest.mark.unit
-async def test_audio_analyze_error_reply_is_retried_as_a_provider_failure(analyze_worker):
+async def test_audio_analyze_error_reply_is_retried_as_a_provider_failure(analyze_worker, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
     worker, jm, adapter = analyze_worker
+    fail_job = type(jm).fail_job
+    scheduling_window = []
+
+    def capture_schedule(manager, *args, **kwargs):
+        # SQLite DATETIME stores UTC seconds; exclude subsequent worker shutdown.
+        before = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        result = fail_job(manager, *args, **kwargs)
+        after = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        scheduling_window.append((before, after))
+        return result
+
+    monkeypatch.setattr(type(jm), "fail_job", capture_schedule)
     adapter.reply = "Error: the provider said no"
     job_id = _analyze_job(jm, "hello transcript")
     await _run_worker_until(worker, lambda: _settled(jm, job_id))
     job = jm.get_job(job_id) or {}
     assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("queued", 1, "provider_failure")
-    assert _seconds_until_due(jm, job_id) >= 4, "a provider failure waits about 5 s"
+    assert len(scheduling_window) == 1
+    before, after = scheduling_window[0]
+    assert before + timedelta(seconds=5) <= datetime.fromisoformat(job["available_at"]) <= after + timedelta(seconds=5)
     assert _stored(jm) == []
 
 

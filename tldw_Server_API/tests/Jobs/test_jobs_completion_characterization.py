@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ from tldw_Server_API.tests.Jobs._completion_characterization_support import (
     completion_arguments,
     durable_state,
     independent_reader,
+    observe_python_calls,
     record_completion_boundaries,
     record_completion_observers,
     rows,
@@ -182,10 +185,6 @@ def test_completion_identity_short_circuits_result_work(
             raise
 
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
-    monkeypatch.setattr(manager, "_maybe_encrypt_json", lambda *args: transforms.append(args))
-    record_completion_observers(manager, monkeypatch, calls)
-    monkeypatch.setattr(manager_module, "_parse_dt", lambda *args: calls.append("prepare_duration"))
-    monkeypatch.setattr(manager_module, "_run_post_commit_side_effects", lambda *args: calls.append("dispatch"))
     original_getattribute = JobManager.__getattribute__
 
     def lookup(self, name):
@@ -196,10 +195,25 @@ def test_completion_identity_short_circuits_result_work(
     monkeypatch.setattr(JobManager, "__getattribute__", lookup)
     expected = (stored_uuid or "") if matching else "stale-identity"
     completion_value = completion_arguments(job)["completion_token"]
-    assert (
-        manager.complete_job(job["id"], result=result, expected_uuid=expected, completion_token=completion_value)
-        is matching
-    )
+    observers = {
+        manager._maybe_encrypt_json: transforms.append,
+        manager_module._parse_dt: lambda args: calls.append("prepare_duration"),
+        manager_module._run_post_commit_side_effects: lambda args: calls.append("dispatch"),
+    }
+    for name in (
+        "increment_json_truncated",
+        "observe_duration",
+        "increment_completed",
+        "increment_sla_breach",
+        "_record_job_span",
+        "observe_job_event",
+    ):
+        observers[getattr(manager_module, name)] = lambda args, name=name: calls.append(name)
+    with observe_python_calls(observers):
+        assert (
+            manager.complete_job(job["id"], result=result, expected_uuid=expected, completion_token=completion_value)
+            is matching
+        )
     assert transforms == []
     assert len(serializations) == 1 and serializations[0] is result  # Size probe only, no final encoding.
     assert serialization_errors == ([] if serialization_error is None else [serialization_error])
@@ -253,10 +267,6 @@ def test_completion_early_exit_never_prepares_result(
             raise
 
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
-    monkeypatch.setattr(manager, "_maybe_encrypt_json", lambda *args: transforms.append(args))
-    record_completion_observers(manager, monkeypatch, calls)
-    monkeypatch.setattr(manager_module, "_parse_dt", lambda *args: calls.append("prepare_duration"))
-    monkeypatch.setattr(manager_module, "_run_post_commit_side_effects", lambda *args: calls.append("dispatch"))
     original_getattribute = JobManager.__getattribute__
 
     def lookup(self, name):
@@ -265,7 +275,22 @@ def test_completion_early_exit_never_prepares_result(
         return original_getattribute(self, name)
 
     monkeypatch.setattr(JobManager, "__getattribute__", lookup)
-    assert manager.complete_job(job_id, result=result, **arguments) is False
+    observers = {
+        manager._maybe_encrypt_json: transforms.append,
+        manager_module._parse_dt: lambda args: calls.append("prepare_duration"),
+        manager_module._run_post_commit_side_effects: lambda args: calls.append("dispatch"),
+    }
+    for name in (
+        "increment_json_truncated",
+        "observe_duration",
+        "increment_completed",
+        "increment_sla_breach",
+        "_record_job_span",
+        "observe_job_event",
+    ):
+        observers[getattr(manager_module, name)] = lambda args, name=name: calls.append(name)
+    with observe_python_calls(observers):
+        assert manager.complete_job(job_id, result=result, **arguments) is False
     assert transforms == []
     assert len(serializations) == 1 and serializations[0] is result
     assert serialization_errors == ([] if serialization_error is None else [serialization_error])
@@ -273,9 +298,7 @@ def test_completion_early_exit_never_prepares_result(
     assert durable_state(reader, job["id"]) == before
 
 
-@pytest.mark.parametrize(
-    "scenario", ["oversize", "type-connect", "value-connect", "type-deferred", "value-deferred", "rejected"]
-)
+@pytest.mark.parametrize("scenario", ["type-connect", "value-connect", "type-deferred", "value-deferred", "rejected"])
 def test_completion_serialization_and_connection_error_precedence(completion_manager, monkeypatch, scenario):
     """Preflight is eager; final encoding follows connect, identity, and transformation."""
     manager = completion_manager
@@ -302,8 +325,7 @@ def test_completion_serialization_and_connection_error_precedence(completion_man
         return original(value, *args, **kwargs)
 
     def connect():
-        if "connect" not in phases:
-            phases.append("connect")
+        phases.append("connect")
         if scenario.endswith("-connect"):
             raise ConnectionError("connect wins")
         return original_connect()
@@ -316,22 +338,73 @@ def test_completion_serialization_and_connection_error_precedence(completion_man
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
     monkeypatch.setattr(manager, "_connect", connect)
     monkeypatch.setattr(manager, "_maybe_encrypt_json", transform)
-    if scenario == "oversize":
-        monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "128")
-        with pytest.raises(ValueError, match="Result too large"):
-            manager.complete_job(job["id"], result=result, **completion_arguments(job))
-        assert phases == ["preflight"]
-    elif scenario.endswith("-connect"):
+    if scenario.endswith("-connect"):
         with pytest.raises(ConnectionError, match="connect wins"):
             manager.complete_job(job["id"], result=result, **completion_arguments(job))
         assert phases == ["preflight", "connect"]
     else:
         assert manager.complete_job(job["id"], result=result, **completion_arguments(job)) is (scenario != "rejected")
-        assert phases == ["preflight", "connect", "transform", "final"]
+        # Applied completion also reads SLA policy and updates real queue gauges.
+        trailing = ["connect", "connect"] if scenario != "rejected" else []
+        assert phases == ["preflight", "connect", "transform", "final", *trailing]
     if scenario in {"type-deferred", "value-deferred"}:
         assert reader.get_job(job["id"])["result"] == transformed
     else:
         assert durable_state(reader, job["id"]) == before
+
+
+def test_completion_oversize_precedes_connection(completion_manager, monkeypatch):
+    """The 128-byte result limit rejects before opening any completion connection."""
+    manager = completion_manager
+    job = seed_job(manager)
+    reader = independent_reader(manager)
+    before = durable_state(reader, job["id"])
+    phases = []
+    monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "128")
+    with observe_python_calls(
+        {
+            manager_module.json.dumps: lambda args: phases.append("preflight"),
+            manager._connect: lambda args: phases.append("connect"),
+            manager._maybe_encrypt_json: lambda args: phases.append("transform"),
+        }
+    ):
+        with pytest.raises(ValueError, match="Result too large"):
+            manager.complete_job(job["id"], result={"input": "x" * 200}, **completion_arguments(job))
+    assert phases == ["preflight"]
+    assert durable_state(reader, job["id"]) == before
+
+
+@pytest.mark.parametrize("fail", [False, True], ids=["return", "exception"])
+def test_call_observer_preserves_bound_methods_and_previous_profile(completion_manager, fail):
+    """Real bound methods stay instance-scoped and the prior profiler always resumes."""
+    manager = completion_manager
+    other = independent_reader(manager)
+    payload = {"ok": True}
+    calls = []
+    returns = []
+    prior_calls = []
+    original_profile = sys.getprofile()
+
+    def previous(frame, event, arg):
+        if event == "call" and frame.f_code is JobManager._maybe_encrypt_json.__code__:
+            prior_calls.append(frame.f_locals["self"])
+
+    sys.setprofile(previous)
+    try:
+        with pytest.raises(RuntimeError, match="observer cleanup probe") if fail else nullcontext():
+            with observe_python_calls(
+                {manager._maybe_encrypt_json: calls.append}, returns={manager._maybe_encrypt_json: returns.append}
+            ):
+                assert manager._maybe_encrypt_json(payload, "chatbooks") is payload
+                assert other._maybe_encrypt_json(payload, "chatbooks") is payload
+                if fail:
+                    raise RuntimeError("observer cleanup probe")
+        assert sys.getprofile() is previous
+    finally:
+        sys.setprofile(original_profile)
+    assert len(calls) == 1 and calls[0]["self"] is manager
+    assert len(returns) == 1 and returns[0] is payload
+    assert prior_calls == [manager, other]
 
 
 @pytest.mark.parametrize(
@@ -445,10 +518,9 @@ def test_completion_cleanup_and_commit_failure_order(completion_manager, monkeyp
         assert durable_state(reader, job["id"]) == before
 
 
-@pytest.mark.parametrize("scenario", ["normal", "encrypted", "truncation-error", "parser-error", "clock-error"])
-def test_completion_metric_preparation_boundaries(completion_manager, monkeypatch, scenario):
-    """Optional metric groups fail independently; SLA uses a later, separate clock."""
-    manager = completion_manager
+@contextmanager
+def metric_preparation_case(manager):
+    """Capture real completion observations; all verdicts belong to the tests."""
     job = seed_job(manager)
     reader = independent_reader(manager)
     raw = rows(reader, "SELECT * FROM jobs WHERE id=?", (job["id"],))[0]
@@ -456,110 +528,19 @@ def test_completion_metric_preparation_boundaries(completion_manager, monkeypatc
         domain="chatbooks", queue="default", job_type=job["job_type"], max_duration_seconds=999999999
     )
     calls: list[str] = []
-    durations: list[tuple[Any, ...]] = []
+    durations: list[dict[str, Any]] = []
     traces: list[dict[str, Any]] = []
     clock_samples: list[datetime] = []
-    fixed = datetime(2030, 1, 1, tzinfo=timezone.utc)
-    record_completion_observers(manager, monkeypatch, calls)
-    record_completion_boundaries(manager, monkeypatch, calls)
-    original_parse = manager_module._parse_dt
-    original_encrypt = manager._maybe_encrypt_json
-
-    class BrokenTruncation(dict):
-        def get(self, key, default=None):
-            if key == "_truncated":
-                raise RuntimeError("truncation preparation probe")
-            return super().get(key, default)
-
-    def encrypt(value, domain):
-        if scenario == "truncation-error":
-            return BrokenTruncation(value)
-        return original_encrypt(value, domain)
-
-    def parse(value):
-        if scenario == "parser-error":
-            raise ValueError("metric parser probe")
-        return original_parse(value)
-
-    def clock():
-        clock_samples.append(fixed)
-        if scenario == "clock-error" and manager.backend == "postgres" and len(clock_samples) == 1:
-            raise RuntimeError("metric clock probe")
-        return fixed + timedelta(seconds=len(clock_samples))
-
-    class MetricDatetime(datetime):
-        @classmethod
-        def utcnow(cls):
-            if scenario == "clock-error":
-                raise RuntimeError("metric clock probe")
-            return datetime(2030, 1, 2)  # SQLite historically samples naive UTC here.
-
-    monkeypatch.setattr(manager, "_maybe_encrypt_json", encrypt)
-    monkeypatch.setattr(manager_module, "_parse_dt", parse)
-    monkeypatch.setattr(manager._clock, "now_utc", clock)
-    if manager.backend == "sqlite":
-        monkeypatch.setattr(manager_module, "datetime", MetricDatetime)
-    if scenario == "encrypted":
-        monkeypatch.setattr(manager, "_should_encrypt", lambda domain: True)
-        monkeypatch.setattr(manager_module, "encrypt_json_blob", lambda value: {"cipher": "opaque"})
-    # PG's parser branch needs a text timestamp; preserve native values in all other cases.
-    if manager.backend == "postgres" and scenario == "parser-error":
-        original_fetchone = CompletionCursor.__getattr__
-
-        def cursor_getattr(self, name):
-            native = original_fetchone(self, name)
-            if name != "fetchone":
-                return native
-
-            def fetchone():
-                value = native()
-                if value and "started_at" in value:
-                    value = dict(value)
-                    for key in ("started_at", "acquired_at"):
-                        if value.get(key) is not None:
-                            value[key] = str(value[key])
-                return value
-
-            return fetchone
-
-        monkeypatch.setattr(CompletionCursor, "__getattr__", cursor_getattr)
-
-    def duration(*args):
-        calls.append("duration")
-        durations.append(args)
-
-    def trace(operation, projection):
-        assert operation == "job.complete"
-        calls.append("trace")
-        traces.append(projection)
-
-    monkeypatch.setattr(manager_module, "observe_duration", duration)
-    monkeypatch.setattr(manager_module, "_record_job_span", trace)
-    monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "128")
-    monkeypatch.setenv("JOBS_JSON_TRUNCATE", "true")
-    assert manager.complete_job(job["id"], result={"long": "x" * 200}, **completion_arguments(job)) is True
-    assert_completed(reader, job["id"])
-    assert ("truncated" in calls) is (scenario not in {"encrypted", "truncation-error"})
-    metric_failed = scenario in {"parser-error", "clock-error"}
-    assert ("duration" in calls, "completed" in calls, "original_gauges" in calls, "trace" in calls) == (
-        not metric_failed,
-    ) * 4
-    assert "event" in calls
-    if not metric_failed:
-        assert durations[0][0] == {
-            "domain": "chatbooks",
-            "queue": "default",
-            "job_type": job["job_type"],
-            "trace_id": "trace-1",
-            "request_id": "request-1",
-        }
-        assert durations[0][1] == datetime.fromisoformat(str(raw["started_at"] or raw["acquired_at"]))
-        assert durations[0][2] == (
-            fixed + timedelta(seconds=1) if manager.backend == "postgres" else datetime(2030, 1, 2)
-        )
-        assert durations[0][2].tzinfo is (timezone.utc if manager.backend == "postgres" else None)
-        # Tracing receives the locked raw projection, not the completed/decrypted facade row.
-        assert traces[0] == {
+    observed = {
+        "job": job,
+        "reader": reader,
+        "raw": raw,
+        "calls": calls,
+        "durations": durations,
+        "traces": traces,
+        "clock_samples": clock_samples,
+        "result": {"_truncated": True, "len_bytes": 212},
+        "projection": {
             key: raw[key]
             for key in (
                 "id",
@@ -578,16 +559,156 @@ def test_completion_metric_preparation_boundaries(completion_manager, monkeypatc
                 "request_id",
                 "owner_user_id",
             )
-        }
-    # Parser failures are also suppressed by the later SLA group before its sample.
-    expected_samples = 0 if scenario == "parser-error" else (2 if manager.backend == "postgres" else 1)
-    assert len(clock_samples) == expected_samples
+        },
+    }
+    yield observed
+
+    def duration(arguments):
+        calls.append("duration")
+        durations.append(arguments)
+
+    def trace(arguments):
+        calls.append("trace")
+        traces.append(arguments)
+
+    observed["before"] = datetime.now(timezone.utc)
+    with observe_python_calls(
+        {
+            manager_module.observe_duration: duration,
+            manager_module._record_job_span: trace,
+            manager_module.increment_json_truncated: lambda args: calls.append("truncated"),
+            manager_module.increment_completed: lambda args: calls.append("completed"),
+            manager._update_gauges: lambda args: calls.append("original_gauges"),
+            manager_module.observe_job_event: lambda args: calls.append("event"),
+        },
+        returns={manager._clock.now_utc: clock_samples.append},
+    ):
+        observed["success"] = manager.complete_job(job["id"], result=observed["result"], **completion_arguments(job))
+    observed["after"] = datetime.now(timezone.utc)
     stored = rows(reader, "SELECT result FROM jobs WHERE id=?", (job["id"],))[0]["result"]
     if isinstance(stored, str):
         stored = manager_module.json.loads(stored)
-    assert ("_truncated" in stored) is (scenario != "encrypted")
-    if scenario == "encrypted":
-        assert stored == {"_encrypted": {"cipher": "opaque"}}
+    observed["stored"] = stored
+
+
+@pytest.mark.parametrize("scenario", ["normal", "encrypted", "truncation-error"])
+def test_completion_metric_preparation_boundaries(completion_manager, monkeypatch, scenario):
+    """Optional truncation failure leaves real metrics, trace, and durable completion intact."""
+    manager = completion_manager
+    with metric_preparation_case(completion_manager) as observed:
+
+        class BrokenTruncation(dict):
+            def get(self, key, default=None):
+                if key == "_truncated":
+                    raise RuntimeError("truncation preparation probe")
+                return super().get(key, default)
+
+        for setting, value in (("JOBS_MAX_JSON_BYTES", "128"), ("JOBS_JSON_TRUNCATE", "true")):
+            monkeypatch.setenv(setting, value)
+        if scenario == "truncation-error":
+            # Exercise the mapping fault directly, without replacing transformation.
+            observed["result"] = BrokenTruncation(observed["result"])
+        else:
+            observed["result"] = {"long": "x" * 200}
+        if scenario == "encrypted":
+            monkeypatch.setattr(manager, "_should_encrypt", lambda domain: True)
+            monkeypatch.setattr(manager_module, "encrypt_json_blob", lambda value: {"cipher": "opaque"})
+    assert observed["success"] is True
+    assert_completed(observed["reader"], observed["job"]["id"])
+    assert observed["calls"] == (
+        (["truncated"] if scenario == "normal" else []) + ["duration", "completed", "original_gauges", "trace", "event"]
+    )
+    assert observed["stored"] == (
+        {"_encrypted": {"cipher": "opaque"}} if scenario == "encrypted" else {"_truncated": True, "len_bytes": 212}
+    )
+    assert observed["traces"] == [{"operation": "job.complete", "job": observed["projection"], "attrs": None}]
+    duration = observed["durations"][0]
+    assert duration["job"] == {
+        "domain": "chatbooks",
+        "queue": "default",
+        "job_type": observed["job"]["job_type"],
+        "trace_id": "trace-1",
+        "request_id": "request-1",
+    }
+    raw = observed["raw"]
+    assert duration["started_at"] == datetime.fromisoformat(str(raw["started_at"] or raw["acquired_at"]))
+    assert duration["completed_at"].tzinfo is (timezone.utc if manager.backend == "postgres" else None)
+    if manager.backend == "postgres":
+        assert duration["completed_at"] == observed["clock_samples"][0]
+    else:
+        assert (
+            observed["before"].replace(tzinfo=None)
+            <= duration["completed_at"]
+            <= observed["after"].replace(tzinfo=None)
+        )
+    assert len(observed["clock_samples"]) == (2 if manager.backend == "postgres" else 1)
+    assert observed["clock_samples"][-1] >= duration["completed_at"].replace(tzinfo=timezone.utc)
+
+
+def test_completion_parser_metric_preparation_failure(completion_manager, monkeypatch):
+    """Parser failure suppresses metrics and the later SLA clock, not completion."""
+    manager = completion_manager
+    with metric_preparation_case(manager) as observed:
+
+        def parse(value):
+            raise ValueError("metric parser probe")
+
+        monkeypatch.setattr(manager_module, "_parse_dt", parse)
+        if manager.backend == "postgres":
+            record_completion_boundaries(manager, monkeypatch, [])
+            original_fetchone = CompletionCursor.__getattr__
+
+            def cursor_getattr(self, name):
+                native = original_fetchone(self, name)
+                if name != "fetchone":
+                    return native
+
+                def fetchone():
+                    value = native()
+                    if value and "started_at" in value:
+                        value = dict(value)
+                        for key in ("started_at", "acquired_at"):
+                            if value.get(key) is not None:
+                                value[key] = str(value[key])
+                    return value
+
+                return fetchone
+
+            monkeypatch.setattr(CompletionCursor, "__getattr__", cursor_getattr)
+    assert observed["success"] is True
+    assert_completed(observed["reader"], observed["job"]["id"])
+    assert observed["calls"] == ["truncated", "event"]
+    assert observed["clock_samples"] == []
+    assert observed["stored"] == {"_truncated": True, "len_bytes": 212}
+
+
+def test_completion_clock_metric_preparation_failure(completion_manager, monkeypatch):
+    """A failed metric clock cannot suppress the later independent SLA evaluation."""
+    manager = completion_manager
+    with metric_preparation_case(manager) as observed:
+        original_clock = manager._clock.now_utc
+        samples = []
+
+        def clock():
+            samples.append(None)
+            if len(samples) == 1:
+                raise RuntimeError("metric clock probe")
+            return original_clock()
+
+        class MetricDatetime(datetime):
+            @classmethod
+            def utcnow(cls):
+                raise RuntimeError("metric clock probe")
+
+        if manager.backend == "postgres":
+            monkeypatch.setattr(manager._clock, "now_utc", clock)
+        else:
+            monkeypatch.setattr(manager_module, "datetime", MetricDatetime)
+    assert observed["success"] is True
+    assert_completed(observed["reader"], observed["job"]["id"])
+    assert observed["calls"] == ["truncated", "event"]
+    assert len(observed["clock_samples"]) == (2 if manager.backend == "postgres" else 1)
+    assert observed["stored"] == {"_truncated": True, "len_bytes": 212}
 
 
 @pytest.mark.parametrize(
@@ -595,8 +716,6 @@ def test_completion_metric_preparation_boundaries(completion_manager, monkeypatc
 )
 def test_completion_policy_read_timing(completion_manager, monkeypatch, scenario):
     """Only the historical policy read points can affect an in-flight completion."""
-    from tldw_Server_API.app.core.Jobs import event_stream
-
     manager = completion_manager
     queued = scenario in {"allow", "deny"}
     job = seed_job(manager, processing=not queued)
@@ -604,55 +723,56 @@ def test_completion_policy_read_timing(completion_manager, monkeypatch, scenario
     calls: list[str] = []
     policy_reads: list[tuple[str, str | None]] = []
     original_getenv = manager_module.os.getenv
-    original_gauges = manager._update_gauges
-    original_event = manager_module.observe_job_event
     original_getattribute = JobManager.__getattribute__
-    record_completion_observers(manager, monkeypatch, calls)
+    # Perturb only environment settings; transformation and observers stay real.
+    settings = {
+        "initial": (
+            {"JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS": "other" if scenario == "allow" else "chatbooks"}
+            if queued
+            else {}
+        ),
+        "transform": (
+            {"JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS": "chatbooks" if scenario == "allow" else "other"}
+            if queued
+            else ({"JOBS_EVENTS_OUTBOX": "false"} if scenario == "outbox-snapshot" else {})
+        ),
+        "binding": {"JOBS_COUNTERS_ENABLED": "false"} if scenario == "counter-after-metrics" else {},
+        "commit": (
+            {"JOBS_COUNTERS_ENABLED": "false", "JOBS_EVENTS_ENABLED": "true"} if scenario == "observer-settings" else {}
+        ),
+    }
 
-    def getenv(name, default=None):
-        value = original_getenv(name, default)
+    def settings_at(phase):
+        for name, value in settings[phase].items():
+            monkeypatch.setenv(name, value)
+
+    def getenv(arguments):
+        name = arguments["key"]
         if name in {
             "JOBS_COUNTERS_ENABLED",
             "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
             "JOBS_EVENTS_OUTBOX",
             "JOBS_EVENTS_ENABLED",
         }:
-            policy_reads.append((name, value))
-        return value
+            policy_reads.append((name, original_getenv(name, arguments.get("default"))))
 
-    def transform(value, domain):
+    def transform(arguments):
         calls.append("transform")
-        if queued:
-            monkeypatch.setenv(
-                "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS", "chatbooks" if scenario == "allow" else "other"
-            )
-        if scenario == "outbox-snapshot":
-            monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
-        return value
+        settings_at("transform")
 
     def getattribute(self, name):
         if self is manager and name == "_update_gauges":
             calls.append("gauge_binding")
-            if scenario == "counter-after-metrics":
-                monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "false")
+            settings_at("binding")
         return original_getattribute(self, name)
 
     def committed():
-        monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "false")
-        monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
+        settings_at("commit")
 
-    if queued:
-        monkeypatch.setenv("JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS", "other" if scenario == "allow" else "chatbooks")
-    if scenario == "observer-settings":
-        monkeypatch.setattr(manager, "_update_gauges", original_gauges)
-        monkeypatch.setattr(manager_module, "observe_job_event", original_event)
-        monkeypatch.setattr(event_stream, "submit_job_audit_event", lambda *args, **kwargs: None)
-        monkeypatch.setattr(manager_module, "set_queue_gauges", lambda *args, **kwargs: calls.append("real_gauges"))
+    settings_at("initial")
     record_completion_boundaries(
         manager, monkeypatch, calls, on_commit=committed if scenario == "observer-settings" else None
     )
-    monkeypatch.setattr(manager_module.os, "getenv", getenv)
-    monkeypatch.setattr(manager, "_maybe_encrypt_json", transform)
     monkeypatch.setattr(JobManager, "__getattribute__", getattribute)
     arguments = completion_arguments(job)
     arguments["enforce"] = not queued
@@ -662,7 +782,14 @@ def test_completion_policy_read_timing(completion_manager, monkeypatch, scenario
     # Independent reader setup/reads are not facade policy observations.
     policy_reads.clear()
     want = scenario not in {"deny", "early"}
-    assert manager.complete_job(job["id"], result={"ok": True}, **arguments) is want
+    with observe_python_calls(
+        {
+            manager_module.os.getenv: getenv,
+            manager._maybe_encrypt_json: transform,
+            manager_module.set_queue_gauges: lambda args: calls.append("real_gauges"),
+        }
+    ):
+        assert manager.complete_job(job["id"], result={"ok": True}, **arguments) is want
     if scenario == "early":
         assert "transform" not in calls and "gauge_binding" not in calls
         assert policy_reads == [("JOBS_EVENTS_OUTBOX", "true")]
@@ -672,10 +799,20 @@ def test_completion_policy_read_timing(completion_manager, monkeypatch, scenario
             ("JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS", "chatbooks" if want else "other"),
         ]
     elif scenario == "counter-after-metrics":
-        assert policy_reads == [("JOBS_EVENTS_OUTBOX", "true"), ("JOBS_COUNTERS_ENABLED", "false")]
+        assert policy_reads == [
+            ("JOBS_EVENTS_OUTBOX", "true"),
+            ("JOBS_COUNTERS_ENABLED", "false"),
+            ("JOBS_COUNTERS_ENABLED", "false"),
+            ("JOBS_EVENTS_ENABLED", "false"),
+        ]
         assert calls.index("gauge_binding") < calls.index("commit")
     elif scenario == "outbox-snapshot":
-        assert policy_reads == [("JOBS_EVENTS_OUTBOX", "true"), ("JOBS_COUNTERS_ENABLED", "true")]
+        assert policy_reads == [
+            ("JOBS_EVENTS_OUTBOX", "true"),
+            ("JOBS_COUNTERS_ENABLED", "true"),
+            ("JOBS_COUNTERS_ENABLED", "true"),
+            ("JOBS_EVENTS_ENABLED", "false"),
+        ]
     else:
         assert policy_reads == [
             ("JOBS_EVENTS_OUTBOX", "true"),
@@ -836,14 +973,8 @@ def test_completion_diagnostic_failure_keeps_pg_commit_guard(completion_manager,
     entry: list[str] = []
     record_completion_observers(manager, monkeypatch, calls)
     record_completion_boundaries(manager, monkeypatch, calls)
-    original_test_mode = manager_module._is_test_mode
-    original_connect = manager._connect
     original_sqlite_execute = CompletionConnection.execute
     original_pg_execute = CompletionCursor.execute
-
-    def connect():
-        entry.append("connect")
-        return original_connect()
 
     def test_mode():
         entry.append("test-mode")
@@ -867,34 +998,35 @@ def test_completion_diagnostic_failure_keeps_pg_commit_guard(completion_manager,
         rewritten = diagnostic(sql)
         return original_pg_execute(self, rewritten, None if rewritten != sql else parameters)
 
-    monkeypatch.setattr(manager, "_connect", connect)
     monkeypatch.setattr(manager_module, "_is_test_mode", test_mode)
-    monkeypatch.setattr(CompletionConnection, "execute", sqlite_execute)
-    monkeypatch.setattr(CompletionCursor, "execute", pg_execute)
-    if abort and manager.backend == "postgres":
-        import psycopg
+    connection_type, execute = (
+        (CompletionCursor, pg_execute) if manager.backend == "postgres" else (CompletionConnection, sqlite_execute)
+    )
+    monkeypatch.setattr(connection_type, "execute", execute)
+    with observe_python_calls({manager._connect: lambda args: entry.append("connect")}):
+        if abort and manager.backend == "postgres":
+            import psycopg
 
-        # The next required counter write sees the genuinely aborted transaction.
-        with pytest.raises(psycopg.errors.InFailedSqlTransaction):
-            manager.complete_job(job["id"], **completion_arguments(job))
-        assert durable_state(reader, job["id"]) == before
-        assert calls == ["cursor_exit", "context_exit", "close"]
-    else:
-        assert manager.complete_job(job["id"], **completion_arguments(job)) is True
-        assert_completed(reader, job["id"])
+            # The next required counter write sees the genuinely aborted transaction.
+            with pytest.raises(psycopg.errors.InFailedSqlTransaction):
+                manager.complete_job(job["id"], **completion_arguments(job))
+            assert durable_state(reader, job["id"]) == before
+            assert calls == ["cursor_exit", "context_exit", "close"]
+        else:
+            assert manager.complete_job(job["id"], **completion_arguments(job)) is True
+            assert_completed(reader, job["id"])
     assert entry[:4] == ["connect", "test-mode", "identity", "diagnostic"]
     # The real guard is reachable with counters/outbox disabled: its separate real
     # policy lookup does not issue statements on the aborted owning connection.
     if abort and manager.backend == "postgres":
-        monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "false")
-        monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+        for setting in ("JOBS_COUNTERS_ENABLED", "JOBS_EVENTS_OUTBOX"):
+            monkeypatch.setenv(setting, "false")
         record_completion_boundaries(manager, monkeypatch, calls)
         calls.clear()
         with pytest.raises(RuntimeError, match="transaction is aborted"):
             manager.complete_job(job["id"], **completion_arguments(job))
         assert "rollback" in calls and "commit" not in calls
         assert durable_state(reader, job["id"]) == before
-    monkeypatch.setattr(manager_module, "_is_test_mode", original_test_mode)
 
 
 @pytest.mark.parametrize("mutation", ["late-binding", "wrong-order"])

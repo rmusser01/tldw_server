@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -11,6 +13,34 @@ import tldw_Server_API.app.core.Jobs.manager as manager_module
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 _BINDING_COMPLETION = "binding-token"
+
+
+@contextmanager
+def observe_python_calls(
+    observers: dict[Callable[..., Any], Callable[[dict[str, Any]], None]],
+    *,
+    returns: dict[Callable[..., Any], Callable[[Any], None]] | None = None,
+) -> Iterator[None]:
+    """Observe real Python calls without replacing their implementation or return value."""
+    by_event = {"call": observers, "return": returns or {}}
+    previous = sys.getprofile()
+
+    def profile(frame: Any, event: str, arg: Any) -> None:
+        if previous is not None:
+            previous(frame, event, arg)
+        for function, observer in by_event.get(event, {}).items():
+            if frame.f_code is not function.__code__:
+                continue
+            owner = getattr(function, "__self__", None)
+            if owner is not None and frame.f_locals.get(frame.f_code.co_varnames[0]) is not owner:
+                continue
+            observer(dict(frame.f_locals) if event == "call" else arg)
+
+    sys.setprofile(profile)
+    try:
+        yield
+    finally:
+        sys.setprofile(previous)
 
 
 class CompletionConnection:

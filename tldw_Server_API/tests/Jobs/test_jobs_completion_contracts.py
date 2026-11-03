@@ -267,7 +267,7 @@ def test_invalid_effect_order_is_rejected(indices: tuple[int, ...]) -> None:
     full = (*prepared_effects({}), SlaWarningEffect(18, 1, "RuntimeError"))
     # Distinct bindings isolate grammar errors from duplicate-binding validation.
     effects = tuple(replace(full[index], binding_id=100 + n) for n, index in enumerate(indices))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^Invalid completion effect preparation order$"):
         CompleteJobResult.applied(origin=CompletionOrigin.PROCESSING, locked_row={}, effects=effects, durable_events=())
 
 
@@ -293,7 +293,7 @@ def test_durable_events_are_independent_of_observer_preparation(event_types: tup
 )
 def test_invalid_durable_event_order_is_rejected(event_types: tuple[str, ...]) -> None:
     """Inserted facts cannot reverse or duplicate lifecycle order."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^Invalid completion durable event order$"):
         CompleteJobResult.applied(
             origin=CompletionOrigin.QUEUED,
             locked_row={},
@@ -310,7 +310,7 @@ def test_binding_ids_are_unique_only_within_attempt(bindings: list[int]) -> None
         assert CompleteJobResult.applied(
             origin=CompletionOrigin.PROCESSING, locked_row={}, effects=effects, durable_events=()
         ).public_success
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^Completion binding IDs must be unique within an attempt$"):
         CompleteJobResult.applied(
             origin=CompletionOrigin.PROCESSING,
             locked_row={},
@@ -329,7 +329,7 @@ def test_metric_permutations_require_a_prepared_prefix(order: list[int]) -> None
             origin=CompletionOrigin.QUEUED, locked_row={}, effects=effects, durable_events=()
         ).public_success
     else:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="^Invalid completion effect preparation order$"):
             CompleteJobResult.applied(origin=CompletionOrigin.QUEUED, locked_row={}, effects=effects, durable_events=())
 
 
