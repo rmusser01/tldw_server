@@ -4056,6 +4056,56 @@ def test_streaming_lazy_openai_oauth_refreshes_once_before_output(
     assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 1
 
 
+def test_streaming_oauth_retry_records_one_usage_row_for_the_successful_attempt(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+):
+    """The attempt that failed before any output is refunded, not recorded, so the retry on the same request and
+    reservation is charged once (TASK-13953)."""
+    runtime_type = _credential_runtime_double(auth_source="oauth")
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=True,
+    )
+    usage_log = AsyncMock(return_value=None)
+
+    def expired_stream():
+        if False:
+            yield ""
+        raise _certified_pre_dispatch(
+            ChatAuthenticationError("sentinel expired oauth", provider="openai")
+        )
+
+    def refreshed_stream():
+        yield 'data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n'
+        yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch.object(chat_service, "log_llm_usage", usage_log),
+    ):
+        provider_call.side_effect = [expired_stream(), refreshed_stream()]
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json=request_data.model_dump(),
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert provider_call.call_count == 2
+        (row,) = [call.kwargs for call in usage_log.await_args_list]
+    assert (row["estimate_source"], row["completion_tokens"]) == ("stream_estimate", len("recovered") // 4)
+
+
 def test_real_openai_401_refreshes_oauth_once_before_stream_output(
     authenticated_client,
     mock_chacha_db,

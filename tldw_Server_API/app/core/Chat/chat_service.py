@@ -204,7 +204,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
-from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _usage_tokens
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _approx_tokens, _StreamUsage, _usage_tokens
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
@@ -215,6 +215,7 @@ from tldw_Server_API.app.core.Persona.conversation_admission import require_curr
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Usage.llm_accounting import submit_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import call_credential_source
 from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage, usage_with_service_tier
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
@@ -4005,6 +4006,82 @@ async def _maybe_refund_streaming_rg(
         pass
 
 
+async def _record_stream_usage(
+    *,
+    request: Any,
+    provider: str,
+    model: str,
+    templated_llm_payload: list[dict[str, Any]],
+    conversation_id: str | None,
+    llm_start_time: float,
+    credential_source: str | None,
+    stream_usage: _StreamUsage | None,
+    full_reply: str = "",
+    rg_commit_cb: Callable[[int], Any] | None,
+) -> None:
+    """Write the one usage row of a /chat/completions stream and commit its tokens; never raises.
+
+    The row comes from the provider's usage chunk when one arrived, else from the prompt estimate and what
+    the stream received: content, reasoning and tool-call arguments, as the provider-level recorder counts
+    them. A side the chunk does not count comes from the estimate. The same tokens go to the Resource
+    Governor and billing through ``rg_commit_cb``, however the stream ended (TASK-13953).
+    """
+    total_tokens = 0
+    try:
+        provider_usage = stream_usage.usage if stream_usage is not None else None
+        reported_prompt, reported_completion = _usage_tokens(provider_usage) if provider_usage else (0, 0)
+        reported = (reported_prompt, reported_completion) != (0, 0)
+        prompt_tokens = reported_prompt
+        if not prompt_tokens:
+            try:
+                prompt_tokens = _estimate_tokens_from_messages(templated_llm_payload)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                prompt_tokens = 0
+        received_chars = stream_usage.chars if stream_usage is not None else len(full_reply or "")
+        completion_tokens = reported_completion or _approx_tokens(received_chars)
+        user_id = None
+        api_key_id = None
+        try:
+            if request is not None and hasattr(request, "state"):
+                user_id = getattr(request.state, "user_id", None)
+                api_key_id = getattr(request.state, "api_key_id", None)
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        total_tokens = int(prompt_tokens + completion_tokens)
+        await log_llm_usage(
+            user_id=user_id,
+            key_id=api_key_id,
+            request=request,
+            endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
+            operation="chat",
+            provider=provider,
+            model=model,
+            status=200,
+            latency_ms=int((time.time() - llm_start_time) * 1000),
+            prompt_tokens=int(prompt_tokens),
+            completion_tokens=int(completion_tokens),
+            total_tokens=total_tokens,
+            request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
+            conversation_id=(str(conversation_id) if conversation_id is not None else None),
+            usage_metadata=provider_usage if reported else None,
+            estimated=None if reported and (prompt_tokens, completion_tokens) == (reported_prompt, reported_completion) else True,
+            estimate_source=None if reported else "stream_estimate",
+            credential_source=credential_source,
+        )
+    except _CHAT_NONCRITICAL_EXCEPTIONS:
+        pass
+    finally:
+        # Commit the recorded tokens to the Resource Governor and billing whatever the write did: a commit skipped
+        # on a failed write would be a quota bypass
+        try:
+            if callable(rg_commit_cb):
+                res = rg_commit_cb(total_tokens)  # may be async or sync
+                if hasattr(res, "__await__"):
+                    await res  # type: ignore[misc]
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+
+
 def _evaluate_chat_prompt_cost_guardrails(
     *,
     cleaned_args: Mapping[str, Any],
@@ -4182,6 +4259,7 @@ async def execute_streaming_call(
     )
     stream_metrics_recorded = False
     stream_failure_recorded = False
+    stream_usage_recorded = False  # one usage row per stream, however it ends (TASK-13953)
     raw_stream_iter: AsyncIterator[str] | Iterator[str] | None = None
     queue_for_exec = None
     queue_future: asyncio.Future[Any] | None = None
@@ -5007,15 +5085,42 @@ async def execute_streaming_call(
             payload=message_payload,
         )
 
+    def _stream_usage_recorder(
+        stream_usage: _StreamUsage | None, full_reply: str = ""
+    ) -> Callable[[], Awaitable[None]] | None:
+        """The write of this stream's one usage row and token commit, or None once it is claimed (TASK-13953)."""
+        nonlocal stream_usage_recorded
+        if stream_usage_recorded:
+            return None
+        stream_usage_recorded = True
+        return partial(
+            _record_stream_usage,
+            request=request,
+            provider=selected_provider,
+            model=model,
+            templated_llm_payload=templated_llm_payload,
+            conversation_id=final_conversation_id,
+            llm_start_time=llm_start_time,
+            credential_source=usage_credential_source,
+            stream_usage=stream_usage,
+            full_reply=full_reply,
+            rg_commit_cb=rg_commit_cb,
+        )
+
     async def save_callback(
         full_reply: str,
         tool_calls: list[dict[str, Any]] | None,
         function_call: dict[str, Any] | None,
         *,
         generation: dict[str, Any] | None = None,
-        provider_usage: dict[str, Any] | None = None,
+        stream_usage: _StreamUsage | None = None,
     ):
         nonlocal stream_metrics_recorded
+        # The usage row and the token commit, once per stream, detached: a client drop or a failure during the
+        # save below must not lose it (an early end records in _finalize_stream)
+        record = _stream_usage_recorder(stream_usage, full_reply)
+        if record is not None:
+            submit_accounting(record)
         saved_message_id: str | None = None
         tool_execution_payload: list[dict[str, Any]] | None = None
         structured_events: list[dict[str, Any]] = []
@@ -5134,60 +5239,6 @@ async def execute_streaming_call(
                     "Streaming chat tool auto-execution skipped error_type={}",
                     type(autoexec_err).__name__,
                 )
-        # Usage logging after the stream completes: from the provider's usage chunk, else an estimate
-        total_tokens = 0
-        try:
-            reported_prompt, reported_completion = _usage_tokens(provider_usage) if provider_usage else (0, 0)
-            reported = (reported_prompt, reported_completion) != (0, 0)
-            # A side the block does not count (a prompt-only block, say) comes from the estimate.
-            prompt_tokens = reported_prompt
-            if not prompt_tokens:
-                try:
-                    prompt_tokens = _estimate_tokens_from_messages(templated_llm_payload)
-                except _CHAT_NONCRITICAL_EXCEPTIONS:
-                    prompt_tokens = 0
-            completion_tokens = reported_completion or max(0, len(full_reply or "") // 4)
-            user_id = None
-            api_key_id = None
-            try:
-                if request is not None and hasattr(request, "state"):
-                    user_id = getattr(request.state, "user_id", None)
-                    api_key_id = getattr(request.state, "api_key_id", None)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pass
-            latency_ms = int((time.time() - llm_start_time) * 1000)
-            total_tokens = int(prompt_tokens + completion_tokens)
-            await log_llm_usage(
-                user_id=user_id,
-                key_id=api_key_id,
-                request=request,
-                endpoint=(f"{request.method}:{request.url.path}" if request else "POST:/api/v1/chat/completions"),
-                operation="chat",
-                provider=selected_provider,
-                model=model,
-                status=200,
-                latency_ms=latency_ms,
-                prompt_tokens=int(prompt_tokens),
-                completion_tokens=int(completion_tokens),
-                total_tokens=total_tokens,
-                request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
-                conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
-                usage_metadata=provider_usage if reported else None,
-                estimated=None if reported_prompt and reported_completion else True,
-                estimate_source=None if reported else "stream_estimate",
-                credential_source=usage_credential_source,
-            )
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Commit the recorded tokens to the Resource Governor, if provided
-        try:
-            if callable(rg_commit_cb):
-                # rg_commit_cb may be async or sync; call accordingly
-                res = rg_commit_cb(total_tokens)
-                if hasattr(res, "__await__"):
-                    await res  # type: ignore[misc]
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            pass
         # Audit success
         try:
             if audit_service and audit_context:
@@ -5507,17 +5558,14 @@ async def execute_streaming_call(
             with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
                 _out_transform.flush = _flush_holdback
 
-            async def _finalize_stream(*, success: bool, cancelled: bool, error: bool) -> None:
+            async def _finalize_stream(
+                *, success: bool, cancelled: bool, error: bool, stream_usage: _StreamUsage | None = None
+            ) -> None:
                 nonlocal stream_failure_recorded, stream_metrics_recorded
                 if not success and not stream_failure_recorded and not stream_metrics_recorded:
                     try:
                         latency = time.time() - llm_start_time
-                        if cancelled:
-                            error_type = "stream_cancelled"
-                        elif error:
-                            error_type = "stream_error"
-                        else:
-                            error_type = "stream_incomplete"
+                        error_type = "stream_cancelled" if cancelled else "stream_error" if error else "stream_incomplete"
                         metrics.track_llm_call(
                             selected_provider,
                             model,
@@ -5532,10 +5580,15 @@ async def execute_streaming_call(
                         pass
                 if success:
                     return
-                if callable(rg_refund_cb):
-                    res = rg_refund_cb(cancelled=cancelled, error=error)
-                    if hasattr(res, "__await__"):
-                        await res  # type: ignore[misc]
+                if not (stream_usage and (stream_usage.usage is not None or stream_usage.chars)):
+                    # Nothing came back (the endpoint may be retrying this attempt): refund, as before (TASK-13953)
+                    await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=cancelled, error=error)
+                    return
+                # Recorded and committed, never refunded: the stream was read (TASK-13953). Detached, because a
+                # cancelled stream's teardown may cut any await here.
+                record = _stream_usage_recorder(stream_usage)
+                if record is not None:
+                    submit_accounting(record)
 
             generator = get_chat_completion_pipeline().execute_streaming(
                 request=StreamingPipelineRequest(
