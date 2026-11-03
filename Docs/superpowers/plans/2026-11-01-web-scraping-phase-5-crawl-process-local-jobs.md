@@ -817,7 +817,7 @@ explicit crawl cancellation, and full-queue retry reservation reuse.
 **Goal:** Switch wrappers/services once, propagate outcomes, and certify real consumers.
 **Success Criteria:** Public parity except approved safety fixes; report/receipt fidelity and architecture guards pass.
 **Tests:** Tasks 9-11 full compatibility, security, browser/lifecycle and affected-consumer coverage.
-**Status:** In Progress (Task 9 independently accepted; Task 10 service outcomes and Task 11 certification remain).
+**Status:** In Progress (Tasks 9-10 independently accepted; Task 11 integration and certification remain).
 
 ### Task 9: Switch Legacy And Enhanced Adapters
 
@@ -1210,7 +1210,7 @@ Partial articles stay available; only active callers may summarize/store success
 articles under existing independent service controls. Failure-only entries cause
 no success storage/summary. No post-processing can mutate terminal crawl outcome.
 
-- [ ] **Step 1: Write every reason/receipt/cancellation mapping test.**
+- [x] **Step 1: Write every reason/receipt/cancellation mapping test.**
 
 ```python
 async def test_ephemeral_receipt_preserves_partial_outcome(service_harness):
@@ -1234,10 +1234,10 @@ Add cancellation-before-publication, summary failure, duplicate/persistent recei
 ingestion unwrap, failed-empty HTTP table, partial-plus-secondary-checkpoint-error,
 no-article failures, existing mid-crawl error list, storage failure not rewriting
 outcome, blocking-write drain, and provenance/summary/cookie/dedup regression.
-- [ ] **Step 2: Run `python -m pytest tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py tldw_Server_API/tests/Web_Scraping/test_phase5_ingestion_outcomes.py -q`.** Expected: missing outcome propagation/status separation fails.
-- [ ] **Step 3: Compose reports and explicit outcome/error projections before existing post-processing, then preserve them through each receipt and stored payload.** Reuse database abstractions; no new persistence engine or re-ingestion authorization from checkpoints.
-- [ ] **Step 4: Run new tests, Task 4 security tests, and existing enhanced/legacy scraping service and media ingestion contract tests identified in Task 1.** Expected: active-caller partial processing retained, no false success, no new service side effects after cancellation.
-- [ ] **Step 5: Commit standalone service cutover and child task:** `fix(web-scraping): preserve crawl outcomes through storage and ingestion`.
+- [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py tldw_Server_API/tests/Web_Scraping/test_phase5_ingestion_outcomes.py -q`.** Expected: missing outcome propagation/status separation fails.
+- [x] **Step 3: Compose reports and explicit outcome/error projections before existing post-processing, then preserve them through each receipt and stored payload.** Reuse database abstractions; no new persistence engine or re-ingestion authorization from checkpoints.
+- [x] **Step 4: Run new tests, Task 4 security tests, and existing enhanced/legacy scraping service and media ingestion contract tests identified in Task 1.** Expected: active-caller partial processing retained, no false success, no new service side effects after cancellation.
+- [x] **Step 5: Commit standalone service cutover and child task:** `fix(web-scraping): preserve crawl outcomes through storage and ingestion`.
 
 ### Task 11: Certify Architecture, Consumers, And Physical Lifecycle
 

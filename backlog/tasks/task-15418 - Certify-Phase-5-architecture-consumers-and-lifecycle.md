@@ -1,7 +1,7 @@
 ---
 id: TASK-15418
 title: Certify Phase 5 architecture consumers and lifecycle
-status: To Do
+status: In Progress
 labels:
 - web-scraping
 - phase5
@@ -24,6 +24,7 @@ Execute Task 11 of the approved Phase 5 plan as an independently reviewable unit
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Parent TASK-15407. Plan Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md, Task 11. ADR assessment: no new ADR; existing ADR-085 governs. Use backlog-py; no product edits outside this task scope without controller ruling. Implementation and review evidence will be linked from the plan-scoped SDD ledger.
+Task10 accepteda864ccb315. Begin Task11 with controller-owned metadata namespace repair and fresh-dev rebase BEFORE certification:45openPR/4568fullypaginatedpaths, maxperPR1168; dev576feef820, externalTASKmax15420/ADR092; mainlocalmax12027/feature15418. Existingcollisions15407/15410..15418 andADR085 require officialbacklog-py renumber+scopedreference updates, namespace-onlyADRrename preservingacceptedrationale, backupanchor, thenrebase ontofreshdev. No sharedbranchpush/merge. LatestdevalreadyfixesarxivNoneassertions/httpx2import, sharedHTTPNativeReady+boundedstream changesmustpreserveandcertifycombinedcode. Single-threadnativeforkbootstrapread-onlyproof passesexisting4assertions withwarningaserror; implementisolationinTask11 withoutdroppingcoverage. Final architecture/lifecycle/consumers/docs/inventory/security/quality/wholebranchreview gates unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
