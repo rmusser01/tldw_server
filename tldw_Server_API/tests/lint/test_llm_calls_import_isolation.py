@@ -75,6 +75,7 @@ AUTHNZ_LOADED_BY_LLM_CALLS: frozenset[str] = frozenset(
         "tldw_Server_API.app.core.AuthNZ.database",
         "tldw_Server_API.app.core.AuthNZ.exceptions",
         "tldw_Server_API.app.core.AuthNZ.ip_allowlist",
+        "tldw_Server_API.app.core.AuthNZ.membership_writer",
         "tldw_Server_API.app.core.AuthNZ.migrations",
         "tldw_Server_API.app.core.AuthNZ.orgs_teams",
         "tldw_Server_API.app.core.AuthNZ.platform_admin",
@@ -83,6 +84,7 @@ AUTHNZ_LOADED_BY_LLM_CALLS: frozenset[str] = frozenset(
         "tldw_Server_API.app.core.AuthNZ.profile_candidate_schema",
         "tldw_Server_API.app.core.AuthNZ.profile_user_fields",
         "tldw_Server_API.app.core.AuthNZ.profile_user_write_guard",
+        "tldw_Server_API.app.core.AuthNZ.profile_version",
         "tldw_Server_API.app.core.AuthNZ.repos",
         "tldw_Server_API.app.core.AuthNZ.repos._dual_backend",
         "tldw_Server_API.app.core.AuthNZ.repos.admin_monitoring_repo",
@@ -91,10 +93,13 @@ AUTHNZ_LOADED_BY_LLM_CALLS: frozenset[str] = frozenset(
         "tldw_Server_API.app.core.AuthNZ.repos.org_stt_settings_repo",
         "tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo",
         "tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo",
+        "tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result",
+        "tldw_Server_API.app.core.AuthNZ.repos.provider_usage_reservations_repo",
         "tldw_Server_API.app.core.AuthNZ.repos.usage_repo",
         "tldw_Server_API.app.core.AuthNZ.repos.workspace_provider_installations_repo",
         "tldw_Server_API.app.core.AuthNZ.settings",
         "tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema",
+        "tldw_Server_API.app.core.AuthNZ.transaction_policy",
     }
 )
 
