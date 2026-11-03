@@ -294,8 +294,9 @@ def test_instrumenting_keeps_type_identity_and_abstractness() -> None:
         _StillAbstract()  # type: ignore[abstract]
 
 
-async def test_non_finite_usage_never_raises_and_counts_as_zero(rows) -> None:
-    """An inf or NaN token count is skipped like a missing one, and the call is unaffected."""
+async def test_non_finite_usage_never_raises_and_is_estimated(rows) -> None:
+    """An inf or NaN token count is skipped like a missing one, so it comes from the estimate (TASK-13953), and
+    the call is unaffected."""
 
     class _NonFiniteProvider(_FakeProvider):
         """Reports non-finite prompt tokens."""
@@ -318,8 +319,9 @@ async def test_non_finite_usage_never_raises_and_counts_as_zero(rows) -> None:
         assert _NonFiniteProvider().chat(REQUEST)["usage"]["completion_tokens"] == 7
         assert len(list(_NonFiniteProvider().stream(REQUEST))) == 2
     chat_row, stream_row = await _settled(rows)
-    assert (chat_row["prompt_tokens"], chat_row["completion_tokens"]) == (0, 7)
-    assert (stream_row["prompt_tokens"], stream_row["completion_tokens"]) == (0, 2)
+    prompt_estimate = usage_accounting._prompt_estimate(REQUEST)
+    assert (chat_row["prompt_tokens"], chat_row["completion_tokens"]) == (prompt_estimate, 7)
+    assert (stream_row["prompt_tokens"], stream_row["completion_tokens"]) == (prompt_estimate, 2)
 
 
 async def test_a_recorder_bug_never_reaches_the_caller(monkeypatch: pytest.MonkeyPatch, rows) -> None:
@@ -421,6 +423,71 @@ async def test_a_usage_block_without_token_fields_is_estimated(rows) -> None:
     (row,) = await _settled(rows)
     assert row["estimated"] is True and row["estimate_source"] == "response_estimate"
     assert row["usage_metadata"] is None
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected_chat", "expected_stream"),
+    [
+        ({"prompt_tokens": 50}, (50, 10), (50, 2)),
+        ({"completion_tokens": 7}, (usage_accounting._prompt_estimate(REQUEST), 7), (usage_accounting._prompt_estimate(REQUEST), 7)),
+    ],
+    ids=["prompt-only", "completion-only"],
+)
+async def test_a_usage_block_that_counts_one_side_takes_the_other_from_the_estimate(
+    rows, usage, expected_chat, expected_stream
+) -> None:
+    """A one-sided block does not make the other side count as nothing, as on /chat/completions (TASK-13953)."""
+
+    class _OneSidedProvider(_FakeProvider):
+        """Reports one side of the usage, in the response and in the stream."""
+
+        name = "fake-one-sided"
+
+        def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+            """Return 40 characters of content with the one-sided block."""
+            return {"choices": [{"message": {"content": "x" * 40}}], "usage": dict(usage)}
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield 8 characters of content, then the one-sided block."""
+            yield 'data: {"choices":[{"delta":{"content":"abcdefgh"}}]}\n\n'
+            yield "data: " + json.dumps({"choices": [], "usage": usage}) + "\n\n"
+            yield "data: [DONE]\n\n"
+
+    with llm_call_context(user_id=7):
+        _OneSidedProvider().chat(REQUEST)
+        list(_OneSidedProvider().stream(REQUEST))
+    chat_row, stream_row = await _settled(rows)
+    assert (chat_row["prompt_tokens"], chat_row["completion_tokens"]) == expected_chat
+    assert (stream_row["prompt_tokens"], stream_row["completion_tokens"]) == expected_stream
+    assert chat_row["estimated"] is True and stream_row["estimated"] is True
+    assert chat_row["usage_metadata"] == usage and stream_row["usage_metadata"] == usage
+
+
+async def test_a_zero_side_the_estimate_agrees_with_is_not_marked_estimated(rows) -> None:
+    """An empty reply with a block that counts no completion tokens keeps (prompt, 0): nothing was estimated."""
+    usage = {"prompt_tokens": 50, "completion_tokens": 0}
+
+    class _EmptyReplyProvider(_FakeProvider):
+        """Returns no content, and a block that counts the prompt only."""
+
+        name = "fake-empty-reply"
+
+        def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+            """Return an empty reply with the block."""
+            return {"choices": [{"message": {"content": ""}}], "usage": dict(usage)}
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Yield the block and nothing else."""
+            yield "data: " + json.dumps({"choices": [], "usage": usage}) + "\n\n"
+            yield "data: [DONE]\n\n"
+
+    with llm_call_context(user_id=7):
+        _EmptyReplyProvider().chat(REQUEST)
+        list(_EmptyReplyProvider().stream(REQUEST))
+    chat_row, stream_row = await _settled(rows)
+    assert (chat_row["prompt_tokens"], chat_row["completion_tokens"]) == (50, 0)
+    assert (stream_row["prompt_tokens"], stream_row["completion_tokens"]) == (50, 0)
+    assert chat_row["estimated"] is None and stream_row["estimated"] is None
 
 
 async def test_the_stream_estimate_counts_reasoning_and_tool_call_arguments(rows) -> None:
