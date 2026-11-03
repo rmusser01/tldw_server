@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from tldw_Server_API.app.api.v1.schemas.document_rendering import (
+from tldw_Server_API.app.core.Document_Workspace.models import (
     MAX_ANNOTATION_BYTES,
     MAX_PDF_BYTES,
     MAX_WORK_BYTES,

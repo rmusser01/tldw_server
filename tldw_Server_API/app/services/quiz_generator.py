@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.osce import OsceStationAuthoringResponse
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import capture_provider_override_call_snapshot
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import configured_provider_model_from_snapshot
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
@@ -28,6 +26,10 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    configured_provider_model_from_snapshot,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.osce_generator import (

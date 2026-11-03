@@ -7992,7 +7992,7 @@ async def persona_sessions(
             str(item.get("session_id") or ""): item
             for item in manager.list_sessions(user_id=user_id, persona_id=persona_id, limit=max(limit, 200))
         }
-        durable_counts = db.list_persona_transcript_counts(user_id=user_id, session_ids=[str(row["id"]) for row in rows])
+        durable_counts = db.persona_transcript_store.list_persona_transcript_counts(user_id=user_id, session_ids=[str(row["id"]) for row in rows])
         return [
             _persona_session_summary_from_db(
                 row,
@@ -8082,6 +8082,154 @@ async def persona_session_export(
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="export persona session") from exc
+
+
+def _persona_live_session_summary_snapshot(
+    voice_runtime: dict[str, Any] | None,
+) -> dict[str, Any]:
+    runtime = dict(voice_runtime or {})
+    return {
+        "auto_commit_enabled": _coerce_bool(runtime.get("enable_vad"), default=True),
+        "vad_threshold": _clamp_persona_live_float(
+            runtime.get("vad_threshold"),
+            default=0.5,
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "min_silence_ms": _clamp_persona_live_int(
+            runtime.get("vad_min_silence_ms"),
+            default=250,
+            min_value=50,
+            max_value=10_000,
+        ),
+        "turn_stop_secs": _clamp_persona_live_float(
+            runtime.get("vad_turn_stop_secs"),
+            default=0.2,
+            min_value=0.05,
+            max_value=10.0,
+        ),
+        "min_utterance_secs": _clamp_persona_live_float(
+            runtime.get("vad_min_utterance_secs"),
+            default=0.4,
+            min_value=0.0,
+            max_value=10.0,
+        ),
+    }
+
+
+def _normalize_voice_runtime_config(msg: dict[str, Any]) -> dict[str, Any]:
+    voice_payload = msg.get("voice") if isinstance(msg.get("voice"), dict) else {}
+    stt_payload = msg.get("stt") if isinstance(msg.get("stt"), dict) else {}
+    tts_payload = msg.get("tts") if isinstance(msg.get("tts"), dict) else {}
+
+    normalized_trigger_phrases: list[str] = []
+    seen_phrases: set[str] = set()
+    for raw_phrase in voice_payload.get("trigger_phrases") or []:
+        phrase = str(raw_phrase or "").strip()
+        if not phrase or phrase in seen_phrases:
+            continue
+        seen_phrases.add(phrase)
+        normalized_trigger_phrases.append(phrase)
+
+    return {
+        "trigger_phrases": normalized_trigger_phrases,
+        "auto_resume": _coerce_bool(voice_payload.get("auto_resume"), default=False),
+        "barge_in": _coerce_bool(voice_payload.get("barge_in"), default=False),
+        "wake_behavior": _bounded_label(
+            voice_payload.get("wake_behavior"),
+            allowed=_PERSONA_WAKE_BEHAVIORS,
+            fallback="one_shot",
+        ),
+        "stt_language": str(stt_payload.get("language") or "").strip() or None,
+        "stt_model": str(stt_payload.get("model") or "").strip() or None,
+        "enable_vad": _coerce_bool(stt_payload.get("enable_vad"), default=True),
+        "vad_threshold": _clamp_persona_live_float(
+            stt_payload.get("vad_threshold"),
+            default=0.5,
+            min_value=0.0,
+            max_value=1.0,
+        ),
+        "vad_min_silence_ms": _clamp_persona_live_int(
+            stt_payload.get("min_silence_ms"),
+            default=250,
+            min_value=50,
+            max_value=10_000,
+        ),
+        "vad_turn_stop_secs": _clamp_persona_live_float(
+            stt_payload.get("turn_stop_secs"),
+            default=0.2,
+            min_value=0.05,
+            max_value=10.0,
+        ),
+        "vad_min_utterance_secs": _clamp_persona_live_float(
+            stt_payload.get("min_utterance_secs"),
+            default=0.4,
+            min_value=0.0,
+            max_value=10.0,
+        ),
+        "tts_provider": str(tts_payload.get("provider") or "").strip() or None,
+        "tts_voice": str(tts_payload.get("voice") or "").strip() or None,
+        "tts_model": str(tts_payload.get("model") or "").strip() or None,
+        "text_only_due_to_tts_failure": False,
+    }
+
+
+def _build_stored_steps_with_policy(
+    steps: list[Any], *, persona_policy_rules: list[dict[str, Any]],
+    session_policy_rules: list[dict[str, Any]], session_scopes: set[str],
+    allow_export: bool, allow_delete: bool,
+) -> tuple[list[dict[str, Any]], bool]:
+    stored: list[dict[str, Any]] = []
+    denied = False
+    for step in steps:
+        step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
+        policy = _evaluate_step_policy(
+            step_type=step_type,
+            tool_name=step.tool,
+            args=step.args,
+            persona_policy_rules=persona_policy_rules,
+            session_policy_rules=session_policy_rules,
+            session_scopes=session_scopes,
+            allow_export=allow_export,
+            allow_delete=allow_delete,
+        )
+        if not bool(policy.get("allow", False)):
+            denied = True
+            _increment_persona_metric(
+                "persona_ws_policy_denials_total",
+                {
+                    "step_type": _bounded_label(
+                        step_type,
+                        allowed=_PERSONA_WS_ALLOWED_STEP_TYPES,
+                        fallback="mcp_tool",
+                    ),
+                    "reason": _metric_reason_bucket(policy.get("reason_code")),
+                },
+            )
+        stored.append(
+            {
+                "idx": step.idx,
+                "step_type": step_type,
+                "tool": step.tool,
+                "args": step.args,
+                "description": step.description,
+                "why": step.why,
+                "policy": policy,
+            }
+        )
+    return stored, denied
+
+
+async def _send_voice_session_unavailable(
+    stream: Any, *, session_id: str, client_message_id: str | None,
+) -> None:
+    """Settle a failed preparation without admitting an unowned voice session."""
+    await stream.send_json({
+        "event": "voice_readiness", "session_id": session_id,
+        "client_message_id": client_message_id, "ready": False,
+        "reason_code": "VOICE_SESSION_UNAVAILABLE",
+        "message": "Connect an active Persona Live session before starting voice.",
+    })
 
 
 @router.websocket("/stream")
@@ -8491,7 +8639,7 @@ async def persona_stream(
                 bound_persona = str(context.get("persona_id") or _DEFAULT_PERSONA_ID)
                 persisted = await run_quiescent_operation(
                     asyncio.to_thread(
-                        chacha_operation(independent=True)(persona_scope_db.validate_persona_transcript_session),
+                        chacha_operation(independent=True)(persona_scope_db.persona_transcript_store.validate_persona_transcript_session),
                         session_id=session_id,
                         user_id=connection_user_id,
                         persona_id=bound_persona,
@@ -8552,7 +8700,7 @@ async def persona_stream(
             )
             snapshot = await run_quiescent_operation(
                 asyncio.to_thread(
-                    chacha_operation(independent=True)(persona_scope_db.append_persona_transcript_turn),
+                    chacha_operation(independent=True)(persona_scope_db.persona_transcript_store.append_persona_transcript_turn),
                     session_id=session_id,
                     user_id=connection_user_id,
                     persona_id=effective_persona_id,
@@ -8941,37 +9089,6 @@ async def persona_stream(
             normalized_persona_id = str(runtime_context.get("persona_id") or "").strip()
             return normalized_persona_id or None
 
-        def _persona_live_session_summary_snapshot(
-            voice_runtime: dict[str, Any] | None,
-        ) -> dict[str, Any]:
-            runtime = dict(voice_runtime or {})
-            return {
-                "auto_commit_enabled": _coerce_bool(runtime.get("enable_vad"), default=True),
-                "vad_threshold": _clamp_persona_live_float(
-                    runtime.get("vad_threshold"),
-                    default=0.5,
-                    min_value=0.0,
-                    max_value=1.0,
-                ),
-                "min_silence_ms": _clamp_persona_live_int(
-                    runtime.get("vad_min_silence_ms"),
-                    default=250,
-                    min_value=50,
-                    max_value=10_000,
-                ),
-                "turn_stop_secs": _clamp_persona_live_float(
-                    runtime.get("vad_turn_stop_secs"),
-                    default=0.2,
-                    min_value=0.05,
-                    max_value=10.0,
-                ),
-                "min_utterance_secs": _clamp_persona_live_float(
-                    runtime.get("vad_min_utterance_secs"),
-                    default=0.4,
-                    min_value=0.0,
-                    max_value=10.0,
-                ),
-            }
 
         async def _upsert_persona_live_session_summary_safe(
             *,
@@ -10257,46 +10374,6 @@ async def persona_stream(
                     reason_code="PLAN_INVALID",
                 )
                 return
-            def _build_stored_steps_with_policy() -> tuple[list[dict[str, Any]], bool]:
-                stored: list[dict[str, Any]] = []
-                denied = False
-                for step in pending_plan.steps:
-                    step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
-                    policy = _evaluate_step_policy(
-                        step_type=step_type,
-                        tool_name=step.tool,
-                        args=step.args,
-                        persona_policy_rules=persona_policy_rules,
-                        session_policy_rules=session_policy_rules,
-                        session_scopes=session_scopes,
-                        allow_export=allow_export,
-                        allow_delete=allow_delete,
-                    )
-                    if not bool(policy.get("allow", False)):
-                        denied = True
-                        _increment_persona_metric(
-                            "persona_ws_policy_denials_total",
-                            {
-                                "step_type": _bounded_label(
-                                    step_type,
-                                    allowed=_PERSONA_WS_ALLOWED_STEP_TYPES,
-                                    fallback="mcp_tool",
-                                ),
-                                "reason": _metric_reason_bucket(policy.get("reason_code")),
-                            },
-                        )
-                    stored.append(
-                        {
-                            "idx": step.idx,
-                            "step_type": step_type,
-                            "tool": step.tool,
-                            "args": step.args,
-                            "description": step.description,
-                            "why": step.why,
-                            "policy": policy,
-                        }
-                    )
-                return stored, denied
 
             async def _rewrite_runtime_policy_denial_to_safe_plan() -> list[dict[str, Any]] | None:
                 nonlocal pending_plan
@@ -10319,10 +10396,18 @@ async def persona_stream(
                         reason_code="PLAN_INVALID",
                     )
                     return None
-                rewritten_steps, _has_safe_denial_policy_denial = _build_stored_steps_with_policy()
+                rewritten_steps, _has_safe_denial_policy_denial = _build_stored_steps_with_policy(
+                    pending_plan.steps, persona_policy_rules=persona_policy_rules,
+                    session_policy_rules=session_policy_rules, session_scopes=session_scopes,
+                    allow_export=allow_export, allow_delete=allow_delete,
+                )
                 return rewritten_steps
 
-            stored_steps, has_policy_denial = _build_stored_steps_with_policy()
+            stored_steps, has_policy_denial = _build_stored_steps_with_policy(
+                    pending_plan.steps, persona_policy_rules=persona_policy_rules,
+                    session_policy_rules=session_policy_rules, session_scopes=session_scopes,
+                    allow_export=allow_export, allow_delete=allow_delete,
+                )
             if runtime_explorer_selected_plan and has_policy_denial:
                 rewritten_steps = await _rewrite_runtime_policy_denial_to_safe_plan()
                 if rewritten_steps is None:
@@ -10337,61 +10422,6 @@ async def persona_stream(
                 persona_id_value=runtime_persona_id,
             )
 
-        def _normalize_voice_runtime_config(msg: dict[str, Any]) -> dict[str, Any]:
-            voice_payload = msg.get("voice") if isinstance(msg.get("voice"), dict) else {}
-            stt_payload = msg.get("stt") if isinstance(msg.get("stt"), dict) else {}
-            tts_payload = msg.get("tts") if isinstance(msg.get("tts"), dict) else {}
-
-            normalized_trigger_phrases: list[str] = []
-            seen_phrases: set[str] = set()
-            for raw_phrase in voice_payload.get("trigger_phrases") or []:
-                phrase = str(raw_phrase or "").strip()
-                if not phrase or phrase in seen_phrases:
-                    continue
-                seen_phrases.add(phrase)
-                normalized_trigger_phrases.append(phrase)
-
-            return {
-                "trigger_phrases": normalized_trigger_phrases,
-                "auto_resume": _coerce_bool(voice_payload.get("auto_resume"), default=False),
-                "barge_in": _coerce_bool(voice_payload.get("barge_in"), default=False),
-                "wake_behavior": _bounded_label(
-                    voice_payload.get("wake_behavior"),
-                    allowed=_PERSONA_WAKE_BEHAVIORS,
-                    fallback="one_shot",
-                ),
-                "stt_language": str(stt_payload.get("language") or "").strip() or None,
-                "stt_model": str(stt_payload.get("model") or "").strip() or None,
-                "enable_vad": _coerce_bool(stt_payload.get("enable_vad"), default=True),
-                "vad_threshold": _clamp_persona_live_float(
-                    stt_payload.get("vad_threshold"),
-                    default=0.5,
-                    min_value=0.0,
-                    max_value=1.0,
-                ),
-                "vad_min_silence_ms": _clamp_persona_live_int(
-                    stt_payload.get("min_silence_ms"),
-                    default=250,
-                    min_value=50,
-                    max_value=10_000,
-                ),
-                "vad_turn_stop_secs": _clamp_persona_live_float(
-                    stt_payload.get("turn_stop_secs"),
-                    default=0.2,
-                    min_value=0.05,
-                    max_value=10.0,
-                ),
-                "vad_min_utterance_secs": _clamp_persona_live_float(
-                    stt_payload.get("min_utterance_secs"),
-                    default=0.4,
-                    min_value=0.0,
-                    max_value=10.0,
-                ),
-                "tts_provider": str(tts_payload.get("provider") or "").strip() or None,
-                "tts_voice": str(tts_payload.get("voice") or "").strip() or None,
-                "tts_model": str(tts_payload.get("model") or "").strip() or None,
-                "text_only_due_to_tts_failure": False,
-            }
 
         def _start_persona_live_turn(*, msg: dict[str, Any], text: str,
                                      turn_type: str = "user_message", source: str = "ws") -> None:
@@ -10469,6 +10499,12 @@ async def persona_stream(
                 )
             except (OSError, RuntimeError, ValueError, CharactersRAGDBError) as exc:
                 logger.bind(error_type=type(exc).__name__).warning("Persona session admission lookup failed")
+                if mtype == "voice_prepare":
+                    await _send_voice_session_unavailable(
+                        stream, session_id=admission_session_id,
+                        client_message_id=_bounded_client_message_id(msg.get("client_message_id")),
+                    )
+                    continue
                 await _emit_notice(
                     session_id=admission_session_id, level="error",
                     reason_code="SESSION_ADMISSION_FAILED",
@@ -10477,6 +10513,12 @@ async def persona_stream(
                 )
                 continue
             if not admitted:
+                if mtype == "voice_prepare":
+                    await _send_voice_session_unavailable(
+                        stream, session_id=admission_session_id,
+                        client_message_id=_bounded_client_message_id(msg.get("client_message_id")),
+                    )
+                    continue
                 await _emit_notice(
                     session_id=admission_session_id, level="error",
                     reason_code="SESSION_ID_UNAVAILABLE",
@@ -10494,12 +10536,9 @@ async def persona_stream(
                     session_id=session_id, user_id=authenticated_user_id,
                 )
                 if not session_id or not runtime_context.get("session_exists") or runtime_context.get("session_terminal"):
-                    await stream.send_json({
-                        "event": "voice_readiness", "session_id": session_id,
-                        "client_message_id": client_message_id, "ready": False,
-                        "reason_code": "VOICE_SESSION_UNAVAILABLE",
-                        "message": "Connect an active Persona Live session before starting voice.",
-                    })
+                    await _send_voice_session_unavailable(
+                        stream, session_id=session_id, client_message_id=client_message_id,
+                    )
                     continue
                 if mtype == "voice_prepare" and (
                     persona_voice_initialization_pending.is_set()

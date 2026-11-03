@@ -332,7 +332,6 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
     monkeypatch.setattr(usage_accounting, "submit_accounting", lambda _: None)
     review = ModerationReviewService(ModerationReviewStore(db_path=str(tmp_path / "review.db")))
-    monkeypatch.setattr(moderation, "get_moderation_review_service", lambda: review)
     actor = AuthPrincipal(  # nosec B106 -- 'access' is the token-kind enum, not a credential.
         kind="user",
         user_id=41,
@@ -374,6 +373,7 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
         app = FastAPI()
         app.add_middleware(SlidesGenerationDisconnectMiddleware)
         app.include_router(moderation.router, prefix="/api/v1")
+        app.dependency_overrides[moderation.get_moderation_review_service] = lambda: review
 
         async def principal(request: Request):
             request.state.auth = AuthContext(principal=actor, ip=None, user_agent=None, request_id=None)

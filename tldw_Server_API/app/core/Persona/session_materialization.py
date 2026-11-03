@@ -306,7 +306,7 @@ def persona_session_transcript_snapshot(
 ) -> dict[str, Any] | None:
     """Prefer durable authority, including retired headers, over a local snapshot."""
     local = session_manager.get_session_snapshot(session_id=session_id, user_id=user_id)
-    durable = db.get_persona_transcript(session_id, user_id=user_id, renew=renew)
+    durable = db.persona_transcript_store.get_persona_transcript(session_id, user_id=user_id, renew=renew)
     if durable is None:
         snapshot = local
     else:

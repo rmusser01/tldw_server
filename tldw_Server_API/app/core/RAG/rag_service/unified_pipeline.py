@@ -588,6 +588,37 @@ class _SearchDepthPreset(TypedDict):
     enable_multi_vector_passages: bool
 
 
+_SEARCH_DEPTH_PRESETS: dict[str, _SearchDepthPreset] = {
+    "speed": {
+        "top_k": 3,
+        "enable_reranking": False,
+        "reranking_strategy": "none",
+        "expand_query": False,
+        "enable_hyde": False,
+        "enable_web_fallback": False,
+        "enable_multi_vector_passages": False,
+    },
+    "balanced": {
+        "top_k": 10,
+        "enable_reranking": True,
+        "reranking_strategy": "flashrank",
+        "expand_query": True,
+        "enable_hyde": False,
+        "enable_web_fallback": False,
+        "enable_multi_vector_passages": False,
+    },
+    "quality": {
+        "top_k": 25,
+        "enable_reranking": True,
+        "reranking_strategy": "two_tier",
+        "expand_query": True,
+        "enable_hyde": True,
+        "enable_web_fallback": True,
+        "enable_multi_vector_passages": True,
+    },
+}
+
+
 def _consume_bound_sgl_response(
     response: Any,
     provider: str,
@@ -2580,36 +2611,7 @@ async def unified_rag_pipeline(
     # overrides take precedence; legacy calls retain their default-value heuristic.
     retrieval_scalar_overrides_applied = False
     if search_depth_mode is not None:
-        _mode_presets: dict[str, _SearchDepthPreset] = {
-            "speed": {
-                "top_k": 3,
-                "enable_reranking": False,
-                "reranking_strategy": "none",
-                "expand_query": False,
-                "enable_hyde": False,
-                "enable_web_fallback": False,
-                "enable_multi_vector_passages": False,
-            },
-            "balanced": {
-                "top_k": 10,
-                "enable_reranking": True,
-                "reranking_strategy": "flashrank",
-                "expand_query": True,
-                "enable_hyde": False,
-                "enable_web_fallback": False,
-                "enable_multi_vector_passages": False,
-            },
-            "quality": {
-                "top_k": 25,
-                "enable_reranking": True,
-                "reranking_strategy": "two_tier",
-                "expand_query": True,
-                "enable_hyde": True,
-                "enable_web_fallback": True,
-                "enable_multi_vector_passages": True,
-            },
-        }
-        presets = _mode_presets.get(search_depth_mode)
+        presets = _SEARCH_DEPTH_PRESETS.get(search_depth_mode)
         # Canonical requests distinguish an omitted value from an explicit default.
         if presets:
             if "top_k" in explicit_fields:

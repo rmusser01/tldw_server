@@ -13,11 +13,13 @@ from fastapi import FastAPI
 
 
 @pytest.fixture
-def lifespan_context(monkeypatch: pytest.MonkeyPatch):
+def lifespan_context(monkeypatch: pytest.MonkeyPatch, fresh_services):
     from tldw_Server_API.app import main
     from tldw_Server_API.app.services import lifespan_shutdown_sequence, lifespan_startup_sequence
 
     handles = SimpleNamespace(db_pool=object(), session_manager=object(), heavy_startup_handles=object())
+    monkeypatch.setattr(fresh_services, "db_pool", handles.db_pool)
+    monkeypatch.setattr(fresh_services, "session_manager", handles.session_manager)
     shutdown = AsyncMock()
     monkeypatch.setattr(lifespan_startup_sequence, "run_lifespan_startup_sequence", AsyncMock(return_value=handles))
     monkeypatch.setattr(lifespan_shutdown_sequence, "run_lifespan_shutdown_sequence", shutdown)

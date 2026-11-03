@@ -168,7 +168,7 @@ def test_postgres_completed_schema_fast_path_reaches_semantic_target(
             "SELECT version FROM db_schema_version WHERE schema_name=%s",
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
-        assert int(version) == 90  # nosec B101 -- Current schema also retains Persona transcripts.
+        assert int(version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION  # nosec B101 -- Reopen reaches the declared current schema.
         assert backend.table_exists("note_semantic_operation_receipts")
         assert backend.table_exists("note_semantic_obsolete_vectors")
         if retained is not None:

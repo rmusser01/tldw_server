@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
+    first_saved_filename,
     save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
@@ -361,10 +362,8 @@ async def process_ebooks_endpoint(
         # Prepare chunking options (with optional templates/hierarchical rules).
         if form_data.perform_chunking:
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0].get("original_filename")
+                first_filename = first_saved_filename(saved_files_info)
             except Exception:
                 first_filename = None
 

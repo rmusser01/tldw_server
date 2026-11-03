@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import persona_transcript_store as transcript_storage
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, SchemaError
 
 pytestmark = pytest.mark.integration
@@ -18,14 +19,14 @@ def test_sqlite_upgrade_failure_rolls_back_payload_table_and_marker(tmp_path, mo
         session = old.create_persona_session({"user_id": "1", "persona_id": persona})
         before = old.get_persona_session(session, user_id="1")
         old.close_all_connections()
-    migrate = CharactersRAGDB._migrate_from_v84_to_v85_sqlite
+    migrate = transcript_storage.migrate_sqlite_transcripts
 
-    def interrupted(self, conn):
-        migrate(self, conn)
+    def interrupted(conn, **kwargs):
+        migrate(conn, **kwargs)
         raise SchemaError("Injected after transcript DDL and marker update")
 
     with monkeypatch.context() as fault:
-        fault.setattr(CharactersRAGDB, "_migrate_from_v84_to_v85_sqlite", interrupted)
+        fault.setattr(transcript_storage, "migrate_sqlite_transcripts", interrupted)
         with pytest.raises(CharactersRAGDBError, match="Injected") as failed:
             CharactersRAGDB(path, client_id="1")
     assert isinstance(failed.value.__cause__, SchemaError)  # nosec B101 -- Preserve the exact migration/schema refusal.
@@ -37,7 +38,7 @@ def test_sqlite_upgrade_failure_rolls_back_payload_table_and_marker(tmp_path, mo
     repaired = CharactersRAGDB(path, client_id="1")
     try:
         assert repaired.get_persona_session(session, user_id="1") == before  # nosec B101
-        assert repaired.get_persona_transcript(session, user_id="1") is None  # nosec B101 -- No fabricated legacy history.
+        assert repaired.persona_transcript_store.get_persona_transcript(session, user_id="1") is None  # nosec B101 -- No fabricated legacy history.
     finally:
         repaired.close_all_connections()
 
@@ -67,7 +68,7 @@ def test_postgres_upgrade_failure_rolls_back_table_rls_and_marker(pg_restricted_
     repaired = CharactersRAGDB(tmp_path / "repaired.db", client_id="1", owner_user_id="1", backend=backend)
     try:
         assert repaired.get_persona_session(session, user_id="1") == before  # nosec B101
-        assert repaired.get_persona_transcript(session, user_id="1") is None  # nosec B101
+        assert repaired.persona_transcript_store.get_persona_transcript(session, user_id="1") is None  # nosec B101
     finally:
         repaired.close_all_connections()
 
@@ -114,7 +115,7 @@ def test_postgres_rls_denies_forged_owner_even_with_real_parent(pg_restricted_ba
                     (session, "2", persona),
                 )
                 conn.execute(query, params)
-        assert db.get_persona_transcript(session, user_id="1") is None  # nosec B101
+        assert db.persona_transcript_store.get_persona_transcript(session, user_id="1") is None  # nosec B101
     finally:
         db.close_all_connections()
 
@@ -167,7 +168,7 @@ def test_postgres_append_clock_is_sampled_after_session_lock(pg_restricted_backe
 
     @chacha_operation(independent=True)
     def append(db):
-        return db.append_persona_transcript_turn(session_id=session, user_id="1", persona_id=persona, turn=turn)
+        return db.persona_transcript_store.append_persona_transcript_turn(session_id=session, user_id="1", persona_id=persona, turn=turn)
 
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:

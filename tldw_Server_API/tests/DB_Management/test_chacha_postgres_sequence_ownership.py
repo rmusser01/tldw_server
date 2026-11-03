@@ -66,6 +66,8 @@ def test_concurrent_chacha_bootstrap_and_media_reopen_do_not_deadlock(
 ):
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     media = MediaDatabase(":memory:", client_id="1", backend=backend)
+    # Healthy reopens are read-only; this drift requires the original owner DDL path.
+    backend.execute("DROP INDEX idx_data_tables_status")
     execute = backend.execute
     boundary = threading.Barrier(2, timeout=10)
     reached = set()
@@ -112,6 +114,9 @@ def test_concurrent_chacha_bootstrap_and_media_reopen_do_not_deadlock(
             media_reopen.result(timeout=30)
         assert len(reached) == 2
         assert boundary_errors == []
+        assert backend.execute(  # nosec B101 -- The real concurrent repair must restore its precondition.
+            "SELECT to_regclass('public.idx_data_tables_status') IS NOT NULL"
+        ).scalar is True
     finally:
         media.close_connection()
         backend.get_pool().close_all()

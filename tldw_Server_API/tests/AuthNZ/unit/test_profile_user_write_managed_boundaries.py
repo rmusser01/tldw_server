@@ -956,8 +956,11 @@ async def test_postgres_bootstrap_executes_static_ddl_as_guarded_single_statemen
             self._authnz_profile_user_guard_identity = self
 
         async def fetchval(self, query: str) -> bool:
+            from tldw_Server_API.app.core.AuthNZ.database import POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL
+
+            if query == POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL:
+                return True
             assert "table_schema = 'public'" in query
-            del query
             return False
 
         def transaction(self) -> _Transaction:

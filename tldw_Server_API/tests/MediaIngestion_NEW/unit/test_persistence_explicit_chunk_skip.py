@@ -131,7 +131,10 @@ async def test_unfinished_repository_chunks_remain_pending(tmp_path: Path) -> No
         row = db.get_media_by_id(media_id)
         assert row["chunking_status"] == "pending"  # nosec B101 # Unfinished work must retain its existing meaning.
         status = derive_workspace_source_media_status(row, media_db=db, media_id=media_id)
-        assert status["state"] == "chunking"  # nosec B101 # The explicit-skip repair cannot weaken genuine pending work.
+        assert (  # nosec B101 -- Pending chunks retain text-only readiness without mutating persistence.
+            status["state"], status["status_reason"], status["readiness"]["fts_ready"],
+            status["readiness"]["vector_ready"], db.get_media_by_id(media_id),
+        ) == ("partially_queryable", "chunking_pending", True, False, row)
     finally:
         db.close_connection()
 

@@ -42,6 +42,32 @@ def _load_legacy_media_support():
     )
 
 
+def _existing_media_url_query(
+    select_columns: str, dedupe_url_candidates: list[str],
+    backend_type: BackendType, owner_lookup_value: str,
+) -> tuple[str, tuple]:
+    owner_clause = (
+        " AND COALESCE(CAST(owner_user_id AS TEXT),client_id) = ?"
+        if backend_type == BackendType.POSTGRESQL else ""
+    )
+    owner_params = (owner_lookup_value,) if owner_clause else ()
+    if len(dedupe_url_candidates) == 1:
+        return (
+            f"SELECT {select_columns} "  # nosec B608
+            "FROM Media WHERE url = ? AND deleted = 0 "
+            "AND system_operation_id IS NULL" + owner_clause + " LIMIT 1",
+            (dedupe_url_candidates[0], *owner_params),
+        )
+    placeholders = ", ".join(["?"] * len(dedupe_url_candidates))
+    return (
+        f"SELECT {select_columns} "  # nosec B608
+        f"FROM Media WHERE url IN ({placeholders}) AND deleted = 0 "
+        "AND system_operation_id IS NULL " + owner_clause +
+        " ORDER BY last_modified DESC, id DESC LIMIT 1",
+        (*dedupe_url_candidates, *owner_params),
+    )
+
+
 class MediaRepository:
     """Caller-facing seam for media persistence while internals migrate out of the shim."""
 
@@ -400,26 +426,10 @@ class MediaRepository:
                                 if old_identity == url:
                                     return candidate
                         return None
-                    owner_clause = (
-                        " AND COALESCE(CAST(owner_user_id AS TEXT),client_id) = ?"
-                        if db.backend_type == BackendType.POSTGRESQL else ""
+                    query, params = _existing_media_url_query(
+                        select_columns, dedupe_url_candidates, db.backend_type, owner_lookup_value,
                     )
-                    owner_params = (owner_lookup_value,) if owner_clause else ()
-                    if len(dedupe_url_candidates) == 1:
-                        return _fetchone(
-                            f"SELECT {select_columns} "  # nosec B608
-                            "FROM Media WHERE url = ? AND deleted = 0 "
-                            "AND system_operation_id IS NULL" + owner_clause + " LIMIT 1",
-                            (dedupe_url_candidates[0], *owner_params),
-                        )
-                    placeholders = ", ".join(["?"] * len(dedupe_url_candidates))
-                    return _fetchone(
-                        f"SELECT {select_columns} "  # nosec B608
-                        f"FROM Media WHERE url IN ({placeholders}) AND deleted = 0 "
-                        "AND system_operation_id IS NULL " + owner_clause +
-                        " ORDER BY last_modified DESC, id DESC LIMIT 1",
-                        (*dedupe_url_candidates, *owner_params),
-                    )
+                    return _fetchone(query, params)
 
                 if db.backend_type == BackendType.POSTGRESQL and media_type != "email":
                     # Serialize the absent-row check across handles until the owning transaction commits.

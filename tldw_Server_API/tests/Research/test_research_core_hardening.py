@@ -291,7 +291,6 @@ async def test_planning_phase_offloads_artifact_writes_from_event_loop(monkeypat
 @pytest.mark.asyncio
 async def test_research_worker_resolves_per_user_paths_when_no_override(monkeypatch, tmp_path):
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.config import settings
     from tldw_Server_API.app.core.Research import jobs_worker
 
@@ -308,34 +307,40 @@ async def test_research_worker_resolves_per_user_paths_when_no_override(monkeypa
             self.cfg = cfg
 
         async def run(self, *, handler, **kwargs):
-            await handler(
-                {
-                    "id": 1,
-                    "owner_user_id": "7",
-                    "payload": {"session_id": session.id, "phase": "drafting_plan"},
-                }
+            acquired = self.jm.acquire_next_job(
+                domain=self.cfg.domain, queue=self.cfg.queue,
+                lease_seconds=self.cfg.lease_seconds, worker_id=self.cfg.worker_id,
             )
+            assert acquired and str(acquired["id"]) == session.active_job_id  # nosec B101 -- Real bound Job/lease.
+            await handler(acquired)
 
         def stop(self):
             return None
 
-    async def fake_handle(job, *, research_db_path, outputs_dir):
+    async def fake_handle(job, *, research_db_path, outputs_dir, lease_check):
+        lease_check()
         captured["research_db_path"] = Path(research_db_path)
         captured["outputs_dir"] = Path(outputs_dir)
         return {"ok": True}
 
     monkeypatch.setattr(jobs_worker, "WorkerSDK", FakeSDK)
-    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: object())
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    manager = JobManager(db_path=tmp_path / "jobs.db", backend="sqlite", enforce_leases=True)
+    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: manager)
     monkeypatch.setattr(jobs_worker, "handle_research_phase_job", fake_handle)
 
     expected_research_db_path = DatabasePaths.get_research_sessions_db_path("7")
     expected_outputs_dir = DatabasePaths.get_user_outputs_dir("7")
-    session = ResearchSessionsDB(expected_research_db_path).create_session(
-        owner_user_id="7",
-        query="Rowan Observatory",
-        source_policy="local_only",
-        autonomy_mode="checkpointed",
-        limits_json={},
+    from tldw_Server_API.app.core.Research.service import ResearchService
+
+    service = ResearchService(
+        research_db_path=expected_research_db_path,
+        outputs_dir=expected_outputs_dir, job_manager=manager,
+    )
+    session = service.create_session(
+        owner_user_id="7", query="Rowan Observatory",
+        source_policy="local_only", autonomy_mode="checkpointed", limits_json={},
     )
     try:
         await jobs_worker.run_research_jobs_worker()

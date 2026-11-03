@@ -34,6 +34,11 @@ from tldw_Server_API.app.core.Utils.Utils import logging, sanitize_filename
 from tldw_Server_API.app.core.Utils.Utils import logging as logger
 
 
+def first_saved_filename(saved_files: Any) -> str | None:
+    """Return the first upload's original name without changing caller error handling."""
+    return saved_files[0].get("original_filename") if saved_files else None
+
+
 class TempDirManager:
     """
     Context manager for temporary directories used during media processing.

@@ -31,7 +31,7 @@ def transcript_db(request, tmp_path):
 
 def save(fixture, turn, **fields):
     db, persona, session = fixture
-    return db.append_persona_transcript_turn(
+    return db.persona_transcript_store.append_persona_transcript_turn(
         session_id=session,
         user_id="1",
         persona_id=persona,
@@ -47,7 +47,7 @@ def test_exact_replay_is_idempotent_and_conflicting_identity_is_refused(transcri
     later = datetime.now(timezone.utc) + timedelta(hours=1)
     monkeypatch.setattr(storage.PersonaTranscriptStore, "_now", staticmethod(lambda: later))
     assert save(transcript_db, deepcopy(turn)) == first  # nosec B101 -- Exact replay cannot renew retention.
-    assert db.get_persona_transcript(session, user_id="1")["turns"] == [turn]  # nosec B101
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["turns"] == [turn]  # nosec B101
     with pytest.raises(ConflictError, match="different content"):
         save(transcript_db, {**turn, "content": "Conflicting replacement"})
 
@@ -59,13 +59,13 @@ def test_read_expiry_does_not_renew_or_rewrite_payload_and_blocks_late_reply(tra
     first = save(transcript_db, user)
     now = datetime.now(timezone.utc)
     monkeypatch.setattr(storage.PersonaTranscriptStore, "_now", staticmethod(lambda: now + timedelta(days=2)))
-    expired = db.get_persona_transcript(session, user_id="1")
+    expired = db.persona_transcript_store.get_persona_transcript(session, user_id="1")
     assert expired["turns"] == [] and expired["revision"] == first["revision"] and expired["retired"]  # nosec B101
-    assert db.list_persona_transcript_counts(user_id="1", session_ids=[session])[session]["turn_count"] == 0  # nosec B101
+    assert db.persona_transcript_store.list_persona_transcript_counts(user_id="1", session_ids=[session])[session]["turn_count"] == 0  # nosec B101
     with pytest.raises(ConflictError, match="originating"):
         save(transcript_db, manager.prepare_turn(role="assistant", content="Orphan"), parent_turn_id=user["turn_id"])
     monkeypatch.setattr(storage.PersonaTranscriptStore, "_now", staticmethod(lambda: now))
-    assert db.get_persona_transcript(session, user_id="1")["turns"] == [user]  # nosec B101 -- Expiry reads are read-only.
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["turns"] == [user]  # nosec B101 -- Expiry reads are read-only.
 
 
 def test_owner_capacity_retirement_fences_runtime_and_late_assistant(transcript_db, monkeypatch):
@@ -82,7 +82,7 @@ def test_owner_capacity_retirement_fences_runtime_and_late_assistant(transcript_
         manager.publish_transcript(user_id="1", snapshot=invalidation)
     assert not manager.publish_transcript(user_id="1", snapshot=old)  # nosec B101
     assert manager.list_turns(session_id=session, user_id="1") == []  # nosec B101
-    assert db.get_persona_transcript(session, user_id="1")["turns"] == []  # nosec B101
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["turns"] == []  # nosec B101
     with pytest.raises(ConflictError, match="originating"):
         save(transcript_db, manager.prepare_turn(role="assistant", content="Late"), parent_turn_id=user["turn_id"])
 
@@ -97,7 +97,7 @@ def test_terminal_or_deleted_session_cannot_append(transcript_db, change):
         save(transcript_db, SessionManager().prepare_turn(role="user", content="Denied legacy"), allow_unpersisted=True)
 
     with pytest.raises(ConflictError, match="unavailable"):
-        db.validate_persona_transcript_session(
+        db.persona_transcript_store.validate_persona_transcript_session(
             session_id=session, user_id="1", persona_id=transcript_db[1], allow_unpersisted=True
         )
 
@@ -106,12 +106,12 @@ def test_foreign_owner_or_persona_cannot_read_or_append(transcript_db):
     db, persona, session = transcript_db
     turn = SessionManager().prepare_turn(role="user", content="Private")
     save(transcript_db, turn)
-    assert db.get_persona_transcript(session, user_id="2") is None  # nosec B101
-    assert db.list_persona_transcript_counts(user_id="2", session_ids=[session]) == {}  # nosec B101
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="2") is None  # nosec B101
+    assert db.persona_transcript_store.list_persona_transcript_counts(user_id="2", session_ids=[session]) == {}  # nosec B101
     other = db.create_persona_profile({"user_id": "1", "name": "Other Persona"})
     for owner, bound in (("2", persona), ("1", other)):
         with pytest.raises(ConflictError, match="unavailable"):
-            db.append_persona_transcript_turn(session_id=session, user_id=owner, persona_id=bound, turn=turn)
+            db.persona_transcript_store.append_persona_transcript_turn(session_id=session, user_id=owner, persona_id=bound, turn=turn)
 
 
 def test_concurrent_appends_have_one_commit_order_and_no_lost_turns(transcript_db):
@@ -125,7 +125,7 @@ def test_concurrent_appends_have_one_commit_order_and_no_lost_turns(transcript_d
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         snapshots = list(pool.map(lambda turn: append(db, turn), turns))
-    saved = db.get_persona_transcript(session, user_id="1")
+    saved = db.persona_transcript_store.get_persona_transcript(session, user_id="1")
     ordered = sorted(snapshots, key=lambda item: item["revision"])
     assert saved["turns"] == ordered[-1]["turns"]  # nosec B101
     assert [item["revision"] for item in ordered] == list(range(1, 7))  # nosec B101
@@ -137,7 +137,7 @@ def test_worst_case_bounded_text_and_metadata_are_serializable(transcript_db):
     manager = SessionManager()
     turn = manager.prepare_turn(role="user", content="\u0000" * 8192, metadata={"unicode": "😀" * 4096})
     save(transcript_db, turn)
-    saved = db.get_persona_transcript(session, user_id="1")
+    saved = db.persona_transcript_store.get_persona_transcript(session, user_id="1")
     assert saved["turns"] == [turn]  # nosec B101
     assert len(json.dumps(turn["metadata"], ensure_ascii=True, sort_keys=True)) <= storage.MAX_METADATA_CHARS  # nosec B101
     assert (
@@ -152,7 +152,7 @@ def test_turn_bound_keeps_latest_exact_turns(transcript_db, monkeypatch):
     turns = [manager.prepare_turn(role="user", content=str(index)) for index in range(3)]
     for turn in turns:
         save(transcript_db, turn)
-    assert db.get_persona_transcript(session, user_id="1")["turns"] == turns[-2:]  # nosec B101
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["turns"] == turns[-2:]  # nosec B101
 
 
 def test_evicted_runtime_is_not_recreated_by_late_publication():
@@ -193,7 +193,7 @@ def test_full_default_capacity_accepts_astral_content(transcript_db):
         conn.execute(query, params)
     saved = save(transcript_db, turns[-1])
     assert saved["turn_count"] == 200  # nosec B101 -- Full public retention capacity with worst-case Unicode.
-    assert db.get_persona_transcript(session, user_id="1")["turns"] == turns  # nosec B101
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["turns"] == turns  # nosec B101
 
 
 def test_read_publication_preserves_activity_but_new_turn_refreshes_it():
@@ -230,10 +230,10 @@ def test_counts_are_limited_to_requested_owned_page(transcript_db):
     save(transcript_db, SessionManager().prepare_turn(role="user", content="Page one"))
     other = db.create_persona_session({"user_id": "1", "persona_id": persona})
     save((db, persona, other), SessionManager().prepare_turn(role="user", content="Page two"))
-    assert set(db.list_persona_transcript_counts(user_id="1", session_ids=[session])) == {session}  # nosec B101
-    assert db.list_persona_transcript_counts(user_id="1", session_ids=[]) == {}  # nosec B101
+    assert set(db.persona_transcript_store.list_persona_transcript_counts(user_id="1", session_ids=[session])) == {session}  # nosec B101
+    assert db.persona_transcript_store.list_persona_transcript_counts(user_id="1", session_ids=[]) == {}  # nosec B101
     with pytest.raises(InputError, match="200 sessions"):
-        db.list_persona_transcript_counts(user_id="1", session_ids=[str(index) for index in range(201)])
+        db.persona_transcript_store.list_persona_transcript_counts(user_id="1", session_ids=[str(index) for index in range(201)])
 
 
 def test_expired_old_read_cannot_seal_a_new_committed_revision(transcript_db, monkeypatch):
@@ -268,7 +268,7 @@ def test_expired_old_read_cannot_seal_a_new_committed_revision(transcript_db, mo
             pending = pool.submit(append, db)
             assert before_insert.wait(5)  # nosec B101
             now[0] += timedelta(seconds=2)
-            old_read = db.get_persona_transcript(session, user_id="1")
+            old_read = db.persona_transcript_store.get_persona_transcript(session, user_id="1")
             assert old_read["turns"] == []  # nosec B101
             manager.publish_transcript(user_id="1", snapshot=old_read)
             assert not manager.publish_transcript(user_id="1", snapshot=first)  # nosec B101 -- Retired same-revision payload cannot return.
@@ -287,13 +287,13 @@ def test_explicit_resume_renews_only_nonexpired_history(transcript_db, monkeypat
     turn = SessionManager().prepare_turn(role="user", content="Resume without regeneration")
     first = save(transcript_db, turn)
     now[0] += timedelta(hours=23)
-    assert db.get_persona_transcript(session, user_id="1")["revision"] == first["revision"]  # nosec B101 -- GET never renews.
-    resumed = db.get_persona_transcript(session, user_id="1", renew=True)
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["revision"] == first["revision"]  # nosec B101 -- GET never renews.
+    resumed = db.persona_transcript_store.get_persona_transcript(session, user_id="1", renew=True)
     assert resumed["revision"] > first["revision"] and resumed["turns"] == [turn]  # nosec B101
     now[0] += timedelta(hours=2)
-    assert db.get_persona_transcript(session, user_id="1")["turns"] == [turn]  # nosec B101 -- More than24h after the turn, within24h after explicit resume.
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["turns"] == [turn]  # nosec B101 -- More than24h after the turn, within24h after explicit resume.
     now[0] += timedelta(days=2)
-    expired = db.get_persona_transcript(session, user_id="1", renew=True)
+    expired = db.persona_transcript_store.get_persona_transcript(session, user_id="1", renew=True)
     assert expired["retired"] and expired["turns"] == []  # nosec B101
     assert expired["revision"] == resumed["revision"]  # nosec B101 -- Expired resume cannot extend or revive history.
 
@@ -302,9 +302,9 @@ def test_legacy_path_requires_true_absence_and_rejects_foreign_or_inactive_paren
     db, persona, session = transcript_db
     turn = SessionManager().prepare_turn(role="user", content="Temporary scaffold")
     with pytest.raises(ConflictError, match="unavailable"):
-        db.append_persona_transcript_turn(session_id="absent", user_id="1", persona_id=persona, turn=turn)
+        db.persona_transcript_store.append_persona_transcript_turn(session_id="absent", user_id="1", persona_id=persona, turn=turn)
     assert (
-        db.append_persona_transcript_turn(  # nosec B101 -- Explicit internal compatibility only for true absence.
+        db.persona_transcript_store.append_persona_transcript_turn(  # nosec B101 -- Explicit internal compatibility only for true absence.
             session_id="absent",
             user_id="1",
             persona_id=persona,
@@ -316,26 +316,26 @@ def test_legacy_path_requires_true_absence_and_rejects_foreign_or_inactive_paren
     foreign = db.create_persona_profile({"user_id": "2", "name": "Other owner"})
     foreign_session = db.create_persona_session({"user_id": "2", "persona_id": foreign})
     with pytest.raises(ConflictError, match="unavailable"):
-        db.append_persona_transcript_turn(
+        db.persona_transcript_store.append_persona_transcript_turn(
             session_id=foreign_session, user_id="1", persona_id=persona, turn=turn, allow_unpersisted=True
         )
     db.update_persona_profile(persona_id=persona, user_id="1", update_data={"is_active": False})
     with pytest.raises(ConflictError, match="unavailable"):
         save(transcript_db, turn, allow_unpersisted=True)
-    assert db.get_persona_transcript(session, user_id="1") is None  # nosec B101 -- No false durable history.
+    assert db.persona_transcript_store.get_persona_transcript(session, user_id="1") is None  # nosec B101 -- No false durable history.
 
     assert (
-        db.validate_persona_transcript_session(
+        db.persona_transcript_store.validate_persona_transcript_session(
             session_id="absent", user_id="1", persona_id=persona, allow_unpersisted=True
         )
         is False
     )  # nosec B101
     with pytest.raises(ConflictError, match="unavailable"):
-        db.validate_persona_transcript_session(
+        db.persona_transcript_store.validate_persona_transcript_session(
             session_id=foreign_session, user_id="1", persona_id=persona, allow_unpersisted=True
         )
     with pytest.raises(ConflictError, match="unavailable"):
-        db.validate_persona_transcript_session(
+        db.persona_transcript_store.validate_persona_transcript_session(
             session_id=session, user_id="1", persona_id=persona, allow_unpersisted=True
         )
 
@@ -353,7 +353,7 @@ def test_legacy_lookup_error_never_falls_back(transcript_db, monkeypatch):
     monkeypatch.setattr(storage.PersonaTranscriptStore, "_query", failed_lookup)
     db, persona, _ = transcript_db
     with pytest.raises(CharactersRAGDBError, match="Injected parent lookup"):
-        db.append_persona_transcript_turn(
+        db.persona_transcript_store.append_persona_transcript_turn(
             session_id="absent",
             user_id="1",
             persona_id=persona,
@@ -362,7 +362,7 @@ def test_legacy_lookup_error_never_falls_back(transcript_db, monkeypatch):
         )
 
     with pytest.raises(CharactersRAGDBError, match="Injected parent lookup"):
-        db.validate_persona_transcript_session(
+        db.persona_transcript_store.validate_persona_transcript_session(
             session_id="absent", user_id="1", persona_id=persona, allow_unpersisted=True
         )
 

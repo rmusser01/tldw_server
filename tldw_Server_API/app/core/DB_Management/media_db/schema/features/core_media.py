@@ -412,7 +412,7 @@ _KEYWORD_LOOKUP_INDEXES = {
 }
 
 
-def ensure_postgres_keyword_identity(db: Any, conn: Any) -> None:
+def ensure_postgres_keyword_identity(db: Any, conn: Any, *, validate_only: bool = False) -> None:
     """Give Postgres Media keywords SQLite's case-insensitive uniqueness (TASK-13950.5).
 
     The Postgres conversion strips ``keyword UNIQUE COLLATE NOCASE`` to an exact-case
@@ -434,6 +434,8 @@ def ensure_postgres_keyword_identity(db: Any, conn: Any) -> None:
     )
     if len(existing.rows) == len(names):
         return
+    if validate_only:
+        raise SchemaError("PostgreSQL keyword indexes require schema-owner reconciliation")
     backend.execute("LOCK TABLE keywords IN SHARE ROW EXCLUSIVE MODE", connection=conn)
     merges = backend.execute(
         "SELECT id, survivor_id, survivor_uuid FROM ("

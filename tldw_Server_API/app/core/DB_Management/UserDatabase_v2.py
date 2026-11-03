@@ -21,10 +21,6 @@ from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
     ensure_postgres_profile_version_sync,
     validate_postgres_profile_version_sync,
 )
-from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
-    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
-    validate_postgres_rbac_runtime,
-)
 from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
     POSTGRES_PROFILE_FOREIGN_KEYS_SQL,
     PROFILE_CANDIDATE_TABLES,
@@ -51,6 +47,10 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.postgres_auth_catalog import (
+    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+    validate_postgres_rbac_runtime,
+)
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 
 _USERDB_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (

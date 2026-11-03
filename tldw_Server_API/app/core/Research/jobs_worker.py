@@ -12,17 +12,17 @@ from pathlib import Path
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    refresh_llm_provider_overrides,
-    shutdown_llm_provider_override_recovery,
-    start_llm_provider_override_refresh_service,
-)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchPhaseChangedError, ResearchSessionsDB
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    refresh_llm_provider_overrides,
+    shutdown_llm_provider_override_recovery,
+    start_llm_provider_override_refresh_service,
+)
 
 from .jobs import RESEARCH_DOMAIN, RESEARCH_QUEUE, handle_research_phase_job
 from .phase_dispatch import read_phase_dispatch

@@ -72,7 +72,7 @@ def test_actual_websocket_opener_preserves_owned_transcript_and_foreign_refusal(
 
         @chacha_operation(independent=True)
         def append(db, prepared):
-            return db.append_persona_transcript_turn(
+            return db.persona_transcript_store.append_persona_transcript_turn(
                 session_id=session, user_id=owner, persona_id=persona, turn=prepared
             )
 
@@ -81,8 +81,8 @@ def test_actual_websocket_opener_preserves_owned_transcript_and_foreign_refusal(
             if db.backend_type == BackendType.POSTGRESQL:
                 # Finish this test-owned SELECT before its pool's async reset workers retire.
                 with db.transaction():
-                    return db.get_persona_transcript(session, user_id=owner)
-            return db.get_persona_transcript(session, user_id=owner)
+                    return db.persona_transcript_store.get_persona_transcript(session, user_id=owner)
+            return db.persona_transcript_store.get_persona_transcript(session, user_id=owner)
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             saved = executor.submit(append, ws_db, turn).result(timeout=15)

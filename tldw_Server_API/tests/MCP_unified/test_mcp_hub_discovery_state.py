@@ -223,7 +223,9 @@ async def test_managed_tool_refresh_uses_shared_persistence(discovery_api):
 
     runtime = discovery_api
     module = ExternalFederationModule(ModuleConfig(name="external_federation"))
-    module._hub_service = runtime.service
+    from tldw_Server_API.app.services.mcp_hub_external_registry_service import McpHubExternalRegistryService
+
+    module._registry_service = McpHubExternalRegistryService(repo=runtime.service.repo)
     module._manager = SimpleNamespace(reconcile_servers=runtime.refresh)
     await module.execute_tool("external.tools.refresh", {"server_id": SERVER})
     row = await runtime.service.repo.get_external_server(SERVER)
@@ -367,3 +369,32 @@ async def test_cancelled_discovery_releases_shared_publication_lock(discovery_ap
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+@pytest.mark.asyncio
+async def test_registry_defers_discovery_initialization_and_reuses_component(monkeypatch):
+    """Config-only callers must not initialize Sandbox; actual refreshes reuse one component."""
+    from tldw_Server_API.app.services.mcp_hub_external_registry_service import McpHubExternalRegistryService
+    from tldw_Server_API.app.services.mcp_hub_service import McpHubService
+
+    repo = SimpleNamespace()
+    created = []
+    calls = []
+
+    def construct(component, actual_repo):
+        created.append((component, actual_repo))
+
+    async def refresh(component, server_id, executor):
+        calls.append((component, server_id, executor))
+        return {"refreshed": True}
+
+    async def executor(server_id):
+        return {"server_id": server_id}
+
+    monkeypatch.setattr(McpHubService, "__init__", construct)
+    monkeypatch.setattr(McpHubService, "refresh_external_server_discovery", refresh)
+    registry = McpHubExternalRegistryService(repo=repo)
+    assert created == []  # nosec B101 -- Config-only construction must not initialize unrelated Sandbox storage.
+    await registry.refresh_external_server_discovery("first", executor)
+    await registry.refresh_external_server_discovery("second", executor)
+    assert len(created) == 1 and created[0][1] is repo  # nosec B101 -- One registry retains one component from the same repository.
+    assert calls == [(created[0][0], "first", executor), (created[0][0], "second", executor)]  # nosec B101 -- Preserve both server identities and the exact executor on one component.

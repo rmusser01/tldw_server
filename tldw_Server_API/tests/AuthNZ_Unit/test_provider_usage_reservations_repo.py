@@ -111,7 +111,7 @@ async def reservation_pool(tmp_path, reservation_schema):
 
 
 def test_migration_105_registered():
-    assert migrations.get_authnz_migrations()[-1].version == 105
+    assert any(migration.version == 105 for migration in migrations.get_authnz_migrations())  # nosec B101 -- Registration must survive later migrations.
 
 
 def test_migration_105_restores_native_user_exposure_index_on_provisional_schema():
@@ -183,7 +183,9 @@ def test_published_user_usage_index_precedes_mcp_reservation_upgrade(tmp_path):
         )
     migrations.apply_authnz_migrations(path)
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 105
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == max(  # nosec B101 -- Applying all migrations must reach the declared latest version.
+            migration.version for migration in migrations.get_authnz_migrations()
+        )
         assert (
             conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_usage_reservations'"
@@ -873,3 +875,9 @@ def test_contracts_frozen():
         field = next(iter(item.__dataclass_fields__))
         with pytest.raises(FrozenInstanceError):
             setattr(item, field, None)
+
+def test_initial_mcp_hub_registrations_preserve_order_and_fresh_instances():
+    first = [item for item in migrations.get_authnz_migrations() if item.version in (55, 56)]
+    second = [item for item in migrations.get_authnz_migrations() if item.version in (55, 56)]
+    assert [item.version for item in first] == [55, 56]  # nosec B101 -- Preserve adjacent registration order.
+    assert all(left is not right for left, right in zip(first, second))  # nosec B101 -- Each registry call owns fresh migration objects.

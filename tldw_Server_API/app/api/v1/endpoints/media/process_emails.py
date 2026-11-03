@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
+    first_saved_filename,
     save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
@@ -415,10 +416,8 @@ async def process_emails_endpoint(
     try:
         if form_data.perform_chunking:
             # Build chunk options once using shared helper + templates.
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0].get("original_filename")
+                first_filename = first_saved_filename(saved_files_info)
             except Exception:
                 logger.debug("Could not determine first filename")
                 first_filename = None
