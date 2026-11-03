@@ -442,7 +442,7 @@ git fetch origin dev --quiet
   | sed -nE 's|^backlog/.*task-([0-9]+)[ .].*|\1|p' | sort -n | tail -1
 ```
 
-`gh pr list` lists at most 100 files per PR, so the recipe can miss ids in a large PR. backend-required fails any PR that leaves two task files with one id (`Helper_Scripts/ci/check_backlog_task_ids.py`, backlog-only PRs included); give the newer file a free id with `task renumber`.
+`gh pr list` lists at most 100 files per PR, so the recipe can miss ids in a large PR. backend-required fails any PR that leaves two task files with one id (`Helper_Scripts/ci/check_backlog_task_ids.py`, backlog-only PRs included); give the newer file a free id with `task renumber`. TASK-15000 to TASK-15281 are the block the 2026-10-31 renumbering used ([ADR-084](Docs/ADR/084-backlog-task-ids-unique-checked-on-every-pr.md)), so new ids continue above TASK-15281.
 
 Do not hand-edit task files unless backlog-py cannot make the change and the user explicitly approves the exception. If backlog-py itself cannot run, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
 
