@@ -1645,10 +1645,6 @@ class MCPServer:
                 roles = metadata.setdefault("roles", [])
                 if "admin" not in roles:
                     roles.append("admin")
-                if compat_auth_via == "single_user_test_api_key":
-                    perms = metadata.setdefault("permissions", [])
-                    if "*" not in perms:
-                        perms.append("*")
                 logger.info("WebSocket authenticated via mounted single-user compatibility key")
             else:
                 try:

@@ -410,8 +410,7 @@ async def _resolve_token_data_compat(
     1) AuthNZ access JWT (multi-user).
     2) MCP JWT (for tools integrations).
     3) API key:
-       - Single-user mode: treat SINGLE_USER_API_KEY (and, in TEST_MODE,
-         SINGLE_USER_TEST_API_KEY) as an admin-style principal.
+       - Single-user mode: treat SINGLE_USER_API_KEY as an admin-style principal.
        - Multi-user: validate via APIKeyManager and map to a user id.
 
     When the multi-user API key path succeeds, this helper also attaches the

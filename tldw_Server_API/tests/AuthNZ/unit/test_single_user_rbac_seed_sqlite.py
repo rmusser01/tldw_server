@@ -119,3 +119,74 @@ async def test_single_user_rbac_seed_sqlite_file_backstops_rbac_tables_when_migr
             conn.close()
     finally:
         reset_settings()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+async def test_startup_seed_revokes_a_stale_test_key_row_stored_by_an_older_boot(
+    backend, tmp_path, monkeypatch, request, fresh_services
+):
+    """A 'single-user test key' admin row from an older TEST_MODE boot stops authenticating."""
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    configured = "configured-key-1234567890"
+    stale = "old-test-key-seeded-by-v0-0987654321"
+    if backend == "postgres":
+        dsn = request.getfixturevalue("pg_temp_db")["dsn"]
+        monkeypatch.setenv("DATABASE_URL", dsn)
+    else:
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'authnz_users.db'}")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", configured)
+    for name in ("TEST_MODE", "TLDW_TEST_MODE", "TESTING", "SINGLE_USER_TEST_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "1")
+
+    reset_settings()
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
+        from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
+        from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import authenticate_api_key_user
+        from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
+        pool = await get_db_pool()
+        # Postgres has no schema until the stores initialize; SQLite gets it from the seed.
+        await UsersDB(pool).initialize(ensure_schema=False)
+        manager = APIKeyManager(db_pool=pool)
+        await manager.initialize()
+        await ensure_single_user_rbac_seed_if_needed()
+        # The row the pre-TASK-13950.19 seed stored under TEST_MODE.
+        await AuthnzApiKeysRepo(pool).upsert_primary_key(
+            user_id=1,
+            key_hash=manager.hash_api_key(stale),
+            key_identifier=None,
+            key_prefix=stale[:10] + "...",
+            name="single-user test key",
+            description="Deterministic API key for test automation",
+            scope="admin",
+            is_virtual=False,
+        )
+        assert await manager.validate_api_key(stale, ip_address="127.0.0.1")
+
+        await ensure_single_user_rbac_seed_if_needed()
+        await ensure_single_user_rbac_seed_if_needed()  # idempotent
+
+        def _req() -> Request:
+            return Request({"type": "http", "method": "GET", "path": "/t", "headers": [], "client": ("127.0.0.1", 0)})
+
+        assert await manager.validate_api_key(stale, ip_address="127.0.0.1") is None
+        assert await mcp_ep._resolve_token_data_compat(credentials=None, x_api_key=stale, request=_req()) is None
+        with pytest.raises(HTTPException) as exc:
+            await authenticate_api_key_user(_req(), stale)
+        assert exc.value.status_code == 401
+
+        user = await authenticate_api_key_user(_req(), configured)
+        assert user.username == "single_user"
+        token = await mcp_ep._resolve_token_data_compat(credentials=None, x_api_key=configured, request=_req())
+        assert token is not None and token.permissions == []
+    finally:
+        reset_settings()
