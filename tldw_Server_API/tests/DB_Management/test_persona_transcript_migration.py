@@ -11,29 +11,29 @@ pytestmark = pytest.mark.integration
 
 def test_sqlite_upgrade_failure_rolls_back_payload_table_and_marker(tmp_path, monkeypatch):
     path = tmp_path / "old-persona.db"
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 84)
-    old = CharactersRAGDB(path, client_id="1")
-    persona = old.create_persona_profile({"user_id": "1", "name": "Preserved"})
-    session = old.create_persona_session({"user_id": "1", "persona_id": persona})
-    before = old.get_persona_session(session, user_id="1")
-    old.close_all_connections()
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 85)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 84)
+        old = CharactersRAGDB(path, client_id="1")
+        persona = old.create_persona_profile({"user_id": "1", "name": "Preserved"})
+        session = old.create_persona_session({"user_id": "1", "persona_id": persona})
+        before = old.get_persona_session(session, user_id="1")
+        old.close_all_connections()
     migrate = CharactersRAGDB._migrate_from_v84_to_v85_sqlite
 
     def interrupted(self, conn):
         migrate(self, conn)
         raise SchemaError("Injected after transcript DDL and marker update")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migrate_from_v84_to_v85_sqlite", interrupted)
-    with pytest.raises(CharactersRAGDBError, match="Injected") as failed:
-        CharactersRAGDB(path, client_id="1")
+    with monkeypatch.context() as fault:
+        fault.setattr(CharactersRAGDB, "_migrate_from_v84_to_v85_sqlite", interrupted)
+        with pytest.raises(CharactersRAGDBError, match="Injected") as failed:
+            CharactersRAGDB(path, client_id="1")
     assert isinstance(failed.value.__cause__, SchemaError)  # nosec B101 -- Preserve the exact migration/schema refusal.
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT version FROM db_schema_version").fetchone()[0] == 84  # nosec B101
         assert (
             conn.execute("SELECT name FROM sqlite_master WHERE name='persona_session_transcripts'").fetchone() is None
         )  # nosec B101
-    monkeypatch.setattr(CharactersRAGDB, "_migrate_from_v84_to_v85_sqlite", migrate)
     repaired = CharactersRAGDB(path, client_id="1")
     try:
         assert repaired.get_persona_session(session, user_id="1") == before  # nosec B101
@@ -44,26 +44,26 @@ def test_sqlite_upgrade_failure_rolls_back_payload_table_and_marker(tmp_path, mo
 
 def test_postgres_upgrade_failure_rolls_back_table_rls_and_marker(pg_restricted_backend, tmp_path, monkeypatch):
     backend = pg_restricted_backend
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 89)
-    old = CharactersRAGDB(tmp_path / "old.db", client_id="1", owner_user_id="1", backend=backend)
-    persona = old.create_persona_profile({"user_id": "1", "name": "Preserved"})
-    session = old.create_persona_session({"user_id": "1", "persona_id": persona})
-    before = old.get_persona_session(session, user_id="1")
-    old.close_connection()
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 90)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 89)
+        old = CharactersRAGDB(tmp_path / "old.db", client_id="1", owner_user_id="1", backend=backend)
+        persona = old.create_persona_profile({"user_id": "1", "name": "Preserved"})
+        session = old.create_persona_session({"user_id": "1", "persona_id": persona})
+        before = old.get_persona_session(session, user_id="1")
+        old.close_connection()
     migrate = CharactersRAGDB._migrate_from_v89_to_v90_postgres
 
     def interrupted(self, conn):
         migrate(self, conn)
         raise SchemaError("Injected after transcript DDL/RLS and marker update")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migrate_from_v89_to_v90_postgres", interrupted)
-    with pytest.raises(CharactersRAGDBError, match="Injected") as failed:
-        CharactersRAGDB(tmp_path / "next.db", client_id="1", owner_user_id="1", backend=backend)
+    with monkeypatch.context() as fault:
+        fault.setattr(CharactersRAGDB, "_migrate_from_v89_to_v90_postgres", interrupted)
+        with pytest.raises(CharactersRAGDBError, match="Injected") as failed:
+            CharactersRAGDB(tmp_path / "next.db", client_id="1", owner_user_id="1", backend=backend)
     assert isinstance(failed.value.__cause__, SchemaError)  # nosec B101
     assert backend.execute("SELECT version FROM db_schema_version").scalar == 89  # nosec B101
     assert not backend.table_exists("persona_session_transcripts")  # nosec B101
-    monkeypatch.setattr(CharactersRAGDB, "_migrate_from_v89_to_v90_postgres", migrate)
     repaired = CharactersRAGDB(tmp_path / "repaired.db", client_id="1", owner_user_id="1", backend=backend)
     try:
         assert repaired.get_persona_session(session, user_id="1") == before  # nosec B101

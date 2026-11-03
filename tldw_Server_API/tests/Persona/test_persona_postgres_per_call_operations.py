@@ -260,26 +260,28 @@ async def test_new_persona_fixtures_release_pool_after_setup_failure(monkeypatch
     from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 
     closed = []
+    failure = RuntimeError("persona fixture setup failed")
     pool = SimpleNamespace(get_connection=lambda: None, close_all=lambda: closed.append("pool"))
     backend = SimpleNamespace(get_pool=lambda: pool)
 
     def construct(*_args, **_kwargs):
         if failure_stage == "constructor":
-            raise RuntimeError("persona fixture setup failed")
+            raise failure
 
         def seed(_data):
-            raise RuntimeError("persona fixture setup failed")
+            raise failure
 
         return SimpleNamespace(create_persona_profile=seed, close_connection=lambda: closed.append("db"))
 
     monkeypatch.setattr(DatabaseBackendFactory, "create_backend", lambda _config: backend)
     monkeypatch.setattr(sys.modules[__name__], "CharactersRAGDB", construct)
     config = DatabaseConfig(BackendType.POSTGRESQL)
-    with pytest.raises(RuntimeError, match="persona fixture setup failed"):
+    with pytest.raises(RuntimeError, match="persona fixture setup failed") as caught:
         if target == "live":
             next(live_session_on_a_small_pool.__wrapped__(config, tmp_path, monkeypatch))
         else:
             await test_a_queued_preferences_write_survives_its_task_being_cancelled(config, tmp_path, True)
+    assert caught.value is failure  # nosec B101 - setup errors propagate unchanged after owned-resource cleanup.
     assert closed == (
         ["pool"] if failure_stage == "constructor" else ["db", "pool"]
     )  # nosec B101 # Each newly acquired handle and pool must close on setup failure.

@@ -187,7 +187,7 @@ describe("Research Workspace migration manifest planning", () => {
     expect(deleteLocalStorageValue).not.toHaveBeenCalled()
   })
 
-  it("deletes covered local content, writes a tombstone, and acknowledges only when server and local gates allow it", async () => {
+  it("retains covered local content even when an older server advertises deletion", async () => {
     const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
     const values = new Map([
       ["tldw-workspace", JSON.stringify({ workspaceId: "ws-1" })],
@@ -246,25 +246,14 @@ describe("Research Workspace migration manifest planning", () => {
       now: () => "2026-05-26T00:00:00Z",
     });
 
-    expect(result.status).toBe("deleted")
-    expect(deleteLocalStorageValue).toHaveBeenCalledWith("tldw-workspace")
-    expect(writeLocalStorageValue).toHaveBeenCalledWith(
-      "tldw:research-workspace:migration:tombstone:legacy-ws",
-      JSON.stringify({
-        legacyWorkspaceId: "legacy-ws",
-        serverWorkspaceId: "ws-1",
-        migrationId: result.migrationId,
-        deletedAt: "2026-05-26T00:00:00Z",
-        contentRetained: false
-      })
-    )
-    expect(ackWorkspaceMigrationClientDelete).toHaveBeenCalledWith(
-      result.migrationId,
-      { acknowledged_manifest_hash: result.manifestHash }
-    )
+    expect(result.status).toBe("finalized_not_delete_eligible")
+    expect(values.get("tldw-workspace")).toBe(JSON.stringify({ workspaceId: "ws-1" }))
+    expect(deleteLocalStorageValue).not.toHaveBeenCalled()
+    expect(writeLocalStorageValue).not.toHaveBeenCalled()
+    expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 
-  it("preflights tombstone writing before deleting remotely covered content", async () => {
+  it("retains local content without a tombstone writer", async () => {
     const values = new Map([
       ["tldw-workspace", JSON.stringify({ workspaceId: "ws-1" })],
     ]);
@@ -319,12 +308,12 @@ describe("Research Workspace migration manifest planning", () => {
       deleteLocalStorageValue,
     });
 
-    expect(result.status).toBe("blocked")
+    expect(result.status).toBe("finalized_not_delete_eligible")
     expect(deleteLocalStorageValue).not.toHaveBeenCalled()
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 
-  it("preflights every local deletion dependency before deleting any chunk", async () => {
+  it("retains both storage classes without invoking deletion dependencies", async () => {
     const values = new Map([
       ["tldw-workspace", JSON.stringify({ workspaceId: "ws-1" })],
     ]);
@@ -389,7 +378,7 @@ describe("Research Workspace migration manifest planning", () => {
       writeLocalStorageValue,
     });
 
-    expect(result.status).toBe("blocked")
+    expect(result.status).toBe("finalized_not_delete_eligible")
     expect(deleteLocalStorageValue).not.toHaveBeenCalled()
     expect(writeLocalStorageValue).not.toHaveBeenCalled()
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
@@ -425,11 +414,11 @@ describe("Research Workspace migration manifest planning", () => {
     expect(result.migrationId).toMatch(/^research-workspace-ws-1-/)
     expect(result.manifestHash).toHaveLength(64)
     expect(result.localDeletionEligibility?.eligible).toBe(true)
-    expect(result.message).toBe("Research Workspace migration failed before local deletion.")
+    expect(result.message).toBe("Research Workspace migration failed; local content is retained.")
     expect(deleteLocalStorageValue).not.toHaveBeenCalled()
   })
 
-  it("fails safely when tombstone preflight write throws before local deletion", async () => {
+  it("does not invoke a failing tombstone writer for receipt-only migration", async () => {
     const values = new Map([
       ["tldw-workspace", JSON.stringify({ workspaceId: "ws-1" })],
     ]);
@@ -487,12 +476,12 @@ describe("Research Workspace migration manifest planning", () => {
       }),
     });
 
-    expect(result.status).toBe("failed")
+    expect(result.status).toBe("finalized_not_delete_eligible")
     expect(deleteLocalStorageValue).not.toHaveBeenCalled()
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 
-  it("does not persist the final tombstone when indexeddb deletion cannot be preflight-cleaned", async () => {
+  it("retains IndexedDB payloads without invoking the failing delete callback", async () => {
     const writeLocalStorageValue = vi.fn()
     const ackWorkspaceMigrationClientDelete = vi.fn(async () => ({ ok: true }))
 
@@ -553,7 +542,7 @@ describe("Research Workspace migration manifest planning", () => {
       }),
     });
 
-    expect(result.status).toBe("blocked")
+    expect(result.status).toBe("finalized_not_delete_eligible")
     expect(writeLocalStorageValue).not.toHaveBeenCalled()
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
@@ -561,7 +550,7 @@ describe("Research Workspace migration manifest planning", () => {
 
 
 it.each([false, true])(
-  "retains only the active chat location hint when migration deletes covered content (late ACK=%s)",
+  "retains the complete local conversation without a destructive marker (late ACK=%s)",
   async (late) => {
     const writes = new Map<string, string>([
       [
@@ -605,13 +594,10 @@ it.each([false, true])(
         writes.set(key, value);
       },
     });
-    expect(result.status).toBe("deleted")
-    const marker = JSON.parse(
-      writes.get(buildResearchWorkspaceMigrationTombstoneKey("ws-hint"))!
-    )
-    expect(marker.chatReference).toEqual(chatReference)
-    expect(marker.serverScopeKey).toBeUndefined()
-    expect(JSON.stringify(marker)).not.toContain("Do not retain this answer")
+    expect(result.status).toBe("finalized_not_delete_eligible")
+    expect(writes.get("tldw-workspace")).toContain("Do not retain this answer")
+    expect(writes.has(buildResearchWorkspaceMigrationTombstoneKey("ws-hint"))).toBe(false)
+    expect(writes.size).toBe(1)
   }
 )
 
@@ -688,8 +674,8 @@ describe("Account-scoped Chat reference inventory", () => {
       deleteLocalStorageValue: (key) => localStorage.removeItem(key),
       writeLocalStorageValue: (key, value) => localStorage.setItem(key, value),
     })
-    expect(result.status).toBe("deleted")
-    expect(localStorage.getItem(contentKey)).toBeNull()
+    expect(result.status).toBe("finalized_not_delete_eligible")
+    expect(localStorage.getItem(contentKey)).toBe(JSON.stringify({ workspaceId: "ws-bob" }))
     expect(localStorage.getItem(hint.key)).toBe(hint.raw)
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       manifest: { retained_local_surface_ids: ["localStorage:" + hint.key] }

@@ -16,6 +16,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 pytestmark = pytest.mark.integration
 
@@ -23,9 +25,11 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 async def world_archive(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     with ExitStack() as stack:
         source = CharactersRAGDB(tmp_path / "source.db", client_id="1")
-        destination = CharactersRAGDB(tmp_path / "destination.db", client_id="2")
+        destination = CharactersRAGDB(DatabasePaths.get_chacha_db_path(2), client_id="2")
         stack.callback(source.close_all_connections)
         stack.callback(destination.close_all_connections)
         world = WorldBookService(source)
@@ -120,42 +124,34 @@ async def test_failed_import_jobs_retain_partial_counts_and_diagnostics(world_ar
         assert error.value.retryable is False  # nosec B101 -- Storage failure stays terminal until legitimate user retry.
     else:
         stop = asyncio.Event()
-        outcomes = []
+        manager = JobManager()
+        queued = manager.create_job(
+            domain="chatbooks",
+            queue="default",
+            job_type="chatbook_import",
+            owner_user_id="2",
+            payload={
+                "action": "import",
+                "chatbooks_job_id": job.job_id,
+                "file_token": str(path),
+                "conflict_resolution": "merge" if lane == "core-refusal" else "skip",
+            },
+        )
 
-        class JobManager:
-            def acquire_next_job(self, **_kwargs):
-                return {
-                    "id": 42,
-                    "uuid": "partial-job-uuid",
-                    "owner_user_id": "2",
-                    "payload": {
-                        "action": "import",
-                        "chatbooks_job_id": job.job_id,
-                        "file_token": str(path),
-                        "conflict_resolution": "merge" if lane == "core-refusal" else "skip",
-                    },
-                    "lease_id": "partial-lease",
-                }
-
-            def get_job(self, _job_id):
-                return {"status": "processing"}
-
-            def complete_job(self, *_args, **_kwargs):
-                outcomes.append("completed")
+        async def stop_when_terminal():
+            try:
+                while manager.get_job(queued["id"])["status"] not in {"failed", "completed", "cancelled"}:
+                    await asyncio.sleep(0.01)
+            finally:
                 stop.set()
 
-            def fail_job(self, *_args, **kwargs):
-                outcomes.append("failed" if kwargs.get("retryable") is False else "retryable")
-                stop.set()
-
-            def renew_job_lease(self, *_args, **_kwargs):
-                return None
-
-        monkeypatch.setattr(core_jobs_worker, "JobManager", JobManager)
-        monkeypatch.setattr(core_jobs_worker, "_build_chacha_db_for_user", lambda _owner: db)
-        monkeypatch.setattr(core_jobs_worker, "ChatbookService", lambda *_args, **_kwargs: service)
-        await asyncio.wait_for(core_jobs_worker.run_chatbooks_core_jobs_worker(stop), timeout=5)
-        assert outcomes == ["failed"]  # nosec B101 -- Actual dispatcher must fail the managed job.
+        watcher = asyncio.create_task(stop_when_terminal())
+        try:
+            await asyncio.wait_for(core_jobs_worker.run_chatbooks_core_jobs_worker(stop), timeout=5)
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
+        assert manager.get_job(queued["id"])["status"] == "failed"  # nosec B101 -- Real durable dispatcher outcome.
     saved = service._get_import_job(job.job_id)
     assert saved.status is ImportStatus.FAILED  # nosec B101 -- No false completed status.
     if lane == "core-refusal":

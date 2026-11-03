@@ -454,24 +454,36 @@ def test_saved_plan_cannot_become_legacy_after_parent_hard_deletion(tmp_path, mo
         db.close_all_connections()
 
 
-@pytest.mark.parametrize("parent_kind", ["foreign", "deleted"])
-@pytest.mark.parametrize("action", ["confirm", "retry"])
-def test_legacy_approval_rejects_a_later_canonical_parent(tmp_path, monkeypatch, parent_kind, action):
-    from types import SimpleNamespace
-
-    from fastapi.testclient import TestClient
-
+@pytest.fixture
+def approval_runtime(tmp_path, monkeypatch):
+    """Use an isolated real runtime and fail immediately if a refused tool dispatches."""
     from tldw_Server_API.app.api.v1.endpoints import persona as endpoint
-    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-    from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until, fastapi_app
 
     async def authenticated(*args, **kwargs):
         return "1", True, True
 
-    monkeypatch.setattr(endpoint, "_resolve_authenticated_user_id", authenticated)
+    def forbidden_dispatch():
+        pytest.fail("A refused or retired Persona approval reached MCP dispatch")
+
+    manager = SessionManager(max_sessions_per_user=1)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    monkeypatch.setattr(endpoint, "_resolve_authenticated_user_id", authenticated)
+    monkeypatch.setattr(endpoint, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(endpoint, "get_mcp_server", forbidden_dispatch)
+    return manager
+
+
+@pytest.mark.parametrize("parent_kind", ["foreign", "deleted"])
+@pytest.mark.parametrize("action", ["confirm", "retry"])
+def test_legacy_approval_rejects_a_later_canonical_parent(tmp_path, monkeypatch, parent_kind, action, approval_runtime):
+
+    from fastapi.testclient import TestClient
+
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until, fastapi_app
+
+    manager = approval_runtime
     session, plan = "temporary-approval", "reviewed-plan"
-    manager = SessionManager()
     manager.create("1", "research_assistant", session)
     manager.put_plan(
         session_id=session,
@@ -496,21 +508,11 @@ def test_legacy_approval_rejects_a_later_canonical_parent(tmp_path, monkeypatch,
             }
         },
     )
-    monkeypatch.setattr(endpoint, "get_session_manager", lambda: manager)
     db = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(1)), client_id="approval-parent-collision")
     owner = "2" if parent_kind == "foreign" else "1"
     persona = db.create_persona_profile({"user_id": owner, "name": "Later canonical parent"})
     db.create_persona_session(
         {"id": session, "user_id": owner, "persona_id": persona, "deleted": parent_kind == "deleted"}
-    )
-    calls = []
-
-    async def handle(request, **kwargs):
-        calls.append(request)
-        return SimpleNamespace(error=None, result={"ok": True})
-
-    monkeypatch.setattr(
-        endpoint, "get_mcp_server", lambda: SimpleNamespace(initialized=True, handle_http_request=handle)
     )
     try:
         with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
@@ -528,7 +530,6 @@ def test_legacy_approval_rejects_a_later_canonical_parent(tmp_path, monkeypatch,
                 ws, lambda event: event.get("event") == "tool_call" or event.get("reason_code") == "SESSION_NOT_FOUND"
             )
             assert outcome.get("reason_code") == "SESSION_NOT_FOUND"  # nosec B101 -- Deny before effect or approval consumption.
-            assert calls == []  # nosec B101
             if action == "confirm":
                 assert manager.get_plan(session_id=session, plan_id=plan, user_id="1") is not None  # nosec B101
             else:
@@ -538,23 +539,16 @@ def test_legacy_approval_rejects_a_later_canonical_parent(tmp_path, monkeypatch,
 
 
 @pytest.mark.parametrize("boundary", ["promote", "retire", "replace"])
-def test_tool_preflight_rechecks_runtime_after_owned_database_await(tmp_path, monkeypatch, boundary):
+def test_tool_preflight_rechecks_runtime_after_owned_database_await(tmp_path, monkeypatch, boundary, approval_runtime):
     from threading import Event
-    from types import SimpleNamespace
 
     from fastapi.testclient import TestClient
 
-    from tldw_Server_API.app.api.v1.endpoints import persona as endpoint
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.Persona.session_materialization import materialize_persona_session
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until, fastapi_app
 
-    async def authenticated(*args, **kwargs):
-        return "1", True, True
-
-    monkeypatch.setattr(endpoint, "_resolve_authenticated_user_id", authenticated)
-    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
-    manager = SessionManager(max_sessions_per_user=1)
+    manager = approval_runtime
     session, plan = "await-boundary", "reviewed-plan"
     manager.put_plan(
         session_id=session,
@@ -563,7 +557,6 @@ def test_tool_preflight_rechecks_runtime_after_owned_database_await(tmp_path, mo
         plan_id=plan,
         steps=[{"idx": 0, "tool": "notes.search", "args": {"query": "reviewed"}}],
     )
-    monkeypatch.setattr(endpoint, "get_session_manager", lambda: manager)
     original = storage.PersonaTranscriptStore.validate_persona_transcript_session
     waiting, release = Event(), Event()
     validations = []
@@ -577,15 +570,6 @@ def test_tool_preflight_rechecks_runtime_after_owned_database_await(tmp_path, mo
         return result
 
     monkeypatch.setattr(storage.PersonaTranscriptStore, "validate_persona_transcript_session", held)
-    calls = []
-
-    async def handle(request, **kwargs):
-        calls.append(request)
-        return SimpleNamespace(error=None, result={"ok": True})
-
-    monkeypatch.setattr(
-        endpoint, "get_mcp_server", lambda: SimpleNamespace(initialized=True, handle_http_request=handle)
-    )
     try:
         with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
             ws.send_json({"type": "confirm_plan", "session_id": session, "plan_id": plan, "approved_steps": [0]})
@@ -611,6 +595,5 @@ def test_tool_preflight_rechecks_runtime_after_owned_database_await(tmp_path, mo
                 ws, lambda event: event.get("event") == "tool_call" or event.get("reason_code") == "SESSION_NOT_FOUND"
             )
             assert outcome.get("reason_code") == "SESSION_NOT_FOUND"  # nosec B101
-            assert calls == []  # nosec B101 -- Approval cannot cross an awaited runtime boundary.
     finally:
         release.set()

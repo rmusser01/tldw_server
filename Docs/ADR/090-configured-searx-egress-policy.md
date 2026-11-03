@@ -1,4 +1,4 @@
-# ADR-084: Scoped egress for the server-configured Searx endpoint
+# ADR-090: Scoped egress for the server-configured Searx endpoint
 
 **Status:** Accepted
 **Date:** 2026-10-29

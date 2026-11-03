@@ -20,7 +20,7 @@ beforeEach(async () => {
 
 afterEach(() => workspacePersistWriterInternals.cancelPendingWrite());
 
-it("preserves a real status update during migration and permits a later stable retry", async () => {
+it("retains a real status update and all local payloads across receipt retries", async () => {
   const workspace = useWorkspaceStore
     .getState()
     .initializeWorkspace("Live migration");
@@ -99,10 +99,7 @@ it("preserves a real status update during migration and permits a later stable r
       api,
     });
   const first = await run();
-  expect(first.status).toBe("failed");
-  expect(first.error).toEqual(
-    new Error("Local workspace data changed before migration cleanup."),
-  );
+  expect(first.status).toBe("finalized_not_delete_eligible");
   expect(remove).not.toHaveBeenCalled();
   expect(api.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
   expect(
@@ -121,10 +118,10 @@ it("preserves a real status update during migration and permits a later stable r
     client_delete_eligible: true,
   }));
   const second = await run();
-  expect(second.status).toBe("deleted");
-  expect(api.ackWorkspaceMigrationClientDelete).toHaveBeenCalledOnce();
+  expect(second.status).toBe("finalized_not_delete_eligible");
+  expect(api.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
   expect(changed.size).toBeGreaterThan(0);
   expect(
-    [...changed.keys()].every((key) => localStorage.getItem(key) === null),
+    [...changed].every(([key, value]) => localStorage.getItem(key) === value),
   ).toBe(true);
 });

@@ -25,17 +25,15 @@ def fresh_persona_runtime(monkeypatch):
 
     manager = SessionManager()
     monkeypatch.setattr(ep, "get_session_manager", lambda: manager)
+    return manager
 
 
 @pytest.fixture
-def owned_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+def owned_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh_persona_runtime) -> Any:
     async def auth(*args: Any, **kwargs: Any) -> Any:
         return "1", True, True
 
     monkeypatch.setattr(ep, "_resolve_authenticated_user_id", auth)
-    from tldw_Server_API.app.core.Persona.session_manager import SessionManager
-    manager = SessionManager()
-    monkeypatch.setattr(ep, "get_session_manager", lambda: manager)
     sid = "live-conversation-test"
     _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=sid, mode="session_scoped")
     return sid
@@ -241,8 +239,6 @@ def test_live_turns_survive_manager_restart_without_regeneration(monkeypatch, ow
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
-    manager = SessionManager()
-    monkeypatch.setattr(ep, "get_session_manager", lambda: manager)
     calls = []
     monkeypatch.setattr(ep, "_get_persona_rbac_flags", lambda: (True, True))
 

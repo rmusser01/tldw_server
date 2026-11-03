@@ -127,7 +127,6 @@ async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_
     import asyncio
 
     from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
-    from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerSDK
     from tldw_Server_API.app.services import media_ingest_jobs_worker as worker
 
     manager, rows = owned_jobs
@@ -136,8 +135,7 @@ async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_
             domain="other", queue="default", job_type="untouched", owner_user_id="11", payload={}
         )
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "1" if outbox else "0")
-    if outbox:
-        monkeypatch.setenv("JOBS_DB_URL", manager.db_url)
+    monkeypatch.setenv("JOBS_DB_URL", manager.db_url)
     seen = []
 
     async def work(job, _manager, _progress):
@@ -145,14 +143,22 @@ async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_
         seen.append((job["owner_user_id"], scope.user_id, scope.is_admin))
         return {"owner": job["owner_user_id"]}
 
-    async def finish_after_empty_acquire(sdk, _seconds):
-        if termination == "cancel":
-            raise asyncio.CancelledError
-        sdk.stop()
+    stop = asyncio.Event()
+    running = asyncio.current_task()
 
-    monkeypatch.setattr(worker, "_jobs_manager", lambda: manager)
+    async def finish_after_durable_completion():
+        while True:
+            with JobManager.scoped_rls_context(is_admin=True, domain_allowlist="media_ingest", owner_user_id=None):
+                completed = [manager.get_job(rows[owner]["id"]) for owner in (11, 22)]
+            if all(row["status"] == "completed" for row in completed):
+                if termination == "cancel":
+                    running.cancel()
+                else:
+                    stop.set()
+                return
+            await asyncio.sleep(0.01)
+
     monkeypatch.setattr(worker, "_handle_job_in_scope", work)
-    monkeypatch.setattr(WorkerSDK, "_sleep_chunked", finish_after_empty_acquire)
     with (
         JobManager.scoped_rls_context(is_admin=False, domain_allowlist="ambient", owner_user_id="999"),
         scoped_context(user_id=999, is_admin=False) as content_scope,
@@ -162,11 +168,18 @@ async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_
             JobManager._RLS_DOMAIN_ALLOWLIST.get(),
             JobManager._RLS_OWNER_USER_ID.get(),
         )
-        if termination == "cancel":
-            with pytest.raises(asyncio.CancelledError):
-                await worker.run_media_ingest_jobs_worker(worker_id="scope-regression")
-        else:
-            await worker.run_media_ingest_jobs_worker(worker_id="scope-regression")
+        watcher = asyncio.create_task(finish_after_durable_completion())
+        try:
+            if termination == "cancel":
+                with pytest.raises(asyncio.CancelledError):
+                    async with asyncio.timeout(5):
+                        await worker.run_media_ingest_jobs_worker(stop, worker_id="scope-regression")
+            else:
+                async with asyncio.timeout(5):
+                    await worker.run_media_ingest_jobs_worker(stop, worker_id="scope-regression")
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
         after = (
             JobManager._RLS_IS_ADMIN.get(),
             JobManager._RLS_DOMAIN_ALLOWLIST.get(),

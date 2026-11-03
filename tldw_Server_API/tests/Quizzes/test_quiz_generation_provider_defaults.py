@@ -75,3 +75,69 @@ async def test_quiz_call_canonicalizes_runtime_default(monkeypatch, configured_a
     assert [(call["selected_provider"], call["model"]) for call in calls] == [
         ("llama.cpp", "configured-local-model")
     ]  # nosec B101 -- Pytest oracle for runtime default alias/model routing.
+
+@pytest.mark.parametrize("policy", ["disabled", "explicit_model", "default_model", "unhealthy"])
+async def test_quiz_denied_provider_policy_never_dispatches(configured_adapter, policy):
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+    _, calls, _ = configured_adapter
+    overrides.set_llm_provider_overrides_cache_for_tests({
+        "llama.cpp": overrides.LLMProviderOverride(
+            provider="llama.cpp", is_enabled=policy != "disabled", allowed_models=["approved-model"]
+        )
+    }, healthy=policy != "unhealthy")
+    with pytest.raises(ByokResolutionError):
+        await quiz_generator._call_quiz_generation_llm(
+            prompt="Private source", api_provider="llamacpp",
+            model="denied-model" if policy == "explicit_model" else None,
+        )
+    assert calls == []  # nosec B101 - denied configuration cannot reach the adapter.
+
+
+async def test_quiz_allowed_configured_model_dispatches(configured_adapter):
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
+
+    _, calls, _ = configured_adapter
+    overrides.set_llm_provider_overrides_cache_for_tests({
+        "llama.cpp": overrides.LLMProviderOverride(provider="llama.cpp", allowed_models=["configured-local-model"])
+    })
+    await quiz_generator._call_quiz_generation_llm(prompt="Source facts", api_provider="llamacpp")
+    assert [call["model"] for call in calls] == ["configured-local-model"]  # nosec B101 - policy uses the dispatched default.
+
+async def test_quiz_cancellation_retains_provider_ownership(configured_adapter, monkeypatch):
+    import asyncio
+    import threading
+
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+    from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
+
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    owners = []
+    class HeldAdapter:
+        def chat(self, request):
+            owners.append(current_llm_user_id())
+            entered.set()
+            try:
+                if not release.wait(2):
+                    raise RuntimeError("test provider was not released")
+                return {"choices": [{"message": {"content": "retained result"}}]}
+            finally:
+                exited.set()
+    monkeypatch.setattr(quiz_generator, "_get_adapter", lambda _provider: HeldAdapter())
+    with llm_call_root(37):
+        work = asyncio.create_task(quiz_generator._call_quiz_generation_llm(prompt="Private facts", api_provider="llamacpp"))
+    try:
+        async with asyncio.timeout(1):
+            while not entered.is_set():
+                await asyncio.sleep(0)
+        work.cancel()
+        await asyncio.sleep(0.03)
+        assert not work.done() and not exited.is_set()  # nosec B101 - async scope still owns the running provider.
+    finally:
+        release.set()
+        try:
+            await work
+        except asyncio.CancelledError:
+            pass
+    assert exited.is_set() and work.cancelled() and owners == [37]  # nosec B101 - real provider drain and restored cancellation.

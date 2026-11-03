@@ -49,36 +49,26 @@ const run = (values: Map<string, string>, network = api(), extra = {}) =>
 
 beforeEach(() => localStorage.clear());
 
-it("recognizes the real producer's deletion and preflight markers as retained non-authoritative metadata", async () => {
-  const values = new Map([
-    ["tldw-workspace", JSON.stringify({ workspaceId: A })],
-  ]);
+it("retains older deletion markers as non-authoritative metadata without writing new ones", async () => {
+  const values = new Map([["tldw-workspace", JSON.stringify({ workspaceId: A })]]);
   const written: Array<[string, string]> = [];
   const result = await run(values, api(), {
-    writeLocalStorageValue: (key: string, value: string) => {
-      written.push([key, value]);
-      values.set(key, value);
-    },
+    writeLocalStorageValue: (key: string, value: string) => { written.push([key, value]); }
   });
-  expect(result.status).toBe("deleted");
-  expect(written).toHaveLength(2);
-  for (const [key] of written)
-    expect(
-      classifyResearchWorkspaceLegacyStorageSurface({
-        kind: "local_storage",
-        key,
-      }),
-    ).toMatchObject({
-      classification: "metadata",
-      deletionPolicy: "retain_local",
-      authoritativeForMigration: false,
+  expect(result.status).toBe("finalized_not_delete_eligible");
+  expect(written).toEqual([]);
+  expect(values.get("tldw-workspace")).toBe(JSON.stringify({ workspaceId: A }));
+  const keys = [
+    "tldw:research-workspace:migration:tombstone:" + A,
+    "tldw:research-workspace:migration:tombstone-preflight:" + A
+  ];
+  for (const key of keys)
+    expect(classifyResearchWorkspaceLegacyStorageSurface({ kind: "local_storage", key })).toMatchObject({
+      classification: "metadata", deletionPolicy: "retain_local", authoritativeForMigration: false
     });
-  const eligibility = evaluateResearchWorkspaceLegacyDeletionEligibility({
-    discoveredLocalStorageKeys: written.map(([key]) => key),
-    manifestCoveredSurfaceIds: [],
-  });
-  expect(eligibility.eligible).toBe(true);
-  expect(eligibility.retainedLocalSurfaces).toHaveLength(2);
+  expect(evaluateResearchWorkspaceLegacyDeletionEligibility({
+    discoveredLocalStorageKeys: keys, manifestCoveredSurfaceIds: []
+  }).retainedLocalSurfaces).toHaveLength(2);
 });
 
 it("keeps reserved-marker lookalikes and empty marker identities blocking", () => {
@@ -250,7 +240,7 @@ it("does not mutate local data after the owner or workspace retires during readb
   expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
 });
 
-it("still deletes a valid target-only payload with both receipt gates satisfied", async () => {
+it("retains a valid target-only payload after receipt matching", async () => {
   const key = snapshotKey(A),
     values = new Map([
       [
@@ -260,9 +250,9 @@ it("still deletes a valid target-only payload with both receipt gates satisfied"
     ]);
   const network = api(),
     result = await run(values, network);
-  expect(result.status).toBe("deleted");
-  expect(values.has(key)).toBe(false);
-  expect(network.ackWorkspaceMigrationClientDelete).toHaveBeenCalledOnce();
+  expect(result.status).toBe("finalized_not_delete_eligible");
+  expect(values.get(key)).toBe(JSON.stringify({ workspaceId: A, currentNote: { content: "Alpha" } }));
+  expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
 });
 
 it("rejects contradictory shared-record ownership even when every row names the target", async () => {
@@ -336,7 +326,7 @@ it("rejects an IndexedDB record key contradicting its declared workspace", async
   expect(remove).not.toHaveBeenCalled();
 });
 
-it("does not tombstone or acknowledge a replacement queued after removal", async () => {
+it("does not invoke destructive callbacks that could overwrite a queued draft", async () => {
   const key = snapshotKey(A),
     values = new Map([[key, JSON.stringify({ workspaceId: A })]]),
     network = api();
@@ -351,7 +341,7 @@ it("does not tombstone or acknowledge a replacement queued after removal", async
     },
   });
   expect(result.status).not.toBe("deleted");
-  expect(values.get(key)).toBe(replacement);
+  expect(values.get(key)).toBe(JSON.stringify({ workspaceId: A }));
   expect(
     [...values.keys()].filter((name) =>
       name.startsWith("tldw:research-workspace:migration:tombstone:"),
@@ -360,7 +350,7 @@ it("does not tombstone or acknowledge a replacement queued after removal", async
   expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
 });
 
-it("still cleans a proved target-only IndexedDB collection after both receipt gates", async () => {
+it("retains a target-only IndexedDB collection after receipt matching", async () => {
   let payload: unknown = {
     workspaceId: A,
     key: "workspace:" + A + ":chat",
@@ -380,12 +370,16 @@ it("still cleans a proved target-only IndexedDB collection after both receipt ga
     readIndexedDbStorePayload: async () => payload,
     deleteIndexedDbStorePayload: remove,
   });
-  expect(result.status).toBe("deleted");
-  expect(remove).toHaveBeenCalledOnce();
-  expect(network.ackWorkspaceMigrationClientDelete).toHaveBeenCalledOnce();
+  expect(result.status).toBe("finalized_not_delete_eligible");
+  expect(remove).not.toHaveBeenCalled();
+  expect(payload).toEqual({
+    workspaceId: A, key: "workspace:" + A + ":chat",
+    session: { messages: [{ message: "Alpha" }] }
+  });
+  expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
 });
 
-it("reports acknowledged partial removal without claiming all content was retained", async () => {
+it("retains every chunk without invoking a partially failing deletion callback", async () => {
   const first = snapshotKey(A),
     second = "tldw-workspace:workspace:" + A + ":chat";
   const raw = JSON.stringify({
@@ -402,9 +396,9 @@ it("reports acknowledged partial removal without claiming all content was retain
       values.delete(key);
     },
   });
-  expect(result.status).toBe("failed");
-  expect(result.deletedSurfaceIds).toEqual(["localStorage:" + first]);
-  expect(result.message).not.toContain("before local deletion");
+  expect(result.status).toBe("finalized_not_delete_eligible");
+  expect(result.deletedSurfaceIds).toEqual([]);
+  expect(values.get(first)).toBe(JSON.stringify({ workspaceId: A }));
   expect(values.get(second)).toBe(raw);
   expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
 });
@@ -421,7 +415,7 @@ it("retains unbound sibling content beside target-bound records", async () => {
   expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
 });
 
-it("still accepts an explicitly target-bound records-only envelope", async () => {
+it("retains an explicitly target-bound records-only envelope", async () => {
   const values = new Map([
     [
       "tldw-workspace",
@@ -431,10 +425,11 @@ it("still accepts an explicitly target-bound records-only envelope", async () =>
       }),
     ],
   ]);
-  expect((await run(values)).status).toBe("deleted");
+  expect((await run(values)).status).toBe("finalized_not_delete_eligible");
+  expect(JSON.parse(values.get("tldw-workspace")!).records).toEqual([{ workspaceId: A, content: "Alpha" }]);
 });
 
-it("does not claim deletion never began when a delete removes data then rejects", async () => {
+it("does not invoke a callback that would remove data and then reject", async () => {
   const key = snapshotKey(A),
     values = new Map([[key, JSON.stringify({ workspaceId: A })]]),
     network = api();
@@ -444,9 +439,27 @@ it("does not claim deletion never began when a delete removes data then rejects"
       throw new Error("Delete receipt lost");
     },
   });
-  expect(result.status).toBe("failed");
-  expect(values.has(key)).toBe(false);
+  expect(result.status).toBe("finalized_not_delete_eligible");
+  expect(values.get(key)).toBe(JSON.stringify({ workspaceId: A }));
   expect(result.deletedSurfaceIds).toEqual([]);
   expect(result.message).not.toContain("before local deletion");
   expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
+});
+
+it("retains target notes, artifacts and chat when the server stores only their hashes", async () => {
+  const key = snapshotKey(A);
+  const payload = JSON.stringify({
+    workspaceId: A,
+    currentNote: { content: "Only recoverable note" },
+    generatedArtifacts: [{ id: "artifact-1", content: "Only recoverable output" }],
+    chatMessages: [{ content: "Only recoverable conversation" }]
+  });
+  const values = new Map([[key, payload]]);
+  const network = api(); // Older servers can incorrectly advertise deletion eligibility.
+  const result = await run(values, network);
+  expect(values.get(key)).toBe(payload);
+  expect(result.status).toBe("finalized_not_delete_eligible");
+  expect(result.deletedSurfaceIds).toEqual([]);
+  expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
+  expect([...values.keys()]).toEqual([key]);
 });

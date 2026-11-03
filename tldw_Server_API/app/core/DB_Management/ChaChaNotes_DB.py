@@ -32435,8 +32435,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         if row is None:
             return None
+        return self._workspace_migration_session_from_row(row)
+
+    def _workspace_migration_session_from_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        """Keep receipt-only sessions, including older finalized rows, non-destructive."""
         session = dict(row)
         session["_chunks"] = self._list_workspace_migration_chunks(str(session["id"]))
+        # Hashes and byte counts do not store or read back the original content.
+        session["client_delete_eligible"] = False
+        recovery = self._parse_workspace_migration_json(session.get("recovery_manifest_json"), fallback={})
+        if isinstance(recovery, dict) and recovery:
+            recovery.update(client_delete_eligible=False, can_delete_legacy_storage=False, server_readback_verified=False)
+            if recovery.get("verification_status") == "verified":
+                recovery["verification_status"] = "content_not_migrated"
+            session["recovery_manifest_json"] = self._serialize_workspace_migration_json(
+                recovery, "recovery_manifest", default={}
+            )
         return session
 
     def _list_workspace_migration_chunks(self, migration_id: str) -> list[dict[str, Any]]:
@@ -32455,9 +32469,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         if row is None:
             return None
-        session = dict(row)
-        session["_chunks"] = self._list_workspace_migration_chunks(migration_id)
-        return session
+        return self._workspace_migration_session_from_row(row)
 
     def list_workspace_migration_sessions(self, *, limit: int = 100) -> list[dict[str, Any]]:
         """Return recent Research Workspace migration sessions with accepted chunk receipts."""
@@ -32468,9 +32480,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         sessions: list[dict[str, Any]] = []
         for row in cursor.fetchall():
-            session = dict(row)
-            session["_chunks"] = self._list_workspace_migration_chunks(str(session["id"]))
-            sessions.append(session)
+            sessions.append(self._workspace_migration_session_from_row(row))
         return sessions
 
     def _get_workspace_migration_chunk(self, migration_id: str, chunk_id: str) -> dict[str, Any] | None:
@@ -32584,7 +32594,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
 
     def _verify_workspace_migration_delete_eligibility(self, session: dict[str, Any]) -> dict[str, Any]:
-        """Verify accepted chunk receipts match declarations before browser-local deletion."""
+        """Check receipt consistency without treating hashes as migrated content."""
         declared = self._declared_workspace_migration_chunks(session)
         accepted_chunks = session.get("_chunks", [])
         accepted = {str(chunk.get("id")): chunk for chunk in accepted_chunks}
@@ -32634,15 +32644,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ):
                 mismatched.append(chunk_id)
 
-        eligible = not missing and not mismatched and not undeclared
-        if eligible:
-            status = "verified"
+        receipts_match = not missing and not mismatched and not undeclared
+        if receipts_match:
+            status = "content_not_migrated"
         elif missing:
             status = "missing_chunks"
         else:
             status = "verification_failed"
         return {
-            "eligible": eligible,
+            "eligible": False,
             "status": status,
             "missing_chunk_ids": sorted(missing),
             "mismatch_chunk_ids": sorted(mismatched),

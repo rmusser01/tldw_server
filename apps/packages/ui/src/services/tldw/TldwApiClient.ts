@@ -5331,13 +5331,16 @@ export class TldwApiClientBase {
 
   async updateDataTable(
     tableId: string,
-    payload: { name?: string; description?: string }
+    payload: { name?: string; description?: string },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     return await bgRequest<any>({
       path: `/api/v1/data-tables/${id}`,
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body: payload
     })
   }
@@ -5347,14 +5350,17 @@ export class TldwApiClientBase {
     payload: {
       columns: DataTableColumn[]
       rows: Record<string, any>[]
-    }
+    },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     const body = buildContentPayload(payload.columns, payload.rows)
     const response = await bgRequest<any>({
       path: `/api/v1/data-tables/${id}/content`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body
     })
     return response?.table ? mapApiDetailToUi(response) : response

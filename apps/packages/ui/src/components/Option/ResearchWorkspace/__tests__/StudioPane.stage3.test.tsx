@@ -626,10 +626,11 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     const view = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><StudioPane /></MemoryRouter></ConfigProvider>)
     try {
       expandGeneratedOutputsSection()
+      const mountedListenerCount = added.mock.calls.length
       fireEvent.click(screen.getByRole("button", { name: "View" }))
       const dialog = await screen.findByRole("dialog")
       await waitFor(() => expect(within(dialog).getByText("Selene tours start Friday at 18:00.", { exact: true })).toBeVisible())
-      const watchers = added.mock.calls.filter(([name]) => name === "tldw:auth-principal-changed").map(([, listener]) => listener)
+      const watchers = added.mock.calls.slice(reason === "account" ? mountedListenerCount : 0).filter(([name]) => name === "tldw:auth-principal-changed").map(([, listener]) => listener)
       expect(watchers.length).toBeGreaterThan(0)
       if (reason === "account") fireEvent(window, new Event("tldw:auth-principal-changed"))
       else view.unmount()

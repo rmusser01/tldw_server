@@ -1,11 +1,11 @@
-# ADR-083: Data Table Completion Before Publication
+# ADR-089: Data Table Completion Before Publication
 
 **Status:** Proposed
 **Date:** 2026-10-27
 **Backfilled from:** not backfilled
 **Decision owner:** UAT requester and implementation review under authorized S03 repair
 **Related task:** TASK-13260.278.18.83.45
-**Related spec/plan:** [Design](../Design/Data_Tables_Completed_Job_Publication_20261027.md), [S03 plan](../Plans/IMPLEMENTATION_PLAN_uat_s03_artifact_editors_20261026.md)
+**Related design:** [Data Tables publication design](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/Data_Tables_Completed_Job_Publication_20261027.md). Implementation and validation history remain in TASK-13260.278.18.83.45.
 
 ## Decision
 
