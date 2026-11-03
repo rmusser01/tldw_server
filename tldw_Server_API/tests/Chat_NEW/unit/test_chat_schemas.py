@@ -249,7 +249,12 @@ class TestChatCompletionRequest:
             )
 
         errors = exc_info.value.errors()
-        assert any("at least 1 item" in str(e) for e in errors)
+        assert any(
+            e["type"] == "value_error"
+            and e["loc"] == ()
+            and "At least one current message is required" in e["msg"]
+            for e in errors
+        )
 
     @pytest.mark.unit
     def test_temperature_bounds(self):

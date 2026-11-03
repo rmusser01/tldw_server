@@ -9,17 +9,17 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx2 import Response
+from httpx import Response
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
 )
-from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,

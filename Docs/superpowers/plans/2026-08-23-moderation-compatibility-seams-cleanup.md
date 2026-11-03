@@ -71,7 +71,7 @@
     the deleted service-private characterization.
 - Modify: `Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md`
   - Record approved status only.
-- Modify: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
+- Modify: `backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md`
   - Record execution, verification, review, and final summary through Backlog.md
     MCP operations.
 - Do not modify: `tldw_Server_API/app/core/Moderation/policy_evaluator.py`
@@ -127,7 +127,7 @@
 **Files:**
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py`
 - Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
-- Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
+- Modify through Backlog.md MCP: `backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
 - [x] **Step 1: Add the failing class-local absence invariant**
 
@@ -303,7 +303,7 @@ deletion. Direct evaluator and service delegation suites passed.
 git add \
   tldw_Server_API/app/core/Moderation/moderation_service.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py \
-  'backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md'
+  'backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md'
 git commit -m "refactor(moderation): remove obsolete policy helper shims"
 ```
 
@@ -316,7 +316,7 @@ Expected: one commit containing only Task 1 production, tests, and tracking.
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py`
 - Modify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py`
 - Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
-- Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
+- Modify through Backlog.md MCP: `backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
 - [x] **Step 1: Add the failing class-local scan absence invariant**
 
@@ -538,7 +538,7 @@ git add \
   tldw_Server_API/app/core/Moderation/moderation_service.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py \
-  'backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md'
+  'backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md'
 git commit -m "refactor(moderation): remove obsolete scan helper shims"
 ```
 
@@ -551,7 +551,7 @@ Expected: one commit containing only Task 2 production, tests, and tracking.
 - Verify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py`
 - Verify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py`
 - Verify: `tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py`
-- Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
+- Modify through Backlog.md MCP: `backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
 - [x] **Step 1: Verify production method scope exactly**
 
@@ -697,7 +697,7 @@ Expected:
 ```text
 Docs/superpowers/plans/2026-08-23-moderation-compatibility-seams-cleanup.md
 Docs/superpowers/specs/2026-08-23-moderation-compatibility-seams-cleanup-design.md
-backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md
+backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md
 tldw_Server_API/app/core/Moderation/moderation_service.py
 tldw_Server_API/tests/unit/test_moderation_policy_evaluator.py
 tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py
@@ -717,7 +717,7 @@ or Definition of Done items complete until the corresponding evidence exists.
 - [x] **Step 9: Commit verification tracking**
 
 ```bash
-git add 'backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md'
+git add 'backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md'
 git commit -m "chore(backlog): record moderation cleanup verification"
 ```
 
@@ -728,7 +728,7 @@ Expected: a tracking-only commit after every technical gate passes.
 **Files:**
 - Review all files in `git diff origin/dev...HEAD`
 - Modify only files required to resolve validated findings
-- Modify through Backlog.md MCP: `backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md`
+- Modify through Backlog.md MCP: `backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md`
 
 - [x] **Step 1: Request spec compliance review**
 
@@ -795,14 +795,14 @@ git add \
   tldw_Server_API/app/core/Moderation/moderation_service.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_characterization.py \
   tldw_Server_API/tests/unit/test_moderation_policy_evaluator_delegation.py \
-  'backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md'
+  'backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md'
 git commit -m "chore(moderation): finalize compatibility cleanup"
 ```
 
 When only Backlog changed, use:
 
 ```bash
-git add 'backlog/tasks/task-13112 - Clean-up-Moderation-evaluator-compatibility-seams.md'
+git add 'backlog/tasks/task-15133 - Clean-up-Moderation-evaluator-compatibility-seams.md'
 git commit -m "chore(backlog): close moderation compatibility cleanup"
 ```
 

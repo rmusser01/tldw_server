@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import base64
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def github_egress_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Own host-policy inputs before individual tests apply their denylist overrides."""
+    for name in ("EGRESS_ALLOWLIST", "EGRESS_DENYLIST", "WORKFLOWS_EGRESS_DENYLIST"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "api.github.com")
 
 
 @pytest.mark.unit
@@ -314,7 +322,7 @@ def test_git_ls_files_timeout_is_reported_as_value_error(tmp_path, monkeypatch):
 
     monkeypatch.setenv("INGESTION_SOURCES_GIT_LS_FILES_TIMEOUT_SECONDS", "1")
     monkeypatch.setattr(git_repository.subprocess, "run", _timeout_run)
-    git_ls_files = getattr(git_repository, "_git_ls_files")
+    git_ls_files = git_repository._git_ls_files
 
     with pytest.raises(ValueError, match="Timed out enumerating git repository files"):
         git_ls_files(

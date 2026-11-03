@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client import
     SandboxSessionHandle,
     _is_self_referential_agent_command,
 )
-from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage, ACPResponseError
+from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage, ACPResponseError, ACPStdioClient
 from tldw_Server_API.app.core.Agent_Client_Protocol.stream_client import ACPStreamClient
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.core.Sandbox.runners.lima_runner import LimaRunner
@@ -111,8 +111,8 @@ def test_is_self_referential_agent_command_detects_runner_binary() -> None:
 
 @pytest.mark.unit
 def test_permission_policy_tier_resolution_matches_standard_runner(monkeypatch) -> None:
-    from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
     import tldw_Server_API.app.services.admin_acp_sessions_service as store_src
+    from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
 
     class _PolicyStore:
         def resolve_permission_tier(self, tool_name: str) -> str | None:
@@ -446,10 +446,11 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
         def __init__(self, result: dict[str, object]) -> None:
             self.result = result
 
-    class _FakeClient:
+    class _FakeClient(ACPStdioClient):
         is_running = True
 
         def __init__(self) -> None:
+            super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
 
         async def call(self, method: str, payload: dict[str, object]):
@@ -460,6 +461,7 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
 
     runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
     fake_client = _FakeClient()
+    fake_client._register_permission_session("session-close")
     runner._client = fake_client
     runner._updates["session-close"] = asyncio.Queue()
     runner._session_owners["session-close"] = 7
@@ -471,6 +473,7 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
     ]
     assert "session-close" not in runner._updates
     assert "session-close" not in runner._session_owners
+    assert "session-close" not in fake_client._permission_sessions
 
 
 @pytest.mark.unit
@@ -480,10 +483,11 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
         def __init__(self, result: dict[str, object]) -> None:
             self.result = result
 
-    class _FakeClient:
+    class _FakeClient(ACPStdioClient):
         is_running = True
 
         def __init__(self) -> None:
+            super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
 
         async def call(self, method: str, payload: dict[str, object]):
@@ -496,6 +500,7 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
 
     runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
     fake_client = _FakeClient()
+    fake_client._register_permission_session("session-close-legacy")
     runner._client = fake_client
 
     await runner.close_session("session-close-legacy")
@@ -504,6 +509,7 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
         ("session/close", {"sessionId": "session-close-legacy"}),
         ("_tldw/session/close", {"sessionId": "session-close-legacy"}),
     ]
+    assert "session-close-legacy" not in fake_client._permission_sessions
 
 
 @pytest.mark.unit
@@ -513,10 +519,11 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
         def __init__(self, result: dict[str, object]) -> None:
             self.result = result
 
-    class _FakeClient:
+    class _FakeClient(ACPStdioClient):
         is_running = True
 
         def __init__(self) -> None:
+            super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
 
         async def call(self, method: str, payload: dict[str, object]):
@@ -529,6 +536,7 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
 
     runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
     fake_client = _FakeClient()
+    fake_client._register_permission_session("session-close-code")
     runner._client = fake_client
 
     await runner.close_session("session-close-code")
@@ -537,6 +545,7 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
         ("session/close", {"sessionId": "session-close-code"}),
         ("_tldw/session/close", {"sessionId": "session-close-code"}),
     ]
+    assert "session-close-code" not in fake_client._permission_sessions
 
 
 @pytest.mark.unit
@@ -956,7 +965,6 @@ async def test_create_session_propagates_non_root_read_only_and_internal_ssh_por
         pytest.fail(f"Expected acp-session-hardened, got {session_id!r}")
 
     session_spec = capture.get("session_spec")
-    run_spec = capture.get("run_spec")
     if session_spec is None:
         pytest.fail("Expected sandbox session spec capture")
 

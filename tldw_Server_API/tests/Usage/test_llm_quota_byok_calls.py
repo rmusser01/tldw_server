@@ -25,6 +25,8 @@ pytestmark = pytest.mark.unit
 REQUEST = {"model": "m1", "messages": [{"role": "user", "content": "hello"}]}
 USAGE = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
 REFUSAL = LLMQuotaRefusal("llm_tokens_month", 100, 100, "Monthly LLM token limit reached", 60)
+# OpenAI's data-residency domains, <region>.api.openai.com (developers.openai.com/api/docs/guides/your-data).
+OPENAI_RESIDENCY_REGIONS = ("us", "eu", "au", "ca", "jp", "in", "sg", "kr", "gb", "ae")
 
 
 class _Provider(ChatProvider):
@@ -116,6 +118,7 @@ async def test_a_runtime_handle_says_whose_key_it_carries() -> None:
         ("qwen", {"api_base_url": "https://dashscope-us.aliyuncs.com/compatible-mode/v1"}, "user"),
         ("bedrock", {"runtime_endpoint": "https://bedrock-runtime.eu-west-1.amazonaws.com"}, "user"),
         ("bedrock", {"runtime_endpoint": "https://ec2-3-4-5-6.compute-1.amazonaws.com"}, "user_unmetered"),
+        ("bedrock", {"runtime_endpoint": "https://bedrock-runtime.x.s3.amazonaws.com"}, "user_unmetered"),
         ("huggingface", {"router_base_url": "http://operator-gpu.internal:8000"}, "user_unmetered"),
         ("lmstudio", {}, "user_unmetered"),
         ("openai", {"api_base_url": "https://api.openai.com.evil.example/v1"}, "user_unmetered"),
@@ -125,7 +128,7 @@ async def test_a_runtime_handle_says_whose_key_it_carries() -> None:
     ],
     ids=[
         "vendor-default", "vendor-url", "operator-url", "vendor-region", "bedrock-region", "bedrock-not-bedrock",
-        "router-url", "unknown-provider", "suffix-lookalike", "prefix-lookalike", "userinfo", "case-and-port",
+        "bedrock-label-span", "router-url", "unknown-provider", "suffix-lookalike", "prefix-lookalike", "userinfo", "case-and-port",
     ],
 )
 def test_a_user_key_is_the_users_own_spend_only_on_the_vendors_host(provider, section, expected) -> None:
@@ -135,12 +138,127 @@ def test_a_user_key_is_the_users_own_spend_only_on_the_vendors_host(provider, se
     assert billed_credential_source(provider, "user", {f"{provider}_api": section}) == expected
 
 
+@pytest.mark.parametrize(
+    ("provider", "url"),
+    [
+        *[("openai", f"https://{region}.api.openai.com/v1") for region in OPENAI_RESIDENCY_REGIONS],
+        ("cohere", "https://api.cohere.com/v2"),
+        ("moonshot", "https://api.moonshot.ai/v1"),
+        ("bedrock", "https://bedrock-runtime-fips.us-east-1.amazonaws.com"),
+    ],
+)
+def test_a_host_the_vendor_documents_bills_the_users_key(provider: str, url: str) -> None:
+    """OpenAI's data-residency hosts, Cohere's and Moonshot's current hosts and Bedrock's FIPS endpoints."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source
+
+    field = "runtime_endpoint" if provider == "bedrock" else "api_base_url"
+    assert billed_credential_source(provider, "user", {f"{provider}_api": {field: url}}) == "user"
+
+
+def test_a_two_label_host_under_openai_still_counts() -> None:
+    """``*.api.openai.com`` is one label, so a host two labels deep is not OpenAI's."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source
+
+    config = {"openai_api": {"api_base_url": "https://a.b.api.openai.com/v1"}}
+    assert billed_credential_source("openai", "user", config) == "user_unmetered"
+
+
+def test_every_billed_adapters_default_base_is_on_its_vendors_host() -> None:
+    """With nothing configured, the base the gateway freezes into the request is on the vendor's host."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import resolve_provider_models_base_url
+    from tldw_Server_API.app.core.Usage.llm_call_context import VENDOR_HOSTS, billed_credential_source
+
+    # A request's base_url is classified too, so a default off VENDOR_HOSTS would count every own-key call.
+    bases = {name: resolve_provider_models_base_url(name, {}, credentials_resolved=True) for name in VENDOR_HOSTS}
+    off_host = {
+        name: base for name, base in bases.items()
+        if base and billed_credential_source(name, "user", {f"{name}_api": {"api_base_url": base}}) != "user"
+    }
+    assert off_host == {}
+    assert {name for name, base in bases.items() if not base} == {"bedrock", "huggingface"}  # no base without config
+
+
 def test_every_provider_that_bills_per_key_names_its_vendors_host() -> None:
-    """A billed provider missing from the host table would count its users' own keys."""
+    """A billed provider missing from the host table, or from the config sections, would misread its users' keys."""
+    from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
     from tldw_Server_API.app.core.LLM_Calls.provider_metadata import PROVIDER_REQUIRES_KEY
     from tldw_Server_API.app.core.Usage.llm_call_context import VENDOR_HOSTS
 
     assert set(VENDOR_HOSTS) == {name for name, billed in PROVIDER_REQUIRES_KEY.items() if billed}
+    assert set(VENDOR_HOSTS) <= set(PROVIDER_APP_CONFIG_KEYS)
+
+
+def test_a_billed_provider_without_a_config_section_counts(monkeypatch) -> None:
+    """A provider added to the host table but not to the config sections counts its users' keys instead of failing."""
+    from tldw_Server_API.app.core.Usage import llm_call_context
+
+    monkeypatch.setitem(llm_call_context.VENDOR_HOSTS, "newvendor", ("api.newvendor.example",))
+    assert llm_call_context.billed_credential_source("newvendor", "user", {}) == "user_unmetered"
+
+
+async def test_a_trusted_callers_base_url_off_the_vendors_host_is_checked(refused) -> None:
+    """A per-request base URL (an admin, service or single-user caller's) wins in every adapter, so it is read too."""
+    request = {
+        **REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
+        "base_url": "http://operator-gpu.internal:8000/v1",
+    }
+    with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError):
+        await _Provider().achat(request)
+
+
+@pytest.mark.parametrize("field", ["base_url", "api_base_url"])
+@pytest.mark.parametrize("layer", ["sync", "async"])
+async def test_a_trusted_callers_base_url_off_the_vendors_host_is_checked_at_the_gateway(
+    refused, monkeypatch, layer: str, field: str
+) -> None:
+    """perform_chat_api_call checks the request's base URL itself; its adapter then runs as already checked."""
+    from tldw_Server_API.app.core.AuthNZ import byok_helpers
+    from tldw_Server_API.app.core.LLM_Calls import gateway as llm_gateway
+
+    monkeypatch.setattr(llm_gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _Provider()))
+    monkeypatch.setattr(llm_gateway, "has_model_listing", lambda _provider: False)  # no model discovery request
+    monkeypatch.setattr(byok_helpers, "resolve_byok_base_url_allowlist", lambda: {"openai"})
+    monkeypatch.setattr(byok_helpers, "validate_base_url_override", lambda value: value)  # no egress DNS lookup
+    args = {
+        "api_provider": "openai", "messages": [{"role": "user", "content": "hi"}], "model": "gpt-4o-mini",
+        "credentials_resolved": True, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
+        field: "https://my-gateway.example.com/v1", "trusted_base_url_override": True,
+    }
+    with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError):
+        if layer == "async":
+            await llm_gateway.perform_chat_api_call_async(**args)
+        else:
+            await asyncio.to_thread(llm_gateway.perform_chat_api_call, **args)
+
+
+async def test_a_trusted_callers_base_url_on_the_vendors_host_is_not_checked(refused) -> None:
+    """The same caller sending the call to the vendor's own host is on the user's own key."""
+    request = {
+        **REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
+        "base_url": "https://api.openai.com/v1",
+    }
+    with llm_call_context(user_id=7):
+        await _Provider().achat(request)
+    await llm_accounting.drain_accounting()
+    assert [row["credential_source"] for row in refused] == ["user"]
+
+
+async def test_an_admitted_call_to_a_trusted_callers_off_host_base_url_counts(refused, monkeypatch) -> None:
+    """Admitted, the off-host call is recorded as ``user_unmetered``, so the user's limits count it."""
+
+    async def _admit(user_id: Any, requested_tokens: int = 1) -> None:
+        """Admit everyone."""
+        return None
+
+    monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _admit)
+    request = {
+        **REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
+        "base_url": "http://operator-gpu.internal:8000/v1",
+    }
+    with llm_call_context(user_id=7):
+        await _Provider().achat(request)
+    await llm_accounting.drain_accounting()
+    assert [row["credential_source"] for row in refused] == ["user_unmetered"]
 
 
 async def test_calls_on_the_users_own_key_are_not_checked_and_are_recorded_as_such(refused) -> None:
@@ -295,6 +413,34 @@ async def test_a_provider_method_nested_in_an_own_key_call_is_not_checked_again(
     with llm_call_context(user_id=7, records_itself=True):
         response = await asyncio.to_thread(_Delegating().chat, request)  # off the loop, where a check can run
     assert len(response["chunks"]) == 1
+
+
+@pytest.mark.parametrize("layer", ["sync", "async"])
+async def test_a_provider_method_nested_in_an_own_key_stream_is_not_checked_again(refused, layer: str) -> None:
+    """The same for a stream: its body runs while it is read, after stream() returned, and is not refused mid-stream."""
+
+    def _without_handle(request: dict[str, Any]) -> dict[str, Any]:
+        """The request a delegate gets: no handle."""
+        return {key: value for key, value in request.items() if key != PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY}
+
+    class _Delegating(_Provider):
+        """stream() and astream() read their reply from chat() and achat()."""
+
+        def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+            """Delegate to chat() while the stream is read."""
+            yield self.chat(_without_handle(request))["choices"][0]["message"]["content"]
+
+        async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
+            """Delegate to achat() while the stream is read."""
+            yield (await self.achat(_without_handle(request)))["choices"][0]["message"]["content"]
+
+    request = {**REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user")}
+    with llm_call_context(user_id=7, records_itself=True):
+        if layer == "sync":
+            chunks = await asyncio.to_thread(lambda: list(_Delegating().stream(request)))
+        else:
+            chunks = [chunk async for chunk in _Delegating().astream(request)]
+    assert chunks == ["hi"]
 
 
 def _chat_request() -> SimpleNamespace:

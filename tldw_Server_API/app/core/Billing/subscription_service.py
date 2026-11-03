@@ -4,13 +4,14 @@ subscription_service.py
 Service for subscription and billing management.
 Coordinates between the billing repository and Stripe client.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -563,8 +564,18 @@ class SubscriptionService:
     # Usage & Limits
     # =========================================================================
 
-    async def get_org_limits(self, org_id: int) -> dict[str, Any]:
-        """Get the effective limits for an organization."""
+    async def get_org_limits(self, org_id: int, *, conn: Any | None = None) -> dict[str, Any]:
+        """Get effective limits, using only ``conn`` when a repository is configured.
+
+        A supplied connection requires the repository's strict API; unsupported
+        repositories fail closed instead of acquiring an extra pool slot. OSS
+        without a billing repository retains its canonical free-tier defaults.
+        """
+        if conn is not None and self._billing_repo is not None:
+            reader = getattr(self._billing_repo, "get_org_limits_on_connection", None)
+            if not callable(reader):
+                raise RuntimeError("Billing repository lacks a strict connection limits API")
+            return cast(dict[str, Any], await reader(conn, org_id))
         if self._billing_repo is not None and hasattr(self._billing_repo, "get_org_limits"):
             return await self._billing_repo.get_org_limits(org_id)
         return get_plan_limits("free")

@@ -44,6 +44,9 @@ def gateway(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("TESTING", raising=False)
     monkeypatch.delenv(egress.ALLOWED_PORTS_ENV, raising=False)
+    # This scenario owns a loopback endpoint; host admission must not preempt
+    # the independent private-address and port-policy assertions below.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1")
     monkeypatch.setenv(egress.BLOCK_PRIVATE_ENV, "true")
     hits: list[str] = []
 

@@ -4,6 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_usage_tables_pg
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
@@ -59,8 +63,14 @@ async def test_the_hosted_plans_llm_tokens_leave_out_a_members_own_key_pg(test_d
     assert await ensure_usage_tables_pg(test_db_pool)
     user_id = await ensure_test_user(test_db_pool, "byok-plan-pg")
     orgs = AuthnzOrgsTeamsRepo(test_db_pool)
-    org_id = int((await orgs.create_organization(name="byok-plan-pg", owner_user_id=user_id))["id"])
-    await orgs.add_org_member(org_id=org_id, user_id=user_id)
+    org = await orgs.create_organization_with_owner_membership(
+        name="byok-plan-pg",
+        owner_user_id=user_id,
+        context=TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        ),
+    )
+    org_id = int(org["id"])
     repo = AuthnzUsageRepo(test_db_pool)
     for source, tokens in (("user", 1000), ("user_unmetered", 40), ("server_default", 300), (None, 5)):
         await repo.insert_llm_usage_log(

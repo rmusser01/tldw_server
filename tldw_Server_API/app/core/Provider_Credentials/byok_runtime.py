@@ -22,22 +22,6 @@ import asyncpg
 from loguru import logger
 from redis import asyncio as redis_async
 
-from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
-    PROVIDER_APP_CONFIG_KEYS,
-    merge_app_config_overrides,
-    runtime_base_url_override_provenance,
-)
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
-    get_byok_gateway_spec,
-    is_byok_enabled,
-    is_provider_allowlisted,
-    is_trusted_base_url_request,
-    load_server_config_snapshot,
-    resolve_byok_base_url_allowlist,
-    resolve_server_default_key_from_snapshot,
-    validate_base_url_override,
-    validate_credential_fields,
-)
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
@@ -47,21 +31,11 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DatabaseError as AuthNZDatabaseError,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
-from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
-    AuthnzOrgProviderSecretsRepo,
-)
-from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import (
-    AuthnzUserProviderSecretsRepo,
+from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+    ProviderScopeResult,
+    ProviderScopeStatus,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
-    ProviderCredentialAliasConflictError,
-    decrypt_byok_payload,
-    dumps_envelope,
-    encrypt_byok_payload,
-    key_hint_for_api_key,
-    loads_envelope,
-)
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
@@ -78,6 +52,36 @@ from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import FileLock
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Metrics import increment_counter
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
+    PROVIDER_APP_CONFIG_KEYS,
+    merge_app_config_overrides,
+    runtime_base_url_override_provenance,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    get_byok_gateway_spec,
+    is_byok_enabled,
+    is_provider_allowlisted,
+    is_trusted_base_url_request,
+    load_server_config_snapshot,
+    resolve_byok_base_url_allowlist,
+    resolve_server_default_key_from_snapshot,
+    validate_base_url_override,
+    validate_credential_fields,
+)
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
+    AuthnzOrgProviderSecretsRepo,
+)
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import (
+    AuthnzUserProviderSecretsRepo,
+)
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
+    decrypt_byok_payload,
+    dumps_envelope,
+    encrypt_byok_payload,
+    key_hint_for_api_key,
+    loads_envelope,
+)
 
 DEFAULT_LAST_USED_THROTTLE_SECONDS = 300
 DEFAULT_OPENAI_OAUTH_REFRESH_SKEW_SECONDS = 120
@@ -564,6 +568,22 @@ class ByokResolutionStatus(str, Enum):
     RESOLVED = "RESOLVED"
 
 
+@dataclass(frozen=True, slots=True)
+class AuthoritativeProviderScope:
+    """Exact authenticated identity whose authority is checked at resolution time."""
+
+    user_id: int
+    team_id: int | None = None
+    organization_id: int | None = None
+
+    def __post_init__(self) -> None:
+        for value in (self.user_id, self.team_id, self.organization_id):
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError("Provider scope IDs must be positive integers")
+        if self.user_id is None:
+            raise ValueError("Provider scope requires a user")
+
+
 class ByokResolutionError(Exception):
     """Sanitized failure raised when credential resolution cannot continue."""
 
@@ -716,21 +736,64 @@ async def _get_org_repo() -> AuthnzOrgProviderSecretsRepo:
     return AuthnzOrgProviderSecretsRepo(pool)
 
 
-async def _fetch_active_shared_secret(
-    repo: AuthnzOrgProviderSecretsRepo,
-    scope_type: str,
-    scope_id: int,
+@dataclass(frozen=True, slots=True, repr=False)
+class _AuthoritativeScopeRows:
+    """Repository snapshots validated before credential precedence is evaluated."""
+
+    user_repo: AuthnzUserProviderSecretsRepo
+    user_record: dict[str, Any] | None
+    shared_repo: AuthnzOrgProviderSecretsRepo | None
+    shared_records: dict[str, dict[str, Any] | None]
+
+
+async def _resolve_authoritative_scope_rows(
+    scope: AuthoritativeProviderScope,
     provider: str,
-) -> dict[str, Any] | None:
-    row = await repo.fetch_secret(
-        scope_type,
-        scope_id,
-        provider,
-        include_revoked=True,
-    )
-    if row is not None and row.get("revoked_at") is not None:
-        raise ByokResolutionError("invalid_provider_credentials", provider)
-    return row
+) -> _AuthoritativeScopeRows:
+    """Validate every supplied scope before selecting any credential source."""
+
+    def authorized_record(result: ProviderScopeResult) -> dict[str, Any] | None:
+        if not isinstance(result, ProviderScopeResult):
+            raise ByokResolutionError("credential_store_unavailable", provider)
+        if result.status == ProviderScopeStatus.UNAUTHORIZED:
+            raise ByokResolutionError("credential_scope_revoked", provider)
+        if result.status == ProviderScopeStatus.UNAVAILABLE:
+            raise ByokResolutionError("credential_store_unavailable", provider)
+        if result.status == ProviderScopeStatus.AUTHORIZED_ABSENT:
+            return None
+        if result.status != ProviderScopeStatus.RESOLVED or result.record is None:
+            raise ByokResolutionError("credential_store_unavailable", provider)
+        row = dict(result.record)
+        if row.get("revoked_at") is not None:
+            raise ByokResolutionError("credential_scope_revoked", provider)
+        return row
+
+    try:
+        user_repo = await _get_user_repo()
+        user_row = authorized_record(await user_repo.resolve_authorized_secret(scope.user_id, provider))
+        shared_repo = None
+        rows: dict[str, dict[str, Any] | None] = {}
+        if scope.team_id is not None or scope.organization_id is not None:
+            shared_repo = await _get_org_repo()
+            for scope_type, scope_id in (("team", scope.team_id), ("org", scope.organization_id)):
+                if scope_id is not None:
+                    rows[scope_type] = authorized_record(
+                        await shared_repo.resolve_authorized_secret(
+                            scope_type,
+                            scope_id,
+                            scope.user_id,
+                            provider,
+                            active_team_id=scope.team_id,
+                            active_organization_id=scope.organization_id,
+                        )
+                    )
+        return _AuthoritativeScopeRows(user_repo, user_row, shared_repo, rows)
+    except ByokResolutionError as exc:
+        raise_detached_error(exc)
+    except ProviderCredentialAliasConflictError:
+        raise_detached_error(ByokResolutionError("invalid_provider_credentials", provider))
+    except Exception:  # noqa: BLE001 - authority-store failures never permit fallback
+        raise_detached_error(ByokResolutionError("credential_store_unavailable", provider))
 
 
 async def _fetch_authorized_shared_secret(
@@ -1621,6 +1684,12 @@ async def _openai_db_refresh_lock(*, lock_key: str, provider: str):
         os.getenv("OPENAI_OAUTH_REFRESH_LOCK_DIR")
         or (Path.home() / ".tldw" / "locks")
     )
+    try:
+        lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError:
+        raise_detached_error(
+            ByokResolutionError("credential_store_unavailable", provider)
+        )
     lock_name = hashlib.sha256(lock_key.encode("utf-8")).hexdigest()
     file_lock = FileLock(
         lock_dir / f"openai-oauth-refresh-{lock_name}.lock",
@@ -2436,8 +2505,24 @@ async def resolve_byok_credentials(
     rejected_credential_generation: str | None = None,
     trusted_base_url_override: bool | None = None,
     required_source: str | None = None,
+    authoritative_scope: AuthoritativeProviderScope | None = None,
 ) -> ResolvedByokCredentials:
     provider_norm = canonical_provider_name(provider)
+    if authoritative_scope is not None:
+        if (
+            type(authoritative_scope) is not AuthoritativeProviderScope
+            or type(user_id) is not int
+            or user_id != authoritative_scope.user_id
+            or team_ids
+            or org_ids
+            or request is not None
+            or required_source is not None
+            or fallback_resolver is not None
+            or fallback_override is not None
+            or server_config_snapshot is None
+        ):
+            raise ByokResolutionError("invalid_provider_credentials", provider_norm)
+        trusted_base_url_override = False
     if required_source is not None:
         if type(required_source) is not str or required_source not in _BYOK_REQUIRED_SOURCES:
             raise ByokResolutionError(
@@ -2498,6 +2583,15 @@ async def resolve_byok_credentials(
         trusted_base_url_override,
     )
 
+    authoritative_rows = None
+    if authoritative_scope is not None:
+        authoritative_rows = await _resolve_authoritative_scope_rows(authoritative_scope, provider_norm)
+        if (not byok_enabled or not allowlisted) and (
+            authoritative_rows.user_record is not None
+            or any(row is not None for row in authoritative_rows.shared_records.values())
+        ):
+            raise ByokResolutionError("invalid_provider_credentials", provider_norm)
+
     if (
         not byok_enabled
         or user_id is None
@@ -2518,7 +2612,10 @@ async def resolve_byok_credentials(
     # Resolve user key only when the caller did not bind another source.
     user_repo = None
     user_row = None
-    if required_source in {None, "user"}:
+    if authoritative_rows is not None:
+        user_repo = authoritative_rows.user_repo
+        user_row = authoritative_rows.user_record
+    elif required_source in {None, "user"}:
         try:
             user_repo = await _get_user_repo()
             user_row = await user_repo.fetch_secret_for_active_user(
@@ -2643,6 +2740,10 @@ async def resolve_byok_credentials(
     elif required_source == "org":
         team_ids = []
 
+    if authoritative_scope is not None:
+        team_ids = [authoritative_scope.team_id] if authoritative_scope.team_id is not None else []
+        org_ids = [authoritative_scope.organization_id] if authoritative_scope.organization_id is not None else []
+
     # Determine org/team scopes if not supplied
     active_team_id = None
     active_org_id = None
@@ -2678,7 +2779,9 @@ async def resolve_byok_credentials(
     org_ids = _apply_active_scope(org_ids, active_org_id, provider=provider_norm)
 
     shared_repo = None
-    if team_ids or org_ids:
+    if authoritative_rows is not None:
+        shared_repo = authoritative_rows.shared_repo
+    elif team_ids or org_ids:
         try:
             shared_repo = await _get_org_repo()
         except Exception as exc:
@@ -2693,19 +2796,14 @@ async def resolve_byok_credentials(
         # Prefer team scope over org scope, mirroring list_user_provider_keys()
         for team_id in sorted({int(tid) for tid in team_ids if tid is not None}):
             try:
-                if required_source == "team":
+                if authoritative_rows is not None:
+                    row = authoritative_rows.shared_records["team"]
+                else:
                     row = await _fetch_authorized_shared_secret(
                         shared_repo,
                         "team",
                         int(team_id),
                         int(user_id),
-                        provider_norm,
-                    )
-                else:
-                    row = await _fetch_active_shared_secret(
-                        shared_repo,
-                        "team",
-                        int(team_id),
                         provider_norm,
                     )
             except ByokResolutionError:
@@ -2781,19 +2879,14 @@ async def resolve_byok_credentials(
 
         for org_id in sorted({int(oid) for oid in org_ids if oid is not None}):
             try:
-                if required_source == "org":
+                if authoritative_rows is not None:
+                    row = authoritative_rows.shared_records["org"]
+                else:
                     row = await _fetch_authorized_shared_secret(
                         shared_repo,
                         "org",
                         int(org_id),
                         int(user_id),
-                        provider_norm,
-                    )
-                else:
-                    row = await _fetch_active_shared_secret(
-                        shared_repo,
-                        "org",
-                        int(org_id),
                         provider_norm,
                     )
             except ByokResolutionError:

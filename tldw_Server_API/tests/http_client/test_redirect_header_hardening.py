@@ -162,6 +162,61 @@ class TestHeaderStripping:
 class TestRedirectFlows:
     """End-to-end through the real redirect loops via httpx.MockTransport."""
 
+    @pytest.mark.parametrize(
+        "location",
+        [
+            "/next",
+            "http://93.184.216.35:11434/blocked",
+            "https://93.184.216.34:11434/blocked",
+            "http://93.184.216.34:11435/blocked",
+        ],
+    )
+    async def test_bounded_json_redirects_keep_exact_configured_scope(self, monkeypatch, location):
+        from types import SimpleNamespace
+
+        from tldw_Server_API.app.core import http_client as hc
+        from tldw_Server_API.app.core.exceptions import EgressPolicyError
+        from tldw_Server_API.app.core.Security import egress as egress_mod
+        from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+        origin = f"{ORIGIN_A}:11434"
+        scope = ConfiguredEndpointScope.from_url(origin)
+        validations = []
+        calls = []
+
+        def policy(url, *, configured_endpoint=None, **kwargs):
+            validations.append((url, configured_endpoint))
+            return SimpleNamespace(
+                allowed=configured_endpoint is scope and url.startswith(origin + "/"),
+                reason="origin mismatch",
+                reason_code="origin_mismatch",
+                resolved_ips=("93.184.216.34",),
+            )
+
+        def handler(request):
+            calls.append(str(request.url))
+            if request.url.path == "/start":
+                return httpx.Response(302, request=request, headers={"Location": location})
+            return httpx.Response(200, request=request, json={"ok": True})
+
+        monkeypatch.setattr(egress_mod, "evaluate_url_policy", policy)
+        client = hc.create_async_client(transport=httpx.MockTransport(handler))
+        try:
+            if location == "/next":
+                assert await hc.afetch_json(
+                    method="GET", url=origin + "/start", client=client, max_bytes=100, configured_endpoint=scope
+                ) == {"ok": True}
+                assert calls == [origin + "/start", origin + "/next"]
+            else:
+                with pytest.raises(EgressPolicyError):
+                    await hc.afetch_json(
+                        method="GET", url=origin + "/start", client=client, max_bytes=100, configured_endpoint=scope
+                    )
+                assert calls == [origin + "/start"]
+        finally:
+            await client.aclose()
+        assert all(item[1] is scope for item in validations)
+
     @staticmethod
     def _handler(
         seen: dict[str, dict[str, str]],

@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB, SemanticMemory
+from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import PersonaExemplarPromptAssembly
 from tldw_Server_API.app.core.Persona.exemplar_runtime import PersonaExemplarRuntimeContext
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
@@ -116,7 +117,7 @@ def _recv_until(client, predicate, timeout=8.0):
     try:
         status, payload = inbox.get(timeout=timeout)
     except queue.Empty:
-        raise AssertionError("Expected event not received in time")
+        raise AssertionError("Expected event not received in time") from None
     if status == "err":
         raise payload  # type: ignore[misc]
     if status == "ok":
@@ -324,6 +325,85 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
             assert "output" in evt_res
             assert "result" in evt_res
             assert evt_res["output"] == evt_res["result"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active_scope", [None, AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)])
+async def test_persona_mcp_forwarder_preserves_response_and_optional_trusted_scope(active_scope):
+    from unittest.mock import AsyncMock
+
+    request = persona_ep.MCPRequest(method="tools/list", params={})
+    response = SimpleNamespace(error=None, result={"tools": []})
+    metadata = {"source": "persona"}
+    server = SimpleNamespace(handle_http_request=AsyncMock(return_value=response))
+    ws = SimpleNamespace(state=SimpleNamespace(persona_server_auth_scope=active_scope))
+
+    result = await persona_ep._forward_persona_mcp_request(server, request, ws, "1", metadata)
+
+    assert result is response
+    expected = {"user_id": "1", "metadata": metadata}
+    if active_scope is not None:
+        expected["server_auth_scope"] = active_scope
+    server.handle_http_request.assert_awaited_once_with(request, **expected)
+
+
+def test_persona_mcp_tool_receives_authenticated_execution_scope(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    scope = AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+            self.server_auth_scope = None
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(
+            self,
+            request,
+            user_id=None,
+            metadata=None,
+            server_auth_scope=None,
+        ):
+            self.server_auth_scope = server_auth_scope
+            return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
+
+    async def _fake_resolve(ws, *args, **kwargs):
+        ws.state.persona_auth_method = "access"
+        ws.state.persona_api_key_scopes = None
+        ws.state.persona_server_auth_scope = scope
+        return "1", True, True
+
+    fake_server = _FakeServer()
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            session_id = "sess_authenticated_scope"
+            ws.send_text(
+                json.dumps(
+                    {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
+                )
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan", timeout=8.0)
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "confirm_plan",
+                        "session_id": session_id,
+                        "plan_id": plan["plan_id"],
+                        "approved_steps": [int(plan["steps"][0]["idx"])],
+                    }
+                )
+            )
+            result = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+            assert result["ok"] is True
+
+    assert fake_server.server_auth_scope == scope
 
 
 def test_persona_tool_result_handles_empty_mcp_response(monkeypatch):
@@ -838,7 +918,9 @@ async def test_persona_resolve_api_key_enforces_read_scope_and_sets_context(monk
     async def _http_verifier(request):
         seen.append((request.headers.get("x-api-key"), request.client and tuple(request.client)))
         request.state._api_key_scope = key_scope
-        return AuthPrincipal(kind="api_key", user_id=7, api_key_id=3, token_type="api_key")
+        return AuthPrincipal(
+            kind="api_key", user_id=7, api_key_id=3, token_type="api_key", active_org_id=9, active_team_id=11
+        )
 
     monkeypatch.setattr(websocket_principal, "get_auth_principal", _http_verifier)
     scope = {
@@ -859,6 +941,44 @@ async def test_persona_resolve_api_key_enforces_read_scope_and_sets_context(monk
     assert result == ("7", True, True)
     assert ws.state.persona_auth_method == "api_key"
     assert set(ws.state.persona_api_key_scopes) == {"read", "write:preview"}
+    assert ws.state.persona_server_auth_scope == AuthenticatedExecutionScope(active_org_id=9, active_team_id=11)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token_type", ["access", "api_key"])
+async def test_persona_verified_principal_projects_scope(monkeypatch, token_type):
+    """Both credential kinds use only the shared resolver's verified active scope."""
+    ws = SimpleNamespace(state=SimpleNamespace())
+
+    async def _resolve(_ws, *, required_scope):
+        assert required_scope == "read"
+        return SimpleNamespace(user_id=7, token_type=token_type, active_org_id=9, active_team_id=11)
+
+    monkeypatch.setattr(persona_ep, "resolve_ws_principal_or_deprecated_query", _resolve)
+    result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
+
+    assert result == ("7", True, True)
+    assert ws.state.persona_server_auth_scope == AuthenticatedExecutionScope(active_org_id=9, active_team_id=11)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_id,org_id", [(7, True), (7, -1), (None, 9)])
+async def test_persona_invalid_verified_scope_clears_previous_scope(monkeypatch, user_id, org_id):
+    """A watchdog rejection must not retain a previously authenticated execution scope."""
+    ws = SimpleNamespace(state=SimpleNamespace(persona_server_auth_scope=AuthenticatedExecutionScope(active_org_id=9)))
+    calls = []
+
+    async def _resolve(_ws, *, required_scope):
+        calls.append(required_scope)
+        return SimpleNamespace(user_id=user_id, token_type="access", active_org_id=org_id, active_team_id=None)
+
+    monkeypatch.setattr(persona_ep, "resolve_ws_principal_or_deprecated_query", _resolve)
+    result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
+
+    assert result == (None, True, False)
+    assert ws.state.persona_server_auth_scope is None
+    assert ws.state.persona_api_key_scopes == []
+    assert calls == ["read"]
 
 
 def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
@@ -877,8 +997,8 @@ def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
             return SimpleNamespace(error=None, result={"ok": True})
 
     async def _fake_resolve(ws, *args, **kwargs):
-        setattr(ws.state, "persona_auth_method", "api_key")
-        setattr(ws.state, "persona_api_key_scopes", ["read"])
+        ws.state.persona_auth_method = "api_key"
+        ws.state.persona_api_key_scopes = ["read"]
         return "1", True, True
 
     fake_server = _FakeServer()

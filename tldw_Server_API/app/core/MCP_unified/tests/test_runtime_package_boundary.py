@@ -1533,6 +1533,44 @@ def test_host_interface_shims_reexport_package_contracts() -> None:
     assert host_storage.ProfileStore is package_storage.ProfileStore
 
 
+def test_host_model_completion_interface_shim_reexports_package_contracts() -> None:
+    """Host model-completion shim should reuse package-owned contracts."""
+
+    package_contracts = importlib.import_module(
+        "mcp_unified.interfaces.model_completion"
+    )
+    host_contracts = importlib.import_module(
+        "tldw_Server_API.app.core.MCP_unified.interfaces.model_completion"
+    )
+
+    for name in package_contracts.__all__:
+        assert getattr(host_contracts, name) is getattr(package_contracts, name)
+
+
+def test_standalone_model_completion_contracts_do_not_import_tldw_host() -> None:
+    """The standalone completion contracts must remain host-neutral."""
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import importlib, json, sys; "
+                "importlib.import_module('mcp_unified.interfaces.model_completion'); "
+                "blocked = [name for name in sys.modules "
+                "if name == 'tldw_Server_API' or name.startswith('tldw_Server_API.')]; "
+                "print(json.dumps(blocked))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_subprocess_env_with_standalone_src(),
+    )
+
+    assert json.loads(result.stdout) == []
+
+
 def test_host_external_config_schema_shim_reexports_package_contracts() -> None:
     """Host external config-schema shim should re-export package contracts."""
 

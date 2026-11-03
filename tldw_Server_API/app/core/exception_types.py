@@ -3,6 +3,31 @@
 from __future__ import annotations
 
 
+class ProviderUsageReservationError(Exception):
+    """Stable, content-free reservation error without a backend exception graph."""
+
+    _CODES = frozenset(
+        {
+            "invalid_reservation",
+            "integer_overflow",
+            "duplicate_execution",
+            "quota_exceeded",
+            "snapshot_unavailable",
+            "reservation_not_found",
+            "invalid_transition",
+            "conflicting_replay",
+            "actuals_exceed_reservation",
+            "usage_write_failed",
+            "reservation_store_unavailable",
+        }
+    )
+
+    def __init__(self, code: str) -> None:
+        """Expose only a recognized public failure code."""
+        self.code = code if code in self._CODES else "reservation_store_unavailable"
+        super().__init__(self.code)
+
+
 class PersonaArtworkValidationError(ValueError):
     """A pack's artwork credit record or carrier violates the native contract.
 

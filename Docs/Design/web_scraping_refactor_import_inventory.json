@@ -5,7 +5,7 @@
       {
         "import_kind": "from",
         "imported_name": "is_content_page",
-        "line": 385,
+        "line": 387,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/app/core/Watchlists/fetchers.py",
         "target_name": "Article_Extractor_Lib"
@@ -535,7 +535,7 @@
       {
         "import_kind": "from",
         "imported_name": "search_discussions",
-        "line": 3384,
+        "line": 3387,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -543,7 +543,7 @@
       {
         "import_kind": "from",
         "imported_name": "perform_websearch",
-        "line": 3413,
+        "line": 3416,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -551,7 +551,7 @@
       {
         "import_kind": "from",
         "imported_name": "process_web_search_results",
-        "line": 3413,
+        "line": 3416,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -575,7 +575,7 @@
       {
         "import_kind": "from",
         "imported_name": "WebSearch_APIs",
-        "line": 374,
+        "line": 376,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/app/core/Workflows/adapters/rag/search.py",
         "target_name": "WebSearch_APIs"
@@ -1017,7 +1017,7 @@
       {
         "import_kind": "from",
         "imported_name": "EnhancedWebScraper",
-        "line": 386,
+        "line": 388,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/core/Watchlists/fetchers.py",
         "target_name": "enhanced_web_scraping"
@@ -2061,7 +2061,7 @@
       {
         "import_kind": "from",
         "imported_name": "normalize_for_crawl",
-        "line": 18,
+        "line": 19,
         "module": "tldw_Server_API.app.core.Web_Scraping.url_utils",
         "path": "tldw_Server_API/app/core/Collections/reading_importers.py",
         "target_name": "url_utils"

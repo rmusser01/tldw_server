@@ -45,8 +45,8 @@ Expected backend implementation/test files after rebase:
 
 Mechanical Backlog fixes:
 
-- Modify: `backlog/tasks/task-12142 - Add-Research-Workspace-slides-presentation-artifact-coverage.md`
-- Modify: `backlog/tasks/task-12143 - Validate-generated-Research-Workspace-slides-are-real-presentations.md`
+- Modify: `backlog/tasks/task-15064 - Add-Research-Workspace-slides-presentation-artifact-coverage.md`
+- Modify: `backlog/tasks/task-15066 - Validate-generated-Research-Workspace-slides-are-real-presentations.md`
 
 The actual touched list must be updated after conflict resolution. Files already correct on `dev` must not be changed merely because they appear above.
 
