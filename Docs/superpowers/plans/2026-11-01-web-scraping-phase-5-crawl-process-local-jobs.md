@@ -12,7 +12,7 @@
 
 **Decision:** [Accepted ADR-093](../../ADR/093-web-scraping-crawl-and-process-local-job-ownership.md). No new ADR: this plan implements that ownership decision without changing it.
 
-**Task:** TASK-15432 (planning complete); TASK-15421 (execution). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01.
+**Task:** TASK-15432 (planning complete); TASK-15421 (execution complete). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01; implementation and review complete locally, not published or merged.
 
 ## Global Constraints
 
@@ -817,7 +817,7 @@ explicit crawl cancellation, and full-queue retry reservation reuse.
 **Goal:** Switch wrappers/services once, propagate outcomes, and certify real consumers.
 **Success Criteria:** Public parity except approved safety fixes; report/receipt fidelity and architecture guards pass.
 **Tests:** Tasks 9-11 full compatibility, security, browser/lifecycle and affected-consumer coverage.
-**Status:** In Progress (Tasks 9-11 independently accepted; final whole-branch review remains).
+**Status:** Complete (Tasks 9-11 independently accepted; whole-branch findings fixed and independently re-reviewed, with final affected verification recorded below).
 
 ### Task 9: Switch Legacy And Enhanced Adapters
 
@@ -1256,7 +1256,7 @@ and one canonical page execution route. Consumer tests retain current analyzer
 advice/results, cancellation/error conventions and non-secret extra fields.
 No central Jobs migration or search-provider decomposition.
 
-- [ ] **Step 1: Write architecture and combined lifecycle tests.**
+- [x] **Step 1: Write architecture and combined lifecycle tests.**
 
 ```python
 def test_lower_modules_do_not_import_execution_owners(import_graph):
@@ -1275,14 +1275,14 @@ Guard tests include negative fixture modules proving forbidden edges are detecte
 Use local controlled browser integration for redirects, subresources/WebSockets,
 transfer stop, cancellation and same-process resume exclusion. Retain shared
 executor reload/shutdown/fork and attestation suites; do not replace them with fakes.
-- [ ] **Step 2: Run new architecture/integration tests.** Expected: guard negative fixtures fail when the checker is disabled; any uncovered wiring/drain regression fails behavior assertions. No artificial production breakage is needed for already-green invariants.
-- [ ] **Step 3: Fix scoped consumer adaptation gaps, refresh actual docs and regenerate inventory once.**
+- [x] **Step 2: Run new architecture/integration tests.** Expected: guard negative fixtures fail when the checker is disabled; any uncovered wiring/drain regression fails behavior assertions. No artificial production breakage is needed for already-green invariants.
+- [x] **Step 3: Fix scoped consumer adaptation gaps, refresh actual docs and regenerate inventory once.**
 
 ```bash
 python Helper_Scripts/web_scraping_refactor_inventory.py --root . --json Docs/Design/web_scraping_refactor_import_inventory.json --markdown Docs/Design/WebScraping_Refactor_Import_Inventory.md
 ```
 
-- [ ] **Step 4: Run certification and record exact results/skips in the child task.**
+- [x] **Step 4: Run certification and record exact results/skips in the child task.**
 
 ```bash
 python -m pytest tldw_Server_API/tests/Web_Scraping/ tldw_Server_API/tests/WebScraping/ tldw_Server_API/tests/http_client/ -q
@@ -1305,7 +1305,41 @@ Run backlog-py normalization, task-format CI ratchet, relative links, and
 `git diff --check`. Require a fresh whole-branch review after task reviews, then
 rerun affected verification after review fixes. Stop after three failed attempts
 on an issue and document/reassess per AGENTS.md.
-- [ ] **Step 5: Commit explicit certification/docs/consumer paths and child task:** `test(web-scraping): certify Phase 5 consumers and lifecycle`. Update all four stage statuses only with recorded evidence. Keep this approved plan as the task-linked design/execution record; remove only disposable task-owned working plans if repository policy requires it.
+- [x] **Step 5: Commit explicit certification/docs/consumer paths and child task:** `test(web-scraping): certify Phase 5 consumers and lifecycle`. Update all four stage statuses only with recorded evidence. Keep this approved plan as the task-linked design/execution record; remove only disposable task-owned working plans if repository policy requires it.
+
+### Final Acceptance Evidence
+
+All eleven child tasks are independently accepted. Certification is committed at
+`66b057c71290f4a9e63b30580116619818529a1b`; final whole-branch corrections are
+committed at `e05c3b7dbad4bf2da5bfe7d8f6b9fdc48602e80c`, on integrated dev
+`576feef820e6521f021e6f57c82c24df2429b901`. The four Important whole-branch findings
+were independently re-reviewed: all addressed, no new findings. Corrections cover
+native preflight redirect admission and actual retirement, recursive cancellation
+report propagation, raw/resolved/final URL bounds with atomic shared-owner stop,
+and the literal legacy modulo-ten checkpoint cadence, including zero and failed
+dispositions. No startup hook, library patch, additional browser connection,
+dependency or control subsystem was introduced.
+
+Final-source gates: scraping/shared HTTP 4,158 passed/28 optional or environment
+skips; mandatory native browser 51 passed/no skips; services 117 passed/no skips,
+including both official PostgreSQL cases; actual consumers 770 passed/12 optional
+skips; architecture/inventory/function/task-format 64 passed/no skips. Fresh
+controller verification on committed source: 71 passed/no skips, 227 known
+warnings, 18.01s (`/tmp/web-phase5-controller-final-focused.log`). Full changed
+Python scope Ruff and compile checks passed. Endpoint-complete final Bandit
+reported eight unchanged LOW findings, no MEDIUM/HIGH findings or scan errors;
+no new suppression. Detailed commands, warning provenance and earlier failed-run
+history remain in TASK-15430 and TASK-15421; final logs use
+`/tmp/web-phase5-fix-*-receipt.log` and
+`/tmp/bandit_web_phase5_controller_final.json`.
+
+This is scoped execution acceptance, not a full-repository-green or merge-ready
+claim. Bare repository collection is blocked by the unchanged duplicate Meetings
+test basenames. Optional curl/live-provider paths and native Windows remain
+unverified; throughput parity and crash-proof/exactly-once recovery are not
+claimed. Task 9/10 DoD tracking is synchronized without replacing their historical
+summaries. The branch/worktree remain local; publication, refreshed-dev checks,
+PR review and the human-written change-summary merge gate remain separate.
 
 ## Cutover And Recovery Gates
 
