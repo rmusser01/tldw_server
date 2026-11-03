@@ -99,7 +99,7 @@ async def _run_moderation_offload(call: Callable[[], T], *, scope: ExecutionScop
                 loop.call_soon_threadsafe(deliver, value, error)
             except RuntimeError:
                 # The event loop is gone, but resource ownership was completed.
-                return
+                pass
 
     try:
         thread = threading.Thread(target=run, name="moderation-offload", daemon=False)

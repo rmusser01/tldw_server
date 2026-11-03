@@ -251,3 +251,151 @@ async def test_normal_disconnect_is_not_reported(incident_store):
         await task
     assert incident_store.list_items()["total"] == 0
     await asyncio.sleep(0.03)
+
+
+@pytest.mark.parametrize("kill_fails", [False, True])
+async def test_cancelled_unconfirmed_cleanup_reports_once_and_keeps_ownership(incident_store, monkeypatch, kill_fails):
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution as execution
+    from tldw_Server_API.app.core.Moderation import execution_incidents as incidents
+    from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata, execution_scope
+    from tldw_Server_API.tests.unit.test_moderation_execution_runner import Child, request, runner
+
+    entered, publish = threading.Event(), threading.Event()
+    child = Child(stalled=True, unreapable=True)
+    metrics, io_threads = [], []
+    persist = incidents._persist_failure
+
+    def record(*args, **kwargs):
+        io_threads.append(threading.current_thread().name)
+        persist(*args, **kwargs)
+
+    def kill():
+        child.killed.set()
+        if kill_fails:
+            raise PermissionError("SECRET_KILL_EXCEPTION")
+
+    def factory(*args, **kwargs):
+        entered.set()
+        assert publish.wait(2)
+        return child
+
+    child.kill = kill
+    owner = runner(factory)
+    monkeypatch.setattr(incidents, "_persist_failure", record)
+    monkeypatch.setattr(incidents, "log_counter", lambda name, **kw: metrics.append((name, kw)))
+    with execution_scope() as shared:
+        task = asyncio.create_task(execution.run_moderation_async(
+            lambda: owner.execute(request(), shared), metadata=FailureMetadata("custom_substitute", None, 5)
+        ))
+    try:
+        async with asyncio.timeout(2):
+            while not entered.is_set():
+                await asyncio.sleep(0.001)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        publish.set()
+        async with asyncio.timeout(1.5):
+            while incident_store.list_items()["total"] == 0:
+                await asyncio.sleep(0.005)
+        [item] = incident_store.list_items()["items"]
+        assert item["context"]["reason"] == "cleanup_failed"
+        assert item["context"]["operation"] == "custom_substitute"
+        assert item["excerpt"] == incidents.ENGINE_FAILURE_EXCERPT
+        assert "SECRET" not in str(item) + str(metrics)
+        assert len(owner._entries) == 1
+        assert execution._active == 1
+        assert io_threads == ["moderation-incident"]
+        assert len([m for m in metrics if m[0] == "moderation_execution_failures_total"]) == 1
+        with pytest.raises(ModerationExecutionError, match="capacity_exhausted"):
+            owner.execute(request(), scope())
+        await asyncio.sleep(0.1)
+        assert incident_store.list_items()["total"] == 1
+    finally:
+        publish.set()
+        child.returncode = -9
+        owner.close()
+        async with asyncio.timeout(2):
+            while execution._active or (incidents._report_thread and incidents._report_thread.is_alive()):
+                await asyncio.sleep(0.005)
+    assert not owner._entries
+
+
+async def test_cancelled_runner_confirmed_cleanup_is_quiet(incident_store):
+    from tldw_Server_API.app.core.Moderation import async_execution as execution
+    from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata, execution_scope
+    from tldw_Server_API.tests.unit.test_moderation_execution_runner import Child, request, runner
+
+    entered = threading.Event()
+    child = Child(stalled=True)
+
+    def factory(*args, **kwargs):
+        entered.set()
+        return child
+
+    owner = runner(factory)
+    with execution_scope() as shared:
+        task = asyncio.create_task(execution.run_moderation_async(
+            lambda: owner.execute(request(), shared), metadata=FailureMetadata("custom_substitute", None, 5)
+        ))
+    try:
+        async with asyncio.timeout(2):
+            while not entered.is_set():
+                await asyncio.sleep(0.001)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        async with asyncio.timeout(2):
+            while execution._active:
+                await asyncio.sleep(0.005)
+        assert not owner._entries
+        assert child.killed.is_set()
+        assert incident_store.list_items()["total"] == 0
+    finally:
+        owner.close()
+
+
+async def test_closed_loop_delivery_retires_offload_without_warning(monkeypatch):
+    import warnings
+    from pathlib import Path
+
+    from tldw_Server_API.app.core.Moderation import async_execution as execution
+
+    entered, release, delivered = threading.Event(), threading.Event(), threading.Event()
+    loop = asyncio.new_event_loop()
+    schedule = loop.call_soon_threadsafe
+
+    def delivery(*args):
+        delivered.set()
+        return schedule(*args)
+
+    monkeypatch.setattr(loop, "call_soon_threadsafe", delivery)
+
+    def call():
+        entered.set()
+        release.wait(2)
+
+    async def start():
+        task = asyncio.create_task(execution._run_moderation_offload(call, scope=scope()))
+        while not entered.is_set():
+            await asyncio.sleep(0.001)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        await asyncio.to_thread(loop.run_until_complete, start())
+        loop.close()
+        release.set()
+        assert await asyncio.to_thread(delivered.wait, 1)
+        async with asyncio.timeout(2):
+            while execution._active:
+                await asyncio.sleep(0.001)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SyntaxWarning)
+            compile(Path(execution.__file__).read_text(), execution.__file__, "exec")
+    finally:
+        release.set()
+        if not loop.is_closed():
+            loop.close()

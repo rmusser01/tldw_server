@@ -130,6 +130,11 @@ seven typed internal reasons are `deadline_exceeded`, `capacity_exhausted`,
 success markers, persistence and downstream continuation are withheld;
 already-emitted safe stream bytes cannot be recalled.
 
+Normal cancellation is quiet. If cancelled child cleanup cannot be confirmed
+within its bounded window, quarantine retains worker/offload ownership and the
+cleanup owner submits one sanitized `cleanup_failed` incident through the shared
+report-once claim and independent reporting slot, without masking cancellation.
+
 One metadata-only incident uses category `moderation_engine_failure`, severity
 `high`, status `needs_review`, source `moderation_engine`, recommendation
 `escalate`, and excerpt `[Moderation execution failed; content withheld]`.
@@ -150,6 +155,13 @@ transactionally upgrade it before serving traffic. Incident writes validate a
 prepared schema and never migrate on first failure. The migration retains IDs,
 decisions, audit, undo leases, indexes, triggers and foreign keys. Roll out the
 service activation and converted callers together, not as an intermediate build.
+
+If pre-traffic preparation fails, API startup retains moderation shutdown
+ownership and emits degraded reporting diagnostics rather than preventing
+unrelated or disabled-moderation traffic. Execution failures still block affected
+content; unavailable/unprepared incident storage never authorizes it and is not
+migrated in the write path. Repair and prepare the store before relying on review
+incident persistence.
 
 Rollback must retain neutral records and compatible readers. Do not downgrade
 to phase-restricted readers after neutral writes, relabel incidents as user
