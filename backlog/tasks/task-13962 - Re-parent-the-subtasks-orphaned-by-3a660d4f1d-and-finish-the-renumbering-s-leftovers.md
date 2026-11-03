@@ -32,6 +32,7 @@ AC 1: 43 subtasks re-parented with task renumber (TASK-12295.1-.6, TASK-12303.1,
 AC 3: TASK-15183 and TASK-13534 (same missing opening ---) got title, status and labels with task edit, and the old block removed with the new task edit --remove-preamble.
 AC 4: 157 bare-id references entries in 126 files checked (Docs/Development/Backlog_Task_Id_References.md): keeper 73, neither 32, renumbered copy 50, unclear 2. 45 changed with the new task edit --ref; 3 in backlog/completed left (task edit cannot reach them); 2 left to #2421 and #3323 (TASK-15419).
 Verification: backlog-py 158 -> 5 failed, 158 passed (RED) -> 163 passed; CI suite 1622 passed, 5 skipped -> 1627 passed, 5 skipped; shard coverage new_uncovered=0; test-quality ratchet OK; check_backlog_task_ids exit 0; Bandit No issues identified (Medium 0, High 0).
+Final review I1 (2026-11-03): task edit --remove-preamble alone on a task with no frontmatter (TASK-13534's old shape) deleted its only title and status. It now refuses unless the same call gives -t (guard in edit_task, so the one-call -t -s -l --remove-preamble repair still works); test_remove_preamble_needs_a_title_when_the_task_has_no_frontmatter RED -> GREEN; backlog-py 164 passed; CI suite 1628 passed, 5 skipped.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

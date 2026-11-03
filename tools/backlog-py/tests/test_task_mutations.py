@@ -791,3 +791,19 @@ def test_remove_preamble_refuses_a_preamble_that_holds_a_section(tmp_path: Path)
     with pytest.raises(TaskMutationError, match="section marker"):
         _repository(repo).edit_task("TASK-1", remove_preamble=True)
     assert _snapshot_tasks(repo) == before
+
+
+def test_remove_preamble_needs_a_title_when_the_task_has_no_frontmatter(tmp_path: Path) -> None:
+    # TASK-13534's shape: with no opening ---, the hand-written block is the task's only title and status.
+    repo = _copy_fixture(tmp_path)
+    path = _task_file(repo)
+    path.write_text("id: TASK-1\ntitle: Hand written\nstatus: Done\n---\n\n## Description\n\nbody\n", encoding="utf-8")
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="no frontmatter"):
+        _repository(repo).edit_task("TASK-1", remove_preamble=True)
+    assert _snapshot_tasks(repo) == before
+
+    repaired = _repository(repo).edit_task("TASK-1", title="Hand written", status="Done", remove_preamble=True)
+    assert (repaired.title, repaired.status) == ("Hand written", "Done")
+    assert "id: TASK-1\ntitle" not in _task_file(repo).read_text(encoding="utf-8")

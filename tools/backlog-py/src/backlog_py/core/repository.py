@@ -189,6 +189,8 @@ class MutableRepository(ReadOnlyRepository):
             raise TaskMutationError(f"{task.path.name}: {exc}") from exc
         parsed = parse_task_markdown(source)
         if remove_preamble:
+            if parsed.raw_frontmatter is None and title is None:  # the preamble is the task's only record
+                raise TaskMutationError("Cannot remove the preamble: the task has no frontmatter; give its title (-t)")
             source = _remove_preamble(source, parsed)
             parsed = parse_task_markdown(source)
         if description is not None:
