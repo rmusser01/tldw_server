@@ -56,7 +56,7 @@ Out of scope:
 ## Architecture Decision Assessment
 
 **ADR required:** Yes.
-**Accepted ADR:** [ADR-085](../../ADR/085-web-scraping-crawl-and-process-local-job-ownership.md).
+**Accepted ADR:** [ADR-093](../../ADR/093-web-scraping-crawl-and-process-local-job-ownership.md).
 
 The durable rule is that crawl and queue own their state and receive execution
 callbacks, while orchestration composes them with canonical article execution.
@@ -662,7 +662,7 @@ incomplete traversal. Bounded internal producer pacing is not admission waiting.
 These choices preserve successful return shapes and collected data while removing
 ambiguous success reporting. They are design decisions, not implemented behavior.
 
-The design task is now TASK-15282 and its proposed decision is ADR-085. Replacement
+The design task is now TASK-15282 and its proposed decision is ADR-093. Replacement
 numbers were checked against refreshed `origin/dev` and every changed-file page
 of all open PRs, including PRs with more than 100 files. The original dated task
 history is retained under the new task identity. No unrelated task or ADR was
