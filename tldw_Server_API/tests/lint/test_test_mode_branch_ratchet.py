@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ast
 import re
+from functools import cache
 import textwrap
 from collections.abc import Iterable
 from pathlib import Path
@@ -55,13 +56,15 @@ SECURITY_FUNCTIONS: frozenset[str] = frozenset(
     {
         "api/v1/endpoints/evaluations/evaluations_auth.py:get_eval_request_user",
         "core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py:_raise_if_url_blocked",
-        "core/MCP_unified/server.py:MCPServer._single_user_compat_auth_via",
+        # TASK-13950.19 Task 4 deletes the test-key arm and re-adds MCPServer._single_user_compat_auth_via.
     }
 )
 
 _TEST_WORDS = frozenset({"test", "tests", "testing", "pytest"})
 _MODE_WORDS = frozenset({"mode", "context", "runtime", "pytest"})
 _TLDW_TEST = re.compile(r"TLDW_TEST_[A-Z0-9_]+")
+# The pin's stricter matcher: the seam guard's constant pattern, and any test word in a name.
+_STRICT_CONSTANT = re.compile(r"(?:^|_)(?:PY)?TEST(?:S|ING)?(?:_|$)")
 
 RATCHET = _ceilings.Ratchet(
     baseline=Path(__file__).resolve().with_name("test_mode_branch_baseline.json"),
@@ -82,6 +85,9 @@ def _words(name: str) -> set[str]:
     return set(name.lower().strip("_").split("_"))
 
 
+# ponytail: counts a reference by its own line only, so a test-named local
+# (``_is_test = is_test_mode()`` then ``if _is_test:``) counts the assignment, not the branch;
+# upgrade to name-flow tracking if such locals appear.
 def is_signal_name(name: str) -> bool:
     words = _words(name)
     return bool(words & _TEST_WORDS) and bool(words & _MODE_WORDS)
@@ -104,17 +110,22 @@ def _core_testing_aliases(tree: ast.Module) -> frozenset[str]:
     )
 
 
-def _reference_lines(nodes: Iterable[ast.AST], aliases: frozenset[str]) -> set[int]:
+def _reference_lines(nodes: Iterable[ast.AST], aliases: frozenset[str], *, strict: bool = False) -> set[int]:
     lines: set[int] = set()
     for root in nodes:
         docstrings = {id(n.value) for n in ast.walk(root) if isinstance(n, ast.Expr)}
         for node in ast.walk(root):
             if isinstance(node, ast.Constant):
-                hit = id(node) not in docstrings and is_signal_constant(node.value)
+                hit = id(node) not in docstrings and (
+                    is_signal_constant(node.value)
+                    or (strict and isinstance(node.value, str) and _STRICT_CONSTANT.search(node.value) is not None)
+                )
             elif isinstance(node, ast.Name):
                 hit = is_signal_name(node.id) or node.id in CORE_TESTING_SIGNALS or node.id in aliases
+                hit = hit or (strict and bool(_words(node.id) & _TEST_WORDS))
             elif isinstance(node, ast.Attribute):
                 hit = is_signal_name(node.attr) or node.attr in CORE_TESTING_SIGNALS
+                hit = hit or (strict and bool(_words(node.attr) & _TEST_WORDS))
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 hit = is_signal_name(node.name)
             else:
@@ -164,7 +175,11 @@ def measure(root: Path = APP_ROOT) -> dict[str, dict[str, int]]:
 
 
 def function_reference_lines(tree: ast.Module, qualname: str) -> list[int] | None:
-    """Reference lines inside the function ``qualname`` (its own ``def`` line excluded), or None if absent."""
+    """Reference lines inside the function ``qualname`` (its own ``def`` line excluded), or None if absent.
+
+    Stricter than the module counter: any name with a test word and any ``*TEST*`` string counts, so
+    a helper such as ``_single_user_test_key_compat_allowed`` or ``SINGLE_USER_TEST_API_KEY`` is found.
+    """
     scope: ast.AST = tree
     for part in qualname.split("."):
         scope = next(
@@ -181,7 +196,7 @@ def function_reference_lines(tree: ast.Module, qualname: str) -> list[int] | Non
         return None
     args = scope.args
     parts = [*scope.body, *scope.decorator_list, *args.defaults, *(d for d in args.kw_defaults if d is not None)]
-    return sorted(_reference_lines(parts, _core_testing_aliases(tree)))
+    return sorted(_reference_lines(parts, _core_testing_aliases(tree), strict=True))
 
 
 # --- Self-tests: each seeds a tree under a fresh tmp root and runs the real scan ---------------
@@ -256,13 +271,25 @@ def test_the_function_pin_finds_a_signal_and_a_missing_function() -> None:
     assert function_reference_lines(tree, "C.gone") is None
     defaulted = ast.parse('import os\n\n@os.getenv("TEST_MODE")\ndef g(x=os.getenv("TEST_MODE")):\n    return 1\n')
     assert function_reference_lines(defaulted, "g") == [3, 4]
+    compat = ast.parse(
+        "import os\n\nclass S:\n    def auth(self, k):\n"
+        '        key = os.getenv("SINGLE_USER_TEST_API_KEY")\n'
+        "        return key and self._test_key_compat_allowed()\n"
+    )
+    assert function_reference_lines(compat, "S.auth") == [5, 6]
 
 
 # --- The ratchet --------------------------------------------------------------------------------
 
 
+@cache
+def _app_measurement() -> dict[str, dict[str, int]]:
+    """The real tree, measured once per session for the tests below (~15 s)."""
+    return measure()
+
+
 def test_test_mode_branches_do_not_grow() -> None:
-    measured, baseline = measure(), _ceilings.load(RATCHET.baseline)
+    measured, baseline = _app_measurement(), _ceilings.load(RATCHET.baseline)
 
     problems = _ceilings.violations(RATCHET, measured, baseline)
 
@@ -271,8 +298,22 @@ def test_test_mode_branches_do_not_grow() -> None:
 
 
 def test_raised_test_mode_ceilings_carry_a_new_reason() -> None:
-    problems = _ceilings.reasonless_bumps(RATCHET, measure())
+    problems = _ceilings.reasonless_bumps(RATCHET, _app_measurement())
     assert problems == [], "\n".join(problems)
+
+
+def test_core_testing_helpers_are_all_counted_by_name() -> None:
+    """core/testing.py is exempt from the scan, so a signal helper it adds must be countable at its call sites."""
+    tree = parse_tree(APP_ROOT)[APP_ROOT / "core/testing.py"]
+    unnamed = [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _reference_lines(node.body, frozenset())
+        and node.name not in CORE_TESTING_SIGNALS
+        and not is_signal_name(node.name)
+    ]
+    assert unnamed == [], f"add {unnamed} to CORE_TESTING_SIGNALS or give them a test-mode name"
 
 
 def test_security_functions_read_no_test_signal() -> None:

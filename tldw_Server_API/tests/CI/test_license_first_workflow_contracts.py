@@ -1606,6 +1606,13 @@ _SHELL_SEPARATORS = {"||", "&&", "|", ";"}
 _SWALLOWING_WORDS = {"||", "|", "+e", "exit"}
 
 
+def _shell_words(script: str) -> list[str]:
+    """shlex.split with comments dropped and operators split off, so an unspaced ``...|true`` is two tokens."""
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
 def _test_mode_unset_problems(workflow: dict[str, Any]) -> list[str]:
     job = workflow["jobs"]["security-required"]
     steps = [step for step in job["steps"] if step.get("name") == TEST_MODE_UNSET_STEP]
@@ -1624,7 +1631,7 @@ def _test_mode_unset_problems(workflow: dict[str, Any]) -> list[str]:
             problems.append(f"step does not set {name}=1")
     scopes = {"workflow": workflow.get("env", {}), "job": job.get("env", {}), "step": env}
     problems += [f"{scope} env sets {flag}" for scope, values in scopes.items() for flag in (*_TEST_MODE_FLAGS, "PYTEST_ADDOPTS") if flag in values]
-    words = shlex.split(step.get("run", "").replace("\\\n", " "), comments=True)
+    words = _shell_words(step.get("run", "").replace("\\\n", " "))
     if "pytest" not in words:
         return problems + ["step does not invoke pytest"]
     args = words[words.index("pytest") + 1 :]
@@ -1715,6 +1722,19 @@ def test_test_mode_unset_contract_fails_when_the_step_changes(mutation: str, exp
     }
     edits[mutation]()
     assert _test_mode_unset_problems(workflow) == [expected]  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("edit", ["mid-command", "end-of-command"])
+def test_test_mode_unset_contract_splits_unspaced_operators(edit: str):
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/security-required.yml").read_text())
+    step = next(s for s in workflow["jobs"]["security-required"]["steps"] if s.get("name") == TEST_MODE_UNSET_STEP)
+    assert "--timeout=300" in step["run"]  # nosec B101 - the mid-command edit needs it
+    if edit == "mid-command":
+        step["run"] = step["run"].replace("--timeout=300", "--timeout=300|true")
+    else:
+        step["run"] = step["run"].rstrip() + "|tee pytest.log\n"
+    assert "step can swallow a failure with |" in _test_mode_unset_problems(workflow)  # nosec B101
 
 
 # TASK-13950.10: packages/ui has no lint of its own, so these frontend-required steps are
