@@ -74,7 +74,7 @@ async def test_native_disconnection_observed_before_retirement_is_not_missed_aft
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["sealed", "creation_failure", "unobserved"])
 async def test_retirement_task_startup_disposes_listener_or_retains_native_work(monkeypatch, mode):
-    from types import SimpleNamespace
+    import weakref
 
     from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as browser
     from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import _adapter, _FakeBrowserRuntime, _FakeGuard
@@ -84,6 +84,8 @@ async def test_retirement_task_startup_disposes_listener_or_retains_native_work(
     lease = pool.acquire(callback_capacity=2)
 
     class Native:
+        connected = True
+
         def on(self, name, callback):
             handlers[name] = callback
 
@@ -91,10 +93,12 @@ async def test_retirement_task_startup_disposes_listener_or_retains_native_work(
             handlers.pop(name)
 
         def is_connected(self):
-            return False
+            return self.connected
 
         async def close(self):
             calls.append("native-closed")
+            self.connected = False
+            handlers["disconnected"]()
 
     class Unobserved(asyncio.Task):
         def add_done_callback(self, *args, **kwargs):
@@ -109,8 +113,9 @@ async def test_retirement_task_startup_disposes_listener_or_retains_native_work(
             raise RuntimeError("cannot create task")
         return Unobserved(operation, loop=asyncio.get_running_loop())
 
-    async def retire():
-        calls.append("retired")
+    class Requests:
+        async def retire(self):
+            calls.append("retired")
 
     monkeypatch.setattr(asyncio, "create_task", create_task)
     if mode == "sealed":
@@ -119,8 +124,10 @@ async def test_retirement_task_startup_disposes_listener_or_retains_native_work(
     lifecycle = browser._CallbackLifecycle(outcome, lease, lambda: None)
     owners = {
         "browser": browser._OwnedResource(Native(), "close", "browser"),
-        "requests": browser._OwnedResource(SimpleNamespace(retire=retire), "close", "requests"),
+        "requests": browser._OwnedResource(Requests(), "close", "requests"),
     }
+    retained = weakref.ref(owners["browser"].resource)
+    retained_policy = weakref.ref(owners["requests"].resource)
     assert await _adapter(_FakeBrowserRuntime(), _FakeGuard([]))._retire_browser_owner(owners, lifecycle, lease)
     if mode == "unobserved":
         for _ in range(10):
@@ -134,8 +141,12 @@ async def test_retirement_task_startup_disposes_listener_or_retains_native_work(
         assert calls == []
         lease.seal()
         lease.owner_finished()
-        assert pool.active_count == 0
-    assert handlers == {}
+        del owners
+        assert pool.active_count == 1, "failed cleanup startup cannot refund a live browser's capacity"
+        assert retained() is not None and retained().is_connected()
+        assert retained_policy() is not None
+    assert pool.acquire(callback_capacity=2) is None
+    assert bool(handlers) == (mode != "unobserved")
 
 
 @pytest.mark.asyncio
