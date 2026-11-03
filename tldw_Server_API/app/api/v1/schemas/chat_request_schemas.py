@@ -9,8 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Core-owned since TASK-13950.15; re-exported for the API layer.
 from tldw_Server_API.app.core.Chat.chat_request_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
-    ALL_SUPPORTED_PROVIDER_NAMES_LIST,
-    normalize_catalog_provider_for_chat,
     _SERVER_MANAGED_CHAT_REQUEST_FIELDS,
     _SERVER_MANAGED_CHAT_REQUEST_COMPACT_FIELDS,
     _is_server_managed_chat_request_field,
