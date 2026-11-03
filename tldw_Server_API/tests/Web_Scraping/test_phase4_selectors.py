@@ -678,6 +678,12 @@ def test_selector_cache_operations_are_thread_safe() -> None:
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork support")
 def test_selector_cache_state_is_reset_in_forked_child_while_lock_is_held() -> None:
+    from tldw_Server_API.tests.Web_Scraping.fork_assertions import run_single_thread_fork_check
+
+    run_single_thread_fork_check(__name__, "_assert_selector_cache_state_is_reset_in_forked_child_while_lock_is_held")
+
+
+def _assert_selector_cache_state_is_reset_in_forked_child_while_lock_is_held() -> None:
     if not hasattr(os, "register_at_fork"):
         pytest.skip("requires os.register_at_fork support")
 

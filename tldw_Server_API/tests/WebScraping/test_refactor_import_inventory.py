@@ -297,3 +297,29 @@ def test_phase5_manifest_expands_actual_crawl_imports_without_rewriting_inventor
         "tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py"
         in inventory.consumers[f"{SERVICE}._scrape_by_url_level"]
     )
+
+
+@pytest.mark.unit
+def test_phase5_execution_packages_are_discovered_and_imported_from_this_checkout() -> None:
+    import importlib
+
+    import tomllib
+    from setuptools import find_packages
+
+    configuration = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]["packages"]["find"]
+    packages = {
+        package
+        for directory in configuration["where"]
+        for package in find_packages(
+            where=str(REPO_ROOT / directory), include=configuration["include"], exclude=configuration["exclude"]
+        )
+    }
+    for relative in ("crawl", "jobs", "orchestration", "contracts", "runtime"):
+        name = f"tldw_Server_API.app.core.Web_Scraping.{relative}"
+        assert name in packages
+        imported = importlib.import_module(name)
+        assert Path(imported.__file__).resolve() == NEW_PACKAGE_ROOT / relative / "__init__.py"
+        for path in sorted((NEW_PACKAGE_ROOT / relative).glob("*.py")):
+            if path.stem != "__init__":
+                module = importlib.import_module(f"{name}.{path.stem}")
+                assert Path(module.__file__).resolve() == path

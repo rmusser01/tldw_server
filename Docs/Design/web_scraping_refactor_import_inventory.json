@@ -13,17 +13,9 @@
       {
         "import_kind": "from",
         "imported_name": "is_content_page",
-        "line": 37,
+        "line": 42,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
-        "target_name": "Article_Extractor_Lib"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "scrape_from_sitemap",
-        "line": 21,
-        "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
-        "path": "tldw_Server_API/app/services/web_scraping_service.py",
         "target_name": "Article_Extractor_Lib"
       },
       {
@@ -37,7 +29,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 23,
+        "line": 22,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
         "target_name": "Article_Extractor_Lib"
@@ -180,14 +172,6 @@
       },
       {
         "import_kind": "from",
-        "imported_name": "Article_Extractor_Lib",
-        "line": 5,
-        "module": "tldw_Server_API.app.core.Web_Scraping",
-        "path": "tldw_Server_API/tests/WebScraping/test_legacy_sync_helpers.py",
-        "target_name": "Article_Extractor_Lib"
-      },
-      {
-        "import_kind": "from",
         "imported_name": "extract_article_with_pipeline",
         "line": 7,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
@@ -283,14 +267,6 @@
         "target_name": "Article_Extractor_Lib"
       },
       {
-        "import_kind": "import",
-        "imported_name": null,
-        "line": 8,
-        "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py",
-        "target_name": "Article_Extractor_Lib"
-      },
-      {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
         "line": 8,
@@ -349,7 +325,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 462,
+        "line": 466,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "Article_Extractor_Lib"
@@ -357,7 +333,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 498,
+        "line": 502,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "Article_Extractor_Lib"
@@ -432,6 +408,78 @@
         "line": 19,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_safe_regex.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 199,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 234,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 843,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 866,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 893,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 990,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 1044,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 1063,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "Article_Extractor_Lib"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "Article_Extractor_Lib",
+        "line": 1089,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
         "target_name": "Article_Extractor_Lib"
       },
       {
@@ -535,7 +583,7 @@
       {
         "import_kind": "from",
         "imported_name": "search_discussions",
-        "line": 3387,
+        "line": 3244,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -543,7 +591,7 @@
       {
         "import_kind": "from",
         "imported_name": "perform_websearch",
-        "line": 3416,
+        "line": 3273,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -551,7 +599,7 @@
       {
         "import_kind": "from",
         "imported_name": "process_web_search_results",
-        "line": 3416,
+        "line": 3273,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -727,7 +775,7 @@
       {
         "import_kind": "from",
         "imported_name": "WebSearch_APIs",
-        "line": 302,
+        "line": 304,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_scraping_module.py",
         "target_name": "WebSearch_APIs"
@@ -735,7 +783,7 @@
       {
         "import_kind": "from",
         "imported_name": "WebSearch_APIs",
-        "line": 322,
+        "line": 324,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_scraping_module.py",
         "target_name": "WebSearch_APIs"
@@ -1025,7 +1073,7 @@
       {
         "import_kind": "from",
         "imported_name": "RateLimiter",
-        "line": 64,
+        "line": 66,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py",
         "target_name": "enhanced_web_scraping"
@@ -1033,7 +1081,7 @@
       {
         "import_kind": "from",
         "imported_name": "EnhancedWebScraper",
-        "line": 41,
+        "line": 48,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1041,7 +1089,7 @@
       {
         "import_kind": "from",
         "imported_name": "JobPriority",
-        "line": 41,
+        "line": 48,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1049,7 +1097,7 @@
       {
         "import_kind": "from",
         "imported_name": "JobStatus",
-        "line": 41,
+        "line": 48,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1057,7 +1105,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 41,
+        "line": 48,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1065,7 +1113,7 @@
       {
         "import_kind": "from",
         "imported_name": "create_enhanced_scraper",
-        "line": 41,
+        "line": 48,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1073,7 +1121,7 @@
       {
         "import_kind": "from",
         "imported_name": "enhanced_web_scraping",
-        "line": 24,
+        "line": 23,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
         "target_name": "enhanced_web_scraping"
@@ -1097,9 +1145,73 @@
       {
         "import_kind": "from",
         "imported_name": "EnhancedWebScraper",
+        "line": 13,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 375,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 401,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJob",
+        "line": 12,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJobQueue",
+        "line": 12,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 321,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
         "line": 6,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/WebScraping/integration/test_llm_extraction_pipeline.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 11,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/WebScraping/integration/test_phase5_crawl_lifecycle.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 279,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/WebScraping/integration/test_phase5_enhanced_browser_native.py",
         "target_name": "enhanced_web_scraping"
       },
       {
@@ -1225,7 +1337,7 @@
       {
         "import_kind": "import",
         "imported_name": null,
-        "line": 9,
+        "line": 8,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_crawl_config_precedence.py",
         "target_name": "enhanced_web_scraping"
@@ -1256,16 +1368,8 @@
       },
       {
         "import_kind": "from",
-        "imported_name": "JobStatus",
-        "line": 5,
-        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_enhanced_service_status_and_queue_retention.py",
-        "target_name": "enhanced_web_scraping"
-      },
-      {
-        "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 5,
+        "line": 7,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_enhanced_service_status_and_queue_retention.py",
         "target_name": "enhanced_web_scraping"
@@ -1273,7 +1377,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJobQueue",
-        "line": 5,
+        "line": 7,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_enhanced_service_status_and_queue_retention.py",
         "target_name": "enhanced_web_scraping"
@@ -1353,7 +1457,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 434,
+        "line": 438,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
         "target_name": "enhanced_web_scraping"
@@ -1361,9 +1465,25 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJobQueue",
-        "line": 434,
+        "line": 438,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_architecture.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 133,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_consumer_imports.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 175,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase4_consumer_imports.py",
         "target_name": "enhanced_web_scraping"
       },
       {
@@ -1376,42 +1496,250 @@
       },
       {
         "import_kind": "from",
-        "imported_name": "EnhancedWebScraper",
-        "line": 5,
-        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_recursive_crawl.py",
+        "imported_name": "enhanced_web_scraping",
+        "line": 107,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
         "target_name": "enhanced_web_scraping"
       },
       {
-        "import_kind": "import",
-        "imported_name": null,
-        "line": 5,
+        "import_kind": "from",
+        "imported_name": "ScrapingJob",
+        "line": 117,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_recursive_crawl_observability.py",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJobQueue",
+        "line": 117,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJob",
+        "line": 164,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJobQueue",
+        "line": 164,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "CookieManager",
+        "line": 378,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
         "target_name": "enhanced_web_scraping"
       },
       {
         "import_kind": "from",
         "imported_name": "EnhancedWebScraper",
-        "line": 6,
+        "line": 389,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_recursive_crawl_observability.py",
-        "target_name": "enhanced_web_scraping"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "EnhancedWebScraper",
-        "line": 5,
-        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_recursive_crawl_semantics.py",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
         "target_name": "enhanced_web_scraping"
       },
       {
         "import_kind": "from",
         "imported_name": "enhanced_web_scraping",
-        "line": 137,
+        "line": 409,
         "module": "tldw_Server_API.app.core.Web_Scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_recursive_crawl_semantics.py",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ContentDeduplicator",
+        "line": 434,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 434,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 467,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ContentDeduplicator",
+        "line": 487,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 487,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 677,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "CookieManager",
+        "line": 764,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 764,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 827,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 1115,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJob",
+        "line": 1115,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 1166,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJob",
+        "line": 1166,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_adapter_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 7,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_browser_availability.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 13,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_default_batch.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "CookieManager",
+        "line": 542,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_enhanced_browser.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "EnhancedWebScraper",
+        "line": 542,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_enhanced_browser.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJob",
+        "line": 91,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJobQueue",
+        "line": 92,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJob",
+        "line": 115,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ScrapingJobQueue",
+        "line": 188,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 11,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_queue_admission.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "import",
+        "imported_name": null,
+        "line": 3,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_recursive_crawl_observability.py",
         "target_name": "enhanced_web_scraping"
       },
       {
@@ -1437,21 +1765,13 @@
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_scraping_job_queue_call_context.py",
         "target_name": "enhanced_web_scraping"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "EnhancedWebScraper",
-        "line": 5,
-        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_strategy_toggle.py",
-        "target_name": "enhanced_web_scraping"
       }
     ],
     "handlers": [
       {
         "import_kind": "from",
         "imported_name": "resolve_handler",
-        "line": 77,
+        "line": 88,
         "module": "tldw_Server_API.app.core.Web_Scraping.handlers",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
         "target_name": "handlers"
@@ -1509,39 +1829,7 @@
       {
         "import_kind": "from",
         "imported_name": "CompositeScorer",
-        "line": 85,
-        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
-        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
-        "target_name": "scoring"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "DomainAuthorityScorer",
-        "line": 85,
-        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
-        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
-        "target_name": "scoring"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "FreshnessScorer",
-        "line": 85,
-        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
-        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
-        "target_name": "scoring"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "KeywordRelevanceScorer",
-        "line": 85,
-        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
-        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
-        "target_name": "scoring"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "PathDepthScorer",
-        "line": 85,
+        "line": 100,
         "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
         "target_name": "scoring"
@@ -1549,9 +1837,89 @@
       {
         "import_kind": "from",
         "imported_name": "ContentTypeScorer",
-        "line": 92,
+        "line": 103,
         "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "DomainAuthorityScorer",
+        "line": 106,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "FreshnessScorer",
+        "line": 109,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "KeywordRelevanceScorer",
+        "line": 112,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "PathDepthScorer",
+        "line": 115,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "CompositeScorer",
+        "line": 41,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/crawl.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "ContentTypeScorer",
+        "line": 41,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/crawl.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "DomainAuthorityScorer",
+        "line": 41,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/crawl.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "FreshnessScorer",
+        "line": 41,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/crawl.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "KeywordRelevanceScorer",
+        "line": 41,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/crawl.py",
+        "target_name": "scoring"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "PathDepthScorer",
+        "line": 41,
+        "module": "tldw_Server_API.app.core.Web_Scraping.scoring",
+        "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/crawl.py",
         "target_name": "scoring"
       },
       {
@@ -1679,7 +2047,7 @@
       {
         "import_kind": "from",
         "imported_name": "calculate_difficulty_score",
-        "line": 373,
+        "line": 375,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.scoring.scoring_engine",
         "path": "tldw_Server_API/tests/WebScraping/test_scraping_module.py",
         "target_name": "scraper_analyzers"
@@ -1687,7 +2055,7 @@
       {
         "import_kind": "from",
         "imported_name": "generate_recommendations",
-        "line": 395,
+        "line": 397,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.recommendations.recommender",
         "path": "tldw_Server_API/tests/WebScraping/test_scraping_module.py",
         "target_name": "scraper_analyzers"
@@ -1793,7 +2161,7 @@
       {
         "import_kind": "from",
         "imported_name": "DEFAULT_HANDLER",
-        "line": 95,
+        "line": 118,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
         "target_name": "scraper_router"
@@ -1801,7 +2169,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScraperRouter",
-        "line": 95,
+        "line": 118,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
         "target_name": "scraper_router"
@@ -1809,7 +2177,7 @@
       {
         "import_kind": "from",
         "imported_name": "DEFAULT_HANDLER",
-        "line": 49,
+        "line": 50,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
         "target_name": "scraper_router"
@@ -1817,7 +2185,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScraperRouter",
-        "line": 49,
+        "line": 50,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article.py",
         "target_name": "scraper_router"
@@ -1825,7 +2193,7 @@
       {
         "import_kind": "from",
         "imported_name": "DEFAULT_HANDLER",
-        "line": 10,
+        "line": 11,
         "module": "tldw_Server_API.app.core.Web_Scraping.scraper_router",
         "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article_models.py",
         "target_name": "scraper_router"
@@ -1987,7 +2355,7 @@
       {
         "import_kind": "from",
         "imported_name": "build_browser_headers",
-        "line": 96,
+        "line": 119,
         "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
         "target_name": "ua_profiles"
@@ -1995,7 +2363,7 @@
       {
         "import_kind": "from",
         "imported_name": "profile_to_impersonate",
-        "line": 96,
+        "line": 119,
         "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
         "target_name": "ua_profiles"
@@ -2003,7 +2371,7 @@
       {
         "import_kind": "from",
         "imported_name": "build_browser_headers",
-        "line": 263,
+        "line": 268,
         "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
         "path": "tldw_Server_API/app/core/Web_Scraping/filters.py",
         "target_name": "ua_profiles"
@@ -2011,7 +2379,7 @@
       {
         "import_kind": "from",
         "imported_name": "build_browser_headers",
-        "line": 11,
+        "line": 12,
         "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
         "path": "tldw_Server_API/app/core/Web_Scraping/orchestration/article_models.py",
         "target_name": "ua_profiles"
@@ -2084,8 +2452,16 @@
       },
       {
         "import_kind": "from",
+        "imported_name": "url_utils",
+        "line": 11,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/app/core/Web_Scraping/crawl/discovery.py",
+        "target_name": "url_utils"
+      },
+      {
+        "import_kind": "from",
         "imported_name": "normalize_for_crawl",
-        "line": 97,
+        "line": 120,
         "module": "tldw_Server_API.app.core.Web_Scraping.url_utils",
         "path": "tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py",
         "target_name": "url_utils"
@@ -2096,6 +2472,38 @@
         "line": 24,
         "module": "tldw_Server_API.app.core.Web_Scraping.url_utils",
         "path": "tldw_Server_API/tests/Collections/test_reading_service.py",
+        "target_name": "url_utils"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "url_utils",
+        "line": 879,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_crawl_composition.py",
+        "target_name": "url_utils"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "url_utils",
+        "line": 157,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_discovery.py",
+        "target_name": "url_utils"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "normalize_for_crawl",
+        "line": 187,
+        "module": "tldw_Server_API.app.core.Web_Scraping.url_utils",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_discovery.py",
+        "target_name": "url_utils"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "url_utils",
+        "line": 158,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_frontier.py",
         "target_name": "url_utils"
       },
       {

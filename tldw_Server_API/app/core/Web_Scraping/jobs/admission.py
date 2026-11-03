@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
+from ...Ingestion_Media_Processing.logging_safety import redact_url_for_log
+from ..contracts.execution import _private_article_key
 from .models import JobPriority, JobStatus, QueueLimits, ScrapingJob
 
 
@@ -62,6 +65,41 @@ def public_diagnostic(value: Any) -> Any:
     return "execution_failed"
 
 
+_PRIVATE_STATE_KEYS = frozenset(
+    {
+        "options",
+        "executionoptions",
+        "executionpayload",
+        "payload",
+        "context",
+        "discovery",
+        "discoveryhtml",
+        "rawdiscoveryhtml",
+        "discoveredlinks",
+        "discoveryresult",
+    }
+)
+PUBLIC_CONTENT_KEYS = frozenset({"content", "raw_html", "raw_content"})
+_URL_IN_TEXT = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+
+
+def private_state_key(key: str) -> bool:
+    """Exclude execution/discovery containers as well as credential aliases."""
+    normalized = "".join(char for char in key.lower() if char.isalnum())
+    return (
+        _private_article_key(key)
+        or normalized in _PRIVATE_STATE_KEYS
+        or normalized.endswith(("options", "headers", "cookies"))
+    )
+
+
+def public_state_string(value: str) -> str:
+    """Redact URL credentials even in nested metadata, but not article prose."""
+    if value.startswith("//"):
+        return redact_url_for_log("https:" + value).removeprefix("https:")
+    return _URL_IN_TEXT.sub(lambda match: redact_url_for_log(match.group()), value)
+
+
 def bounded_snapshot(
     value: Any, limit: int, *, redact: bool = False, article_path: tuple[str, ...] | None = None
 ) -> tuple[Any, int]:
@@ -71,8 +109,6 @@ def bounded_snapshot(
     unbounded serialized result. A depth/cycle guard rejects hostile containers.
     Only direct prose fields at the trusted article_path bypass URL redaction.
     """
-    from .projections import PUBLIC_CONTENT_KEYS, private_state_key, public_state_string
-
     size = 0
     ancestors: set[int] = set()
 

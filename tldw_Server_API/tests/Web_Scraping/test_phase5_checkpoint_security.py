@@ -388,7 +388,26 @@ def _fork_contender(inherited, path, root, connection):
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="POSIX descriptor inheritance")
-def test_fork_child_cannot_write_or_unlock_parent_store(store, tmp_path):
+def test_fork_child_cannot_write_or_unlock_parent_store():
+    from tldw_Server_API.tests.Web_Scraping.fork_assertions import run_single_thread_fork_check
+
+    run_single_thread_fork_check(__name__, "_assert_fork_checkpoint_in_fresh_directory")
+
+
+def _assert_fork_checkpoint_in_fresh_directory():
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="phase5-fork-checkpoint-") as directory:
+        root = Path(directory)
+        scope = CheckpointScope("owner", "crawl", root=root)
+        store = CheckpointStore.open(root / "progress.json", scope=scope, limits=CheckpointLimits())
+        try:
+            _assert_fork_child_cannot_write_or_unlock_parent_store(store, root)
+        finally:
+            store.close()
+
+
+def _assert_fork_child_cannot_write_or_unlock_parent_store(store, tmp_path):
     ctx = multiprocessing.get_context("fork")
     parent, child = ctx.Pipe(duplex=False)
     process = ctx.Process(target=_fork_contender, args=(store, tmp_path / "progress.json", tmp_path, child))

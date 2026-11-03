@@ -1,6 +1,5 @@
 """Count/byte-bounded allowlisted polling history, independent of live delivery."""
 
-import re
 import sys
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -8,9 +7,13 @@ from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
-from ...Ingestion_Media_Processing.logging_safety import redact_url_for_log
-from ..contracts.execution import CrawlOutcome, _private_article_key
+from ..contracts.execution import CrawlOutcome
+from .admission import _PRIVATE_STATE_KEYS as _PRIVATE_STATE_KEYS
+from .admission import _URL_IN_TEXT as _URL_IN_TEXT
+from .admission import PUBLIC_CONTENT_KEYS as PUBLIC_CONTENT_KEYS
 from .admission import bounded_snapshot, public_diagnostic
+from .admission import private_state_key as private_state_key
+from .admission import public_state_string as public_state_string
 from .models import ScrapingJob
 
 ARTICLE_FIELDS = frozenset(
@@ -38,22 +41,6 @@ ARTICLE_FIELDS = frozenset(
     }
 )
 
-_PRIVATE_STATE_KEYS = frozenset(
-    {
-        "options",
-        "executionoptions",
-        "executionpayload",
-        "payload",
-        "context",
-        "discovery",
-        "discoveryhtml",
-        "rawdiscoveryhtml",
-        "discoveredlinks",
-        "discoveryresult",
-    }
-)
-PUBLIC_CONTENT_KEYS = frozenset({"content", "raw_html", "raw_content"})
-_URL_IN_TEXT = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _PROGRESS_FIELDS = frozenset(
     {
         "status",
@@ -77,23 +64,6 @@ _PROGRESS_FIELDS = frozenset(
         "service_status",
     }
 )
-
-
-def private_state_key(key: str) -> bool:
-    """Exclude execution/discovery containers as well as credential aliases."""
-    normalized = "".join(char for char in key.lower() if char.isalnum())
-    return (
-        _private_article_key(key)
-        or normalized in _PRIVATE_STATE_KEYS
-        or normalized.endswith(("options", "headers", "cookies"))
-    )
-
-
-def public_state_string(value: str) -> str:
-    """Redact URL credentials even in nested metadata, but not article prose."""
-    if value.startswith("//"):
-        return redact_url_for_log("https:" + value).removeprefix("https:")
-    return _URL_IN_TEXT.sub(lambda match: redact_url_for_log(match.group()), value)
 
 
 def public_crawl_outcome(outcome: CrawlOutcome) -> dict[str, Any]:
