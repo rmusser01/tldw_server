@@ -360,6 +360,7 @@ describe("generated Kanban drafts", () => {
       }),
     );
     await waitFor(() => expect(chats()).toHaveLength(1));
+    expect(within(dialog).queryByText("Fixture model picker")).not.toBeInTheDocument();
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Stop", exact: true }),
     );

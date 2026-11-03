@@ -77,7 +77,7 @@ Heartbeat stays PAUSED; no tracking-only commit, new task, window or proof artif
 **Goal**: Combine new fixes, committed bf8 repairs, six qualified readers and published fe117 repairs onto fresh current dev, preserving original worktrees and all published behavior.
 **Success Criteria**: Exact source/ref and owned patch guards, resolved conflicts without assertion loss, supported combined API export/types, scoped lint/security and final actual/staged review.
 **Tests**: Genuinely affected incoming suites and new regressions; preserve VN call_soon_threadsafe/release_observed/direct-await/finally-drain oracle, audio finite quota/cache/DSN cleanup, offline accounting mock and causal guard.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Qualification and acceptance
 **Goal**: Publish with normal hooks/exact lease and exact human-summary readback; satisfy current-head hosted and real UAT/native/installer gates before merge.
@@ -85,7 +85,7 @@ Heartbeat stays PAUSED; no tracking-only commit, new task, window or proof artif
 **Tests**: 43 UAT/15 runtime bug acceptance, native first-import and whole-process Prompt shutdown, installer 53/55/56, fresh runtime/client/principal context, applicable queue-platform acceptance. After a qualified source freeze, use the approved fresh private runtime/build/browser cell within the 120-second startup and 600-second build caps, preserving previous runtimes. No queue mutation, model/environment reconstruction or proof bundles.
 **Status**: In Progress
 
-## Current qualification
+## Historical qualification checkpoints
 
 - Local rebase completed: 143282af365cd8b462f842c6b8907d6120ce0ea7 on guarded dev 7ba48f251ec47a1e0bb680f49f9b7d86ec2b988d; 14 committed patches compare equal to the previous range. Five-path owned WIP is byte-identical, and only two incoming docs/task paths changed the committed tree. Unpublished.
 - Independent integrated-source review clear; published main/control-plane/Sync/lifetime files, VN loop-release oracle, audio assertions, offline guards/accounting regressions and task history preserved.
@@ -1884,3 +1884,9 @@ Backend repairs through local882e1ae880ddd5d0cf8b83d17d5b1554484d8a64 are normal
 Every completed S06 primary/native profile is removed after successful retirement/official-fixture teardown, exact identity/no-handle and original canonical/owner guards. The original API/frontend/data and original Chrome absence are preserved; its DOM remains untouched/unverified. Four obsolete private package copies (15,384 files/312,907,665 bytes) are removed. Current qualified artifacts and shared dependencies remain; 91 completed helper/test files (846,548 bytes) are removed after independently reviewed removal of obsolete S06-only shared-helper branches, exact file identities, no references/open handles/processes and protected-owner checks. No S06 bytecode files remain. The shared-helper candidate has identical non-S06 top-level ASTs, compiles, and retains only2 inherited Bandit findings/3 inherited Ruff diagnostics with0new/0errors. Normal local closure is recorded in the task.
 
 Proposed ADR086 explicitly retains the unowned legacy PostgreSQL Skill identity/Trash recovery limitation; this repair does not guess ownership or certify that recovery. Historical canonical-body preservation loss, owner-probe failure and Kanban timeout retain their accepted limitations/open incident status. Latest-dev integration, genuinely affected validation, native/installer/release/human-summary/landing gates remain separate. No source publication, queue or merge action occurred. Heartbeat remains paused.
+
+## Latest-dev source integration closeout — 2026-11-02
+
+All 160 accepted UAT commits are preserved on verified dev `b2b7d5d2b04256458fe6f33e02a36019e2c46795` (127 patch-identical,33 adapted), followed by the final integration repair in this commit. Independent actual/staged source review is clear after fixing annotation replay-index validation and the old-owned104 migration collision. Normal hooks and genuinely affected checks pass: full client TypeScript,60 tests per client,49 composed owner/runtime/annotation checks (SQLite/PostgreSQL),9 migration checks,34 PDF checks, scoped security/lint, canonical API/types and the155-page production build. Counts overlap and are separate scoped runs; task notes retain failures, warnings, fixture corrections and exact results.
+
+The completed owned latest-dev rebase plan is removed. All43 selected workflow families retain their recorded functional/humanUX acceptance on frozen/composed live artifacts; this source integration does not manufacture a fresh all43 UAT run on the new candidate. Stage3, native first-import/whole-Prompt shutdown, installer and broader release/CI/human-summary/publication/merge gates remain open. Original runtime/Chat/data, backup refs, WIP and needed functional artifacts remain preserved; no publication or runtime transition occurred.

@@ -198,6 +198,19 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     })
   })
 
+  it("moves focus through the actual offcanvas sidebar ref and returns it on Escape", async () => {
+    setViewportWidth(375)
+    renderPage()
+    const opener = screen.getByTestId("notes-mobile-open-list-button")
+    opener.focus()
+    fireEvent.click(opener)
+    const sidebar = screen.getByTestId("notes-list-region")
+    await waitFor(() => expect(sidebar.querySelector("[data-notes-search-input]")).toHaveFocus())
+    fireEvent.keyDown(sidebar.querySelector("[data-notes-search-input]")!, { key: "Escape" })
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(sidebar).toHaveAttribute("inert")
+  })
+
   it.each([375, 1024])("removes the hidden sidebar from keyboard and screen-reader navigation at %ipx and restores it when opened", async (width) => {
     setViewportWidth(width)
     renderPage()

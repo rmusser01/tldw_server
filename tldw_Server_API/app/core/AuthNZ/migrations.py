@@ -6578,6 +6578,8 @@ def get_authnz_migrations() -> list[Migration]:
 
 def migration_106_add_mcp_external_discovery_state(conn: sqlite3.Connection) -> None:
     """Retain discovery outcomes independently of the server configuration revision."""
+    # Earlier accepted candidates recorded discovery as 104 before upstream usage attribution 104.
+    migration_104_add_llm_usage_log_credential_source(conn)
     if not _sqlite_table_exists(conn, "mcp_external_servers"):
         return
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(mcp_external_servers)")}

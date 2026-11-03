@@ -195,6 +195,7 @@ def owner_source(pg_restricted_backend):
         "ux_content_items_user_canonical",
         "ux_content_items_user_hash",
         "idx_tts_history_user_created",
+        "idx_annotations_client_id",
     ],
 )
 def test_current_owner_reopen_restores_missing_required_index(owner_source, index):
@@ -338,3 +339,24 @@ def test_owner_reopen_backfills_preexisting_fts_rows(owner_source, table, alias,
         assert reopened.get_media_by_id(media_id)["content"] == "Keep the Rowan source."  # nosec B101 -- Pytest verifies that index repair leaves the source content intact.
     finally:
         reopened.release_context_connection()
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "CREATE INDEX idx_annotations_client_id ON document_annotations(user_id,media_id,client_id)",
+        "CREATE UNIQUE INDEX idx_annotations_client_id ON document_annotations(user_id,client_id)",
+        "CREATE UNIQUE INDEX idx_annotations_client_id ON document_annotations(user_id,media_id,client_id) WHERE client_id <> 'excluded-intent'",
+    ],
+    ids=["nonunique", "wrong-key", "partial"],
+)
+def test_owner_reopen_refuses_malformed_annotation_identity(owner_source, definition):
+    from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+
+    db, media_id, _ = owner_source
+    with db.backend.transaction() as conn:
+        db.backend.execute("DROP INDEX idx_annotations_client_id", connection=conn)
+        db.backend.execute(definition, connection=conn)
+    with pytest.raises(DatabaseError, match="annotation.*schema-owner"):
+        MediaDbFactory(":memory:", client_id="341", backend=db.backend).for_request()
+    assert db.get_media_by_id(media_id)["content"] == "Keep the Rowan source."  # nosec B101 -- Refusing an invalid replay arbiter preserves existing source data.

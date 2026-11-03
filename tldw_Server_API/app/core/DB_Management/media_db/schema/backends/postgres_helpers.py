@@ -113,6 +113,11 @@ def ensure_postgres_post_core_structures(
     db._ensure_postgres_data_tables(conn)
     _ensure_postgres_safe_transcript_extractor(db, conn)
     ensure_postgres_document_workspace_schema(conn)
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation import (
+        validate_postgres_annotation_replay_index,
+    )
+
+    validate_postgres_annotation_replay_index(db, conn)
     db._ensure_postgres_source_hash_column(conn)
     db._ensure_postgres_claims_extensions(conn)
     db._ensure_postgres_email_schema(conn)

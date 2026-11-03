@@ -18,7 +18,7 @@ vi.mock('@/utils/safe-storage', () => ({
   },
 }));
 
-import { TldwApiClient } from '../TldwApiClient';
+import { TldwApiClient, TldwApiClientBase } from '../TldwApiClient';
 import type { ScopedRequestOptions } from '../TldwApiClient';
 
 const scope: NonNullable<ScopedRequestOptions['requestScope']> = {
@@ -32,6 +32,11 @@ describe('captured Data Tables owner: composed client', () => {
     vi.restoreAllMocks();
     transport.request.mockReset();
     transport.request.mockResolvedValue({ job_id: 71 });
+  });
+  it('keeps scoped table methods canonical in the domain', () => {
+    for (const name of ['getDataTable', 'regenerateDataTable']) {
+      expect(Object.prototype.hasOwnProperty.call(TldwApiClientBase.prototype, name)).toBe(false);
+    }
   });
   it.each(['generate', 'regenerate', 'poll', 'read', 'cancel'] as const)(
     'keeps the original scope for %s',
