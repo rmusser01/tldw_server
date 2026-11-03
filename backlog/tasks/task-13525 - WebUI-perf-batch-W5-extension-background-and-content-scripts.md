@@ -1,7 +1,7 @@
 ---
 id: TASK-13525
 title: 'WebUI perf batch W5: extension background and content scripts'
-status: To Do
+status: In Progress
 created_date: 2026-10-07 04:14
 ---
 
@@ -18,7 +18,7 @@ WebUI/extension perf program. Index: Docs/Plans/2026-10-06-webui-perf-remediatio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Stage 1 (web-clipper tiered capture, WP-56/WP-57): overlap check found TASK-13511 (in dev) had made the parser lazily loaded, but capture still eagerly serialized outerHTML + ran the parser + forced innerText on every clip; requestedType never reached the extraction. Stage 1 threads requestedType into extractClipPageTextFromDocument: selection clips with a live selection return the selection immediately (no outerHTML serialize, no parser, no innerText forced layout — spy-pinned mechanism test), article tier next, fullPageText only as the final fallback for selection/article requests; other clip types keep the eager general flow (characterization trio pins selection-present / selection-absent / article-empty tiers; no captured-content regression). parser/default.ts per-attribute removeAttr loop replaced by one in-place attribs pass preserving the exact kept-set {href, src} (pinned via link title / image alt behavior). Tests: services/web-clipper/__tests__/content-extract.test.ts (6) + parser/__tests__/default.test.ts (1); scoped suites green (30 tests / 6 files incl. existing), apps/tldw-frontend bun run typecheck exit 0. ADR assessment: none required — scoped perf change under the approved plan (Docs/Plans/2026-10-06-webui-perf-batch-5-extension-scripts-implementation-plan.md); no new durable architecture rule.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
