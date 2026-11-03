@@ -295,3 +295,37 @@ async def test_unavailable_reporter_preserves_original_async_block(store, monkey
     with pytest.raises(ModerationExecutionError) as caught:
         await run_moderation_async(call, metadata=FailureMetadata("evaluate", None, 1))
     assert caught.value is error
+
+
+def test_background_cleanup_failure_uses_shared_report_once_slot_without_queue(store, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    original = incidents._persist_failure
+    metrics = []
+
+    def stalled(*args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        original(*args, **kwargs)
+
+    monkeypatch.setattr(incidents, "_persist_failure", stalled)
+    monkeypatch.setattr(incidents, "log_counter", lambda name, **kw: metrics.append((name, kw)))
+    monkeypatch.setattr(incidents, "_closed", False)
+    metadata = FailureMetadata("redact", None, 1)
+    error = ModerationExecutionError("cleanup_failed")
+    with execution_scope() as first:
+        thread = incidents.report_execution_failure_background(error, metadata=metadata, scope=first)
+    try:
+        assert entered.wait(1)
+        with execution_scope() as second:
+            started = time.monotonic()
+            assert incidents.report_execution_failure_background(error, metadata=metadata, scope=second) is None
+            assert incidents.report_execution_failure_background(error, metadata=metadata, scope=second) is None
+            assert time.monotonic() - started < 0.1
+        assert incidents._report_thread is thread and thread.is_alive()
+        assert len([m for m in metrics if m[0] == "moderation_execution_failures_total"]) == 2
+        assert len([m for m in metrics if m[0] == "moderation_execution_reporter_failures_total"]) == 1
+    finally:
+        release.set()
+        thread.join(2)
+    assert not thread.is_alive()
+    assert store.list_items()["total"] == 1

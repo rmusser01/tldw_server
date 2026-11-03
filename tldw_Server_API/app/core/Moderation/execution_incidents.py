@@ -131,28 +131,25 @@ def report_execution_failure(
         _reporter_failure()
 
 
-async def report_execution_failure_async(
+def report_execution_failure_background(
     error: ModerationExecutionError, *, metadata: FailureMetadata, scope: ExecutionScope
-) -> None:
-    """One PID-local I/O slot, no queue, and at most 0.5 seconds awaiting it.
+) -> threading.Thread | None:
+    """Submit once to the single independent I/O slot, without waiting or queueing.
 
-    A timed-out/cancelled waiter does not release the still-running thread's
-    lease. Shutdown can bound its wait even during an arbitrary filesystem stall.
+    Cleanup owners can report even after their caller's event loop disappears.
+    The actual thread retains its lease through exit, including filesystem stalls.
     """
     global _report_thread
     try:
         metadata = FailureMetadata(metadata.operation, metadata.phase, metadata.input_chars)
         if not _claim(error, metadata, scope):
             return
-        finished = threading.Event()
 
         def run() -> None:
             try:
                 _persist_failure(error, metadata=metadata, scope=scope)
             except Exception:  # noqa: BLE001 - sanitize all persistence failures.
                 _reporter_failure()
-            finally:
-                finished.set()
 
         with _lock:
             if _report_thread is not None and not _report_thread.is_alive():
@@ -169,8 +166,23 @@ async def report_execution_failure_async(
         if busy:
             _reporter_failure()
             return
+        return thread
+    except Exception:  # noqa: BLE001 - preserve the original execution error.
+        _reporter_failure()
+        return None
+
+
+async def report_execution_failure_async(
+    error: ModerationExecutionError, *, metadata: FailureMetadata, scope: ExecutionScope
+) -> None:
+    """Use the independent I/O slot and await it for at most 0.5 seconds."""
+    global _report_thread
+    try:
+        thread = report_execution_failure_background(error, metadata=metadata, scope=scope)
+        if thread is None:
+            return
         deadline = time.monotonic() + 0.5
-        while not finished.is_set() or thread.is_alive():
+        while thread.is_alive():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 _reporter_failure()

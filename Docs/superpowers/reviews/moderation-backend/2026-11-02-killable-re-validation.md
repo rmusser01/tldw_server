@@ -321,9 +321,11 @@ git diff --check
 git diff --cached --check
 ```
 
-- Compile exit0; Python3.14 emits the existing `async_execution.py:102`
+- Compile exit0; Python3.14 emits the Task5-inherited, whole-branch-added `async_execution.py:102`
   SyntaxWarning (`return` in a `finally` block, the closed-loop offload-delivery
-  branch). No suppression or runtime edit. Raw Ruff exit1/68 findings on cumulative68 paths; Task4's14
+  branch). At that checkpoint there was no suppression or runtime edit; final-review M2
+  subsequently removes the return and verifies closed-loop retirement. This was not
+  preexisting BASE debt. Raw Ruff exit1/68 findings on cumulative68 paths; Task4's14
   findings used its narrower40-path scope. Exact path/code/message multiset
   comparison against both starting HEAD and c5561bf4d3 finds0 new findings
   (HEAD68/base89/current68). No blanket ignore or unrelated cleanup.

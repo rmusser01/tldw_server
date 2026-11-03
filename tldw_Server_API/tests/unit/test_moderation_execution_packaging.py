@@ -56,8 +56,15 @@ def installed_release(tmp_path_factory):
     return target, directory
 
 
-@pytest.mark.parametrize("flags", [re.IGNORECASE | re.MULTILINE, re.ASCII | re.IGNORECASE, re.DEBUG])
-def test_installed_worker_outside_checkout_preserves_flags_without_app_imports(installed_release, flags):
+@pytest.mark.parametrize("flags,pattern,text,action", [
+    (re.IGNORECASE | re.MULTILINE, "^release-probe$", "safe\nRELEASE-PROBE\nsafe", "block"),
+    (re.ASCII | re.IGNORECASE, r"^\w+$", "cafe\u00e9", "pass"),
+    (re.IGNORECASE, r"^\w+$", "cafe\u00e9", "block"),
+    (re.DEBUG, "^release-probe$", "safe\nRELEASE-PROBE\nsafe", "pass"),
+], ids=["multiline", "ascii", "unicode", "debug"])
+def test_installed_worker_outside_checkout_preserves_flags_without_app_imports(
+    installed_release, flags, pattern, text, action,
+):
     """Missing graph files, package initializers, debug output or engine swaps fail here."""
     target, cwd = installed_release
     worker = target / "tldw_Server_API/app/core/Moderation/regex_worker.py"
@@ -75,9 +82,9 @@ def guarded(name, *args, **kwargs):
 builtins.__import__ = guarded
 runpy.run_path({str(worker)!r}, run_name='__main__')
 """
-    policy = ModerationPolicy(enabled=True, block_patterns=[re.compile("^release-probe$", flags)])
+    policy = ModerationPolicy(enabled=True, block_patterns=[re.compile(pattern, flags)])
     request = snapshot_request(
-        "evaluate", "safe\nRELEASE-PROBE\nsafe", policy, "input",
+        "evaluate", text, policy, "input",
         EvaluationLimits(100, 10, 1000, None), ExecutionBounds(),
     )
     child = subprocess.run(
@@ -88,7 +95,7 @@ runpy.run_path({str(worker)!r}, run_name='__main__')
     assert child.stderr == b""
     response = decode_response(child.stdout, request)
     assert response.reason is None
-    assert response.result.action == ("block" if flags & re.MULTILINE else "pass")
+    assert response.result.action == action
     assert response.resource_limits["cpu"] is (sys.platform != "win32")
 
 
