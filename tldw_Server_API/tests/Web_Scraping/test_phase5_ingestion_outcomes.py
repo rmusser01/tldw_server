@@ -195,3 +195,61 @@ async def test_expired_receipt_keeps_aggregate_outcome_in_sanitized_http_failure
         )
     assert error.value.status_code == 500
     assert error.value.detail["crawl_outcome"] == PARTIAL
+
+
+@pytest.mark.parametrize("articles", [[None], []], ids=["malformed-article", "missing-partial-articles"])
+async def test_nested_receipt_failure_keeps_outcome_in_http_response(monkeypatch, client_with_single_user, articles):
+    client, _ = client_with_single_user
+    result_id = ephemeral_storage.store_data({"result": {"articles": articles}})
+
+    async def scrape_task(**kwargs):
+        return {"ephemeral_id": result_id, "crawl_outcome": dict(PARTIAL)}
+
+    monkeypatch.setattr(media, "process_web_scraping_task", scrape_task)
+    try:
+        response = client.post(
+            "/api/v1/media/ingest-web-content",
+            json={
+                "urls": ["https://example.com"],
+                "scrape_method": "recursive_scraping",
+                "perform_analysis": False,
+                "perform_chunking": False,
+            },
+        )
+        assert response.status_code == 500
+        assert response.json() == {
+            "detail": {
+                "message": "Failed to ingest web content",
+                "crawl_outcome": PARTIAL,
+            }
+        }
+        assert ephemeral_storage.get_data(result_id) is None
+    finally:
+        ephemeral_storage.remove_data(result_id)
+
+
+@pytest.mark.parametrize(("articles", "failure"), [([None], AttributeError), ([], ValueError)])
+async def test_nested_receipt_failure_preserves_exception_type_and_release(articles, failure):
+    result_id = ephemeral_storage.store_data({"result": {"articles": articles}})
+    try:
+        with pytest.raises(failure) as error:
+            service._ingest_crawl_articles({"ephemeral_id": result_id, "crawl_outcome": dict(PARTIAL)})
+        assert error.value.crawl_outcome == PARTIAL
+        assert ephemeral_storage.get_data(result_id) is None
+    finally:
+        ephemeral_storage.remove_data(result_id)
+
+
+async def test_receipt_normalization_cancellation_still_propagates_and_releases_storage():
+    result_id = ephemeral_storage.store_data({"result": {"articles": [{"content": "Body"}]}})
+
+    async def consume():
+        asyncio.current_task().cancel()
+        return service._ingest_crawl_articles({"ephemeral_id": result_id, "crawl_outcome": dict(PARTIAL)})
+
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.create_task(consume())
+        assert ephemeral_storage.get_data(result_id) is None
+    finally:
+        ephemeral_storage.remove_data(result_id)

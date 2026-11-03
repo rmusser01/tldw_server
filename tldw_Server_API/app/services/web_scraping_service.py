@@ -263,39 +263,41 @@ def _ingest_crawl_articles(service_result: Any) -> list[dict[str, Any]]:
     """
     outcome = service_result.get("crawl_outcome") if isinstance(service_result, dict) else None
     service_status = service_result.get("service_status") if isinstance(service_result, dict) else None
-    if isinstance(service_result, dict) and service_result.get("ephemeral_id"):
-        result_id = service_result["ephemeral_id"]
-        try:
+    ephemeral_id = service_result.get("ephemeral_id") if isinstance(service_result, dict) else None
+    result_id = ephemeral_id or (
+        service_result.get("media_id")
+        if isinstance(service_result, dict) and service_result.get("status") == "ephemeral-ok"
+        else None
+    )
+    known_outcome = None
+    try:
+        known_outcome = CrawlOutcome(**outcome) if outcome is not None else None
+        if ephemeral_id:
             stored = ephemeral_storage.get_data(result_id)
             if stored is None:
                 raise ResourceNotFoundError("Web crawl results", result_id, "expired before ingestion")
             service_result = stored["result"]
-        except Exception as error:  # noqa: BLE001 - retain typed receipt facts without changing legacy exceptions
-            if outcome is not None:
-                error.crawl_outcome = public_crawl_outcome(CrawlOutcome(**outcome))
-            raise
-        finally:
+        if isinstance(service_result, dict):
+            outcome = service_result.get("crawl_outcome", outcome)
+            service_status = service_result.get("service_status", service_status)
+            service_result = service_result.get("articles") or service_result.get("results") or []
+        articles = service_result if isinstance(service_result, list) else []
+        terminal = CrawlOutcome(**outcome) if outcome is not None else None
+        known_outcome = known_outcome or terminal
+        if terminal is not None:
+            raise_for_empty_failed_crawl(CrawlReport(tuple(articles), terminal))
+        _check_service_active()
+        for article in articles:
+            if isinstance(article, dict) and "summary" in article and "analysis" not in article:
+                article["analysis"] = article.get("summary")
+        return _IngestArticles(articles, terminal, service_status)
+    except Exception as error:  # noqa: BLE001 - preserve known receipt facts through normalization failures
+        if known_outcome is not None:
+            error.crawl_outcome = public_crawl_outcome(known_outcome)
+        raise
+    finally:
+        if result_id:
             ephemeral_storage.remove_data(result_id)
-    elif (
-        isinstance(service_result, dict)
-        and service_result.get("status") == "ephemeral-ok"
-        and service_result.get("media_id")
-    ):
-        # Legacy crawls also store a copy, but already return the articles inline.
-        ephemeral_storage.remove_data(service_result["media_id"])
-    if isinstance(service_result, dict):
-        outcome = service_result.get("crawl_outcome", outcome)
-        service_status = service_result.get("service_status", service_status)
-        service_result = service_result.get("articles") or service_result.get("results") or []
-    articles = service_result if isinstance(service_result, list) else []
-    terminal = CrawlOutcome(**outcome) if outcome is not None else None
-    if terminal is not None:
-        raise_for_empty_failed_crawl(CrawlReport(tuple(articles), terminal))
-    _check_service_active()
-    for article in articles:
-        if isinstance(article, dict) and "summary" in article and "analysis" not in article:
-            article["analysis"] = article.get("summary")
-    return _IngestArticles(articles, terminal, service_status)
 
 
 async def ingest_web_content_orchestrate(
