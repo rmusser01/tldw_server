@@ -1473,6 +1473,33 @@ def test_backend_required_enforces_layering_ratchets(ratchet: str) -> None:
 
 
 @pytest.mark.unit
+def test_backend_required_runs_all_workspaces_api_tests() -> None:
+    """TASK-13950.85: optional full-suite shards cannot enforce this API module."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    job = workflow["jobs"]["backend-required"]
+    gates = [step for step in job["steps"] if step.get("name") == "Workspaces API tests"]
+    assert len(gates) == 1
+    gate = gates[0]
+    assert not job.get("continue-on-error", False)
+    assert not gate.get("continue-on-error", False)
+    assert gate["if"] == "needs.changes.outputs.backend_changed == 'true'"
+    assert gate["env"] == {
+        "PYTHONPATH": ".",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "TEST_MODE": "true",
+        "DISABLE_HEAVY_STARTUP": "1",
+    }
+    assert shlex.split(gate["run"].replace("\\\n", " "), comments=True) == [
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "-p",
+        "pytest_asyncio.plugin",
+        "tldw_Server_API/tests/Workspaces/test_workspaces_api.py",
+    ]
+
+
+@pytest.mark.unit
 def test_backend_required_unit_smoke_runs_the_unit_tests() -> None:
     """TASK-13950.15: the core-owned schema re-export test lives in tests/unit; this step is its required gate."""
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())

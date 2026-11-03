@@ -331,6 +331,18 @@ jobs:
             tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py \
             tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py
 
+      # TASK-13950.85: optional full-suite shards do not protect this API module.
+      - name: Workspaces API tests
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          TEST_MODE: "true"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/Workspaces/test_workspaces_api.py
+
       - name: Backend unit smoke
         if: needs.changes.outputs.backend_changed == 'true'
         env:
