@@ -1160,6 +1160,36 @@ class WorkflowEngine:
                 run_id, after_step_id, last_outputs=last_outputs, next_step_id=next_step_id, retry_resume=retry_resume
             )
 
+    def _recover_successful_step_outputs(
+        self,
+        run_id: str,
+        id_to_idx: dict[str, int],
+        start_idx: int,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Recover the completed prefix, retaining earlier context if later output is malformed."""
+        import json
+
+        recovered_last: dict[str, Any] = {}
+        try:
+            for step_run in self.db.list_step_runs(run_id=run_id):
+                step_id = str(step_run.get("step_id") or "")
+                if (
+                    step_run.get("status") != "succeeded"
+                    or step_id not in id_to_idx
+                    or id_to_idx[step_id] >= start_idx
+                ):
+                    continue
+                outputs = step_run.get("outputs_json")
+                if isinstance(outputs, str):
+                    outputs = json.loads(outputs or "{}")
+                if isinstance(outputs, dict):
+                    context[step_id] = outputs
+                    recovered_last = outputs
+        except _WF_NONCRITICAL_EXCEPTIONS:
+            recovered_last = {}
+        return recovered_last
+
     async def _continue_run_impl(
         self,
         run_id: str,
@@ -1238,24 +1268,7 @@ class WorkflowEngine:
             "run_id": run_id,
             "user_id": getattr(run, "user_id", None),
         }
-        recovered_last: dict[str, Any] = {}
-        try:
-            for step_run in self.db.list_step_runs(run_id=run_id):
-                step_id = str(step_run.get("step_id") or "")
-                if (
-                    step_run.get("status") != "succeeded"
-                    or step_id not in id_to_idx
-                    or id_to_idx[step_id] >= start_idx
-                ):
-                    continue
-                outputs = step_run.get("outputs_json")
-                if isinstance(outputs, str):
-                    outputs = json.loads(outputs or "{}")
-                if isinstance(outputs, dict):
-                    context[step_id] = outputs
-                    recovered_last = outputs
-        except _WF_NONCRITICAL_EXCEPTIONS:
-            recovered_last = {}
+        recovered_last = self._recover_successful_step_outputs(run_id, id_to_idx, start_idx, context)
         try:
             meta = definition.get("metadata") if isinstance(definition, dict) else None
             if isinstance(meta, dict):

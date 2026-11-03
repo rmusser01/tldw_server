@@ -128,14 +128,17 @@ def test_chat_preflight_refuses_unsafe_registry_before_read(registry_db):
             db.history_skills_may_be_visible()
 
 
-def test_late_registered_migration_failure_rolls_back_catalog_and_legacy_rows(pg_restricted_backend, tmp_path):
+def test_late_registered_migration_failure_rolls_back_catalog_and_legacy_rows(pg_restricted_backend, tmp_path, monkeypatch):
     class Legacy(CharactersRAGDB):
         _POSTGRES_SCHEMA_VERSION = 90
 
-    class RejectAfterInstall(CharactersRAGDB):
-        def _verify_skill_registry_schema_postgres(self, conn):
-            super()._verify_skill_registry_schema_postgres(conn)
-            raise SchemaError("Controlled late Skill verifier failure")
+    from tldw_Server_API.app.core.DB_Management.chacha import skill_registry_schema
+
+    verify = skill_registry_schema.verify_postgres_skill_registry
+
+    def reject_after_install(*args):
+        verify(*args)
+        raise SchemaError("Controlled late Skill verifier failure")
 
     with chacha_operation(independent=True):
         old = Legacy(tmp_path / "old.db", client_id="1", backend=pg_restricted_backend)
@@ -147,8 +150,10 @@ def test_late_registered_migration_failure_rolls_back_catalog_and_legacy_rows(pg
                     ("legacy-rollback", "/unreviewed/legacy/rollback", str(uuid4()), 7),
                 )
                 before = [dict(row) for row in conn.execute("SELECT * FROM skill_registry").fetchall()]
-            with pytest.raises(CharactersRAGDBError) as failed:
-                RejectAfterInstall(tmp_path / "failed.db", client_id="2", backend=pg_restricted_backend)
+            with monkeypatch.context() as fault:
+                fault.setattr(skill_registry_schema, "verify_postgres_skill_registry", reject_after_install)
+                with pytest.raises(CharactersRAGDBError) as failed:
+                    CharactersRAGDB(tmp_path / "failed.db", client_id="2", backend=pg_restricted_backend)
             assert isinstance(failed.value.__cause__, SchemaError)  # nosec B101 # Actual late verifier refusal is wrapped by the constructor.
             with old.transaction() as conn:
                 assert old._get_schema_version_postgres(getattr(conn, "_connection", conn)) == 90  # nosec B101 # No premature version publication.

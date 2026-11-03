@@ -191,9 +191,17 @@ def test_audio_without_preparation_does_not_fabricate_transcript(voice_socket: A
     assert event["client_message_id"] == "turn-1"
 
 
-def test_prepare_requires_owned_persisted_session(voice_socket: Any) -> None:
+@pytest.mark.parametrize("lookup_failure", [False, True], ids=["unowned", "lookup-failed"])
+def test_prepare_requires_owned_persisted_session(
+    voice_socket: Any, monkeypatch: pytest.MonkeyPatch, lookup_failure: bool,
+) -> None:
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until
 
+    if lookup_failure:
+        def reject_lookup(*args: Any, **kwargs: Any) -> None:
+            raise persona_ep.CharactersRAGDBError("unavailable lookup")
+
+        monkeypatch.setattr(persona_ep, "_admit_persona_stream_session_id", reject_lookup)
     voice_socket.send_json({"type": "voice_prepare", "session_id": "unknown", "client_message_id": "prepare-1"})
     event = _recv_until(voice_socket, lambda value: value.get("event") in {"notice", "voice_readiness"})
     assert event["event"] == "voice_readiness"

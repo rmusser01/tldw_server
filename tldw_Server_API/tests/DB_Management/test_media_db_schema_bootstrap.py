@@ -243,10 +243,20 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         "ensure_postgres_keyword_identity",
         lambda value, connection: calls.append(("keyword_identity", value, connection)),
     )
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_media_owner_identity",
+        lambda value, connection: calls.append(("media_owner_identity", value, connection)),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation.validate_postgres_annotation_replay_index",
+        lambda value, connection: calls.append(("annotation_replay", value, connection)),
+    )
     postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
 
-    assert calls == [
+    assert calls == [  # nosec B101 -- Pytest asserts the updated real contract.
         ("sync_contract", db, conn),
+        ("media_owner_identity", db, conn),
         ("collections", conn),
         ("tts_history", conn),
         ("audio_presets", conn),
@@ -257,6 +267,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
             conn,
         ),
         ("document_workspace", conn),
+        ("annotation_replay", db, conn),
         ("source_hash", conn),
         ("claims_extensions", conn),
         *[("safe_transcript_extractor", statement, conn) for statement in POSTGRES_PUBLICATION_DDL],
@@ -1117,11 +1128,13 @@ def test_postgres_data_tables_structures_ensure_postgres_data_tables_runs_create
 
     postgres_data_table_structures_module.ensure_postgres_data_tables(db, conn)
 
-    assert calls == [
+    assert calls == [  # nosec B101 -- Pytest asserts the updated real contract.
         ("CREATE TABLE data_tables (...)", conn),
         ("CREATE TABLE data_table_columns (...)", conn),
         ("ensure_columns", conn),
         ("CREATE INDEX idx_data_tables_workspace_tag ON data_tables(workspace_tag)", conn),
+        ("DROP INDEX IF EXISTS ux_data_table_columns_table_position_active", conn),
+        ("DROP INDEX IF EXISTS ux_data_table_rows_table_index_active", conn),
     ]
 
 
@@ -2158,9 +2171,14 @@ def test_sqlite_post_core_structures_ensure_sqlite_data_tables_executes_sql_and_
     class RecordingConn:
         def __init__(self) -> None:
             self.scripts: list[str] = []
+            self.queries: list[str] = []
 
         def executescript(self, script: str) -> None:
             self.scripts.append(script)
+
+        def execute(self, query: str):
+            self.queries.append(query)
+            return []
 
     class FailingConn:
         def executescript(self, _script: str) -> None:
@@ -2173,6 +2191,13 @@ def test_sqlite_post_core_structures_ensure_sqlite_data_tables_executes_sql_and_
     sqlite_post_core_structures_module.ensure_sqlite_data_tables(db, FailingConn())
 
     assert ok_conn.scripts == ["data tables sql"]
+
+    assert ok_conn.queries == [  # nosec B101 -- Preserve column ensure before obsolete-index removal.
+        "PRAGMA table_info(data_tables)",
+        "ALTER TABLE data_tables ADD COLUMN generation_job_json TEXT",
+        "DROP INDEX IF EXISTS ux_data_table_columns_table_position_active",
+        "DROP INDEX IF EXISTS ux_data_table_rows_table_index_active",
+    ]
 
 
 @pytest.mark.unit

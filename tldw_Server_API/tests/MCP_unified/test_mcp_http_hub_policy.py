@@ -20,7 +20,7 @@ from tldw_Server_API.app.services.mcp_hub_approval_service import McpHubApproval
 @pytest.mark.parametrize("operation", ["call", "list"])
 @pytest.mark.parametrize("policy_case", ["denied", "allowed", "disabled"])
 async def test_http_ingress_respects_current_hub_policy(
-    monkeypatch, tmp_path, auth_kind, transport, operation, policy_case
+    monkeypatch, tmp_path, fresh_services, auth_kind, transport, operation, policy_case
 ):
     """Use real routes/server/protocol and a harmless provider at its dependency boundary."""
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
@@ -44,7 +44,7 @@ async def test_http_ingress_respects_current_hub_policy(
     server = MCPServer()
     server.protocol = protocol
     server.initialized = True
-    monkeypatch.setattr(endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(fresh_services, "mcp_server", server)
     auth = endpoint.McpAuthContext(
         user=endpoint.TokenData(sub="7", permissions=["tools.execute:stub.echo", "modules.read"]),
         principal=None,

@@ -37,8 +37,8 @@ from typing import Any, Callable
 from cachetools import LRUCache
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     ProviderOverridePolicyError,
     capture_provider_override_call_snapshot,
 )
@@ -912,6 +912,65 @@ def _is_job_cancelled(jm: JobManager, job_id: int) -> bool:
     return status == "cancelled"
 
 
+async def _generate_table_payload(jm: JobManager, job_id: int, model: str | None, llm_prompt: str) -> dict[str, Any]:
+    provider = (get_default_provider() or "openai").strip().lower()
+    api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
+    if provider_requires_api_key(provider) and not api_key:
+        raise DataTablesJobError(f"missing_api_key:{provider}", retryable=False)
+
+    messages_payload = [{"role": "user", "content": llm_prompt}]
+    response_format = {"type": "json_object"}
+    timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
+
+    def _call_llm():
+        app_config = load_and_log_configs() or {}
+        try:
+            override = capture_provider_override_call_snapshot(provider)
+            model_to_use = _resolve_model(override.provider, model, app_config)
+            override.enforce(model_to_use, require_model=True)
+        except ByokResolutionError as exc:
+            code = exc.policy_code if isinstance(exc, ProviderOverridePolicyError) else exc.code
+            raise DataTablesJobError(code, retryable=code == "credential_store_unavailable") from None
+        if model_to_use is None:
+            raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
+        adapter = _get_adapter(provider)
+        return adapter.chat(
+            {
+                "messages": messages_payload,
+                "api_key": api_key,
+                "model": model_to_use,
+                "temperature": _LLM_TEMPERATURE,
+                "max_tokens": _LLM_MAX_TOKENS,
+                "response_format": response_format,
+                "app_config": app_config,
+            },
+            timeout=timeout,
+        )
+
+    start = time.time()
+    loop = asyncio.get_running_loop()
+    llm_future = loop.run_in_executor(None, _call_llm)
+    try:
+        if timeout is None:
+            raw_response = await await_owned_worker(llm_future)
+        else:
+            raw_response = await asyncio.wait_for(await_owned_worker(llm_future), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_timeout")
+        raise DataTablesJobError("llm_timeout", retryable=True) from exc
+    logger.info(
+        "data_tables worker: LLM call completed in {:.1f}ms",
+        (time.time() - start) * 1000.0,
+    )
+
+    content_text = extract_response_content(raw_response)
+    payload_obj = _extract_json_payload(content_text if content_text is not None else raw_response)
+    if not isinstance(payload_obj, dict):
+        raise DataTablesJobError("llm_payload_invalid", retryable=False)
+
+    return payload_obj
+
+
 @owns_chacha_checkouts
 async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
     """Stage a table result; only exact Jobs completion authorizes publication."""
@@ -1130,60 +1189,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
-        provider = (get_default_provider() or "openai").strip().lower()
-        api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
-        if provider_requires_api_key(provider) and not api_key:
-            raise DataTablesJobError(f"missing_api_key:{provider}", retryable=False)
-
-        messages_payload = [{"role": "user", "content": llm_prompt}]
-        response_format = {"type": "json_object"}
-        timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
-
-        def _call_llm():
-            app_config = load_and_log_configs() or {}
-            try:
-                override = capture_provider_override_call_snapshot(provider)
-                model_to_use = _resolve_model(override.provider, model, app_config)
-                override.enforce(model_to_use, require_model=True)
-            except ByokResolutionError as exc:
-                code = exc.policy_code if isinstance(exc, ProviderOverridePolicyError) else exc.code
-                raise DataTablesJobError(code, retryable=code == "credential_store_unavailable") from None
-            if model_to_use is None:
-                raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
-            adapter = _get_adapter(provider)
-            return adapter.chat(
-                {
-                    "messages": messages_payload,
-                    "api_key": api_key,
-                    "model": model_to_use,
-                    "temperature": _LLM_TEMPERATURE,
-                    "max_tokens": _LLM_MAX_TOKENS,
-                    "response_format": response_format,
-                    "app_config": app_config,
-                },
-                timeout=timeout,
-            )
-
-        start = time.time()
-        loop = asyncio.get_running_loop()
-        llm_future = loop.run_in_executor(None, _call_llm)
-        try:
-            if timeout is None:
-                raw_response = await await_owned_worker(llm_future)
-            else:
-                raw_response = await asyncio.wait_for(await_owned_worker(llm_future), timeout=timeout)
-        except asyncio.TimeoutError as exc:
-            jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_timeout")
-            raise DataTablesJobError("llm_timeout", retryable=True) from exc
-        logger.info(
-            "data_tables worker: LLM call completed in {:.1f}ms",
-            (time.time() - start) * 1000.0,
-        )
-
-        content_text = extract_response_content(raw_response)
-        payload_obj = _extract_json_payload(content_text if content_text is not None else raw_response)
-        if not isinstance(payload_obj, dict):
-            raise DataTablesJobError("llm_payload_invalid", retryable=False)
+        payload_obj = await _generate_table_payload(jm, job_id, model, llm_prompt)
 
         raw_columns = payload_obj.get("columns") or payload_obj.get("schema")
         raw_rows = payload_obj.get("rows") or payload_obj.get("data") or payload_obj.get("records")

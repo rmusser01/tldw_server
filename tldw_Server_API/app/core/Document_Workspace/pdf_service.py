@@ -11,14 +11,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.document_rendering import (
+from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool, await_bounded_sync_call
+from tldw_Server_API.app.core.Document_Workspace.models import (
     MAX_PDF_BYTES,
     MAX_WORK_BYTES,
     PDF_ERRORS,
     DocumentRenderRequest,
     PdfAnnotation,
 )
-from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool, await_bounded_sync_call
 
 _PDF_POOL = BoundedDaemonPool(2)
 _PDF_REQUESTS = BoundedDaemonPool(2)

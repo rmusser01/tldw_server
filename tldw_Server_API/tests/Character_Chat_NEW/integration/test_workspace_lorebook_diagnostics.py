@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.integration
@@ -23,6 +24,7 @@ def diagnostics_api(tmp_path, request):
         db.upsert_workspace("workspace-a", "Research")
         chat = db.add_conversation({"title": "Research", "scope_type": "workspace", "workspace_id": "workspace-a"})
         app = FastAPI()
+        app.add_middleware(ChaChaOperationMiddleware)
         app.include_router(character_chat_sessions.router, prefix="/api/v1/chats")
         assert "/api/v1/chats/{chat_id}/diagnostics/lorebook" in app.openapi()["paths"]  # nosec B101 -- pytest public route-fixture guard.
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db

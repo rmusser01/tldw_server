@@ -8,14 +8,14 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import ProviderOverridePolicyError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call
+from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import ProviderOverridePolicyError
 from tldw_Server_API.app.core.Slides.visual_style_generation import (
     apply_visual_block_fallback,
     build_visual_style_generation_prompt,
 )
-from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Utils.tokenizer import count_tokens
 
@@ -413,12 +413,12 @@ class SlidesGenerator:
             {"role": "user", "content": user_prompt},
         ]
         try:
-            from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-                capture_provider_override_call_snapshot,
-            )
             from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
                 ensure_app_config,
                 resolve_provider_model,
+            )
+            from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+                capture_provider_override_call_snapshot,
             )
 
             policy = capture_provider_override_call_snapshot(provider)

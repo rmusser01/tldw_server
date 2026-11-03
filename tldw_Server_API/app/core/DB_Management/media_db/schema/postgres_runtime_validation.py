@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import SchemaError
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
     _EXPECTED_MEDIA_COLUMNS,
     _POSTGRES_REQUIRED_TABLES,
+    ensure_postgres_keyword_identity,
     ensure_postgres_media_owner_identity,
     ensure_postgres_sync_log_contract,
 )
@@ -332,6 +333,7 @@ def validate_postgres_schema_catalog(db: Any, conn: Any) -> None:
         if not expected_columns <= columns:
             raise SchemaError(f"PostgreSQL runtime columns are incomplete for {table}")
     ensure_postgres_sync_log_contract(db, conn, validate_only=True)
+    ensure_postgres_keyword_identity(db, conn, validate_only=True)
     ensure_postgres_media_owner_identity(db, conn, validate_only=True)
     validate_postgres_annotation_replay_index(db, conn)
 

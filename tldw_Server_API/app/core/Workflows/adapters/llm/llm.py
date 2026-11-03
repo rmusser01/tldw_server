@@ -151,8 +151,10 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     stream = bool(config.get("stream", False))
     include_response = bool(config.get("include_response", False))
 
-    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import capture_provider_override_call_snapshot
     from tldw_Server_API.app.core.LLM_Calls.adapter_utils import ensure_app_config, resolve_provider_model
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        capture_provider_override_call_snapshot,
+    )
 
     # Bind the configured default so policy checks the same model sent to dispatch.
     override_snapshot = capture_provider_override_call_snapshot(provider)

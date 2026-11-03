@@ -54,9 +54,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope, load_server_config_snapshot
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import capture_provider_override_call_snapshot
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     MODERATION_AUDIT_READ,
     MODERATION_REVIEW_BULK_DECIDE,
@@ -64,7 +61,6 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     MODERATION_REVIEW_READ,
     SYSTEM_CONFIGURE,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Moderation.classification import (
     ClassificationError,
@@ -73,11 +69,18 @@ from tldw_Server_API.app.core.Moderation.classification import (
     saved_classification,
 )
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
-from tldw_Server_API.app.core.Moderation.review_service import get_moderation_review_service
+from tldw_Server_API.app.core.Moderation.review_service import ModerationReviewService, get_moderation_review_service
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     GuardianModerationProxy,
     bootstrap_guardian_moderation_runtime,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+    load_server_config_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import ProviderCredentialRuntime
 from tldw_Server_API.app.core.Slides.generation_disconnect import generation_disconnected
 
 router = APIRouter()
@@ -663,6 +666,7 @@ async def classify_moderation_sample(
     request: Request,
     principal: CurrentPrincipal,
     current_user: User = Depends(get_request_user),
+    review: ModerationReviewService = Depends(get_moderation_review_service),
 ) -> ModerationReviewItem:
     """Save advisory model evidence; never change enforcement or make a human decision."""
     runtime = None
@@ -671,7 +675,6 @@ async def classify_moderation_sample(
         current_owner = getattr(current_user, "id_int", None) or getattr(current_user, "id", None)
         if owner is None or principal.user_id != owner or str(current_owner) != str(owner):
             raise HTTPException(status_code=403, detail="Classification requires an authenticated user owner.")
-        review = get_moderation_review_service()
         saved = saved_classification(payload, actor_id=principal.principal_id, review=review)
         if saved is not None:
             return ModerationReviewItem.model_validate(saved)

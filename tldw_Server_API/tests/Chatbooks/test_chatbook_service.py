@@ -21,7 +21,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from pathlib import Path
 
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookJobLimits, ChatbookService
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import (
+    ChatbookJobLimits,
+    ChatbookService,
+    _ACCOUNT_RESTORE_PAYLOAD_KEY,
+    _build_import_result,
+)
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ChatbookManifest,
     ChatbookContent,
@@ -1970,3 +1975,34 @@ class TestGap6BinaryLimitTruncationMetadata:
         trunc = manifest.truncation["embeddings"]
         assert trunc["truncated"] is True
         assert "big_col" in trunc.get("binary_limited_collections", [])
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("total", "successful", "failed", "skipped", "expected"),
+    [
+        (2, 1, 1, 0, (False, "Import incomplete: 1/2 items failed; 1 imported, 0 skipped")),
+        (2, 2, 0, 0, (True, "Successfully imported 2/2 items")),
+        (0, 0, 0, 0, (True, "Import completed: No items to import")),
+        (2, 0, 0, 2, (True, "Import completed: All 2 items were skipped")),
+        (2, 0, 0, 0, (False, "No items were imported")),
+    ],
+)
+def test_import_result_preserves_partial_counts_and_private_finalize_payload(total, successful, failed, skipped, expected):
+    job = ImportJob(
+        job_id="result", user_id="test_user", status=ImportStatus.PENDING, chatbook_path="local",
+        total_items=total, processed_items=total, successful_items=successful, failed_items=failed,
+        skipped_items=skipped, warnings=["retained"],
+    )
+    imported = {"notes": successful}
+    inventory = {"total": total}
+    non_restorable = {"source_files": 1}
+    private = {"preferences": {"retained_for_finalize": True}}
+    ok, message, result = _build_import_result(job, imported, inventory, non_restorable, private)
+    assert (ok, message) == expected  # nosec B101 -- Failed items outrank successes; empty/skipped outcomes retain their messages.
+    assert result == {  # nosec B101 -- Partial counts and the private finalize payload must survive this internal result.
+        "imported_items": imported, "warnings": ["retained"], "total_items": total, "processed_items": total,
+        "successful_items": successful, "failed_items": failed, "skipped_items": skipped,
+        "inventory_summary": inventory, "skipped_non_restorable": non_restorable,
+        _ACCOUNT_RESTORE_PAYLOAD_KEY: private,
+    }
+    assert result["warnings"] is not job.warnings  # nosec B101 -- Result consumers must not mutate the job's warning list.

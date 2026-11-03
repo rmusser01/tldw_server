@@ -63,6 +63,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
     record_email_native_persist,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import first_saved_filename
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
     exception_frames_for_log,
     exception_type_for_log,
@@ -3085,10 +3086,8 @@ async def add_media_orchestrate(
                     )
 
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0]["original_filename"]
+                first_filename = first_saved_filename(saved_files_info)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 first_filename = None
             first_source = all_valid_input_sources[0] if all_valid_input_sources else first_url or first_filename
@@ -4267,6 +4266,7 @@ async def process_batch_media(
                         owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         if source_hash_column_available is None:
                             source_hash_column_available = _media_has_source_hash_column(db)
+                        existing_record = None
                         if source_hash_column_available:
                             pre_check_query_template = """
                                 SELECT m.id
@@ -4284,29 +4284,7 @@ async def process_batch_media(
                                 (*url_params, source_hash, *owner_params),
                             )
                             existing_record = cursor.fetchone()
-                            if not existing_record:
-                                pre_check_query_template = """
-                                    SELECT m.id
-                                    FROM Media m
-                                    JOIN DocumentVersions dv ON dv.media_id = m.id
-                                    WHERE {url_clause_alias}
-                                      AND m.is_trash = 0
-                                      AND m.deleted = 0
-                                      AND dv.deleted = 0
-                                      AND dv.safe_metadata LIKE ?
-                                    {owner_clause}
-                                LIMIT 1
-                                """
-                                pre_check_query = pre_check_query_template.format(
-                                    url_clause_alias=url_clause_alias, owner_clause=owner_clause
-                                )  # nosec B608
-                                hash_fragment = f'%"source_hash":"{source_hash}"%'
-                                cursor = db.execute_query(
-                                    pre_check_query,
-                                    (*url_params_alias, hash_fragment, *owner_params),
-                                )
-                                existing_record = cursor.fetchone()
-                        else:
+                        if not existing_record:
                             pre_check_query_template = """
                                 SELECT m.id
                                 FROM Media m
@@ -5653,6 +5631,21 @@ async def process_document_like_item(
     return final_result
 
 
+def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
+    """Recognize successful parsed mail; synthetic envelopes lack email fields."""
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("parser_used") != "builtin-email":
+        return False
+    email_metadata = metadata.get("email")
+    return (
+        result.get("status") in ("Success", "Warning")
+        and isinstance(email_metadata, dict)
+        and isinstance(email_metadata.get("format"), str)
+        and bool(email_metadata["format"])
+        and isinstance(email_metadata.get("headers_map"), dict)
+    )
+
+
 async def persist_doc_item_and_children(
     *,
     final_result: dict[str, Any],
@@ -5672,19 +5665,6 @@ async def persist_doc_item_and_children(
     Persist a single document/email item (and any children) produced by the /add
     orchestration, mirroring the previous post-processing DB logic.
     """
-    def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
-        """Recognize successful parsed mail; synthetic envelopes lack email fields."""
-        metadata = result.get("metadata")
-        if not isinstance(metadata, dict) or metadata.get("parser_used") != "builtin-email":
-            return False
-        email_metadata = metadata.get("email")
-        return (
-            result.get("status") in ("Success", "Warning")
-            and isinstance(email_metadata, dict)
-            and isinstance(email_metadata.get("format"), str)
-            and bool(email_metadata["format"])
-            and isinstance(email_metadata.get("headers_map"), dict)
-        )
 
     resolved_email_tenant_id = email_tenant_id or str(client_id)
     email_scope = get_scope() if media_type == "email" else None

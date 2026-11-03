@@ -63,7 +63,7 @@ class ResourceDailyLedger:
             async with self.db_pool.transaction() as conn:
                 can_migrate = True
                 if is_pg:
-                    from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                    from tldw_Server_API.app.core.DB_Management.postgres_auth_catalog import (
                         POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
                     )
                     from tldw_Server_API.app.core.exceptions import SchemaReadinessError

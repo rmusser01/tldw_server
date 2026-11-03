@@ -6126,6 +6126,22 @@ def rollback_077_drop_sharing_tables(conn: sqlite3.Connection) -> None:
 # Migration Registry
 #
 
+def _mcp_hub_initial_migrations() -> list[Migration]:
+    """Create the initial Hub schema registrations without sharing mutable migration objects."""
+    return [
+        Migration(
+            55,
+            "Create MCP Hub tables",
+            migration_055_create_mcp_hub_tables,
+        ),
+        Migration(
+            56,
+            "Create MCP Hub policy tables",
+            migration_056_create_mcp_hub_policy_tables,
+        ),
+    ]
+
+
 def get_authnz_migrations() -> list[Migration]:
     """Get all AuthNZ migrations in order"""
     return [
@@ -6314,16 +6330,7 @@ def get_authnz_migrations() -> list[Migration]:
             "Add llm_usage_log router analytics columns and indexes",
             migration_054_add_llm_usage_log_router_analytics_columns,
         ),
-        Migration(
-            55,
-            "Create MCP Hub tables",
-            migration_055_create_mcp_hub_tables,
-        ),
-        Migration(
-            56,
-            "Create MCP Hub policy tables",
-            migration_056_create_mcp_hub_policy_tables,
-        ),
+        *_mcp_hub_initial_migrations(),
         Migration(
             57,
             "Add consumable MCP approval decision columns",

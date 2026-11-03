@@ -6,16 +6,17 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_limits import TURN_METADATA_DIAGNOSTIC_CHARS
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     ConflictError,
     InputError,
     SchemaError,
 )
-from tldw_Server_API.app.core.Persona.session_manager import TURN_METADATA_DIAGNOSTIC_CHARS
 
 MAX_TURNS = 200
 MAX_CONTENT_CHARS = 8192
@@ -364,3 +365,24 @@ class PersonaTranscriptStore:
             "retired": False,
             "invalidations": invalidations,
         }
+
+
+def migrate_sqlite_transcripts(
+    conn: sqlite3.Connection, *, schema_name: str, get_version: Callable[[sqlite3.Connection], int]
+) -> None:
+    """Install transcripts atomically through the existing migration transaction."""
+
+    if get_version(conn) != 84:
+        raise SchemaError("Persona transcript migration requires SQLite version 84.")
+    conn.execute(persona_transcript_schema_sql())
+    conn.execute(
+        "CREATE INDEX persona_transcript_owner_activity ON persona_session_transcripts(user_id,last_activity) WHERE turn_count>0"
+    )
+
+    verify_persona_transcript_sqlite(conn)
+    result = conn.execute(
+        "UPDATE db_schema_version SET version=85 WHERE schema_name=? AND version=84",
+        (schema_name,),
+    )
+    if result.rowcount != 1 or get_version(conn) != 85:
+        raise SchemaError("Persona transcript SQLite version transition failed.")

@@ -239,6 +239,54 @@ def record_failed_import_result(job: ImportJob, result: Any) -> None:
     }
 
 
+def _build_import_result(
+    import_status: ImportJob,
+    imported_items: dict[str, int],
+    inventory_summary: dict[str, Any] | None,
+    skipped_non_restorable: dict[str, int],
+    account_restore_payload: dict[str, Any] | None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Build the complete synchronous result before the caller cleans its extracted archive."""
+    # Build result message
+    logger.debug(f"Import status: total={import_status.total_items}, successful={import_status.successful_items}, skipped={import_status.skipped_items}, failed={import_status.failed_items}")
+    sync_result = {
+        "imported_items": imported_items,
+        "warnings": list(import_status.warnings or []),
+        "total_items": import_status.total_items,
+        "processed_items": import_status.processed_items,
+        "successful_items": import_status.successful_items,
+        "failed_items": import_status.failed_items,
+        "skipped_items": import_status.skipped_items,
+    }
+    if inventory_summary:
+        sync_result["inventory_summary"] = inventory_summary
+    if skipped_non_restorable:
+        sync_result["skipped_non_restorable"] = skipped_non_restorable
+    if account_restore_payload:
+        sync_result[_ACCOUNT_RESTORE_PAYLOAD_KEY] = account_restore_payload
+
+    if import_status.failed_items > 0:
+        return False, (
+            f"Import incomplete: {import_status.failed_items}/{import_status.total_items} items failed; "
+            f"{import_status.successful_items} imported, {import_status.skipped_items} skipped"
+        ), sync_result
+    if import_status.successful_items > 0:
+        message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
+        if import_status.skipped_items > 0:
+            message += f" ({import_status.skipped_items} skipped)"
+        return True, message, sync_result
+    elif import_status.total_items == 0:
+        # No items to import is not an error
+        return True, "Import completed: No items to import", sync_result
+    elif import_status.skipped_items > 0:
+        # All items were skipped (e.g., due to conflicts)
+        return True, f"Import completed: All {import_status.skipped_items} items were skipped", sync_result
+    else:
+        logger.debug("Import failed: No items were successfully imported or skipped")
+        return False, "No items were imported", sync_result
+
+
+
 class ChatbookService:
     """Service for creating and importing chatbooks with user isolation."""
 
@@ -3508,43 +3556,13 @@ class ChatbookService:
 
             # Note: We do NOT delete the original import file - the caller owns it
 
-            # Build result message
-            logger.debug(f"Import status: total={import_status.total_items}, successful={import_status.successful_items}, skipped={import_status.skipped_items}, failed={import_status.failed_items}")
-            sync_result = {
-                "imported_items": imported_items,
-                "warnings": list(import_status.warnings or []),
-                "total_items": import_status.total_items,
-                "processed_items": import_status.processed_items,
-                "successful_items": import_status.successful_items,
-                "failed_items": import_status.failed_items,
-                "skipped_items": import_status.skipped_items,
-            }
-            if inventory_summary:
-                sync_result["inventory_summary"] = inventory_summary
-            if skipped_non_restorable:
-                sync_result["skipped_non_restorable"] = skipped_non_restorable
-            if account_restore_payload:
-                sync_result[_ACCOUNT_RESTORE_PAYLOAD_KEY] = account_restore_payload
-
-            if import_status.failed_items > 0:
-                return False, (
-                    f"Import incomplete: {import_status.failed_items}/{import_status.total_items} items failed; "
-                    f"{import_status.successful_items} imported, {import_status.skipped_items} skipped"
-                ), sync_result
-            if import_status.successful_items > 0:
-                message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
-                if import_status.skipped_items > 0:
-                    message += f" ({import_status.skipped_items} skipped)"
-                return True, message, sync_result
-            elif import_status.total_items == 0:
-                # No items to import is not an error
-                return True, "Import completed: No items to import", sync_result
-            elif import_status.skipped_items > 0:
-                # All items were skipped (e.g., due to conflicts)
-                return True, f"Import completed: All {import_status.skipped_items} items were skipped", sync_result
-            else:
-                logger.debug("Import failed: No items were successfully imported or skipped")
-                return False, "No items were imported", sync_result
+            return _build_import_result(
+                import_status,
+                imported_items,
+                inventory_summary,
+                skipped_non_restorable,
+                account_restore_payload,
+            )
 
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error importing chatbook: {e}")

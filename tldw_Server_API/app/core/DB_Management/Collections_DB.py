@@ -830,6 +830,312 @@ def _postgres_predicate_matches(actual: str | None, expected: str | None) -> boo
         return False
 
 
+POSTGRES_CONTENT_DDL = """
+            CREATE TABLE IF NOT EXISTS collection_tags (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                UNIQUE (user_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS content_items (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                origin_type TEXT,
+                origin_id BIGINT,
+                url TEXT,
+                canonical_url TEXT,
+                domain TEXT,
+                title TEXT,
+                summary TEXT,
+                notes TEXT,
+                content_hash TEXT,
+                word_count INTEGER,
+                published_at TEXT,
+                status TEXT,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT,
+                media_id BIGINT,
+                job_id BIGINT,
+                run_id BIGINT,
+                source_id BIGINT,
+                read_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
+            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
+            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
+
+            CREATE TABLE IF NOT EXISTS media_collections (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                description TEXT,
+                source_url TEXT,
+                metadata_json TEXT,
+                default_tags_json TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
+                ON media_collections(user_id, deleted, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
+                ON media_collections(user_id, kind, deleted, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS media_collection_items (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id BIGINT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                source_url TEXT NOT NULL,
+                normalized_source_id TEXT,
+                source_kind TEXT,
+                title TEXT,
+                speaker TEXT,
+                published_at TEXT,
+                track TEXT,
+                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
+                status TEXT NOT NULL DEFAULT 'planned',
+                media_id BIGINT,
+                content_item_id BIGINT,
+                latest_job_id TEXT,
+                latest_run_id BIGINT,
+                idempotency_key TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_summary TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT,
+                tags_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
+                ON media_collection_items(user_id, normalized_source_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
+                ON media_collection_items(user_id, media_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
+                ON media_collection_items(user_id, latest_job_id);
+
+            CREATE TABLE IF NOT EXISTS media_collection_runs (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id BIGINT NOT NULL,
+                batch_id TEXT,
+                status TEXT NOT NULL,
+                requested_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                processing_count INTEGER NOT NULL DEFAULT 0,
+                completed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                cancelled_count INTEGER NOT NULL DEFAULT 0,
+                options_json TEXT,
+                summary_json TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
+                ON media_collection_runs(user_id, collection_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
+                ON media_collection_runs(user_id, batch_id);
+
+            CREATE TABLE IF NOT EXISTS content_item_tags (
+                item_id BIGINT NOT NULL,
+                tag_id BIGINT NOT NULL,
+                UNIQUE (item_id, tag_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS saved_searches (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                query_json TEXT NOT NULL,
+                sort TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_saved_searches_user_name ON saved_searches(user_id, name);
+            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS content_item_note_links (
+                user_id TEXT NOT NULL,
+                item_id BIGINT NOT NULL,
+                note_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, item_id, note_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
+                ON content_item_note_links(user_id, item_id, created_at DESC);
+            """
+
+
+SQLITE_CONTENT_DDL = """
+            CREATE TABLE IF NOT EXISTS collection_tags (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                UNIQUE (user_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS content_items (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                origin_type TEXT,
+                origin_id INTEGER,
+                url TEXT,
+                canonical_url TEXT,
+                domain TEXT,
+                title TEXT,
+                summary TEXT,
+                notes TEXT,
+                content_hash TEXT,
+                word_count INTEGER,
+                published_at TEXT,
+                status TEXT,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT,
+                media_id INTEGER,
+                job_id INTEGER,
+                run_id INTEGER,
+                source_id INTEGER,
+                read_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
+            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
+            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
+
+            CREATE TABLE IF NOT EXISTS media_collections (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                description TEXT,
+                source_url TEXT,
+                metadata_json TEXT,
+                default_tags_json TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
+                ON media_collections(user_id, deleted, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
+                ON media_collections(user_id, kind, deleted, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS media_collection_items (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id INTEGER NOT NULL,
+                ordinal INTEGER NOT NULL,
+                source_url TEXT NOT NULL,
+                normalized_source_id TEXT,
+                source_kind TEXT,
+                title TEXT,
+                speaker TEXT,
+                published_at TEXT,
+                track TEXT,
+                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
+                status TEXT NOT NULL DEFAULT 'planned',
+                media_id INTEGER,
+                content_item_id INTEGER,
+                latest_job_id TEXT,
+                latest_run_id INTEGER,
+                idempotency_key TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_summary TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT,
+                tags_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
+                ON media_collection_items(user_id, normalized_source_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
+                ON media_collection_items(user_id, media_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
+                ON media_collection_items(user_id, latest_job_id);
+
+            CREATE TABLE IF NOT EXISTS media_collection_runs (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id INTEGER NOT NULL,
+                batch_id TEXT,
+                status TEXT NOT NULL,
+                requested_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                processing_count INTEGER NOT NULL DEFAULT 0,
+                completed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                cancelled_count INTEGER NOT NULL DEFAULT 0,
+                options_json TEXT,
+                summary_json TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
+                ON media_collection_runs(user_id, collection_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
+                ON media_collection_runs(user_id, batch_id);
+
+            CREATE TABLE IF NOT EXISTS content_item_tags (
+                item_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                UNIQUE (item_id, tag_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS saved_searches (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                query_json TEXT NOT NULL,
+                sort TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS content_item_note_links (
+                user_id TEXT NOT NULL,
+                item_id INTEGER NOT NULL,
+                note_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, item_id, note_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
+                ON content_item_note_links(user_id, item_id, created_at DESC);
+            """
+
+
 @_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
@@ -2531,309 +2837,9 @@ class CollectionsDatabase:
         # Collections layer tables
         fts_available = self.backend.backend_type == BackendType.SQLITE
         if self.backend.backend_type == BackendType.POSTGRESQL:
-            content_ddl = """
-            CREATE TABLE IF NOT EXISTS collection_tags (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                UNIQUE (user_id, name)
-            );
-
-            CREATE TABLE IF NOT EXISTS content_items (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                origin_type TEXT,
-                origin_id BIGINT,
-                url TEXT,
-                canonical_url TEXT,
-                domain TEXT,
-                title TEXT,
-                summary TEXT,
-                notes TEXT,
-                content_hash TEXT,
-                word_count INTEGER,
-                published_at TEXT,
-                status TEXT,
-                favorite INTEGER NOT NULL DEFAULT 0,
-                metadata_json TEXT,
-                media_id BIGINT,
-                job_id BIGINT,
-                run_id BIGINT,
-                source_id BIGINT,
-                read_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
-            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
-            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
-
-            CREATE TABLE IF NOT EXISTS media_collections (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                description TEXT,
-                source_url TEXT,
-                metadata_json TEXT,
-                default_tags_json TEXT,
-                deleted BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
-                ON media_collections(user_id, deleted, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
-                ON media_collections(user_id, kind, deleted, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS media_collection_items (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id BIGINT NOT NULL,
-                ordinal INTEGER NOT NULL,
-                source_url TEXT NOT NULL,
-                normalized_source_id TEXT,
-                source_kind TEXT,
-                title TEXT,
-                speaker TEXT,
-                published_at TEXT,
-                track TEXT,
-                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
-                status TEXT NOT NULL DEFAULT 'planned',
-                media_id BIGINT,
-                content_item_id BIGINT,
-                latest_job_id TEXT,
-                latest_run_id BIGINT,
-                idempotency_key TEXT,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                error_summary TEXT,
-                warnings_json TEXT,
-                metadata_json TEXT,
-                tags_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
-                ON media_collection_items(user_id, normalized_source_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
-                ON media_collection_items(user_id, media_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
-                ON media_collection_items(user_id, latest_job_id);
-
-            CREATE TABLE IF NOT EXISTS media_collection_runs (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id BIGINT NOT NULL,
-                batch_id TEXT,
-                status TEXT NOT NULL,
-                requested_count INTEGER NOT NULL DEFAULT 0,
-                queued_count INTEGER NOT NULL DEFAULT 0,
-                processing_count INTEGER NOT NULL DEFAULT 0,
-                completed_count INTEGER NOT NULL DEFAULT 0,
-                failed_count INTEGER NOT NULL DEFAULT 0,
-                skipped_count INTEGER NOT NULL DEFAULT 0,
-                cancelled_count INTEGER NOT NULL DEFAULT 0,
-                options_json TEXT,
-                summary_json TEXT,
-                started_at TEXT,
-                completed_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
-                ON media_collection_runs(user_id, collection_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
-                ON media_collection_runs(user_id, batch_id);
-
-            CREATE TABLE IF NOT EXISTS content_item_tags (
-                item_id BIGINT NOT NULL,
-                tag_id BIGINT NOT NULL,
-                UNIQUE (item_id, tag_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS saved_searches (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                query_json TEXT NOT NULL,
-                sort TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_saved_searches_user_name ON saved_searches(user_id, name);
-            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS content_item_note_links (
-                user_id TEXT NOT NULL,
-                item_id BIGINT NOT NULL,
-                note_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                PRIMARY KEY (user_id, item_id, note_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
-                ON content_item_note_links(user_id, item_id, created_at DESC);
-            """
+            content_ddl = POSTGRES_CONTENT_DDL
         else:
-            content_ddl = """
-            CREATE TABLE IF NOT EXISTS collection_tags (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                UNIQUE (user_id, name)
-            );
-
-            CREATE TABLE IF NOT EXISTS content_items (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                origin_type TEXT,
-                origin_id INTEGER,
-                url TEXT,
-                canonical_url TEXT,
-                domain TEXT,
-                title TEXT,
-                summary TEXT,
-                notes TEXT,
-                content_hash TEXT,
-                word_count INTEGER,
-                published_at TEXT,
-                status TEXT,
-                favorite INTEGER NOT NULL DEFAULT 0,
-                metadata_json TEXT,
-                media_id INTEGER,
-                job_id INTEGER,
-                run_id INTEGER,
-                source_id INTEGER,
-                read_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
-            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
-            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
-
-            CREATE TABLE IF NOT EXISTS media_collections (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                description TEXT,
-                source_url TEXT,
-                metadata_json TEXT,
-                default_tags_json TEXT,
-                deleted INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
-                ON media_collections(user_id, deleted, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
-                ON media_collections(user_id, kind, deleted, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS media_collection_items (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id INTEGER NOT NULL,
-                ordinal INTEGER NOT NULL,
-                source_url TEXT NOT NULL,
-                normalized_source_id TEXT,
-                source_kind TEXT,
-                title TEXT,
-                speaker TEXT,
-                published_at TEXT,
-                track TEXT,
-                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
-                status TEXT NOT NULL DEFAULT 'planned',
-                media_id INTEGER,
-                content_item_id INTEGER,
-                latest_job_id TEXT,
-                latest_run_id INTEGER,
-                idempotency_key TEXT,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                error_summary TEXT,
-                warnings_json TEXT,
-                metadata_json TEXT,
-                tags_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
-                ON media_collection_items(user_id, normalized_source_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
-                ON media_collection_items(user_id, media_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
-                ON media_collection_items(user_id, latest_job_id);
-
-            CREATE TABLE IF NOT EXISTS media_collection_runs (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id INTEGER NOT NULL,
-                batch_id TEXT,
-                status TEXT NOT NULL,
-                requested_count INTEGER NOT NULL DEFAULT 0,
-                queued_count INTEGER NOT NULL DEFAULT 0,
-                processing_count INTEGER NOT NULL DEFAULT 0,
-                completed_count INTEGER NOT NULL DEFAULT 0,
-                failed_count INTEGER NOT NULL DEFAULT 0,
-                skipped_count INTEGER NOT NULL DEFAULT 0,
-                cancelled_count INTEGER NOT NULL DEFAULT 0,
-                options_json TEXT,
-                summary_json TEXT,
-                started_at TEXT,
-                completed_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
-                ON media_collection_runs(user_id, collection_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
-                ON media_collection_runs(user_id, batch_id);
-
-            CREATE TABLE IF NOT EXISTS content_item_tags (
-                item_id INTEGER NOT NULL,
-                tag_id INTEGER NOT NULL,
-                UNIQUE (item_id, tag_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS saved_searches (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                query_json TEXT NOT NULL,
-                sort TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE (user_id, name)
-            );
-            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS content_item_note_links (
-                user_id TEXT NOT NULL,
-                item_id INTEGER NOT NULL,
-                note_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                PRIMARY KEY (user_id, item_id, note_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
-                ON content_item_note_links(user_id, item_id, created_at DESC);
-            """
+            content_ddl = SQLITE_CONTENT_DDL
         try:
             self.backend.create_tables(content_ddl)
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:

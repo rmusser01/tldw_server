@@ -12,9 +12,12 @@ from datetime import datetime, timedelta, timezone
 from threading import RLock
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_limits import (
+    TURN_METADATA_DIAGNOSTIC_CHARS,
+)
+
 _VALID_PERSONA_PLAN_STEP_TYPES = frozenset({"mcp_tool", "skill", "rag_query", "final_answer"})
 _TRUNCATION_SUFFIX = "... [truncated]"
-TURN_METADATA_DIAGNOSTIC_CHARS = 512
 _MAX_PENDING_PLAN_REVIEW_STEPS = 100
 _MAX_PENDING_PLAN_REVIEW_BYTES = 65_536
 

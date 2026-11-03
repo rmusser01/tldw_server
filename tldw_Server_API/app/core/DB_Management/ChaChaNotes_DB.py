@@ -53,11 +53,25 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
+from functools import partial as bind_migration
 from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Protocol, TypeAlias, overload  # noqa: E402
 
 from loguru import logger  # noqa: E402
+
+from tldw_Server_API.app.core.DB_Management.chacha.postgres_note_schema_contracts import (
+    MOODBOARD_STUDIO_V61_INDEX_STATEMENTS,
+    NOTE_ATTACHMENT_COLUMN_CONTRACTS,
+    NOTE_TASK_PRIMARY_KEYS,
+    POSTGRES_CORE_INDEX_STATEMENTS,
+    require_moodboard_migration_complete,
+)
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_migration_records import (
+    parse_workspace_migration_json,
+    serialize_workspace_migration_json,
+    workspace_migration_session_from_row,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
@@ -9868,13 +9882,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (81, "_migrate_from_v81_to_v82_sqlite"),
             (82, "_migrate_from_v82_to_v83_sqlite"),
             (83, "_migrate_from_v83_to_v84_sqlite"),
-            (84, "_migrate_from_v84_to_v85_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
                 steps[version] = method
-        return steps
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import migrate_sqlite_transcripts
 
+        steps[84] = bind_migration(migrate_sqlite_transcripts, schema_name=self._SCHEMA_NAME, get_version=self._get_db_version)
+        return steps
     def _run_sqlite_linear_migration_step(
         self,
         conn: sqlite3.Connection,
@@ -15594,27 +15609,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
             raise SchemaError(f"Notes semantic v83 SQLite migration failed: {exc}") from exc
 
-    def _migrate_from_v84_to_v85_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Install transcripts atomically through the existing migration transaction."""
-        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import persona_transcript_schema_sql
-
-        if self._get_db_version(conn) != 84:
-            raise SchemaError("Persona transcript migration requires SQLite version 84.")
-        conn.execute(persona_transcript_schema_sql())
-        conn.execute(
-            "CREATE INDEX persona_transcript_owner_activity ON persona_session_transcripts(user_id,last_activity) WHERE turn_count>0"
-        )
-        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
-            verify_persona_transcript_sqlite,
-        )
-
-        verify_persona_transcript_sqlite(conn)
-        result = conn.execute(
-            "UPDATE db_schema_version SET version=85 WHERE schema_name=? AND version=84",
-            (self._SCHEMA_NAME,),
-        )
-        if result.rowcount != 1 or self._get_db_version(conn) != 85:
-            raise SchemaError("Persona transcript SQLite version transition failed.")
 
     def _migrate_from_v89_to_v90_postgres(self, conn: Any) -> None:
         """Install transcripts and forced owner/parent RLS before publishing the version."""
@@ -15631,7 +15625,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             *persona_transcript_rls_sql(),
         ):
             self.backend.execute(statement, connection=conn)
-        self._verify_persona_transcript_schema_postgres(conn)
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
+            verify_persona_transcript_postgres,
+        )
+
+        verify_persona_transcript_postgres(
+            self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
+        )
         self.backend.execute(
             "UPDATE db_schema_version SET version=90 WHERE schema_name=%s AND version=89",
             (self._SCHEMA_NAME,),
@@ -15640,16 +15640,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 90:
             raise SchemaError("Persona transcript PostgreSQL version transition failed.")
 
-    def _verify_persona_transcript_schema_postgres(self, conn: Any) -> None:
-        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
-            verify_persona_transcript_postgres,
-        )
-
-        verify_persona_transcript_postgres(
-            self.backend,
-            getattr(conn, "_connection", conn),
-            self._normalize_postgres_catalog_expression,
-        )
 
     def _migrate_from_v83_to_v84_sqlite(self, conn: sqlite3.Connection) -> None:
         """Add durable semantic operation and resolved-model authority."""
@@ -16540,6 +16530,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             if version == 63:
                 self._verify_notes_moodboard_studio_schema_postgres(conn)
+                require_moodboard_migration_complete(self._postgres_v61_progress_row(conn, "migration"))
                 conn.commit()
                 return False
             if version != 62:
@@ -16866,16 +16857,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn.commit()
             self._notes_moodboard_studio_v61_postgres_checkpoint(progress_phase)
 
-        indexes = (
-            "CREATE INDEX IF NOT EXISTS idx_moodboards_scope_page ON moodboards(owner_user_id,dataset_id,deleted,last_modified,id)",
-            "CREATE INDEX IF NOT EXISTS idx_moodboards_scope_sync_id ON moodboards(owner_user_id,dataset_id,sync_id)",
-            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_board_page ON moodboard_notes(owner_user_id,dataset_id,moodboard_id,deleted,order_index,placement_id)",
-            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_note ON moodboard_notes(owner_user_id,dataset_id,note_id,deleted,moodboard_id)",
-            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_placement ON moodboard_notes(owner_user_id,dataset_id,placement_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_page ON note_studio_documents(owner_user_id,dataset_id,deleted,last_modified,note_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_note ON note_studio_documents(owner_user_id,dataset_id,note_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_source ON note_studio_documents(owner_user_id,dataset_id,source_note_id)",
-        )
+        indexes = MOODBOARD_STUDIO_V61_INDEX_STATEMENTS
         for index, statement in enumerate(indexes):
             if not begin_phase(f"index {index} phase"):
                 return
@@ -16912,7 +16894,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "note_studio_documents IN SHARE MODE",
             connection=conn,
         )
-        self._verify_notes_moodboard_studio_schema_postgres(conn, migrating=True)
+        self._verify_notes_moodboard_studio_schema_postgres(conn)
+        self._postgres_v61_progress_row(conn, "migration")
         self._upsert_postgres_v61_progress(
             conn, phase="migration", cursor=None, count=0,
             fingerprint=f"sha256:{hashlib.sha256().hexdigest()}", status="complete",
@@ -16922,9 +16905,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._notes_moodboard_studio_v61_postgres_checkpoint("version")
 
     def _verify_notes_moodboard_studio_schema_postgres(
-        self, conn: Any, *, migrating: bool = False, runtime: bool = False
-    ) -> None:
-        """Reject PostgreSQL v61 catalog, relationship, or forced-RLS drift."""
+        self, conn: Any
+    ) -> bool:
+        """Reject catalog drift and return the journal owner's role authority."""
         progress_state = self.backend.execute(
             """
             SELECT pg_has_role(current_user,c.relowner,'USAGE') AS has_owner_authority,
@@ -17610,22 +17593,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if relationship_failures or studio_failures:
             raise SchemaError("Notes moodboard/Studio v61 PostgreSQL relationship catalog drifted.")  # noqa: TRY003
 
-        # A database owner may inherit the journal owner's role without sharing its OID.
-        runtime_nonowner = runtime and not bool(progress_state[0]["has_owner_authority"])
-        if runtime_nonowner:
-            # The owner publishes completion and version atomically; runtime cannot forge either.
-            writable_version = self.backend.execute(
-                "SELECT has_table_privilege(current_user, 'db_schema_version', "
-                "'INSERT,UPDATE,DELETE,TRUNCATE') OR "
-                "has_any_column_privilege(current_user, 'db_schema_version', 'INSERT,UPDATE')",
-                connection=conn,
-            ).scalar
-            if writable_version or self._get_schema_version_postgres(conn) != self._POSTGRES_SCHEMA_VERSION:
-                raise SchemaError("Notes PostgreSQL runtime migration-version authority is unsafe.")  # noqa: TRY003
-        else:
-            progress = self._postgres_v61_progress_row(conn, "migration")
-            if not migrating and progress["status"] != "complete":
-                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL migration progress is incomplete.")  # noqa: TRY003
+        return bool(progress_state[0]["has_owner_authority"])
 
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
@@ -17741,27 +17709,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "Notes attachment v59 PostgreSQL registry ownership or RLS catalog drifted."
             )
 
-        expected_columns = (
-            ("client_id", "text", True, None),
-            ("dataset_id", "text", True, None),
-            ("attachment_id", "text", True, None),
-            ("note_id", "text", True, None),
-            ("file_name", "text", True, None),
-            ("normalized_file_name", "text", True, None),
-            ("original_file_name", "text", True, None),
-            ("content_type", "text", True, None),
-            ("size_bytes", "bigint", True, None),
-            ("blob_hash", "text", True, None),
-            ("object_hash", "text", True, None),
-            ("version", "bigint", True, None),
-            ("deleted", "boolean", True, "false"),
-            ("deleted_at", "timestamp with time zone", False, None),
-            ("delete_reason", "text", False, None),
-            ("created_at", "timestamp with time zone", True, None),
-            ("last_modified", "timestamp with time zone", True, None),
-            ("created_by", "text", True, None),
-            ("source_kind", "text", True, None),
-        )
+        expected_columns = NOTE_ATTACHMENT_COLUMN_CONTRACTS
         column_rows = backend.execute(
             """
             SELECT column_row.attname AS column_name,
@@ -18264,25 +18212,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "dataset_id<>'local-unbound'"
             ),
         }
-        expected_primary = {
-            "note_tasks_pkey": ("note_tasks", ("owner_user_id", "dataset_id", "id")),
-            "task_note_projections_pkey": (
-                "task_note_projections", ("owner_user_id", "dataset_id", "task_id"),
-            ),
-            "task_events_pkey": ("task_events", ("owner_user_id", "dataset_id", "id")),
-            "task_event_read_state_pkey": (
-                "task_event_read_state", ("owner_user_id", "dataset_id", "event_id", "user_id"),
-            ),
-            "note_task_reconciliation_state_pkey": (
-                "note_task_reconciliation_state", ("owner_user_id", "dataset_id", "note_id"),
-            ),
-            "task_projection_drifts_pkey": (
-                "task_projection_drifts", ("owner_user_id", "dataset_id", "id"),
-            ),
-            "note_task_scope_authority_pkey": (
-                "note_task_scope_authority", ("owner_user_id",),
-            ),
-        }
+        expected_primary = NOTE_TASK_PRIMARY_KEYS
         expected_foreign = {
             "note_tasks_note_owner_fkey": (
                 "note_tasks", ("owner_user_id", "note_id"), "notes", ("client_id", "id"), "c", "c",
@@ -19380,15 +19310,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 78:
             raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
 
-    def _verify_skill_registry_schema_postgres(self, conn: Any) -> None:
-        """Verify the registered Skill tenant boundary without request DDL."""
-        from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import (
-            verify_postgres_skill_registry,
-        )
-
-        verify_postgres_skill_registry(
-            self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
-        )
 
     def _migrate_from_v90_to_v91_postgres(self, conn: Any) -> None:
         """Preserve unowned legacy rows before publishing forced registry isolation."""
@@ -19400,7 +19321,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         for statement in postgres_skill_registry_statements():
             self.backend.execute(statement, connection=conn)
-        self._verify_skill_registry_schema_postgres(conn)
+        from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import verify_postgres_skill_registry
+
+        verify_postgres_skill_registry(
+            self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
+        )
         self.backend.execute(
             "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 90",
             (91, self._SCHEMA_NAME),
@@ -20553,6 +20478,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
         if self._get_schema_version_postgres(conn) >= 63:
             self._verify_notes_moodboard_studio_schema_postgres(conn)
+            require_moodboard_migration_complete(self._postgres_v61_progress_row(conn, "migration"))
             return
         statements = (
             """
@@ -27170,14 +27096,38 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return False
         self._verify_note_attachment_schema_postgres(conn, runtime=True)
         self._verify_note_task_schema_postgres(conn, runtime=True)
-        self._verify_notes_moodboard_studio_schema_postgres(conn, runtime=True)
+        has_owner_authority = self._verify_notes_moodboard_studio_schema_postgres(conn)
+        if not has_owner_authority:
+            # Runtime may validate completion, but cannot publish a migration version.
+            writable_version = self.backend.execute(
+                "SELECT has_table_privilege(current_user, 'db_schema_version', "
+                "'INSERT,UPDATE,DELETE,TRUNCATE') OR "
+                "has_any_column_privilege(current_user, 'db_schema_version', 'INSERT,UPDATE')",
+                connection=conn,
+            ).scalar
+            if writable_version or self._get_schema_version_postgres(conn) != self._POSTGRES_SCHEMA_VERSION:
+                raise SchemaError("Notes PostgreSQL runtime migration-version authority is unsafe.")  # noqa: TRY003
+        else:
+            require_moodboard_migration_complete(self._postgres_v61_progress_row(conn, "migration"))
         self._ensure_note_semantic_schema_postgres(conn)
         if current_version >= 89:
             self._verify_dictionary_schema_postgres(conn)
         if current_version >= 90:
-            self._verify_persona_transcript_schema_postgres(conn)
+            from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
+                verify_persona_transcript_postgres,
+            )
+
+            verify_persona_transcript_postgres(
+                self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
+            )
         if current_version >= 91:
-            self._verify_skill_registry_schema_postgres(conn)
+            from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import (
+                verify_postgres_skill_registry,
+            )
+
+            verify_postgres_skill_registry(
+                self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
+            )
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -27329,6 +27279,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._verify_note_task_schema_postgres(conn)
                 if current_version >= 63:
                     self._verify_notes_moodboard_studio_schema_postgres(conn)
+                    require_moodboard_migration_complete(self._postgres_v61_progress_row(conn, "migration"))
                 if current_version >= 64:
                     self._ensure_note_graph_suggestion_schema_postgres(conn)
                 if current_version >= 65:
@@ -27612,109 +27563,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_postgres_fts(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_flashcards_conversation ON flashcards(conversation_id)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_flashcards_message ON flashcards(message_id)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_state ON conversations(state)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_cluster ON conversations(cluster_id)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_topic_label ON conversations(topic_label)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_source_external_ref ON conversations(source, external_ref)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_last_modified "
-                        "ON conversations(client_id, deleted, last_modified DESC)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_client_character_deleted_last_modified "
-                        "ON conversations(client_id, character_id, deleted, last_modified DESC)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_created_at "
-                        "ON conversations(client_id, deleted, created_at DESC)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_notes_conversation ON notes(conversation_id)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_notes_message ON notes(message_id)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_sessions_last_modified ON writing_sessions(last_modified)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_sessions_deleted ON writing_sessions(deleted)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_templates_last_modified ON writing_templates(last_modified)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_templates_deleted ON writing_templates(deleted)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_themes_last_modified ON writing_themes(last_modified)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_themes_deleted ON writing_themes(deleted)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_themes_order ON writing_themes(order_index)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_status ON writing_wordclouds(status)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_last_modified ON writing_wordclouds(last_modified)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_character_exemplars_character ON character_exemplars(character_id)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_character_exemplars_scenario_emotion ON character_exemplars(scenario, emotion)",
-                        connection=conn,
-                    )
-                    self.backend.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_character_exemplars_novelty ON character_exemplars(novelty_hint)",
-                        connection=conn,
-                    )
+                    for index_statement in POSTGRES_CORE_INDEX_STATEMENTS:
+                        self.backend.execute(index_statement, connection=conn)
                 except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
                     logger.warning("Failed to ensure ChaChaNotes PostgreSQL indexes: {}", exc)
             except BackendDatabaseError as exc:
@@ -28572,7 +28422,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Read potential model-visible registry state without creating/syncing tables."""
         with self.transaction() as conn:
             if self.backend_type == BackendType.POSTGRESQL:
-                self._verify_skill_registry_schema_postgres(conn)
+                from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import (
+                    verify_postgres_skill_registry,
+                )
+
+                verify_postgres_skill_registry(
+                    self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
+                )
             elif not self.backend.table_exists("skill_registry", connection=conn):
                 return False
             row = conn.execute(
@@ -28627,7 +28483,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if self.backend_type == BackendType.POSTGRESQL:
             with self.transaction() as conn:
-                self._verify_skill_registry_schema_postgres(conn)
+                from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import (
+                    verify_postgres_skill_registry,
+                )
+
+                verify_postgres_skill_registry(
+                    self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
+                )
             return
 
         raise NotImplementedError(
@@ -32399,33 +32261,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Workspace Migration Methods ---
 
-    @staticmethod
-    def _serialize_workspace_migration_json(value: Any, field_name: str, *, default: Any) -> str:
-        if value is None:
-            value = default
-        if isinstance(value, str):
-            try:
-                json.loads(value)
-            except json.JSONDecodeError as exc:
-                raise InputError(f"{field_name} must be valid JSON when provided as a string.") from exc  # noqa: TRY003
-            return value
-        try:
-            return json.dumps(value, ensure_ascii=True)
-        except TypeError as exc:
-            raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
 
-    @staticmethod
-    def _parse_workspace_migration_json(value: Any, *, fallback: Any) -> Any:
-        if value is None:
-            return fallback
-        if isinstance(value, (dict, list)):
-            return value
-        if not isinstance(value, str) or not value.strip():
-            return fallback
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return fallback
 
     def _get_workspace_migration_session_by_idempotency_key(self, idempotency_key: str) -> dict[str, Any] | None:
         cursor = self.execute_query(
@@ -32435,23 +32271,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         if row is None:
             return None
-        return self._workspace_migration_session_from_row(row)
+        return workspace_migration_session_from_row(row, chunks=self._list_workspace_migration_chunks(str(row["id"])))
 
-    def _workspace_migration_session_from_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
-        """Keep receipt-only sessions, including older finalized rows, non-destructive."""
-        session = dict(row)
-        session["_chunks"] = self._list_workspace_migration_chunks(str(session["id"]))
-        # Hashes and byte counts do not store or read back the original content.
-        session["client_delete_eligible"] = False
-        recovery = self._parse_workspace_migration_json(session.get("recovery_manifest_json"), fallback={})
-        if isinstance(recovery, dict) and recovery:
-            recovery.update(client_delete_eligible=False, can_delete_legacy_storage=False, server_readback_verified=False)
-            if recovery.get("verification_status") == "verified":
-                recovery["verification_status"] = "content_not_migrated"
-            session["recovery_manifest_json"] = self._serialize_workspace_migration_json(
-                recovery, "recovery_manifest", default={}
-            )
-        return session
 
     def _list_workspace_migration_chunks(self, migration_id: str) -> list[dict[str, Any]]:
         cursor = self.execute_query(
@@ -32469,7 +32290,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         if row is None:
             return None
-        return self._workspace_migration_session_from_row(row)
+        return workspace_migration_session_from_row(row, chunks=self._list_workspace_migration_chunks(str(row["id"])))
 
     def list_workspace_migration_sessions(self, *, limit: int = 100) -> list[dict[str, Any]]:
         """Return recent Research Workspace migration sessions with accepted chunk receipts."""
@@ -32480,7 +32301,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         sessions: list[dict[str, Any]] = []
         for row in cursor.fetchall():
-            sessions.append(self._workspace_migration_session_from_row(row))
+            sessions.append(workspace_migration_session_from_row(row, chunks=self._list_workspace_migration_chunks(str(row["id"]))))
         return sessions
 
     def _get_workspace_migration_chunk(self, migration_id: str, chunk_id: str) -> dict[str, Any] | None:
@@ -32529,13 +32350,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
         now = self._get_current_utc_timestamp_iso()
-        manifest_json = self._serialize_workspace_migration_json(data.get("manifest"), "manifest", default={})
-        diagnostics_json = self._serialize_workspace_migration_json(
+        manifest_json = serialize_workspace_migration_json(data.get("manifest"), "manifest", default={})
+        diagnostics_json = serialize_workspace_migration_json(
             data.get("diagnostics"),
             "diagnostics",
             default={},
         )
-        declared_chunks_json = self._serialize_workspace_migration_json(
+        declared_chunks_json = serialize_workspace_migration_json(
             data.get("declared_chunks"),
             "declared_chunks",
             default=[],
@@ -32582,7 +32403,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return created, True
 
     def _declared_workspace_migration_chunks(self, session: dict[str, Any]) -> list[dict[str, Any]]:
-        parsed = self._parse_workspace_migration_json(session.get("declared_chunks_json"), fallback=[])
+        parsed = parse_workspace_migration_json(session.get("declared_chunks_json"), fallback=[])
         return parsed if isinstance(parsed, list) else []
 
     def _workspace_migration_missing_chunk_ids(self, session: dict[str, Any]) -> list[str]:
@@ -32736,7 +32557,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 entity_id=normalized_chunk_id,
             )
 
-        metadata_json = self._serialize_workspace_migration_json(data.get("metadata"), "metadata", default={})
+        metadata_json = serialize_workspace_migration_json(data.get("metadata"), "metadata", default={})
         now = self._get_current_utc_timestamp_iso()
         with self.transaction() as conn:
             try:
@@ -32829,7 +32650,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "next_step": "enqueue_workspace_source_ingestion_jobs",
             "finalized_at": now,
         }
-        recovery_json = self._serialize_workspace_migration_json(
+        recovery_json = serialize_workspace_migration_json(
             recovery_manifest,
             "recovery_manifest",
             default={},
@@ -47854,11 +47675,6 @@ for _keyword_store_method in (
         _keyword_store_method,
         _delegate_store_method("keyword_store", _keyword_store_method),
     )
-
-
-for _persona_transcript_method in ("validate_persona_transcript_session", "get_persona_transcript", "list_persona_transcript_counts", "append_persona_transcript_turn"):
-    setattr(CharactersRAGDB, _persona_transcript_method,
-            _delegate_store_method("persona_transcript_store", _persona_transcript_method))
 
 
 for _persona_state_store_method in (
