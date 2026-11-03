@@ -9,6 +9,7 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     apply_authnz_migrations,
     ensure_authnz_tables,
+    migration_015_create_llm_usage_tables,
 )
 
 pytestmark = pytest.mark.unit
@@ -66,6 +67,8 @@ def _create_legacy_users_db(
             """,
             (_LEGACY_SCHEMA_VERSION,),
         )
+        # Include the published usage schema before claiming migration 90.
+        migration_015_create_llm_usage_tables(conn)
 
 
 def _profile_version(db_path: Path) -> str | None:
@@ -126,6 +129,7 @@ def _create_current_users_db_with_profile_definition(
             VALUES (91, 'current', CURRENT_TIMESTAMP)
             """
         )
+        migration_015_create_llm_usage_tables(conn)
 
 
 def test_fresh_sqlite_schema_has_canonical_profile_version_default(tmp_path: Path) -> None:
@@ -320,6 +324,7 @@ def test_sqlite_upgrade_preserves_custom_users_schema_objects_and_foreign_keys(
             UPDATE sqlite_sequence SET seq = 42 WHERE name = 'users';
             """
         )
+        migration_015_create_llm_usage_tables(conn)
 
     if target_version is None:
         ensure_authnz_tables(db_path)

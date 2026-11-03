@@ -1270,7 +1270,7 @@ const captureNormalHistoryTurn = async (
     state: HistoryTurnRecovery["state"],
     extra: Pick<
       Partial<HistoryTurnRecovery>,
-      "outcome" | "interruption_reason" | "failure_reason" | "settled_message_id"
+      "outcome" | "interruption_reason" | "failure_reason" | "failure_action" | "settled_message_id"
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
@@ -1453,7 +1453,9 @@ const captureNormalHistoryTurn = async (
       // A reply the server never received leaves the server copy incomplete.
       endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
       const failure = !data.outcome && error != null
-        ? decodeChatErrorPayload(buildFriendlyErrorMessage(error))
+        ? decodeChatErrorPayload(
+            buildFriendlyErrorMessage(error, { modelLabel: turn.replyModel?.label })
+          )
         : null
       await saveRecord(
         record(
@@ -1471,7 +1473,10 @@ const captureNormalHistoryTurn = async (
                 ? { interruption_reason: data.interruptionReason }
                 : {})
             } : {}),
-            ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {})
+            ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {}),
+            ...(failure?.recoveryAction === "open-model-selector"
+              ? { failure_action: failure.recoveryAction }
+              : {})
           }
         )
       )

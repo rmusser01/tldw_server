@@ -43685,13 +43685,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def import_osce_quiz_entry_atomic(
         self,
-        entry: OsceQuizExportV2 | Mapping[str, Any],
+        entry: OsceQuizExportV2,
     ) -> dict[str, Any]:
-        """Validate, rekey, downgrade, and atomically persist one portable OSCE entry."""
-        from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+        """Rekey, downgrade, and atomically persist one portable OSCE entry the caller validated."""
         from tldw_Server_API.app.services.osce_practice import materialize_station_content
 
-        validated = OsceQuizExportV2.model_validate(entry)
+        validated = entry
         stations: list[dict[str, object]] = [
             {
                 "content": materialize_station_content(station.content),

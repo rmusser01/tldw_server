@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     resolve_byok_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
@@ -33,6 +34,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_endpoints_sqlite import (
     _insert_raw_shared_key,
     _setup_byok_sqlite,
 )
+from tldw_Server_API.tests.AuthNZ_SQLite.test_provider_scope_resolution_sqlite import _execute as _execute_scope_fixture
 
 
 async def _upsert_user_key(repo, user_id, provider, api_key, credential_fields=None):
@@ -62,6 +64,17 @@ async def _upsert_shared_key(repo, scope_type, scope_id, provider, api_key, cred
         metadata=None,
         updated_at=datetime.now(timezone.utc),
     )
+
+
+async def _set_user_active(pool, *, user_id: int, is_active: bool) -> None:
+    async with pool.transaction() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=user_id,
+            profile_visible_fields=("is_active",),
+            statement="UPDATE users SET is_active = ? WHERE id = ?",
+            parameters=(is_active, user_id),
+        )
 
 
 def _make_request(principal: AuthPrincipal) -> Request:
@@ -169,6 +182,7 @@ def _stub_openai_model_inventory(monkeypatch, *, api_key: str | None = None):
     discovery used the same credential as generation.
     """
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     def discover(_provider, key, **_kwargs):
@@ -176,8 +190,9 @@ def _stub_openai_model_inventory(monkeypatch, *, api_key: str | None = None):
             return ModelDiscoveryResult("auth_failed")
         return ModelDiscoveryResult("ready", ("gpt-test",))
 
-    monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1")
+    monkeypatch.setattr(gateway, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1")
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
 
 
 async def _insert_raw_user_payload(pool, *, user_id: int, provider: str, payload: dict) -> None:
@@ -627,17 +642,24 @@ async def test_revoked_shared_tombstone_check_wins_before_lower_scope(tmp_path, 
     lower_scope_reached = asyncio.Event()
 
     class GatedSharedRepo:
-        async def fetch_secret(self, scope_type, scope_id, provider, *, include_revoked=False):
-            if scope_type == "team" and include_revoked:
+        async def fetch_authorized_secret_for_user(
+            self,
+            scope_type,
+            scope_id,
+            authorized_user_id,
+            provider,
+        ):
+            assert authorized_user_id == user_id
+            if scope_type == "team":
                 tombstone_check_entered.set()
                 await allow_tombstone_check.wait()
             if scope_type == "org":
                 lower_scope_reached.set()
-            return await real_repo.fetch_secret(
+            return await real_repo.fetch_authorized_secret_for_user(
                 scope_type,
                 scope_id,
+                authorized_user_id,
                 provider,
-                include_revoked=include_revoked,
             )
 
     async def get_gated_repo():
@@ -1286,3 +1308,109 @@ async def test_inactive_user_static_openai_key_fails_before_adapter_sqlite(
     assert exc_info.value.__context__ is None
     assert adapter_calls == 0
     assert captured_headers == []
+
+
+@pytest.mark.parametrize("source", ["user", "team", "org", "server_default"])
+@pytest.mark.asyncio
+async def test_authoritative_exact_scope_precedence_sqlite(tmp_path, monkeypatch, source):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    pool = state["pool"]
+    user_id, team_id, org_id = (int(state[key]["id"]) for key in ("user", "team", "org"))
+    sources = ("user", "team", "org")
+    if source in sources:
+        for candidate in sources[sources.index(source) :]:
+            if candidate == "user":
+                await _upsert_user_key(AuthnzUserProviderSecretsRepo(pool), user_id, "openai", "user-key")
+            else:
+                await _upsert_shared_key(
+                    AuthnzOrgProviderSecretsRepo(pool),
+                    candidate,
+                    team_id if candidate == "team" else org_id,
+                    "openai",
+                    f"{candidate}-key",
+                )
+    result = await resolve_byok_credentials(
+        "openai",
+        user_id=user_id,
+        authoritative_scope=AuthoritativeProviderScope(user_id, team_id, org_id),
+        server_config_snapshot={"openai_api": {"api_key": "server_default-key"}},
+    )
+    assert (result.source, result.api_key) == (source, f"{source}-key")
+
+
+@pytest.mark.parametrize("revocation", ["user", "team_member", "org_member", "team", "org"])
+@pytest.mark.asyncio
+async def test_authoritative_scope_revoked_before_first_resolution_sqlite(tmp_path, monkeypatch, revocation):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    pool = state["pool"]
+    user_id, team_id, org_id = (int(state[key]["id"]) for key in ("user", "team", "org"))
+    runtime = ProviderCredentialRuntime(
+        user_id=user_id,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        authoritative_scope=AuthoritativeProviderScope(user_id, team_id, org_id),
+        server_config_snapshot={"openai_api": {"api_key": "server-key"}},
+    )
+    if revocation == "user":
+        await set_authnz_test_user_active(pool, user_id, False)
+    elif revocation == "team_member":
+        await _execute_scope_fixture(
+            pool,
+            "UPDATE team_members SET status = 'inactive' WHERE team_id = ? AND user_id = ?",
+            team_id,
+            user_id,
+            membership_fixture=True,
+        )
+    elif revocation == "org_member":
+        await _execute_scope_fixture(
+            pool,
+            "UPDATE org_members SET status = 'inactive' WHERE org_id = ? AND user_id = ?",
+            org_id,
+            user_id,
+            membership_fixture=True,
+        )
+    elif revocation == "team":
+        await pool.execute("UPDATE teams SET is_active = 0 WHERE id = ?", (team_id,))
+    else:
+        await pool.execute("UPDATE organizations SET is_active = 0 WHERE id = ?", (org_id,))
+    try:
+        with pytest.raises(ByokResolutionError, match="credential_scope_revoked"):
+            await runtime.resolve("openai")
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_authoritative_runtime_rechecks_shared_revocation_after_success_sqlite(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import AuthoritativeProviderScope
+
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    pool = state["pool"]
+    user_id, team_id, org_id = (int(state[key]["id"]) for key in ("user", "team", "org"))
+    await _upsert_shared_key(AuthnzOrgProviderSecretsRepo(pool), "team", team_id, "openai", "team-key")
+    runtime = ProviderCredentialRuntime(
+        user_id=user_id,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        authoritative_scope=AuthoritativeProviderScope(user_id, team_id, org_id),
+        server_config_snapshot={"openai_api": {"api_key": "server-key"}},
+    )
+    try:
+        assert (await runtime.resolve("openai")).api_key == "team-key"
+        await _execute_scope_fixture(
+            pool,
+            "UPDATE team_members SET status = 'inactive' WHERE team_id = ? AND user_id = ?",
+            team_id,
+            user_id,
+            membership_fixture=True,
+        )
+        with pytest.raises(ByokResolutionError, match="credential_scope_revoked"):
+            await runtime.resolve("openai")
+    finally:
+        await runtime.close()

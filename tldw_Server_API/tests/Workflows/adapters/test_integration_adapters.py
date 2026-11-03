@@ -1133,6 +1133,7 @@ def _route_github_through_mock_transport(monkeypatch, handler):
     monkeypatch.setattr(socket, "create_connection", _no_real_network)
     monkeypatch.setattr(socket.socket, "connect", _no_real_network)
     monkeypatch.setattr(socket, "getaddrinfo", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "api.github.com")
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     client = http_client.create_async_client(transport=httpx.MockTransport(handler))
 

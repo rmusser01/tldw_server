@@ -6,7 +6,6 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from sqlite3 import IntegrityError
 
 import pytest
 
@@ -30,6 +29,105 @@ async def shared_repo_state(tmp_path, monkeypatch):
 
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
     return state, AuthnzOrgProviderSecretsRepo(state["pool"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ("org", "team"))
+@pytest.mark.parametrize("operation", ("upsert", "delete"))
+async def test_claimed_platform_admin_cannot_mutate_shared_secret_or_alias(
+    shared_repo_state, monkeypatch, scope_type: str, operation: str,
+) -> None:
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import shared_keys_scoped as routes
+    from tldw_Server_API.app.api.v1.schemas.user_keys import UserProviderKeyUpsertRequest
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    state, repo = shared_repo_state
+    pool = state["pool"]
+    scope_id = _scope_id(state, scope_type)
+    await _insert_shared_row(
+        pool,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        provider="oai",
+        encrypted_blob="unchanged-legacy-secret",
+    )
+    before = [dict(row) for row in await pool.fetchall("SELECT * FROM org_provider_secrets")]
+
+    async def get_repo():
+        return repo
+
+    async def provider_ok(**_kwargs):
+        return "model-test"
+
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", get_repo)
+    monkeypatch.setattr(routes, "test_provider_credentials", provider_ok)
+    principal = AuthPrincipal(
+        kind="user", user_id=int(state["user"]["id"]), roles=["admin"], permissions=["*"],
+    )
+    endpoint = getattr(routes, f"{operation}_{scope_type}_shared_key")
+    kwargs = {f"{scope_type}_id": scope_id, "principal": principal}
+    if operation == "upsert":
+        kwargs.update(
+            payload=UserProviderKeyUpsertRequest(provider="openai", api_key="sk-replacement"),
+            request=Request({"type": "http", "headers": []}),
+        )
+    else:
+        kwargs["provider"] = "openai"
+
+    with pytest.raises(HTTPException) as exc:
+        await endpoint(**kwargs)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == f"{scope_type.title()} manager role required"
+    after = [dict(row) for row in await pool.fetchall("SELECT * FROM org_provider_secrets")]
+    assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ("org", "team"))
+@pytest.mark.parametrize("operation", ("upsert", "list"))
+async def test_shared_manager_read_and_write_live_sqlite_busy_response(
+    shared_repo_state, monkeypatch, scope_type: str, operation: str,
+) -> None:
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.endpoints import shared_keys_scoped as routes
+    from tldw_Server_API.app.api.v1.schemas.user_keys import UserProviderKeyUpsertRequest
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    state, repo = shared_repo_state
+    pool = state["pool"]
+
+    async def get_repo():
+        return repo
+
+    async def provider_ok(**_kwargs):
+        return "model-test"
+
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", get_repo)
+    monkeypatch.setattr(routes, "test_provider_credentials", provider_ok)
+    principal = AuthPrincipal(kind="user", user_id=int(state["admin"]["id"]), roles=["admin"])
+    suffix = "s" if operation == "list" else ""
+    endpoint = getattr(routes, f"{operation}_{scope_type}_shared_key{suffix}")
+    kwargs = {f"{scope_type}_id": _scope_id(state, scope_type), "principal": principal}
+    if operation == "upsert":
+        kwargs.update(
+            payload=UserProviderKeyUpsertRequest(provider="oai", api_key="sk-must-not-store"),
+            request=Request({"type": "http", "headers": []}),
+        )
+
+    async with pool.transaction():
+        for retry_after in (7, 19):
+            monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", str(retry_after))
+            with pytest.raises(HTTPException) as exc:
+                await endpoint(**kwargs)
+            assert exc.value.status_code == 503
+            assert exc.value.detail == "Authentication database is busy. Please retry shortly."
+            assert exc.value.headers == {"Retry-After": str(retry_after)}
+    assert await pool.fetchval("SELECT COUNT(*) FROM org_provider_secrets") == 0
 
 
 async def _insert_shared_row(
@@ -66,6 +164,40 @@ def _scope_id(state, scope_type: str) -> int:
     return int(state[scope_type]["id"])
 
 
+async def _execute_membership_fixture_sql(pool, query: str, parameters: tuple) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            query,
+            parameters,
+            backend="sqlite",
+        )
+
+
+async def _execute_profile_fixture_update(
+    pool,
+    *,
+    user_id: int,
+    value,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_version import (
+        VersionedUserWriteGateway,
+    )
+
+    async with pool.acquire() as conn:
+        await VersionedUserWriteGateway("sqlite").execute_update(
+            conn,
+            user_id=user_id,
+            profile_visible_fields=("is_active",),
+            statement="UPDATE users SET is_active = ? WHERE id = ?",
+            parameters=(value, user_id),
+        )
+
+
 class _SQLiteMutationGatePool:
     """Coordinate old split-statement and new transactional mutation paths."""
 
@@ -86,10 +218,16 @@ class _SQLiteMutationGatePool:
         self.upsert_attempted = upsert_attempted
 
     @asynccontextmanager
-    async def transaction(self):
+    async def transaction(
+        self,
+        *,
+        acquire_timeout_seconds: float | None = None,
+    ):
         if self.role == "upsert":
             self.upsert_attempted.set()
-        async with self.delegate.transaction() as conn:
+        async with self.delegate.transaction(
+            acquire_timeout_seconds=acquire_timeout_seconds,
+        ) as conn:
             if self.role == "revoke":
                 self.revoke_ready.set()
                 await self.release_revoke.wait()
@@ -220,8 +358,10 @@ async def test_authorized_shared_fetch_is_atomic_across_active_scope_boundaries(
     ) is None
 
     if disabled_boundary == "team_membership":
-        await state["pool"].execute(
-            "UPDATE team_members SET status = 'suspended' WHERE team_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.team_members SET status = 'suspended' "
+            "WHERE team_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     elif disabled_boundary == "team":
@@ -235,8 +375,10 @@ async def test_authorized_shared_fetch_is_atomic_across_active_scope_boundaries(
             (int(state["org"]["id"]),),
         )
     elif disabled_boundary == "org_membership":
-        await state["pool"].execute(
-            "UPDATE org_members SET status = 'suspended' WHERE org_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.org_members SET status = 'suspended' "
+            "WHERE org_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     else:
@@ -300,8 +442,10 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_sqlite(
             )
         return
     elif null_boundary == "team_membership":
-        await state["pool"].execute(
-            "UPDATE team_members SET status = NULL WHERE team_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.team_members SET status = NULL "
+            "WHERE team_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     elif null_boundary == "team":
@@ -315,8 +459,10 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_sqlite(
             (int(state["org"]["id"]),),
         )
     elif null_boundary == "org_membership":
-        await state["pool"].execute(
-            "UPDATE org_members SET status = NULL WHERE org_id = ? AND user_id = ?",
+        await _execute_membership_fixture_sql(
+            state["pool"],
+            "UPDATE main.org_members SET status = NULL "
+            "WHERE org_id = ? AND user_id = ?",
             (scope_id, user_id),
         )
     else:
@@ -581,7 +727,6 @@ async def test_authorized_shared_alias_lookup_uses_one_sqlite_snapshot_during_ro
     from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
         AuthnzOrgProviderSecretsRepo,
     )
-
     state, _repo = shared_repo_state
     scope_type = "team"
     scope_id = _scope_id(state, scope_type)
@@ -960,6 +1105,9 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch, fresh_ser
     from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
         AuthnzOrgProviderSecretsRepo,
     )
+    from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
+        AuthnzOrgsTeamsRepo,
+    )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
         build_secret_payload,
@@ -991,6 +1139,11 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch, fresh_ser
         uuid_value=uuid.uuid4(),
     )
     user_id = int(created_user["id"])
+    organization = await AuthnzOrgsTeamsRepo(pool).create_organization(
+        name="BYOK repository organization",
+        owner_user_id=None,
+    )
+    scope_id = int(organization["id"])
 
     repo = AuthnzOrgProviderSecretsRepo(pool)
     await repo.ensure_tables()
@@ -1003,7 +1156,7 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch, fresh_ser
 
     await repo.upsert_secret(
         scope_type="org",
-        scope_id=1,
+        scope_id=scope_id,
         provider="OpenAI",
         encrypted_blob=encrypted_blob,
         key_hint=key_hint,
@@ -1013,7 +1166,7 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch, fresh_ser
         updated_by=user_id,
     )
 
-    row = await repo.fetch_secret("org", 1, "openai")
+    row = await repo.fetch_secret("org", scope_id, "openai")
     assert row is not None
     assert row["provider"] == "openai"
     assert row["encrypted_blob"] == encrypted_blob
@@ -1021,22 +1174,30 @@ async def test_org_provider_secrets_repo_sqlite(tmp_path, monkeypatch, fresh_ser
     assert row["created_by"] == user_id
     assert row["updated_by"] == user_id
 
-    items = await repo.list_secrets(scope_type="org", scope_id=1)
+    items = await repo.list_secrets(scope_type="org", scope_id=scope_id)
     assert len(items) == 1
     assert items[0]["provider"] == "openai"
 
-    items_filtered = await repo.list_secrets(scope_type="org", scope_id=1, provider="openai")
+    items_filtered = await repo.list_secrets(
+        scope_type="org",
+        scope_id=scope_id,
+        provider="openai",
+    )
     assert len(items_filtered) == 1
 
-    await repo.touch_last_used("org", 1, "openai", now)
-    refreshed = await repo.fetch_secret("org", 1, "openai")
+    await repo.touch_last_used("org", scope_id, "openai", now)
+    refreshed = await repo.fetch_secret("org", scope_id, "openai")
     assert refreshed is not None
     assert refreshed["last_used_at"] is not None
 
-    deleted = await repo.delete_secret("org", 1, "openai")
+    deleted = await repo.delete_secret("org", scope_id, "openai")
     assert deleted
-    missing = await repo.fetch_secret("org", 1, "openai")
+    missing = await repo.fetch_secret("org", scope_id, "openai")
     assert missing is None
-    revoked_rows = await repo.list_secrets(scope_type="org", scope_id=1, include_revoked=True)
+    revoked_rows = await repo.list_secrets(
+        scope_type="org",
+        scope_id=scope_id,
+        include_revoked=True,
+    )
     assert len(revoked_rows) == 1
     assert revoked_rows[0]["revoked_at"] is not None

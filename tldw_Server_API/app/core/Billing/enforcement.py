@@ -4,6 +4,7 @@ enforcement.py
 Billing limit enforcement that integrates with the Resource Governor system.
 Provides dependencies for checking and enforcing subscription limits.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -291,6 +292,28 @@ class BillingEnforcer:
             )
             return self._permissive_limit_fallbacks()
 
+    async def get_mcp_token_limit(self, scope: Any, *, operator_limit: int | None, conn: Any) -> int | None:
+        """Combine operator and active hosted limits on the supplied transaction."""
+        if conn is None:
+            raise ValueError("MCP billing limits require a supplied connection")
+        if operator_limit is not None and (type(operator_limit) is not int or not 0 <= operator_limit < (1 << 63)):
+            raise ValueError("Invalid MCP operator quota")
+        if scope.kind != "org":
+            return operator_limit
+        if not await billing_checks_active():
+            return operator_limit
+        from tldw_Server_API.app.core.Billing.subscription_service import (
+            get_subscription_service,
+        )
+
+        limits = await (await get_subscription_service()).get_org_limits(scope.value, conn=conn)
+        value = limits["llm_tokens_month"]
+        if type(value) is not int or not -1 <= value < (1 << 63):
+            raise ValueError("Invalid MCP subscription quota")
+        if value == -1:
+            return operator_limit
+        return value if operator_limit is None else min(value, operator_limit)
+
     async def get_org_usage(self, org_id: int) -> UsageSummary:
         """
         Get current usage summary for an organization.
@@ -383,6 +406,9 @@ class BillingEnforcer:
 
         Calls on a member's own provider key are left out (ADR-083), except on
         a schema without ``credential_source``, where every row counts.
+        Explicit request-time organization attribution takes precedence. Legacy
+        calls without it use the primary org or API-key org. Unresolved MCP
+        exposure is added without age filtering; reconciled rows are excluded.
         """
         try:
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -393,6 +419,20 @@ class BillingEnforcer:
             # Naive UTC: on PostgreSQL llm_usage_log.ts is TIMESTAMP without time zone, and asyncpg
             # refuses an aware bound for it, so the plan's tokens counted nothing there (TASK-13955).
             month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+            from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
+
+            missing_schema_errors: tuple[type[Exception], ...] = (sqlite3.OperationalError,)
+            if asyncpg is not None:
+                missing_schema_errors += (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError)
+            try:
+                async with pool.acquire() as conn:
+                    return await AuthnzUsageRepo(pool).read_org_token_exposure(conn, org_id, month_start)
+            except missing_schema_errors as exc:
+                if not any(
+                    name in str(exc) for name in ("billing_org_id", "provider_usage_reservations", "credential_source")
+                ):
+                    raise
+                # Only legacy Billing readers may fall back to pre-MCP schema.
             try:
                 return await self._sum_org_llm_tokens(pool, org_id, month_start, _OWN_KEY_EXCLUDED)
             except Exception as exc:

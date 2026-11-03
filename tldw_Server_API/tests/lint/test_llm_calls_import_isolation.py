@@ -22,7 +22,11 @@ from tldw_Server_API.tests.lint._ast_cache import REPO_ROOT
 pytestmark = pytest.mark.unit
 
 _SCRIPT = "import importlib, json, sys; importlib.import_module(sys.argv[1]); print(json.dumps(sorted(sys.modules)))"
-CASES = [("tldw_Server_API.app.core.Chat", "tldw_Server_API.app.api")]
+CASES = [
+    ("tldw_Server_API.app.core.Chat", "tldw_Server_API.app.api"),
+    ("tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter", "tldw_Server_API.app.core.Chat"),
+    ("tldw_Server_API.app.core.LLM_Calls.gateway", "tldw_Server_API.app.core.Chat"),
+]
 
 
 def loaded_after_import(module: str) -> list[str]:
@@ -54,5 +58,5 @@ def test_importing_does_not_load(module: str, forbidden: str) -> None:
 
 
 def test_the_guard_sees_a_forbidden_load() -> None:
-    # chat_loop_store imports api.v1.schemas.chat_loop_schemas: a known violator.
-    assert forbidden_loads("tldw_Server_API.app.core.Chat.chat_loop_store", "tldw_Server_API.app.api")
+    # chat_target_resolution loads api.v1.schemas.chat_request_schemas through chat_helpers: a known violator.
+    assert forbidden_loads("tldw_Server_API.app.core.Chat.chat_target_resolution", "tldw_Server_API.app.api")

@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
@@ -142,10 +143,8 @@ async def test_auto_router_dispatch_keeps_one_static_credential_snapshot(
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
-    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
-
     monkeypatch.setattr(
-        chat_request_schemas,
+        config_llm_providers,
         "get_api_keys",
         lambda: {"local-llm": current_key["value"]},
     )

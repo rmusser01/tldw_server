@@ -371,3 +371,20 @@ def raise_chat_error_from_http(
             upstream=exc,
         )
     )
+
+
+def exception_summary(exc: BaseException) -> dict[str, Any]:
+    """Summarize exception metadata without rendering the exception message."""
+    summary: dict[str, Any] = {"type": type(exc).__name__}
+    for attr in ("status_code", "status", "provider"):
+        value = getattr(exc, attr, None)
+        if value is not None:
+            summary[attr] = value
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status_code = getattr(response, "status_code", None)
+        if status_code is None:
+            status_code = getattr(response, "status", None)
+        if status_code is not None:
+            summary["response_status_code"] = status_code
+    return summary

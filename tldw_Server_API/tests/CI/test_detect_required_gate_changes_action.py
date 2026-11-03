@@ -93,3 +93,53 @@ def test_action_compares_the_requested_commit_range(tmp_path, event, dispatch_ba
     else:
         assert result.returncode == 0, result.stderr
         assert set((tmp_path / "required-gate-changed-files.txt").read_text().splitlines()) == expected
+
+
+def test_action_lists_both_sides_of_a_rename(tmp_path):
+    """A rename must classify by both paths: moving a file out of a gated tree is a gated change.
+
+    Default rename detection lists only the destination, so `apps/...` -> `Docs/...` read as docs-only.
+    """
+    action = yaml.safe_load(Path(".github/actions/detect-required-gate-changes/action.yml").read_text())
+    step = action["runs"]["steps"][0]
+    git_binary = shutil.which("git")
+    bash_binary = shutil.which("bash")
+    assert git_binary is not None and bash_binary is not None
+
+    def git(*args):
+        # Arguments are fixed test commands in a disposable repository.
+        return subprocess.check_output(  # nosec B603
+            [git_binary, *args], cwd=tmp_path, text=True, stderr=subprocess.DEVNULL, timeout=30
+        ).strip()
+
+    git("init")
+    git("config", "user.name", "CI comparison fixture")
+    git("config", "user.email", "ci-fixture@example.invalid")
+    source = tmp_path / "apps/packages/ui/src/notes.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("export const notes = 'unchanged content long enough to be a rename';\n")
+    git("add", ".")
+    git("commit", "-m", "base")
+    (tmp_path / "Docs").mkdir()
+    git("mv", "apps/packages/ui/src/notes.ts", "Docs/notes.ts")
+    git("commit", "-m", "move")
+    script = step["run"].split("mapfile -t CHANGED_FILES", 1)[0]
+    for expression, value in {
+        "github.event_name": "pull_request",
+        "github.event.pull_request.base.sha": git("rev-parse", "HEAD~1"),
+        "github.event.before": "",
+        "github.sha": git("rev-parse", "HEAD"),
+    }.items():
+        script = script.replace("${{ " + expression + " }}", value)
+    # Execute only the checked-in action block with fixed test event metadata.
+    result = subprocess.run(  # nosec B603
+        [bash_binary, "-c", script],
+        cwd=tmp_path,
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "DISPATCH_BASE_SHA": ""},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    changed = set((tmp_path / "required-gate-changed-files.txt").read_text().splitlines())
+    assert changed == {"apps/packages/ui/src/notes.ts", "Docs/notes.ts"}

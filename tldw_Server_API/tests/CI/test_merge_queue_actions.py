@@ -56,7 +56,7 @@ def _check(name=BACKEND, conclusion="success", completed="2026-10-04T11:58:00Z",
 
 
 def _checks(overrides=None):
-    """The six check-run contexts, all passed; `overrides` maps a context to another conclusion,
+    """The check-run contexts, all passed; `overrides` maps a context to another conclusion,
     or to None for no run at all."""
     conclusions = {name: "success" for name in CHECK_NAMES}
     conclusions.update(overrides or {})
@@ -68,7 +68,7 @@ def _status(state="success", created="2026-10-04T11:58:00Z", url="https://licens
 
 
 def _green(overrides=None, statuses=None):
-    """FakeGh keyword arguments for a head whose seven contexts all passed, with exceptions."""
+    """FakeGh keyword arguments for a head whose contexts all passed, with exceptions."""
     return {"checks": {OLD: _checks(overrides)}, "statuses": {OLD: [_status()] if statuses is None else statuses}}
 
 
@@ -87,8 +87,8 @@ def _held(rid, workflow="backend-required.yml", actor="github-actions[bot]", eve
             "head_repository": {"full_name": repo or mq.REPO}, "html_url": f"https://run/{rid}"}
 
 
-def _six_held(first=31):
-    """The six gate workflows' held runs on a queue-rebased head."""
+def _held_gates(first=31):
+    """Every gate workflow's held run on a queue-rebased head."""
     return [_held(first + i, workflow) for i, workflow in enumerate(GATE_FILES)]
 
 
@@ -365,11 +365,11 @@ def test_dry_mode_decides_for_the_next_front_after_an_eviction():
     assert gh.calls == []
 
 
-# --- reading the seven contexts --------------------------------------------------------------
+# --- reading the eight contexts --------------------------------------------------------------
 
 
-def test_check_runs_are_read_by_name_for_exactly_the_six_check_contexts():
-    """A head here carries 250+ check runs. Only the six required names are asked for, so the
+def test_check_runs_are_read_by_name_for_exactly_the_check_contexts():
+    """A head here carries 250+ check runs. Only the required check names are asked for, so the
     other checks on the head can never crowd a required one off the pages the queue reads."""
     noise = [_check(f"ci / shard {i}", "failure") for i in range(300)]
     gh = FakeGh([_node(1, state="CLEAN")], checks={OLD: noise + _checks()}, statuses={OLD: [_status()]})
@@ -388,7 +388,7 @@ def test_workflow_runs_are_read_before_check_runs():
             return super().rest(method, path, fields)
 
     mq.read_contexts(Recording([]), OLD)
-    assert order == ["runs"] + ["checks"] * 6 + ["statuses"]
+    assert order == ["runs"] + ["checks"] * len(CHECK_NAMES) + ["statuses"]
 
 
 @pytest.mark.parametrize(("statuses", "kind", "contexts"), [
@@ -537,7 +537,7 @@ def test_blocked_green_waits_for_auto_merge_and_never_asks_about_review_threads(
 
 def test_a_pr_disarmed_since_the_decision_gets_no_checks():
     """Another queue run evicted it, or its author disarmed it, while this run was reading the
-    seven contexts. Starting checks now would spend runners on a PR that has left the line."""
+    required contexts. Starting checks now would spend runners on a PR that has left the line."""
     gh = FakeGh([_node(1, state="BLOCKED")], late_nodes=[_node(1, state="BLOCKED", armed=None)])
     decisions = _run(gh)
     assert [d[1].kind for d in decisions] == ["start"]
@@ -612,7 +612,7 @@ def test_two_failed_hand_diagnostics_do_not_evict_a_green_pr():
     assert gh.calls == []
 
 
-def test_stuck_green_is_timed_from_the_last_of_the_seven_contexts():
+def test_stuck_green_is_timed_from_the_last_of_the_contexts():
     late_license = [_status(created="2026-10-04T11:50:00Z")]
     checks = {OLD: [_check(name, completed="2026-10-04T11:00:00Z") for name in CHECK_NAMES]}
     waiting = FakeGh([_node(1, state="CLEAN")], checks=checks, statuses={OLD: late_license})
@@ -783,7 +783,7 @@ def test_a_license_status_that_turned_pending_since_the_decision_is_not_dispatch
 def test_a_refused_license_dispatch_fails_the_run_and_disarms_nobody(state, status):
     """The license gate is dispatched on dev, so no PR can be blamed for its refusal: a 422 or
     404 there means dev's workflow is broken or not landed yet. Evicting would disarm every
-    front in turn. The run fails instead, before any of the six gates is started."""
+    front in turn. The run fails instead, before any of the gates is started."""
     nodes = [_node(1, state=state)] + [_node(i, armed=f"2026-10-04T1{i}:00:00Z", state="BLOCKED") for i in (2, 3)]
     gh = FakeGh(nodes, dispatch_refused={LICENSE_GATE}, dispatch_status=status)
     with pytest.raises(mq.GhError, match=rf"\(HTTP {status}\)"):
@@ -938,7 +938,7 @@ def test_a_failed_gh_call_raises_with_the_http_status_the_refusal_rule_reads(mon
 def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path):
     """main() through the real Gh and _run_gh down to the subprocess argv, with canned JSON for
     a BEHIND front PR: line query, context reads, pinned-head rebase, poll reread, the license
-    dispatch, the six approvals, the non-gate cleanup, comment."""
+    dispatch, one approval per gate, the non-gate cleanup, comment."""
     owner, name = mq.REPO.split("/")
     node = _node(7, ref="feat/queue-me")
     seen = []
@@ -986,11 +986,12 @@ def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path):
     assert mutating[0] == ["gh", "api", "graphql", "-f", f"query={mq.REBASE_MUTATION}", "-f", "id=PR_7", "-f", f"oid={OLD}"]
     assert mutating[1] == ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/frontend-license-gate.yml/dispatches",
                            "-f", "ref=dev", "-f", "inputs[pr]=7"]
-    assert [a[4] for a in mutating[2:8]] == [f"{repo}/actions/runs/{31 + i}/approve" for i in range(6)]
-    assert mutating[8] == ["gh", "api", "-X", "DELETE", f"{repo}/actions/runs/40"]
-    assert mutating[9][:6] == ["gh", "api", "-X", "POST", f"{repo}/issues/7/comments", "-f"]
-    assert mutating[9][6].startswith(f"body=<!-- merge-queue:rebased:{NEW} -->\nMerge queue: this PR is next.")
-    assert len(mutating) == 10
+    gates = len(GATE_FILES)
+    assert [a[4] for a in mutating[2:2 + gates]] == [f"{repo}/actions/runs/{31 + i}/approve" for i in range(gates)]
+    assert mutating[2 + gates] == ["gh", "api", "-X", "DELETE", f"{repo}/actions/runs/40"]
+    assert mutating[3 + gates][:6] == ["gh", "api", "-X", "POST", f"{repo}/issues/7/comments", "-f"]
+    assert mutating[3 + gates][6].startswith(f"body=<!-- merge-queue:rebased:{NEW} -->\nMerge queue: this PR is next.")
+    assert len(mutating) == 4 + gates
     assert "| #7 | rebase | behind dev |" in summary.read_text(encoding="utf-8")
 
 
@@ -1179,8 +1180,8 @@ def test_comment_once_removes_its_own_copy_when_a_racing_run_posted_first():
     assert ("delete-comment", "50") in gh.calls
 
 
-def test_rebase_dispatches_the_license_then_approves_exactly_the_six_gates_then_cleans_up_then_cancels():
-    held, ci = _six_held(), _held(40, "ci.yml")
+def test_rebase_dispatches_the_license_then_approves_exactly_the_gates_then_cleans_up_then_cancels():
+    held, ci = _held_gates(), _held(40, "ci.yml")
     old_live, queue_run = _run_of("backend-required.yml", 11), _run_of("merge-queue.yml", 12)
     gh = FakeGh([_node(1)], runs={OLD: [old_live, queue_run], NEW: held + [ci]})
     assert _run(gh)[0][1].kind == "rebase"
@@ -1195,18 +1196,18 @@ def test_rebase_dispatches_the_license_then_approves_exactly_the_six_gates_then_
     assert calls.index(("cancel", "11")) > max(approvals)
     assert ("cancel", "12") not in calls, "a merge-queue.yml run on the old head is never cancelled"
     assert calls[-1][0] == "comment" and f"merge-queue:rebased:{NEW}" in calls[-1][2]
-    assert len(gh.dispatched()) == 1, "nothing else is dispatched: all six gates were approved"
+    assert len(gh.dispatched()) == 1, "nothing else is dispatched: every gate was approved"
 
 
 def test_a_rebase_whose_gates_are_not_all_held_in_time_wakes_a_kick():
-    gh = FakeGh([_node(1)], runs={NEW: _six_held()[:4]})
+    gh = FakeGh([_node(1)], runs={NEW: _held_gates()[:4]})
     _run(gh)
     assert ("dispatch", "security-required.yml", {"ref": "dev", "inputs[queue_kick]": "true"}) in gh.calls
-    assert "approved 4 of its 6 required gates" in gh.calls[-1][2]
+    assert f"approved 4 of its {len(GATE_FILES)} required gates" in gh.calls[-1][2]
 
 
 def test_rebase_approves_only_after_the_new_head_appears():
-    gh = FakeGh([_node(1)], runs={NEW: _six_held()}, rebase_lag=2)
+    gh = FakeGh([_node(1)], runs={NEW: _held_gates()}, rebase_lag=2)
     _run(gh)
     first_approve = next(i for i, e in enumerate(gh.events) if e[0] == "approve")
     assert ("read_pr", NEW) in gh.events[:first_approve]
@@ -1516,7 +1517,7 @@ def test_start_never_restarts_a_run_held_for_someone_else():
 
 
 def test_a_behind_front_gets_no_approvals_on_its_old_head():
-    gh = FakeGh([_node(1)], runs={OLD: [_held(90, "e2e-required.yml")], NEW: _six_held()})
+    gh = FakeGh([_node(1)], runs={OLD: [_held(90, "e2e-required.yml")], NEW: _held_gates()})
     _run(gh)
     assert ("approve", "90") not in gh.calls
 
@@ -1543,12 +1544,12 @@ def test_a_non_gate_held_run_listed_after_the_first_cleanup_is_deleted_too():
         def rest(self, method, path, fields=None):
             out = super().rest(method, path, fields)
             if (method == "GET" and f"head_sha={NEW}" in path and "status=action_required" in path and not self.added
-                    and sum(c[0] == "approve" for c in self.calls) == 6):
+                    and sum(c[0] == "approve" for c in self.calls) == len(GATE_FILES)):
                 self.added = True
                 self.runs[NEW].append(_held(40, "ci.yml"))
             return out
 
-    gh = LateHeld([_node(1)], runs={NEW: _six_held()})
+    gh = LateHeld([_node(1)], runs={NEW: _held_gates()})
     _run(gh)
     assert ("delete", "40") in gh.calls
 
@@ -1728,7 +1729,7 @@ def test_on_mode_rebases_the_front_only():
         _run_of("ci.yml", 12),
         _run_of("pre-commit.yml", 13, "completed", "success"),
         _run_of("merge-queue.yml", 14, "completed", "success"),
-    ], NEW: _six_held()}
+    ], NEW: _held_gates()}
     gh = FakeGh([_node(1), _node(2, armed="2026-10-04T11:00:00Z")], runs=runs)
     _run(gh)
     assert [c for c in gh.calls if c[0] == "rebase"] == [("rebase", "PR_1", OLD)]
@@ -1736,7 +1737,7 @@ def test_on_mode_rebases_the_front_only():
     assert [c for c in gh.calls if c[0] == "cancel"] == [("cancel", "11"), ("cancel", "12")]
     comment = next(c for c in gh.calls if c[0] == "comment")
     assert comment[1] == 1 and f"<!-- merge-queue:rebased:{NEW} -->" in comment[2]
-    assert "approved its 6 required gates" in comment[2]
+    assert f"approved its {len(GATE_FILES)} required gates" in comment[2]
     assert all(c[1] != "PR_2" for c in gh.calls if c[0] in ("rebase", "disarm"))
 
 

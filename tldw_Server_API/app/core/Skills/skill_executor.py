@@ -382,8 +382,8 @@ class SkillExecutor:
         provider = context.default_provider if context else None
         if not provider:
             try:
-                from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
-                provider = DEFAULT_LLM_PROVIDER
+                from tldw_Server_API.app.core.config_llm_providers import get_default_provider
+                provider = get_default_provider()
             except Exception:
                 provider = "openai"
 

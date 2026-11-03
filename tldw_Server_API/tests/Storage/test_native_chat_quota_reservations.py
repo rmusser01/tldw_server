@@ -16,12 +16,30 @@ import asyncio
 import json
 import os
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership, MembershipMutation, MembershipMutationKind, MembershipMutationRelationship,
+    MembershipScopeType, MembershipWriter, TrustedMembershipReason, TrustedMembershipWriteContext,
+)
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _execute_membership_scope_sql
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
+
+async def seed_memberships(pool, users):
+    mutations = tuple(mutation for user in users for mutation in (
+        MembershipMutation(MembershipScopeType.ORGANIZATION, 51, user, MembershipMutationKind.ADD, role='member'),
+        MembershipMutation(MembershipScopeType.TEAM, 52, user, MembershipMutationKind.ADD, role='member',
+            relationship=MembershipMutationRelationship.ORGANIZATION_COMPANION),
+    ))
+    async with pool.transaction() as conn:
+        await MembershipWriter(pool).apply_membership_mutations(
+            conn=conn, context=TrustedMembershipWriteContext(TrustedMembershipReason.BOOTSTRAP),
+            mutations=mutations, anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+            operation_time=datetime.now(timezone.utc))
 
 async def main():
     try:
@@ -294,8 +312,7 @@ async def main():
             from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
             await pool.execute('INSERT INTO organizations (id,name) VALUES (?, ?)', 51, 'native-ledger-failure-org')
             await pool.execute('INSERT INTO teams (id,org_id,name) VALUES (?, ?, ?)', 52, 51, 'native-ledger-failure-team')
-            await pool.execute('INSERT INTO org_members (org_id,user_id) VALUES (?, ?)', 51, user)
-            await pool.execute('INSERT INTO team_members (team_id,user_id) VALUES (?, ?)', 52, user)
+            await seed_memberships(pool, [user])
             quotas = AuthnzStorageQuotasRepo(pool)
             await quotas.upsert_org_quota(51, quota_mb=10)
             await quotas.upsert_team_quota(52, quota_mb=10)
@@ -495,9 +512,7 @@ async def main():
                 await service.set_user_quota(member, 100)
             await pool.execute('INSERT INTO organizations (id,name) VALUES (?, ?)', 51, 'native-quota-org')
             await pool.execute('INSERT INTO teams (id,org_id,name) VALUES (?, ?, ?)', 52, 51, 'native-quota-team')
-            for member in members:
-                await pool.execute('INSERT INTO org_members (org_id,user_id) VALUES (?, ?)', 51, member)
-                await pool.execute('INSERT INTO team_members (team_id,user_id) VALUES (?, ?)', 52, member)
+            await seed_memberships(pool, members)
             owners = [NativeQuotaOwner(member, 'native:fixture', str((await pool.fetchone('SELECT uuid FROM users WHERE id = ?', member))['uuid']), org_id=51, team_id=52) for member in members]
             await service.reserve_native_bytes(owners[0], 'before-pool', 2 * 1048576)
             quotas = AuthnzStorageQuotasRepo(pool)
@@ -527,12 +542,21 @@ async def main():
             billing = BillingEnforcer()
             billing._usage_cache[51] = (UsageSummary(org_id=51, storage_bytes=3 * 1048576), time.time())
             summaries = [await billing.get_org_usage(51), await billing.get_org_usage(51)]
-            await pool.execute('UPDATE org_members SET status = NULL WHERE org_id = ? AND user_id = ?', 51, members[1])
+            # These intentionally invalid/legacy states are fixtures, not serving writes.
+            backend = 'postgres' if pool.pool is not None else 'sqlite'
+            async with pool.transaction() as conn:
+                await _execute_membership_scope_sql(conn,
+                    'UPDATE org_members SET status = NULL WHERE org_id = $1 AND user_id = $2',
+                    51, members[1], backend=backend)
             native_first = (await service.native_usage(members[0]))['bytes']
             null_member_excluded = (await billing.get_org_usage(51)).storage_bytes == 3 * 1048576 + native_first
-            await pool.execute("UPDATE org_members SET status = 'active' WHERE org_id = ?", 51)
-            await pool.execute("UPDATE org_members SET status = 'inactive' WHERE org_id = ?", 51)
-            await pool.execute("UPDATE team_members SET status = 'inactive' WHERE team_id = ?", 52)
+            async with pool.transaction() as conn:
+                await _execute_membership_scope_sql(conn,
+                    "UPDATE org_members SET status = 'active' WHERE org_id = $1", 51, backend=backend)
+                await _execute_membership_scope_sql(conn,
+                    "UPDATE org_members SET status = 'inactive' WHERE org_id = $1", 51, backend=backend)
+                await _execute_membership_scope_sql(conn,
+                    "UPDATE team_members SET status = 'inactive' WHERE team_id = $1", 52, backend=backend)
             replay = await service.reserve_native_bytes(owners[0], 'before-pool', 2 * 1048576)
             denied = False
             try:
@@ -700,7 +724,7 @@ from pathlib import Path
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations
+from tldw_Server_API.app.core.AuthNZ.migrations import apply_authnz_migrations, get_authnz_migrations
 from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaOwner
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
@@ -750,7 +774,7 @@ async def main():
                 sentinel = await pool.fetchone('SELECT uuid,storage_used_mb FROM users WHERE id = ?', 41)
                 assert sentinel['uuid'] == '22222222222242228222222222222222' and sentinel['storage_used_mb'] == 12
             if os.environ['NATIVE_QUOTA_BACKEND'] == 'sqlite':
-                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == 104
+                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == get_authnz_migrations()[-1].version
                 indexes = await pool.fetchall("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_sessions_created_at', 'idx_org_members_org_user')")
                 assert {row['name'] for row in indexes} == {'idx_sessions_created_at', 'idx_org_members_org_user'}
             if prior == 'preview101':

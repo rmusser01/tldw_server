@@ -658,7 +658,7 @@ def _guard_postgres_copy_target(table_name: Any) -> None:
     target = table_name.strip().rsplit(".", 1)[-1]
     if len(target) >= 2 and target[0] == target[-1] and target[0] in {'"', "'"}:
         target = target[1:-1]
-    if target.lower() == "users":
+    if target.lower() in {"users", "org_members", "team_members"}:
         raise ProfileUserWriteRejected()
 
 
@@ -788,6 +788,26 @@ class _GuardedSQLiteConnection:
 
     async def cursor(self) -> _GuardedSQLiteCursor:
         return _GuardedSQLiteCursor(await self._connection.cursor(), self)
+
+    @staticmethod
+    def _savepoint_name(name: str) -> str:
+        if type(name) is not str or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", name) is None:
+            raise ValueError("Invalid SQLite savepoint name")
+        return name
+
+    async def create_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(f'SAVEPOINT "{savepoint}"')  # nosec B608
+
+    async def rollback_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(
+            f'ROLLBACK TO SAVEPOINT "{savepoint}"'  # nosec B608
+        )
+
+    async def release_savepoint(self, name: str) -> None:
+        savepoint = self._savepoint_name(name)
+        await self._connection.execute(f'RELEASE SAVEPOINT "{savepoint}"')  # nosec B608
 
     async def commit(self) -> None:
         await self._connection.commit()
@@ -1935,7 +1955,7 @@ async def reset_db_pool():
     except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"reset_db_pool: ignoring UsersDB reset error: {e}")
     try:
-        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
             set_llm_provider_overrides_cache_for_tests as _reset_llm_overrides_cache,
         )
         _reset_llm_overrides_cache({})

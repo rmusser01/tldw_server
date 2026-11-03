@@ -152,7 +152,7 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
     app.dependency_overrides[get_prompts_db_for_user] = settings_database
     app.dependency_overrides[get_auth_principal] = principal
     monkeypatch.setattr(endpoint, "get_prompts_db_for_user", database, raising=False)
-    monkeypatch.setattr(endpoint, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(endpoint, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(endpoint, "resolve_provider_api_key", provider_key)
     monkeypatch.setattr(endpoint, "load_and_log_configs", provider_config)
     monkeypatch.setattr(OpenAIAdapter, "chat", model)

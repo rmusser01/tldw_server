@@ -34,7 +34,7 @@
 - `tldw_Server_API/app/core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py`: invoke the diagnostic at yt-dlp request boundaries.
 - `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py`: stale/current/invalid version behavior.
 - `Docs/Code_Documentation/Ingestion_Pipeline_Video.md`: existing-environment update guidance.
-- `backlog/tasks/task-12946 - Fix-Quick-Ingest-repeat-ingestion-and-queued-job-recovery.md`: maintained only through Backlog MCP/CLI.
+- `backlog/tasks/task-15117 - Fix-Quick-Ingest-repeat-ingestion-and-queued-job-recovery.md`: maintained only through Backlog MCP/CLI.
 
 ### Task 1: Preserve Webpack Watch Ignores
 
@@ -349,7 +349,7 @@ git commit -m "test: cover repeated quick ingest browser flow"
 ### Task 7: Full Verification, UAT, and PR Closeout
 
 **Files:**
-- Modify through Backlog CLI/MCP: `backlog/tasks/task-12946 - Fix-Quick-Ingest-repeat-ingestion-and-queued-job-recovery.md`
+- Modify through Backlog CLI/MCP: `backlog/tasks/task-15117 - Fix-Quick-Ingest-repeat-ingestion-and-queued-job-recovery.md`
 - Modify: `Docs/superpowers/plans/2026-07-10-quick-ingest-pr-2709-review-remediation-plan.md` status checkboxes during execution.
 
 - [x] **Step 1: Run all affected automated suites outside the sandbox**

@@ -16,6 +16,7 @@ from loguru import logger
 from .exception_types import (  # noqa: F401 - centralized compatibility exports.
     PersonaArtworkValidationError,
     PromptCatalogError,
+    ProviderUsageReservationError,
 )
 
 if TYPE_CHECKING:
@@ -184,6 +185,92 @@ class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
 
     def __init__(self) -> None:
         super().__init__("API key not found or unauthorized")
+
+
+# AuthNZ re-exports these bases so foundation code need not import AuthNZ.
+class UserRegistrationException(Exception):
+    """Base exception for user registration system."""
+
+
+class DatabaseError(UserRegistrationException):
+    """Base database exception."""
+
+
+class RollbackSignal(Exception):
+    """Trusted control-flow signal that requires transaction rollback."""
+
+
+class MembershipWriterContractError(ValueError):
+    """Raised when membership planning input violates the closed contract."""
+
+    def __init__(self) -> None:
+        super().__init__("Invalid membership writer contract.")
+
+
+class OfflineMigrationContextRejected(MembershipWriterContractError):
+    """Raised when an offline-only context reaches a serving boundary."""
+
+    def __init__(self) -> None:
+        ValueError.__init__(
+            self,
+            "Offline migration membership context is unavailable while serving.",
+        )
+
+
+class MembershipWriteError(UserRegistrationException):
+    """Base class for sanitized runtime membership-write failures."""
+
+
+class MembershipReadError(UserRegistrationException):
+    """A membership-state read failed without exposing backend details."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership state could not be read.")
+
+
+class MembershipAuthorizationError(MembershipWriteError):
+    """The persisted actor authority is insufficient for the locked scopes."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership write is not authorized.")
+
+
+class MembershipScopeNotFound(MembershipWriteError):
+    """A requested organization or team is absent or inactive."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership scope was not found.")
+
+
+class MembershipTargetNotFound(MembershipWriteError):
+    """A requested target user is absent."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership target was not found.")
+
+
+class MembershipParentRequired(MembershipWriteError):
+    """A team-add target lacks an active parent-organization membership."""
+
+    def __init__(self) -> None:
+        super().__init__("Active parent organization membership is required.")
+
+
+class MembershipPreflightChanged(MembershipWriteError):
+    """Database-derived lock inputs changed before all locks were held."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership write preconditions changed.")
+
+
+class _MembershipScopeDeletionRetry(RollbackSignal):
+    """Private signal forcing scope-deletion retry after transaction rollback."""
+
+
+class ProviderCredentialAliasConflictError(
+    ValueError, UserRegistrationException, TransactionPassthroughError
+):
+    """Raised when more than one legacy alias row exists for one provider."""
 
 
 class BuiltinCharacterSeedError(TransactionPassthroughError):
@@ -832,16 +919,6 @@ class _ParseDeadlineExceeded(Exception):
     pass
 
 
-# AuthNZ's base errors live here so foundation code can subclass them, and
-# core/AuthNZ/exceptions.py re-exports them (TASK-13950.12).
-class UserRegistrationException(Exception):
-    """Base exception for user registration system"""
-
-
-class DatabaseError(UserRegistrationException):
-    """Base database exception"""
-
-
 class AudioQuotaStoreUnavailable(DatabaseError):
     """Raised when canonical audio daily-minute quota storage is unavailable."""
 
@@ -1068,6 +1145,14 @@ class SchemaReadinessError(RuntimeError):
     Messages are fixed operator-facing reasons, never row data, so transaction
     boundaries that sanitize other failures pass this reason through.
     """
+
+
+class PGUsageSchemaError(SchemaReadinessError, TransactionPassthroughError):
+    """A hard usage-schema failure that must survive transaction translation."""
+
+    def __init__(self) -> None:
+        """Expose a fixed readiness code without native failure data."""
+        super().__init__("AUTHNZ_PG_USAGE_SCHEMA_NOT_READY")
 
 
 def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
@@ -2155,3 +2240,19 @@ class LLMQuotaExceededError(HTTPException):
         self.current = current
         self.limit = limit
         self.retry_after = int(retry_after)
+
+
+class LLMPolicyRefusal(HTTPException):
+    """A gateway pre-call policy hook refused an LLM call: always HTTP 400 (TASK-13950.13).
+
+    An ``HTTPException``, like ``LLMQuotaExceededError`` and for the same reason: endpoints report
+    a ``ChatAPIError`` as a provider failure, and most let an ``HTTPException`` through unchanged.
+    ``detail`` is client-safe text the hook author writes. It never echoes the request, the system
+    prompt or retrieved context.
+    """
+
+    retryable = False  # job workers read these, as for LLMQuotaExceededError
+    failure_code = "llm_policy_refused"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=400, detail=detail)

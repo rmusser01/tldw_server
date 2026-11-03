@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 def _chat_stub_response():
@@ -23,23 +25,11 @@ def _chat_stub_response():
 
 def _override_chat_deps(app, monkeypatch, chacha_db_path: Path):
     import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-    import tldw_Server_API.app.api.v1.schemas.chat_request_schemas as schema_chat
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
     monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", lambda **kwargs: _chat_stub_response())
-    monkeypatch.setattr(
-        chat_endpoint,
-        "API_KEYS",
-        {**(chat_endpoint.API_KEYS or {}), "openai": "test"},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        schema_chat,
-        "API_KEYS",
-        {**(schema_chat.API_KEYS or {}), "openai": "test"},
-        raising=False,
-    )
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test"}))
 
     async def _override_chacha_db_for_user(current_user=None):
         return CharactersRAGDB(db_path=chacha_db_path, client_id="test-llm-budget")

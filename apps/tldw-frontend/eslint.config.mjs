@@ -110,7 +110,7 @@ const uiFolderRules = (folder, boundaries) => ({
 // the number and add a "bump: <reason>" comment on that line.
 const frozenUiFiles = {
   "components/Option/Playground/PlaygroundForm.tsx": [7568, 7079], // bump: #3298 wave 3 growth (2c60650739)
-  "components/Sidepanel/Chat/form.tsx": [4851, 4616], // bump: #3298 wave 3 growth (2c60650739)
+  "components/Sidepanel/Chat/form.tsx": [4853, 4617], // bump: #3356 side-panel "Switch model" after a failed send (CC-02)
   "hooks/chat/useChatActions.ts": [5833, 5309], // bump: #3298 wave 3 growth (2c60650739)
   "hooks/useMessage.tsx": [4012, 3848],
   "routes/sidepanel-chat.tsx": [3293, 2782] // bump: #3298 wave 3 growth (2c60650739)

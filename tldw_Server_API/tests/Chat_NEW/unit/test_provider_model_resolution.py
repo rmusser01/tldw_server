@@ -4,12 +4,12 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import (
     build_call_params_from_request,
     invalidate_model_alias_caches,
     resolve_provider_and_model,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 
 
@@ -74,8 +74,8 @@ def test_registered_slash_provider_aliases_still_qualify_models(
     monkeypatch, alias: str, canonical: str, model: str, explicit_provider: bool
 ) -> None:
     """Registered aliases keep their existing routing and prefix stripping."""
-    monkeypatch.setattr(chat_service, "_load_alias_overrides_cached", lambda: {})
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda _: ())
+    monkeypatch.setattr(gateway, "_load_alias_overrides_cached", lambda: {})
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda _: ())
     request = ChatCompletionRequest(
         api_provider=canonical if explicit_provider else None,
         model=f"{alias}/{model}",
@@ -84,7 +84,7 @@ def test_registered_slash_provider_aliases_still_qualify_models(
     _, _, provider, selected_model, _ = resolve_provider_and_model(
         request, metrics_default_provider="openai", normalize_default_provider="openai"
     )
-    assert (chat_service._resolve_chat_provider_name(provider), selected_model) == (canonical, model)
+    assert (gateway._resolve_chat_provider_name(provider), selected_model) == (canonical, model)
 
 
 @pytest.mark.unit
@@ -247,9 +247,9 @@ def test_resolve_provider_and_model_catalog_unique_match_when_provider_not_expli
         messages=[{"role": "user", "content": "Hello"}],
     )
 
-    monkeypatch.setattr(chat_service, "_provider_has_model_cached", lambda _provider, _model: False)
+    monkeypatch.setattr(gateway, "_provider_has_model_cached", lambda _provider, _model: False)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda _model: ("ollama",),
     )
@@ -274,9 +274,9 @@ def test_resolve_provider_and_model_never_infers_a_commercial_provider_from_the_
         messages=[{"role": "user", "content": "Hello"}],
     )
 
-    monkeypatch.setattr(chat_service, "_provider_has_model_cached", lambda _provider, _model: False)
+    monkeypatch.setattr(gateway, "_provider_has_model_cached", lambda _provider, _model: False)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda _model: ("deepseek",),
     )
@@ -299,9 +299,9 @@ def test_resolve_provider_and_model_keeps_explicit_provider_even_when_catalog_di
         api_provider="openai",
     )
 
-    monkeypatch.setattr(chat_service, "_provider_has_model_cached", lambda _provider, _model: False)
+    monkeypatch.setattr(gateway, "_provider_has_model_cached", lambda _provider, _model: False)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda _model: ("deepseek",),
     )

@@ -43,8 +43,8 @@ def _pr(**kw: object) -> mq.PrState:
     return mq.PrState(**base)
 
 
-def test_the_seven_required_contexts() -> None:
-    """Six gate check runs started by approving their held pull_request runs; one license status
+def test_the_eight_required_contexts() -> None:
+    """Seven gate check runs started by approving their held pull_request runs; one license status
     dispatched on dev (spec 4.1)."""
     assert [(c.name, c.workflow, c.kind) for c in mq.CONTEXTS] == [
         ("backend-required", "backend-required.yml", "check"),
@@ -53,9 +53,10 @@ def test_the_seven_required_contexts() -> None:
         ("frontend-required", "frontend-required.yml", "check"),
         ("e2e-required", "e2e-required.yml", "check"),
         ("container-build-check", "container-build-check.yml", "check"),
+        ("E2E Critical (Tier 1 + Journeys)", "frontend-e2e-tiers.yml", "check"),
         ("frontend-license-policy/trusted/dev", "frontend-license-gate.yml", "status"),
     ]
-    assert {c.workflow for c in mq.CONTEXTS[:6]} == mq.GATE_WORKFLOWS
+    assert {c.workflow for c in mq.CONTEXTS[:7]} == mq.GATE_WORKFLOWS
     assert mq.LICENSE.name == "frontend-license-policy/trusted/dev"
     assert mq.REPO.count("/") == 1 and mq.BASE == "dev"
 
@@ -147,9 +148,9 @@ def test_context_state_table(runs: list[mq.CheckRun], state: str) -> None:
          "start", (CONTAINER,)),
     ],
     ids=[
-        "unknown-waits", "behind-rebases-and-starts-all-seven", "dirty-evicts",
+        "unknown-waits", "behind-rebases-and-starts-all", "dirty-evicts",
         "running-waits", "failed-twice-evicts", "failed-once-retries-only-that-context",
-        "missing-dispatches-only-those-contexts", "no-run-at-all-dispatches-all-seven",
+        "missing-dispatches-only-those-contexts", "no-run-at-all-dispatches-all",
         "only-cancelled-dispatches", "missing-on-a-young-head-waits", "future-dated-head-starts", "slightly-ahead-head-waits",
         "green-clean-waits", "green-unstable-waits", "stuck-green-evicts",
         "green-is-timed-from-the-last-context-to-finish",

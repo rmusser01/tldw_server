@@ -21,12 +21,12 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
     ChatConfigurationError,
     ChatProviderError,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import (
     CustomOpenAIAdapter2,
 )
@@ -140,7 +140,7 @@ def test_chat_translation_forwards_authentic_handle_to_configured_custom_adapter
         api_key="snapshot-key",
     )
 
-    provider, request, internal = chat_service._build_adapter_request_from_chat_args(
+    provider, request, internal = gateway._build_adapter_request_from_chat_args(
         {
             "api_provider": "custom-openai-api-2",
             **_request(handle),

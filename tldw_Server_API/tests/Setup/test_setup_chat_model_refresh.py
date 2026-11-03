@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import SetupProviderSaveRe
 from tldw_Server_API.app.core import config
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.custom_openai_providers import custom_openai_model_env_keys
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.Setup import setup_manager
 
 
@@ -28,6 +29,7 @@ def isolated_model_config(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_manager, "get_config_file_path", lambda: path)
     # Catalog transport is unrelated; retain a catalog-only positive control.
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: ["catalog-model"])
+    monkeypatch.setattr(gateway, "list_provider_models", chat_service.list_provider_models)
     for number in (1, 2):
         for name in custom_openai_model_env_keys(number):
             monkeypatch.delenv(name, raising=False)

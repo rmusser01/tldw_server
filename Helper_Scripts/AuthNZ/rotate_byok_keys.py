@@ -16,7 +16,7 @@ import asyncio
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_rotation import rotate_byok_secrets
+from tldw_Server_API.app.core.Provider_Credentials.byok_rotation import rotate_byok_secrets
 
 
 def _format_stats(label: str, stats) -> None:

@@ -17,13 +17,13 @@ from urllib.parse import SplitResult, parse_qsl, unquote, urlencode, urljoin, ur
 
 import httpx
 
-from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
-    LlamaCppAsset,
-    LlamaCppAssetDownloadRequest,
-)
 from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM.llamacpp_admin_schemas import (
+    LlamaCppAsset,
+    LlamaCppAssetDownloadRequest,
+)
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Setup import setup_manager
 

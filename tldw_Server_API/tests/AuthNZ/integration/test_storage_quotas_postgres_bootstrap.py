@@ -7,6 +7,10 @@ import os
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
@@ -30,9 +34,12 @@ async def test_fresh_postgres_bootstrap_supports_org_quota_upsert(
             password_hash="synthetic-hash",
             is_verified=True,
         )
-        org = await AuthnzOrgsTeamsRepo(pool).create_organization(
+        org = await AuthnzOrgsTeamsRepo(pool).create_organization_with_owner_membership(
             name="Synthetic Quota Organization",
             owner_user_id=user_id,
+            context=TrustedMembershipWriteContext(
+                trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+            ),
             slug="synthetic-quota-organization",
         )
         quotas = AuthnzStorageQuotasRepo(pool)

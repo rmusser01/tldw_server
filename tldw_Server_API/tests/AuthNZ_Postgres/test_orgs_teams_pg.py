@@ -1,6 +1,14 @@
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.mark.integration
@@ -59,15 +67,23 @@ async def test_orgs_teams_postgres(test_db_pool):
     # Use services to exercise Postgres path
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         add_team_member,
-        create_organization,
+        create_organization_with_owner_membership,
         create_team,
         list_team_members,
     )
-    org = await create_organization(name="PG Org", owner_user_id=user_id)
+    org = await create_organization_with_owner_membership(
+        name="PG Org",
+        owner_user_id=user_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert org['id'] > 0
     team = await create_team(org_id=org['id'], name="PG Team")
     assert team['org_id'] == org['id']
-    member = await add_team_member(team_id=team['id'], user_id=user_id)
+    member = await add_team_member(
+        team_id=team['id'],
+        user_id=user_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert member['team_id'] == team['id'] and member['user_id'] == user_id
     members = await list_team_members(team_id=team['id'])
     assert any(m['user_id'] == user_id for m in members)

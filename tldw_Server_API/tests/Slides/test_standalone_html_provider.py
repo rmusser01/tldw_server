@@ -77,7 +77,7 @@ EXPECTED_CLOSED_ADAPTER_MANIFEST = (
 
 
 @pytest.fixture
-def provider_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+def provider_module(monkeypatch: pytest.MonkeyPatch, standalone_provider_egress: None) -> ModuleType:
     try:
         module = importlib.import_module("tldw_Server_API.app.core.Slides.standalone_html_provider")
     except ModuleNotFoundError:

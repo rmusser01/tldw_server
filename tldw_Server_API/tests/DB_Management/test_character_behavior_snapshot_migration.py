@@ -1390,6 +1390,7 @@ def _postgres_store_db(
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
     db.client_id = "postgres-store-owner"
+    db._owner_user_id = "postgres-store-owner"
     db.db_path_str = "postgresql://recording"
     db.message_store = MessageStore(db)
     db.conversation_resume_store = ConversationResumeStore(db)

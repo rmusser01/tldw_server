@@ -13,7 +13,6 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.document_insights import (
     DocumentInsightsResponse,
     GenerateInsightsRequest,
@@ -28,6 +27,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
 )
@@ -275,7 +275,7 @@ async def generate_document_insights(
 {category_instruction}"""
 
     # 4. Resolve provider and credentials
-    provider = (DEFAULT_LLM_PROVIDER or "openai").strip().lower()
+    provider = (get_default_provider() or "openai").strip().lower()
     api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
     if provider_requires_api_key(provider) and not api_key:
         logger.error("No API key available for configured provider")

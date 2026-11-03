@@ -234,9 +234,11 @@ def test_concurrent_invalid_credential_headers_fail_before_valid_adapter_dispatc
 @pytest.mark.asyncio
 async def test_rag_runtime_openai_fallback_reaches_real_adapter_without_unrelated_secrets(monkeypatch):
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini",)))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
@@ -317,9 +319,11 @@ async def test_rag_runtime_openai_fallback_reaches_real_adapter_without_unrelate
 @pytest.mark.concurrent
 async def test_concurrent_rag_openai_fallbacks_keep_key_base_and_headers_paired(monkeypatch):
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-4o-mini",)))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as mod
     from tldw_Server_API.app.core.AuthNZ import byok_runtime
     from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (

@@ -39,7 +39,7 @@ OCR is typically enabled via the media ingestion request options. Key fields (se
 - The PDF pipeline stores structured OCR data under `analysis_details.ocr.structured` when the backend returns it.
 - Per-page OCR concurrency is capped by the smaller of `OCR_PAGE_CONCURRENCY` and the backend profile's `max_page_concurrency`.
 
-Reference (code): `tldw_Server_API/app/api/v1/schemas/media_request_models.py`.
+Reference (code): `tldw_Server_API/app/core/Ingestion_Media_Processing/media_request_models.py`, re-exported from `tldw_Server_API/app/api/v1/schemas/media_request_models.py`.
 
 ### MinerU behavior
 

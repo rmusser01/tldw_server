@@ -8,7 +8,7 @@ StudyPacks generates flashcard study packs from notes, media, and chat messages.
 - `generation_service.py` handles provider selection, prompt construction, LLM output validation, JSON repair, and flashcard persistence.
 - `jobs.py` defines job payload and enqueue helpers for background generation.
 - Related API surface: `app/api/v1/endpoints/flashcards.py`.
-- Related schemas: `app/api/v1/schemas/study_packs.py`.
+- Related schemas: `study_pack_schemas.py` owns the request models; `app/api/v1/schemas/study_packs.py` re-exports them and holds the response models.
 - Related tests: `tests/StudyPacks/`.
 
 ## Responsibilities
@@ -26,6 +26,7 @@ StudyPacks generates flashcard study packs from notes, media, and chat messages.
 - `generation_service.py` - generation orchestration and persistence.
 - `provenance.py` - provenance records for generated study content.
 - `jobs.py` - background job payloads and enqueue helpers.
+- `study_pack_schemas.py` - study-pack request models (`StudyPackCreateJobRequest`, `StudyPackSourceSelection`, `StudyPackSourceType`), re-exported by the API schemas.
 - `types.py` - shared dataclasses and type definitions.
 
 ## How It Connects
@@ -38,7 +39,7 @@ StudyPacks generates flashcard study packs from notes, media, and chat messages.
 
 ## Extension Points
 
-- For a new source type, extend `source_resolver.py`, `types.py`, `study_packs.py`, and source-resolution tests.
+- For a new source type, extend `source_resolver.py`, `types.py`, `study_pack_schemas.py`, and source-resolution tests.
 - For prompt or output schema changes, update `generation_service.py` and tests covering validation and repair.
 - For provenance changes, inspect `provenance.py` and storage tests before changing endpoint responses.
 - For background job behavior, update `jobs.py`, `study_pack_jobs_worker.py`, and job-worker tests together.

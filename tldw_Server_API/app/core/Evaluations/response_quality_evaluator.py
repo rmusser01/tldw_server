@@ -20,9 +20,6 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
@@ -35,6 +32,9 @@ from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
     analyze,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
 )
 
 _QUALITY_RATING_FORMAT = (

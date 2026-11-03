@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatProviderError,
     ChatRateLimitError,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
 )
@@ -830,11 +831,12 @@ def _install_real_health_chat_capacity_boundary(
         raising=False,
     )
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: _Registry({"openai": chat_adapter}),
     )
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
         admin_llm_providers,
         "_provider_health_timeout_seconds",

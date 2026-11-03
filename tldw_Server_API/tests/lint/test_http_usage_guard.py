@@ -238,6 +238,11 @@ def test_outbound_http_goes_through_core_http_client() -> None:
 # pairs that spell the key are not seen. Other scope carriers (``required_endpoint_scope=``, ``TrustedProviderEndpoint(scope=...)``,
 # ``provider_credential_runtime``) are gated through the allowlisted adapters they feed.
 SCOPE_ALLOWLIST: dict[str, str] = {
+    "tldw_Server_API/app/core/MCP_unified/adapters/model_completion/transport.py": (
+        "scope from the frozen operator-selected model endpoint and its captured server config; "
+        "credential URL overrides are rejected and the issued endpoint identity must match exactly "
+        "before the single bounded dispatch. Never derived from prompt/tool arguments or a response URL."
+    ),
     "tldw_Server_API/app/api/v1/endpoints/llm_providers.py": (
         "scope built from the configured provider endpoint URL for the provider calls it makes."
     ),
@@ -295,7 +300,7 @@ SCOPE_ALLOWLIST: dict[str, str] = {
         "allow_private_network), or an admin BYOK base_url when audio_cpp is in "
         "BYOK_ALLOWED_BASE_URL_PROVIDERS."
     ),
-    "tldw_Server_API/app/core/Chat/chat_service.py": (
+    "tldw_Server_API/app/core/LLM_Calls/gateway.py": (
         "model-discovery scope from provider_model_inventory.inventory_endpoint_scope: only the provider base "
         "the server's own config and environment resolve to; caller app config, BYOK and per-request bases "
         "get no scope."

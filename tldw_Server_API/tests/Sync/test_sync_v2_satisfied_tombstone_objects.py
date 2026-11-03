@@ -40,6 +40,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
@@ -133,6 +134,7 @@ def client(monkeypatch: pytest.MonkeyPatch, chacha_db: CharactersRAGDB, sync_ser
 @pytest.fixture()
 def notes_client(monkeypatch: pytest.MonkeyPatch, chacha_db: CharactersRAGDB, sync_service: SyncV2Service) -> TestClient:
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(notes_endpoint.router, prefix="/api/v1/notes")
 
     async def _db_override():

@@ -6,6 +6,7 @@
  * to the server's default model, and a successful answer makes it "Working".
  */
 import {
+  act,
   createFakeTldwServer,
   FAKE_MODEL,
   FAKE_PROVIDER,
@@ -16,10 +17,12 @@ import {
   sendFromComposer,
   waitFor,
   waitForChatIdle,
+  within,
   type PlaygroundView
 } from "./harness/playground-harness"
 import { beforeEach, describe, expect, it } from "vitest"
 import { resetChatModelSendOutcomes } from "@/utils/chat-model-readiness"
+import { useStoreMessageOption } from "@/store/option"
 
 const OLLAMA_MODEL = "llama3.2:3b"
 
@@ -112,6 +115,54 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
     expect(String(requests.at(-1)?.body?.api_provider)).toMatch(/custom[-_]openai[-_]api/)
     await waitFor(() => expect(modelChip()).toHaveAccessibleName(/Working/), HARNESS_WAIT)
     expect(screen.queryByTestId("model-readiness-switch")).toBeNull()
+  })
+
+  it.each([
+    ["a saved chat", false],
+    ["a temporary chat", true]
+  ])("CC-N2: a provider failure in %s names the model, not the tldw server", async (_label, temporary) => {
+    const server = twoProviderServer()
+    const view = await renderPlayground({ server, persistedModel: `ollama:${OLLAMA_MODEL}` })
+    if (temporary) act(() => useStoreMessageOption.getState().startNewChatDraft(true))
+    server.planCompletion({
+      status: 502,
+      errorBody: {
+        detail: {
+          error_code: "provider_unavailable",
+          message: "The chat service provider is currently unavailable."
+        }
+      }
+    })
+
+    await sendFailingTurn(view, "Is anyone there?")
+
+    const named = new RegExp(`Couldn't reach ${OLLAMA_MODEL.replace(/[.]/g, "\\.")} \\(Ollama\\)\\.`)
+    // Shown once: the composer banner doesn't repeat an error the transcript shows.
+    await screen.findAllByText(named, {}, HARNESS_WAIT)
+    expect(screen.getAllByText(named)).toHaveLength(1)
+    expect(screen.queryByText(/Something went wrong while talking to your tldw server/)).toBeNull()
+  })
+
+  it("CC-02: a saved chat's failed send offers Switch model, which opens the model picker", async () => {
+    const server = twoProviderServer()
+    const view = await renderPlayground({ server, persistedModel: `ollama:${OLLAMA_MODEL}` })
+    server.planCompletion({
+      status: 502,
+      errorBody: {
+        detail: {
+          error_code: "provider_unavailable",
+          message: "The chat service provider is currently unavailable."
+        }
+      }
+    })
+
+    await sendFailingTurn(view, "Is anyone there?")
+
+    const title = await screen.findByText("No reply to this message", {}, HARNESS_WAIT)
+    const card = title.closest("[role='status']") as HTMLElement
+    expect(within(card).getByRole("alert")).toHaveTextContent(`Couldn't reach ${OLLAMA_MODEL} (Ollama).`)
+    await view.user.click(within(card).getByRole("button", { name: "Switch model" }))
+    expect(await screen.findByRole("textbox", { name: "Search models" }, HARNESS_WAIT)).toBeInTheDocument()
   })
 
   it("CC-01: shows a provider the server reports as failing as Unreachable before any send", async () => {

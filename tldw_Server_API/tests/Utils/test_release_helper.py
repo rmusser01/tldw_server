@@ -73,6 +73,7 @@ def test_extract_required_check_names() -> None:
         "frontend-required",
         "e2e-required",
         "container-build-check",
+        "E2E Critical (Tier 1 + Journeys)",
     ]
 
 
@@ -411,6 +412,7 @@ class StubReleaseRunner:
             "frontend-required": "success",
             "e2e-required": "success",
             "container-build-check": "success",
+            "E2E Critical (Tier 1 + Journeys)": "success",
         }
         self.release_state = "fresh"
         self.remote_main_sha = self.origin_main_sha
@@ -985,3 +987,31 @@ def test_shell_release_runner_required_checks_reads_paginated_check_runs(
             "repos/example/repo/commits/abc123/check-runs?per_page=100",
         ]
     ]
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "green"),
+    [("success", True), ("skipped", True), ("failure", False), ("cancelled", False), ("neutral", False)],
+)
+def test_shell_release_runner_counts_a_skipped_required_check_as_passing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    conclusion: str,
+    green: bool,
+) -> None:
+    """GitHub satisfies a required check that was skipped; E2E Critical skips by design."""
+    name = "E2E Critical (Tier 1 + Journeys)"
+
+    def _fake_run_text(self: ShellReleaseRunner, args: list[str]) -> str:
+        if args[:3] == ["gh", "repo", "view"]:
+            return "example/repo"
+        return json.dumps([{"check_runs": [{"name": name, "status": "completed", "conclusion": conclusion}]}])
+
+    monkeypatch.setattr(ShellReleaseRunner, "_run_text", _fake_run_text)
+    runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
+
+    if green:
+        runner.ensure_required_checks_green("abc123", [name])
+    else:
+        with pytest.raises(RuntimeError, match="non_green"):
+            runner.ensure_required_checks_green("abc123", [name])

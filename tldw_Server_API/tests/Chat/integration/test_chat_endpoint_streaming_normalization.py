@@ -9,10 +9,12 @@ from unittest.mock import patch
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user, DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionBatchResult,
     ToolExecutionRecord,
 )
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 def _make_test_db():
@@ -151,9 +153,10 @@ def test_endpoint_streaming_normalizes_openai_sse_frames():
 
             with (
                 patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
-                patch(
-                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-                    {"openai": "sk-test"},
+                patch.object(
+                    config_llm_providers,
+                    "get_api_keys",
+                    api_keys_source({"openai": "sk-test"}),
                 ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()
@@ -234,9 +237,10 @@ def test_endpoint_streaming_normalizes_multiline_event_and_data_frames():
 
             with (
                 patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
-                patch(
-                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-                    {"openai": "sk-test"},
+                patch.object(
+                    config_llm_providers,
+                    "get_api_keys",
+                    api_keys_source({"openai": "sk-test"}),
                 ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()
@@ -306,9 +310,10 @@ def test_endpoint_streaming_emits_single_terminal_done_frame():
 
             with (
                 patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
-                patch(
-                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-                    {"openai": "sk-test"},
+                patch.object(
+                    config_llm_providers,
+                    "get_api_keys",
+                    api_keys_source({"openai": "sk-test"}),
                 ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
@@ -413,9 +418,10 @@ def test_endpoint_streaming_emits_tool_results_event_before_stream_end():
                     },
                     clear=False,
                 ),
-                patch(
-                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-                    {"openai": "sk-test"},
+                patch.object(
+                    config_llm_providers,
+                    "get_api_keys",
+                    api_keys_source({"openai": "sk-test"}),
                 ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
@@ -545,9 +551,10 @@ def test_endpoint_non_stream_auto_continue_returns_followup_assistant_content():
                     },
                     clear=False,
                 ),
-                patch(
-                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-                    {"openai": "sk-test"},
+                patch.object(
+                    config_llm_providers,
+                    "get_api_keys",
+                    api_keys_source({"openai": "sk-test"}),
                 ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
@@ -626,7 +633,7 @@ def test_endpoint_forwards_an_empty_choices_usage_chunk_only_to_a_client_that_as
         with (
             _make_test_client(db) as client,
             patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-test"}),
+            patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "sk-test"})),
             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()),
         ):
             body = {

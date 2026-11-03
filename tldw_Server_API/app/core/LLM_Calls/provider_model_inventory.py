@@ -442,7 +442,8 @@ def resolve_provider_model_selection(
     if call_policy is not None:
         if not isinstance(call_policy, ProviderCallPolicy):
             return ModelDiscoveryResult("unsupported")
-        scope = call_policy.required_endpoint_scope
+        if call_policy.required_endpoint_scope is not None:
+            scope = call_policy.required_endpoint_scope
         if call_policy.maximum_timeout_seconds is not None:
             budget = min(budget, call_policy.maximum_timeout_seconds)
     endpoint = _models_url(provider, base)
@@ -583,7 +584,8 @@ def discover_provider_models(
     """Return a complete authoritative inventory or a sanitized failure.
 
     ``configured_endpoint`` is the scope ``inventory_endpoint_scope`` gives a server-owned base; a call
-    policy's own scope replaces it, as it does for generation.
+    policy's own scope replaces it, as it does for generation. A policy without a scope (capability limits
+    only) keeps it: generation treats that policy as non-strict and calls the configured base.
 
     All pages share a five-second monotonic budget and one-attempt HTTP timeouts.
     Limits abort discovery rather than publishing a partial catalog. Only ready
@@ -607,7 +609,8 @@ def discover_provider_models(
             return ModelDiscoveryResult("unsupported")
         if call_policy.maximum_timeout_seconds is not None:
             budget = min(budget, float(call_policy.maximum_timeout_seconds))
-        scope = call_policy.required_endpoint_scope
+        if call_policy.required_endpoint_scope is not None:
+            scope = call_policy.required_endpoint_scope
     deadline = time.monotonic() + budget
     base = _safe_base_url(base_url) if base_url is not None else resolve_provider_models_base_url(provider)
     if base is None:

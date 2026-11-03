@@ -11,27 +11,18 @@ from tldw_Server_API.app.core.Persona import live_conversation as live
 
 
 def test_target_resolution_does_not_require_static_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.core.Chat import chat_service, chat_target_resolution
+    from tldw_Server_API.app.core.Chat import chat_target_resolution
 
     target = SimpleNamespace(provider="deepseek", model="deepseek-chat")
     monkeypatch.setattr(chat_target_resolution, "resolve_chat_target", lambda **kwargs: target)
-
-    def unexpected_static_credentials(*args: Any, **kwargs: Any) -> Any:
-        pytest.fail("Text must leave effective credential resolution to authenticated Chat")
-
-    monkeypatch.setattr(chat_service, "resolve_static_provider_fallback", unexpected_static_credentials)
     assert live.resolve_persona_conversation_target() is target
 
 
 def test_voice_preflight_accepts_target_without_server_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.core.Chat import chat_service
     from tldw_Server_API.app.core.LLM_Calls import adapter_utils, provider_metadata
 
     monkeypatch.setattr(
         live, "resolve_persona_conversation_target", lambda: SimpleNamespace(provider="deepseek", model="deepseek-chat")
-    )
-    monkeypatch.setattr(
-        chat_service, "resolve_static_provider_fallback", lambda provider: SimpleNamespace(api_key=None, app_config={})
     )
     monkeypatch.setattr(provider_metadata, "provider_requires_api_key", lambda provider: True)
     monkeypatch.setattr(adapter_utils, "provider_auth_is_resolved", lambda *args, **kwargs: False)

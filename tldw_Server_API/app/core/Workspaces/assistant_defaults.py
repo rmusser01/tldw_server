@@ -10,15 +10,15 @@ from fastapi import HTTPException
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
-from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
+from tldw_Server_API.app.core import feature_flags
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.Workspaces.chat_session_schemas import ChatSessionCreate
+from tldw_Server_API.app.core.Workspaces.workspace_schemas import (
     WorkspaceAssistantDefaultDegradedReason,
     WorkspaceAssistantDefaults,
     WorkspaceEffectiveAssistantDefault,
 )
-from tldw_Server_API.app.core import feature_flags
-from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 WorkspacePersonaProfileCache = dict[tuple[str, str, bool], dict[str, Any] | None]
 

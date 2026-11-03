@@ -22,7 +22,12 @@ pytestmark = pytest.mark.unit
 def _allow_synthetic_public_observability_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep the public test host reachable under CI's hostile egress allowlist."""
+    """Declare mocked host/port access independently of collection order."""
+    ports = os.getenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")
+    allowed_ports = [port.strip() for port in ports.split(",") if port.strip()]
+    if "*" not in allowed_ports and "8443" not in allowed_ports:
+        allowed_ports.append("8443")
+        monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", ",".join(allowed_ports))
     configured = os.getenv("WORKFLOWS_EGRESS_ALLOWLIST", "")
     if not configured.strip():
         return

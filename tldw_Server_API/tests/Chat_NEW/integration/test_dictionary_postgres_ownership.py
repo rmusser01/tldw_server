@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import AuthorizationDe
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import build_materialized_behavior_settings
 from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import DICTIONARY_TABLES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, InputError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import _mint
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
     single_user_cookie_client as single_user_cookie_client,
@@ -146,6 +147,7 @@ def native_catalog_chat(catalog_rows, single_user_cookie_client, monkeypatch):
     monkeypatch.setattr(character_conversation_factory, "ensure_app_config", lambda: deepcopy(CONFIG))
     monkeypatch.setattr(chat_service, "load_comprehensive_config", lambda: deepcopy(CONFIG))
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: [MODEL])
+    monkeypatch.setattr(gateway, "list_provider_models", chat_service.list_provider_models)
     old = client.app.dependency_overrides.get(get_chacha_db_for_user)
     client.app.dependency_overrides[get_chacha_db_for_user] = lambda: c.alice
     # Seed owned source data without claiming unrelated automatic-ID Character

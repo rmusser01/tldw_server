@@ -28,6 +28,70 @@ tracker. Host reboot and launchd validation are explicit manual/operator-gated
 drills; this tracker records whether those drills were run or intentionally
 skipped for a prepared-host evidence packet.
 
+## 2026-11-01: Real-VM Disposable Payload Cleanup (Accepted)
+
+- TASK-15412 ran the unchanged failure workflow on Apple Silicon arm64,
+  macOS 26.5.2 (25F84), from isolated branch
+  `codex/vz-real-cleanup-acceptance`, based on dev
+  `61d02ed484a3c80f5423676b959cf14e7b572a62`. No runtime source was edited.
+- Historical September refreshed-source/helper paths were absent. The existing
+  canonical Debian bundle was preflighted through an owned disposable VM.
+  A current guest agent was built offline and installed, using the existing
+  journal-recovering installer, into a separate offline input clone. The
+  canonical bundle was never modified or booted directly. Preparation and
+  targeted real-VM cleanup receipts are retained under
+  `~/Library/Logs/tldw-vz-real-cleanup-20261101-source/` and
+  `~/Library/Logs/tldw-vz-real-cleanup-20261101-preflight/` respectively.
+- Invocation after activating the project venv:
+
+  ```bash
+  TLDW_TEST_NO_DOCKER=1 PYTHONDONTWRITEBYTECODE=1 \
+    python tools/macos-vz-helper/scripts/vz-failure-drill.py \
+      --allow-fault-injection \
+      --source-bundle "$HOME/Library/Logs/tldw-vz-real-cleanup-20261101-source/image-store/runs/healthy-refreshed-source/bundle" \
+      --helper tools/macos-vz-helper/.build/debug/macos-vz-helper \
+      --evidence-dir "$HOME/Library/Logs/tldw-vz-real-cleanup-20261101-full"
+  ```
+
+- The command exited zero. All twelve cases met acceptance: six positive live
+  tests passed and six negative controls failed only at their intended
+  assertions after proven real execution. There were no skips, unexpected
+  failures, errors or cleanup uncertainties. Each case had empty owned VM
+  inventory and closed disk handles. All six prepared-source final comparisons
+  and the selected input before/after comparison passed before removal.
+- Default `remove-payloads` finalization removed **108 boot payload files from
+  36 invocation-owned bundles**. No `--keep-bundles` override was used.
+  Independent read-only audit verified all recorded payload names were absent,
+  each had a final SHA-256 record, both bundle/run manifests remained, and no
+  `.payload-cleanup-*` staging directories remained. Ninety manifest/build-info
+  hashes captured during finalization also matched after completion. This is
+  a logical file-removal count, not a measurement of reclaimed APFS space.
+- The original canonical rootfs remained
+  `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf`;
+  selected refreshed input rootfs remained
+  `cef38135beae00e6b517d447fb6226bdf7ebacc863b259eb63bf65c95774d01c`.
+  Both inputs are deliberately retained, not disposable run payloads.
+  Current installed guest-agent SHA-256:
+  `24db849ef1d8cabdf2bc7e8de344d431634f21541334dca6567c5af94adb9be5`.
+  Signed helper SHA-256:
+  `fffcf728bd0d1af9239c21e6bc45daa83cc14df5f479f3a3431d8db2ce1a9caa`.
+- Full receipt: `~/Library/Logs/tldw-vz-real-cleanup-20261101-full/receipt.json`,
+  SHA-256 `86ca2f4ae3c199c486da4143bf8af82f984ff34d3d1d449d2e33e9d1e57ea3d7`.
+  `independent-audit.json` records the 12-case/36-bundle/108-removal audit and
+  verification of all 70 recorded execution-input hashes. The packet retains
+  JUnit, case results, logs, provenance, the signed `helper-used`, and audit
+  script. Preparation packets retain their operator scripts.
+- Real helper teardown passed: empty VM inventory, closed handles, helper
+  shutdown, socket/PID absence and private-runtime removal. Independent
+  process/handle checks found no owned helper. No default-helper takeover,
+  Docker, host reboot, guest distribution build or historical artifact deletion
+  occurred. Portable scope: 231 passed plus two expected native opt-in skips;
+  explicit native controls: two passed. Swift: 95 passed; Go guest tests passed;
+  Ruff, Black, four canonical task-format tests, scoped Bandit and independent
+  read-only review passed. This closes the live cleanup
+  evidence gap, not host-reboot, arbitrary kernel/VZ-callback hang, workspace
+  path-escape, hostile same-UID interference or SIGKILL/host-failure guarantees.
+
 ## 2026-09-26: Initramfs Boot-Stall Workflow (Accepted)
 
 - TASK-13243.10 ran on Apple Silicon `Mac17,6`, macOS 26.5.2, in an isolated
@@ -1481,6 +1545,7 @@ triage issue.
 | Prepared-host default smoke evidence | Recorded locally on 2026-06-16 with helper daemon smoke, real ephemeral execution, same-session reuse, and recovery diagnostics/dry-run repair smoke passing. | Repeat periodically through a trusted local or host-gated run and add newer evidence packets as needed. |
 | Failure-drill evidence | Recorded locally on 2026-06-16 with drill-owned stale VM replacement and smoke-owned helper restart drill passing. | Repeat when runtime/helper recovery behavior changes; keep manual opt-in only. |
 | Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
+| Disposable boot-payload cleanup | Real twelve-case acceptance recorded on 2026-11-01: 108 boot files removed from 36 owned bundles after source verification, real VM/helper teardown and closed-handle checks; hashes, manifests and logs retained. Earlier native tiny-file controls remain separate coverage. | Repeat when allocation, teardown, ownership or deletion behavior changes. Preserve source inputs; unknown checks retain payloads and fail acceptance. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. A separate no-agent-connection startup timeout and recovery drill passed on 2026-09-25. The twelve-case workflow on 2026-09-26 additionally proved a serial-correlated initramfs PID1 stall, bounded transport timeout, cleanup, healthy recovery/reuse and same-wrapper continue control. The default smoke still does not inject faults. | Repeat the opt-in drills when the handshake or lifecycle changes. Arbitrary kernel hangs and stalled Apple VZ start callbacks remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
 | Guest-agent mismatch | The checked-in eight-case workflow on 2026-09-14 proved missing-`exec`, guest wire protocol and advertised workspace mismatch rejection, cleanup, healthy recovery and session reuse. The ten-case workflow on 2026-09-25 added real missing-agent startup absence with a normal-agent negative control. Not part of default smoke. | Repeat the opted-in workflow when handshake or admission changes. Actual mount/path-escape isolation remains a separate evidence case under the lifecycle-drill contract. |

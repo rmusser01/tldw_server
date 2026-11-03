@@ -7,7 +7,7 @@ from typing import Callable
 
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppAsset
+from tldw_Server_API.app.core.Local_LLM.llamacpp_admin_schemas import LlamaCppAsset
 from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import (
     ModelNotFoundError,

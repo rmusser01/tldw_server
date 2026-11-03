@@ -679,7 +679,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       const retained = (await pending())[0]
       await page.reload({ waitUntil: "domcontentloaded" })
       await waitForConnection(page)
-      const retainedOutcomes = page.locator("summary").filter({ hasText: /^Retained outcomes \(1\)$/ })
+      const retainedOutcomes = page.locator("summary").filter({ hasText: /^Earlier messages to review \(1\)$/ })
       const retainedPanel = page.locator("details").filter({ has: retainedOutcomes })
       await expect(retainedPanel).toHaveJSProperty("open", false)
       await retainedOutcomes.click()

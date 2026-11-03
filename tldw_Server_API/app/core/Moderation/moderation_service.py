@@ -275,10 +275,6 @@ class ModerationService:
     def _parse_rule_line(self, s: str) -> tuple[str | None, str | None, str | None, set[str] | None]:
         return self._policy_compiler.parse_rule_line(s)
 
-    @staticmethod
-    def _split_action_directive(text: str) -> tuple[str, str | None]:
-        return PolicyCompiler.split_action_directive(text)
-
     @classmethod
     def _parse_regex_expr(cls, expr: str) -> tuple[str, str] | None:
         return PolicyCompiler.parse_regex_expr(expr)
@@ -529,17 +525,6 @@ class ModerationService:
         self._log_compilation_report(result.report)
         return result.policy
 
-    def _resolve_categories_override(
-        self,
-        overrides: dict[str, object],
-        default_categories: set[str] | None,
-    ) -> set[str] | None:
-        return self._policy_compiler.resolve_categories_override(overrides, default_categories)
-
-    @staticmethod
-    def _parse_categories_override(v: object | None) -> set[str] | None:
-        return PolicyCompiler.parse_categories_override(v)
-
     @classmethod
     def _is_valid_action(cls, action: str) -> bool:
         return str(action).strip().lower() in cls._ALLOWED_ACTIONS
@@ -648,20 +633,9 @@ class ModerationService:
         out["rules"] = normalized_rules
         return out
 
-    def _compile_user_rule(self, raw_rule: object) -> PatternRule | None:
-        """Compile a per-user override rule into a PatternRule."""
-        report = PolicyCompilationReport()
-        compiled = self._policy_compiler.compile_user_rule(raw_rule, report, 0)
-        self._log_compilation_report(report)
-        return compiled
-
     def effective_policy_snapshot(self, user_id: str | None) -> dict[str, object]:
         """Return a serializable dict of the effective policy for inspection."""
         return self.get_effective_policy(user_id).to_dict()
-
-    @staticmethod
-    def _coalesce_bool(v: str | bool | None, default: bool) -> bool:
-        return PolicyCompiler.coalesce_bool(v, default)
 
     @staticmethod
     def _parse_bool_value(v: object) -> bool | None:

@@ -167,7 +167,10 @@ export function normalizeTldwModels(
       chat_provider:
         toNonEmptyProviderString(m.chat_provider) ??
         inheritedAvailability?.chat_provider,
-      provider_health: inheritedAvailability?.health
+      provider_health: inheritedAvailability?.health,
+      sampling_fields: Array.isArray(m.sampling_fields)
+        ? m.sampling_fields.filter((field: unknown): field is string => typeof field === "string")
+        : undefined
     }
   })
 }

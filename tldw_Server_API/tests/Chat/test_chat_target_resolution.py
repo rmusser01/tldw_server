@@ -372,17 +372,17 @@ def test_request_provider_identity_uses_only_unique_catalog_inference(
     catalog_providers: tuple[str, ...],
     expected_provider: str,
 ) -> None:
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     monkeypatch.setattr(target_module, "get_default_provider", lambda: "llama.cpp")
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda provider: [])
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda provider: [])
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_provider_has_model_cached",
         lambda provider, model: False,
     )
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda model: catalog_providers,
     )
@@ -404,16 +404,16 @@ def test_request_provider_identity_never_infers_over_explicit_provider(
     target_module,
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda provider: [])
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda provider: [])
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_provider_has_model_cached",
         lambda provider, model: False,
     )
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda model: ("anthropic",),
     )

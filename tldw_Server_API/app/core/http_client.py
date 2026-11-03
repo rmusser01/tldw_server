@@ -158,6 +158,7 @@ def _terminal_status_network_error(error: _TerminalHTTPStatusError) -> NetworkEr
 
 
 ResponseHeadersCallback = Callable[[int, Mapping[str, str]], Awaitable[None] | None]
+NativeReadyCallback = Callable[[], Awaitable[None]]
 
 _HTTPCLIENT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -934,6 +935,7 @@ class TransportAdapter(Protocol):
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
+        on_native_ready: NativeReadyCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
@@ -1077,10 +1079,14 @@ class HttpxAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
+        on_native_ready: NativeReadyCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncGenerator[bytes, None]:
+        native_ready_kwargs: dict[str, Any] = (
+            {"on_native_ready": on_native_ready} if on_native_ready is not None else {}
+        )
         stream = _astream_bytes_httpx(
             method=method,
             url=url,
@@ -1101,6 +1107,7 @@ class HttpxAdapter:
             raise_for_status=raise_for_status,
             verify=verify,
             configured_endpoint=configured_endpoint,
+            **native_ready_kwargs,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1228,10 +1235,13 @@ class AiohttpAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
+        on_native_ready: NativeReadyCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncGenerator[bytes, None]:
+        if on_native_ready is not None:
+            raise ValueError("Native-ready callbacks require HTTPX")
         stream = _astream_bytes_aiohttp(
             method=method,
             url=url,
@@ -5580,6 +5590,7 @@ async def _afetch_json_bounded(
     **kwargs: Any,
 ) -> Any:
     allow_redirects = bool(kwargs.pop("allow_redirects", True))
+    kwargs["max_response_bytes"] = max_bytes
     hop_headers = dict(kwargs.pop("headers", None) or {})
     hop_cookies = kwargs.pop("cookies", None)
     current_url = url
@@ -5655,8 +5666,13 @@ async def afetch_json(
     require_json_ct: bool = True,
     max_bytes: int | None = None,
     on_response: ResponseHeadersCallback | None = None,
+    on_native_ready: NativeReadyCallback | None = None,
     **kwargs: Any,
 ) -> Any:
+    if on_native_ready is not None:
+        if max_bytes is None or kwargs.get("allow_redirects") is not False:
+            raise ValueError("Native-ready callbacks require bounded JSON without redirects")
+        kwargs["on_native_ready"] = on_native_ready
     if max_bytes is not None:
         return await _afetch_json_bounded(
             method=method,
@@ -5807,12 +5823,16 @@ async def _astream_bytes_httpx(
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
+    on_native_ready: NativeReadyCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[bytes, None]:
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
+    if on_native_ready is not None:
+        if not isinstance(client, httpx.AsyncClient) or retry is None or retry.attempts != 1:
+            raise ValueError("Native-ready callbacks require explicit single-attempt HTTPX")
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -5837,7 +5857,7 @@ async def _astream_bytes_httpx(
         ac = _get_httpx_async_client(proxies=proxies, verify=verify)
         need_close = False
 
-    attempts = max(1, retry.attempts)
+    attempts = 1 if on_native_ready is not None else max(1, retry.attempts)
     t0 = time.time()
     try:
         sleep_s = 0.0
@@ -5875,6 +5895,13 @@ async def _astream_bytes_httpx(
                                 )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
+
+                if on_native_ready is not None:
+                    try:
+                        await on_native_ready()
+                    except Exception as exc:
+                        callback_error = exc
+                        raise
 
                 async with _preserve_terminal_status_during_stream_cleanup(
                     _httpx_stream_io(
@@ -6368,12 +6395,20 @@ async def astream_bytes(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    max_response_bytes: int | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
+    on_native_ready: NativeReadyCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[bytes, None]:
+    """Stream decoded bytes, optionally stopping after the first overflow byte."""
+    if max_response_bytes is not None and (type(max_response_bytes) is not int or max_response_bytes < 0):
+        raise ValueError("max_response_bytes must be a non-negative integer")
+    native_ready_kwargs: dict[str, Any] = (
+        {"on_native_ready": on_native_ready} if on_native_ready is not None else {}
+    )
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -6402,10 +6437,20 @@ async def astream_bytes(
         raise_for_status=raise_for_status,
         verify=verify,
         configured_endpoint=configured_endpoint,
+        **native_ready_kwargs,
     )
+    consumed = 0
     try:
         async for chunk in stream:
-            yield chunk
+            if max_response_bytes is None:
+                yield chunk
+                continue
+            remaining = max_response_bytes + 1 - consumed
+            bounded_chunk = chunk[:remaining]
+            consumed += len(bounded_chunk)
+            yield bounded_chunk
+            if consumed > max_response_bytes:
+                raise NetworkError("Response exceeds max_response_bytes limit")
     finally:
         close = getattr(stream, "aclose", None)
         if close is not None:

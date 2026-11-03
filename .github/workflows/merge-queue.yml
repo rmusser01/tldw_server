@@ -44,7 +44,7 @@ jobs:
       contents: write
       pull-requests: write
       actions: write
-      # read: the six required check runs and the license commit status on the front PR's head.
+      # read: the seven required check runs and the license commit status on the front PR's head.
       checks: read
       statuses: read
     steps:

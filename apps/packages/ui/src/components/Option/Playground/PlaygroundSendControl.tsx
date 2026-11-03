@@ -249,8 +249,6 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             "playground:documentProcessing.preparingForSend",
             "Preparing documents"
           )
-      : shouldQueuePrimaryAction
-      ? t("common:queue", "Queue")
       : sendLabel
     const isMac =
       typeof navigator !== "undefined" &&
@@ -277,7 +275,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             "Conversation history isn't ready yet. Wait for it to load, or start a new chat."
           ) as string)
       : shouldQueuePrimaryAction
-        ? (t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string)
+        ? (t("playground:composer.queue.primaryWhileBusy", "Sends your message after the current reply finishes.") as string)
         : sendWhenEnter
           ? (t(
               "playground:composer.submitAriaEnter",
@@ -299,7 +297,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       : shouldQueuePrimaryAction
         ? (t(
             "playground:composer.queue.primaryAria",
-            "Queue request"
+            "Send after this reply"
           ) as string)
         : (t(
             "playground:composer.submitAria",

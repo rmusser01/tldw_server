@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
@@ -40,8 +41,9 @@ def anthropic_inventory(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         lookups.append(kwargs["url"].rsplit("/", 1)[-1])
         return SimpleNamespace(status_code=404, json=lambda: {}, close=lambda: None)
 
-    monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.anthropic.com/v1")
+    monkeypatch.setattr(gateway, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.anthropic.com/v1")
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_a, **_k: ModelDiscoveryResult("ready", _LISTED))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     monkeypatch.setattr(provider_model_inventory, "_http_fetch", lookup)
     return lookups
 

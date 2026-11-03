@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     is_runtime_issued_provider_call_credentials,
 )
 from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.LLM_Calls import gateway
 
 pytestmark = pytest.mark.integration
 
@@ -60,6 +61,7 @@ def healthy_override_cache_between_tests(monkeypatch):
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: SimpleNamespace(
         status="ready", models=("claude-3-sonnet-20240229", "claude-3-5-sonnet-latest", "gpt-4o-mini"),
     ))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     try:
         yield
     finally:

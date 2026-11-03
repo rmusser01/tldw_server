@@ -1182,7 +1182,7 @@ describe("PlaygroundForm image prompt refinement modal integration", () => {
       screen.getByTestId("composer-textarea"),
       "Queue this while offline"
     )
-    await user.click(screen.getByRole("button", { name: "Queue request" }))
+    await user.click(screen.getByRole("button", { name: "Send after this reply" }))
 
     expect(onSubmitMock).not.toHaveBeenCalled()
     const queuedUpdate =

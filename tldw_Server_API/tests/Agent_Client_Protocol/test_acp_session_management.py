@@ -424,7 +424,7 @@ def test_acp_record_audit_event_sanitizes_persistence_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_permission_response_audit_records_policy_snapshot_fingerprint(monkeypatch):
+async def test_permission_response_audit_records_policy_snapshot_fingerprint(monkeypatch, admitted_permission_prompt):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
     from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
         ACPRunnerClient,
@@ -442,6 +442,8 @@ async def test_permission_response_audit_records_policy_snapshot_fingerprint(mon
     client = ACPRunnerClient(cfg)
     session_id = "audit-session"
     request_id = "perm-1"
+    client._session_owners[session_id] = 7
+    await admitted_permission_prompt(client, session_id)
     future = asyncio.get_running_loop().create_future()
 
     registry = SessionWebSocketRegistry(session_id=session_id)
@@ -457,6 +459,7 @@ async def test_permission_response_audit_records_policy_snapshot_fingerprint(mon
         governance_reason="policy_approval_required",
     )
     client._ws_registry[session_id] = registry
+    client._active_prompts[session_id].permission_ids.add(request_id)
 
     recorded: list[dict[str, object]] = []
 
@@ -492,9 +495,14 @@ async def test_permission_response_audit_records_policy_snapshot_fingerprint(mon
     assert recorded
     event = recorded[-1]
     assert event["action"] == "permission_response"
+    assert event["user_id"] == 7
+    assert event["session_id"] == session_id
     assert event["metadata"]["approved"] is True
     assert event["metadata"]["policy_snapshot_fingerprint"] == "snapshot-audit-123"
     assert event["metadata"]["approval_requirement"] == "approval_required"
+    assert future.result() == {"outcome": "approved"}
+    assert request_id not in registry.pending_permissions
+    assert request_id not in client._active_prompts[session_id].permission_ids
 
 
 @pytest.mark.asyncio

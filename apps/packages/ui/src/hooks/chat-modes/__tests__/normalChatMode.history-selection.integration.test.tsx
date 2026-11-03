@@ -853,7 +853,8 @@ it.each([
   const entry = (await loadHistoryTurnRecoveries(current.bookmarkScope!, current.view!))[0]
   expect(entry.turn).toMatchObject({ state: "accepted_unsent", input_id: "first-user", input_text: question, result_text: "" })
   const guidance = startupTimeout
-    ? "The model did not start responding in time. Retry, or adjust Chat startup timeout in Settings → tldw server → Advanced timeouts."
+    // CM-06: a reply that never started names its model and the wait.
+    ? "No response from test after 120 seconds. Retry, or adjust Chat startup timeout in Settings → tldw server → Advanced timeouts."
     : "Something went wrong while talking to your tldw server. Try again in a moment, or open Health & diagnostics to inspect server health."
   const review = render(<HistorySelectionReview selection={reopened.result.current} />)
   expect(screen.getByRole("alert").textContent).toBe(guidance)
@@ -1885,9 +1886,9 @@ describe("normal Chat owned history creation and H1 admission", () => {
     if (replay === "saved") {
       await waitFor(() => expect(controller.recoveries).toEqual([]))
       expect(await loadHistoryTurnRecoveries(scope, savedView)).toEqual([])
-      expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
+      expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
     } else {
-      expect(await screen.findByText("Turn needs review")).toBeInTheDocument()
+      expect(await screen.findByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).toBeInTheDocument()
       expect(screen.getByText(assistant.content)).toBeInTheDocument()
       expect(controller.getCurrent()).toMatchObject({
         status: "stale_selection", settingsQualified: true,
@@ -1900,7 +1901,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
       expect(await screen.findByText("Could not keep this reply. The original recovery is retained for review."))
         .toBeInTheDocument()
       expect(await loadHistoryTurnRecoveries(scope, savedView)).toHaveLength(1)
-      expect(screen.getByText("Turn needs review")).toBeInTheDocument()
+      expect(screen.getByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).toBeInTheDocument()
     }
     expect(capture.mock.calls.some(([, request]) =>
       request.required_capability === "tldw_history_existing_input_v1" &&

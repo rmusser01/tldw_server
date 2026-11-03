@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from tldw_Server_API.app.api.v1.endpoints import messages
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory as inventory
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import AuditedCallPolicyTransport
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
@@ -56,8 +57,9 @@ def boundary(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) ->
             enforces_maximum_timeout=True,
         ),
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "discover_provider_models", inventory.discover_provider_models)
+    monkeypatch.setattr(gateway, "discover_provider_models", inventory.discover_provider_models)
     monkeypatch.setattr(inventory, "_http_fetch", fetch)
     return state
 
@@ -206,6 +208,17 @@ def test_alias_lookup_respects_audited_endpoint_and_deadline(boundary: SimpleNam
     for call in boundary.http:
         assert call["configured_endpoint"] == policy.required_endpoint_scope
         assert 0 < call["timeout"] <= 0.5
+
+
+def test_alias_lookup_keeps_the_operator_scope_under_a_scopeless_policy(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A policy with no endpoint scope leaves the server-owned gateway's scope on list and lookup alike."""
+    gateway_base = "http://127.0.0.1:4000/v1"
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", gateway_base)
+    _generate(boundary, "anthropic", "claude-current-alias", call_policy=ProviderCallPolicy(allow_tools=False))
+    assert len(boundary.adapter.calls) == 1
+    assert [call["configured_endpoint"] for call in boundary.http] == [ConfiguredEndpointScope.from_url(gateway_base)] * 2
 
 
 @pytest.mark.asyncio

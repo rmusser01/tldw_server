@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from tldw_Server_API.app.api.v1.schemas.buddy_turns import BuddyTurnCreate
+from tldw_Server_API.app.core.Buddy.buddy_schemas import BuddyTurnCreate
 from tldw_Server_API.app.core.Buddy.publication import BuddyPublication, current_buddy_publication
 from tldw_Server_API.app.core.Buddy.service import BuddyService
 from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BuddyTurnRepository

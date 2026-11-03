@@ -27,6 +27,7 @@ import type {
   SaveMessageErrorData
 } from "@/types/chat-modes"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { formatChatModelLabel } from "@/utils/chat-model-label"
 import { applyMcpModuleDisclosureFromToolCalls } from "@/utils/mcp-disclosure"
 import {
   buildMessageVariant,
@@ -648,7 +649,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         throw new Error("request_config_scope_changed")
       historyTurn.selection = selection
       historyTurn.input = input
-      historyTurn.replyModel = { name: selectedModel, id: resolvedModelId }
+      historyTurn.replyModel = {
+        name: selectedModel,
+        id: resolvedModelId,
+        label: formatChatModelLabel({ modelId: rawSelectedModel })
+      }
       await historyTurn.beforeDispatch?.()
       context.assertPreparationCurrent?.()
       if (!historyTurn.validateLease() || signal.aborted)
@@ -1418,7 +1423,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     }
     const assistantContent = isAbort
       ? fullText
-      : buildAssistantErrorContent(fullText, e)
+      : buildAssistantErrorContent(fullText, e, {
+          modelLabel: formatChatModelLabel({ modelId: rawSelectedModel })
+        })
     const assistantErrorDynamicUIEnvelope =
       params.dynamicUIRequest?.renderer === "openui"
         ? buildDynamicUIEnvelope("openui", assistantContent)

@@ -10,7 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.research_runs_schemas import (
+from tldw_Server_API.app.core.Research.research_runs_schemas import (
     ResearchArtifactManifestEntry,
     ResearchCheckpointSummary,
     ResearchRunResponse,

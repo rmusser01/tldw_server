@@ -94,7 +94,7 @@ class ChatProvider(ABC):
 
     def _validate_model_inventory(self, request: dict[str, Any], refreshable_oauth: bool = False) -> None:
         """Cover direct adapter callers as well as the ordinary Chat dispatcher."""
-        from tldw_Server_API.app.core.Chat.chat_service import (
+        from tldw_Server_API.app.core.LLM_Calls.gateway import (
             _call_policy_after_model_discovery,
             _validate_provider_model_selection,
         )

@@ -304,6 +304,8 @@ export const prepareChatCompletionRequest = (
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
+        topk: options.topK,
+        minp: options.minP,
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {
@@ -349,6 +351,9 @@ export interface TldwChatOptions {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  /** Sent only when the provider accepts it; see ChatTldw (#3283). */
+  topK?: number
+  minP?: number
   stream?: boolean
   systemPrompt?: string
   reasoningEffort?: "low" | "medium" | "high"
@@ -471,6 +476,8 @@ export class TldwChatService {
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
+        topk: options.topK,
+        minp: options.minP,
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {

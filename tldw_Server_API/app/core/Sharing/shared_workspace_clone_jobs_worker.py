@@ -20,9 +20,6 @@ from uuid import UUID
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
-    SharedWorkspaceCloneResult as SharedWorkspaceCloneResultModel,
-)
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     TerminalOperationResultPatchCommand,
@@ -63,6 +60,9 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
     parse_clone_publication_abort,
     parse_clone_publication_checkpoint,
     target_workspace_id,
+)
+from tldw_Server_API.app.core.Sharing.shared_workspace_recipient_schemas import (
+    SharedWorkspaceCloneResult as SharedWorkspaceCloneResultModel,
 )
 
 _PAYLOAD_FIELDS = frozenset(

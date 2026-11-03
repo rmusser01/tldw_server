@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -56,8 +57,14 @@ def test_sqlite_acquire_runs_success_observers_after_operation_returns(
         command: Any,
         counters_enabled: bool,
         now: Any,
+        decode_payload: Callable[..., Any] | None = None,
     ) -> LifecycleResult:
-        captured.update(command=command, counters_enabled=counters_enabled, now=now)
+        captured.update(
+            command=command,
+            counters_enabled=counters_enabled,
+            now=now,
+            decode_payload=decode_payload,
+        )
         observed.append("operation-returned")
         return LifecycleResult.applied(
             row={
@@ -92,6 +99,7 @@ def test_sqlite_acquire_runs_success_observers_after_operation_returns(
     assert acquired is not None
     assert acquired["payload"] == {"value": 1}
     assert acquired["lease_id"] == captured["command"].lease_id
+    assert captured["decode_payload"] == manager._maybe_decrypt_json
     assert observed == ["operation-returned", "latency", "gauge", "event"]
 
 
@@ -485,12 +493,14 @@ def test_postgres_acquire_runs_success_observers_after_operation_returns(
         command: Any,
         counters_enabled: bool,
         now: Any,
+        decode_payload: Callable[..., Any] | None = None,
     ) -> LifecycleResult:
         captured.update(
             command=command,
             counters_enabled=counters_enabled,
             cursor_factory=cursor_factory,
             now=now,
+            decode_payload=decode_payload,
         )
         observed.append("operation-returned")
         return LifecycleResult.applied(
@@ -526,6 +536,7 @@ def test_postgres_acquire_runs_success_observers_after_operation_returns(
     assert acquired is not None
     assert acquired["payload"] == {"value": 1}
     assert acquired["lease_id"] == captured["command"].lease_id
+    assert captured["decode_payload"] == manager._maybe_decrypt_json
     assert captured["cursor_factory"] == manager._pg_cursor
     assert captured["command"].priority_direction == "DESC"
     assert captured["command"].tie_break == "lifo"

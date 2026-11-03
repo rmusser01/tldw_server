@@ -50,6 +50,7 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
 )
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, get_password_service
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
@@ -99,7 +100,6 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.services.registration_service import RegistrationService, get_registration_service
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 # Narrowed exception tuple for auth dependency safety (BLE001)
 _AUTH_DEPS_NONCRITICAL_EXCEPTIONS = (
@@ -189,8 +189,10 @@ def _read_non_negative_float_env(name: str, default: float) -> float:
     return max(parsed, 0.0)
 
 
-def _authnz_busy_http_exception(retry_after_seconds: int) -> HTTPException:
-    """Create a consistent 503 response for temporary AuthNZ DB contention."""
+def _authnz_busy_http_exception(retry_after_seconds: int | None = None) -> HTTPException:
+    """Create a consistent 503, resolving live policy when no retry is supplied."""
+    if retry_after_seconds is None:
+        retry_after_seconds = get_authnz_transaction_policy().busy_retry_after_seconds
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Authentication database is busy. Please retry shortly.",
