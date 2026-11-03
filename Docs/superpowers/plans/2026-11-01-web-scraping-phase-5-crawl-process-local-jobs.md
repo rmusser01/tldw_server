@@ -1192,6 +1192,18 @@ persistent/duplicate receipts, ingestion receipts, and owned progress/job views.
 Keep separate service operation status and storage disposition. Bare-list internal
 consumers use established failure list or `CrawlInterrupted`, never discard outcome.
 
+**Projection Ownership Clarification (2026-11-03):**
+Project an aggregate crawl outcome where that report is actually owned: service
+task progress, envelopes and receipts. Existing queue jobs are individual pages,
+not service-operation/crawl jobs; their live controls are deliberately cleared
+after physical drain and are absent from safe polling/history copies. Do not
+infer an aggregate outcome from a page's status, retain live controls for polling,
+or add a job-to-crawl registry to manufacture that association. The existing
+optional typed `public_job(..., crawl_outcome=...)` uses the common projection
+when an owning caller actually supplies an outcome; standalone page-job status
+keeps its established contract. This clarifies the existing ownership boundary,
+not a new aggregate job API or a removal of progress/receipt data.
+
 HTTP failures without articles: overload/stopping/transport 503; policy 403;
 deadline 504; budget 429; payload 413; sanitized unexpected/checkpoint failure 500.
 Partial articles stay available; only active callers may summarize/store successful
