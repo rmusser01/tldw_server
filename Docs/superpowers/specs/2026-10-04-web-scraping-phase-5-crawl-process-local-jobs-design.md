@@ -3,7 +3,7 @@
 **Date:** 2026-10-04
 **Last amended:** 2026-11-01
 **Status:** Approved by the human requester on 2026-11-01
-**Task:** TASK-15282
+**Task:** TASK-15431
 **Implementation:** Not started; implementation-plan approval and execution-method selection required
 **Code baseline:** `75ab224081bf140ef52017c1a9b0a04f6878d488` (`origin/dev` inspected on 2026-10-04)
 **Integration check:** `54b321dcec8cdbb6358581f42c1548696260570b` inspected on 2026-11-01; design branch not rebased
@@ -662,7 +662,7 @@ incomplete traversal. Bounded internal producer pacing is not admission waiting.
 These choices preserve successful return shapes and collected data while removing
 ambiguous success reporting. They are design decisions, not implemented behavior.
 
-The design task is now TASK-15282 and its proposed decision is ADR-093. Replacement
+The design task is now TASK-15431 and its proposed decision is ADR-093. Replacement
 numbers were checked against refreshed `origin/dev` and every changed-file page
 of all open PRs, including PRs with more than 100 files. The original dated task
 history is retained under the new task identity. No unrelated task or ADR was
