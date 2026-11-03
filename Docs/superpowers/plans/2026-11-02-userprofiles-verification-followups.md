@@ -291,3 +291,56 @@ Check Python3.12 shard result step, not a new executable test. Final exact-head
 record review, authorized source publication and fresh automatic required checks
 remain. Task15413 is In Progress; prior broad-suite/Skills/OAuth limitations
 remain explicit. No merge, CI retry/dispatch or old-head check transfer.
+
+## November 3 Latest-Dev Integration
+
+Published d2cbae's eight actual required checks succeeded, but authoritative dev
+advanced to576feef820e6521f021e6f57c82c24df2429b901. The PR is still open,
+unmerged and unarmed; no stale-head merge was attempted. Only this next-to-merge
+verification branch was rebased, not unfinished WP4 runtime work. Backup
+codex/userprofiles-verification-pre-576feef preserves exact d2cbae; ref updates
+and autostash were disabled. Local560451aeae608174f4c0fe3a33852bd6d1a4ec05
+is unpublished and requires a bounded independent integration review.
+
+All13 patches replay range-diff equal. Of406 upstream paths,405 match dev by
+object/type/mode; the combined AuthNZ WebSocket matrix preserves upstream's
+container-owned JWT reset and the reviewed real-ACP/credential controls. All
+28613 other approved leaf entries, including eight UI artifacts, remain exact.
+No new runtime, workflow, dependency, schema or policy change is introduced by
+this integration. Full proof is retained at
+/private/tmp/userprofiles15413-dev576-preservation.mjs and its log.
+
+Separate overlapping fresh controls, not one aggregate suite: four affected
+HTTP/AuthNZ/ACP/backup files366pass/2998warnings; Slides/database-owner224pass/
+684warnings; complete plugin/audio controls86pass/383warnings; official isolated
+VN resolver12pass (six actual PostgreSQL plus six SQLite),61deselected/
+379warnings; two official PostgreSQL benchmark cases2pass/18warnings. No skips
+in those runs. PostgreSQL runs were serial against the existing configured
+cluster with official temporary databases, no lifecycle or server-setting edits.
+An initial incorrect ACP path stopped exit4 before collection; the corrected
+four-file command is the366-pass result, not a hidden product failure.
+
+All nine touched Python paths pass Ruff/compile/diff. Unfiltered Bandit ignoring
+nosec against exact dev reports647->662B101 test assertions, unchanged4B105/
+3B106/2B608 contexts and zero errors/new nonassert findings; scans exit1 for
+retained findings, not a clean scan. Full quality5368 baseline unchanged and
+shard870/5368/fourignored/baseline44/new0 pass. The byte-identical embedded VN
+script carries its earlier reviewed security evidence, not a newly claimed scan.
+
+New nonrequired d2cbae infrastructure shard125613616538/run41543048234 failed
+the registry weakref lifetime case (488 other passes,128warnings); full-suite
+aggregate failure is consequent. Test/runtime inputs match current dev. Local
+unchanged focused4pass/20warnings and configured full shard489pass/1030warnings
+do not explain the remote failure or establish harmlessness. No speculative
+runtime fix, collection loop, sleep, skip, retry, exclusion or policy change.
+
+Independent latest-dev/exact-head review is not yet available: the agent review
+attempt hit account usage limits before producing a report. Existing own-source
+approvals carry unchanged content but do not approve this unseen integration.
+No review is fabricated or replaced by author self-review, and no credits or
+reviewer service were purchased. This checkpoint stays local until that gate
+is met. Fresh automatic published-head checks remain necessary afterward;
+d2cbae's green statuses cannot qualify the rebased head. TASK15413 stays In
+Progress, AC4 open. Earlier broad-suite and Skills/OAuth limits remain explicit.
+Logs use /private/tmp/userprofiles15413-dev576-*; no unchanged UI suites or
+whole-PR review were restarted merely for pending CI.
