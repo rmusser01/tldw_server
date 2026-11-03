@@ -257,11 +257,29 @@ wall =440.637ms pre-scope import/setup +78.787ms shared scoped decision/redactio
 `public research [REDACTED]` result. Log:
 `/tmp/moderation-task5-cold-diagnostic.jsonl`. The quieter uninstrumented recheck
 is `/tmp/moderation-task5-cold-recheck.jsonl`. These do not erase the first sample
-or prove its split. Parent must decide cold-start/setup scope expectations;
-no actual scoped legitimate deadline failure was observed, no limit was tuned,
+or prove its split. No actual scoped legitimate deadline failure was observed,
+no limit was tuned,
 and no Task4 runtime fix or design amendment was implemented or is needed from
 the observed79ms scoped diagnostic. The first wall-time sample is retained for
 clarity, not presented as a request to widen approved bounds.
+
+### Deadline Boundary Ruling
+
+Task5 fix round1/3 records the parent's interpretation of the binding service
+operation wording (focused spec lines125-129/151-154 and service boundary654):
+the two-second deadline begins at execution-scope entry, before admission and
+serialization, and is shared across child startup and decision/redaction batches.
+It is not an end-to-end HTTP/public-call wall-clock guarantee including first
+trusted module initialization, failure reporting or kernel cleanup. API lifecycle
+preparation loads/prepares the incident reporter before traffic. The operator
+README table and adjacent guidance now name this boundary explicitly.
+
+The 2063.809 ms cold sample remains unpartitioned; the later 78.787 ms scoped
+diagnostic is a separate call and cannot explain the earlier sample. Neither
+justifies widening the approved deadline or limits. This is documentation of the
+parent ruling, not a runtime/spec/ADR/cap change. Cost if the interpretation is
+wrong: stricter direct-embedding latency requirements need separate review; the
+parent's final whole-branch review will judge that interpretation.
 
 Actual `StreamingResponseHandler.safe_stream_generator`, ten24-character chunks,
 three samples: unchecked median0.337ms, checked median832.436ms, approximately
