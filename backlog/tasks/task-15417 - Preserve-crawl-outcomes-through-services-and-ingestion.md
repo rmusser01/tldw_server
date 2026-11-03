@@ -1,7 +1,7 @@
 ---
 id: TASK-15417
 title: Preserve crawl outcomes through services and ingestion
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - phase5
@@ -15,9 +15,9 @@ Execute Task 10 of the approved Phase 5 plan as an independently reviewable unit
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 10 behavior and interfaces match the approved spec and plan.
-- [ ] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
-- [ ] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
+- [x] #1 Task 10 behavior and interfaces match the approved spec and plan.
+- [x] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
+- [x] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -31,12 +31,13 @@ Author committed8307be613b; final-source270pass/0skip, amended-boundary355pass/0
 Fresh task10 reviewer Sagan NEEDSFIXES one Important I1: malformed nested stored articles [None] or [] after a valid partial receipt raise AttributeError/ValueError outside outcome attachment; storage released but HTTP500 loses known terminal outcome. Preserve validated exact3key outcome across all normalization/consistency failures, exception types/cancellation/release unchanged; endpoint-level RED/GREEN required. All other reviewed ownership/compatibility/architecture coherent, aggregate page-job clarification accepted on merits. Original author Lagrange resumed fixround1/3 BASE2987eec27f; Task10 remains In Progress. No freshdev/metadata integration yet.
 I1 repair started at reviewed HEAD2987eec27f, original Task10 BASE9feeaee6c7 retained. Read task-10-review.md verbatim and verified lookup-only exception handler leaves reconstruction outside the boundary. TDD endpoint payloads [None] and [] with valid partial receipt, plus exact exception/cleanup checks; extend only existing ingestion failure boundary. Preserve controller aggregate ownership clarification, no new registry or architecture. Existing controller I1 task note retained. Report/interim will carry exact amended-source verification and scoped fix commit; fresh narrow re-review required.
 I1 repair complete for narrow re-review, not accepted. BASE2987eec27f; original Task10 BASE9feeaee6c7 preserved. Two real HTTP malformed nested payloads [None]/[] plus AttributeError/ValueError+cleanup checks observed RED4fail (/tmp/task10-i1-red.log), GREEN4pass (/tmp/task10-i1-green.log); supplementary cancellation/cleanup check added. Existing ingestion helper now retains validated known receipt outcome through full unwrap/normalization/consistency boundary and releases enhanced/legacy storage in one finally; original exceptions and CancelledError remain unchanged, no manufactured completion/empty-success. Final amended-source covering195passed0skipped3682warnings141.33s (/tmp/task10-i1-covering.log): ingestion15, crawl outcomes52, Task4security25, legacy ingest16, friendly flags5, summaryHTTP82. Changed-scope Ruff/format/compile/diff and normal explicit hooks PASS; Bandit changed production file0findings0errors0nosec0skipped. Helper43ASTlines, existing ingestion364 unchanged; no ceiling changes. Only service web_scraping_service.py, existing phase5_ingestion_outcomes tests, and this child record in fix commit. Report I1 append contains exact commands/output and original failure history. Accepted aggregate ownership clarification unchanged; no plan/ledger/controller source edits, no new subsystem/dependency/rebase/push/merge. Fresh narrow re-review required.
+Task10 independently accepted: fullreview9feeaee6c7..2987eec27f coherent spec/quality exceptI1; freshI1review2987eec27f..a864ccb315 ADDRESSED/no new findings. Final-source270pass,amended355pass,postcommit87pass beforefix; finalfixcovering195pass3682warnings141.33s andpostcommit15pass85warnings10.84s,0skips. AllscopedRuff/format/compile/diff/hooks/Bandit0. All owned service size ceilings restored without raising. Current sourcea864ccb315; page-job ownership clarification accepted, no invented registry. Stage4remainsTask11 integration/certification; oldarxiv/httpx2 failures alreadyfixedonfreshdev not duplicated. No publish/merge.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task10 I1 repaired for fresh narrow re-review. Validated known terminal outcome survives malformed nested payload/consistency failures with exact sanitized HTTP500 detail, original exception types and cancellation/cleanup preserved. TDD4RED->4GREEN; final amended-source195passed0skipped; scoped quality/normal hooks clean and Bandit0. No Task10 acceptance claim.
+Services consume canonical reports before summaries/storage and preserve immutable outcomes independently of operation/storage status through all receipts and owned progress. Retained existing prompts, metadata, cookies, deduplication, public lists and failure shapes. Managed DB writes drain after cancellation without starting later writes; entered shutdown owns startup-through-cleanup. Malformed nested receipts retain known validated outcomes while preserving original exceptions and releasing storage. Independently reviewed; final integration and certification remain Task11.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
