@@ -287,7 +287,7 @@ def test_mounted_http_single_user_test_api_key_rejected_when_test_mode_false(
     assert metadata.get("auth_via") != "single_user_test_api_key"
 
 
-def test_mounted_http_single_user_test_api_key_attaches_test_metadata_with_guard(
+def test_mounted_http_single_user_test_api_key_rejected_in_test_mode(
     monkeypatch: pytest.MonkeyPatch,
 ):
 
@@ -306,16 +306,17 @@ def test_mounted_http_single_user_test_api_key_attaches_test_metadata_with_guard
     with build_mcp_test_client() as client:
         response = client.post(
             "/api/v1/mcp/request",
-            json={"jsonrpc": "2.0", "method": "tools/list", "id": "http-test-list"},
+            json={"jsonrpc": "2.0", "method": "tools/list", "id": "http-test-reject"},
             headers={"X-API-KEY": test_key},
         )
 
     assert response.status_code == 200
-    assert response.json()["result"] == {"tools": []}
+    body = response.json()
+    assert body["error"]["code"] == -32001
+    assert server.calls[-1]["user_id"] is None
     metadata = server.calls[-1]["metadata"]
-    assert metadata["auth_via"] == "single_user_test_api_key"
-    assert metadata["trusted_auth_claims"] is True
-    assert metadata["compat_claims_source"] == "mounted_http"
+    assert "trusted_auth_claims" not in metadata
+    assert metadata.get("auth_via") != "single_user_test_api_key"
 
 
 def test_mounted_http_single_user_api_key_does_not_attach_trust_when_ip_rejected(
@@ -838,7 +839,7 @@ def test_mounted_ws_single_user_test_api_key_rejected_when_test_mode_false(
                 pass
 
 
-def test_mounted_ws_single_user_test_api_key_attaches_test_metadata_with_guard(
+def test_mounted_ws_single_user_test_api_key_rejected_in_test_mode(
     monkeypatch: pytest.MonkeyPatch,
 ):
     from tldw_Server_API.app.core.MCP_unified import get_mcp_server
@@ -846,7 +847,7 @@ def test_mounted_ws_single_user_test_api_key_attaches_test_metadata_with_guard(
     api_key = "primary-single-user-key-12345"
     test_key = "test-single-user-key-12345"
     server = get_mcp_server()
-    protocol = _install_mounted_ws_single_user_compat(
+    _install_mounted_ws_single_user_compat(
         monkeypatch,
         server=server,
         api_key=api_key,
@@ -856,20 +857,12 @@ def test_mounted_ws_single_user_test_api_key_attaches_test_metadata_with_guard(
     )
 
     with build_mcp_test_client() as client:
-        with client.websocket_connect(
-            "/api/v1/mcp/ws?client_id=ws-test",
-            headers={"X-API-KEY": test_key},
-        ) as ws:
-            ws.send_json({"jsonrpc": "2.0", "method": "tools/list", "id": "ws-test-list"})
-            body = ws.receive_json()
-
-    assert body["result"] == {"tools": []}
-    context = protocol.contexts[-1]
-    assert context.user_id == "1"
-    assert context.metadata["auth_via"] == "single_user_test_api_key"
-    assert context.metadata["trusted_auth_claims"] is True
-    assert context.metadata["compat_claims_source"] == "mounted_ws"
-    assert context.server_auth_scope is None
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                "/api/v1/mcp/ws?client_id=ws-test-reject",
+                headers={"X-API-KEY": test_key},
+            ):
+                pass
 
 
 def test_mounted_request_success_omits_error():

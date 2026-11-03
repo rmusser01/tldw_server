@@ -912,38 +912,6 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
                     scope="admin",
                     is_virtual=False,
                 )
-
-            test_api_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-            if test_mode and test_api_key:
-                api_manager = api_manager or APIKeyManager(db_pool=pool)
-                test_key_hash = api_manager.hash_api_key(test_api_key)
-                test_key_prefix = (
-                    (test_api_key[:10] + "...")
-                    if len(test_api_key) > 10
-                    else test_api_key
-                )
-                test_key_identifier = None
-                try:
-                    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import parse_api_key
-
-                    parsed = parse_api_key(test_api_key)
-                    if parsed:
-                        test_key_identifier, _secret = parsed
-                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.opt(exception=True).debug(
-                        "Failed to parse SINGLE_USER_TEST_API_KEY for seed key identifier extraction: {}",
-                        exc,
-                    )
-                await api_repo.upsert_primary_key(
-                    user_id=single_user_id,
-                    key_hash=test_key_hash,
-                    key_identifier=test_key_identifier,
-                    key_prefix=test_key_prefix,
-                    name="single-user test key",
-                    description="Deterministic API key for test automation",
-                    scope="admin",
-                    is_virtual=False,
-                )
         except _AUTHNZ_SINGLE_USER_OPTIONAL_BACKFILL_EXCEPTIONS as role_assign_err:
             # Log at warning level with context so repeated failures surface operationally
             logger.warning(
@@ -1279,13 +1247,6 @@ async def bootstrap_single_user_profile() -> bool:
         print("✅ Single-user primary API key ensured in AuthNZ store")
         logger.info("Single-user primary API key ensured in AuthNZ store")
         allowed_hashes: set[str] = {key_hash}
-        test_api_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-        if (
-            is_test_mode()
-            and test_api_key
-            and test_api_key != api_key_value
-        ):
-            allowed_hashes.add(manager.hash_api_key(test_api_key))
         errors = await _collect_single_user_invariant_errors(
             pool,
             expected_user_id=expected_user_id,
