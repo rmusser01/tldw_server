@@ -2,7 +2,7 @@
 id: TASK-13962
 title: Re-parent the subtasks orphaned by 3a660d4f1d and apply the dependency retargets
   left to open PRs
-status: To Do
+status: In Progress
 labels:
 - backlog
 dependencies:
@@ -27,6 +27,7 @@ On 2026-07-05, 3a660d4f1d renumbered active parents without their subtasks, so 4
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 From TASK-13960's Task 4 review (2026-10-31): (1) backlog/tasks/task-15183 (was task-13511, 'Remediate WebUI and extension performance review findings') was hand-written on dev without an opening '---', so backlog-py read it as having no frontmatter; the renumber put a new frontmatter block (id: TASK-15183) on top and left the old block (id: TASK-13511, title, status: Done, labels, a stray ---) as body text. Backlog tools see TASK-15183 with no title, status or labels, as they saw the original with none. (2) 155 bare-id references: entries in task files name a renumbered id and now resolve to the keeper, even where they meant the renumbered copy (e.g. task-12968.2 references TASK-12971 though its dependency was retargeted to TASK-15121; task-12301 references TASK-407, whose Workspace Playground copy is now TASK-15005). The plan left references to old ids as they are; each renumbered file's note names its old id.
+Plan: Docs/superpowers/plans/2026-11-03-reparent-orphaned-subtasks-13962.md. Follow-up for AC 2: TASK-15419. Owner answers (2026-11-03): Decision 1 (Change summary) waiver covers this PR; Decision 2 (AC 2's home) follow-up task; Decision 3 (TASK-13534) repair it.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
