@@ -1,6 +1,6 @@
 # UAT fixes on latest dev — 2026-10-23
 
-Task: TASK-13260.278.18.83.45. Human authorizes necessary repairs/setup/retries and sequential completion of all43 workflows. Current selected acceptance42/43: S05, including real-provider classification and human UX, is complete; S06 is next. Qualified backendf8c8e56f and frontenda5694093/BUILDmGTZqAja6jYViLeN34z28 compose on frozen deva412 with Chat redesign3309–3311. Completed S05 private payloads are disposed, current artifacts/shared helpers and original runtime/data preserved. Original Chrome is absent; its DOM remains untouched/unverified. Historical checkpoints below retain their exact scope; no fresh live-dev or broader release qualification is claimed.
+Task: TASK-13260.278.18.83.45. Human authorizes necessary repairs/setup/retries, sequential completion of all43 selected workflows, and preservation/rebase onto latest dev. Selected functional and human UX acceptance is43/43 by the retained master ledger, ending with reviewed S06 closure. Qualified backend882e1ae880ddd5d0cf8b83d17d5b1554484d8a64 and frontenddb9495e876262379b178e1417f8074d7f4a2326c/BUILD_2AjagsPaWq3agNLU2rMQ compose on frozen deva412f6580b7ed0cf48fd7d222a47a20cfc0dde92 including Chat3309–3311; they are not current November-dev qualification. All completed S06 profiles/operators and four superseded package copies are disposed. Current artifacts/shared helpers and original runtime/data remain preserved; original Chrome is absent/DOM untouched and unverified. Next: fresh exact-dev review, preserve every still-needed UAT fix, rebase and qualify genuinely affected combined source before any publication. Historical checkpoints retain exact scope; broader release gates remain open.
 
 ## Constraints and rulings
 
@@ -27,7 +27,13 @@ Ruling: normal Git stash in the new checkout is functional rebase state, not a p
 **Goal**: Preserve recorded X01/X02 acceptance, integrate and qualify actual incoming dev changes, then continue X03 and the remaining workflows sequentially.
 **Success Criteria**: Version-source checkpoints oldest justified plusv0.1.43/v0.1.46; all required SQLite/PostgreSQL single/multi upgrade, backup/separate restore, preserved old data/accounts/Jobs, new writes, real provider, UI/reload, malformed/recovery and complete lifecycle/handback checks. Prior accepted UX remains; screenshot for changed UX. Dispose completed functional bulk/operators promptly. Update officialtask/X01/masterindex accurately, then move one workflow at a time.
 **Tests**: Reviewed actual drivers with current source/package/build binding, no model replay merely for operator diagnosis. Explicit limitations retained; no latestdev readiness or completion claim from old artifacts.
-**Status**: In Progress
+**Status**: Complete
+
+## Stage4: Refresh and qualify latest November dev
+**Goal**: Preserve the completed UAT fixes and protected original runtime while rebasing this existing checkout onto freshly verified dev.
+**Success Criteria**: Exact source/ref/owned-change guards; bounded read-only incoming assessment; no blanket ours/theirs or assertion loss; all still-needed fixes retained; genuinely affected combined checks, scoped security, canonical API/types only where affected, final review and normal hooks.
+**Tests**: Incoming/conflict-affected source and caller/test boundaries, supported isolated SQLite/PostgreSQL where affected; no unchanged UAT/provider/build replay without a demonstrated new need. Source/qualification limits and broader landing gates remain explicit. No queue/push/merge or original-runtime transition follows automatically.
+**Status**: Not Started
 
 ## 2026-10-23 integration checkpoint
 

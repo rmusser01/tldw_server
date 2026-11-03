@@ -1,7 +1,7 @@
 # Persona session transcript durability — 2026-11-02
 
 Task: TASK-13260.278.18.83.45.
-Plan: ../Plans/IMPLEMENTATION_PLAN_uat_s06_specialized_tools_discovery_20261101.md.
+Plan: ../Plans/IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#s06-specialized-tools-and-discovery-selected-closure--2026-11-02.
 ADR check: required, ../ADR/085-bounded-durable-persona-session-transcripts.md. This changes a lasting Persona persistence rule; ADR-046's Chat adapter and ADR-080's checkout ownership remain in force.
 
 ## Failure and intended behavior
