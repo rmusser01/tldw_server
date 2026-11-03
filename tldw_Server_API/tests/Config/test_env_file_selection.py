@@ -81,9 +81,10 @@ def test_chat_request_schema_does_not_bypass_exclusive_env_file(
     monkeypatch.setenv("TLDW_ENV_FILE_EXCLUSIVE", "1")
     monkeypatch.setattr(dotenv, "load_dotenv", record_dotenv_load)
 
-    schema = importlib.import_module(
-        "tldw_Server_API.app.api.v1.schemas.chat_request_schemas"
-    )
-    importlib.reload(schema)
+    for name in (
+        "tldw_Server_API.app.core.Chat.chat_request_schemas",
+        "tldw_Server_API.app.api.v1.schemas.chat_request_schemas",
+    ):
+        importlib.reload(importlib.import_module(name))
 
     assert working_directory_env.resolve() not in loaded_paths  # nosec B101

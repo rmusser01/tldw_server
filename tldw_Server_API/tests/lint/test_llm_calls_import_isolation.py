@@ -24,6 +24,7 @@ pytestmark = pytest.mark.unit
 _SCRIPT = "import importlib, json, sys; importlib.import_module(sys.argv[1]); print(json.dumps(sorted(sys.modules)))"
 CASES = [
     ("tldw_Server_API.app.core.Chat", "tldw_Server_API.app.api"),
+    ("tldw_Server_API.app.core.Chat.chat_request_schemas", "tldw_Server_API.app.api"),
     ("tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter", "tldw_Server_API.app.core.Chat"),
     ("tldw_Server_API.app.core.LLM_Calls.gateway", "tldw_Server_API.app.core.Chat"),
 ]

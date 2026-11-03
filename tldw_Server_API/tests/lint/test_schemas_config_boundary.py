@@ -159,8 +159,10 @@ def _module_name(path: Path, root: Path) -> str:
 def schema_config_calls(root: Path = APP_ROOT) -> dict[str, list[tuple[int, str]]]:
     out: dict[str, list[tuple[int, str]]] = {}
     schemas = root.resolve() / "api" / "v1" / "schemas"
+    # The core-owned chat request model (TASK-13950.15 S10) keeps the no-import-time-config guarantee .14 gave it.
+    chat_request = root.resolve() / "core" / "Chat" / "chat_request_schemas.py"
     for path, tree in parse_tree(root).items():
-        if not path.is_relative_to(schemas):
+        if not (path.is_relative_to(schemas) or path == chat_request):
             continue
         calls = import_time_config_calls(tree, _module_name(path, root.resolve()))
         if calls:

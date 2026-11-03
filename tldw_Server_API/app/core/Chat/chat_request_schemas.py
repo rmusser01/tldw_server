@@ -29,6 +29,9 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
+# --- Pydantic Models for OpenAI Chat Completion Request ---
+# Based on https://platform.openai.com/docs/api-reference/chat/create
+
 _SERVER_MANAGED_CHAT_REQUEST_FIELDS = frozenset(
     {
         "api_endpoint",
