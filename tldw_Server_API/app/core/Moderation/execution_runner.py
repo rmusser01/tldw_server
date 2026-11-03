@@ -126,7 +126,6 @@ class ModerationExecutionRunner:
         """Run one framed batch, retaining ownership through every failure race."""
         global _owned_total
         self._check_pid()
-        caller_cancelled = False
         deadline = min(scope.deadline, self._clock() + min(self.bounds.timeout_s, request.bounds.timeout_s))
         self._check_scope(scope, deadline)
         if threading.current_thread().daemon or multiprocessing.current_process().daemon:
@@ -200,9 +199,6 @@ class ModerationExecutionRunner:
                     self._check_scope(scope, deadline)
                     return response
                 scope.cancelled.wait(min(0.01, max(0, deadline - self._clock())))
-        except asyncio.CancelledError:
-            caller_cancelled = True
-            raise
         finally:
             # Also covers BaseException/cancellation during process creation.
             entry.spawning = False
@@ -219,7 +215,8 @@ class ModerationExecutionRunner:
                     self._mark_quarantined()
                     self._ensure_reaper_locked()
             self._wake.set()
-            if caller_cancelled and entry.quarantined:
+            if entry.quarantined:
+                # The original error/cancellation may never reach a caller reporter.
                 from tldw_Server_API.app.core.Moderation.execution_incidents import report_execution_failure_background
 
                 report_execution_failure_background(

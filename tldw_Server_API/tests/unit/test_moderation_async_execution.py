@@ -103,7 +103,7 @@ async def test_cancelled_offloads_retain_four_thread_slots_until_finished():
         await asyncio.sleep(0.05)
 
 
-async def test_quarantined_injected_runner_keeps_offload_admission_owned():
+async def test_quarantined_injected_runner_keeps_offload_admission_owned(incident_store):
     from tldw_Server_API.app.core.exception_types import ModerationExecutionError
     from tldw_Server_API.app.core.Moderation.async_execution import _run_moderation_offload
     from tldw_Server_API.tests.unit.test_moderation_execution_runner import Child, request, runner
@@ -367,6 +367,116 @@ async def test_cancelled_runner_confirmed_cleanup_is_quiet(incident_store):
         assert incident_store.list_items()["total"] == 0
     finally:
         owner.close()
+
+
+@pytest.mark.parametrize("cancel_at", ["cleanup_started", "quarantined", None], ids=["during-cleanup", "after-quarantine", "not-cancelled"])
+@pytest.mark.parametrize("primary_claimed", [False, True], ids=["unclaimed", "primary-claimed"])
+async def test_cleanup_owner_reports_independently_of_cancellation_order(
+    incident_store, monkeypatch, cancel_at, primary_claimed,
+):
+    import io
+    import json
+
+    from loguru import logger
+
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution as execution
+    from tldw_Server_API.app.core.Moderation import execution_incidents as incidents
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds, FailureMetadata, execution_scope
+    from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request
+    from tldw_Server_API.app.core.Moderation.models import ModerationPolicy
+    from tldw_Server_API.app.core.Moderation.policy_evaluator import EvaluationLimits
+    from tldw_Server_API.tests.unit.test_moderation_execution_runner import Child, request, runner
+
+    cleanup_started, runner_returned = threading.Event(), threading.Event()
+    child = Child(stalled=True, unreapable=True)
+    child.stdout = io.BytesIO(b"")  # EOF raises a typed error before cleanup/cancellation.
+    submitted = snapshot_redaction_batch_request(
+        ["PRIVATE_ALPHA", "PRIVATE_BETA"], ModerationPolicy(), "output",
+        EvaluationLimits(100, 0, 1000, None), ExecutionBounds(),
+    )
+    metadata = FailureMetadata("redact_many", "output", 25)
+    messages, metrics, io_threads, underlying_errors = [], [], [], []
+    persist = incidents._persist_failure
+
+    def record(*args, **kwargs):
+        io_threads.append(threading.current_thread().name)
+        persist(*args, **kwargs)
+
+    def kill():
+        cleanup_started.set()
+        raise PermissionError("PRIVATE_KILL_EXCEPTION")
+
+    child.kill = kill
+    owner = runner(lambda *a, **k: child)
+    monkeypatch.setattr(incidents, "_persist_failure", record)
+    monkeypatch.setattr(incidents, "log_counter", lambda name, **kw: metrics.append((name, kw)))
+    sink = logger.add(lambda message: messages.append(str(message)))
+
+    def run():
+        if primary_claimed:
+            incidents.report_execution_failure(
+                ModerationExecutionError("invalid_response"), operation="redact_many", phase="output",
+                scope=shared, input_chars=25,
+            )
+        try:
+            return owner.execute(submitted, shared)
+        except ModerationExecutionError as error:
+            underlying_errors.append(error.reason)
+            raise
+        finally:
+            runner_returned.set()
+
+    with execution_scope() as shared:
+        task = asyncio.create_task(execution.run_moderation_async(run, metadata=metadata))
+    try:
+        async with asyncio.timeout(1.5):
+            while not cleanup_started.is_set():
+                await asyncio.sleep(0.001)
+        with owner._lock:
+            [entry] = owner._entries
+            assert entry.reason == "invalid_response"
+        if cancel_at == "quarantined":
+            async with asyncio.timeout(1.5):
+                while not runner_returned.is_set():
+                    await asyncio.sleep(0.001)
+            assert entry.quarantined and entry.owner_done
+            assert execution._active == 1 and not task.done()
+        if cancel_at is not None:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        async with asyncio.timeout(1.25):
+            while not runner_returned.is_set() or incident_store.list_items()["total"] == 0:
+                await asyncio.sleep(0.005)
+        [item] = incident_store.list_items()["items"]
+        assert item["context"]["reason"] == ("invalid_response" if primary_claimed else "cleanup_failed")
+        assert item["context"]["operation"] == "redact_many"
+        assert item["context"]["input_chars"] == 25
+        assert item["phase"] == "output"
+        assert item["excerpt"] == incidents.ENGINE_FAILURE_EXCERPT
+        assert io_threads == (["moderation-offload"] if primary_claimed else ["moderation-incident"])
+        assert len([m for m in metrics if m[0] == "moderation_execution_failures_total"]) == 1
+        assert entry.quarantined and len(owner._entries) == 1 and execution._active == 1
+        assert shared.cancelled.is_set() is (cancel_at is not None)
+        with pytest.raises(ModerationExecutionError, match="capacity_exhausted"):
+            owner.execute(request(), scope())
+        assert "PRIVATE" not in json.dumps([item, metrics, messages])
+    finally:
+        child.returncode = -9
+        owner.close()
+        outcomes = await asyncio.gather(task, return_exceptions=True)
+        async with asyncio.timeout(2):
+            while execution._active or (incidents._report_thread and incidents._report_thread.is_alive()):
+                await asyncio.sleep(0.005)
+        logger.remove(sink)
+    assert not owner._entries
+    assert underlying_errors == ["invalid_response"]
+    if cancel_at is None:
+        assert isinstance(outcomes[0], ModerationExecutionError) and outcomes[0].reason == "invalid_response"
+    else:
+        assert isinstance(outcomes[0], asyncio.CancelledError)
+    assert incident_store.list_items()["total"] == 1
 
 
 async def test_closed_loop_delivery_retires_offload_without_warning(monkeypatch):
