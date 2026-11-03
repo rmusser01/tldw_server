@@ -30,12 +30,13 @@ Verification: task-format pytest suite 4 passed, 1 warning; backlog-py normalize
 2026-11-01: Human selected option 1 (subagent-driven execution) after plan presentation. Approved plan carried onto current dev without replaying obsolete colliding draft identifiers. Product execution is now authorized under TASK-15407 and its eleven child tasks; this planning task is complete.
 Namespace-only correction after fresh-dev rebase: original planning identifier TASK-15406 is occupied by an unrelated Moderation design. Current web-scraping planning identifier TASK-15432. Status, criteria, approved plan and history preserved; official path-specific backlog-py renumber used, no unrelated record altered.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+Task11 fresh reviewer Minor1 addressed: current execution-child inventory explicitly excludes unrelated task IDs and keeps parent TASK-15421 separate. Historical notes unchanged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Four-stage eleven-task implementation plan written, self-reviewed, verified and presented. Human selected subagent-driven execution on 2026-11-01, satisfying plan review and execution-method gate. TASK-15421 and TASK-15408 through TASK-15430 track implementation; no product completion is implied.
+Four-stage eleven-task implementation plan written, self-reviewed, verified and presented. Human selected subagent-driven execution on 2026-11-01, satisfying plan review and execution-method gate. TASK-15421 and TASK-15408, TASK-15409, and TASK-15422 through TASK-15430 track implementation; no product completion is implied.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
