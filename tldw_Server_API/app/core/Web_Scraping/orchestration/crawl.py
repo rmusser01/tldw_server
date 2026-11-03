@@ -662,7 +662,7 @@ async def execute_crawl(
         # Exception tracebacks can outlive this owner. Physical handles and the
         # engine's drain retainer, not completed coroutine frames, own live state.
         private.clear()
-        transform = None
+        transform = browser_http_fallback = None
         stored = None
         requested_agent = None
         config = headers = header_copy = credentials = options = cookies = hooks = policy = acquire = fetch_document = (
