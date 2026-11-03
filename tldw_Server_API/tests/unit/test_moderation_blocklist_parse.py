@@ -743,8 +743,10 @@ def test_chunk_scanning_limits_search_window():
         block_patterns=[PatternRule(regex=pat, action="block")],
     )
     text = ("a" * 100) + "secret"
-    flagged, _ = svc.check_text(text, pol)
-    assert flagged is True
+    from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
+
+    result = PolicyEvaluator().evaluate_text(text, pol, None, svc._evaluation_limits(), include_redacted_text=False)
+    assert result.action != "pass"
     assert pat.calls
 
 

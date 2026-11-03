@@ -298,33 +298,42 @@ def test_falsy_and_unsupported_string_actions_are_literal(
 
 def test_effective_action_lower_result_behavior_is_literal():
     service = _service()
+    evaluator = PolicyEvaluator()
 
-    bytes_result = service.evaluate_text(
+    bytes_result = evaluator.evaluate_text(
         "secret",
         _policy(_rule("secret", action=_LowerBytes())),
         "input",
+        service._evaluation_limits(),
+        include_redacted_text=True,
     )
-    block_result = service.evaluate_text(
+    block_result = evaluator.evaluate_text(
         "secret",
         _policy(_rule("secret", action=_LowerBlock())),
         "input",
+        service._evaluation_limits(),
+        include_redacted_text=True,
     )
 
     assert bytes_result.action == "warn"
     assert block_result.action == "block"
 
     with pytest.raises(AttributeError):
-        service.evaluate_text(
+        evaluator.evaluate_text(
             "secret",
             _policy(_rule("secret", action=_MissingLower())),
             "input",
+            service._evaluation_limits(),
+            include_redacted_text=True,
         )
 
     with pytest.raises(TypeError):
-        service.evaluate_text(
+        evaluator.evaluate_text(
             "secret",
             _policy(_rule("secret", action=_LowerUnhashable())),
             "input",
+            service._evaluation_limits(),
+            include_redacted_text=True,
         )
 
 
@@ -595,9 +604,11 @@ def test_long_redaction_unsupported_limit_exception_characterization(
     )
 
     with pytest.raises(error_type):
-        getattr(service, method_name)(
+        getattr(PolicyEvaluator(), method_name)(
             "x x x",
             _policy(_rule("x", replacement="[R]")),
+            None,
+            service._evaluation_limits(),
         )
 
 
@@ -605,7 +616,7 @@ def test_long_redaction_unsupported_limit_exception_characterization(
 def test_redaction_path_comparison_does_not_coerce_max_scan(raw):
     service = _service(max_scan_chars=raw)
     with pytest.raises(TypeError):
-        service.redact_text("x", _policy(_rule("x")))
+        PolicyEvaluator().redact_text("x", _policy(_rule("x")), None, service._evaluation_limits())
 
 
 @pytest.mark.timeout(2)
@@ -634,13 +645,20 @@ def test_zero_length_matches_differ_between_short_and_long_redaction():
 
 
 def test_malformed_raw_rule_exceptions_propagate():
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+
     policy = _policy()
     policy.block_patterns = [None]  # type: ignore[list-item]
     service = _service()
+    evaluator = PolicyEvaluator()
+    with pytest.raises(AttributeError):
+        evaluator.evaluate_text("secret", policy, "input", service._evaluation_limits(), include_redacted_text=True)
+    with pytest.raises(AttributeError):
+        evaluator.redact_text("secret", policy, "input", service._evaluation_limits())
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
         service.evaluate_text("secret", policy, "input")
-    with pytest.raises(AttributeError):
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
         service.redact_text("secret", policy, "input")
 
 
@@ -664,13 +682,15 @@ def test_regex_errors_keep_current_no_match_and_skip_behavior():
     policy = _policy()
     policy.block_patterns = [_RegexErrorPattern()]  # type: ignore[list-item]
     service = _service()
+    evaluator = PolicyEvaluator()
 
-    assert service.evaluate_text("secret", policy, "input") == (ModerationEvaluationResult())
-    assert service.redact_text("secret", policy, "input") == "secret"
-    assert service.redact_text_with_count(
+    assert evaluator.evaluate_text("secret", policy, "input", service._evaluation_limits(), include_redacted_text=True) == (ModerationEvaluationResult())
+    assert evaluator.redact_text("secret", policy, "input", service._evaluation_limits()) == "secret"
+    assert evaluator.redact_text_with_count(
         "secret",
         policy,
         "input",
+        service._evaluation_limits(),
     ) == ("secret", 0)
 
 
@@ -689,15 +709,19 @@ def test_replacement_lookup_regex_error_remains_inside_rule_boundary():
     policy = _ReplacementErrorPolicy()
 
     assert (
-        service.redact_text(
+        PolicyEvaluator().redact_text(
             "secret",
             policy,  # type: ignore[arg-type]
+            None,
+            service._evaluation_limits(),
         )
         == "secret"
     )
-    assert service.redact_text_with_count(
+    assert PolicyEvaluator().redact_text_with_count(
         "secret",
         policy,  # type: ignore[arg-type]
+        None,
+        service._evaluation_limits(),
     ) == ("secret", 0)
 
 

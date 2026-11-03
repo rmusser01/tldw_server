@@ -66,6 +66,9 @@ from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import
     get_override_model_priority,
     validate_provider_override,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
+from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata
 from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
@@ -3909,13 +3912,23 @@ async def create_chat_completion(
                                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                                     req_user_id = None
                                 policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
-                                action, redacted, matched, category = moderation.evaluate_action(content_text, policy, 'input')
+                                def moderate_injection():
+                                    action, redacted, matched, category = moderation.evaluate_action(
+                                        content_text, policy, "input"
+                                    )
+                                    if action == "redact" and not isinstance(redacted, str):
+                                        redacted = moderation.redact_text(content_text, policy)
+                                    return action, redacted, matched, category
+
+                                action, redacted, matched, category = await run_moderation_async(
+                                    moderate_injection, metadata=FailureMetadata("evaluate", "input", len(content_text))
+                                )
                                 if action and action != 'pass':
                                     inj_mod['action'] = action
                                     inj_mod['category'] = category
                                     inj_mod['pattern'] = matched
                                     if action == 'redact':
-                                        moderated_content_text = moderation.redact_text(content_text, policy)
+                                        moderated_content_text = redacted
                                         inj_mod['redacted'] = True
                                     elif action == 'block':
                                         inj_mod['blocked'] = True
@@ -3954,6 +3967,14 @@ async def create_chat_completion(
                                                 type(exc).__name__,
                                                 str(exc),
                                             )
+                            except ModerationExecutionError:
+                                raise HTTPException(
+                                    status_code=503,
+                                    detail={
+                                        "error_code": "moderation_unavailable",
+                                        "message": "Moderation is currently unavailable",
+                                    },
+                                ) from None
                             except MandatoryAuditWriteError as exc:
                                 raise HTTPException(
                                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -4071,7 +4092,7 @@ async def create_chat_completion(
                 if (
                     _cmd_err.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
                     and isinstance(detail, dict)
-                    and detail.get("error_code") == "mandatory_audit_unavailable"
+                    and detail.get("error_code") in {"mandatory_audit_unavailable", "moderation_unavailable"}
                 ):
                     raise
                 logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")

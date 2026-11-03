@@ -24,9 +24,9 @@ from tldw_Server_API.app.core.Moderation.moderation_service import (
 from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
 from tldw_Server_API.app.core.Workflows.adapters import (
     run_llm_adapter,
-    run_llm_with_tools_adapter,
     run_llm_compare_adapter,
     run_llm_critique_adapter,
+    run_llm_with_tools_adapter,
     run_moderation_adapter,
     run_policy_check_adapter,
     run_translate_adapter,
@@ -410,6 +410,7 @@ async def test_llm_with_tools_adapter_tool_execution(monkeypatch):
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     import sys
+
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
 
     call_count = 0
@@ -470,6 +471,7 @@ async def test_llm_with_tools_adapter_sanitizes_tool_execution_errors(monkeypatc
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     import sys
+
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
 
     call_count = 0
@@ -531,6 +533,7 @@ async def test_llm_with_tools_adapter_max_iterations(monkeypatch):
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     import sys
+
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
 
     async def fake_call(**kwargs):
@@ -1295,3 +1298,31 @@ def test_llm_adapters_have_config_models():
     for name in expected:
         spec = registry.get_spec(name)
         assert spec.config_model is not None, f"Adapter '{name}' missing config_model"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replacement,patterns,want,count",
+    [
+        (r"<\1>", [r"(secret)", "["], "<secret>", 1),
+        (r"\g<missing>", ["secret"], "secret", 0),
+        ("x", ["secret", "x"], "x", 2),
+    ],
+)
+async def test_workflow_custom_template_rules_run_only_in_worker(monkeypatch, replacement, patterns, want, count):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Moderation import moderation_service, regex_worker
+    from tldw_Server_API.app.core.Moderation.models import ModerationPolicy
+    from tldw_Server_API.app.core.Workflows.adapters.llm import moderation
+
+    service = SimpleNamespace(
+        get_effective_policy=lambda uid: ModerationPolicy(redact_replacement=replacement),
+        redact_text_with_count=lambda text, policy: (text, 0),
+    )
+    monkeypatch.setattr(moderation_service, "get_moderation_service", lambda: service)
+    monkeypatch.setattr(moderation, "is_test_mode", lambda: False)
+    monkeypatch.setattr(regex_worker, "execute_request", lambda *a, **k: pytest.fail("inline worker"))
+    result = await moderation.run_moderation_adapter({"action": "redact", "text": "secret", "patterns": patterns}, {})
+    assert result["text"] == want
+    assert result["redaction_count"] == count

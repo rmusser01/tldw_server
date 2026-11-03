@@ -29,6 +29,14 @@ from dataclasses import dataclass, replace
 from loguru import logger
 
 from tldw_Server_API.app.core.config import load_and_log_configs, load_comprehensive_config
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.execution_models import (
+    BaseOperation,
+    ExecutionBounds,
+    ExecutionScope,
+    execution_scope,
+)
+from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_request
 from tldw_Server_API.app.core.Moderation.models import (
     ModerationEvaluationResult,
     ModerationPolicy,
@@ -642,6 +650,39 @@ class ModerationService:
         return PolicyCompiler.parse_bool_value(v)
 
     # --------------- Checking and transformations ---------------
+    @contextlib.contextmanager
+    def _execution_boundary(self, operation: BaseOperation, text: str, phase: str | None) -> Iterator[ExecutionScope]:
+        """Keep overrides and nested batches inside one reporting/deadline scope."""
+        from tldw_Server_API.app.core.Moderation.execution_incidents import report_execution_failure
+
+        with execution_scope() as scope:
+            try:
+                yield scope
+            except ModerationExecutionError as error:
+                try:
+                    report_execution_failure(
+                        error, operation=operation, phase=phase, scope=scope, input_chars=len(text)
+                    )
+                except Exception:  # noqa: BLE001 - reporting must never replace enforcement.
+                    with contextlib.suppress(Exception):
+                        logger.warning("Moderation failure reporting unavailable")
+                raise error from None
+
+    def _execute_batch(
+        self, operation: BaseOperation, text: str, policy: ModerationPolicy, phase: str | None
+    ) -> ModerationEvaluationResult | str | tuple[str, int]:
+        """Snapshot in the parent; only the owned child may inspect content with re."""
+        from tldw_Server_API.app.core.Moderation.execution_runner import get_execution_runner
+
+        with self._execution_boundary(operation, text, phase) as scope:
+            try:
+                request = snapshot_request(operation, text, policy, phase, self._evaluation_limits(), ExecutionBounds())
+            except ModerationExecutionError:
+                raise
+            except (AttributeError, TypeError, ValueError, re.error):
+                raise ModerationExecutionError("invalid_response") from None
+            return get_execution_runner().execute(request, scope).result
+
     def check_text(
         self,
         text: str,
@@ -678,12 +719,14 @@ class ModerationService:
         policy: ModerationPolicy,
         phase: str | None = None,
     ) -> str:
-        return self._policy_evaluator.redact_text(
-            text,
-            policy,
-            phase,
-            self._evaluation_limits(),
-        )
+        if (
+            not text
+            or not policy.block_patterns
+            or (phase == "input" and not policy.input_enabled)
+            or (phase == "output" and not policy.output_enabled)
+        ):
+            return text
+        return self._execute_batch("redact", text, policy, phase)
 
     def redact_text_with_count(
         self,
@@ -692,12 +735,14 @@ class ModerationService:
         phase: str | None = None,
     ) -> tuple[str, int]:
         """Redact text and return (redacted_text, replacement_count)."""
-        return self._policy_evaluator.redact_text_with_count(
-            text,
-            policy,
-            phase,
-            self._evaluation_limits(),
-        )
+        if (
+            not text
+            or not policy.block_patterns
+            or (phase == "input" and not policy.input_enabled)
+            or (phase == "output" and not policy.output_enabled)
+        ):
+            return text, 0
+        return self._execute_batch("redact_with_count", text, policy, phase)
 
     # --------------- Decision helpers ---------------
     def evaluate_text(
@@ -723,19 +768,19 @@ class ModerationService:
         include_redacted_text: bool,
     ) -> ModerationEvaluationResult:
         """Shared moderation evaluation logic for probes and full result generation."""
-        decision = self._policy_evaluator.evaluate_text(
-            text,
-            policy,
-            phase,
-            self._evaluation_limits(),
-            include_redacted_text=False,
-        )
-        if include_redacted_text and decision.action == "redact":
-            return replace(
-                decision,
-                redacted_text=self.redact_text(text, policy, phase=phase),
-            )
-        return decision
+        with self._execution_boundary("evaluate", text, phase):
+            if (
+                not text
+                or not policy.enabled
+                or not policy.block_patterns
+                or (phase == "input" and not policy.input_enabled)
+                or (phase == "output" and not policy.output_enabled)
+            ):
+                return ModerationEvaluationResult()
+            decision = self._execute_batch("evaluate", text, policy, phase)
+            if include_redacted_text and decision.action == "redact":
+                return replace(decision, redacted_text=self.redact_text(text, policy, phase=phase))
+            return decision
 
     def _evaluate_action_internal(
         self,
@@ -744,13 +789,15 @@ class ModerationService:
         phase: str | None,
     ) -> tuple[str, str | None, str | None, str | None, tuple[int, int] | None]:
         """Compatibility wrapper around evaluate_text()."""
-        result = self.evaluate_text(text, policy, phase)
-        return result.action, result.redacted_text, result.matched_pattern, result.category, result.match_span
+        with self._execution_boundary("evaluate", text, phase):
+            result = self.evaluate_text(text, policy, phase)
+            return result.action, result.redacted_text, result.matched_pattern, result.category, result.match_span
 
     def evaluate_action(self, text: str, policy: ModerationPolicy, phase: str) -> tuple[str, str | None, str | None, str | None]:
         """Decide the action for a given text and phase."""
-        result = self.evaluate_text(text, policy, phase)
-        return result.action, result.redacted_text, result.matched_pattern, result.category
+        with self._execution_boundary("evaluate", text, phase):
+            result = self.evaluate_text(text, policy, phase)
+            return result.action, result.redacted_text, result.matched_pattern, result.category
 
     def evaluate_action_with_match(
         self,
@@ -759,8 +806,9 @@ class ModerationService:
         phase: str,
     ) -> tuple[str, str | None, str | None, str | None, tuple[int, int] | None]:
         """Decide action and return the match span when available."""
-        result = self.evaluate_text(text, policy, phase)
-        return result.action, result.redacted_text, result.matched_pattern, result.category, result.match_span
+        with self._execution_boundary("evaluate", text, phase):
+            result = self.evaluate_text(text, policy, phase)
+            return result.action, result.redacted_text, result.matched_pattern, result.category, result.match_span
 
     # --------------- Persistence helpers ---------------
     def list_user_overrides(self) -> dict[str, dict[str, object]]:

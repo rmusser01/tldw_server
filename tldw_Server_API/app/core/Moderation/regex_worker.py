@@ -137,7 +137,7 @@ def execute_request(request: WorkerRequest) -> WorkerResponse:
                 evaluator = PolicyEvaluator()
                 if request.operation == "evaluate":
                     result = evaluator.evaluate_text(
-                        request.text, policy, request.phase, limits, include_redacted_text=True, output_budget=budget
+                        request.text, policy, request.phase, limits, include_redacted_text=False, output_budget=budget
                     )
                 elif request.operation == "redact":
                     result = evaluator.redact_text(request.text, policy, request.phase, limits, output_budget=budget)

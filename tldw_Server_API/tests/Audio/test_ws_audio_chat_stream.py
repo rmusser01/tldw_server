@@ -941,6 +941,42 @@ async def test_audio_chat_ws_streams_llm_and_tts(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("reason", ["deadline_exceeded", "capacity_exhausted", "size_exceeded", "worker_unavailable", "worker_crashed", "invalid_response", "cleanup_failed"])
+async def test_audio_chat_moderation_failure_never_continues_to_llm_or_tts(monkeypatch, tmp_path, reason):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
+    from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
+
+    monkeypatch.setenv("STT_REDACT_PII", "1")
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
+    prepare_moderation_incident_store()
+    provider, tts = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(audio, "chat_api_call_async", provider)
+    monkeypatch.setattr(audio, "get_tts_service", tts)
+
+    def redact(text, *, policy, is_partial):
+        if is_partial:
+            return "safe prefix"
+        raise ModerationExecutionError(reason)
+
+    monkeypatch.setattr(stt_policy, "apply_transcript_text_policy", redact)
+    ws = DummyWebSocket([
+        {"type": "config", "stt": {"model": "parakeet"}, "llm": {"provider": "stub", "model": "stub-model"}, "tts": {"voice": "af_heart", "format": "pcm"}},
+        {"type": "audio", "data": _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])},
+        {"type": "commit"}, {"type": "stop"},
+    ])
+    await audio.websocket_audio_chat_stream(ws, token=None)
+    assert any(frame.get("code") == "moderation_unavailable" for frame in ws.sent_json)
+    assert not any(frame.get("type") in {"full_transcript", "assistant_summary", "llm_delta", "tts_done", "done"} for frame in ws.sent_json)
+    assert ws.sent_bytes == []
+    assert ws.closed
+    provider.assert_not_called()
+    tts.assert_not_called()
+
+
+@pytest.mark.integration
 async def test_audio_chat_ws_tts_keeps_two_user_runtime_snapshots_isolated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

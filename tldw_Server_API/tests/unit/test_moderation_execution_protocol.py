@@ -559,7 +559,7 @@ def test_each_safety_bound_only_tightens_and_rejects_booleans(field):
         {"action": "pass", "sample": "unexpected"},
         {"action": "pass", "matched_pattern": "hello"},
         {"action": "warn", "match_span": [0, 1], "matched_pattern": None},
-        {"action": "redact", "match_span": [0, 1], "matched_pattern": "hello", "redacted_text": None},
+        {"action": "redact", "match_span": [0, 1], "matched_pattern": "hello", "redacted_text": "eager text"},
     ],
 )
 def test_evaluation_response_fields_are_consistent(changes):
@@ -573,3 +573,34 @@ def test_evaluation_response_fields_are_consistent(changes):
     data["result"].update(changes)
     with pytest.raises(ModerationExecutionError, match="invalid_response"):
         decode_response(frame(data), original)
+
+
+def test_redact_decision_without_redacted_text_is_valid():
+    from tldw_Server_API.app.core.Moderation.models import ModerationEvaluationResult
+
+    policy = ModerationPolicy(block_patterns=[re.compile("hello")])
+    request = snapshot_request(
+        "evaluate", "hello", policy, None, EvaluationLimits(100, 0, 100, None), ExecutionBounds()
+    )
+    result = ModerationEvaluationResult(action="redact", matched_pattern="hello", match_span=(0, 5))
+    response = decode_response(encode_response(WorkerResponse("evaluate", result)), request)
+    assert response.result == result
+    assert response.result.redacted_text is None
+
+
+@given(action=st.sampled_from(["pass", "warn", "block", "redact"]), eager_text=st.text(max_size=80))
+def test_every_decision_rejects_non_null_redaction_text(action, eager_text):
+    from tldw_Server_API.app.core.Moderation.models import ModerationEvaluationResult
+
+    policy = ModerationPolicy(block_patterns=[re.compile("hello")])
+    request = snapshot_request(
+        "evaluate", "hello", policy, None, EvaluationLimits(100, 0, 100, None), ExecutionBounds()
+    )
+    result = ModerationEvaluationResult(
+        action=action,
+        redacted_text=eager_text,
+        matched_pattern="hello" if action != "pass" else None,
+        match_span=(0, 5) if action != "pass" else None,
+    )
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_response(encode_response(WorkerResponse("evaluate", result)), request)

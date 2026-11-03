@@ -68,6 +68,9 @@ from tldw_Server_API.app.core.Moderation.classification import (
     classify_sample,
     saved_classification,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
+from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata, execution_scope
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import ModerationReviewService, get_moderation_review_service
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
@@ -563,6 +566,17 @@ async def test_moderation(
     payload: ModerationTestRequest, request: Request, principal: CurrentPrincipal
 ) -> ModerationTestResponse:
     """Evaluate sample text against the effective moderation policy for a user."""
+    with execution_scope():
+        try:
+            return await _test_moderation_scoped(payload)
+        except ModerationExecutionError:
+            raise HTTPException(
+                status_code=503,
+                detail={"error_code": "moderation_unavailable", "message": "Moderation is currently unavailable"},
+            ) from None
+
+
+async def _test_moderation_scoped(payload: ModerationTestRequest) -> ModerationTestResponse:
     base_service = get_moderation_service()
     service = base_service
     user_id = _normalize_optional_identifier(payload.user_id)
@@ -599,7 +613,10 @@ async def test_moderation(
             )
 
     effective_policy = service.get_effective_policy(user_id)
-    result = service.evaluate_text(payload.text, effective_policy, payload.phase)
+    result = await run_moderation_async(
+        lambda: service.evaluate_text(payload.text, effective_policy, payload.phase),
+        metadata=FailureMetadata("evaluate", payload.phase, len(payload.text)),
+    )
 
     action = result.action
     category = result.category
@@ -607,7 +624,7 @@ async def test_moderation(
     # When guardian overlay is active, run a direct supervised-engine pass
     # so notify-only rules are preserved (the proxy coerces notify→warn).
     if supervised_engine is not None and guardian_dep_uid is not None:
-        supervised_result = supervised_engine.check_text(
+        supervised_result = await supervised_engine.check_text_async(
             payload.text,
             guardian_dep_uid,
             phase=payload.phase,
@@ -621,10 +638,10 @@ async def test_moderation(
         elif supervised_result.action == "notify" and action == "warn":
             # The proxy coerced notify→warn; restore the original action
             # when the base policy itself didn't produce the warn.
-            base_result = base_service.evaluate_text(
-                payload.text,
-                base_service.get_effective_policy(user_id),
-                payload.phase,
+            base_policy = base_service.get_effective_policy(user_id)
+            base_result = await run_moderation_async(
+                lambda: base_service.evaluate_text(payload.text, base_policy, payload.phase),
+                metadata=FailureMetadata("evaluate", payload.phase, len(payload.text)),
             )
             if base_result.action == "pass":
                 action = "notify"

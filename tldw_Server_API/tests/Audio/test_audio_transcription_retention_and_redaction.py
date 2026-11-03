@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
 
 TEST_API_KEY = "test-api-key-1234567890"
 
@@ -70,17 +71,17 @@ def _setup_stubbed_audio_app(
     monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", TEST_API_KEY)
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
 
-    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-        get_auth_principal,
-        get_db_transaction,
-    )
-    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
     import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_transcriptions
     import tldw_Server_API.app.core.DB_Management.db_path_utils as db_path_utils
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy as stt_policy
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+        get_auth_principal,
+        get_db_transaction,
+    )
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
     async def _fake_get_request_user() -> User:
         return User(id=1, username="single_user")
@@ -167,6 +168,36 @@ def _setup_stubbed_audio_app(
     app.dependency_overrides[get_db_transaction] = _fake_get_db_transaction
     app.include_router(audio_router, prefix="/api/v1/audio")
     return app
+
+
+@pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
+def test_transcription_moderation_failure_is_safe_http_503(monkeypatch, tmp_path, bypass_api_limits, reason):
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_transcriptions
+    from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
+
+    monkeypatch.setenv("STT_REDACT_PII", "1")
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
+    prepare_moderation_incident_store()
+    app = _setup_stubbed_audio_app(monkeypatch, transcript_text="private transcript", temp_outputs_dir=tmp_path)
+
+    def fail(*args, **kwargs):
+        raise ModerationExecutionError(reason)
+
+    monkeypatch.setattr(audio_transcriptions, "apply_transcript_text_policy", fail)
+    retained = AsyncMock()
+    monkeypatch.setattr(audio_transcriptions, "retain_stt_audio_artifact", retained)
+    with bypass_api_limits(app), TestClient(app) as client:
+        response = client.post(
+            "/api/v1/audio/transcriptions",
+            headers={"X-API-KEY": TEST_API_KEY},
+            files={"file": ("sample.wav", io.BytesIO(_make_wav_bytes()), "audio/wav")},
+            data={"model": "external:stub", "response_format": "verbose_json"},
+        )
+    assert response.status_code == 503
+    assert response.json()["detail"]["error_code"] == "moderation_unavailable"
+    assert "private transcript" not in response.text
+    assert "segments" not in response.text
+    retained.assert_not_called()
 
 
 def test_stt_policy_accepts_stricter_request_overrides() -> None:
