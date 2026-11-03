@@ -1,7 +1,7 @@
 ---
 id: TASK-15416
 title: Switch crawl and queue compatibility adapters
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - phase5
@@ -15,9 +15,9 @@ Execute Task 9 of the approved Phase 5 plan as an independently reviewable unit.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 9 behavior and interfaces match the approved spec and plan.
-- [ ] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
-- [ ] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
+- [x] #1 Task 9 behavior and interfaces match the approved spec and plan.
+- [x] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
+- [x] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -75,11 +75,13 @@ Final amended R1/R2/R3 covering:1914passed1failed3843warnings137.84s/no skips; s
 R1/R2/R3 committed b8532a2d7a with all applicable normal hooks passed; first sandbox commit attempt could not create index.lock, escalated identical command succeeded, no hook bypass. Added plan clarification for independently observed native disconnected event plus false state after rejected close (not bare state read), with held-command lease retention and native barrier proof; same bounded ownership/ADR085 decision, no new ADR needed. Fresh review will cover code commit and clarification, BASEd42fcb9b2e. Task9 remains In Progress.
 Fresh R1/R2/R3 scoped review d42fcb9b2e..032e934bee: all original findings ADDRESSED, but one new Important startup-failure ownership defect. If retirement-task creation fails, helper unobserves exit and returns, then seals/refunds live-browser capacity. Existing fake had disconnected Native, missing live case. Controller verified actual lease release predicate and original/current flow; minimal existing-lease conservative retention fix with connected-native weakref/admission regression now RED. No new registry/poller/retry/connection; Task9 remains In Progress.
 New I1 startup ownership fix RED2failed1passed then GREEN3passed; strengthened independent policy weakref and replacement rejection final3passed. Existing lease now retains failed-cleanup owner tuple in idle-release predicate when retirement task cannot start; same conservative permanent-capacity policy as unobservable cleanup tasks. No hidden recovery/retry/poller/registry; normal observed cleanup unchanged. Relevant10file browser/crawl/batch/queue+Native covering470passed953warnings61.36s/no skips; final focused after policy weakref3pass. Ruff/format/compile/diffcheck clean, Bandit0/errors[]. Exact commands and tradeoff appended task-9-r123-inline-report.md. Prepare normal scoped commit then independent I1-only rereview BASE032e934bee; Task9 In Progress.
+Task9 accepted Nov3 after combining original task review and all scoped fix reviews. I1/I3/I4, B1-B5, browser R1/R2/R3 and new cleanup-startup I1 all independently ADDRESSED; final narrow review task-9-browser-rereview-r4.md no new findings. Product HEAD82ed7a3544; original taskBASE1080d0f114. Relevant final470pass953warnings/no skips after narrow fix, broader1914behaviorpass1knownlater-sizegate/3843warnings, Native69pass151warnings incl3mandatoryoriginalsmokes. Scoped Ruff/format/compile/Bandit0/diff/hooks allpass. Existing HTTP/service size debts, multithread-fork certification, inventory/arXiv/httpx2 baseline, metadata conflicts/freshdev integration remain explicitly Tasks10-11, not hidden passing claims. No startup hook/new connection/dependency/subsystem or functionality loss. No push/merge authorized.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Switched legacy/enhanced crawl and queue adapters to canonical governed composition while preserving analyzer precedence, public APIs, instance capabilities, callbacks, extraction/DOM fallback, cookies/proxies, bounded sync ownership and actual drain. Corrected batch parent-budget integration and no-browser fallback. Native browser guards retain ownership through real exit, raw Cookie remains origin-scoped with natural jar semantics, and terminal routes complete safely. Independent task and fix gates accepted; service outcomes and final certification remain separate work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
