@@ -160,6 +160,7 @@ class _BrowserAcquisitionLease:
         self._sealed = False
         self._owner_finished = False
         self._released = False
+        self._failed_cleanup_owners: tuple[_OwnedResource, ...] = ()
         owner = physical_work.get()
         self._physical_release = owner.acquire() if owner is not None else None
 
@@ -243,6 +244,11 @@ class _BrowserAcquisitionLease:
             return task, "unobserved"
         return task, "retained"
 
+    def retain_failed_cleanup(self, owners: Mapping[str, _OwnedResource]) -> None:
+        """Permanently retain unobservable cleanup, as for an unobservable task."""
+        with self._lock:
+            self._failed_cleanup_owners = tuple(owners.values())
+
     def ensure_emergency_shutdown(
         self,
         factory: Callable[[], Coroutine[Any, Any, None]],
@@ -318,7 +324,7 @@ class _BrowserAcquisitionLease:
                 self._pool._release(self)
 
     def _mark_released_if_idle(self) -> bool:
-        if self._released or not self._sealed or not self._owner_finished or self._tasks:
+        if self._released or not self._sealed or not self._owner_finished or self._tasks or self._failed_cleanup_owners:
             return False
         self._released = True
         return True
@@ -1483,7 +1489,7 @@ class GuardedArticleBrowser:
 
         task, retention = lease.start_cleanup(finish(), name="article-browser-owner-retirement")
         if task is None:
-            outcome.unwatch_browser(native)
+            lease.retain_failed_cleanup(owners)
             return True
         if retention == "unobserved":
             return True
