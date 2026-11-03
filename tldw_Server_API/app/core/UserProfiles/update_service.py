@@ -6,25 +6,32 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 from pydantic import EmailStr, TypeAdapter, ValidationError
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    AnchorOwnership,
+    MembershipAuthority,
+    MembershipMutation,
+    MembershipMutationKind,
+    MembershipScopeType,
+    MembershipWriter,
+    MembershipWriteResult,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
-    add_team_member,
-    get_team,
     list_memberships_for_user,
     list_org_memberships_for_user,
-    remove_team_member,
-    update_org_member_role,
-    update_team_member_role,
 )
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
     UserVersionOwnership,
     VersionedUserWriteGateway,
 )
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.Usage.quota_resolver import invalidate_user
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
@@ -61,6 +68,12 @@ class _MembershipContext:
     actor_team_roles: dict[int, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _PreparedMembershipUpdate:
+    update_index: int
+    mutation: MembershipMutation
+
+
 @dataclass
 class _CallerOwnedAnchor:
     gateway: VersionedUserWriteGateway
@@ -77,6 +90,13 @@ class _CallerOwnedAnchor:
             )
 
     def mark_changed(self) -> None:
+        self.changed = True
+
+    def include_floor(self, version_floor: Any) -> None:
+        if self.version_floor is None:
+            self.version_floor = version_floor
+        else:
+            self.version_floor = max(self.version_floor, version_floor)
         self.changed = True
 
     async def finalize(self) -> None:
@@ -121,21 +141,85 @@ class UserProfileUpdateService:
         updates_list = list(updates)
         membership_context: _MembershipContext | None = None
         if any(str(key).startswith("memberships.") for key, _ in updates_list):
+            requested_team_ids: set[int] = set()
+            for key, value in updates_list:
+                if key == "memberships.teams.member":
+                    try:
+                        team_id, _action, _role = _parse_team_membership_payload(value)
+                    except ValueError:
+                        continue
+                    requested_team_ids.add(team_id)
             membership_context = await self._build_membership_context(
                 user_id=user_id,
                 scope=scope,
                 is_platform_admin=is_platform_admin,
+                db_conn=None if dry_run else db_conn,
+                requested_team_ids=tuple(sorted(requested_team_ids)),
             )
         is_postgres_backend = _is_postgres_backend_for_pool(self._db_pool)
+        operation_time = datetime.now(timezone.utc)
         anchor = _CallerOwnedAnchor(
             gateway=VersionedUserWriteGateway(
-                "postgres" if is_postgres_backend else "sqlite"
+                "postgres" if is_postgres_backend else "sqlite",
+                clock=lambda: operation_time,
             ),
             db_conn=db_conn,
             user_id=user_id,
         )
+        prepared_memberships: dict[int, _PreparedMembershipUpdate] = {}
+        membership_prepare_errors: dict[int, str] = {}
+        membership_validation_skips: list[dict[str, str]] = []
+        if membership_context is not None:
+            for update_index, (key, value) in enumerate(updates_list):
+                if key not in {
+                    "memberships.orgs.role",
+                    "memberships.teams.role",
+                    "memberships.teams.member",
+                }:
+                    continue
+                entry = catalog_map.get(key)
+                if entry is None or not _can_edit(entry, normalized_roles) or value is None:
+                    continue
+                ok, normalized, err = _validate_value(entry, value)
+                if not ok:
+                    if key in {"memberships.orgs.role", "memberships.teams.role"} and isinstance(value, dict):
+                        membership_validation_skips.append(
+                            {"key": key, "message": err or "invalid_value"}
+                        )
+                    continue
+                try:
+                    mutation = self._prepare_membership_mutation(
+                        user_id=user_id,
+                        key=key,
+                        value=normalized,
+                        scope=scope,
+                        is_platform_admin=is_platform_admin,
+                        membership_context=membership_context,
+                    )
+                except ValueError as exc:
+                    membership_prepare_errors[update_index] = str(exc)
+                else:
+                    prepared_memberships[update_index] = _PreparedMembershipUpdate(
+                        update_index=update_index,
+                        mutation=mutation,
+                    )
+        # Invalid role payloads abort; ordinary scalar skips retain bulk partial success.
+        if membership_validation_skips and not dry_run:
+            result.skipped.extend(membership_validation_skips)
+            return result
+        membership_results: dict[int, Any] = {}
+        if prepared_memberships and not dry_run:
+            membership_results, write_result = await self._apply_membership_batch(
+                db_conn=db_conn,
+                prepared=tuple(prepared_memberships.values()),
+                scope=scope,
+                is_platform_admin=is_platform_admin,
+                operation_time=operation_time,
+            )
+            if user_id in write_result.affected_user_ids:
+                anchor.include_floor(write_result.floor_for(user_id))
 
-        for key, value in updates_list:
+        for update_index, (key, value) in enumerate(updates_list):
             entry = catalog_map.get(key)
             if not entry:
                 result.skipped.append({"key": key, "message": "unknown_key"})
@@ -162,12 +246,32 @@ class UserProfileUpdateService:
                 result.skipped.append({"key": key, "message": "null_not_allowed"})
                 continue
 
-            if key in {"memberships.orgs.role", "memberships.teams.role"} and isinstance(value, dict):
-                ok, normalized, err = True, value, None
-            else:
-                ok, normalized, err = _validate_value(entry, value)
+            ok, normalized, err = _validate_value(entry, value)
             if not ok:
                 result.skipped.append({"key": key, "message": err or "invalid_value"})
+                continue
+
+            if key.startswith("memberships."):
+                prepare_error = membership_prepare_errors.get(update_index)
+                if prepare_error is not None:
+                    result.skipped.append({"key": key, "message": prepare_error})
+                    continue
+                prepared = prepared_memberships.get(update_index)
+                if prepared is None:
+                    result.skipped.append({"key": key, "message": "unsupported_key"})
+                    continue
+                if dry_run:
+                    result.applied.append(key)
+                    continue
+                mutation_result = membership_results[update_index]
+                result_error = self._membership_result_error(mutation_result)
+                if result_error is not None:
+                    result.skipped.append({"key": key, "message": result_error})
+                    continue
+                if not mutation_result.changed:
+                    await anchor.capture()
+                    anchor.mark_changed()
+                result.applied.append(key)
                 continue
 
             try:
@@ -179,9 +283,6 @@ class UserProfileUpdateService:
                     db_conn=db_conn,
                     repo_holder=repo_holder,
                     updated_by=updated_by,
-                    scope=scope,
-                    is_platform_admin=is_platform_admin,
-                    membership_context=membership_context,
                     is_postgres_backend=is_postgres_backend,
                     anchor=anchor,
                     result=result,
@@ -211,9 +312,6 @@ class UserProfileUpdateService:
         db_conn: Any,
         repo_holder: dict[str, UserProfileOverridesRepo | None],
         updated_by: int | None,
-        scope: ProfileUpdateScope | None,
-        is_platform_admin: bool,
-        membership_context: _MembershipContext | None,
         is_postgres_backend: bool,
         anchor: _CallerOwnedAnchor,
         result: UpdateResult,
@@ -332,9 +430,19 @@ class UserProfileUpdateService:
                 anchor.mark_changed()
             return True
 
+        return False
+
+    def _prepare_membership_mutation(
+        self,
+        *,
+        user_id: int,
+        key: str,
+        value: Any,
+        scope: ProfileUpdateScope | None,
+        is_platform_admin: bool,
+        membership_context: _MembershipContext,
+    ) -> MembershipMutation:
         if key == "memberships.orgs.role":
-            if membership_context is None:
-                raise ValueError("membership_context_unavailable")
             org_id_override = None
             role_value = value
             if isinstance(value, dict):
@@ -348,7 +456,13 @@ class UserProfileUpdateService:
             if org_id_override is not None:
                 if org_id_override not in membership_context.target_org_roles:
                     raise ValueError("membership_not_found")
-                if not is_platform_admin and org_id_override not in membership_context.actor_org_roles:
+                if (
+                    not is_platform_admin
+                    and not self._actor_can_access_org(
+                        membership_context,
+                        org_id=org_id_override,
+                    )
+                ):
                     raise ValueError("forbidden_scope")
                 org_id = org_id_override
             else:
@@ -357,24 +471,15 @@ class UserProfileUpdateService:
                     scope=scope,
                     is_platform_admin=is_platform_admin,
                 )
-            if not dry_run:
-                await anchor.capture()
-                result = await update_org_member_role(
-                    org_id=org_id,
-                    user_id=user_id,
-                    role=str(role_value),
-                )
-                if not result:
-                    raise ValueError("membership_not_found")
-                if result.get("error") == "owner_required":
-                    raise ValueError("owner_required")
-                await _touch_user_updated_at(db_conn, user_id)
-                anchor.mark_changed()
-            return True
+            return MembershipMutation(
+                scope_type=MembershipScopeType.ORGANIZATION,
+                scope_id=org_id,
+                user_id=user_id,
+                kind=MembershipMutationKind.UPDATE_ROLE,
+                role=str(role_value),
+            )
 
         if key == "memberships.teams.role":
-            if membership_context is None:
-                raise ValueError("membership_context_unavailable")
             team_id_override = None
             role_value = value
             if isinstance(value, dict):
@@ -400,49 +505,84 @@ class UserProfileUpdateService:
                     scope=scope,
                     is_platform_admin=is_platform_admin,
                 )
-            if not dry_run:
-                await anchor.capture()
-                result = await update_team_member_role(
-                    team_id=team_id,
-                    user_id=user_id,
-                    role=str(role_value),
-                )
-                if not result:
-                    raise ValueError("membership_not_found")
-                await _touch_user_updated_at(db_conn, user_id)
-                anchor.mark_changed()
-            return True
+            return MembershipMutation(
+                scope_type=MembershipScopeType.TEAM,
+                scope_id=team_id,
+                user_id=user_id,
+                kind=MembershipMutationKind.UPDATE_ROLE,
+                role=str(role_value),
+            )
 
         if key == "memberships.teams.member":
-            if membership_context is None:
-                raise ValueError("membership_context_unavailable")
             team_id, action, role = _parse_team_membership_payload(value)
-            if not dry_run:
-                await anchor.capture()
-                team = await get_team(team_id)
-                if not team:
-                    raise ValueError("team_not_found")
-                if not is_platform_admin and not self._actor_can_access_team(
-                    membership_context,
-                    team_id=team_id,
-                    team_org_id=int(team.get("org_id")) if team.get("org_id") is not None else None,
-                ):
-                    raise ValueError("forbidden_scope")
-                if action == "add":
-                    if team.get("org_id") is not None:
-                        org_id = int(team.get("org_id"))
-                        if org_id not in membership_context.target_org_roles:
-                            raise ValueError("org_membership_required")
-                    await add_team_member(team_id=team_id, user_id=user_id, role=role or "member")
-                else:
-                    res = await remove_team_member(team_id=team_id, user_id=user_id)
-                    if not res.get("removed"):
-                        raise ValueError("membership_not_found")
-                await _touch_user_updated_at(db_conn, user_id)
-                anchor.mark_changed()
-            return True
+            if not is_platform_admin and not self._actor_can_access_team(
+                membership_context,
+                team_id=team_id,
+            ):
+                raise ValueError("forbidden_scope")
+            return MembershipMutation(
+                scope_type=MembershipScopeType.TEAM,
+                scope_id=team_id,
+                user_id=user_id,
+                kind=(
+                    MembershipMutationKind.ADD
+                    if action == "add"
+                    else MembershipMutationKind.REMOVE
+                ),
+                role=(role or "member") if action == "add" else None,
+            )
+        raise ValueError("unsupported_key")
 
-        return False
+    async def _apply_membership_batch(
+        self,
+        *,
+        db_conn: Any,
+        prepared: tuple[_PreparedMembershipUpdate, ...],
+        scope: ProfileUpdateScope | None,
+        is_platform_admin: bool,
+        operation_time: datetime,
+    ) -> tuple[dict[int, Any], MembershipWriteResult]:
+        actor_user_id = scope.actor_user_id if scope else None
+        if type(actor_user_id) is not int or actor_user_id <= 0:
+            raise ValueError("membership_context_unavailable")
+        context = ActorMembershipWriteContext(
+            actor_user_id=actor_user_id,
+            required_authority=(
+                MembershipAuthority.PLATFORM_ADMIN
+                if is_platform_admin
+                else MembershipAuthority.SCOPED_MEMBERSHIP
+            ),
+        )
+        write_result = await MembershipWriter(self._db_pool).apply_membership_mutations(
+            conn=db_conn,
+            context=context,
+            mutations=tuple(item.mutation for item in prepared),
+            anchor_ownership=AnchorOwnership.CALLER_OWNS_ANCHOR,
+            operation_time=operation_time,
+        )
+        if len(write_result.mutation_results) != len(prepared):
+            raise RuntimeError("Membership writer returned an incomplete result batch")
+        return (
+            {
+                item.update_index: mutation_result
+                for item, mutation_result in zip(
+                    prepared,
+                    write_result.mutation_results,
+                    strict=True,
+                )
+            },
+            write_result,
+        )
+
+    @staticmethod
+    def _membership_result_error(mutation_result: Any) -> str | None:
+        if mutation_result.error is not None:
+            return str(mutation_result.error)
+        if mutation_result.mutation.kind is MembershipMutationKind.UPDATE_ROLE:
+            return None if mutation_result.found else "membership_not_found"
+        if mutation_result.mutation.kind is MembershipMutationKind.REMOVE:
+            return None if mutation_result.changed else "membership_not_found"
+        return None
 
     async def _build_membership_context(
         self,
@@ -450,9 +590,32 @@ class UserProfileUpdateService:
         user_id: int,
         scope: ProfileUpdateScope | None,
         is_platform_admin: bool,
+        db_conn: Any | None = None,
+        requested_team_ids: tuple[int, ...] = (),
     ) -> _MembershipContext:
-        target_org_rows = await list_org_memberships_for_user(user_id)
-        target_team_rows = await list_memberships_for_user(user_id)
+        if db_conn is None:
+            async def _list_orgs(member_user_id: int) -> list[dict[str, Any]]:
+                return await list_org_memberships_for_user(member_user_id)
+
+            async def _list_teams(member_user_id: int) -> list[dict[str, Any]]:
+                return await list_memberships_for_user(member_user_id)
+        else:
+            membership_repo = AuthnzOrgsTeamsRepo(self._db_pool)
+
+            async def _list_orgs(member_user_id: int) -> list[dict[str, Any]]:
+                return await membership_repo.list_org_memberships_for_user(
+                    member_user_id,
+                    conn=db_conn,
+                )
+
+            async def _list_teams(member_user_id: int) -> list[dict[str, Any]]:
+                return await membership_repo.list_memberships_for_user(
+                    member_user_id,
+                    conn=db_conn,
+                )
+
+        target_org_rows = await _list_orgs(user_id)
+        target_team_rows = await _list_teams(user_id)
         target_org_roles = {
             int(row.get("org_id")): str(row.get("role") or "member").lower()
             for row in target_org_rows
@@ -468,12 +631,19 @@ class UserProfileUpdateService:
             for row in target_team_rows
             if row.get("team_id") is not None and row.get("org_id") is not None
         }
+        membership_repo = AuthnzOrgsTeamsRepo(self._db_pool)
+        for team_id in requested_team_ids:
+            parent_id = await membership_repo.get_team_parent_organization_id(
+                team_id, conn=db_conn,
+            )
+            if parent_id is not None:
+                target_team_orgs[team_id] = parent_id
         actor_org_roles: dict[int, str] = {}
         actor_team_roles: dict[int, str] = {}
         actor_user_id = scope.actor_user_id if scope else None
         if actor_user_id is not None and not is_platform_admin:
-            actor_org_rows = await list_org_memberships_for_user(int(actor_user_id))
-            actor_team_rows = await list_memberships_for_user(int(actor_user_id))
+            actor_org_rows = await _list_orgs(int(actor_user_id))
+            actor_team_rows = await _list_teams(int(actor_user_id))
             actor_org_roles = {
                 int(row.get("org_id")): str(row.get("role") or "member").lower()
                 for row in actor_org_rows
@@ -507,15 +677,27 @@ class UserProfileUpdateService:
             org_id = int(active_org_id)
             if org_id not in target_org_ids:
                 raise ValueError("membership_not_found")
-            if not is_platform_admin and org_id not in context.actor_org_roles:
+            if not is_platform_admin and not UserProfileUpdateService._actor_can_access_org(
+                context,
+                org_id=org_id,
+            ):
                 raise ValueError("forbidden_scope")
             return org_id
-        shared_orgs = target_org_ids & set(context.actor_org_roles)
+        shared_orgs = {
+            org_id
+            for org_id in target_org_ids
+            if UserProfileUpdateService._actor_can_access_org(
+                context,
+                org_id=org_id,
+            )
+        }
         if shared_orgs:
             if len(shared_orgs) == 1:
                 return next(iter(shared_orgs))
             raise ValueError("ambiguous_org_membership")
         if len(target_org_ids) == 1:
+            if not is_platform_admin:
+                raise ValueError("forbidden_scope")
             return next(iter(target_org_ids))
         raise ValueError("ambiguous_org_membership")
 
@@ -556,12 +738,23 @@ class UserProfileUpdateService:
         team_id: int,
         team_org_id: int | None = None,
     ) -> bool:
-        if team_id in context.actor_team_roles:
+        team_role = context.actor_team_roles.get(team_id, "").strip().lower()
+        if team_role in {"owner", "admin", "lead"}:
             return True
         org_id = team_org_id if team_org_id is not None else context.target_team_orgs.get(team_id)
         if org_id is None:
             return False
-        return org_id in context.actor_org_roles
+        org_role = context.actor_org_roles.get(org_id, "").strip().lower()
+        return org_role in {"owner", "admin"}
+
+    @staticmethod
+    def _actor_can_access_org(
+        context: _MembershipContext,
+        *,
+        org_id: int,
+    ) -> bool:
+        role = context.actor_org_roles.get(org_id, "").strip().lower()
+        return role in {"owner", "admin"}
 
 
 def _can_edit(entry: UserProfileCatalogEntry, roles: set[str]) -> bool:
@@ -570,6 +763,19 @@ def _can_edit(entry: UserProfileCatalogEntry, roles: set[str]) -> bool:
 
 
 def _validate_value(entry: UserProfileCatalogEntry, value: Any) -> tuple[bool, Any, str | None]:
+    if entry.key in {"memberships.orgs.role", "memberships.teams.role"}:
+        if isinstance(value, dict) and "role" not in value:
+            return False, None, "invalid_membership_payload"
+        role = value.get("role") if isinstance(value, dict) else value
+        if not isinstance(role, str):
+            return False, None, "invalid_value"
+        role = role.strip().lower()
+        if role not in {"owner", "admin", "lead", "member"} or (
+            entry.enum and role not in entry.enum
+        ):
+            return False, None, "enum_violation"
+        return True, {**value, "role": role} if isinstance(value, dict) else role, None
+
     if entry.enum and value not in entry.enum:
         return False, None, "enum_violation"
 

@@ -48,6 +48,8 @@ def test_managed_mode_reuses_existing_ocr_process(monkeypatch):
     reset_managed_process_registry()
     monkeypatch.setenv("LLAMACPP_OCR_MODE", "managed")
     monkeypatch.setenv("LLAMACPP_OCR_ALLOW_MANAGED_START", "true")
+    monkeypatch.setenv("LLAMACPP_OCR_HOST", "127.0.0.1")
+    monkeypatch.setenv("LLAMACPP_OCR_PORT", "18081")
 
     process = types.SimpleNamespace(pid=999, poll=lambda: None, returncode=None)
     register_managed_process("llamacpp", process, host="127.0.0.1", port=18081)
@@ -58,8 +60,9 @@ def test_managed_mode_reuses_existing_ocr_process(monkeypatch):
         spawned.append((args, kwargs))
         raise AssertionError("existing OCR-managed process should be reused")
 
-    def fake_fetch_json(*, method, url, json, timeout):
+    def fake_fetch_json(*, method, url, json, timeout, configured_endpoint):
         assert url == "http://127.0.0.1:18081/v1/chat/completions"  # nosec B101
+        assert (configured_endpoint.scheme, configured_endpoint.host, configured_endpoint.port) == ("http", "127.0.0.1", 18081)  # nosec B101
         return {"choices": [{"message": {"content": "managed text"}}]}
 
     monkeypatch.setattr(
@@ -122,8 +125,9 @@ def test_managed_mode_uses_private_ocr_port_not_admin_port(monkeypatch):
         assert timeout_total > 0  # nosec B101
         return True
 
-    def fake_fetch_json(*, method, url, json, timeout):
+    def fake_fetch_json(*, method, url, json, timeout, configured_endpoint):
         assert url == "http://127.0.0.1:19090/v1/chat/completions"  # nosec B101
+        assert (configured_endpoint.scheme, configured_endpoint.host, configured_endpoint.port) == ("http", "127.0.0.1", 19090)  # nosec B101
         return {"choices": [{"message": {"content": "managed text"}}]}
 
     monkeypatch.setattr(

@@ -3,15 +3,15 @@ id: TASK-12936
 title: Verify chat document upload processing UX
 status: Done
 assignee: []
-created_date: '2026-07-09 06:25'
-updated_date: '2026-07-09 07:03'
+created_date: 2026-07-09 06:25
+updated_date: 2026-07-09 07:03
 labels:
-  - implementation
-  - chat
-  - frontend
-  - testing
+- implementation
+- chat
+- frontend
+- testing
 dependencies:
-  - TASK-12092
+- TASK-15040
 ---
 
 ## Description

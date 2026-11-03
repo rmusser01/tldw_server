@@ -109,6 +109,7 @@ from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
@@ -166,7 +167,6 @@ from tldw_Server_API.app.services.auth_service import (
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
 from tldw_Server_API.app.services.storage_quota_service import resolved_storage_quota_mb
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -956,27 +956,38 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
 
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-        from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
+        from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+            TrustedMembershipReason,
+            TrustedMembershipWriteContext,
+        )
         from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
+        pool = await get_db_pool()
+        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+        context = TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        )
         org = None
         for attempt in range(3):
             name = base_name if attempt == 0 else f"{base_name}-{secrets.token_hex(2)}"
             try:
-                org = await create_organization(name=name, owner_user_id=int(user_id))
+                org = await repo.create_organization_with_owner_membership(
+                    name=name,
+                    owner_user_id=int(user_id),
+                    context=context,
+                )
                 break
             except DuplicateOrganizationError:
                 continue
 
         if not org:
             return
-
-        pool = await get_db_pool()
-        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-        await repo.add_org_member(org_id=org["id"], user_id=int(user_id), role="owner")
     except Exception as exc:
         # Best-effort bootstrap: org creation failures must not block login flows.
-        logger.warning("Org bootstrap failed for user {}: {}", user_id, exc)
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Org bootstrap failed for user_id={}",
+            user_id,
+        )
 
 def _is_pytest_context() -> bool:
     """Return True when running under pytest or explicit test-mode flags."""
@@ -3879,6 +3890,17 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid registration code."
         ) from e
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as e:
+        logger.warning("Registration deferred because the authentication database is busy")
+        log_counter("auth_register_database_busy")
+        log_histogram("auth_register_duration", time.perf_counter() - start_time)
+        _finalize_register_diag(http_request, response)
+        raise _authnz_busy_http_exception() from e
     except RegistrationError as e:
         logger.error(f"Registration error: {e}")
         log_counter("auth_register_error")

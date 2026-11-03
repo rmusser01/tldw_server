@@ -832,7 +832,7 @@ the implementation pass. For example, if the implementation pass uses `TASK-393`
 only:
 
 ```bash
-git add "backlog/tasks/task-393 - Plan-Quick-Ingest-UX-remediation-implementation.md"
+git add "backlog/tasks/task-15208 - Plan-Quick-Ingest-UX-remediation-implementation.md"
 git commit -m "docs: record quick ingest remediation verification"
 ```
 

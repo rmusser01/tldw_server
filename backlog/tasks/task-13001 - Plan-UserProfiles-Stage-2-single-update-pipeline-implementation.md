@@ -4,7 +4,7 @@ title: Plan UserProfiles Stage 2 single-update pipeline implementation
 status: Done
 created_date: 2026-07-26 03:50
 dependencies:
-- TASK-13000
+- TASK-15127
 labels:
 - UserProfiles
 - planning

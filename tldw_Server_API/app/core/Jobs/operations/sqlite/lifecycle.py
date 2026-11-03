@@ -9,6 +9,9 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+    workflow_enrollment_projection,
+)
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
 )
@@ -152,10 +155,19 @@ def _candidate_sql(
     command: AcquireJobCommand,
     now_sql: str,
 ) -> tuple[str, list[Any]]:
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_enrollment_projection
+
     sql = (
         "SELECT id FROM jobs WHERE domain = ? AND queue = ? "
         "AND status = 'queued' AND (available_at IS NULL OR available_at <= DATETIME(?))"
     )
+    if workflow_enrollment_projection(conn, backend="sqlite") == "workflow_capability_version":
+        sql = (
+            "SELECT id FROM jobs WHERE domain = ? AND queue = ? "
+            "AND status = 'queued' AND (available_at IS NULL OR "
+            "(workflow_capability_version=1 AND JULIANDAY(available_at)<=JULIANDAY('now')) OR "
+            "(workflow_capability_version IS NULL AND available_at<=DATETIME(?)))"
+        )
     sql += _dependency_condition()
     params: list[Any] = [command.domain, command.queue, now_sql]
     if command.owner_user_id:
@@ -179,6 +191,13 @@ def _candidate_sql(
             "SELECT 1 FROM jobs WHERE domain=? AND queue=? "
             "AND status='queued' AND available_at IS NOT NULL AND available_at > DATETIME(?)"
         )
+        if workflow_enrollment_projection(conn, backend="sqlite") == "workflow_capability_version":
+            scheduled_sql = (
+                "SELECT 1 FROM jobs WHERE domain=? AND queue=? "
+                "AND status='queued' AND available_at IS NOT NULL AND ("
+                "(workflow_capability_version=1 AND JULIANDAY(available_at)>JULIANDAY('now')) OR "
+                "(workflow_capability_version IS NULL AND available_at>DATETIME(?)))"
+            )
         scheduled_params: list[Any] = [command.domain, command.queue, now_sql]
         if command.owner_user_id:
             scheduled_sql += " AND owner_user_id=?"
@@ -250,6 +269,7 @@ def _renew_lease_statement(
     command: RenewLeaseCommand,
     *,
     now: datetime,
+    enrollment_column: bool = False,
 ) -> tuple[str, tuple[Any, ...]]:
     """Build the SQLite statement for one lease renewal attempt."""
 
@@ -258,12 +278,37 @@ def _renew_lease_statement(
     has_message = command.progress_message is not None
     sql = _RENEW_SQL_VARIANTS[(command.enforce, has_percent, has_message)]
     params: list[Any] = [now_sql, now_sql, command.seconds]
+    if enrollment_column:
+        # Keep the legacy clock/representation for null markers. Enrolled
+        # authority uses numeric database time, including fractional deadlines.
+        sql = (
+            "UPDATE jobs SET leased_until = CASE WHEN workflow_capability_version IS NULL THEN "
+            "MAX(COALESCE(leased_until, DATETIME(?)), DATETIME(?, '+' || ? || ' seconds')) "
+            "WHEN JULIANDAY(leased_until)>=JULIANDAY('now','+' || ? || ' seconds') THEN leased_until "
+            "ELSE STRFTIME('%Y-%m-%d %H:%M:%f','now','+' || ? || ' seconds') END"
+        )
+        params.extend((command.seconds, command.seconds))
+        if has_percent:
+            sql += ", progress_percent = ?"
+        if has_message:
+            sql += ", progress_message = ?"
+        sql += " WHERE id = ? AND status = 'processing'"
+        if command.enforce:
+            sql += " AND worker_id = ? AND lease_id = ?"
     if has_percent:
         params.append(float(command.progress_percent))
     if has_message:
         params.append(str(command.progress_message))
     params.append(command.job_id)
     if command.enforce:
+        params.extend((command.worker_id, command.lease_id))
+    if enrollment_column:
+        sql += (
+            " AND (workflow_capability_version IS NULL OR "
+            "(typeof(workflow_capability_version)='integer' AND workflow_capability_version=1 "
+            "AND worker_id=? AND lease_id=? AND worker_id<>'' AND lease_id<>'' "
+            "AND JULIANDAY(leased_until)>JULIANDAY('now')))"
+        )
         params.extend((command.worker_id, command.lease_id))
     return sql, tuple(params)
 
@@ -299,10 +344,13 @@ def renew_lease(
 ) -> LifecycleResult:
     """Renew one processing SQLite job lease without shortening it."""
 
-    sql, params = _renew_lease_statement(command, now=now)
-
     transaction = nullcontext(conn) if conn.in_transaction else conn
     with transaction:
+        sql, params = _renew_lease_statement(
+            command,
+            now=now,
+            enrollment_column=workflow_enrollment_projection(conn, backend="sqlite") == "workflow_capability_version",
+        )
         changed = conn.execute(sql, params)
         if changed.rowcount != 1:
             return _classify_lifecycle_no_transition(
@@ -334,6 +382,7 @@ def renew_leases_batch(
 
     applied_count = 0
     with _batch_renew_transaction(conn):
+        enrollment_column = workflow_enrollment_projection(conn, backend="sqlite") == "workflow_capability_version"
         for item in command.items:
             item_command = RenewLeaseCommand(
                 job_id=item.job_id,
@@ -342,7 +391,7 @@ def renew_leases_batch(
                 worker_id=item.worker_id,
                 lease_id=item.lease_id,
             )
-            sql, params = _renew_lease_statement(item_command, now=clock())
+            sql, params = _renew_lease_statement(item_command, now=clock(), enrollment_column=enrollment_column)
             changed = conn.execute(sql, params)
             applied_count += int(changed.rowcount or 0)
         return BatchRenewLeasesResult(
@@ -362,16 +411,21 @@ def release_job(
     owns_transaction = begin_immediate_if_needed(conn)
     transaction = conn if owns_transaction else nullcontext(conn)
     with transaction:
-        selected = conn.execute(
-            (
-                "SELECT id, domain, queue, job_type, status, worker_id, lease_id "
-                "FROM jobs WHERE id = ?"
-            ),
-            (command.job_id,),
-        ).fetchone()
+        enrollment = workflow_enrollment_projection(conn, backend="sqlite")
+        selected_sql = "SELECT id, domain, queue, job_type, status, worker_id, lease_id FROM jobs WHERE id = ?"
+        if enrollment == "workflow_capability_version":
+            selected_sql = (
+                "SELECT id, domain, queue, job_type, status, worker_id, lease_id, "
+                "workflow_capability_version FROM jobs WHERE id = ?"
+            )
+        selected = conn.execute(selected_sql, (command.job_id,)).fetchone()
         if selected is None:
             return LifecycleResult.no_transition(NoTransitionReason.MISSING)
         current = dict(selected)
+        if current.get("workflow_capability_version") is not None:
+            # Generic release cannot close a workflow episode or attest domain
+            # facts. Leave it live for CONTINUE, or bounded expiry recovery.
+            return LifecycleResult.no_transition(NoTransitionReason.WRONG_STATUS, row=current)
         if current.get("status") != "processing":
             return LifecycleResult.no_transition(NoTransitionReason.WRONG_STATUS, row=current)
         if command.enforce and (
@@ -419,6 +473,7 @@ def acquire_job(
     command: AcquireJobCommand,
     counters_enabled: bool,
     now: datetime,
+    decode_payload: Callable[..., Any] | None = None,
 ) -> LifecycleResult:
     """Atomically acquire the next eligible SQLite job."""
 
@@ -427,11 +482,21 @@ def acquire_job(
         # Selection and transition must exclude concurrent dependency writers.
         conn.execute("BEGIN IMMEDIATE")
         if command.max_inflight_quota and command.owner_user_id:
-            inflight_row = conn.execute(
-                (
+            from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_enrollment_projection
+
+            inflight_sql = (
+                "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' "
+                "AND leased_until IS NOT NULL AND leased_until > DATETIME(?)"
+            )
+            if workflow_enrollment_projection(conn, backend="sqlite") == "workflow_capability_version":
+                inflight_sql = (
                     "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' "
-                    "AND leased_until IS NOT NULL AND leased_until > DATETIME(?)"
-                ),
+                    "AND leased_until IS NOT NULL AND ("
+                    "(workflow_capability_version=1 AND JULIANDAY(leased_until)>JULIANDAY('now')) OR "
+                    "(workflow_capability_version IS NULL AND leased_until > DATETIME(?)))"
+                )
+            inflight_row = conn.execute(
+                inflight_sql,
                 (command.domain, command.owner_user_id, now_sql),
             ).fetchone()
             if int(inflight_row[0] or 0) >= command.max_inflight_quota:
@@ -503,6 +568,21 @@ def acquire_job(
         if not row:
             return LifecycleResult.no_transition(NoTransitionReason.NO_ELIGIBLE_JOB)
         acquired = dict(row)
+        if acquired.get("workflow_capability_version") == 1:
+            conn.execute(
+                "UPDATE jobs SET leased_until=STRFTIME('%Y-%m-%d %H:%M:%f','now',?) WHERE uuid=?",
+                (f"+{command.lease_seconds} seconds", acquired["uuid"]),
+            )
+            acquired["leased_until"] = conn.execute(
+                "SELECT leased_until FROM jobs WHERE uuid=?", (acquired["uuid"],)
+            ).fetchone()[0]
+        from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+            record_workflow_acquisition_in_transaction,
+        )
+
+        record_workflow_acquisition_in_transaction(
+            conn, backend="sqlite", acquired=acquired, decode_payload=decode_payload
+        )
         if counters_enabled:
             _bump_acquired_counters(conn, acquired=acquired)
         return LifecycleResult.applied(row=acquired)
@@ -608,14 +688,15 @@ def _prepared_counter_transition(
     *,
     row: dict[str, Any],
     new_status: str,
+    queued_scheduled: bool = True,
 ) -> None:
     old_status = str(row.get("status") or "")
     old_scheduled = old_status == "queued" and row.get("available_at") is not None
     ready_delta = int(new_status == "queued") - int(old_status == "queued" and not old_scheduled)
     scheduled_delta = int(new_status == "queued") - int(old_scheduled)
     if new_status == "queued":
-        ready_delta = 0
-        scheduled_delta = 1 - int(old_scheduled)
+        ready_delta = 0 if queued_scheduled else 1 - int(old_status == "queued" and not old_scheduled)
+        scheduled_delta = int(queued_scheduled) - int(old_scheduled)
     processing_delta = -int(old_status == "processing")
     quarantined_delta = int(new_status == "quarantined") - int(old_status == "quarantined")
     conn.execute(

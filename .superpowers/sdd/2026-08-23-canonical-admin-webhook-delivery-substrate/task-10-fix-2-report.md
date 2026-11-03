@@ -115,7 +115,7 @@ the changed repository path.
 - `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py`
 - `tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py`
 - `Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md`
-- `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
+- `backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
 - This report.
 
 The Backlog file included the controller's pre-existing re-review ruling and was

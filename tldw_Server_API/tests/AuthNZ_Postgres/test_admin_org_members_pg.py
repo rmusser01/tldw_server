@@ -80,7 +80,7 @@ async def test_admin_org_members_endpoints_postgres(test_db_pool):
 
     # Insert admin and standard user
     admin_id = await ensure_test_user(
-        pool, "pgadmin2", "pgadmin2@example.com"
+        pool, "pgadmin2", "pgadmin2@example.com", role="admin"
     )
     bob_id = await ensure_test_user(
         pool, "pgbob", "pgbob@example.com"

@@ -3,21 +3,19 @@ id: TASK-386
 title: Implement cache-aware LLM usage reporting
 status: Done
 assignee: []
-created_date: '2026-05-15 16:29'
-updated_date: '2026-05-15 16:44'
+created_date: 2026-05-15 16:29
+updated_date: 2026-05-15 16:44
 labels:
-  - llm-cache
-  - usage-reporting
-  - cost-control
-  - implementation
+- llm-cache
+- usage-reporting
+- cost-control
+- implementation
 dependencies:
-  - TASK-377
-  - TASK-378
+- TASK-377
+- TASK-15207
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-15-chat-worldbook-cache-cost-control-implementation-plan.md
+- Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md
+- Docs/superpowers/plans/2026-05-15-chat-worldbook-cache-cost-control-implementation-plan.md
 priority: medium
 ---
 
