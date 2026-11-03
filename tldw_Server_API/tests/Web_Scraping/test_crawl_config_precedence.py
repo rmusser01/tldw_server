@@ -9,6 +9,7 @@ import tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping as enhanced_c
 import tldw_Server_API.app.services.enhanced_web_scraping_service as enhanced_svc_mod
 import tldw_Server_API.app.services.web_scraping_service as legacy_svc_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ScrapeMethod
+from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlOutcome, CrawlReport
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
     EnhancedWebScraper,
     ScrapingJob,
@@ -234,13 +235,16 @@ async def test_enhanced_service_propagates_analysis_intent_to_scraper(
     captured: dict[str, dict[str, object]] = {}
 
     class FakeScraper:
-        async def scrape_multiple(self, _urls, **kwargs):
-            captured["multiple"] = kwargs
-            return []
+        def _set_progress(self, *_args, **_kwargs):
+            pass
 
-        async def scrape_sitemap(self, _url, **kwargs):
-            captured["sitemap"] = kwargs
-            return []
+        async def _batch_report(self, _urls, **kwargs):
+            captured["multiple"] = kwargs
+            return CrawlReport((), CrawlOutcome("completed", "frontier_exhausted", False))
+
+        async def _crawl_report(self, _url, **kwargs):
+            captured["sitemap"] = kwargs["options"]
+            return CrawlReport((), CrawlOutcome("completed", "frontier_exhausted", False))
 
     svc = WebScrapingService()
     svc._initialized = True
@@ -413,18 +417,15 @@ async def test_friendly_ingest_propagates_analysis_intent_to_direct_scrapers(
             "extraction_successful": True,
         }
 
-    def fake_scrape_from_sitemap(_url, *, allow_llm_extraction=None):
-        captured["allow_llm_extraction"] = allow_llm_extraction
-        return [
-            {
-                "url": "https://example.com/article",
-                "content": "article",
-                "extraction_successful": True,
-            }
-        ]
+    async def fake_crawl_report(_request, **kwargs):
+        captured["allow_llm_extraction"] = kwargs["options"]["allow_llm_extraction"]
+        return CrawlReport(
+            ({"url": "https://example.com/article", "content": "article", "extraction_successful": True},),
+            CrawlOutcome("completed", "frontier_exhausted", False),
+        )
 
     monkeypatch.setattr(legacy_svc_mod, "scrape_article", fake_scrape_article)
-    monkeypatch.setattr(legacy_svc_mod, "scrape_from_sitemap", fake_scrape_from_sitemap)
+    monkeypatch.setattr(legacy_svc_mod, "execute_crawl", fake_crawl_report)
 
     request = SimpleNamespace(
         scrape_method=scrape_method,

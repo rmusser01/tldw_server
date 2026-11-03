@@ -60,16 +60,14 @@ CONSUMER_IMPORTS = {
     },
     "tldw_Server_API/app/services/web_scraping_service.py": {
         ORCHESTRATION_MODULE: {"scrape_article"},
-        LEGACY_MODULE: {"scrape_from_sitemap"},
+        f"{ORCHESTRATION_MODULE}.crawl": {"execute_crawl"},
+        LEGACY_MODULE: set(),
     },
 }
 
 REQUIRED_LEGACY_IMPORTS = {
     "tldw_Server_API/app/core/Watchlists/fetchers.py": {"is_content_page"},
     "tldw_Server_API/app/services/enhanced_web_scraping_service.py": {"is_content_page"},
-    "tldw_Server_API/app/services/web_scraping_service.py": {
-        "scrape_from_sitemap",
-    },
 }
 
 
@@ -101,7 +99,7 @@ def _legacy_module_imports(path: Path) -> set[str]:
     "source",
     [
         f"import {LEGACY_MODULE} as legacy\n",
-        ("from tldw_Server_API.app.core.Web_Scraping " "import Article_Extractor_Lib as legacy\n"),
+        ("from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy\n"),
     ],
 )
 def test_legacy_module_alias_imports_are_detected(tmp_path: Path, source: str) -> None:

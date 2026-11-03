@@ -74,6 +74,7 @@ _PROGRESS_FIELDS = frozenset(
         "current_depth",
         "error",
         "crawl_outcome",
+        "service_status",
     }
 )
 
@@ -95,6 +96,15 @@ def public_state_string(value: str) -> str:
     return _URL_IN_TEXT.sub(lambda match: redact_url_for_log(match.group()), value)
 
 
+def public_crawl_outcome(outcome: CrawlOutcome) -> dict[str, Any]:
+    """Project terminal crawl facts, never execution state or credentials."""
+    return {
+        "state": outcome.state,
+        "stop_reason": outcome.stop_reason,
+        "has_partial_results": outcome.has_partial_results,
+    }
+
+
 def public_job(job: ScrapingJob, *, crawl_outcome: CrawlOutcome | None = None) -> dict[str, Any]:
     """Allowlist polling state for both legacy and process-local job values."""
     snapshot = {
@@ -114,11 +124,7 @@ def public_job(job: ScrapingJob, *, crawl_outcome: CrawlOutcome | None = None) -
         "cancel_requested": job.cancel_requested,
     }
     if crawl_outcome is not None:
-        snapshot["crawl_outcome"] = {
-            "state": crawl_outcome.state,
-            "stop_reason": crawl_outcome.stop_reason,
-            "has_partial_results": crawl_outcome.has_partial_results,
-        }
+        snapshot["crawl_outcome"] = public_crawl_outcome(crawl_outcome)
     return bounded_snapshot(snapshot, sys.maxsize, redact=True, article_path=("result",))[0]
 
 
