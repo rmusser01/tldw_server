@@ -123,14 +123,16 @@ async def test_persistence_reports_safe_extraction_failure_without_storing(
     code: str,
 ):
     _patch_db(monkeypatch)
-    response = await _persist([
-        _article(
-            url="https://example.com/private?token=source-private-secret",
-            content="",
-            extraction_successful=False,
-            **failure,
-        )
-    ])
+    response = await _persist(
+        [
+            _article(
+                url="https://example.com/private?token=source-private-secret",
+                content="",
+                extraction_successful=False,
+                **failure,
+            )
+        ]
+    )
     # Users need to see which source failed: host plus path, never the query.
     assert response["extraction_failures"] == [{"code": code, "source": "example.com/private"}]
     assert response["errors"] == [f"example.com/private: {_PUBLIC_FAILURE_MESSAGES[code]}"]
@@ -159,9 +161,18 @@ async def test_queued_timeout_reaches_persistence_with_its_safe_category(monkeyp
     scraper = scraper_mod.EnhancedWebScraper(config={"max_concurrent": 1})
     monkeypatch.setattr(scraper_mod, "afetch", AsyncMock(side_effect=NetworkError(message, classification="timeout")))
 
+    job_ids = []
+
     async def scrape_without_preflight(url, *_args, **_kwargs):
         return await scraper._scrape_with_trafilatura(url)
 
+    submit = scraper.job_queue.submit_page
+
+    async def capture_job(job, **kwargs):
+        job_ids.append(job.job_id)
+        return await submit(job, **kwargs)
+
+    monkeypatch.setattr(scraper.job_queue, "submit_page", capture_job)
     monkeypatch.setattr(scraper, "scrape_article", scrape_without_preflight)
     await scraper.job_queue.start()
     try:
@@ -169,7 +180,8 @@ async def test_queued_timeout_reaches_persistence_with_its_safe_category(monkeyp
         response = await _persist(articles)
         assert response["extraction_failures"] == [{"code": "extraction_timeout", "source": "example.com/article"}]
         assert response["stored_articles"] == 0
-        assert all(job.status == scraper_mod.JobStatus.FAILED for job in scraper.job_queue._completed_jobs.values())
+        assert len(job_ids) == 1
+        assert scraper.job_queue.get_job(job_ids[0]).status == scraper_mod.JobStatus.FAILED
     finally:
         await scraper.job_queue.stop()
 
@@ -297,7 +309,9 @@ async def test_enhanced_webscraping_persist_does_not_infer_duplicate_from_error_
 
     assert response["status"] == "persist-ok"
     assert response["duplicate_articles"] == 0
-    assert response["errors"] == ["example.com/unavailable: Source extraction failed. Check the server logs for details."]
+    assert response["errors"] == [
+        "example.com/unavailable: Source extraction failed. Check the server logs for details."
+    ]
 
 
 @pytest.mark.integration
@@ -478,27 +492,38 @@ async def test_persisted_web_article_is_searchable_only_by_its_effective_owner(
 
     backend = request.getfixturevalue("pg_restricted_backend") if backend_name == "postgres" else None
     if backend is not None:
+
         @contextmanager
         def postgres_manager(**kwargs: Any):
             with managed_media_database(**kwargs, backend=backend) as db:
                 yield db
+
         monkeypatch.setattr(svc_mod, "managed_media_database", postgres_manager)
     _patch_real_db_path(monkeypatch, tmp_path)
     with scoped_context(user_id=effective_owner):
-        response = await _persist([
-            _article(title="Owned searchable article", content="A05SearchOwnerBoundary article body."),
-        ], user_id=user_id)
+        response = await _persist(
+            [
+                _article(title="Owned searchable article", content="A05SearchOwnerBoundary article body."),
+            ],
+            user_id=user_id,
+        )
         media_id = response["media_ids"][0]
         with managed_media_database(
-            client_id=str(effective_owner), db_path=str(tmp_path / "media_test.db"),
-            backend=backend, initialize=False, existing_only=True,
+            client_id=str(effective_owner),
+            db_path=str(tmp_path / "media_test.db"),
+            backend=backend,
+            initialize=False,
+            existing_only=True,
         ) as db:
             stored_owner = db.get_media_by_id(media_id)["owner_user_id"]
             own_rows, own_total = search_media(db, "A05SearchOwnerBoundary", search_fields=["title", "content"])
     with scoped_context(user_id=effective_owner + 1):
         with managed_media_database(
-            client_id=str(effective_owner + 1), db_path=str(tmp_path / "media_test.db"),
-            backend=backend, initialize=False, existing_only=True,
+            client_id=str(effective_owner + 1),
+            db_path=str(tmp_path / "media_test.db"),
+            backend=backend,
+            initialize=False,
+            existing_only=True,
         ) as db:
             foreign_rows, foreign_total = search_media(db, "A05SearchOwnerBoundary", search_fields=["title", "content"])
     assert (stored_owner, [row["id"] for row in own_rows], own_total, foreign_rows, foreign_total) == (  # nosec B101 - Real persistence/search owner-isolation regression oracle.

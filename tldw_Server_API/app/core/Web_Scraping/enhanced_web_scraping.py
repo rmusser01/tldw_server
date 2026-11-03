@@ -2037,6 +2037,7 @@ class EnhancedWebScraper:
         """Compose instance capabilities privately and expose the canonical report."""
         from .contracts.requests import CrawlRequest, ScrapeContext
         from .crawl.models import CrawlHooks
+        from .jobs.projections import public_crawl_outcome
 
         sitemap = profile == "enhanced_sitemap"
         total = (
@@ -2057,6 +2058,7 @@ class EnhancedWebScraper:
             }
         if task_id:
             self._progress[task_id].pop("completed_at", None)
+            self._progress[task_id].pop("crawl_outcome", None)
             self._set_progress(task_id, status="in_progress")
 
         def progress(snapshot):
@@ -2085,10 +2087,12 @@ class EnhancedWebScraper:
                 transform=self._apply_dedup,
                 browser_http_fallback=self._browser_http_fallback,
             )
-        except asyncio.CancelledError:
-            self._set_progress(task_id, status="cancelled")
+        except asyncio.CancelledError as error:
+            report = getattr(error, "report", None)
+            updates = {"crawl_outcome": public_crawl_outcome(report.outcome)} if report is not None else {}
+            self._set_progress(task_id, status="cancelled", **updates)
             raise
-        self._set_progress(task_id, status=report.outcome.state)
+        self._set_progress(task_id, status=report.outcome.state, crawl_outcome=public_crawl_outcome(report.outcome))
         if report.outcome.state == "completed":
             self._set_progress(task_id, completed_at=datetime.now().isoformat())
         return report

@@ -37,10 +37,7 @@ def test_scan_file_finds_direct_imports(tmp_path: Path) -> None:
 
     records = scan_file(source, project_root=tmp_path, targets=TARGET_MODULES)
 
-    assert [
-        (record.target_name, record.module, record.imported_name, record.line)
-        for record in records
-    ] == [
+    assert [(record.target_name, record.module, record.imported_name, record.line) for record in records] == [
         (
             "Article_Extractor_Lib",
             "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
@@ -98,10 +95,7 @@ def test_scan_file_sorts_mixed_import_forms_without_type_error(tmp_path: Path) -
 
     records = scan_file(source, project_root=tmp_path, targets=TARGET_MODULES)
 
-    assert [
-        (record.target_name, record.module, record.imported_name, record.line)
-        for record in records
-    ] == [
+    assert [(record.target_name, record.module, record.imported_name, record.line) for record in records] == [
         (
             "ua_profiles",
             "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
@@ -125,10 +119,7 @@ def test_scan_file_resolves_relative_imports_for_web_scraping_modules(tmp_path: 
 
     records = scan_file(module_path, project_root=tmp_path, targets=TARGET_MODULES)
 
-    assert [
-        (record.target_name, record.module, record.imported_name, record.line)
-        for record in records
-    ] == [
+    assert [(record.target_name, record.module, record.imported_name, record.line) for record in records] == [
         (
             "ua_profiles",
             "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
@@ -139,9 +130,7 @@ def test_scan_file_resolves_relative_imports_for_web_scraping_modules(tmp_path: 
 
 
 @pytest.mark.unit
-def test_main_resolves_relative_output_paths_against_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_resolves_relative_output_paths_against_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project_root = tmp_path / "repo"
     external_cwd = tmp_path / "cwd"
     project_root.mkdir()
@@ -200,7 +189,9 @@ def test_new_internal_packages_constant_excludes_legacy_wrappers() -> None:
 
 @pytest.mark.unit
 def test_import_inventory_artifact_matches_current_import_surface(tmp_path: Path) -> None:
-    assert INVENTORY_JSON.exists(), "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the inventory artifact"
+    assert INVENTORY_JSON.exists(), (
+        "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the inventory artifact"
+    )
     assert INVENTORY_MARKDOWN.exists(), (
         "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the Markdown inventory artifact"
     )
@@ -298,7 +289,8 @@ def test_phase5_manifest_expands_actual_crawl_imports_without_rewriting_inventor
     assert inventory.crawl_entrypoints == PROFILE_MANIFEST.entrypoints
     assert len(inventory.crawl_entrypoints) == 8  # Seven profiles plus the legacy sync entry.
     assert (
-        "tldw_Server_API/app/services/web_scraping_service.py" in inventory.consumers[f"{LEGACY}.scrape_from_sitemap"]
+        "tldw_Server_API/app/services/web_scraping_service.py"
+        not in inventory.consumers[f"{LEGACY}.scrape_from_sitemap"]
     )
     assert "tldw_Server_API/app/core/Watchlists/fetchers.py" in inventory.consumers[f"{ENHANCED}.scrape_sitemap"]
     assert (

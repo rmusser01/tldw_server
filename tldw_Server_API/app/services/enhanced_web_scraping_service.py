@@ -7,9 +7,12 @@ with the existing tldw_server API structure.
 import asyncio
 import json
 import re
+import sys
 import time
 import uuid
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,6 +41,8 @@ from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import is_content_page
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
+from tldw_Server_API.app.core.Web_Scraping.contracts.conversion import to_legacy_crawl
+from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlReport, successful_article
 
 # Import the enhanced scraper
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
@@ -47,7 +52,8 @@ from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
     ScrapingJob,
     create_enhanced_scraper,
 )
-from tldw_Server_API.app.core.Web_Scraping.jobs.projections import public_job
+from tldw_Server_API.app.core.Web_Scraping.jobs.projections import public_crawl_outcome, public_job
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PhysicalWork, owned_to_thread, physical_work
 
 # Import existing components
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
@@ -178,6 +184,95 @@ def _observe_lifecycle_task(task: asyncio.Task) -> None:
         task.exception()
 
 
+def _check_service_active() -> None:
+    """Do not launch new postprocessing after cancellation has been requested."""
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError
+
+
+def raise_for_empty_failed_crawl(report: CrawlReport) -> None:
+    """Map typed empty failures without exposing acquisition diagnostics."""
+    if report.outcome.state == "cancelled":
+        error = asyncio.CancelledError()
+        error.report = report
+        raise error
+    if report.outcome.state != "failed" or any(successful_article(item) for item in report.articles):
+        return
+    status = {
+        "queue_overloaded": 503,
+        "queue_stopping": 503,
+        "transport_unavailable": 503,
+        "policy_denied": 403,
+        "deadline_exhausted": 504,
+        "budget_exhausted": 429,
+        "job_payload_too_large": 413,
+    }.get(report.outcome.stop_reason, 500)
+    raise HTTPException(
+        status_code=status,
+        detail={
+            "message": "Web crawl failed",
+            "crawl_outcome": public_crawl_outcome(report.outcome),
+        },
+    )
+
+
+@asynccontextmanager
+async def _draining_media_database(**kwargs: Any):
+    """Keep the existing DB owner open until its actual thread work has exited."""
+    manager = managed_media_database(**kwargs)
+    db = manager.__enter__()
+    owner = PhysicalWork()
+    token = physical_work.set(owner)
+    try:
+        yield db
+    finally:
+        physical_work.reset(token)
+        error = sys.exc_info()
+        owner.finish()
+        if owner.drained.done():
+            manager.__exit__(*error)
+        else:
+            owner.drained.add_done_callback(lambda _done: manager.__exit__(*error))
+
+
+def _content_with_crawl_metadata(article: dict[str, Any], body_text: str) -> tuple[str, Any, Any, Any]:
+    """Retain nested/legacy traversal metadata precedence and normalization."""
+    md = article.get("metadata") if isinstance(article.get("metadata"), dict) else {}
+    depth = md.get("depth") if md.get("depth") is not None else md.get("crawl_depth")
+    if depth is None:
+        depth = article.get("crawl_depth")
+    parent = md.get("parent_url") if md.get("parent_url") is not None else md.get("crawl_parent_url")
+    if parent is None:
+        parent = article.get("crawl_parent_url")
+    score = md.get("score") if md.get("score") is not None else md.get("crawl_score")
+    if score is None:
+        score = article.get("crawl_score")
+    try:
+        if depth is not None:
+            depth = int(depth)
+    except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
+        pass
+    try:
+        if score is not None:
+            score = float(score)
+    except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
+        pass
+    content = ContentMetadataHandler.format_content_with_metadata(
+        url=article.get("url", ""),
+        content=body_text,
+        pipeline=article.get("method", "enhanced"),
+        additional_metadata={
+            "date": article.get("date", ""),
+            "author": article.get("author", "Unknown"),
+            "crawl_depth": depth,
+            "crawl_parent_url": parent,
+            "crawl_score": score,
+        },
+    )
+    return content, depth, parent, score
+
+
 class WebScrapingService:
     """Enhanced web scraping service with production features"""
 
@@ -236,21 +331,45 @@ class WebScrapingService:
     async def shutdown(self):
         """Shutdown the scraping service"""
         async with self._lifecycle_lock:
-            if self._initialization_task is not None:
-                await asyncio.shield(self._initialization_task)
-            self._initialized = False
-            if self.scraper is None:
+            if self.scraper is None and self._initialization_task is None and not self._stopping:
+                self._initialized = False
                 return
             self._stopping = True
             cleanup = self._shutdown_task
             # Retry a finished unsuccessful attempt, never shadow live cleanup.
             if cleanup is None or (cleanup.done() and (cleanup.cancelled() or cleanup.exception() is not None)):
-                self._shutdown_task = asyncio.create_task(self.scraper.stop())
+                self._shutdown_task = asyncio.create_task(self._shutdown_scraper())
                 self._shutdown_task.add_done_callback(_observe_lifecycle_task)
             # Request cancellation must not cancel the resource owner's cleanup.
             await asyncio.shield(self._shutdown_task)
             if self._finish_shutdown_if_drained():
                 logger.info("Web scraping service shutdown")
+
+    async def _shutdown_scraper(self) -> None:
+        """Own the entire entered transition, including already-owned startup."""
+        if self._initialization_task is not None:
+            await asyncio.shield(self._initialization_task)
+        self._initialized = False
+        if self.scraper is not None:
+            await self.scraper.stop()
+
+    def _consume_report(
+        self, report: CrawlReport, task_id: str | None, user_id: int | None, *, profile: str = "enhanced_recursive"
+    ) -> list[dict[str, Any]]:
+        """Publish the finalized outcome before conversion or service side effects."""
+        self.scraper._set_progress(
+            task_id,
+            crawl_outcome=public_crawl_outcome(report.outcome),
+            owner_user_id=str(user_id) if user_id is not None else None,
+            service_status="processing",
+        )
+        raise_for_empty_failed_crawl(report)
+        _check_service_active()
+        return (
+            to_legacy_crawl(report, profile=profile)
+            if report.outcome.state == "completed"
+            else deepcopy(list(report.articles))
+        )
 
     async def process_web_scraping_task(
         self,
@@ -294,9 +413,10 @@ class WebScrapingService:
         - Robust error handling
         """
         # Ensure service is initialized
-        if not self._initialized:
+        if self._stopping or not self._initialized:
             await self.initialize()
 
+        task_id = f"scrape_{uuid.uuid4().hex[:8]}"
         try:
             # Read crawl feature flags (env > config.txt); keep behavior unchanged if params provided
             cfg = load_and_log_configs() or {}
@@ -371,9 +491,6 @@ class WebScrapingService:
             }
             job_priority = priority_map.get(priority.lower(), JobPriority.NORMAL)
 
-            # Create task ID
-            task_id = f"scrape_{uuid.uuid4().hex[:8]}"
-
             # Process based on scraping method
             if scrape_method == "Individual URLs":
                 result = await self._scrape_individual_urls(
@@ -392,6 +509,7 @@ class WebScrapingService:
                     custom_headers,
                     user_id=user_id,
                     summary_prompt_overrides=summary_prompt_overrides,
+                    task_id=task_id,
                 )
 
             elif scrape_method == "Sitemap":
@@ -488,6 +606,7 @@ class WebScrapingService:
                 )
 
             # Process results based on mode
+            _check_service_active()
             if mode == "ephemeral":
                 stored = await self._store_ephemeral(result, task_id, user_id)
             else:
@@ -503,9 +622,28 @@ class WebScrapingService:
                 )
                 if isinstance(stored, dict):
                     stored["task_id"] = task_id
+            if self.scraper is not None:
+                self.scraper._set_progress(task_id, service_status="completed")
+            stored["service_status"] = "completed"
             return stored
 
-        except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
+        except asyncio.CancelledError as error:
+            report = getattr(error, "report", None)
+            updates = {"service_status": "cancelled", "owner_user_id": str(user_id) if user_id is not None else None}
+            if report is not None:
+                progress = self.scraper._progress.get(task_id, {})
+                if "crawl_outcome" not in progress:
+                    updates["crawl_outcome"] = public_crawl_outcome(report.outcome)
+            if self.scraper is not None:
+                self.scraper._set_progress(task_id, **updates)
+            raise
+        except HTTPException:
+            if self.scraper is not None:
+                self.scraper._set_progress(task_id, service_status="failed")
+            raise
+        except Exception as e:  # noqa: BLE001 - sanitize the public service boundary
+            if self.scraper is not None:
+                self.scraper._set_progress(task_id, service_status="failed")
             logger.error("Web scraping task failed ({})", exception_type_for_log(e))
             raise HTTPException(status_code=500, detail="Enhanced web scraping task failed") from e
 
@@ -527,6 +665,7 @@ class WebScrapingService:
         *,
         user_id: Optional[int] = None,
         summary_prompt_overrides: Mapping[str, str] | None = None,
+        task_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Scrape individual URLs with enhanced features"""
         # Parse URLs and titles
@@ -543,23 +682,28 @@ class WebScrapingService:
         logger.debug("URLs to scrape: {}", [redact_url_for_log(url) for url in urls])
 
         # Scrape with enhanced scraper
-        results = await self.scraper.scrape_multiple(
+        report = await self.scraper._batch_report(
             urls,
             method="trafilatura",  # Can be made configurable
             priority=priority,
-            summarize=summarize,
-            custom_prompt=custom_prompt,
-            api_name=api_name,
-            api_key=api_key,
-            system_prompt=system_prompt,
-            summary_prompt_overrides=summary_prompt_overrides,
-            temperature=temperature,
-            custom_cookies=custom_cookies,
-            user_agent=user_agent,
-            custom_headers=custom_headers,
+            options={"custom_cookies": custom_cookies, "user_agent": user_agent, "custom_headers": custom_headers},
             user_id=str(user_id) if user_id is not None else None,
             allow_llm_extraction=summarize,
         )
+        results = self._consume_report(report, task_id, user_id, profile="enhanced_batch")
+        if summarize:
+            for result in results:
+                if successful_article(result):
+                    _check_service_active()
+                    result["summary"] = await self.scraper._summarize_content(
+                        result["content"],
+                        custom_prompt=custom_prompt,
+                        api_name=api_name,
+                        api_key=api_key,
+                        system_prompt=system_prompt,
+                        summary_prompt_overrides=summary_prompt_overrides,
+                        temperature=temperature,
+                    )
 
         logger.info(f"Scraping completed, got {len(results)} results")
         for i, result in enumerate(results):
@@ -574,7 +718,13 @@ class WebScrapingService:
             if i < len(titles) and titles[i]:
                 result["title"] = titles[i]
 
-        return {"method": "Individual URLs", "total_articles": len(results), "articles": results, "keywords": keywords}
+        return {
+            "method": "Individual URLs",
+            "total_articles": len(results),
+            "articles": results,
+            "keywords": keywords,
+            "crawl_outcome": public_crawl_outcome(report.outcome),
+        }
 
     async def _scrape_sitemap(
         self,
@@ -603,24 +753,31 @@ class WebScrapingService:
             raise RuntimeError("Enhanced scraper not initialized - Playwright may not be available")
 
         # Scrape sitemap with content page filter
-        results = await self.scraper.scrape_sitemap(
+        report = await self.scraper._crawl_report(
             sitemap_url,
-            filter_func=is_content_page,
-            max_urls=max_pages,
+            profile="enhanced_sitemap",
+            url_filter=is_content_page,
+            options={"max_urls": max_pages, "allow_llm_extraction": summarize},
             custom_cookies=custom_cookies,
             user_agent=user_agent,
             custom_headers=custom_headers,
             user_id=str(user_id) if user_id is not None else None,
             task_id=task_id,
-            allow_llm_extraction=summarize,
         )
+        results = self._consume_report(report, task_id, user_id)
 
         # Add summarization if requested
         if summarize:
             for result in results:
-                if result.get("extraction_successful") and result.get("content"):
+                if successful_article(result):
+                    _check_service_active()
                     summary = await self._summarize_content(
-                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                        result["content"],
+                        custom_prompt,
+                        api_name,
+                        api_key,
+                        system_prompt,
+                        temperature,
                         summary_prompt_overrides=summary_prompt_overrides,
                     )
                     result["summary"] = summary
@@ -631,6 +788,7 @@ class WebScrapingService:
             "articles": results,
             "keywords": keywords,
             "sitemap_url": sitemap_url,
+            "crawl_outcome": public_crawl_outcome(report.outcome),
         }
 
     async def _scrape_by_url_level(
@@ -667,28 +825,38 @@ class WebScrapingService:
             return len(path_parts) <= url_level and is_content_page(url)
 
         # Recursive scrape with level filter
-        results = await self.scraper.recursive_scrape(
+        report = await self.scraper._crawl_report(
             base_url,
-            max_pages=max_pages,
-            max_depth=url_level,
+            profile="enhanced_recursive",
+            options={
+                "max_pages": max_pages,
+                "max_depth": url_level,
+                "include_external_override": include_external,
+                "score_threshold_override": score_threshold,
+                "crawl_strategy": crawl_strategy,
+                "allow_llm_extraction": summarize,
+            },
             url_filter=url_level_filter,
             custom_cookies=custom_cookies,
             user_agent=user_agent,
             custom_headers=custom_headers,
             user_id=str(user_id) if user_id is not None else None,
-            include_external_override=include_external,
-            score_threshold_override=score_threshold,
-            crawl_strategy=crawl_strategy,
             task_id=task_id,
-            allow_llm_extraction=summarize,
         )
+        results = self._consume_report(report, task_id, user_id)
 
         # Add summarization if requested
         if summarize:
             for result in results:
-                if result.get("extraction_successful") and result.get("content"):
+                if successful_article(result):
+                    _check_service_active()
                     summary = await self._summarize_content(
-                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                        result["content"],
+                        custom_prompt,
+                        api_name,
+                        api_key,
+                        system_prompt,
+                        temperature,
                         summary_prompt_overrides=summary_prompt_overrides,
                     )
                     result["summary"] = summary
@@ -699,6 +867,7 @@ class WebScrapingService:
             "articles": results,
             "keywords": keywords,
             "url_level": url_level,
+            "crawl_outcome": public_crawl_outcome(report.outcome),
         }
 
     async def _scrape_recursive(
@@ -726,40 +895,50 @@ class WebScrapingService:
         summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Recursive scraping with progress tracking"""
-        # Create progress file for resumability
+        # Progress is an observation snapshot, not a resumable engine checkpoint.
         progress_file = Path(f"./scrape_progress_{uuid.uuid4().hex[:8]}.json")
         progress_key = task_id or "recursive_scrape"
 
         try:
             # Perform recursive scrape
-            results = await self.scraper.recursive_scrape(
+            report = await self.scraper._crawl_report(
                 base_url,
-                max_pages=max_pages,
-                max_depth=max_depth,
+                profile="enhanced_recursive",
+                options={
+                    "max_pages": max_pages,
+                    "max_depth": max_depth,
+                    "include_external_override": include_external,
+                    "score_threshold_override": score_threshold,
+                    "crawl_strategy": crawl_strategy,
+                    "allow_llm_extraction": summarize,
+                },
                 url_filter=is_content_page,
                 custom_cookies=custom_cookies,
                 user_agent=user_agent,
                 custom_headers=custom_headers,
                 user_id=str(user_id) if user_id is not None else None,
-                include_external_override=include_external,
-                score_threshold_override=score_threshold,
-                crawl_strategy=crawl_strategy,
                 task_id=task_id,
-                allow_llm_extraction=summarize,
             )
+            results = self._consume_report(report, progress_key, user_id)
 
             # Add summarization if requested
             if summarize:
                 for result in results:
-                    if result.get("extraction_successful") and result.get("content"):
+                    if successful_article(result):
+                        _check_service_active()
                         summary = await self._summarize_content(
-                            result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                            result["content"],
+                            custom_prompt,
+                            api_name,
+                            api_key,
+                            system_prompt,
+                            temperature,
                             summary_prompt_overrides=summary_prompt_overrides,
                         )
                         result["summary"] = summary
 
             # Save final progress
-            await self.scraper.save_progress(progress_key, progress_file)
+            await self._save_progress_snapshot(progress_key, progress_file)
 
             return {
                 "method": "Recursive Scraping",
@@ -768,12 +947,21 @@ class WebScrapingService:
                 "keywords": keywords,
                 "max_depth": max_depth,
                 "progress_file": str(progress_file),
+                "crawl_outcome": public_crawl_outcome(report.outcome),
             }
 
         except Exception:
-            # Save progress on error for resumability
-            await self.scraper.save_progress(progress_key, progress_file)
+            # A failed operation still retains its existing observation snapshot.
+            await self._save_progress_snapshot(progress_key, progress_file)
             raise
+
+    async def _save_progress_snapshot(self, task_id: str, path: Path) -> None:
+        """A secondary observation failure cannot replace the primary crawl fact."""
+        _check_service_active()
+        try:
+            await self.scraper.save_progress(task_id, path)
+        except Exception as error:  # noqa: BLE001 - a secondary snapshot never replaces the primary outcome
+            logger.warning("Web crawl progress snapshot failed ({})", exception_type_for_log(error))
 
     async def _summarize_content(
         self,
@@ -790,13 +978,23 @@ class WebScrapingService:
         try:
             # Provide default prompts from Prompts/webscraping if not supplied
             overrides = summary_prompt_overrides or {}
-            custom_prompt = overrides["user"] if "user" in overrides else (
-                custom_prompt or load_prompt("webscraping", "article_summary_user")
-                or "Summarize this article concisely."
+            custom_prompt = (
+                overrides["user"]
+                if "user" in overrides
+                else (
+                    custom_prompt
+                    or load_prompt("webscraping", "article_summary_user")
+                    or "Summarize this article concisely."
+                )
             )
-            system_prompt = overrides["system"] if "system" in overrides else (
-                system_prompt or load_prompt("webscraping", "article_summary_system")
-                or "You are a professional summarizer."
+            system_prompt = (
+                overrides["system"]
+                if "system" in overrides
+                else (
+                    system_prompt
+                    or load_prompt("webscraping", "article_summary_system")
+                    or "You are a professional summarizer."
+                )
             )
             summary = await asyncio.to_thread(
                 analyze,
@@ -819,6 +1017,7 @@ class WebScrapingService:
             "user_id": user_id,
             "timestamp": datetime.now().isoformat(),
             "result": result,
+            "crawl_outcome": result.get("crawl_outcome"),
         }
 
         ephemeral_id = ephemeral_storage.store_data(ephemeral_data)
@@ -829,6 +1028,7 @@ class WebScrapingService:
             "task_id": task_id,
             "total_articles": result.get("total_articles", 0),
             "method": result.get("method"),
+            "crawl_outcome": result.get("crawl_outcome"),
             "preview": {
                 "articles": len(result.get("articles", [])),
                 "first_article": (
@@ -862,12 +1062,11 @@ class WebScrapingService:
         # Default to user_id 1 if not provided (single-user mode)
         effective_user_id = user_id if user_id is not None else 1
         db_path = get_user_media_db_path(effective_user_id)
-        with managed_media_database(
+        async with _draining_media_database(
             client_id=str(effective_user_id),
             db_path=db_path,
             initialize=False,
         ) as db:
-
             # Metrics
             try:
                 reg = get_metrics_registry()
@@ -887,26 +1086,21 @@ class WebScrapingService:
             )
             _batch_t0 = time.perf_counter()
             for article in result.get("articles", []):
+                _check_service_active()
                 logger.debug(
                     f"Processing article: url={redact_url_for_log(article.get('url'))}, "
                     f"extraction_successful={article.get('extraction_successful')}"
                 )
-                if not article.get("extraction_successful"):
-                    if (
-                        article.get("is_duplicate") is True
-                        or article.get("error_code") == "duplicate_content"
-                    ):
+                if not article.get("extraction_successful") or article.get("error"):
+                    if article.get("is_duplicate") is True or article.get("error_code") == "duplicate_content":
                         skipped_articles += 1
                         duplicate_articles += 1
                         logger.info(
-                            f"Skipping duplicate article: "
-                            f"{redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                            f"Skipping duplicate article: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
                         )
                         continue
                     failure_code = _classify_extraction_failure(article)
-                    logger.warning(
-                        f"Failed to extract: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
-                    )
+                    logger.warning(f"Failed to extract: {redact_url_for_log(article.get('url', 'Unknown URL'))}")
                     _record_extraction_failure(errors, extraction_failures, failure_code, article.get("url"))
                     continue
 
@@ -917,61 +1111,14 @@ class WebScrapingService:
                     else content_text
                 )
                 if not isinstance(body_text, str) or not body_text.strip():
-                    logger.warning(
-                        f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
-                    )
+                    logger.warning(f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}")
                     _record_extraction_failure(errors, extraction_failures, "empty_extraction", article.get("url"))
                     continue
 
                 try:
-                    # Prepare data for database
-                    {
-                        "title": article.get("title", "Untitled"),
-                        "author": article.get("author", "Unknown"),
-                        "source": article.get("url", ""),
-                        "scrape_method": result.get("method", "Unknown"),
-                        "extraction_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    }
-
-                    # Format content with metadata
-                    # Include crawl metadata (depth, parent_url, score) if present
-                    md = article.get("metadata") if isinstance(article.get("metadata"), dict) else {}
-                    crawl_depth = md.get("depth") if md.get("depth") is not None else md.get("crawl_depth")
-                    if crawl_depth is None:
-                        crawl_depth = article.get("crawl_depth")
-                    crawl_parent = (
-                        md.get("parent_url") if md.get("parent_url") is not None else md.get("crawl_parent_url")
-                    )
-                    if crawl_parent is None:
-                        crawl_parent = article.get("crawl_parent_url")
-                    crawl_score = md.get("score") if md.get("score") is not None else md.get("crawl_score")
-                    if crawl_score is None:
-                        crawl_score = article.get("crawl_score")
-
-                    # Normalize metadata types when possible so persistence remains stable.
-                    try:
-                        if crawl_depth is not None:
-                            crawl_depth = int(crawl_depth)
-                    except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
-                        pass
-                    try:
-                        if crawl_score is not None:
-                            crawl_score = float(crawl_score)
-                    except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS:
-                        pass
-
-                    content_with_metadata = ContentMetadataHandler.format_content_with_metadata(
-                        url=article.get("url", ""),
-                        content=body_text,
-                        pipeline=article.get("method", "enhanced"),
-                        additional_metadata={
-                            "date": article.get("date", ""),
-                            "author": article.get("author", "Unknown"),
-                            # Propagate traversal metadata for context
-                            "crawl_depth": crawl_depth,
-                            "crawl_parent_url": crawl_parent,
-                            "crawl_score": crawl_score,
-                        },
+                    content_with_metadata, crawl_depth, crawl_parent, crawl_score = _content_with_crawl_metadata(
+                        article,
+                        body_text,
                     )
                     chunk_options = None
                     chunking_plan = None
@@ -1019,13 +1166,15 @@ class WebScrapingService:
                                 "max_size": 500,
                                 "overlap": 200,
                             }
-                            flat = await asyncio.to_thread(
-                                lambda _cwm=content_with_metadata, _opts=options: Chunker().chunk_text_hierarchical_flat(
-                                    _cwm,
-                                    method=_opts.get("method") or "sentences",
-                                    max_size=_opts.get("max_size") or 500,
-                                    overlap=_opts.get("overlap") or 200,
-                                    language=_opts.get("language"),
+                            flat = await owned_to_thread(
+                                lambda _cwm=content_with_metadata, _opts=options: (
+                                    Chunker().chunk_text_hierarchical_flat(
+                                        _cwm,
+                                        method=_opts.get("method") or "sentences",
+                                        max_size=_opts.get("max_size") or 500,
+                                        overlap=_opts.get("overlap") or 200,
+                                        language=_opts.get("language"),
+                                    )
                                 )
                             )
                             kind_map = {
@@ -1073,7 +1222,8 @@ class WebScrapingService:
 
                     # Run blocking DB write off the event loop and observe latency
                     _t0 = time.perf_counter()
-                    media_id, media_uuid, message = await asyncio.to_thread(
+                    _check_service_active()
+                    media_id, media_uuid, message = await owned_to_thread(
                         db.add_media_with_keywords,
                         url=article.get("url", ""),
                         title=article.get("title", "Untitled"),
@@ -1109,14 +1259,14 @@ class WebScrapingService:
                         skipped_articles += 1
                         duplicate_articles += 1
                         logger.info(
-                            f"Skipping duplicate article: "
-                            f"{redact_url_for_log(article.get('url', 'Unknown URL'))}"
+                            f"Skipping duplicate article: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
                         )
                         continue
 
                     if media_id:
                         if not perform_chunking:
-                            await asyncio.to_thread(
+                            _check_service_active()
+                            await owned_to_thread(
                                 db.update_media_reprocess_state,
                                 media_id,
                                 chunking_status="skipped",
@@ -1136,10 +1286,7 @@ class WebScrapingService:
                                 "webscraping.persist: metric increment failed ({})", exception_type_for_log(me)
                             )
                     else:
-                        logger.warning(
-                            f"Failed to get media_id for article: "
-                            f"{redact_url_for_log(article.get('url'))}"
-                        )
+                        logger.warning(f"Failed to get media_id for article: {redact_url_for_log(article.get('url'))}")
                         errors.append("Storage failed for article")
                         try:
                             if reg:
@@ -1195,6 +1342,7 @@ class WebScrapingService:
             "method": result.get("method"),
             "errors": errors if errors else None,
             "extraction_failures": extraction_failures or None,
+            "crawl_outcome": result.get("crawl_outcome"),
         }
 
     def _is_admin_user(self, user: Any) -> bool:
@@ -1253,6 +1401,12 @@ class WebScrapingService:
 
     def get_service_status(self) -> dict[str, Any]:
         """Get service status and statistics"""
+        if self._stopping:
+            return {
+                "status": "stopping",
+                "initialized": False,
+                "queue": self.scraper.job_queue.get_status() if self.scraper is not None else {},
+            }
         if not self._initialized:
             return {"status": "not_initialized", "initialized": False}
 
