@@ -837,9 +837,21 @@ jobs:
           - name: auth-integration-authnz
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
-          - name: auth-integration-b-z
+          - name: auth-integration-b-o
             paths: >-
-              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
+          - name: auth-integration-postgres-profiles
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
+          - name: auth-integration-prompts-providers
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_prompt*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_provider*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_r*.py
+          - name: auth-integration-s-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[s-z]*.py
           - name: auth-postgres
             paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
@@ -2544,9 +2556,21 @@ jobs:
           - name: auth-integration-authnz
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
-          - name: auth-integration-b-z
+          - name: auth-integration-b-o
             paths: >-
-              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
+          - name: auth-integration-postgres-profiles
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
+          - name: auth-integration-prompts-providers
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_prompt*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_provider*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_r*.py
+          - name: auth-integration-s-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[s-z]*.py
           - name: auth-postgres
             paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
@@ -4090,9 +4114,21 @@ jobs:
           - name: auth-integration-authnz
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
-          - name: auth-integration-b-z
+          - name: auth-integration-b-o
             paths: >-
-              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
+          - name: auth-integration-postgres-profiles
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
+          - name: auth-integration-prompts-providers
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_prompt*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_provider*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_r*.py
+          - name: auth-integration-s-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[s-z]*.py
           - name: auth-postgres
             paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
@@ -5546,9 +5582,21 @@ jobs:
           - name: auth-integration-authnz
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
-          - name: auth-integration-b-z
+          - name: auth-integration-b-o
             paths: >-
-              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
+          - name: auth-integration-postgres-profiles
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
+          - name: auth-integration-prompts-providers
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_prompt*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_provider*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_r*.py
+          - name: auth-integration-s-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[s-z]*.py
           - name: auth-postgres
             paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
@@ -6993,9 +7041,21 @@ jobs:
           - name: auth-integration-authnz
             paths: >-
               tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
-          - name: auth-integration-b-z
+          - name: auth-integration-b-o
             paths: >-
-              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
+          - name: auth-integration-postgres-profiles
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
+          - name: auth-integration-prompts-providers
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_prompt*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_provider*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_r*.py
+          - name: auth-integration-s-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[s-z]*.py
           - name: auth-postgres
             paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres

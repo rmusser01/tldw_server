@@ -884,7 +884,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "auth-core-unit-m-z",
             "auth-integration-admin-auth",
             "auth-integration-authnz",
-            "auth-integration-b-z",
+            "auth-integration-b-o",
+            "auth-integration-postgres-profiles",
+            "auth-integration-prompts-providers",
+            "auth-integration-s-z",
             "auth-postgres",
             "auth-sqlite",
             "auth-unit-a-l",
@@ -1930,6 +1933,58 @@ def test_db_management_partitions_cover_each_file_once() -> None:
         )
         assert len(covered) == len(set(covered))
         assert set(covered) == files
+
+
+def test_auth_integration_separates_expensive_suites_and_preserves_every_file() -> None:
+    """Keep the four expensive auth families independent under existing job budgets."""
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests/AuthNZ/integration")
+    files = {path.as_posix() for path in root.glob("test_[b-z]*.py")}
+    expensive = (
+        "test_evaluations_cookie_session.py",
+        "test_postgres_runtime_schema.py",
+        "test_prompt_studio_cookie_session.py",
+        "test_single_user_cookie_session.py",
+    )
+    jobs = (
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
+    )
+    for job in jobs:
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        owners: dict[str, list[str]] = {filename: [] for filename in files}
+        for shard in shards:
+            for pattern in str(shard["paths"]).split():
+                for filename in files:
+                    if fnmatch.fnmatch(filename, pattern):
+                        owners[filename].append(shard["name"])
+        assert files and all(
+            len(names) == 1 for names in owners.values()
+        ), (  # nosec B101 -- Preserve all original test paths exactly once.
+            job,
+            {path: names for path, names in owners.items() if len(names) != 1},
+        )
+        assigned_shards = {names[0] for names in owners.values()}
+        for shard in shards:
+            if shard["name"] in assigned_shards:
+                for pattern in str(shard["paths"]).split():
+                    assert any(
+                        fnmatch.fnmatch(filename, pattern) for filename in files
+                    ), (  # nosec B101 -- Unmatched shell globs would fail pytest collection.
+                        job,
+                        pattern,
+                    )
+        assignments = {
+            owners[(root / filename).as_posix()][0] for filename in expensive
+        }
+        assert len(assignments) == len(expensive), (
+            job,
+            assignments,
+        )  # nosec B101 -- Independent real-app/database workloads need separate job budgets.
 
 
 def test_auth_core_unit_partitions_cover_each_file_once() -> None:
