@@ -89,9 +89,13 @@ Archive hashes can vary across builds because wheel timestamps are not fixed.
 ## Backend Manifest
 
 Fresh precommit full focused run: **2048 passed, 2 skipped, 5883 warnings,
-261.25s, exit0**, `/tmp/moderation-task5-full-focused.log`. One subsequent added
-rollback-reader characterization is verified separately and in the final
-postcommit run recorded in the task handoff. Repeated runs are not unique totals.
+261.25s, exit0**, `/tmp/moderation-task5-full-focused.log`. After the rollback
+characterization was added, the same full manifest at committed revision
+`b39236218a2c908772332cf98982ebad0a5f9fca` passed **2049 tests, 2 preexisting
+skips, 5885 warnings, 221.14s, exit0**; output
+`/tmp/moderation-task5-postcommit-focused.log`. The subsequent evidence commit
+changes only this document and task notes, not tested source/UI/package metadata.
+Repeated runs are not unique totals.
 
 Exact focused command, from the worktree after venv activation:
 
@@ -255,7 +259,9 @@ wall =440.637ms pre-scope import/setup +78.787ms shared scoped decision/redactio
 is `/tmp/moderation-task5-cold-recheck.jsonl`. These do not erase the first sample
 or prove its split. Parent must decide cold-start/setup scope expectations;
 no actual scoped legitimate deadline failure was observed, no limit was tuned,
-and no Task4 runtime fix or design amendment was implemented.
+and no Task4 runtime fix or design amendment was implemented or is needed from
+the observed79ms scoped diagnostic. The first wall-time sample is retained for
+clarity, not presented as a request to widen approved bounds.
 
 Actual `StreamingResponseHandler.safe_stream_generator`, ten24-character chunks,
 three samples: unchecked median0.337ms, checked median832.436ms, approximately
@@ -297,7 +303,9 @@ git diff --check
 git diff --cached --check
 ```
 
-- Compile exit0. Raw Ruff exit1/68 findings on cumulative68 paths; Task4's14
+- Compile exit0; Python3.14 emits the existing `async_execution.py:102`
+  SyntaxWarning (`return` in a `finally` block, the closed-loop offload-delivery
+  branch). No suppression or runtime edit. Raw Ruff exit1/68 findings on cumulative68 paths; Task4's14
   findings used its narrower40-path scope. Exact path/code/message multiset
   comparison against both starting HEAD and c5561bf4d3 finds0 new findings
   (HEAD68/base89/current68). No blanket ignore or unrelated cleanup.
