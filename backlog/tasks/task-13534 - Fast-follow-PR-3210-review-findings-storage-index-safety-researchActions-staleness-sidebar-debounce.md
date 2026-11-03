@@ -1,9 +1,10 @@
-id: TASK-13534
-title: Fast-follow PR #3210 review findings (storage index safety, researchActions staleness, sidebar debounce)
+---
 status: Done
 labels:
 - frontend
 - review-followup
+title: 'Fast-follow PR #3210 review findings (storage index safety, researchActions
+  staleness, sidebar debounce)'
 ---
 
 ## Description
