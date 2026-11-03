@@ -79,7 +79,8 @@ ceilings; nonfinite, nonpositive and boolean values are rejected:
 | --- | --- |
 | Execution scope, including admission, serialization, child startup and all batches | 2 seconds |
 | Active owned workers per API process | 4, immediate nonblocking admission |
-| Input / output | 1,000,000 characters each |
+| Input / output (aggregate across independent batch fields) | 1,000,000 characters each |
+| Independent redaction fields per batch | 4,096, including empty fields |
 | Rules | 256 |
 | Each pattern / replacement | 4,096 characters each |
 | Encoded policy object | 262,144 bytes (256 KiB) |
@@ -90,6 +91,16 @@ Character admission and ASCII-escaped JSON byte admission are independent;
 non-ASCII content may hit a frame ceiling first. Existing evaluator scan/count
 limits are separate and may examine less than the admitted input. A facade that
 decides then redacts shares one deadline across both child batches.
+
+Audio transcript/segment redaction uses one fresh `redact_many` child with a
+single policy snapshot, not one interpreter per segment. Fields retain separate
+anchors, boundaries, literal replacements and per-field evaluator limits; they
+are never concatenated. Full transcript and checked segment duplicates count
+toward the aggregate character/frame caps. Partial opt-outs are not submitted.
+All fields succeed before any mapped payload is returned. Trusted `redact_text`
+overrides retain dispatch under the inherited scope; the default path never
+matches content in the parent. This bounded amendment is recorded in
+`Docs/superpowers/specs/2026-11-03-moderation-audio-batch-amendment.md`.
 
 The two-second deadline starts at execution-scope entry, before admission and
 serialization. It is not an end-to-end HTTP or public-call wall-time guarantee:

@@ -445,3 +445,49 @@ def test_child_never_exceeds_even_an_unreportably_small_response_cap():
     )
     assert child.returncode != 0
     assert child.stdout == child.stderr == b""
+
+
+@pytest.mark.parametrize("scan", [1, 100])
+@pytest.mark.parametrize("pattern", [r"^a$", r"(?=a)", "ab", "a"])
+def test_redact_many_independent_fields_match_literal_evaluator_semantics(scan, pattern, monkeypatch):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request
+
+    texts = ["a", "b", "", "ab", "\u00e9", "a\na"]
+    limits = EvaluationLimits(scan, 0, 1000, 1)
+    policy = ModerationPolicy(enabled=True, redact_replacement=r"\1", block_patterns=[
+        re.compile(pattern, re.MULTILINE), PatternRule(re.compile("b"), replacement="B", phase="output"),
+    ])
+    expected = [PolicyEvaluator().redact_text(text, policy, "output", limits) for text in texts]
+    request = snapshot_redaction_batch_request(texts, policy, "output", limits, ExecutionBounds())
+    original = regex_worker._reconstruct_policy
+    reconstructions = []
+
+    def reconstruct(snapshot):
+        reconstructions.append(True)
+        return original(snapshot)
+
+    monkeypatch.setattr(regex_worker, "_reconstruct_policy", reconstruct)
+    response = regex_worker.execute_request(request)
+    assert response.reason is None
+    assert response.result == expected
+    assert reconstructions == [True]
+
+
+@pytest.mark.parametrize("texts,want", [(["a", ""], ["xx", ""]), (["a", "a"], None)])
+def test_redact_many_remaining_zero_budget_permits_only_empty_results(texts, want):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request
+
+    policy = ModerationPolicy(block_patterns=[PatternRule(re.compile("a"), replacement="xx")])
+    request = snapshot_redaction_batch_request(texts, policy, None, LIMITS, ExecutionBounds(max_output_chars=2))
+    response = regex_worker.execute_request(request)
+    assert response.result == want
+    assert response.reason == (None if want is not None else "size_exceeded")
+
+
+def test_internal_zero_output_budget_rejects_growth_and_negative_allowance():
+    budget = OutputBudget(0)
+    budget.check(0)
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        budget.check(1)
+    with pytest.raises(ValueError):
+        OutputBudget(-1)

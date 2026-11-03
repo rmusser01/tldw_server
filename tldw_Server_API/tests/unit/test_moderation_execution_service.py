@@ -133,6 +133,72 @@ def test_disabled_redaction_still_applies_rules():
     assert make_service().redact_text("secret", policy) == "[REDACTED]"
 
 
+def test_redact_texts_batches_once_with_independent_anchors_and_no_parent_evaluator(monkeypatch):
+    service = make_service()
+    service._policy_evaluator = Mock(side_effect=AssertionError("parent matching"))
+    owner = execution_runner.get_execution_runner()
+    batches = []
+
+    def execute(request, scope):
+        batches.append((request.operation, scope))
+        return owner.execute(request, scope)
+
+    monkeypatch.setattr(execution_runner, "get_execution_runner", lambda: type("Runner", (), {"execute": staticmethod(execute)})())
+    policy = ModerationPolicy(block_patterns=[PatternRule(re.compile("^secret$"), replacement=r"\1")])
+    with execution_scope() as shared:
+        assert service.redact_texts(["secret", "secretx", ""], policy) == [r"\1", "secretx", ""]
+    assert batches == [("redact_many", shared)]
+
+
+def test_redact_texts_preserves_trusted_override_and_inherited_scope():
+    service = make_service()
+    scopes = []
+
+    def override(text, policy, phase=None):
+        with execution_scope() as scope:
+            scopes.append(scope)
+        return "override:" + text
+
+    service.redact_text = override
+    with execution_scope() as shared:
+        assert service.redact_texts(["a", ""], make_policy()) == ["override:a", "override:"]
+    assert scopes == [shared, shared]
+
+
+def test_redact_texts_checks_aggregate_override_output_and_empty_field_cap():
+    service = make_service()
+    service.redact_text = lambda *a, **k: "x" * 600000
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        service.redact_texts(["a", "b"], make_policy())
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        service.redact_texts([""] * 4097, ModerationPolicy())
+
+
+def test_redact_texts_noop_enforces_tightened_output_ceiling(monkeypatch):
+    from tldw_Server_API.app.core.Moderation import moderation_service
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
+
+    monkeypatch.setattr(moderation_service, "ExecutionBounds", lambda: ExecutionBounds(max_output_chars=1))
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        make_service().redact_texts(["a", "b"], ModerationPolicy())
+
+
+def test_redact_texts_override_cannot_refresh_deadline():
+    service = make_service()
+    calls = []
+
+    def override(text, policy, phase=None):
+        with execution_scope() as shared:
+            shared.deadline = 0
+        calls.append(text)
+        return text
+
+    service.redact_text = override
+    with pytest.raises(ModerationExecutionError, match="deadline_exceeded"):
+        service.redact_texts(["a", "b"], make_policy())
+    assert calls == ["a"]
+
+
 @pytest.mark.parametrize("method", ["_evaluate_action_internal", "evaluate_action", "evaluate_action_with_match"])
 def test_tuple_facades_retain_evaluate_override(method):
     from tldw_Server_API.app.core.Moderation.models import ModerationEvaluationResult

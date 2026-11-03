@@ -19,8 +19,9 @@ from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.Moderation.models import ModerationEvaluationResult
 
 BaseOperation = Literal["evaluate", "redact", "redact_with_count"]
-Operation = BaseOperation | Literal["supervised_evaluate", "custom_substitute"]
-OPERATIONS = frozenset({"evaluate", "redact", "redact_with_count", "supervised_evaluate", "custom_substitute"})
+Operation = BaseOperation | Literal["supervised_evaluate", "custom_substitute", "redact_many"]
+OPERATIONS = frozenset({"evaluate", "redact", "redact_with_count", "supervised_evaluate", "custom_substitute", "redact_many"})
+MAX_TEXT_FIELDS = 4096
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,7 @@ class OutputBudget:
     max_chars: int
 
     def __post_init__(self) -> None:
-        if type(self.max_chars) is not int or not 0 < self.max_chars <= 1_000_000:
+        if type(self.max_chars) is not int or not 0 <= self.max_chars <= 1_000_000:
             raise ValueError("invalid moderation output budget")
 
     def check(self, chars: int) -> None:
@@ -164,11 +165,16 @@ class WorkerRequest:
     """A data-only operation snapshot, independently validated at the wire."""
 
     operation: Operation
-    text: str
+    text: str | tuple[str, ...]
     phase: str | None
     policy: dict
     limits: dict
     bounds: ExecutionBounds
+
+
+def request_input_chars(request: WorkerRequest) -> int:
+    """Count submitted characters, not independent fields, for safe metadata."""
+    return sum(map(len, request.text)) if isinstance(request.text, tuple) else len(request.text)
 
 
 @dataclass(frozen=True)
@@ -178,7 +184,7 @@ class WorkerResponse:
     # None is reserved for failures before request decoding (e.g. limit failure).
     operation: Operation | None
     result: (
-        ModerationEvaluationResult | str | tuple[str, int] | SupervisedBatchResult | SubstitutionBatchResult | None
+        ModerationEvaluationResult | str | list[str] | tuple[str, int] | SupervisedBatchResult | SubstitutionBatchResult | None
     ) = None
     reason: str | None = None
     resource_limits: dict[str, bool] | None = None

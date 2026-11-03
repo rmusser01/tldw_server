@@ -141,6 +141,15 @@ def execute_request(request: WorkerRequest) -> WorkerResponse:
                     )
                 elif request.operation == "redact":
                     result = evaluator.redact_text(request.text, policy, request.phase, limits, output_budget=budget)
+                elif request.operation == "redact_many":
+                    result = []
+                    remaining = request.bounds.max_output_chars
+                    for text in request.text:
+                        redacted = evaluator.redact_text(
+                            text, policy, request.phase, limits, output_budget=OutputBudget(remaining)
+                        )
+                        remaining -= len(redacted)
+                        result.append(redacted)
                 else:
                     result = evaluator.redact_text_with_count(
                         request.text, policy, request.phase, limits, output_budget=budget

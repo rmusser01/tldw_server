@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.Moderation.execution_models import (
     FailureMetadata,
     WorkerRequest,
     WorkerResponse,
+    request_input_chars,
 )
 from tldw_Server_API.app.core.Moderation.execution_protocol import decode_response, encode_request
 
@@ -223,7 +224,7 @@ class ModerationExecutionRunner:
 
                 report_execution_failure_background(
                     ModerationExecutionError("cleanup_failed"),
-                    metadata=FailureMetadata(request.operation, request.phase, len(request.text)),
+                    metadata=FailureMetadata(request.operation, request.phase, request_input_chars(request)),
                     scope=scope,
                 )
 

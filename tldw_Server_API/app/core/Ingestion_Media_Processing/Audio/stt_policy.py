@@ -328,7 +328,7 @@ async def apply_transcript_payload_policy_async(payload: dict[str, Any], *, poli
         input_chars -= len(text)
     return await run_moderation_async(
         lambda: apply_transcript_payload_policy(payload, policy=policy),
-        metadata=FailureMetadata("redact", "output", input_chars),
+        metadata=FailureMetadata("redact_many", "output", input_chars),
     )
 
 
@@ -347,24 +347,23 @@ def apply_transcript_text_policy(
 
     try:
         moderation = get_moderation_service()
-        pii_rules = moderation._load_builtin_pii_rules()
-        moderation_policy = ModerationPolicy(
-            enabled=True,
-            input_enabled=False,
-            output_enabled=True,
-            input_action="warn",
-            output_action="redact",
-            redact_replacement="[PII]",
-            per_user_overrides=False,
-            block_patterns=pii_rules,
-            categories_enabled=_expand_redact_categories(policy.redact_categories),
-        )
+        moderation_policy = _transcript_moderation_policy(moderation, policy)
         return moderation.redact_text(text, moderation_policy)
     except ModerationExecutionError:
         raise
     except _STT_POLICY_EXCEPTIONS as exc:
         logger.warning("STT transcript redaction failed; suppressing text for safety: {}", exc)
         return "[redaction-unavailable]"
+
+
+def _transcript_moderation_policy(moderation: Any, policy: STTPolicy) -> ModerationPolicy:
+    """Build one PII snapshot for all checked transcript fields."""
+    return ModerationPolicy(
+        enabled=True, input_enabled=False, output_enabled=True,
+        input_action="warn", output_action="redact", redact_replacement="[PII]",
+        per_user_overrides=False, block_patterns=moderation._load_builtin_pii_rules(),
+        categories_enabled=_expand_redact_categories(policy.redact_categories),
+    )
 
 
 def apply_transcript_payload_policy(payload: dict[str, Any], *, policy: STTPolicy) -> dict[str, Any]:
@@ -382,16 +381,43 @@ def apply_transcript_payload_policy(payload: dict[str, Any], *, policy: STTPolic
 
 def _apply_transcript_payload_policy(payload: dict[str, Any], *, policy: STTPolicy) -> dict[str, Any]:
     payload_type = str(payload.get("type", "")).strip().lower()
-    text = payload["text"]
     updated = dict(payload)
-    updated["text"] = apply_transcript_text_policy(
-        text,
-        policy=policy,
-        is_partial=(payload_type == "partial" and not bool(payload.get("is_final"))),
-    )
-    segments = updated.get("segments")
-    if isinstance(segments, list):
-        updated["segments"] = redact_timed_segments(segments, policy=policy)
+    fields: list[str] = []
+    targets: list[tuple[dict[str, Any], tuple[str, ...]]] = []
+    text = payload.get("text")
+    partial_opt_out = payload_type == "partial" and not payload.get("is_final") and policy.allow_unredacted_partials
+    if policy.redact_pii and isinstance(text, str) and text and not partial_opt_out:
+        fields.append(text)
+        targets.append((updated, ("text",)))
+    if isinstance(payload.get("segments"), list):
+        updated["segments"] = []
+        for segment in payload["segments"]:
+            if not isinstance(segment, dict):
+                updated["segments"].append(segment)
+                continue
+            copied = dict(segment)
+            updated["segments"].append(copied)
+            value = segment.get("text", segment.get("Text"))
+            if isinstance(value, str):
+                for key in ("text", "Text"):
+                    if key in copied:
+                        copied[key] = value
+            if policy.redact_pii and isinstance(value, str) and value:
+                fields.append(value)
+                targets.append((copied, tuple(key for key in ("text", "Text") if key in segment)))
+    if fields:
+        try:
+            moderation = get_moderation_service()
+            results = moderation.redact_texts(fields, _transcript_moderation_policy(moderation, policy))
+        except ModerationExecutionError:
+            raise
+        except _STT_POLICY_EXCEPTIONS:
+            logger.warning("STT transcript redaction failed; suppressing checked fields for safety")
+            results = ["[redaction-unavailable]" if text else "" for text in fields]
+        # Do not expose any field until the whole batch has succeeded.
+        for (target, keys), result in zip(targets, results, strict=True):
+            for key in keys:
+                target[key] = result
     return updated
 
 
@@ -409,21 +435,7 @@ def _redact_timed_segments(segments: list[dict[str, Any]] | None, *, policy: STT
     if not isinstance(segments, list):
         return segments
 
-    redacted_segments: list[dict[str, Any]] = []
-    for segment in segments:
-        if not isinstance(segment, dict):
-            redacted_segments.append(segment)
-            continue
-        updated_segment = dict(segment)
-        text = updated_segment.get("text", updated_segment.get("Text"))
-        if isinstance(text, str):
-            redacted_text = apply_transcript_text_policy(text, policy=policy, is_partial=False)
-            if "text" in updated_segment:
-                updated_segment["text"] = redacted_text
-            if "Text" in updated_segment:
-                updated_segment["Text"] = redacted_text
-        redacted_segments.append(updated_segment)
-    return redacted_segments
+    return _apply_transcript_payload_policy({"segments": segments}, policy=policy)["segments"]
 
 
 def build_audio_retention_decision(policy: STTPolicy) -> STTAudioRetentionDecision:
