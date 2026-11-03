@@ -16,32 +16,220 @@ pytestmark = [pytest.mark.integration]
 
 
 @pytest.mark.asyncio
-async def test_native_cancel_keeps_lease_until_guard_exits_after_owned_browser_retirement(monkeypatch):
+@pytest.mark.parametrize("close_mode", ["failed", "held"])
+async def test_native_failed_or_held_close_keeps_guard_and_lease_until_actual_browser_exit(monkeypatch, close_mode):
     from playwright.async_api import Browser
+
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as owner
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    native, policies, detach_states = [], [], []
+    original_close = Browser.close
+    bind = owner._BrowserRequestPolicy.bind
+    detach = owner._BrowserRequestPolicy._detach
+
+    async def retained_bind(self, *args):
+        policies.append(self)
+        return await bind(self, *args)
+
+    async def failed_or_held(self, *args, **kwargs):
+        native.append(self)
+        entered.set()
+        if close_mode == "failed":
+            raise RuntimeError("close rejected while browser still connected")
+        await release.wait()
+        await original_close(self, *args, **kwargs)
+
+    async def observed_detach(session):
+        detach_states.append(native[0].is_connected())
+        await detach(session)
+
+    monkeypatch.setattr(Browser, "close", failed_or_held)
+    monkeypatch.setattr(owner._BrowserRequestPolicy, "bind", retained_bind)
+    monkeypatch.setattr(owner._BrowserRequestPolicy, "_detach", staticmethod(observed_detach))
+    pool = owner._BrowserAcquisitionPool(1)
+    async with _sites() as (bases, seen):
+
+        class Guard:
+            async def decide(self, url, **kwargs):
+                return SimpleNamespace(allowed=urlsplit(url).path != "/deny")
+
+        plan = ArticlePlan.from_routing_plan(
+            SimpleNamespace(url=bases[0] + "/done", domain="127.0.0.1"),
+            {"web_scraper_retry_count": 1, "web_scraper_retry_timeout": 5},
+        ).for_enhanced_browser([])
+        browser = GuardedArticleBrowser(
+            egress_guard=Guard(),
+            context=RuntimeRequestContext(),
+            transport_decision=_legacy_allowed,
+            acquisition_pool=pool,
+            cleanup_grace_s=0.1,
+        )
+        task = asyncio.create_task(browser.acquire(plan.url, plan.browser))
+        evaluation = None
+        try:
+            await asyncio.wait_for(entered.wait(), 8)
+            with pytest.raises(ArticleFailure, match="browser_error"):
+                await asyncio.wait_for(asyncio.shield(task), 2)
+            assert native[0].is_connected() and pool.active_count == 1 and detach_states == []
+            assert len(native) == 1, "no new close retries or polling"
+            assert pool.acquire(callback_capacity=2) is None
+            paused = asyncio.Event()
+            policies[0]._root.on(
+                "Fetch.requestPaused",
+                lambda event: paused.set() if urlsplit(event["request"]["url"]).path == "/deny" else None,
+            )
+            # Isolate the still-owned browser guard, rather than the earlier context route.
+            await native[0].contexts[0].unroute_all(behavior="wait")
+            evaluation = asyncio.create_task(
+                native[0].contexts[0].pages[0].evaluate("fetch('/deny').catch(() => null)")
+            )
+            await asyncio.wait_for(paused.wait(), 2)
+            assert not any(path == "/deny" for _, path, _ in seen)
+            assert detach_states == [] and pool.active_count == 1
+            if close_mode == "failed":
+                await original_close(native[0])
+            else:
+                release.set()
+            for _ in range(200):
+                if pool.active_count == 0:
+                    break
+                await asyncio.sleep(0.01)
+            assert not native[0].is_connected() and pool.active_count == 0
+            assert detach_states and not any(detach_states)
+            assert not any(path == "/deny" for _, path, _ in seen)
+        finally:
+            release.set()
+            if native and native[0].is_connected():
+                await original_close(native[0])
+            if evaluation is not None:
+                await asyncio.gather(evaluation, return_exceptions=True)
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/children", "/cookie-port", "/cross", "/popup-chain"])
+async def test_native_raw_cookie_override_is_origin_scoped_without_losing_browser_jar(path):
+    async with _sites() as (bases, seen):
+
+        class Guard:
+            async def decide(self, *args, **kwargs):
+                return SimpleNamespace(allowed=True)
+
+        plan = ArticlePlan.from_routing_plan(
+            SimpleNamespace(
+                url=bases[0] + path,
+                domain="127.0.0.1",
+                extra_headers={"Cookie": "raw-secret=original", "Authorization": "secret"},
+            ),
+            {"web_scraper_retry_count": 1, "web_scraper_retry_timeout": 5},
+        ).for_enhanced_browser(
+            [
+                {"name": "localjar", "value": "original", "url": bases[0] + "/"},
+                {"name": "framejar", "value": "natural", "domain": "localhost", "path": "/"},
+                {"name": "narrow", "value": "hidden", "domain": "localhost", "path": "/private"},
+            ]
+        )
+        browser = GuardedArticleBrowser(
+            egress_guard=Guard(), context=RuntimeRequestContext(), transport_decision=_legacy_allowed
+        )
+        await browser.acquire(plan.url, plan.browser)
+        original_requests = list(seen)
+        initial = next(headers for _, received, headers in seen if received == path)
+        assert initial.get("cookie") == "raw-secret=original"
+        if path in {"/children", "/cookie-port"}:
+            frames = [headers for _, received, headers in seen if received in {"/frame", "/frame-image"}]
+            assert len(frames) == 2
+            assert all(
+                "raw-secret" not in headers.get("cookie", "") and "narrow" not in headers.get("cookie", "")
+                for headers in frames
+            )
+            if path == "/cookie-port":
+                assert all(headers.get("cookie") == "localjar=original" for headers in frames)
+            else:
+                # Compare actual Chromium third-party/SameSite selection; do not invent a jar override.
+                from dataclasses import replace
+
+                count = len(seen)
+                control = replace(plan.browser, extra_headers={"Authorization": "secret"})
+                await browser.acquire(plan.url, control)
+                natural = [
+                    headers.get("cookie")
+                    for _, received, headers in seen[count:]
+                    if received in {"/frame", "/frame-image"}
+                ]
+                assert [headers.get("cookie") for headers in frames] == natural
+            assert all(
+                headers.get("cookie") == "raw-secret=original"
+                for _, received, headers in original_requests
+                if received in {"/image", "/worker-fetch", "/popup"}
+            )
+        else:
+            redirected = [headers for _, received, headers in seen if received in {"/return", "/done"}]
+            assert len(redirected) == 2
+            assert all(
+                "raw-secret" not in headers.get("cookie", "") and "authorization" not in headers
+                for headers in redirected
+            )
+            assert all(headers.get("cookie") == "localjar=original" for headers in redirected)
+            if path == "/popup-chain":
+                assert next(h for _, received, h in seen if received == "/cross")["cookie"] == "raw-secret=original"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hold_stage", ["guard", "continue", "early_continue_error"])
+async def test_native_cancel_keeps_lease_until_guard_exits_after_owned_browser_retirement(monkeypatch, hold_stage):
+    from playwright._impl._errors import TargetClosedError
+    from playwright.async_api import Browser, Route
 
     from tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser import _BrowserAcquisitionPool
 
     entered, release = asyncio.Event(), asyncio.Event()
     disconnected = []
+    native_closed = asyncio.Event()
     close = Browser.close
+    continue_ = Route.continue_
+    abort = Route.abort
+
+    async def held():
+        entered.set()
+        while not release.is_set():
+            try:
+                await asyncio.shield(release.wait())
+            except asyncio.CancelledError:
+                pass
+
+    async def held_continue(self, *args, **kwargs):
+        if urlsplit(self.request.url).path == "/stream-body":
+            if hold_stage == "continue":
+                await held()
+            elif hold_stage == "early_continue_error":
+                raise RuntimeError("continuation failed before browser exit")
+        return await continue_(self, *args, **kwargs)
+
+    async def early_abort(self, *args, **kwargs):
+        if hold_stage == "early_continue_error" and urlsplit(self.request.url).path == "/stream-body":
+            entered.set()
+            raise TargetClosedError("page route unavailable before browser exit")
+        return await abort(self, *args, **kwargs)
 
     async def observed_close(self, *args, **kwargs):
+        if hold_stage == "early_continue_error":
+            await release.wait()
         await close(self, *args, **kwargs)
         disconnected.append(not self.is_connected())
+        native_closed.set()
 
     monkeypatch.setattr(Browser, "close", observed_close)
+    monkeypatch.setattr(Route, "continue_", held_continue)
+    monkeypatch.setattr(Route, "abort", early_abort)
     pool = _BrowserAcquisitionPool(1)
     async with _sites() as (bases, seen):
 
         class Guard:
             async def decide(self, url, **kwargs):
-                if urlsplit(url).path == "/stream-body":
-                    entered.set()
-                    while not release.is_set():
-                        try:
-                            await asyncio.shield(release.wait())
-                        except asyncio.CancelledError:
-                            pass
+                if hold_stage == "guard" and urlsplit(url).path == "/stream-body":
+                    await held()
                 return SimpleNamespace(allowed=True)
 
         plan = ArticlePlan.from_routing_plan(
@@ -60,8 +248,15 @@ async def test_native_cancel_keeps_lease_until_guard_exits_after_owned_browser_r
             task.cancel()
             done, _ = await asyncio.wait({task}, timeout=3)
             assert task in done and task.cancelled()
-            assert disconnected == [True]
             assert pool.active_count == 1 and not release.is_set()
+            if hold_stage == "early_continue_error":
+                assert disconnected == []
+                assert [path for _, path, _ in seen] == ["/stream-child"]
+                release.set()
+            await asyncio.wait_for(native_closed.wait(), 8)
+            assert disconnected == [True]
+            if hold_stage != "early_continue_error":
+                assert pool.active_count == 1 and not release.is_set()
             assert [path for _, path, _ in seen] == ["/stream-child"]
             release.set()
             for _ in range(100):
@@ -236,6 +431,8 @@ async def _sites(*, stream=None, wire=None):
                     f'<html><iframe src="{bases[1].replace("127.0.0.1", "localhost")}/frame"></iframe>'
                     '<img src="/image"><script>new Worker("/worker.js");window.open("/popup");</script></html>'
                 ).encode()
+            elif path == "/cookie-port":
+                body = f'<html>article preserved<iframe src="{bases[1]}/frame"></iframe></html>'.encode()
             elif path == "/websocket":
                 body = f'<html>article preserved<script>new WebSocket("{bases[0].replace("http:", "ws:")}/deny");</script></html>'.encode()
             elif path == "/bad-frame":

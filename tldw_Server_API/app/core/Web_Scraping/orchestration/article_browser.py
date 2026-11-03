@@ -224,7 +224,7 @@ class _BrowserAcquisitionLease:
     ) -> tuple[asyncio.Task[Any] | None, str]:
         """Create and retain cleanup atomically with respect to sealing."""
         with self._lock:
-            if self._sealed:
+            if self._sealed and asyncio.current_task() not in self._tasks:
                 if inspect.iscoroutine(operation):
                     operation.close()
                 return None, "sealed"
@@ -410,7 +410,23 @@ class _AcquisitionOutcome:
         self.parent_stop: BaseException | None = None
         self.callback_cancelled = False
         self.native_browser_disconnected = False
+        self.native_exit = asyncio.Event()
+        self.native_exit_handler = None
         self._lock = threading.Lock()
+
+    def watch_browser(self, native: Any) -> None:
+        def exited(*_args):
+            if native.is_connected() is False:
+                self.native_browser_disconnected = True
+                self.native_exit.set()
+
+        self.native_exit_handler = exited
+        native.on("disconnected", exited)
+
+    def unwatch_browser(self, native: Any) -> None:
+        if self.native_exit_handler is not None:
+            native.remove_listener("disconnected", self.native_exit_handler)
+            self.native_exit_handler = None
 
     def fail(self, stage: str) -> None:
         self.latch(ArticleFailure("browser_error", stage))
@@ -801,6 +817,7 @@ class _BrowserRequestPolicy:
     ) -> None:
         self._origin = http_client._url_origin(url)
         self._headers = {k: v for k, v in headers.items() if k.lower() not in {"cookie", "host", "proxy-authorization"}}
+        self._raw_cookie = next((value for key, value in headers.items() if key.lower() == "cookie"), None)
         self._browser = browser
         self._outcome = outcome
         self._requests: dict[str, bool] = {}
@@ -851,6 +868,7 @@ class _BrowserRequestPolicy:
             self._transfer_sessions.closed = True
         self._requests.clear()
         self._headers.clear()
+        self._raw_cookie = None
 
     async def retire(self) -> None:
         self._transfer_sessions.retire(native_browser_disconnected=self._outcome.native_browser_disconnected)
@@ -914,6 +932,9 @@ class _BrowserRequestPolicy:
         permitted = permitted and same
         self._requests[request_id] = permitted
         headers = dict(request["headers"])
+        if permitted and self._raw_cookie is not None:
+            headers = {key: value for key, value in headers.items() if key.lower() != "cookie"}
+            headers["Cookie"] = self._raw_cookie
         if not permitted:
             source = f"{self._origin[0]}://{self._origin[1]}:{self._origin[2]}" if self._origin else ""
             # Cookie was already selected by Chromium's domain/path/secure rules.
@@ -1221,10 +1242,12 @@ class GuardedArticleBrowser:
         except ParentStop:
             raise
         except Exception as error:  # noqa: BLE001 - sanitize the browser route boundary
-            if outcome.native_browser_disconnected:
+            if outcome.native_browser_disconnected or outcome.native_exit_handler is not None:
                 from playwright._impl._errors import TargetClosedError
 
                 if isinstance(error, TargetClosedError):
+                    if not outcome.native_browser_disconnected:
+                        await outcome.native_exit.wait()
                     # The owned browser has exited; finish only Playwright's local route future.
                     await route.fallback()
             outcome.fail("http_route")
@@ -1272,7 +1295,7 @@ class GuardedArticleBrowser:
             except Exception:  # noqa: BLE001 - route action failures fail closed
                 outcome.fail("http_route")
                 try:
-                    await route.abort()
+                    await self._abort_http(route, outcome, failure_stage="http_route")
                 except asyncio.CancelledError:
                     raise
                 except ParentStop:
@@ -1408,12 +1431,7 @@ class GuardedArticleBrowser:
                 emergency_shutdown.cancel()
                 cleanup_failed = True
         if "requests" in by_kind:
-            owner = by_kind["browser"]
-            browser_close_failed = await _bounded_method(owner, lease=lease, grace_s=self._cleanup_grace_s)
-            cleanup_failed |= browser_close_failed
-            if not browser_close_failed and owner.resource.is_connected() is False:
-                lifecycle._outcome.native_browser_disconnected = True
-                return cleanup_failed | await self._retire_browser_resources(by_kind, lifecycle, lease)
+            return cleanup_failed | await self._retire_browser_owner(by_kind, lifecycle, lease)
         if context is not None and http_routing_started:
             cleanup_failed |= await _bounded_method(
                 _OwnedResource(context, "unroute_all", "http-routes"),
@@ -1441,6 +1459,37 @@ class GuardedArticleBrowser:
                     grace_s=self._cleanup_grace_s,
                 )
         return cleanup_failed
+
+    async def _retire_browser_owner(self, owners, lifecycle, lease) -> bool:
+        """Retain the guarded owner until actual exit, even when close rejects or stalls."""
+        native = owners["browser"].resource
+        outcome = lifecycle._outcome
+        if outcome.native_exit_handler is None:
+            outcome.watch_browser(native)
+
+        async def finish():
+            try:
+                close_failed = False
+                try:
+                    await _invoke_method(native, "close")
+                except Exception:  # noqa: BLE001 - a rejected close never proves native retirement
+                    close_failed = True
+                if close_failed or native.is_connected() is not False:
+                    await outcome.native_exit.wait()
+                outcome.native_browser_disconnected = True
+                return close_failed | await self._retire_browser_resources(owners, lifecycle, lease)
+            finally:
+                outcome.unwatch_browser(native)
+
+        task, retention = lease.start_cleanup(finish(), name="article-browser-owner-retirement")
+        if task is None:
+            outcome.unwatch_browser(native)
+            return True
+        if retention == "unobserved":
+            return True
+        _, pending = await asyncio.wait({task}, timeout=self._cleanup_grace_s)
+        # Never cancel native close or detach its guard to meet a logical timeout.
+        return bool(pending) or _task_failed(task) or task.result()
 
     async def _retire_browser_resources(self, owners, lifecycle, lease) -> bool:
         """Retire local handles only after this acquisition's native browser exits."""
@@ -1593,11 +1642,20 @@ class GuardedArticleBrowser:
                 guard_session = await browser.new_browser_cdp_session()
                 requests = _BrowserRequestPolicy(url, profile.extra_headers, self, outcome)
                 resources.append(_OwnedResource(requests, "close", "requests"))
+                outcome.watch_browser(browser)
                 await requests.bind(guard_session, lifecycle, transfer, lease)
             stage = "context"
             context = await browser.new_context(
                 **({"proxy": dict(proxy)} if proxy is not None else {}),
-                **({"extra_http_headers": dict(profile.extra_headers)} if profile.extra_headers is not None else {}),
+                **(
+                    {
+                        "extra_http_headers": {
+                            key: value for key, value in profile.extra_headers.items() if key.lower() != "cookie"
+                        }
+                    }
+                    if profile.extra_headers is not None
+                    else {}
+                ),
                 service_workers="block",
                 user_agent=profile.user_agent,
                 viewport={
