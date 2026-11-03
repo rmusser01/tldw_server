@@ -649,15 +649,13 @@ async def test_new_checkpoint_authority_is_not_cancelled_by_previous_terminal_jo
     await _one_phase(tmp_path, monkeypatch, manager, session)
     parked = db.get_session(session.id)
     assert parked.status == "waiting_human" and manager.get_job(int(session.active_job_id))["status"] == "failed"  # nosec B101 -- The completed phase produced a real checkpoint before its parent acknowledgement failed.
-    create = manager.create_job
-
     def lose_new_ack(**kwargs):
         raise RuntimeError("controlled new approval admission acknowledgement")
 
-    monkeypatch.setattr(manager, "create_job", lose_new_ack)
-    with pytest.raises(RuntimeError, match="new approval"):
-        service.approve_checkpoint(owner_user_id="1", session_id=session.id, checkpoint_id=parked.latest_checkpoint_id)
-    monkeypatch.setattr(manager, "create_job", create)
+    with monkeypatch.context() as fault:
+        fault.setattr(manager, "create_job", lose_new_ack)
+        with pytest.raises(RuntimeError, match="new approval"):
+            service.approve_checkpoint(owner_user_id="1", session_id=session.id, checkpoint_id=parked.latest_checkpoint_id)
     recovered = service.get_session(owner_user_id="1", session_id=session.id)
     assert recovered.status == "queued" and recovered.active_job_id is not None  # nosec B101 -- A new explicit checkpoint decision must not inherit an old delivery's terminal failure.
     job = manager.get_job(int(recovered.active_job_id))
@@ -725,16 +723,24 @@ async def test_checkpoint_commit_recovery_preserves_one_winning_artifact(tmp_pat
     assert len(manager.list_jobs(domain="research", owner_user_id="1")) == 1  # nosec B101 -- Unknown enqueue acknowledgement reuses the same admitted candidate.
 
 
+@pytest.fixture
+def capacity_one_jobs(tmp_path, monkeypatch):
+    """The actual worker and service share one isolated queue with both admission caps."""
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED", "1")
+    monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "chain-jobs.db"))
+    return JobManager()
+
+
 @pytest.mark.parametrize("autonomy", ["autonomous", "checkpointed"])
-async def test_real_sdk_completes_all_phases_at_one_job_capacity(tmp_path, monkeypatch, autonomy):
+async def test_real_sdk_completes_all_phases_at_one_job_capacity(tmp_path, monkeypatch, autonomy, capacity_one_jobs):
     from tldw_Server_API.app.core.Research import jobs as phase_jobs
     from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
     from tldw_Server_API.app.core.Research.broker import ResearchBroker
     from tldw_Server_API.app.core.Research.synthesizer import ResearchSynthesizer
 
-    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED", "1")
-    monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
-    manager = JobManager(tmp_path / "chain-jobs.db", backend="sqlite")
+    manager = capacity_one_jobs
     db = ResearchSessionsDB(tmp_path / "research.db")
     service = ResearchService(
         research_db_path=tmp_path / "research.db", outputs_dir=tmp_path / "outputs", job_manager=manager
@@ -792,7 +798,6 @@ async def test_real_sdk_completes_all_phases_at_one_job_capacity(tmp_path, monke
         deliveries.append((job["payload"]["phase"], job["payload"].get("approved_outline_locked", False)))
         return await actual(job, broker=broker, synthesizer=synthesizer, **kwargs)
 
-    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: manager)
     monkeypatch.setattr(jobs_worker, "handle_research_phase_job", controlled_providers)
 
     async def review_and_watch():

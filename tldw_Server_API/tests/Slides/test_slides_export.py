@@ -655,8 +655,7 @@ def test_pdf_deadline_refuses_late_bytes_and_awaits_cleanup(tmp_path, monkeypatc
         )
 
     assert cancelled == [True]  # nosec B101 -- pytest behavior assertion.
-    browser.close.assert_awaited_once()
-    context.stop.assert_awaited_once()
+    assert (browser.close.await_count, context.stop.await_count) == (1, 1)  # nosec B101 - renderer deadline drains both owned resources exactly once.
 
 
 def test_pdf_render_error_awaits_browser_and_context_cleanup(tmp_path, pdf_renderer):

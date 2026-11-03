@@ -129,6 +129,12 @@ async def test_discovery_does_not_publish_old_configuration_outcome(discovery_ap
     response = await refresh_route(discovery_api.client, route)
     assert response.status_code == 409  # nosec B101 -- concurrent configuration changes require a new discovery.
 
+    assert response.json() == {
+        "detail": "External server configuration changed during discovery; refresh again"
+    }  # nosec B101 - callers receive the actual recoverable configuration conflict.
+    stored = await discovery_api.service.repo.get_external_server(SERVER)
+    assert stored["last_successful_discovery_at"] is None  # nosec B101 - the retired discovery never stamps current success.
+
 
 async def refresh_route(client, route):
     """Exercise both current refresh contracts, including UI's optional global target."""

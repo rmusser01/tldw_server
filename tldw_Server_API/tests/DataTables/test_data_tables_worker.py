@@ -422,6 +422,8 @@ def test_resolve_worker_user_id_rejects_job_owner_mismatch_without_payload():
 
 class _TimeoutAdapter:
     def chat(self, _request, *, timeout=None):
+        import time
+        time.sleep(0.03)
         return {"choices": [{"message": {"content": "{}"}}]}
 
 
@@ -443,10 +445,6 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
     )
     table_id = int(table.get("id"))
 
-    async def _raise_timeout(_future, timeout=None):
-        raise asyncio.TimeoutError
-
-    monkeypatch.setattr(jobs_worker.asyncio, "wait_for", _raise_timeout)
     monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: _TimeoutAdapter())
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
@@ -612,3 +610,68 @@ def test_owned_document_read_restores_context_and_drops_ambient_admin(monkeypatc
                 jobs_worker._extract_owned_media_text(object(), 7, "401") == "Selene"
             )  # nosec B101 -- successful owner-scoped content retained.
         assert get_scope() is parent  # nosec B101 -- success/failure restores the exact caller context.
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", ["timeout", "cancel"])
+async def test_provider_thread_exits_before_job_can_finish_or_retry(monkeypatch, tmp_path, interruption):
+    import threading
+
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+    from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
+
+    media_path = tmp_path / "owned-media.db"
+    monkeypatch.setattr(jobs_worker, "get_user_media_db_path", lambda _user: str(media_path))
+    monkeypatch.setattr(jobs_worker, "get_user_chacha_db_path", lambda _user: str(tmp_path / "owned-chacha.db"))
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "llama.cpp")
+    monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_kw: (None, {}))
+    monkeypatch.setattr(jobs_worker, "_LLM_TIMEOUT_SECONDS", 0.03 if interruption == "timeout" else 2)
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    owners = []
+
+    class HeldAdapter:
+        def chat(self, request, *, timeout=None):
+            owners.append(current_llm_user_id())
+            entered.set()
+            try:
+                if not release.wait(2):
+                    raise RuntimeError("test provider release was not delivered")
+                return {"choices": [{"message": {"content": '{"columns": [{"name": "Term"}], "rows": [["alpha"]]}'}}]}
+            finally:
+                exited.set()
+
+    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: HeldAdapter())
+    db = MediaDatabase(db_path=str(media_path), client_id="1")
+    jm = JobManager(tmp_path / "owned-jobs.db")
+    table = db.create_data_table(name="Owned inference", prompt="Source facts", status="queued")
+    job = _acquire_generation(jm, {
+        "job_type": "data_table_generate", "owner_user_id": "1",
+        "payload": {
+            "table_id": table["id"], "table_uuid": table["uuid"], "prompt": "Source facts", "model": "test-model",
+            "sources": [{"source_type": "rag_query", "source_id": "facts",
+                         "snapshot": {"chunks": [{"chunk_text": "alpha"}]}}],
+        },
+    })
+    with llm_call_root(1):
+        work = asyncio.create_task(jobs_worker._handle_job(job, jm))
+    try:
+        async with asyncio.timeout(1):
+            while not entered.is_set():
+                await asyncio.sleep(0)
+        if interruption == "cancel":
+            work.cancel()
+        await asyncio.sleep(0.06)
+        assert not work.done() and not exited.is_set()  # nosec B101 - no retry/resource release while provider owns work.
+    finally:
+        release.set()
+        try:
+            await work
+        except (DataTablesJobError, asyncio.CancelledError):
+            pass
+        db.close_connection()
+    assert exited.is_set() and owners == [1]  # nosec B101 - actual thread exit and SDK-style user attribution.
+    if interruption == "timeout":
+        with pytest.raises(DataTablesJobError, match="llm_timeout") as error:
+            work.result()
+        assert error.value.retryable is True  # nosec B101 - retain the existing retry policy after provider drain.
+    else:
+        assert work.cancelled()  # nosec B101 - caller cancellation remains cancellation after draining.

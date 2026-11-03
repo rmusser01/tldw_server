@@ -85,8 +85,9 @@ def test_tx_fixture_releases_pool_when_setup_fails(monkeypatch, tmp_path, fixtur
     monkeypatch.setattr(module, "CharactersRAGDB", construct)
     fixture_function = tx_db if fixture_name == "tx" else module.pg_db
     fixture = fixture_function.__wrapped__(object(), tmp_path)
-    with pytest.raises(RuntimeError, match="fixture setup failed"):
+    with pytest.raises(RuntimeError, match="fixture setup failed") as caught:
         next(fixture)
+    assert caught.value is failure  # nosec B101 - the real fixture preserves the original setup exception.
     assert closed == ["pool"]  # nosec B101 # The fixture must release its pool after every setup error.
 
 

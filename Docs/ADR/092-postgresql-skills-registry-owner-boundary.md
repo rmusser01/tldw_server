@@ -1,4 +1,4 @@
-# ADR-086: Owner-scoped PostgreSQL Skill registry
+# ADR-092: Owner-scoped PostgreSQL Skill registry
 
 - Status: Proposed
 - Date: 2026-11-02

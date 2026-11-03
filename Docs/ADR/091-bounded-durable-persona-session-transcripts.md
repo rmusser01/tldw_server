@@ -1,4 +1,4 @@
-# ADR-085: Bounded durable Persona session transcripts
+# ADR-091: Bounded durable Persona session transcripts
 
 **Status:** Accepted
 **Date:** 2026-11-02

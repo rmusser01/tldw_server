@@ -1,7 +1,7 @@
 import React from 'react';
 import { ConfigProvider, message } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useDataTablesStore } from '@/store/data-tables';
 import type { DataTable } from '@/types/data-tables';
@@ -12,6 +12,14 @@ const api = vi.hoisted(() => ({
   saveDataTableContent: vi.fn(),
 }));
 vi.mock('@/services/tldw/TldwApiClient', () => ({ tldwClient: api }));
+vi.mock('@/services/service-prompts', async (original) => ({
+  ...(await original<typeof import('@/services/service-prompts')>()),
+  resolveServicePromptScope: vi.fn(async () => ({
+    config: { serverUrl: 'https://original-table.test', authMode: 'multi-user' },
+    userId: 42, scopeKey: 'original-table-owner', clientPrincipalVerified: true,
+  })),
+}));
+
 vi.mock('@/utils/data-table-export', () => ({ exportAndDownload: vi.fn() }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -148,4 +156,32 @@ describe('SaveTablePanel persistence', () => {
       expect(screen.getByRole('button', { name: 'CSV' })).toBeEnabled();
     }
   );
+});
+
+it('pins both private preview writes to the same verified account', async () => {
+  renderPreview();
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }));
+  await screen.findByText('Table Saved!');
+  const contentOptions = api.saveDataTableContent.mock.calls[0][2];
+  const metadataOptions = api.updateDataTable.mock.calls[0][2];
+  expect(contentOptions).toMatchObject({
+    requestScope: { config: { serverUrl: 'https://original-table.test' }, userId: 42 },
+    signal: expect.any(AbortSignal),
+  });
+  expect(metadataOptions).toBe(contentOptions);
+});
+
+it('does not patch metadata or publish a held save after account replacement', async () => {
+  let finish!: (table: DataTable) => void;
+  api.saveDataTableContent.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  renderPreview();
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }));
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed'));
+    finish(structuredClone(original));
+  });
+  expect(api.updateDataTable).not.toHaveBeenCalled();
+  expect(useDataTablesStore.getState().tables).toEqual([]);
+  expect(screen.queryByText('Table Saved!')).not.toBeInTheDocument();
 });

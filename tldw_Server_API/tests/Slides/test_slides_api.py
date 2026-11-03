@@ -2586,7 +2586,7 @@ def test_slide_generation_keeps_event_loop_responsive(monkeypatch):
             theme="black",
         )
         try:
-            with pytest.raises(HTTPException, match="Failed to generate presentation"):
+            with pytest.raises(HTTPException, match="Failed to generate presentation") as refusal:
                 await slides_ep._generate_presentation(
                     response=Response(),
                     http_request=_connected_request(),
@@ -2597,6 +2597,9 @@ def test_slide_generation_keeps_event_loop_responsive(monkeypatch):
                     source_ref=None,
                     source_query=request.prompt,
                 )
+            assert (refusal.value.status_code, refusal.value.detail) == (
+                500, "Failed to generate presentation"
+            )  # nosec B101 - the real API maps the provider failure to its fixed public error.
         finally:
             release.set()
 

@@ -184,9 +184,7 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 vi.mock("@/store/workspace-migration", async (original) => ({
-  readResearchWorkspaceChatReference: (
-    await original<typeof import("@/store/workspace-migration")>()
-  ).readResearchWorkspaceChatReference,
+  ...(await original<typeof import("@/store/workspace-migration")>()),
   runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration,
   RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX:
     "tldw:research-workspace:migration:tombstone"
@@ -949,7 +947,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       serverMigration: {
         id: "research-workspace-workspace-1-abcd",
         status: "finalized",
-        client_delete_eligible: false
+        client_delete_eligible: true
       },
       localDeletionEligibility: {
         eligible: true,
@@ -979,14 +977,14 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     await expect(
       migrationInput.readLocalStorageValue("tldw-workspace")
     ).resolves.toBe(legacyPayload)
-    expect(migrationInput.deleteLocalStorageValue).toEqual(expect.any(Function))
-    expect(migrationInput.writeLocalStorageValue).toEqual(expect.any(Function))
+    expect(migrationInput.deleteLocalStorageValue).toBeUndefined()
+    expect(migrationInput.writeLocalStorageValue).toBeUndefined()
 
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Legacy workspace data found")
     expect(notice).toHaveTextContent("Server receipt saved")
     expect(notice).toHaveTextContent(
-      "Local data retained until server deletion eligibility is available"
+      "Local data retained until server content and readback are verified"
     )
     fireEvent.click(
       screen.getByRole("button", { name: "Review migration recovery details" })
@@ -997,6 +995,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(dialog).toHaveTextContent("research-workspace-workspace-1-abcd")
     expect(dialog).toHaveTextContent("Server receipt saved")
     expect(dialog).toHaveTextContent("Client deletion eligible")
+    expect(within(dialog).getByText("Client deletion eligible").nextElementSibling).toHaveTextContent("No")
     expect(screen.queryByText(/workspace-playground/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId("workspace-trust-panel")).not.toBeInTheDocument()
   })
@@ -1175,7 +1174,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Server receipt saved")
     expect(notice).toHaveTextContent(
-      "Local data retained until server deletion eligibility is available"
+      "Local data retained until server content and readback are verified"
     )
   })
 

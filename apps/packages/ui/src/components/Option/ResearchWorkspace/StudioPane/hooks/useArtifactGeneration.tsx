@@ -1850,11 +1850,15 @@ const saveFlashcardsWithFallback = async (
         failedCount: Math.max(0, flashcardInputs.length - createdCount)
       }
     }
+    throw new Error("Flashcard saving was not confirmed.")
   } catch (bulkError) {
-    if (isAbortLikeError(bulkError)) {
-      throw bulkError
-    }
-    console.warn("Bulk flashcard save failed, falling back to per-card saves:", bulkError)
+    if (isAbortLikeError(bulkError)) throw bulkError
+    const status = isRecord(bulkError) ? bulkError.status : undefined
+    const detail = isRecord(bulkError) && isRecord(bulkError.details) ? bulkError.details.detail : undefined
+    // An unknown write may already have committed; only a missing route permits new creates.
+    if (!(status === 404 && detail === "Not Found") && status !== 405 && status !== 501)
+      throw new Error("Flashcard saving was not confirmed. Check the deck before generating again.")
+    console.warn("Bulk flashcard route unavailable; using per-card saves.")
   }
 
   const settledResults = await Promise.allSettled(

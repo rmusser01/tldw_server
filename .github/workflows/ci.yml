@@ -813,6 +813,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
               tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_store_path.py
           - name: admin-users
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
@@ -925,6 +926,7 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_upsert_owner_boundary.py
           # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
           - name: db-management-a-c
             paths: >-
@@ -983,6 +985,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_named_template_owner_access.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -1176,6 +1179,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_search_depth_explicit_overrides.py
           - name: rag-new-unit-unified-pipeline
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline*.py
@@ -1423,6 +1427,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_lorebook_diagnostics.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_message_citations.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -1511,6 +1517,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
               tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
+              tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -1692,6 +1699,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
               tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
+              tldw_Server_API/tests/Workflows/test_manual_retry.py
+              tldw_Server_API/tests/Workflows/test_workflow_response_timestamps.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -1718,6 +1727,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
               tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
+              tldw_Server_API/tests/Workflows/test_llm_provider_policy.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -1752,6 +1762,7 @@ jobs:
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_ingestion_sources_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -2509,6 +2520,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
               tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_store_path.py
           - name: admin-users
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
@@ -2621,6 +2633,7 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_upsert_owner_boundary.py
           # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
           - name: db-management-a-c
             paths: >-
@@ -2680,6 +2693,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
+              tldw_Server_API/tests/Chunking/test_chunking_named_template_owner_access.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -2873,6 +2887,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_search_depth_explicit_overrides.py
           - name: rag-new-unit-unified-pipeline
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline*.py
@@ -3122,6 +3137,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_lorebook_diagnostics.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_message_citations.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -3210,6 +3227,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
               tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
+              tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -3389,6 +3407,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
               tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
+              tldw_Server_API/tests/Workflows/test_manual_retry.py
+              tldw_Server_API/tests/Workflows/test_workflow_response_timestamps.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -3415,6 +3435,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
               tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
+              tldw_Server_API/tests/Workflows/test_llm_provider_policy.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -3450,6 +3471,7 @@ jobs:
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
+              tldw_Server_API/tests/Services/test_ingestion_sources_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -4044,6 +4066,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
               tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_store_path.py
           - name: admin-users
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
@@ -4156,6 +4179,7 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_upsert_owner_boundary.py
           # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
           - name: db-management-a-c
             paths: >-
@@ -4215,6 +4239,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
+              tldw_Server_API/tests/Chunking/test_chunking_named_template_owner_access.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -4408,6 +4433,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_search_depth_explicit_overrides.py
           - name: rag-new-unit-unified-pipeline
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline*.py
@@ -4657,6 +4683,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_lorebook_diagnostics.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_message_citations.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -4745,6 +4773,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
               tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
+              tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -4924,6 +4953,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
               tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
+              tldw_Server_API/tests/Workflows/test_manual_retry.py
+              tldw_Server_API/tests/Workflows/test_workflow_response_timestamps.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -4950,6 +4981,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
               tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
+              tldw_Server_API/tests/Workflows/test_llm_provider_policy.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -4985,6 +5017,7 @@ jobs:
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
+              tldw_Server_API/tests/Services/test_ingestion_sources_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -5489,6 +5522,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
               tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_store_path.py
           - name: admin-users
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
@@ -5601,6 +5635,7 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_upsert_owner_boundary.py
           # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
           - name: db-management-a-c
             paths: >-
@@ -5660,6 +5695,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
+              tldw_Server_API/tests/Chunking/test_chunking_named_template_owner_access.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -5853,6 +5889,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_search_depth_explicit_overrides.py
           - name: rag-new-unit-unified-pipeline
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline*.py
@@ -6102,6 +6139,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_lorebook_diagnostics.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_message_citations.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -6190,6 +6229,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
               tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
+              tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -6369,6 +6409,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
               tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
+              tldw_Server_API/tests/Workflows/test_manual_retry.py
+              tldw_Server_API/tests/Workflows/test_workflow_response_timestamps.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -6395,6 +6437,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
               tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
+              tldw_Server_API/tests/Workflows/test_llm_provider_policy.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -6430,6 +6473,7 @@ jobs:
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
+              tldw_Server_API/tests/Services/test_ingestion_sources_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -6925,6 +6969,7 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_storage_quotas.py
               tldw_Server_API/tests/Admin/test_admin_system_ops_service.py
               tldw_Server_API/tests/Admin/test_admin_t*.py
+              tldw_Server_API/tests/Admin/test_admin_system_ops_store_path.py
           - name: admin-users
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_u*.py
@@ -7037,6 +7082,7 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_upsert_owner_boundary.py
           # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
           - name: db-management-a-c
             paths: >-
@@ -7096,6 +7142,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
+              tldw_Server_API/tests/Chunking/test_chunking_named_template_owner_access.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -7289,6 +7336,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_runtime_provider_call.py
               tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py
               tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_search_depth_explicit_overrides.py
           - name: rag-new-unit-unified-pipeline
             paths: >-
               tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline*.py
@@ -7538,6 +7586,8 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_chat_import_local_chats.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_lorebook_diagnostics.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_workspace_message_citations.py
           - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
@@ -7626,6 +7676,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
               tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
+              tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -7805,6 +7856,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
               tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
+              tldw_Server_API/tests/Workflows/test_manual_retry.py
+              tldw_Server_API/tests/Workflows/test_workflow_response_timestamps.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -7831,6 +7884,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
               tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
+              tldw_Server_API/tests/Workflows/test_llm_provider_policy.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -7866,6 +7920,7 @@ jobs:
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
+              tldw_Server_API/tests/Services/test_ingestion_sources_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py

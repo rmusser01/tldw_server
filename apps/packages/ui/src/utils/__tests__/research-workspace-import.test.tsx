@@ -2449,6 +2449,9 @@ it("retires mounted migration loading and prevents cleanup when the account chan
   localStorage.setItem(key, raw);
   let release!: () => void;
   const methods = {
+    upsertWorkspace: vi.fn(async (id: string) => ({ id, name: "Workspace A", version: 1 })),
+    getWorkspaceSources: vi.fn(async () => []),
+    addWorkspaceSource: vi.fn(async () => ({})),
     createWorkspaceMigration: vi.fn(async (body: { id: string }) => ({
       id: body.id,
       status: "created",

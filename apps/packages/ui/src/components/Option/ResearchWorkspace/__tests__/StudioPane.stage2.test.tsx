@@ -404,7 +404,9 @@ const expandMoreOutputsSection = (container: HTMLElement) => {
 }
 
 const renderStudioPane = () => {
-  const renderResult = render(<StudioPane />)
+  const renderResult = render(
+    <ConfigProvider theme={{ token: { motion: false } }}><StudioPane /></ConfigProvider>
+  )
   expandOutputTypesSection(renderResult.container);
   expandGeneratedOutputsSection(renderResult.container);
   return renderResult
@@ -499,6 +501,10 @@ describe("StudioPane Stage 2 workflows", () => {
       workspaceStoreState.generatingOutputType = isGenerating ? outputType : null
     })
 
+    mockGetMediaDetails.mockReset().mockResolvedValue({
+      id: 101, title: "DSPy Prompting Talk",
+      content: "Selene is the telescope at Rowan Observatory."
+    })
     mockListDecks.mockResolvedValue([])
     mockGenerateFlashcardsService.mockResolvedValue({
       flashcards: [{ front: "Term", back: "Definition" }],
@@ -512,8 +518,8 @@ describe("StudioPane Stage 2 workflows", () => {
     })
     mockGetChatModels.mockResolvedValue([])
     mockCreateDeck.mockResolvedValue({ id: 1, name: "Workspace Flashcards" })
-    mockCreateFlashcard.mockResolvedValue({ uuid: "card-1" })
-    mockCreateFlashcardsBulk.mockResolvedValue({
+    mockCreateFlashcard.mockReset().mockResolvedValue({ uuid: "card-1" })
+    mockCreateFlashcardsBulk.mockReset().mockResolvedValue({
       items: [{ uuid: "card-1", deck_id: 4 }],
       count: 1,
       total: 1
@@ -1450,7 +1456,7 @@ describe("StudioPane Stage 2 workflows", () => {
     ], expect.objectContaining({ signal: expect.any(AbortSignal) }))
   }, 15000)
 
-  it("falls back to per-card flashcard saves when bulk save rejects", async () => {
+  it("falls back to per-card flashcard saves only when the bulk route is unsupported", async () => {
     mockListDecks.mockResolvedValue([])
     mockGenerateFlashcardsService.mockResolvedValue({
       flashcards: [
@@ -1463,7 +1469,7 @@ describe("StudioPane Stage 2 workflows", () => {
       id: 9,
       name: "Workspace A Flashcards"
     })
-    mockCreateFlashcardsBulk.mockRejectedValueOnce(new Error("Bulk flashcard save failed"))
+    mockCreateFlashcardsBulk.mockRejectedValueOnce(Object.assign(new Error("Not Implemented"), { status: 501 }))
     mockCreateFlashcard
       .mockResolvedValueOnce({ uuid: "card-a" })
       .mockRejectedValueOnce(new Error("Second card failed"))
@@ -1498,6 +1504,40 @@ describe("StudioPane Stage 2 workflows", () => {
       })
     )
   }, 15000)
+
+  it.each(["network", "postcommit-500", "empty-ack"])(
+    "does not duplicate committed flashcards after %s", async (failure) => {
+      mockGetMediaDetails.mockResolvedValue({
+        id: 101, title: "DSPy Prompting Talk",
+        content: "Selene is the telescope at Rowan Observatory."
+      });
+      mockListDecks.mockResolvedValue([]);
+      mockGenerateFlashcardsService.mockResolvedValue({
+        flashcards: [{ front: "Selene", back: "Rowan telescope" }], count: 1
+      });
+      mockCreateDeck.mockResolvedValue({ id: 12, name: "Workspace A Flashcards" });
+      const committed: unknown[] = [];
+      mockCreateFlashcardsBulk.mockImplementationOnce(async (inputs) => {
+        committed.push(...inputs);
+        if (failure === "empty-ack") return { items: [] };
+        throw Object.assign(new Error("Save acknowledgement unavailable"), {
+          ...(failure === "postcommit-500" ? { status: 500 } : {})
+        });
+      });
+      mockCreateFlashcard.mockImplementation(async input => {
+        committed.push(input);
+        return { uuid: "duplicate" };
+      });
+      renderStudioPane();
+      fireEvent.click(screen.getByRole("button", { name: "Flashcards" }));
+      await waitFor(() => expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/), "failed",
+        expect.objectContaining({ errorMessage: expect.any(String) })
+      ));
+      expect(mockCreateFlashcard).not.toHaveBeenCalled();
+      expect(committed).toHaveLength(1);
+    }, 15000
+  );
 
   it("does not fall back to per-card saves when bulk flashcard save aborts", async () => {
     mockListDecks.mockResolvedValue([])
@@ -2120,7 +2160,7 @@ describe("StudioPane Stage 2 workflows", () => {
     })
   }, 15000)
 
-  it("uses fullscreen modal sizing when viewing outputs on mobile", () => {
+  it("uses fullscreen modal sizing when viewing outputs on mobile", async () => {
     isMobile = true
     workspaceStoreState.generatedArtifacts = [
       {
@@ -2133,33 +2173,14 @@ describe("StudioPane Stage 2 workflows", () => {
       }
     ]
 
-    const modalInfoSpy = vi
-      .spyOn(Modal, "info")
-      .mockImplementation(
-        () =>
-          ({
-            destroy: vi.fn(),
-            update: vi.fn()
-          }) as any
-      )
-
     renderStudioPane()
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
-    expect(modalInfoSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        width: "100%",
-        style: expect.objectContaining({ top: 0, paddingBottom: 0 }),
-        styles: expect.objectContaining({
-          body: expect.objectContaining({
-            maxHeight: "calc(100dvh - 96px)",
-            overflowY: "auto"
-          })
-        })
-      })
-    )
-
-    modalInfoSpy.mockRestore()
+    const dialog = (await screen.findByText("Mobile view content")).closest(".ant-modal")
+    expect(dialog).toHaveStyle({ width: "100%", top: "0px", paddingBottom: "0px" })
+    expect(dialog.querySelector(".ant-modal-body")).toHaveStyle({
+      maxHeight: "calc(100dvh - 96px)", overflowY: "auto"
+    })
   }, 15000)
   it.each(["flashcards", "quiz"] as const)("waits for a canonical edit acknowledgement before replacing the %s card or closing its editor", async (type) => {
     const original = bindWorkspaceArtifactOrigin({
@@ -2225,7 +2246,9 @@ describe("StudioPane Stage 2 workflows", () => {
     if (boundary === "account") window.dispatchEvent(new Event("tldw:auth-principal-changed"))
     else workspaceStoreState.workspaceId = "other"
     workspaceStoreState.generatedArtifacts = []
-    view.rerender(<StudioPane />)
+    view.rerender(
+      <ConfigProvider theme={{ token: { motion: false } }}><StudioPane /></ConfigProvider>
+    )
     await waitFor(() => expect(screen.queryByDisplayValue("Private unsaved edit")).not.toBeInTheDocument())
     await act(async () => { acknowledge({ ...editIO.save.mock.calls[0][0], workspaceArtifactVersion: 2 }) })
     expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()

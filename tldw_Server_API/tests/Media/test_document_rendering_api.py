@@ -190,6 +190,10 @@ def test_export_refuses_an_overlong_location_sentinel(document_client, tmp_path,
     )
     response = client.get(f"/api/v1/media/{media_id}/annotated-file")
     assert response.status_code == 422  # nosec B101 # A truncated page label is never reinterpreted as a canonical page number.
+    assert response.json() == {
+        "detail": "A saved annotation has an invalid page number or exceeds the export limits."
+    }  # nosec B101 - invalid saved content produces the fixed actionable error, never a truncated PDF.
+
 
 
 @pytest.mark.parametrize("field", ["location", "text", "note"])
@@ -216,6 +220,10 @@ def test_export_refuses_embedded_nul_instead_of_losing_saved_content(document_cl
         )
     response = client.get(f"/api/v1/media/{media_id}/annotated-file")
     assert response.status_code == 422  # nosec B101 # SQLite NUL prefixes cannot masquerade as complete canonical annotation data.
+    assert response.json() == {
+        "detail": "A saved annotation has an invalid page number or exceeds the export limits."
+    }  # nosec B101 - invalid saved content produces the fixed actionable error, never a truncated PDF.
+
 
 
 from tldw_Server_API.tests.Media.test_document_annotation_sync_replay import replay_store as replay_store

@@ -75,6 +75,7 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int, jobs_manager_from_env as _jobs_manager
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import resolve_provider_model
+from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
@@ -902,18 +903,6 @@ def _mark_table_for_job_error(
     )
 
 
-def _drain_late_llm_future(future: asyncio.Future[Any]) -> None:
-    """Consume late executor completion after timeout without blocking the worker."""
-    if future.cancelled():
-        return
-    try:
-        future.exception()
-    except asyncio.CancelledError:
-        return
-    except Exception as exc:
-        logger.debug("data_tables worker: late LLM future completed with error: {}", exc)
-
-
 def _is_job_cancelled(jm: JobManager, job_id: int) -> bool:
     try:
         job = jm.get_job(job_id)
@@ -1180,12 +1169,10 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
         llm_future = loop.run_in_executor(None, _call_llm)
         try:
             if timeout is None:
-                raw_response = await llm_future
+                raw_response = await await_owned_worker(llm_future)
             else:
-                raw_response = await asyncio.wait_for(asyncio.shield(llm_future), timeout=timeout)
+                raw_response = await asyncio.wait_for(await_owned_worker(llm_future), timeout=timeout)
         except asyncio.TimeoutError as exc:
-            llm_future.add_done_callback(_drain_late_llm_future)
-            llm_future.cancel()
             jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_timeout")
             raise DataTablesJobError("llm_timeout", retryable=True) from exc
         logger.info(

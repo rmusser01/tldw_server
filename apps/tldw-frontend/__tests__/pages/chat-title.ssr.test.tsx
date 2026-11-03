@@ -6,7 +6,7 @@ import { HeadManagerContext } from 'next/dist/shared/lib/head-manager-context.sh
 import ChatPage from '@web/pages/chat';
 
 describe('Chat page server rendering', () => {
-  it('imports the real shared title hook and emits its fallback without browser globals', () => {
+  it('emits the route fallback without importing the browser Chat workspace', () => {
     expect(typeof window).toBe('undefined');
     const updateHead = vi.fn();
     renderToString(

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.osce import OsceStationAuthoringResponse
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import capture_provider_override_call_snapshot
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import configured_provider_model_from_snapshot
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError, QuizMalformedOutputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
@@ -1521,11 +1523,13 @@ async def _call_quiz_generation_llm(
     response_format = {"type": "json_object"}
 
     def _call_llm():
-        adapter = _get_adapter(provider)
         app_config = load_and_log_configs() or {}
-        model_to_use = _resolve_model(provider, model, app_config)
+        override = capture_provider_override_call_snapshot(provider)
+        model_to_use = _resolve_model(override.provider, model, app_config)
+        override.enforce(model_to_use, require_model=True)
         if model_to_use is None:
             raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
+        adapter = _get_adapter(provider)
         return adapter.chat(
             {
                 "messages": messages_payload,
@@ -1539,7 +1543,7 @@ async def _call_quiz_generation_llm(
         )
 
     start = time.time()
-    raw_response = await asyncio.get_running_loop().run_in_executor(None, _call_llm)
+    raw_response = await await_owned_worker(asyncio.get_running_loop().run_in_executor(None, _call_llm))
     logger.info("Quiz generation LLM call completed in {:.1f}ms", (time.time() - start) * 1000.0)
     return raw_response
 

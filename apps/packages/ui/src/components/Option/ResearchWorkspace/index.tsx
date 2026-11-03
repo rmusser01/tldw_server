@@ -3,7 +3,6 @@ import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/service
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { hasResearchWorkspaceMigrationTombstone } from "@/store/workspace";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
-import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 import { useResearchWebCapture } from "@/utils/use-research-web-capture"
 import { WebArticleCaptureModal } from "./SourcesPane/WebArticleCaptureModal"
@@ -39,8 +38,6 @@ import {
 } from "@/store/workspace-events"
 import {
   runResearchWorkspaceMigration,
-  deleteResearchWorkspaceMigrationLocalValue,
-  buildResearchWorkspaceMigrationTombstoneKey,
   type ResearchWorkspaceIndexedDbStoreRef,
   type ResearchWorkspaceMigrationRunResult,
   type ResearchWorkspaceMigrationRunInput,
@@ -1672,7 +1669,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       return [
         "Legacy workspace data found",
         "Server receipt saved",
-        "Local data retained until server deletion eligibility is available"
+        "Local data retained until server content and readback are verified"
       ]
     }
 
@@ -1815,29 +1812,15 @@ const ResearchWorkspaceBody: React.FC = () => {
       setWorkspaceMigrationLoading(false);
       setWorkspaceMigrationResult(null);
     });
-    const capturedValues = new Map<string, string | null>();
-    const removedKeys = new Set<string>();
     setWorkspaceMigrationLoading(true)
 
-    const migrationReferenceId = useWorkspaceStore.getState().workspaceChatReferenceId
-    const getChatReference = () => {
-      const active = useWorkspaceStore.getState()
-      const referenceId = active.workspaceId === workspaceId ? active.workspaceChatReferenceId : migrationReferenceId
-      const session = active.getWorkspaceChatSession(buildWorkspaceChatSessionKey(workspaceId, referenceId))
-      return session ? { referenceId, serverChatId: session.serverChatId } : undefined
-    }
     const migrationInput: ResearchWorkspaceMigrationRunInput = {
       targetWorkspaceId: workspaceId,
       targetWorkspaceName: workspaceName || "Research Workspace",
-      getChatReference,
       isCurrent,
       discoveredLocalStorageKeys,
       discoveredIndexedDbStores,
-      readLocalStorageValue: async (key) => {
-        const value = window.localStorage.getItem(key);
-        capturedValues.set(key, value);
-        return value;
-      },
+      readLocalStorageValue: async (key) => window.localStorage.getItem(key),
       api: {
         createWorkspaceMigration: tldwClient.createWorkspaceMigration,
         putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
@@ -1846,32 +1829,6 @@ const ResearchWorkspaceBody: React.FC = () => {
         ackWorkspaceMigrationClientDelete:
           tldwClient.ackWorkspaceMigrationClientDelete,
       },
-      deleteLocalStorageValue: (key) => {
-        deleteResearchWorkspaceMigrationLocalValue(
-          key,
-          capturedValues.get(key),
-          isCurrent,
-        );
-        removedKeys.add(key);
-      },
-      writeLocalStorageValue: (key, value) => {
-        if (!isCurrent())
-          throw new Error(
-            "Workspace migration owner changed before local cleanup.",
-          );
-        if (
-          key === buildResearchWorkspaceMigrationTombstoneKey(workspaceId) &&
-          [...removedKeys].some(
-            (name) => window.localStorage.getItem(name) !== null,
-          )
-        )
-          throw new Error(
-            "Local workspace data reappeared during migration cleanup.",
-          );
-        window.localStorage.setItem(key, value);
-        capturedValues.set(key, value);
-      },
-      now: () => new Date().toISOString(),
     };
     const migrationPromise = (async () => {
       // Capture after initial source hydration and its queued durable writes settle.
@@ -4413,9 +4370,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                 )}
               </dt>
               <dd>
-                {workspaceMigrationResult.serverMigration?.client_delete_eligible
-                  ? t("common:yes", "Yes")
-                  : t("common:no", "No")}
+                {t("common:no", "No")}
               </dd>
             </dl>
 

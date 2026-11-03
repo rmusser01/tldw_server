@@ -2,7 +2,6 @@ import {
   classifyResearchWorkspaceLegacyStorageSurface,
   RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX,
   RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX,
-  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX,
   evaluateResearchWorkspaceLegacyDeletionEligibility,
   type ResearchWorkspaceLegacyDeletionEligibility,
 } from "@/store/research-workspace-legacy-storage-inventory";
@@ -557,106 +556,13 @@ export const deleteResearchWorkspaceMigrationLocalValue = (
   window.localStorage.removeItem(key)
 }
 
-const canDeleteCoveredLocalPayloads = ({
-  chunks,
-  deleteLocalStorageValue,
-  deleteIndexedDbStorePayload
-}: {
-  chunks: ResearchWorkspaceMigrationChunkPlan[]
-  deleteLocalStorageValue?: (key: string) => Promise<void> | void
-  deleteIndexedDbStorePayload?: (
-    store: ResearchWorkspaceIndexedDbStoreRef
-  ) => Promise<void> | void
-}): boolean => {
-  for (const chunk of chunks) {
-    if (chunk.storageKind === "local_storage") {
-      if (!chunk.key || !deleteLocalStorageValue) return false
-      continue
-    }
-
-    if (chunk.storageKind === "indexeddb_store") {
-      if (
-        !chunk.databaseName ||
-        !chunk.storeName ||
-        !deleteIndexedDbStorePayload
-      ) {
-        return false
-      }
-    }
-  }
-
-  return true
-}
-
-const deleteCoveredLocalPayloads = async ({
-  chunks,
-  deletedSurfaceIds,
-  assertCurrent,
-  beforeDelete,
-  deleteLocalStorageValue,
-  deleteIndexedDbStorePayload,
-}: {
-  chunks: ResearchWorkspaceMigrationChunkPlan[];
-  deletedSurfaceIds: string[];
-  assertCurrent: () => void;
-  beforeDelete: () => void;
-  deleteLocalStorageValue?: (key: string) => Promise<void> | void;
-  deleteIndexedDbStorePayload?: (
-    store: ResearchWorkspaceIndexedDbStoreRef,
-  ) => Promise<void> | void;
-}): Promise<string[] | null> => {
-  if (
-    !canDeleteCoveredLocalPayloads({
-      chunks,
-      deleteLocalStorageValue,
-      deleteIndexedDbStorePayload,
-    })
-  ) {
-    return null;
-  }
-
-  for (const chunk of chunks) {
-    assertCurrent();
-    if (chunk.storageKind === "local_storage") {
-      if (!chunk.key || !deleteLocalStorageValue) return null;
-      beforeDelete();
-      await deleteLocalStorageValue(chunk.key);
-      deletedSurfaceIds.push(chunk.surfaceId);
-      continue;
-    }
-
-    if (
-      chunk.storageKind === "indexeddb_store" &&
-      chunk.databaseName &&
-      chunk.storeName
-    ) {
-      if (!deleteIndexedDbStorePayload) return null;
-      beforeDelete();
-      await deleteIndexedDbStorePayload({
-        databaseName: chunk.databaseName,
-        storeName: chunk.storeName,
-      });
-      deletedSurfaceIds.push(chunk.surfaceId);
-    }
-  }
-
-  return deletedSurfaceIds;
-};
-
 export const runResearchWorkspaceMigration = async ({
   api,
-  legacyWorkspaceId,
-  getChatReference,
   isCurrent,
-  deleteLocalStorageValue,
-  writeLocalStorageValue,
-  deleteIndexedDbStorePayload,
-  now = () => new Date().toISOString(),
   ...planInput
 }: ResearchWorkspaceMigrationRunInput): Promise<ResearchWorkspaceMigrationRunResult> => {
   let plan: ResearchWorkspaceMigrationPlan | null = null;
   const deletedSurfaceIds: string[] = [];
-  let deletionAttempted = false;
   const assertCurrent = () => {
     if (isCurrent?.() === false)
       throw new Error(
@@ -729,176 +635,16 @@ export const runResearchWorkspaceMigration = async ({
       };
     }
 
-    if (!serverMigration.client_delete_eligible) {
-      return {
-        status: "finalized_not_delete_eligible",
-        migrationId: plan.migrationId,
-        manifestHash: plan.manifestHash,
-        serverMigration,
-        localDeletionEligibility: plan.localDeletionEligibility,
-        deletedSurfaceIds: [],
-        message:
-          "Server receipt was saved. Local data is retained until server deletion eligibility is available.",
-      };
-    }
-
-    if (!writeLocalStorageValue) {
-      return {
-        status: "blocked",
-        migrationId: plan.migrationId,
-        manifestHash: plan.manifestHash,
-        serverMigration,
-        localDeletionEligibility: plan.localDeletionEligibility,
-        deletedSurfaceIds: [],
-        message:
-          "Server deletion eligibility is available, but local deletion dependencies are not configured.",
-      };
-    }
-
-    for (const chunk of plan.chunks) {
-      assertCurrent();
-      const current =
-        chunk.storageKind === "local_storage"
-          ? await planInput.readLocalStorageValue(chunk.key!)
-          : await planInput.readIndexedDbStorePayload?.({
-              databaseName: chunk.databaseName!,
-              storeName: chunk.storeName!,
-            });
-      const serialized =
-        chunk.storageKind === "local_storage"
-          ? current
-          : stableStringify(current);
-      if (
-        typeof serialized !== "string" ||
-        (await sha256Text(serialized)) !== chunk.sha256
-      )
-        throw new Error(
-          "Local workspace data changed before migration cleanup.",
-        );
-      assertCurrent();
-    }
-
-    const hasCoveredLocalPayloads = plan.chunks.length > 0;
-    if (hasCoveredLocalPayloads && !deleteLocalStorageValue) {
-      return {
-        status: "blocked",
-        migrationId: plan.migrationId,
-        manifestHash: plan.manifestHash,
-        serverMigration,
-        localDeletionEligibility: plan.localDeletionEligibility,
-        deletedSurfaceIds: [],
-        message:
-          "Server deletion eligibility is available, but local deletion dependencies are not configured.",
-      };
-    }
-
-    if (
-      !canDeleteCoveredLocalPayloads({
-        chunks: plan.chunks,
-        deleteLocalStorageValue,
-        deleteIndexedDbStorePayload,
-      })
-    ) {
-      return {
-        status: "blocked",
-        migrationId: plan.migrationId,
-        manifestHash: plan.manifestHash,
-        serverMigration,
-        localDeletionEligibility: plan.localDeletionEligibility,
-        deletedSurfaceIds: [],
-        message:
-          "Server deletion eligibility is available, but local deletion dependencies are not configured.",
-      };
-    }
-
-    assertCurrent();
-    const tombstone = buildResearchWorkspaceMigrationTombstone({
-      legacyWorkspaceId: legacyWorkspaceId || planInput.targetWorkspaceId,
-      serverWorkspaceId: planInput.targetWorkspaceId,
-      migrationId: plan.migrationId,
-      deletedAt: now(),
-    });
-    const tombstoneKey = buildResearchWorkspaceMigrationTombstoneKey(
-      tombstone.legacyWorkspaceId,
-    );
-    const tombstonePayload = () => {
-      const chatReference = readResearchWorkspaceChatReference(
-        getChatReference?.(),
-      );
-      return JSON.stringify({
-        ...tombstone,
-        ...(chatReference ? { chatReference } : {}),
-      });
-    };
-    const preflightKey = `${RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX}:${encodeURIComponent(
-      tombstone.legacyWorkspaceId,
-    )}`;
-    if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
-      await writeLocalStorageValue(preflightKey, tombstonePayload());
-    }
-
-    assertCurrent();
-    const deleted = await deleteCoveredLocalPayloads({
-      chunks: plan.chunks,
-      deletedSurfaceIds,
-      assertCurrent,
-      beforeDelete: () => {
-        deletionAttempted = true;
-      },
-      deleteLocalStorageValue,
-      deleteIndexedDbStorePayload,
-    });
-
-    if (!deleted) {
-      return {
-        status: "blocked",
-        migrationId: plan.migrationId,
-        manifestHash: plan.manifestHash,
-        serverMigration,
-        localDeletionEligibility: plan.localDeletionEligibility,
-        deletedSurfaceIds: [],
-        message:
-          "Server deletion eligibility is available, but local deletion dependencies are not configured.",
-      };
-    }
-
-    for (const chunk of plan.chunks) {
-      assertCurrent();
-      const remaining =
-        chunk.storageKind === "local_storage"
-          ? await planInput.readLocalStorageValue(chunk.key!)
-          : await planInput.readIndexedDbStorePayload?.({
-              databaseName: chunk.databaseName!,
-              storeName: chunk.storeName!,
-            });
-      if (
-        remaining != null &&
-        !(Array.isArray(remaining) && remaining.length === 0)
-      )
-        throw new Error(
-          "Local workspace data reappeared during migration cleanup.",
-        );
-    }
-    assertCurrent();
-    await writeLocalStorageValue(tombstoneKey, tombstonePayload());
-    if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
-      assertCurrent();
-      await deleteLocalStorageValue(preflightKey);
-    }
-    assertCurrent();
-    await api.ackWorkspaceMigrationClientDelete(plan.migrationId, {
-      acknowledged_manifest_hash: plan.manifestHash,
-    });
-
+    // This protocol transfers hashes, not recoverable note/artifact/chat content.
     return {
-      status: "deleted",
+      status: "finalized_not_delete_eligible",
       migrationId: plan.migrationId,
       manifestHash: plan.manifestHash,
       serverMigration,
       localDeletionEligibility: plan.localDeletionEligibility,
-      deletedSurfaceIds,
+      deletedSurfaceIds: [],
       message:
-        "Legacy Research Workspace content was migrated and local content payloads were deleted.",
+        "Migration receipts were saved. Local content is retained until its server copy can be verified.",
     };
   } catch (error) {
     return {
@@ -908,9 +654,7 @@ export const runResearchWorkspaceMigration = async ({
       serverMigration: null,
       localDeletionEligibility: plan?.localDeletionEligibility ?? null,
       deletedSurfaceIds,
-      message: deletionAttempted
-        ? "Research Workspace migration stopped. Review local data before retrying cleanup."
-        : "Research Workspace migration failed before local deletion.",
+      message: "Research Workspace migration failed; local content is retained.",
       error,
     };
   }

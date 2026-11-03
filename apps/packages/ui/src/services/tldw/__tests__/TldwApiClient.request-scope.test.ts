@@ -711,3 +711,25 @@ it.each([[true], [false]])("preserves native greeting seed query and captured sc
     method: "POST", body: { character_id: 12, scope_type: "global" }, abortSignal: signal, ...expectedScopeFields
   }))
 })
+
+it.each(["base", "domain"])("pins both Data Table content and metadata writes in %s", async implementation => {
+  const client = new TldwApiClientBase();
+  const methods = implementation === "base" ? TldwApiClientBase.prototype : mediaMethods;
+  const options = { requestScope, signal: new AbortController().signal };
+  const tableId = "83569797-3613-42e0-b2a2-498794fc1cd0";
+  mocks.bgRequest.mockReset();
+  mocks.bgRequest.mockResolvedValue({});
+  await methods.saveDataTableContent.call(client, tableId, {
+    columns: [{ id: "fact", name: "Fact", type: "text" }], rows: [{ Fact: "Private fact" }]
+  }, options);
+  await methods.updateDataTable.call(client, tableId, { name: "Private title" }, options);
+  expect(mocks.bgRequest.mock.calls.map(([request]) => [request.method, request.path])).toEqual([
+    ["PUT", "/api/v1/data-tables/" + tableId + "/content"], ["PATCH", "/api/v1/data-tables/" + tableId]
+  ]);
+  for (const [request] of mocks.bgRequest.mock.calls)
+    expect(request).toMatchObject({
+      abortSignal: options.signal,
+      headers: expectedScopeFields.headers,
+      servicePromptConfig: expectedScopeFields.servicePromptConfig
+    });
+});

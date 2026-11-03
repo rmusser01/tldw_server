@@ -2,7 +2,7 @@
 
 Task: TASK-13260.278.18.83.45. S03 remains open. This is the bounded backend repair design, not runtime acceptance. The human authorized necessary fixes/diagnostics and the three additional S03 capabilities; no new approval is pending.
 
-ADR required: yes. Proposed [ADR-083](../ADR/083-data-table-completion-before-publication.md) adds the completion/publication rule while retaining ADR-003 Jobs, ADR-023 Media storage/exports and ADR-058 exact locked completion identity.
+ADR required: yes. Proposed [ADR-089](../ADR/089-data-table-completion-before-publication.md) adds the completion/publication rule while retaining ADR-003 Jobs, ADR-023 Media storage/exports and ADR-058 exact locked completion identity.
 
 ## Problem and causal evidence
 

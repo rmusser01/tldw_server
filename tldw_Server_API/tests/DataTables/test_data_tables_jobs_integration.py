@@ -231,7 +231,7 @@ async def test_data_tables_regenerate_uses_snapshot(monkeypatch, tmp_path, data_
 
 
 @contextmanager
-def _s03_publication_case(monkeypatch, tmp_path, data_tables_app_factory, *, acquire=True, generation_payload=None):
+def _s03_publication_case(monkeypatch, tmp_path, data_tables_app_factory, *, acquire=True, generation_payload=None, stub_llm=True):
     """Seed saved content through Media abstractions and acquire its real regeneration."""
     media_path = _configure_worker_paths(tmp_path, monkeypatch)
     db = MediaDatabase(db_path=str(media_path), client_id="test_client")
@@ -252,13 +252,14 @@ def _s03_publication_case(monkeypatch, tmp_path, data_tables_app_factory, *, acq
         )
         original = _s03_content(db, table_id)
         app, jobs_path = data_tables_app_factory(media_path)
-        _stub_llm(
-            monkeypatch,
-            {
-                "columns": [{"name": "Fact", "type": "text"}],
-                "rows": [["Replacement"]],
-            },
-        )
+        if stub_llm:
+            _stub_llm(
+                monkeypatch,
+                {
+                    "columns": [{"name": "Fact", "type": "text"}],
+                    "rows": [["Replacement"]],
+                },
+            )
         with TestClient(app) as client:
             response = client.post(f"/api/v1/data-tables/{table['uuid']}/regenerate", json=generation_payload or {})
             assert response.status_code == 202, response.text  # nosec B101 # pytest API oracle.
@@ -796,8 +797,16 @@ async def test_reopening_a_publication_conflict_does_not_rewrite_failure_metadat
         assert _s03_content(db, job["payload"]["table_id"]) == original  # nosec B101 # never replaces a newer edit.
 
 
+@pytest.fixture
+def keyless_local_provider(monkeypatch):
+    """Isolate the configured provider and real key policy from operator credentials."""
+    monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_args, **_kwargs: ("", {}))
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "llamacpp")
+    monkeypatch.delenv("DEFAULT_MODEL_LLAMA_CPP", raising=False)
+
+
 @pytest.mark.asyncio
-async def test_local_provider_alias_without_key_completes_generation(monkeypatch, tmp_path, data_tables_app_factory):
+async def test_local_provider_alias_without_key_completes_generation(monkeypatch, tmp_path, data_tables_app_factory, keyless_local_provider):
     """The real credential policy must admit a registered keyless local alias."""
     media_path = _configure_worker_paths(tmp_path, monkeypatch)
     app, jobs_db_path = data_tables_app_factory(media_path)
@@ -822,8 +831,6 @@ async def test_local_provider_alias_without_key_completes_generation(monkeypatch
             }
 
     monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: LocalAdapter())
-    monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_args, **_kwargs: ("", {}))
-    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "llamacpp")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {"llama_api": {"model": "local-test-model"}})
     try:
         with TestClient(app) as client:
@@ -896,18 +903,16 @@ async def test_local_provider_alias_without_key_completes_generation(monkeypatch
     ],
 )
 async def test_regeneration_enforces_real_provider_policy_before_dispatch(
-    monkeypatch, tmp_path, data_tables_app_factory, policy, selected, configured, status, code
+    monkeypatch, tmp_path, data_tables_app_factory, policy, selected, configured, status, code, keyless_local_provider
 ):
     from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
 
-    monkeypatch.delenv("DEFAULT_MODEL_LLAMA_CPP", raising=False)
-    real_model = jobs_worker._resolve_model
-    real_key_policy = jobs_worker.provider_requires_api_key
     with _s03_publication_case(
         monkeypatch,
         tmp_path,
         data_tables_app_factory,
         acquire=False,
+        stub_llm=False,
         generation_payload={"model": selected} if selected else {},
     ) as case:
         db, manager, queued, _app, original = case
@@ -934,9 +939,6 @@ async def test_regeneration_enforces_real_provider_policy_before_dispatch(
                 }
 
         monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: Adapter())
-        monkeypatch.setattr(jobs_worker, "_resolve_model", real_model)
-        monkeypatch.setattr(jobs_worker, "provider_requires_api_key", real_key_policy)
-        monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "llamacpp")
         monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {"llama_api": {"model": configured}})
         overrides.set_llm_provider_overrides_cache_for_tests(
             {
