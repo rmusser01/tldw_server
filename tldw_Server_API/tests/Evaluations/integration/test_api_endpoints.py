@@ -565,7 +565,7 @@ class TestWebhookEndpoints:
     async def test_webhook_delivery_on_evaluation(
         self, async_api_client, auth_headers, webhook_receiver_server, monkeypatch
     ):
-        """Test webhook delivery using a real local receiver (no mocks)."""
+        """Test webhook delivery to a real local receiver (only the SSRF resolver is stubbed)."""
         from tldw_Server_API.app.core.Evaluations import webhook_manager as _wm
 
         # The receiver is a loopback server, which the delivery-time SSRF check refuses by

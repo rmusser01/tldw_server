@@ -444,8 +444,7 @@ async def test_deliver_retries_with_backoff_and_a_fresh_signature(
 
 
 def _resolve_hostnames(monkeypatch: pytest.MonkeyPatch, resolver) -> None:
-    """Make the egress check resolve hostnames through ``resolver``, as it does outside pytest."""
-    from tldw_Server_API.app.core import http_client
+    """Make the egress check resolve hostnames through ``resolver``."""
     from tldw_Server_API.app.core.Security import egress
 
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: resolver(host))

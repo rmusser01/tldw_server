@@ -222,6 +222,8 @@ async def test_registered_webhook_delivery_uses_resolved_safe_target(temp_db_pat
 async def test_registered_webhook_delivery_resolves_the_target_under_pytest(temp_db_path, monkeypatch) -> None:
     manager = WebhookManager(str(temp_db_path))
     original_url = "http://attacker.test/webhook"
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TLDW_TEST_MODE", "y")
     webhook = {
         "id": 1,
         "url": original_url,
@@ -243,7 +245,6 @@ async def test_registered_webhook_delivery_resolves_the_target_under_pytest(temp
         patch.object(manager, "_create_delivery_record", return_value=1),
         patch.object(manager, "_update_delivery_record", MagicMock()),
         patch.object(manager, "_update_webhook_stats", MagicMock()),
-        patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=False),
         patch(
             "socket.getaddrinfo",
             return_value=[(None, None, None, None, ("93.184.216.34", 80))],

@@ -1674,13 +1674,11 @@ async def test_document_limit_is_utf8_bytes_and_clamped_to_fixed_one_mib(
 
 
 # --- Production egress policy (TASK-13950.11 group D) -------------------------------------------
-# The fixtures above run under http_client's test-mode shortcut (no DNS check for hostnames). These
-# switch it off and answer DNS from a table, so the egress policy decides as it does in production.
+# These answer DNS from a table, so the egress policy decides on resolved addresses.
 
 
 @pytest.fixture
 def production_egress(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
-    from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Security import egress
 
     answers: dict[str, list[str]] = {}

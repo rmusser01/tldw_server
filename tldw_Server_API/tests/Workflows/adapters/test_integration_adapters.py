@@ -1159,8 +1159,7 @@ def _route_github_through_mock_transport(monkeypatch, handler):
 
 
 def _resolve_api_github_com_to(monkeypatch, ip):
-    """Make the egress check resolve hostnames to ``ip``, as it does outside pytest."""
-    from tldw_Server_API.app.core import http_client
+    """Make the egress check resolve hostnames to ``ip``."""
     from tldw_Server_API.app.core.Security import egress
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: [ip])
 

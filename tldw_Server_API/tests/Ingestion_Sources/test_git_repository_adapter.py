@@ -496,10 +496,9 @@ def test_remote_github_sync_refuses_api_host_resolving_to_metadata(monkeypatch):
     """If api.github.com resolves to link-local metadata, the token is never sent."""
     import httpx
 
-    from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Security import egress
 
-    # Outside pytest the egress check resolves hostnames; make it do so here.
+    # The egress check resolves the host; answer with link-local metadata.
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["169.254.169.254"])
     seen: list[httpx.Request] = []
 

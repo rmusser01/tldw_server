@@ -101,10 +101,8 @@ def mcp_http_egress(monkeypatch):
 def mcp_dns_rebinding(monkeypatch, mcp_http_egress):
     """DNS that answers public to validate_mcp_http_url and loopback at connect time.
 
-    http_client skips the DNS check for hostnames under pytest; that skip is
-    switched off here so the egress policy resolves the host as in production.
+    The egress policy resolves the host through the stubbed ``_resolve_host_ips``.
     """
-    from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Agent_Client_Protocol import hardening
     from tldw_Server_API.app.core.Security import egress
 
