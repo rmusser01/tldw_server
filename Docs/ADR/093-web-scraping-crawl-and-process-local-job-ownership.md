@@ -1,4 +1,4 @@
-# ADR-085: Web Scraping Crawl And Process-Local Job Ownership
+# ADR-093: Web Scraping Crawl And Process-Local Job Ownership
 
 **Status:** Accepted
 **Date:** 2026-10-04
@@ -89,3 +89,12 @@ The unpublished draft originally used ADR-063 and TASK-13452. Those identifiers
 subsequently landed on `dev` for unrelated work. This document and its design task
 were renumbered to ADR-085 and TASK-15282 after checking `dev` and all open PR file
 pages. This is not a supersession or modification of the unrelated ADR-063.
+
+## Identifier Correction (2026-11-03)
+
+The accepted AuthNZ membership-writer ADR now occupies ADR-085 on `dev`.
+This web-scraping record was renamed ADR-093 after checking fresh `dev` and
+all pages of every open PR's changed-file list. Its accepted decision and
+rationale are unchanged. This is a namespace correction, not a supersession or
+modification of the unrelated AuthNZ decision. Historical identifiers above
+refer to the same web-scraping record before this correction.
