@@ -116,9 +116,7 @@ def task_command(
     if args and args[0] == "renumber":
         if len(args) != 2 or not task_id:
             raise click.UsageError("Usage: task renumber PATH --id NEW_ID")
-        task_record = _mutable_repository(ctx).renumber_task(
-            Path(args[1]), task_id, note="\n".join(append_notes) or None
-        )
+        task_record = _mutable_repository(ctx).renumber_task(Path(args[1]), task_id, note=append_notes)
         click.echo(_format_task_line(task_record, plain=plain))
         return
     if args and args[0] == "normalize":

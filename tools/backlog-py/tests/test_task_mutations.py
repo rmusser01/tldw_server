@@ -645,6 +645,24 @@ def test_renumber_takes_only_existing_files_in_the_task_directories(tmp_path: Pa
     assert _snapshot_backlog_markdown(repo) == before
 
 
+def test_renumber_refuses_an_invalid_id(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_backlog_markdown(repo)
+
+    with pytest.raises(TaskMutationError, match="Invalid task id: foo"):
+        _repository(repo).renumber_task(_task_file(repo).relative_to(repo), "foo")
+    assert _snapshot_backlog_markdown(repo) == before
+
+
+def test_renumber_takes_a_subtask_id(tmp_path: Path) -> None:
+    # The 2026-10-31 renumbering gave duplicate subtasks a free child id (P.n), so a dotted id is a valid new id.
+    repo = _copy_fixture(tmp_path)
+
+    moved = _repository(repo).renumber_task(_task_file(repo).relative_to(repo), "task-5.1")
+
+    assert (moved.id, moved.path.name) == ("TASK-5.1", "task-5.1 - Example-task.md")
+
+
 def test_edit_accepts_a_dependency_on_a_completed_task(tmp_path: Path) -> None:
     repo = _copy_fixture(tmp_path)
     repository = _repository(repo)
@@ -666,6 +684,21 @@ def test_cli_task_renumber_appends_the_note(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert result.output.startswith("TASK-12 - ")
     assert "Was TASK-1." in _task_file(repo, "task-12").read_text(encoding="utf-8")
+
+
+def test_cli_task_renumber_appends_each_note_as_task_edit_does(tmp_path: Path) -> None:
+    edited, renumbered = _copy_fixture(tmp_path / "edit"), _copy_fixture(tmp_path / "renumber")
+    task = _task_file(renumbered).relative_to(renumbered)
+    notes = ["--append-notes", "Was TASK-1.\n", "--append-notes", "Second."]
+
+    for repo, command in ((edited, ["edit", "TASK-1"]), (renumbered, ["renumber", str(task), "--id", "TASK-12"])):
+        result = CliRunner().invoke(main, ["--cwd", str(repo), "task", *command, *notes])
+        assert result.exit_code == 0, result.output
+
+    def _notes(path: Path) -> str:
+        return parse_task_markdown(path.read_text(encoding="utf-8")).sections["IMPLEMENTATION_NOTES"].content
+
+    assert _notes(_task_file(renumbered, "task-12")) == _notes(_task_file(edited))
 
 
 def test_create_refuses_an_id_held_in_completed(tmp_path: Path) -> None:

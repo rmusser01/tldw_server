@@ -235,12 +235,13 @@ class MutableRepository(ReadOnlyRepository):
             current_path.unlink()
         return _load_task(target)
 
-    def renumber_task(self, path: Path, new_id: str, *, note: str | None = None) -> TaskRecord:
+    def renumber_task(self, path: Path, new_id: str, *, note: str | Sequence[str] | None = None) -> TaskRecord:
         """Give the task file at ``path`` (relative to the project root) a new id, in place.
 
         Takes a path because two files can share an id, which ``edit_task`` cannot tell apart. The
         file keeps its directory and its file-name tail, and is normalized like every edit. Refuses
         an id that any task file in backlog/tasks, backlog/completed or backlog/archive/tasks holds.
+        ``note`` may be one text or several, each appended as its own block, like ``append_notes``.
         """
         candidate = self.project.root / Path(path)
         if candidate.parent.resolve() not in {d.resolve() for d in self._task_dirs()} or not candidate.is_file():
@@ -258,8 +259,8 @@ class MutableRepository(ReadOnlyRepository):
         except ValueError as exc:
             raise TaskMutationError(f"{current_path.name}: {exc}") from exc
         parsed = parse_task_markdown(source)
-        if note:
-            source, parsed = _append_notes(source, parsed, note)
+        for text in [note] if isinstance(note, str) else note or ():
+            source, parsed = _append_notes(source, parsed, text)
         source = _replace_frontmatter_values(source, parsed, {"id": normalized_id})
         parse_task_markdown(source)
         tail = current_path.name.split(" - ", 1)[1] if " - " in current_path.name else "Task.md"

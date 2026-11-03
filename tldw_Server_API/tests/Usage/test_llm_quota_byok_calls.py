@@ -125,10 +125,15 @@ async def test_a_runtime_handle_says_whose_key_it_carries() -> None:
         ("openai", {"api_base_url": "https://evil-api.openai.com/v1"}, "user_unmetered"),
         ("openai", {"api_base_url": "https://api.openai.com@evil.example/v1"}, "user_unmetered"),
         ("openai", {"api_base_url": "https://API.OpenAI.com:443/v1"}, "user"),
+        ("openai", {"api_base_url": "https://.api.openai.com/v1"}, "user_unmetered"),
+        ("bedrock", {"runtime_endpoint": "https://bedrock-runtime..amazonaws.com"}, "user_unmetered"),
+        ("openai", {"api_base_url": "https://api.openai.com./v1"}, "user"),
+        ("openai", {"api_base_url": "https://api.openai.com../v1"}, "user_unmetered"),
     ],
     ids=[
         "vendor-default", "vendor-url", "operator-url", "vendor-region", "bedrock-region", "bedrock-not-bedrock",
-        "bedrock-label-span", "router-url", "unknown-provider", "suffix-lookalike", "prefix-lookalike", "userinfo", "case-and-port",
+        "bedrock-label-span", "router-url", "unknown-provider", "suffix-lookalike", "prefix-lookalike", "userinfo",
+        "case-and-port", "empty-label", "bedrock-empty-label", "trailing-dot", "two-trailing-dots",
     ],
 )
 def test_a_user_key_is_the_users_own_spend_only_on_the_vendors_host(provider, section, expected) -> None:
@@ -215,7 +220,8 @@ async def test_a_trusted_callers_base_url_off_the_vendors_host_is_checked_at_the
     from tldw_Server_API.app.core.AuthNZ import byok_helpers
     from tldw_Server_API.app.core.LLM_Calls import gateway as llm_gateway
 
-    monkeypatch.setattr(llm_gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _Provider()))
+    registry = SimpleNamespace(get_adapter=lambda _name: _Provider())
+    monkeypatch.setattr(llm_gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(llm_gateway, "has_model_listing", lambda _provider: False)  # no model discovery request
     monkeypatch.setattr(byok_helpers, "resolve_byok_base_url_allowlist", lambda: {"openai"})
     monkeypatch.setattr(byok_helpers, "validate_base_url_override", lambda value: value)  # no egress DNS lookup
@@ -334,7 +340,8 @@ async def test_the_shared_call_layer_does_not_check_a_call_on_the_users_own_key(
             return await llm_gateway.perform_chat_api_call_async(**kwargs)
         return await asyncio.to_thread(llm_gateway.perform_chat_api_call, **kwargs)
 
-    monkeypatch.setattr(llm_gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _Provider()))
+    registry = SimpleNamespace(get_adapter=lambda _name: _Provider())
+    monkeypatch.setattr(llm_gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(llm_gateway, "has_model_listing", lambda _provider: False)  # no model discovery request
     args = {
         "api_provider": "openai", "messages": [{"role": "user", "content": "hi"}], "model": "gpt-4o-mini",
@@ -344,7 +351,9 @@ async def test_the_shared_call_layer_does_not_check_a_call_on_the_users_own_key(
         response = await _call(**args)
         with pytest.raises(LLMQuotaExceededError):
             await _call(**{**args, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("server_default")})
+    await llm_accounting.drain_accounting()
     assert response["usage"] == USAGE
+    assert [row["credential_source"] for row in refused] == ["user"]  # the own-key call's row; none for the refusal
 
 
 @pytest.mark.parametrize(
@@ -415,12 +424,20 @@ async def test_a_provider_method_nested_in_an_own_key_call_is_not_checked_again(
     assert len(response["chunks"]) == 1
 
 
-@pytest.mark.parametrize("layer", ["sync", "async"])
-async def test_a_provider_method_nested_in_an_own_key_stream_is_not_checked_again(refused, layer: str) -> None:
-    """The same for a stream: its body runs while it is read, after stream() returned, and is not refused mid-stream."""
+@pytest.mark.parametrize("source", ["user", "server_default"])
+@pytest.mark.parametrize("layer", ["sync", "async", "awaitable"])
+async def test_a_provider_method_nested_in_a_stream_is_not_checked_again(refused, monkeypatch, layer, source) -> None:
+    """The same for a stream, whose body runs while it is read: an own-key stream is never checked, and a server-key
+    stream is checked once, at its start, not again by a method nested in its body."""
+    checks: list[Any] = []
+
+    async def _admit(user_id: Any, requested_tokens: int = 1) -> None:
+        """Admit everyone, noting each check."""
+        checks.append(user_id)
 
     def _without_handle(request: dict[str, Any]) -> dict[str, Any]:
         """The request a delegate gets: no handle."""
+        checks.append("body")  # called in the body, just before the nested call
         return {key: value for key, value in request.items() if key != PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY}
 
     class _Delegating(_Provider):
@@ -434,13 +451,28 @@ async def test_a_provider_method_nested_in_an_own_key_stream_is_not_checked_agai
             """Delegate to achat() while the stream is read."""
             yield (await self.achat(_without_handle(request)))["choices"][0]["message"]["content"]
 
-    request = {**REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user")}
+    class _AwaitedFirst(_Delegating):
+        """astream() is a coroutine that returns the stream, as some adapters' is."""
+
+        async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
+            """Return the stream once awaited."""
+
+            async def _items() -> AsyncIterator[str]:
+                """Delegate to achat() while the stream is read."""
+                yield (await self.achat(_without_handle(request)))["choices"][0]["message"]["content"]
+
+            return _items()
+
+    monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _admit)
+    request = {**REQUEST, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle(source)}
     with llm_call_context(user_id=7, records_itself=True):
         if layer == "sync":
             chunks = await asyncio.to_thread(lambda: list(_Delegating().stream(request)))
-        else:
+        elif layer == "async":
             chunks = [chunk async for chunk in _Delegating().astream(request)]
-    assert chunks == ["hi"]
+        else:
+            chunks = [chunk async for chunk in await _AwaitedFirst().astream(request)]
+    assert (chunks, checks) == (["hi"], ["body"] if source == "user" else [7, "body"])
 
 
 def _chat_request() -> SimpleNamespace:
