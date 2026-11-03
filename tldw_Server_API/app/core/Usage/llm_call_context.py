@@ -141,7 +141,9 @@ def _on_vendor_host(url: str, hosts: tuple[str, ...]) -> bool:
         host = urlsplit(url.strip()).hostname or ""
     except ValueError:  # a malformed URL is not the vendor's
         return False
-    return any(fnmatchcase(host, pattern) and host.count(".") == pattern.count(".") for pattern in hosts)
+    host = host.removesuffix(".")  # an absolute name (one trailing dot) is the same host
+    labels = host.split(".")
+    return all(labels) and any(fnmatchcase(host, p) and len(labels) == p.count(".") + 1 for p in hosts)
 
 
 def current_llm_user_id() -> int | None:

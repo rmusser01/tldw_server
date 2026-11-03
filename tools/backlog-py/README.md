@@ -48,6 +48,8 @@ any of them. `task renumber PATH --id NEW_ID` gives one file a new id in place.
 It takes a path because two files can share an id, keeps the directory and the
 file-name tail, and `--append-notes` records why. The `changes` job of
 `backend-required` fails a PR that leaves two task files with one id (TASK-13960).
+TASK-15000 to TASK-15281 are the block the 2026-10-31 renumbering used, so new
+ids continue above TASK-15281.
 
 ## Oracle Fixtures
 

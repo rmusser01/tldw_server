@@ -270,7 +270,9 @@ async def test_users_own_key_serves_mirrors_the_first_test_of_credential_resolut
 
 
 @pytest.mark.parametrize("lost", [None, "revoked", "user-deactivated"])
-async def test_users_own_key_serves_reads_the_users_stored_key(tmp_path, monkeypatch: pytest.MonkeyPatch, lost) -> None:
+async def test_users_own_key_serves_reads_the_users_stored_key(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, lost: str | None
+) -> None:
     """On real BYOK storage, a stored key serves; once revoked, or once its user is deactivated, it does not."""
     from tldw_Server_API.app.core.AuthNZ import byok_helpers
     from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
