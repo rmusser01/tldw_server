@@ -817,7 +817,7 @@ explicit crawl cancellation, and full-queue retry reservation reuse.
 **Goal:** Switch wrappers/services once, propagate outcomes, and certify real consumers.
 **Success Criteria:** Public parity except approved safety fixes; report/receipt fidelity and architecture guards pass.
 **Tests:** Tasks 9-11 full compatibility, security, browser/lifecycle and affected-consumer coverage.
-**Status:** In Progress (Tasks 9-10 independently accepted; Task 11 integration and certification remain).
+**Status:** In Progress (Tasks 9-11 independently accepted; final whole-branch review remains).
 
 ### Task 9: Switch Legacy And Enhanced Adapters
 

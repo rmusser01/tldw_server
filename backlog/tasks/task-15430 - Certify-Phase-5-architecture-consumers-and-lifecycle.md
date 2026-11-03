@@ -1,7 +1,7 @@
 ---
 id: TASK-15430
 title: Certify Phase 5 architecture consumers and lifecycle
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - phase5
@@ -17,7 +17,7 @@ Execute Task 11 of the approved Phase 5 plan as an independently reviewable unit
 <!-- AC:BEGIN -->
 - [x] #1 Task 11 behavior and interfaces match the approved spec and plan.
 - [x] #2 Focused red-green tests, relevant regressions, lint and scoped Bandit evidence are recorded.
-- [ ] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
+- [x] #3 Fresh task reviewer approves spec compliance and code quality; findings are addressed before the next task.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,17 +32,18 @@ Fresh-dev integration completed: all 67 local commits rebased onto origin/dev 57
 Task11 certification started at clean a4a58a80e9a5b9c7460c6dc7d0b1a40897b0a179, review BASE a16565207c9f2f51692142e29c79a0618187a4a3. Brief and current instructions read; interim evidence: .superpowers/sdd/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs/task-11-interim.md. Controller retains progress ledger, bare whole-repository pytest and metadata audit ownership.
 Interim: native mandatory Phase3+Phase4 smokes plus Phase5 native/combined lifecycle passed36,0skips,121warnings; log /tmp/web-phase5-task11-native-final.log. Corrected Watchlists fixture proves unchanged consumer propagates CrawlInterrupted/partial identity and cancellation, preserves ordinary fallback; no consumer code change warranted. Native fork isolation4assertions retained in fresh bounded single-thread subprocesses with fork warnings as errors. Four authorized sharedHTTP AST corrections measured exactly; ratchet green13. Architecture guard negative fixtures fail31 when disabled; real graph catches deferred jobs.admission<->jobs.projections cycle; requesting minimal existing-helper relocation ruling, no production edits pending approval. Harness correction failures are NOT product RED. AC3 remains unchecked pending independent controller review.
 Task11 final implementation evidence: sanctioned minimal existing redaction-helper relocation removes actual admission/projections cycle; all5definitions AST-identical to clean executionHEAD; projection-module helper imports preserved. Architecture negative fixtures fail31when disabled; realcycle RED and missing canonical reexport RED ->325passed focused architecture/projection/admission/history/checkpoint/package/inventory. Final full scraping/HTTP4106passed28optional skips13010warnings252.34s; final actualconsumers770passed12optional skips6914warnings189.57s; final service115passed0skips394warnings7.70s; mandatory native36passed0skips121warnings58.06s and rerun in final full gate. Earlier2Postgres skips were sandbox reachability, resolved by official-fixture sanctioned2case recheck2passed then finalservice0skips. Watchlists unchanged; fixture corrections are NOT product RED. Finalinventory regenerated after approved source move and artifact equality passes. Four authorized HTTP ratchet entries only; size+taskformat17passed64warnings. Scoped Ruff10files/compile/normalization/difffcheck/explicitnormalhooks pass. Final endpoint-complete Bandit includes media/ingest_web_content.py:8knownuntouchedLOW,0MED/HIGH,0scanerrors, no new findings. Detailed warnings/skips/exact commands/limitations/self-review in .superpowers/sdd/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs/task-11-report.md. Controller owns bare whole-repo pytest baseline Meetings basename collision and metadata audit (task-11-controller-evidence.md). No nested agents/ledger edits/push/PR/merge. AC3 and DOD1 remain unchecked pending independent controller Task11 review and later wholebranch review.
+Fresh independent reviewer Russell approved full Task11 range a16565207c..66b057c712: spec compliant, code quality Approved, no Critical or Important findings. Review task-11-review.md. Both Minor findings corrected: precise child-ID inventory in planning summary via official API; evidence adds existing nine-ceiling ratchet advisory without suppression/tightening. Final source4106pass28optional/envskips, consumers770pass12optional, services115pass0skip including realPostgres, native36pass0skip, postcommit67pass0skip. Controller independently extended Ruff and compile to every changed Python file, exit0/zeroRufffindings; Bandit8untouchedLOW0new including both endpoints. Parent TASK-15421 remains In Progress until independent whole-branch review; no push/PR/merge or whole-repository-green claim. Global repository collection blocked by unchanged Meetings duplicate-module names.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Task11 certification with architecture negative fixtures, preserved true-fork safety assertions in bounded fresh single-thread subprocesses, real combined browser/crawl/queue/executor/checkpoint/service lifecycle, actual consumer certification, exact four HTTP ratchet corrections, final inventory/docs and scoped quality/security gates. Only product change is controller-approved AST-identical existing sanitizer relocation with compatibility reexports to remove the guard-proven dependency cycle. Final scraping/HTTP4106pass, consumers770pass, services115pass, native36pass0skip; optional skips and known LOW Bandit findings fully disclosed in task-11-report.md. Ready for independent controller review; AC3 is NOT self-approved and task remains In Progress.
+Task11 independently approved at66b057c712. Added actual architecture negative fixtures, real browser/executor/checkpoint/service drain certification, preserved true fork inheritance in safe test-only subprocesses, verified existing Watchlists behavior, removed only the proven helper dependency cycle with compatibility aliases, refreshed actual architecture/inventories, and measured four authorized HTTP security ratchets. Scoped compatibility/security/native/service/consumer gates pass with documented optional skips and existing warnings. Final whole-branch review belongs to parent TASK-15421 and remains outstanding; repository-wide collection is blocked by unrelated Meetings module-name collision. No functionality removal, startup hook, new runtime dependency/connection/subsystem, push or merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
