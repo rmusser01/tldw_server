@@ -47,7 +47,6 @@ SIGNAL_KEYS: frozenset[str] = frozenset({"TEST_MODE", "TESTING", "TLDW_TEST_MODE
 CORE_TESTING_SIGNALS: frozenset[str] = frozenset(
     {"is_test_mode", "is_explicit_pytest_runtime", "is_test_context", "audio_imports_enabled_for_runtime"}
 )
-CORE_TESTING_MODULE = "tldw_Server_API.app.core.testing"
 EXEMPT: frozenset[str] = frozenset({"core/testing.py"})
 PREDICATE_EXEMPT: frozenset[str] = frozenset(
     {"core/MCP_unified/environment.py", "core/MCP_unified/adapters/tldw_runtime.py"}
@@ -95,10 +94,11 @@ def is_signal_constant(value: object) -> bool:
 
 
 def _core_testing_aliases(tree: ast.Module) -> frozenset[str]:
+    # Any module: absolute, relative (``from ..testing import``) or a re-export (MCP_unified.environment).
     return frozenset(
         alias.asname or alias.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == CORE_TESTING_MODULE
+        if isinstance(node, ast.ImportFrom)
         for alias in node.names
         if alias.name in CORE_TESTING_SIGNALS
     )
@@ -127,6 +127,7 @@ def _reference_lines(nodes: Iterable[ast.AST], aliases: frozenset[str]) -> set[i
 def _is_predicate(node: ast.FunctionDef | ast.AsyncFunctionDef, aliases: frozenset[str]) -> bool:
     return (
         bool(_words(node.name) & _TEST_WORDS)
+        # ponytail: exactly ``-> bool``; ``bool | None``, ``Optional[bool]`` and string annotations evade it.
         and isinstance(node.returns, ast.Name)
         and node.returns.id == "bool"
         and bool(_reference_lines(node.body, aliases))
@@ -178,7 +179,9 @@ def function_reference_lines(tree: ast.Module, qualname: str) -> list[int] | Non
             return None
     if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return None
-    return sorted(_reference_lines(scope.body, _core_testing_aliases(tree)))
+    args = scope.args
+    parts = [*scope.body, *scope.decorator_list, *args.defaults, *(d for d in args.kw_defaults if d is not None)]
+    return sorted(_reference_lines(parts, _core_testing_aliases(tree)))
 
 
 # --- Self-tests: each seeds a tree under a fresh tmp root and runs the real scan ---------------
@@ -203,6 +206,8 @@ def test_the_counter_counts_each_reference_shape(tmp_path: Path) -> None:
         "core/X/nested.py": 'import sys\n\n\ndef outer():\n    def _in_tests() -> bool:\n        return "pytest" in sys.modules\n'
                             "    return _in_tests()\n",
         "core/X/sniff.py": 'X = "tldw_Server_API.tests.helpers"\n',
+        "core/X/relative.py": "from ..testing import is_test_mode as _x\n\n\ndef f():\n    return _x()\n",
+        "core/X/reexport.py": "from ...MCP_unified.environment import is_test_mode as _y\n\n\ndef g():\n    return _y()\n",
         "core/X/domain.py": 'def test_connection() -> bool:\n    return True\n\n\nLATEST = "ABTEST"\n',
         "core/X/docs.py": '"""Reads TEST_MODE."""\n# os.getenv("TEST_MODE")\n',
         "core/testing.py": 'import os\nX = os.getenv("TEST_MODE")\n',
@@ -217,6 +222,8 @@ def test_the_counter_counts_each_reference_shape(tmp_path: Path) -> None:
         "core/X/method.py": {"lines": 2, "predicates": 1},
         "core/X/nested.py": {"lines": 1, "predicates": 1},
         "core/X/predicate.py": {"lines": 2, "predicates": 1},
+        "core/X/reexport.py": {"lines": 1, "predicates": 0},
+        "core/X/relative.py": {"lines": 1, "predicates": 0},
         "core/X/sniff.py": {"lines": 1, "predicates": 0},
     }
 
@@ -247,6 +254,8 @@ def test_the_function_pin_finds_a_signal_and_a_missing_function() -> None:
     assert function_reference_lines(tree, "guarded") == [4]
     assert function_reference_lines(tree, "C.clean") == []
     assert function_reference_lines(tree, "C.gone") is None
+    defaulted = ast.parse('import os\n\n@os.getenv("TEST_MODE")\ndef g(x=os.getenv("TEST_MODE")):\n    return 1\n')
+    assert function_reference_lines(defaulted, "g") == [3, 4]
 
 
 # --- The ratchet --------------------------------------------------------------------------------
