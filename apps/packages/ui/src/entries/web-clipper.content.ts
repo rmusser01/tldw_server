@@ -19,7 +19,10 @@ export default defineContentScript({
       const requestedType = message.requestedType || "article"
       const explicitSelectionText = String(message.selectionText || "").trim()
       return (async () => {
-        const pageExtraction = await extractClipPageTextFromDocument(document)
+        const pageExtraction = await extractClipPageTextFromDocument(
+          document,
+          requestedType
+        )
         return buildClipDraft({
           requestedType,
           pageUrl: window.location.href,

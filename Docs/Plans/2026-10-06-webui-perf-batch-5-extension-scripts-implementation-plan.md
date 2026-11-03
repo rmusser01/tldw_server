@@ -18,7 +18,7 @@
 - `defaultExtractContent` fallback: replace the `$("*").each` + per-attribute `removeAttr` loop with one cheerio filter/select pass per attribute family (or drop attributes via `cheerio`'s `parseOptions` with `lowerCaseAttributeNames` and a single traversal).
 **Success Criteria:** Selection clip on a 5 MB DOM: no `outerHTML` serialize, no `innerText` forced layout (assert via spies/mocks); capture main-thread time < 10 ms for selection path.
 **Tests:** Unit: selection-clip extraction with a stubbed document — assert `outerHTML`/`innerText`/DOMParser never touched; article fallback still produced when selection empty; parity of extracted text vs golden fixtures for full-page mode.
-**Status:** Not Started
+**Status:** Complete (Stage 1, TASK-13525: `extractClipPageTextFromDocument` takes `requestedType`; selection clips with a live selection return early; `fullPageText` is the final fallback for selection/article tiering; `parser/default.ts` attr strip is a single in-place pass preserving `{href, src}`. Pinned by `services/web-clipper/__tests__/content-extract.test.ts` + `parser/__tests__/default.test.ts`.)
 
 ## Stage 2: Copilot popup streaming + audio base64 (WP-58, WP-59)
 
