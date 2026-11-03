@@ -13,7 +13,7 @@ references:
 - Docs/superpowers/specs/2026-06-24-claims-jobs-operational-control-plane-design.md
 - Docs/superpowers/plans/2026-06-25-claims-jobs-stage1-implementation-plan.md
 - TASK-9935
-- TASK-9936
+- TASK-15030
 documentation:
 - Docs/superpowers/plans/2026-06-25-claims-jobs-stage1-implementation-plan.md
 modified_files:
