@@ -522,6 +522,13 @@ async def test_cancellation_traceback_does_not_retain_live_hooks_after_physical_
 
     callback = Callback()
     retained = weakref.ref(callback)
+
+    class Availability:
+        def __call__(self):
+            return False
+
+    availability = Availability()
+    availability_retained = weakref.ref(availability)
     accepted = asyncio.Event()
     loop = asyncio.get_running_loop()
     drained = loop.create_future()
@@ -534,6 +541,7 @@ async def test_cancellation_traceback_does_not_retain_live_hooks_after_physical_
     def start(*_args, **_kwargs):
         accepted.set()
         result = asyncio.create_task(asyncio.Event().wait())
+        drained.add_done_callback(lambda _done, capability=_kwargs["browser_http_fallback"]: None)
         return WorkHandle(result, drained, result.cancel)
 
     monkeypatch.setattr(crawl.article, "start_page", start)
@@ -546,17 +554,21 @@ async def test_cancellation_traceback_does_not_retain_live_hooks_after_physical_
             config={},
             credentials={},
             hooks=CrawlHooks(on_progress=callback),
+            browser_http_fallback=availability,
         )
     )
     del callback
+    del availability
     await accepted.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError) as caught:
         await task
     assert retained() is not None
+    assert availability_retained() is not None
     drained.set_result(None)
     await asyncio.gather(*(item for item in asyncio.all_tasks() if item.get_name() == "crawl-owned-drain"))
     assert retained() is None
+    assert availability_retained() is None
     assert caught.value is not None
 
 
