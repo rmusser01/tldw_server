@@ -5,7 +5,7 @@
 **Last amended:** 2026-11-01
 **Backfilled from:** not backfilled
 **Decision owner:** Human requester in the Web Refactoring chat; written design approved 2026-11-01
-**Related task:** TASK-15282
+**Related task:** TASK-15431
 **Related spec/plan:** [Phase 5 design](../superpowers/specs/2026-10-04-web-scraping-phase-5-crawl-process-local-jobs-design.md); [implementation plan](../superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md) awaiting review
 
 ## Decision
@@ -98,3 +98,8 @@ all pages of every open PR's changed-file list. Its accepted decision and
 rationale are unchanged. This is a namespace correction, not a supersession or
 modification of the unrelated AuthNZ decision. Historical identifiers above
 refer to the same web-scraping record before this correction.
+
+The corresponding web-scraping design and planning records are now TASK-15431
+and TASK-15432; their older numbers had also been allocated to unrelated work.
+Historical notes retain their original identifiers; current tracking links use
+the corrected namespace. The accepted decision remains unchanged.

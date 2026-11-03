@@ -1,5 +1,5 @@
 ---
-id: TASK-15282
+id: TASK-15431
 title: Design Web_Scraping Phase 5 crawl and process-local jobs split
 status: Done
 labels:
@@ -40,12 +40,14 @@ Current artifacts: Docs/superpowers/specs/2026-10-04-web-scraping-phase-5-crawl-
 2026-11-01 follow-up verification: fresh independent read-only builder check of the three targeted refinements reported nothing important left. Existing task-format suite passed (4 tests, 1 warning); backlog-py normalize --check passed; all 78 relative document links resolve; applicable scoped pre-commit hooks and git diff --check pass. Diff scope is only the Phase 5 spec, Proposed ADR-085, and this task record. Main-checkout status digest remains 5ebc9c470bddba78447f0d30aaffde0ec38de3c7326e74f13a0e9451072fba60. Runtime regression tests, compile/lint of product code, and Bandit are not applicable to the Markdown-only change and are not claimed as run. All three approved follow-up findings are addressed in the written artifacts. Commit and present the amended specification for user review; task remains In Progress and no implementation plan/product code is authorized yet.
 2026-11-01: Human requester explicitly approved the written Phase 5 specification and ADR after the follow-up amendments (commit c5c182af1f). Written-spec review gate is satisfied. Record the spec as Approved and ADR-085 as Accepted (design decision; implementation is not started), and proceed only to implementation planning. A separate planning task will carry the detailed plan and concrete limits; plan review and execution-method selection remain required before product code.
 2026-11-01 approval closeout: spec and ADR approval metadata updated, ADR index synchronized, and links added to the separately tracked implementation plan. Fresh task-format suite: 4 passed, 1 warning; backlog-py normalization passed; all 82 relative links across four docs resolve; applicable scoped pre-commit hooks, ASCII and whitespace checks pass. Scope is Markdown only; Bandit and product runtime/compile tests not applicable. Main-checkout porcelain digest unchanged at 5ebc9c470bddba78447f0d30aaffde0ec38de3c7326e74f13a0e9451072fba60. Written-spec design task is complete; plan approval and execution-method selection are still required.
+Namespace-only correction after fresh-dev rebase: original design identifier TASK-15282 is occupied by an unrelated completed Chunker design. Current web-scraping design identifier TASK-15431. Status, criteria, accepted design and history preserved; official path-specific backlog-py renumber used, no unrelated record altered.
+Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Written Phase 5 specification and ADR-085 approved by the human requester on 2026-11-01 after all targeted review amendments. Recorded spec Approved and ADR Accepted; no product implementation. Separate TASK-15406 owns the detailed plan, safety defaults and plan-review gate. Scoped documentation and task checks pass; runtime behavior is not claimed tested.
+Written Phase 5 specification and ADR-093 approved by the human requester on 2026-11-01 after all targeted review amendments. Recorded spec Approved and ADR Accepted; no product implementation. Separate TASK-15432 owns the detailed plan, safety defaults and plan-review gate. Scoped documentation and task checks pass; runtime behavior is not claimed tested.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

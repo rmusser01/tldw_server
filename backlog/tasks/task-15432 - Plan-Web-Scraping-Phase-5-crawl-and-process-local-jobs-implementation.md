@@ -1,5 +1,5 @@
 ---
-id: TASK-15406
+id: TASK-15432
 title: Plan Web_Scraping Phase 5 crawl and process-local jobs implementation
 status: Done
 labels:
@@ -11,7 +11,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create the implementation plan from the user-approved Phase 5 written specification and ADR-085. Map scoped files, exact cross-task interfaces, concrete finite safety defaults, test-first reviewable tasks, staged compatibility cutovers, and verification/rollback gates. Preserve analyzer and legacy behavior, bounded batch production, outcome/cancellation ownership, and the process-local queue; durable Jobs migration remains deferred. Documentation and tracking only: no product implementation until the user reviews this plan and selects an execution method.
+Create the implementation plan from the user-approved Phase 5 written specification and ADR-093. Map scoped files, exact cross-task interfaces, concrete finite safety defaults, test-first reviewable tasks, staged compatibility cutovers, and verification/rollback gates. Preserve analyzer and legacy behavior, bounded batch production, outcome/cancellation ownership, and the process-local queue; durable Jobs migration remains deferred. Documentation and tracking only: no product implementation until the user reviews this plan and selects an execution method.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -28,12 +28,14 @@ Create the implementation plan from the user-approved Phase 5 written specificat
 2026-11-01: Wrote Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md with four stages/eleven task-level TDD and commit gates, numeric finite defaults/trusted overrides, exact internal interfaces, file map, staged cutovers/rollback, service outcome mappings, and certification. Self-review corrected post-admission subscription races, lower-level concrete-context coupling, async admission composition, article-plan/credential propagation, single accounting ownership and actual conversion/doc paths. Five Review Focus failure classes each have owning named tests. Opaque external-tool invocation/time/output accounting explicitly does not claim internal wire-byte measurement. No product code or future tests were implemented.
 Verification: task-format pytest suite 4 passed, 1 warning; backlog-py normalize --check passed for both tasks; all 82 relative file links across four documents resolve; scoped pre-commit hooks, ASCII and git diff --check pass. Bandit/product compile/runtime suites are not applicable to this Markdown-only plan. Main checkout unchanged. Commit and present plan for review, then wait for explicit plan approval and execution-method selection. TASK-15406 remains In Progress through the review gate; no rebase, implementation, PR readiness or merge is claimed.
 2026-11-01: Human selected option 1 (subagent-driven execution) after plan presentation. Approved plan carried onto current dev without replaying obsolete colliding draft identifiers. Product execution is now authorized under TASK-15407 and its eleven child tasks; this planning task is complete.
+Namespace-only correction after fresh-dev rebase: original planning identifier TASK-15406 is occupied by an unrelated Moderation design. Current web-scraping planning identifier TASK-15432. Status, criteria, approved plan and history preserved; official path-specific backlog-py renumber used, no unrelated record altered.
+Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Four-stage eleven-task implementation plan written, self-reviewed, verified and presented. Human selected subagent-driven execution on 2026-11-01, satisfying plan review and execution-method gate. TASK-15407 and TASK-15408 through TASK-15418 track implementation; no product completion is implied.
+Four-stage eleven-task implementation plan written, self-reviewed, verified and presented. Human selected subagent-driven execution on 2026-11-01, satisfying plan review and execution-method gate. TASK-15421 and TASK-15408 through TASK-15430 track implementation; no product completion is implied.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
