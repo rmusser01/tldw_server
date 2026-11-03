@@ -80,7 +80,7 @@ async def init_auth_services() -> object:
     override_store = None
     try:
         override_store = import_module(
-            "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides"
+            "tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides"
         )
 
         await override_store.refresh_llm_provider_overrides(db_pool)

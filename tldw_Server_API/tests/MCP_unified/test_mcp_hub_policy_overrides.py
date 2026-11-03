@@ -8,7 +8,7 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 async def _make_repo(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -18,7 +18,6 @@ async def _make_repo(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -30,7 +29,7 @@ async def _make_repo(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_repo_policy_override_is_one_to_one_and_enriches_assignment_summary(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, fresh_services
 ) -> None:
     repo = await _make_repo(tmp_path, monkeypatch)
 
@@ -80,7 +79,7 @@ async def test_repo_policy_override_is_one_to_one_and_enriches_assignment_summar
 
 
 @pytest.mark.asyncio
-async def test_repo_delete_policy_assignment_removes_override(tmp_path, monkeypatch) -> None:
+async def test_repo_delete_policy_assignment_removes_override(tmp_path, monkeypatch, fresh_services) -> None:
     repo = await _make_repo(tmp_path, monkeypatch)
 
     assignment = await repo.create_policy_assignment(

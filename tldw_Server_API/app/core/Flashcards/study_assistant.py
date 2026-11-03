@@ -435,10 +435,10 @@ async def generate_study_assistant_reply(
     guidance: str | None = None,
 ) -> dict[str, Any]:
     """Generate an assistant reply for the provided card/question context."""
-    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
     from tldw_Server_API.app.core.Chat.chat_target_resolution import resolve_chat_target
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 
     prompt_package = build_study_assistant_prompt_package(
         action=action,

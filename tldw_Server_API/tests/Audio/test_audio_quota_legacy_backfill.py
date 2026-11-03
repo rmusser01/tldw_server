@@ -63,7 +63,7 @@ async def test_legacy_audio_usage_daily_backfilled_into_resource_daily_ledger(tm
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("first_period", ["daily", "monthly"])
-async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypatch, first_period, restart_audio_ledger_caches):
+async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypatch, first_period, restart_audio_ledger_caches, fresh_services):
     """A reporting-first upgrade includes legacy usage before any admission."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.Usage import audio_quota, quota_checks
@@ -91,4 +91,3 @@ async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypa
         assert await read(7) == 2.5  # nosec B101 - pytest regression assertion.
     finally:
         quota_checks.reset_ledger_cache()
-        await reset_db_pool()

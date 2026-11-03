@@ -12,10 +12,6 @@ from urllib.parse import urlsplit
 import httpx
 
 from tldw_Server_API.app.core import http_client as hc
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-    is_runtime_issued_provider_call_credentials,
-)
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import TrustedProviderEndpoint
 from tldw_Server_API.app.core.MCP_unified.adapters.model_completion import normalization
@@ -24,6 +20,10 @@ from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
     ModelCompletionFailure,
     ModelCompletionRequest,
     ModelFailureDomain,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
 )
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 

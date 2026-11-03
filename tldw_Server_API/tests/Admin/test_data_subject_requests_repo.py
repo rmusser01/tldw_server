@@ -17,16 +17,15 @@ def _setup_env(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_repo_create_request_is_idempotent(tmp_path):
+async def test_repo_create_request_is_idempotent(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
@@ -74,16 +73,15 @@ async def test_repo_create_request_is_idempotent(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch):
+async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
@@ -101,16 +99,15 @@ async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_repo_list_requests_scopes_by_org_ids(tmp_path):
+async def test_repo_list_requests_scopes_by_org_ids(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()

@@ -8,18 +8,17 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 
 @pytest.mark.asyncio
-async def test_admin_org_members_endpoints_sqlite(tmp_path):
+async def test_admin_org_members_endpoints_sqlite(tmp_path, fresh_services):
     # Configure SQLite
     os.environ['AUTH_MODE'] = 'single_user'
     db_path = tmp_path / 'users.db'
     os.environ['DATABASE_URL'] = f'sqlite:///{db_path}'
 
     # Reset singletons and init schema
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

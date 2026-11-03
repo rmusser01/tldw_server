@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
 from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.main import app
 
 # Disable HTTP security guard for these tests (IP allowlist/mTLS) to focus on auth behavior.
@@ -106,7 +107,7 @@ class _LoggerStub:
 
 def _install_dummy_server(monkeypatch) -> _DummyServer:
     server = _DummyServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
     return server
 
 
@@ -278,6 +279,7 @@ async def test_mcp_http_and_batch_forward_typed_scope_outside_metadata(monkeypat
     )
 
     await mcp_ep.mcp_request(
+        server=server,
         http_request=_json_request({"jsonrpc": "2.0", "method": "status", "id": 1}),
         response=Response(),
         client_id=None,
@@ -289,6 +291,7 @@ async def test_mcp_http_and_batch_forward_typed_scope_outside_metadata(monkeypat
     assert server.last_server_auth_scope == scope
 
     await mcp_ep.mcp_request_batch(
+        server=server,
         http_request=_json_request([{"jsonrpc": "2.0", "method": "status", "id": 2}]),
         response=Response(),
         client_id=None,
@@ -315,6 +318,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
     metadata_key = "_server_standalone_html_validation_pool"
 
     await mcp_ep.mcp_request(
+        server=server,
         http_request=_json_request({"jsonrpc": "2.0", "method": "tools/call", "id": 1}),
         response=Response(),
         client_id=None,
@@ -327,6 +331,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
     assert server.last_metadata[metadata_key] is sentinel_pool
 
     await mcp_ep.mcp_request_batch(
+        server=server,
         http_request=_json_request([{"jsonrpc": "2.0", "method": "tools/call", "id": 2}]),
         response=Response(),
         client_id=None,
@@ -339,6 +344,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
     assert server.last_metadata[metadata_key] is sentinel_pool
 
     await mcp_ep.execute_tool(
+        server=server,
         request=mcp_ep.ToolExecutionRequest(
             tool_name="slides.presentations.restore",
             arguments={"presentation_id": "html-deck", "expected_version": 2},
@@ -360,7 +366,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
             self.kwargs = kwargs
 
     websocket_server = _WebSocketServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: websocket_server)
+    monkeypatch.setattr(app_services(), "mcp_server", websocket_server)
     websocket = SimpleNamespace(app=app)
     await mcp_ep.websocket_endpoint(
         websocket=websocket,
@@ -394,7 +400,7 @@ def test_mcp_get_client_ip_sanitizes_resolution_failure_log(monkeypatch):
 async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(mcp_ep, "logger", logger_stub)
-    _install_dummy_server(monkeypatch)
+    server = _install_dummy_server(monkeypatch)
 
     original_import = builtins.__import__
 
@@ -407,6 +413,7 @@ async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
     auth = mcp_ep.McpAuthContext(user=None, principal=None, api_key_info=None, raw_api_key=None)
 
     await mcp_ep.mcp_request(
+        server=server,
         http_request=_json_request({"jsonrpc": "2.0", "method": "initialize", "id": 1}),
         response=Response(),
         client_id=None,
@@ -416,6 +423,7 @@ async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
         _guard=None,
     )
     await mcp_ep.mcp_request_batch(
+        server=server,
         http_request=_json_request([{"jsonrpc": "2.0", "method": "initialize", "id": 2}]),
         response=Response(),
         client_id=None,
@@ -565,7 +573,7 @@ def test_http_api_key_scopes_enforced(monkeypatch):
     monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
 
     server = _ScopeServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     payload = {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "media.search"}, "id": 1}
 
@@ -704,7 +712,7 @@ def test_tools_execute_preserves_rag_json_content_wrapper(monkeypatch):
             )
 
     server = _RagJsonServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     headers = {"X-API-KEY": os.getenv("SINGLE_USER_API_KEY", "THIS-IS-A-SECURE-KEY-123-FAKE-KEY")}
     payload = {"tool_name": "rag.search", "arguments": {"query": "hello"}}
@@ -741,7 +749,7 @@ def test_tools_execute_api_key_scopes_enforced(monkeypatch):
     monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
 
     server = _ScopeServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     payload = {"tool_name": "media.search", "arguments": {"query": "hello"}}
 

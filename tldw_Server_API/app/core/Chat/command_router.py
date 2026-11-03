@@ -657,7 +657,7 @@ async def _resolve_skills_runtime(ctx: CommandContext) -> tuple[int, Path, Any]:
 
     db = meta.get("chat_db")
     if db is None:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+        from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import get_chacha_db_for_user_id
 
         db = await get_chacha_db_for_user_id(user_id, client_id=str(ctx.user_id or user_id))
 

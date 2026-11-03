@@ -9,9 +9,9 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
+async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch, fresh_services):
     """AuthnzOrgsTeamsRepo membership helpers should work on SQLite."""
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.exceptions import DuplicateOrganizationError
     from tldw_Server_API.app.core.AuthNZ.membership_writer import (
         ActorMembershipWriteContext,
@@ -42,7 +42,6 @@ async def test_authnz_orgs_teams_repo_membership_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

@@ -6,8 +6,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_maintenance_rotation_runs_repo_sqlite_roundtrip(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_maintenance_rotation_runs_repo_sqlite_roundtrip(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
         AuthnzMaintenanceRotationRunsRepo,
@@ -19,7 +19,6 @@ async def test_maintenance_rotation_runs_repo_sqlite_roundtrip(tmp_path, monkeyp
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -66,9 +65,9 @@ async def test_maintenance_rotation_runs_repo_sqlite_roundtrip(tmp_path, monkeyp
 @pytest.mark.asyncio
 async def test_maintenance_rotation_runs_repo_sqlite_lists_newest_first_and_updates_status(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
         AuthnzMaintenanceRotationRunsRepo,
@@ -80,7 +79,6 @@ async def test_maintenance_rotation_runs_repo_sqlite_lists_newest_first_and_upda
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -144,9 +142,9 @@ async def test_maintenance_rotation_runs_repo_sqlite_lists_newest_first_and_upda
 @pytest.mark.asyncio
 async def test_maintenance_rotation_runs_repo_sqlite_enforces_single_active_execute_run(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
         AuthnzMaintenanceRotationRunsRepo,
@@ -158,7 +156,6 @@ async def test_maintenance_rotation_runs_repo_sqlite_enforces_single_active_exec
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))

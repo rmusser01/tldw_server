@@ -52,6 +52,7 @@ async def test_chacha_db_cache_rebinds_to_new_base_dir_after_reset(
     to the new DB (#2580 — wrong-DB handle leak).
     """
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as dep
+    from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 
     base_a = tmp_path / "base_a"
     base_b = tmp_path / "base_b"
@@ -62,18 +63,18 @@ async def test_chacha_db_cache_rebinds_to_new_base_dir_after_reset(
     try:
         await dep.shutdown_chacha_resources()
         dep.reset_chacha_shutdown_state()
-        assert dep._get_chacha_cached_instance_count() == 0
+        assert len(get_chacha_runtime().cached_instances()) == 0
 
         monkeypatch.setenv("USER_DB_BASE_DIR", str(base_a))
         db_a = await dep.get_chacha_db_for_user_id(1)
         path_a = db_a.db_path_str
-        assert dep._get_chacha_cached_instance_count() == 1
+        assert len(get_chacha_runtime().cached_instances()) == 1
         assert str(base_a) in path_a
 
         # the reset hook — clears the per-user cache
         await dep.shutdown_chacha_resources()
         dep.reset_chacha_shutdown_state()
-        assert dep._get_chacha_cached_instance_count() == 0, "reset did not clear the DB cache"
+        assert len(get_chacha_runtime().cached_instances()) == 0, "reset did not clear the DB cache"
 
         monkeypatch.setenv("USER_DB_BASE_DIR", str(base_b))
         db_b = await dep.get_chacha_db_for_user_id(1)

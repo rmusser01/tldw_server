@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -51,6 +50,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_r
     append_sqlite_media_visibility,
 )
 from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.testing import is_production_like_env
 
@@ -64,8 +64,7 @@ from .hyde import (
 )
 from .retrieval_plan import RetrievalPlan
 from .types import DataSource, Document
-from .utils import get_float_env as _get_float_env
-from .utils import normalize_scores as _normalize_scores
+from .utils import get_float_env as _get_float_env, normalize_scores as _normalize_scores
 from .vector_stores import (
     VectorStoreAdapter,
     create_from_settings_for_user,

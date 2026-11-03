@@ -21,11 +21,6 @@ import re
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-)
-
 #
 # Import Local
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
@@ -57,6 +52,10 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.LLM_Calls.provider_results import (
     _extract_text_from_upstream_sse,
     extract_response_content,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
 

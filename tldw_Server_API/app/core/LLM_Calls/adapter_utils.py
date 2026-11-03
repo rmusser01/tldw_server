@@ -4,11 +4,6 @@ import copy
 import os
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    is_runtime_issued_provider_call_credentials,
-)
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
@@ -17,6 +12,11 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.gateway import resolve_provider_api_key
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
+)
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 _PROVIDER_SECTION_MAP: dict[str, str] = {

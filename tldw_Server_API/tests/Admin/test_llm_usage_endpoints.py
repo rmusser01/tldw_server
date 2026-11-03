@@ -184,15 +184,11 @@ async def _insert_cache_usage_rows():
 
 
 @pytest.mark.asyncio
-async def test_llm_usage_endpoints_sqlite(monkeypatch, tmp_path):
+async def test_llm_usage_endpoints_sqlite(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
     with TestClient(app, headers=headers) as client:

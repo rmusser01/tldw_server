@@ -2,7 +2,6 @@ import sqlite3
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
 
@@ -10,7 +9,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_single_user_rbac_seed_sqlite_file_applies_schema_and_seeds(tmp_path, monkeypatch):
+async def test_single_user_rbac_seed_sqlite_file_applies_schema_and_seeds(tmp_path, monkeypatch, fresh_services):
     """ensure_single_user_rbac_seed_if_needed should succeed on a fresh SQLite DB file.
 
     This specifically exercises the "no inline CREATE TABLE in the seed path" behavior for
@@ -23,7 +22,6 @@ async def test_single_user_rbac_seed_sqlite_file_applies_schema_and_seeds(tmp_pa
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
 
     reset_settings()
-    await reset_db_pool()
 
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
@@ -37,14 +35,13 @@ async def test_single_user_rbac_seed_sqlite_file_applies_schema_and_seeds(tmp_pa
         finally:
             conn.close()
     finally:
-        await reset_db_pool()
         reset_settings()
 
 
 @pytest.mark.asyncio
 async def test_single_user_rbac_seed_sqlite_file_backstops_rbac_tables_when_migrations_skip(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ):
     """File-backed SQLite seed should tolerate a skipped migration-lock path."""
     db_path = tmp_path / "authnz_users.db"
@@ -57,7 +54,6 @@ async def test_single_user_rbac_seed_sqlite_file_backstops_rbac_tables_when_migr
         raise RuntimeError("Redis unavailable for migration lock; refusing local file fallback")
 
     reset_settings()
-    await reset_db_pool()
 
     try:
         from tldw_Server_API.app.core.AuthNZ import initialize
@@ -78,5 +74,4 @@ async def test_single_user_rbac_seed_sqlite_file_backstops_rbac_tables_when_migr
         finally:
             conn.close()
     finally:
-        await reset_db_pool()
         reset_settings()

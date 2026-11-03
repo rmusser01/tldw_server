@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from tldw_Server_API.app.core.Utils.app_services import app_services
+
 
 @pytest.fixture(autouse=True)
 def mounted_mcp_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,7 +169,7 @@ def test_mounted_http_transports_forward_authenticated_scope_separately(
         )
 
     server = _RecordingHttpAuthServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client(auth_principal_override=_scoped_auth_override) as client:
         response = client.post(
@@ -208,7 +210,7 @@ def test_mounted_http_principal_dependency_projects_authenticated_scope(
 
     server = _RecordingHttpAuthServer()
     monkeypatch.setattr(mcp_unified_endpoint, "get_auth_principal", _scoped_principal)
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client() as client:
         response = client.post(
@@ -228,7 +230,6 @@ def test_mounted_http_principal_dependency_projects_authenticated_scope(
 def test_mounted_http_single_user_api_key_attaches_trusted_mounted_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
 
     api_key = "primary-single-user-key-12345"
     _install_mounted_http_single_user_compat(
@@ -237,7 +238,7 @@ def test_mounted_http_single_user_api_key_attaches_trusted_mounted_metadata(
         test_mode=False,
     )
     server = _RecordingHttpAuthServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client() as client:
         response = client.post(
@@ -258,7 +259,6 @@ def test_mounted_http_single_user_api_key_attaches_trusted_mounted_metadata(
 def test_mounted_http_single_user_test_api_key_rejected_when_test_mode_false(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
 
     api_key = "primary-single-user-key-12345"
     test_key = "test-single-user-key-12345"
@@ -269,7 +269,7 @@ def test_mounted_http_single_user_test_api_key_rejected_when_test_mode_false(
         test_key=test_key,
     )
     server = _RecordingHttpAuthServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client() as client:
         response = client.post(
@@ -290,7 +290,6 @@ def test_mounted_http_single_user_test_api_key_rejected_when_test_mode_false(
 def test_mounted_http_single_user_test_api_key_attaches_test_metadata_with_guard(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
 
     api_key = "primary-single-user-key-12345"
     test_key = "test-single-user-key-12345"
@@ -302,7 +301,7 @@ def test_mounted_http_single_user_test_api_key_attaches_test_metadata_with_guard
         test_key=test_key,
     )
     server = _RecordingHttpAuthServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client() as client:
         response = client.post(
@@ -338,7 +337,7 @@ def test_mounted_http_single_user_api_key_does_not_attach_trust_when_ip_rejected
 
     monkeypatch.setattr(mcp_unified_endpoint, "get_auth_principal", _valid_principal)
     server = _RecordingHttpAuthServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client() as client:
         response = client.post(
@@ -392,7 +391,6 @@ def _install_mounted_ws_single_user_compat(
     debug_mode: bool = False,
     test_key: str | None = None,
 ) -> _RecordingWsProtocol:
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
     from tldw_Server_API.app.core.MCP_unified import server as mcp_server_module
 
     protocol = _RecordingWsProtocol()
@@ -410,7 +408,7 @@ def _install_mounted_ws_single_user_compat(
     monkeypatch.setattr(mcp_server_module, "is_single_user_profile_mode", lambda: True, raising=False)
     monkeypatch.setattr(mcp_server_module, "get_settings", lambda: _SingleUserSettings(api_key), raising=False)
     monkeypatch.setattr(mcp_server_module, "is_single_user_ip_allowed", lambda _ip, _settings: True, raising=False)
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
     if test_key is None:
         monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
     else:
@@ -937,7 +935,6 @@ def test_mounted_request_initialized_notification_returns_204_empty_body():
 def test_mounted_request_notification_is_delivered_to_server_before_response_suppression(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
     from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse
 
     class _RecordingServer:
@@ -959,7 +956,7 @@ def test_mounted_request_notification_is_delivered_to_server_before_response_sup
             return MCPResponse(result={"should": "be suppressed"}, id=request.id)
 
     server = _RecordingServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as client:
         response = client.post(
@@ -990,7 +987,6 @@ def test_mounted_request_explicit_null_id_returns_null_id_response():
 
 
 def test_mounted_request_post_protocol_authz_failure_stays_jsonrpc_200(monkeypatch: pytest.MonkeyPatch):
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
     from tldw_Server_API.app.core.MCP_unified import MCPResponse
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPError
 
@@ -1003,7 +999,7 @@ def test_mounted_request_post_protocol_authz_failure_stays_jsonrpc_200(monkeypat
         async def handle_http_request(self, *_args: Any, **_kwargs: Any) -> MCPResponse:
             return MCPResponse(error=MCPError(code=-32001, message="Insufficient permissions"), id="deny-1")
 
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: _DenyingServer())
+    monkeypatch.setattr(app_services(), "mcp_server", _DenyingServer())
 
     with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as client:
         response = client.post(
@@ -1042,7 +1038,6 @@ def test_mounted_request_pre_protocol_auth_dependency_failure_stays_http_error()
 def test_mounted_batch_notification_is_delivered_to_server_and_omitted_from_response(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
     from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPError
 
@@ -1071,7 +1066,7 @@ def test_mounted_batch_notification_is_delivered_to_server_and_omitted_from_resp
             ]
 
     server = _RecordingBatchServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as client:
         response = client.post(

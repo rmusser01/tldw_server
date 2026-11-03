@@ -20,22 +20,18 @@ def _setup_env(monkeypatch, *, user_db_base: str) -> None:
 
 
 @pytest.mark.unit
-async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
+async def test_admin_system_ops_endpoints(monkeypatch, tmp_path, fresh_services):
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
 
     from tldw_Server_API.app.core.config import settings
     monkeypatch.setitem(settings, "AUDIT_BUFFER_SIZE", 1)
     monkeypatch.setitem(settings, "AUDIT_FLUSH_INTERVAL", 0.1)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.Logging.system_log_buffer import ensure_system_log_buffer
     from tldw_Server_API.app.services import admin_system_ops_service
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     monkeypatch.setattr(admin_system_ops_service, "_STORE_PATH", tmp_path / "system_ops.json")
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}

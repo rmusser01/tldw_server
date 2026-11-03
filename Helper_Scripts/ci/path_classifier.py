@@ -58,6 +58,7 @@ E2E_BACKEND_GLOBS = [
     "tldw_Server_API/app/api/v1/endpoints/**",
     "tldw_Server_API/app/api/v1/schemas/**",
     "tldw_Server_API/app/core/AuthNZ/**",
+    "tldw_Server_API/app/core/Provider_Credentials/**",
 ]
 
 

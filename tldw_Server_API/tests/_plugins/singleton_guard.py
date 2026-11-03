@@ -108,6 +108,12 @@ def _identity_attr(attr: str) -> Callable[[Any], object]:
     return read
 
 
+def _chacha_cached_count(module: Any) -> object:
+    """Reader: cached ChaCha DB count in the container's runtime, None when the slot is empty."""
+    runtime = module.app_services().chacha_runtime
+    return None if runtime is None else len(runtime.cached_instances())
+
+
 def _module_self_id(module: Any) -> object:
     """Reader: ``id`` of the watched module object itself.
 
@@ -134,9 +140,9 @@ WATCHLIST: list[WatchedGlobal] = [
     # 2. Per-user ChaCha DB cache — #2580. Live handles bound to USER_DB_BASE_DIR
     #    carried across a boundary return wrong-DB handles.
     WatchedGlobal(
-        label="_chacha_db_instances",
-        module="tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
-        reader=_len_attr("_chacha_db_instances"),
+        label="chacha_runtime cached instances",
+        module="tldw_Server_API.app.core.Utils.app_services",
+        reader=_chacha_cached_count,
         why="per-user ChaChaNotesDB handles left cached across suites",
     ),
     # 3. App-main module identity — #2585. reload_app_main() swaps this module;

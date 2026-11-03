@@ -66,10 +66,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -109,7 +107,7 @@ async def _create_user_and_key(*, username: str, email: str) -> tuple[int, str]:
 
 
 @pytest.mark.asyncio
-async def test_e2e_evaluations_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_evaluations_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_evals_e2e.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(username="evals-user", email="evals-user@example.com")
@@ -268,7 +266,7 @@ async def test_e2e_authnz_debug_deny_headers_retry_after(monkeypatch, tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_e2e_character_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_character_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_character_e2e.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     user_id, api_key = await _create_user_and_key(username="character-user", email="character-user@example.com")
@@ -343,7 +341,7 @@ async def test_e2e_character_chat_deny_headers_retry_after(monkeypatch, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_e2e_auth_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_auth_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_auth_e2e.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 

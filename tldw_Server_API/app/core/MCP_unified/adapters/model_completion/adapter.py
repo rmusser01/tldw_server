@@ -11,11 +11,6 @@ from typing import Any, TypeVar, cast
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    AuthoritativeProviderScope,
-    ByokResolutionError,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.MCP_unified.adapters.model_completion.accounting import (
     CompletionAccountingPolicy,
@@ -34,6 +29,11 @@ from tldw_Server_API.app.core.MCP_unified.interfaces.model_completion import (
     ModelCompletionResult,
     ModelFailureDomain,
     ModelInvocationIdentity,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    AuthoritativeProviderScope,
+    ByokResolutionError,
+    ProviderCredentialRuntime,
 )
 
 _T = TypeVar("_T")

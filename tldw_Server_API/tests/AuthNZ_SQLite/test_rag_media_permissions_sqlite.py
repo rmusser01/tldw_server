@@ -72,13 +72,12 @@ def _override_rag(app, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_rag_search_claims_with_api_key_sqlite(tmp_path, monkeypatch):
+async def test_rag_search_claims_with_api_key_sqlite(tmp_path, monkeypatch, fresh_services):
     _base_env(tmp_path)
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -141,18 +140,16 @@ async def test_rag_search_claims_with_api_key_sqlite(tmp_path, monkeypatch):
             await pool.close()
         except Exception:
             _ = None
-        await reset_db_pool()
         reset_settings()
 
 
 @pytest.mark.asyncio
-async def test_media_process_videos_requires_permission_sqlite(tmp_path):
+async def test_media_process_videos_requires_permission_sqlite(tmp_path, fresh_services):
     _base_env(tmp_path)
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -206,5 +203,4 @@ async def test_media_process_videos_requires_permission_sqlite(tmp_path):
             await pool.close()
         except Exception:
             _ = None
-        await reset_db_pool()
         reset_settings()

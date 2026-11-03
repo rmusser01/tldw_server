@@ -11,11 +11,6 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    is_runtime_issued_provider_call_credentials,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_sync_call,
@@ -42,6 +37,11 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
 )
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_renderer import (
     SingleTextRecipeRenderResult,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
 )
 
 ########################################################################################################################

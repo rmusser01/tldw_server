@@ -23,13 +23,9 @@ def _setup_env(tmp_path) -> None:
 
 
 async def _reset_auth_state() -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
 
 async def _seed_user(*, username: str, email: str) -> int:
@@ -145,7 +141,7 @@ def _seed_subject_store_data(*, tmp_path, user_id: int, media_count: int, note_c
 
 
 @pytest.mark.asyncio
-async def test_preview_returns_404_for_unknown_requester(tmp_path):
+async def test_preview_returns_404_for_unknown_requester(tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
 
@@ -162,7 +158,7 @@ async def test_preview_returns_404_for_unknown_requester(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_preview_returns_500_when_subject_store_query_fails(tmp_path):
+async def test_preview_returns_500_when_subject_store_query_fails(tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
     user_id = await _seed_user(username="subject_user", email="subject@example.com")
@@ -188,7 +184,7 @@ async def test_preview_returns_500_when_subject_store_query_fails(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_preview_returns_500_when_subject_store_is_missing(tmp_path):
+async def test_preview_returns_500_when_subject_store_is_missing(tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
     await _seed_user(username="subject_user", email="subject@example.com")
@@ -209,7 +205,7 @@ async def test_preview_returns_500_when_subject_store_is_missing(tmp_path):
 @pytest.mark.parametrize("operation", ["preview", "intake"])
 @pytest.mark.parametrize("failure_at", ["manager", "list", "count"])
 async def test_embedding_coverage_failure_is_sanitized_and_does_not_record_intake(
-    monkeypatch, tmp_path, operation, failure_at
+    monkeypatch, tmp_path, operation, failure_at, fresh_services
 ):
     from tldw_Server_API.app.core.config import settings
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
@@ -256,7 +252,7 @@ async def test_embedding_coverage_failure_is_sanitized_and_does_not_record_intak
 
 
 @pytest.mark.asyncio
-async def test_notes_only_preview_succeeds_with_unrelated_stores_missing(monkeypatch, tmp_path):
+async def test_notes_only_preview_succeeds_with_unrelated_stores_missing(monkeypatch, tmp_path, fresh_services):
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
 
@@ -279,7 +275,7 @@ async def test_notes_only_preview_succeeds_with_unrelated_stores_missing(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_create_records_request_and_reuses_client_request_id(monkeypatch, tmp_path):
+async def test_create_records_request_and_reuses_client_request_id(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
     user_id = await _seed_user(username="subject_user", email="subject@example.com")
@@ -344,7 +340,7 @@ async def test_create_records_request_and_reuses_client_request_id(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_list_returns_newest_first_with_limit_offset(monkeypatch, tmp_path):
+async def test_list_returns_newest_first_with_limit_offset(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
 
@@ -435,7 +431,7 @@ def test_data_subject_request_list_response_defaults_pagination_aliases():
 
 
 @pytest.mark.asyncio
-async def test_preview_enforces_admin_scope(monkeypatch, tmp_path):
+async def test_preview_enforces_admin_scope(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
     user_id = await _seed_user(username="subject_user", email="subject@example.com")
@@ -469,7 +465,7 @@ async def test_preview_enforces_admin_scope(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_preview_hides_out_of_scope_requesters_before_counting(monkeypatch, tmp_path):
+async def test_preview_hides_out_of_scope_requesters_before_counting(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
     user_id = await _seed_user(username="subject_user", email="subject@example.com")
@@ -510,7 +506,7 @@ async def test_preview_hides_out_of_scope_requesters_before_counting(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_create_hides_out_of_scope_requesters_before_counting(monkeypatch, tmp_path):
+async def test_create_hides_out_of_scope_requesters_before_counting(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
     await _reset_auth_state()
     user_id = await _seed_user(username="subject_user", email="subject@example.com")

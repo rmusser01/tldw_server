@@ -15,7 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import mcp_hub_management as routes
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
@@ -89,7 +89,7 @@ class _DiscoveryAdapter(ExternalMCPTransportAdapter):
 
 
 @pytest.fixture
-async def runtime(tmp_path, monkeypatch):
+async def runtime(tmp_path, monkeypatch, fresh_services):
     """Existing canonical temporary AuthNZ storage and local module lifecycle."""
     # Fixture setup and test overrides share one undo stack through runtime shutdown.
     with monkeypatch.context() as patch:
@@ -97,7 +97,6 @@ async def runtime(tmp_path, monkeypatch):
         patch.setenv("AUTH_MODE", "multi_user")
         patch.setenv("DATABASE_URL", f"sqlite:///{path}")
         reset_settings()
-        await reset_db_pool()
         pool = await get_db_pool()
         ensure_authnz_tables(path)
         repo = McpHubRepo(pool)
@@ -121,7 +120,6 @@ async def runtime(tmp_path, monkeypatch):
                                       patch=patch)
         finally:
             await registry.shutdown_all()
-            await reset_db_pool()
     reset_settings()
 
 

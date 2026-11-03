@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.rate_limit
@@ -16,7 +18,6 @@ def rg_backend(request) -> str:
 
 def _repo_policy_path() -> str:
 
-
      # tldw_Server_API/tests/Resource_Governance → tldw_Server_API
     return str(Path(__file__).resolve().parents[2] / "Config_Files" / "resource_governor_policies.yaml")
 
@@ -25,8 +26,9 @@ def _repo_policy_path() -> str:
 def _with_rg_middleware(app):
     """Temporarily install RGSimpleMiddleware for tests that set RG_ENABLED after app import."""
     try:
-        from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
         from starlette.middleware import Middleware
+
+        from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
     except Exception:
         yield
         return
@@ -53,7 +55,6 @@ def _with_rg_middleware(app):
 
 
 def _reset_rg_state(app) -> None:
-
 
     """
     Ensure each test starts with a fresh ResourceGovernor / policy loader.
@@ -105,10 +106,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -166,7 +165,7 @@ async def _create_user_and_key(*, username: str, email: str, role: str = "user")
 
 
 @pytest.mark.asyncio
-async def test_e2e_chat_headers_tokens_and_requests(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_chat_headers_tokens_and_requests(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_chat_headers.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     user_id, api_key = await _create_user_and_key(username="chat-headers-user", email="chat-headers-user@example.com")
@@ -219,7 +218,7 @@ async def test_e2e_chat_headers_tokens_and_requests(monkeypatch, tmp_path, rg_ba
 
 
 @pytest.mark.asyncio
-async def test_e2e_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend, fresh_services):
     """
     Verify that when RGSimpleMiddleware denies /api/v1/chat/completions
     via a low-RPM policy, the response includes Retry-After and
@@ -275,7 +274,7 @@ async def test_e2e_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backe
 
 
 @pytest.mark.asyncio
-async def test_e2e_embeddings_headers_route_map(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_embeddings_headers_route_map(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_embeddings_headers.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(
@@ -304,7 +303,7 @@ async def test_e2e_embeddings_headers_route_map(monkeypatch, tmp_path, rg_backen
 
 
 @pytest.mark.asyncio
-async def test_e2e_embeddings_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_embeddings_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_embeddings_deny.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(
@@ -361,15 +360,13 @@ async def test_e2e_mcp_headers_route_map(monkeypatch, rg_backend):
     monkeypatch.setenv("RG_POLICY_PATH", _repo_policy_path())
     monkeypatch.setenv("RG_POLICY_RELOAD_ENABLED", "false")
 
-    import tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint as mcp_ep
-
     class _StubMCP:
         initialized = True
 
         async def get_status(self):
             return {"status": "healthy", "version": "test", "uptime_seconds": 1.0, "connections": {}, "modules": {}}
 
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: _StubMCP())
+    monkeypatch.setattr(app_services(), "mcp_server", _StubMCP())
 
     from tldw_Server_API.app.main import app
 
@@ -385,7 +382,7 @@ async def test_e2e_mcp_headers_route_map(monkeypatch, rg_backend):
 
 
 @pytest.mark.asyncio
-async def test_e2e_audio_websocket_streams_limit(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_audio_websocket_streams_limit(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_audio_ws.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(username="audio-ws-user", email="audio-ws-user@example.com")
@@ -444,7 +441,7 @@ async def test_e2e_audio_websocket_streams_limit(monkeypatch, tmp_path, rg_backe
 
 
 @pytest.mark.asyncio
-async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_audio_transcriptions.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(
@@ -476,7 +473,6 @@ async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_
     monkeypatch.setenv("RG_POLICY_RELOAD_ENABLED", "false")
 
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
-
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
 
     def _fake_check_status(model_name: str):

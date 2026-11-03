@@ -20,7 +20,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, ge
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import claims as claims_endpoints
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_single_user_instance
@@ -223,33 +223,29 @@ def fva(request, monkeypatch, tmp_path: Path):
 
 
 @pytest.fixture
-async def real_api_keys(tmp_path, monkeypatch):
+async def real_api_keys(tmp_path, monkeypatch, fresh_services):
     """Multi-user mode for real: an AuthNZ SQLite DB with an admin (ADMIN) and a member (MEMBER), each with an API key."""
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-fva-endpoint-1234567890")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     monkeypatch.setenv("VIRTUAL_KEYS_ENABLED", "false")
     reset_settings()
-    await reset_db_pool()
-    try:
-        pool = await get_db_pool()
-        ensure_authnz_tables(Path(pool.db_path))
-        keys: dict[int, str] = {}
-        manager = APIKeyManager()
-        await manager.initialize()
-        for user_id, role in ((ADMIN, "admin"), (MEMBER, "user")):
-            await create_authnz_test_user(
-                pool, username=f"u{user_id}", email=f"u{user_id}@example.com", role=role, user_id=user_id, is_verified=True
-            )
-            role_row = await pool.fetchrow("SELECT id FROM roles WHERE name = ?", role)
-            role_id = int(role_row["id"] if isinstance(role_row, dict) else role_row[0])
-            async with pool.transaction() as conn:
-                await conn.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)", (user_id, role_id))
-            created = await manager.create_api_key(user_id=user_id, name=f"k{user_id}", scope="write", expires_in_days=7)
-            keys[user_id] = str(created["key"])
-        yield keys
-    finally:
-        await reset_db_pool()
+    pool = await get_db_pool()
+    ensure_authnz_tables(Path(pool.db_path))
+    keys: dict[int, str] = {}
+    manager = APIKeyManager()
+    await manager.initialize()
+    for user_id, role in ((ADMIN, "admin"), (MEMBER, "user")):
+        await create_authnz_test_user(
+            pool, username=f"u{user_id}", email=f"u{user_id}@example.com", role=role, user_id=user_id, is_verified=True
+        )
+        role_row = await pool.fetchrow("SELECT id FROM roles WHERE name = ?", role)
+        role_id = int(role_row["id"] if isinstance(role_row, dict) else role_row[0])
+        async with pool.transaction() as conn:
+            await conn.execute("INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)", (user_id, role_id))
+        created = await manager.create_api_key(user_id=user_id, name=f"k{user_id}", scope="write", expires_in_days=7)
+        keys[user_id] = str(created["key"])
+    yield keys
 
 
 def _assert_all_for(spies: _Spies, response: httpx.Response, owner: int) -> None:

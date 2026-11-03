@@ -15,7 +15,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_auth_rate_limit,
     get_auth_principal,
 )
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     TrustedMembershipReason,
     TrustedMembershipWriteContext,
@@ -53,7 +52,7 @@ def test_build_federation_redirect_uri_uses_public_base_without_request_host(
 @pytest.fixture
 def federation_client(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path: Path, fresh_services,
 ):
     db_path = tmp_path / "oidc_login_flow.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -67,7 +66,6 @@ def federation_client(
         raising=False,
     )
 
-    asyncio.run(reset_db_pool())
     reset_settings()
 
     from tldw_Server_API.app.main import app as fastapi_app
@@ -102,7 +100,6 @@ def federation_client(
             yield client
     finally:
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
-        asyncio.run(reset_db_pool())
         reset_settings()
 
 

@@ -9,7 +9,7 @@ from tldw_Server_API.app.api.v1.schemas.integrations_control_plane_schemas impor
     IntegrationConnection,
     IntegrationOverviewResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import normalize_provider_name
 from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc as _coerce_datetime
 
 _PERSONAL_PROVIDER_ORDER = ("slack", "discord")

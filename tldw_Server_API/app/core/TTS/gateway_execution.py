@@ -15,7 +15,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ResolvedByokCredentials
 
 from .adapters.base import AudioFormat, TTSRequest, TTSResponse
 from .gateway_config import (

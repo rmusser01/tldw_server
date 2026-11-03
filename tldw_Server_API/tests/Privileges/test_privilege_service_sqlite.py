@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import tldw_Server_API.app.core.PrivilegeMaps.service as service_module
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -72,7 +72,7 @@ def _test_catalog(scope_ids: list[str], *, version: str = "test-privileges") -> 
 
 
 @pytest.mark.asyncio
-async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypatch):
+async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -81,7 +81,6 @@ async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypat
 
     # Reset global singletons so we pick up the test configuration.
     reset_settings()
-    await reset_db_pool()
 
     # Ensure migrations run so privilege_snapshots and RBAC tables exist ahead of service usage.
     ensure_authnz_tables(Path(db_path))
@@ -247,12 +246,11 @@ async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypat
     ]
     assert ingest_rows and ingest_rows[0]["status"] == "allowed"
 
-    await reset_db_pool()
     reset_settings()
 
 
 @pytest.mark.asyncio
-async def test_privilege_service_honors_expiry_and_explicit_permission_denies(tmp_path, monkeypatch):
+async def test_privilege_service_honors_expiry_and_explicit_permission_denies(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz-effective-permissions.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -260,7 +258,6 @@ async def test_privilege_service_honors_expiry_and_explicit_permission_denies(tm
     monkeypatch.setenv("TEST_MODE", "true")
 
     reset_settings()
-    await reset_db_pool()
     ensure_authnz_tables(Path(db_path))
 
     pool = await get_db_pool()
@@ -336,7 +333,6 @@ async def test_privilege_service_honors_expiry_and_explicit_permission_denies(tm
     assert set(effective_user["permissions"]) == {"scope.active"}
     assert effective_user["allowed_scopes"] == {"scope.active"}
 
-    await reset_db_pool()
     reset_settings()
 
 
@@ -359,7 +355,7 @@ async def test_privilege_service_multi_user_fetch_failure_fails_closed(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypatch):
+async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz-org.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -367,7 +363,6 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
     monkeypatch.setenv("TEST_MODE", "true")
 
     reset_settings()
-    await reset_db_pool()
     ensure_authnz_tables(Path(db_path))
 
     pool = await get_db_pool()
@@ -460,12 +455,11 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
     assert summary_org_none["users"] == 0
     assert len(org_none_users) == 0
 
-    await reset_db_pool()
     reset_settings()
 
 
 @pytest.mark.asyncio
-async def test_privilege_service_team_filter_uses_active_memberships_and_teams(tmp_path, monkeypatch):
+async def test_privilege_service_team_filter_uses_active_memberships_and_teams(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz-team-filter.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -473,7 +467,6 @@ async def test_privilege_service_team_filter_uses_active_memberships_and_teams(t
     monkeypatch.setenv("TEST_MODE", "true")
 
     reset_settings()
-    await reset_db_pool()
     ensure_authnz_tables(Path(db_path))
 
     pool = await get_db_pool()
@@ -537,7 +530,6 @@ async def test_privilege_service_team_filter_uses_active_memberships_and_teams(t
     assert inactive_summary["users"] == 0
     assert inactive_users == []
 
-    await reset_db_pool()
     reset_settings()
 
 

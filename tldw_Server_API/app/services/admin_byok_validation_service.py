@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_byok_enabled
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.byok_validation_runs_repo import (
-    AuthnzByokValidationRunsRepo,
-)
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
 from tldw_Server_API.app.core.exceptions import (
     ByokValidationActiveRunError,
     ByokValidationDisabledError,
     ByokValidationRunNotFoundError,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import is_byok_enabled
+from tldw_Server_API.app.core.Provider_Credentials.repos.byok_validation_runs_repo import (
+    AuthnzByokValidationRunsRepo,
+)
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import normalize_provider_name
 from tldw_Server_API.app.services import admin_scope_service
 
 

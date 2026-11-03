@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.notifications import router as notifications_router
-from tldw_Server_API.app.core.AuthNZ.jwt_service import create_access_token, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import create_access_token
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 pytestmark = pytest.mark.integration
 
@@ -58,7 +59,7 @@ def _effective_auth_state(fixture: ModuleType, user_id: int) -> tuple[list[str],
 
 
 def _notification_auth_client(user_id: int, role: str = "user") -> tuple[TestClient, dict[str, str]]:
-    reset_jwt_service()
+    app_services().jwt_service = None
     access_token = create_access_token(user_id, "chatbooks-backup-source", role)
     app = FastAPI()
     app.include_router(notifications_router, prefix="/api/v1")

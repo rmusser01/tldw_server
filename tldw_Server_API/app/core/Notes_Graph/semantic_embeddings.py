@@ -12,14 +12,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from tldw_Server_API.app.core.AuthNZ.byok_config import (
-    runtime_base_url_override_provenance,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionStatus,
-    ResolvedByokCredentials,
-    resolve_byok_credentials,
-)
 from tldw_Server_API.app.core.Embeddings.orchestrator import EmbeddingRequestOrchestrator
 from tldw_Server_API.app.core.Embeddings.request_types import EmbeddingRequestContext
 from tldw_Server_API.app.core.Embeddings.vector_validation import (
@@ -28,6 +20,14 @@ from tldw_Server_API.app.core.Embeddings.vector_validation import (
 )
 from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import (
     get_embeddings_registry,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
+    runtime_base_url_override_provenance,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+    resolve_byok_credentials,
 )
 
 from .semantic_capabilities import (
