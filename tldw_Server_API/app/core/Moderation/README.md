@@ -77,7 +77,7 @@ ceilings; nonfinite, nonpositive and boolean values are rejected:
 
 | Limit | Default / Ceiling |
 | --- | --- |
-| Complete service operation, including child startup and all batches | 2 seconds |
+| Execution scope, including admission, serialization, child startup and all batches | 2 seconds |
 | Active owned workers per API process | 4, immediate nonblocking admission |
 | Input / output | 1,000,000 characters each |
 | Rules | 256 |
@@ -90,6 +90,17 @@ Character admission and ASCII-escaped JSON byte admission are independent;
 non-ASCII content may hit a frame ceiling first. Existing evaluator scan/count
 limits are separate and may examine less than the admitted input. A facade that
 decides then redacts shares one deadline across both child batches.
+
+The two-second deadline starts at execution-scope entry, before admission and
+serialization. It is not an end-to-end HTTP or public-call wall-time guarantee:
+first trusted module initialization before scope entry, failure reporting, and
+kernel cleanup can add wall time. API lifecycle preparation loads the incident
+reporter before traffic. This boundary follows the parent's recorded service
+operation interpretation; it does not widen the deadline or any safety ceiling.
+Direct embeddings needing a stricter end-to-end latency contract require separate
+review. The release evidence retains the unpartitioned 2063.809 ms cold wall
+sample and the later, separate 78.787 ms scoped diagnostic; the latter does not
+explain the former.
 
 Each API process owns its own four-worker allowance: N API processes can own
 4*N children, with up to 512 MiB address space per Linux child, in addition to
