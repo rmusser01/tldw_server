@@ -816,11 +816,13 @@ class _CallbackLifecycle:
 
 
 class _BrowserRequestPolicy:
-    """Before-dispatch enhanced policy on this acquisition's browser session."""
+    """Before-dispatch policy, retaining direct versus enhanced credentials."""
 
     def __init__(
-        self, url: str, headers: Mapping[str, str], browser: GuardedArticleBrowser, outcome: _AcquisitionOutcome
+        self, url: str, headers: Mapping[str, str] | None, browser: GuardedArticleBrowser, outcome: _AcquisitionOutcome
     ) -> None:
+        self._enhanced = headers is not None
+        headers = headers or {}
         self._origin = http_client._url_origin(url)
         self._headers = {k: v for k, v in headers.items() if k.lower() not in {"cookie", "host", "proxy-authorization"}}
         self._raw_cookie = next((value for key, value in headers.items() if key.lower() == "cookie"), None)
@@ -905,12 +907,14 @@ class _BrowserRequestPolicy:
     async def handle(self, event: Mapping[str, Any], session: Any) -> None:
         request_id = event["requestId"]
         request = event["request"]
+        if self._browser._parent is not None:
+            self._browser._parent.check_url(request["url"])
         url = _http_policy_url(request["url"])
         if (
             not isinstance(request_id, str)
             or len(request_id) > 1024
             or url is None
-            or len(url.encode("utf-8")) > 65_536
+            or (self._browser._parent is None and len(url.encode("utf-8")) > 65_536)
         ):
             raise ArticleFailure("browser_error", "capability")
         if self._closed or self._outcome.failure is not None:
@@ -927,6 +931,13 @@ class _BrowserRequestPolicy:
             return
         if self._closed or self._outcome.failure is not None:
             await self._abort(session, request_id)
+            return
+        if not self._enhanced:
+            # Controlled direct pages need the same redirect admission, but keep
+            # their browser-owned headers/cookies and legacy serialization.
+            await self._transfer_sessions.track()
+            self._browser._reserve_parent("network_requests")
+            await session.send("Fetch.continueRequest", {"requestId": request_id})
             return
         previous = event.get("redirectedRequestId")
         permitted = self._requests.pop(previous, True)
@@ -1228,6 +1239,8 @@ class GuardedArticleBrowser:
         raise ArticleFailure("response_too_large", "rendered_html")
 
     async def _decision_allowed(self, url: str) -> bool:
+        if self._parent is not None:
+            self._parent.check_url(url)
         decision = await self._egress_guard.decide(
             url,
             context=replace(self._context, stage="fetch"),
@@ -1269,9 +1282,15 @@ class GuardedArticleBrowser:
         try:
             request = route.request
             url = request.url
+            if self._parent is not None:
+                self._parent.check_url(url)
             policy_url = _http_policy_url(url)
             if policy_url is None:
                 await self._abort_http(route, outcome, failure_stage="egress")
+                return
+            if request_policy is not None:
+                await request_policy.prepare(request)
+                await route.continue_()
                 return
             try:
                 allowed = await self._decision_allowed(policy_url)
@@ -1285,14 +1304,8 @@ class GuardedArticleBrowser:
             if not allowed:
                 await self._abort_http(route, outcome, failure_stage="egress")
                 return
-            if request_policy is not None:
-                await request_policy.prepare(request)
-                if outcome.failure is not None or request_policy._closed:
-                    await self._abort_http(route, outcome, failure_stage="callback")
-                    return
             try:
-                if request_policy is None:
-                    self._reserve_parent("network_requests")
+                self._reserve_parent("network_requests")
                 await route.continue_()
             except asyncio.CancelledError:
                 raise
@@ -1555,6 +1568,8 @@ class GuardedArticleBrowser:
         elif not isinstance(limits, ArticleLimits):
             raise TypeError("limits must be an ArticleLimits instance")
 
+        if self._parent is not None:
+            self._parent.check_url(url)
         attempts = profile.retries
         if attempts == 0:
             return ""
@@ -1644,7 +1659,7 @@ class GuardedArticleBrowser:
                 headless=True, **({"channel": "chromium"} if profile.extra_headers is not None else {})
             )
             resources.append(_OwnedResource(browser, "close", "browser"))
-            if profile.extra_headers is not None:
+            if profile.extra_headers is not None or self._parent is not None:
                 guard_session = await browser.new_browser_cdp_session()
                 requests = _BrowserRequestPolicy(url, profile.extra_headers, self, outcome)
                 resources.append(_OwnedResource(requests, "close", "requests"))
@@ -1774,13 +1789,16 @@ class GuardedArticleBrowser:
                     if self._parent
                     else max(self._cleanup_grace_s, profile.timeout_ms / 1000)
                 )
-            if requests is None:
+            if profile.extra_headers is None:
                 html = await self._serialize_html(cdp_session, limits.max_article_bytes)
             else:
                 html, self._rendered_fallback = await self._serialize_document(
                     cdp_session, limits.max_article_bytes, capture_dom=True
                 )
-            self.final_url = str(getattr(page, "url", url) or url)
+            final_url = str(getattr(page, "url", url) or url)
+            if self._parent is not None:
+                self._parent.check_url(final_url)
+            self.final_url = final_url
         except asyncio.CancelledError as exc:
             primary_error = exc
         except ArticleFailure as exc:

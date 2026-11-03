@@ -452,9 +452,15 @@ def _redirect_location(response: FetchResponse) -> str | None:
     return None
 
 
-def _redirect_target(current_url: str, response: FetchResponse, location: str) -> str:
+def _redirect_target(
+    current_url: str, response: FetchResponse, location: str, parent: ParentControls | None = None
+) -> str:
     try:
-        target = urljoin(response.url or current_url, location)
+        target = (
+            parent.resolve_url(response.url or current_url, location)
+            if parent is not None
+            else urljoin(response.url or current_url, location)
+        )
         parsed = urlsplit(target)
         if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
             raise ValueError
@@ -535,13 +541,15 @@ async def _fetch_lightweight(
                     raise overflow from None
                 raise
 
+            if dependencies.parent is not None:
+                dependencies.parent.check_url(response.url or current_url)
             location = _redirect_location(response)
             if response.status not in _REDIRECT_STATUSES or location is None:
                 return response, _bounded_backend(response.backend)
             if redirect_count == DEFAULT_MAX_REDIRECTS:
                 raise ArticleFailure("fetch_error", "redirect")
 
-            target_url = _redirect_target(current_url, response, location)
+            target_url = _redirect_target(current_url, response, location, dependencies.parent)
             if target_url in seen_urls:
                 raise ArticleFailure("fetch_error", "redirect")
             seen_urls.add(target_url)
@@ -606,6 +614,7 @@ async def _extract(
 ) -> dict[str, Any]:
     if dependencies.parent is not None:
         dependencies.parent.check()
+        dependencies.parent.check_url(final_url or url)
     deferred_discovery = dependencies.discovery_on_success or dependencies.discovery_gate is not None
     if dependencies.acquired is not None and not deferred_discovery:
         dependencies.acquired(html, url, final_url or url)
@@ -1286,6 +1295,7 @@ def start_page(
     async def run() -> PageData:
         token = physical_work.set(owner)
         try:
+            parent.check_url(url)
             reservation = parent.reserve("page_attempts")
             try:
                 reservation.commit()

@@ -423,6 +423,59 @@ async def test_reused_adapter_progress_replaces_previous_outcome_on_cancellation
         await scraper.job_queue.stop()
 
 
+@pytest.mark.parametrize("committed", [False, True])
+async def test_real_recursive_engine_cancellation_reaches_adapter_and_service(monkeypatch, tmp_path, committed):
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as core
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import Phase5Harness
+
+    base, child = "https://example.com/blog/start", "https://example.com/blog/child"
+    fixture = Phase5Harness(profile="enhanced_recursive", outcomes=[{"url": base, "links": [child]}, {"url": child}])
+    entered = asyncio.Event()
+    monkeypatch.setattr(core, "get_database_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(module, "load_and_log_configs", lambda: {})
+    with fixture.boundaries(), monkeypatch.context() as patch:
+        fetch = canonical._fetch_response
+
+        async def held(dependencies, request):
+            if request.url == (child if committed else base):
+                entered.set()
+                await asyncio.Event().wait()
+            return await fetch(dependencies, request)
+
+        patch.setattr(canonical, "_fetch_response", held)
+        service = module.WebScrapingService()
+        service._initialized, service.scraper = True, fixture.scraper
+        task = asyncio.create_task(
+            service.process_web_scraping_task(
+                scrape_method="Recursive Scraping",
+                url_input=base,
+                max_pages=3,
+                perform_chunking=False,
+                mode="ephemeral",
+                user_id=7,
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            task.cancel("original recursive cancellation")
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await task
+            report = getattr(raised.value, "report", None)
+            assert report is not None, "real run_crawl must attach its finalized report"
+            assert raised.value.args == ("original recursive cancellation",)
+            expected = {"state": "cancelled", "stop_reason": "cancelled", "has_partial_results": committed}
+            progress = next(iter(fixture.scraper._progress.values()))
+            assert progress["crawl_outcome"] == expected
+            assert progress["status"] == progress["service_status"] == "cancelled"
+            assert progress["owner_user_id"] == "7"
+            assert [item["url"] for item in report.articles] == ([base] if committed else [])
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await fixture.scraper.job_queue.stop()
+
+
 async def test_late_cancel_drains_blocking_write_without_closing_db_or_launching_next(harness):
     harness.report = CrawlReport((article(), article("https://example.com/news/b")), CrawlOutcome(**COMPLETED))
     harness.write_entered, harness.write_release = threading.Event(), threading.Event()

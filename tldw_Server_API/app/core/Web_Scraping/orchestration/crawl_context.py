@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from ..contracts.execution import CrawlOutcome
+from ..crawl.discovery import resolve_reference, url_bytes
 from ..crawl.models import CrawlLimits
 from ..runtime.controls import (
     COUNTERS,
@@ -94,6 +95,28 @@ class CrawlContext:
         """Raise parent cancellation or latched exhaustion before starting work."""
         with self._lock:
             self._check_locked()
+
+    def check_url(self, value: str) -> int:
+        """Bound a target without charging discovery or changing its identity."""
+        with self._lock:
+            self._check_locked()
+            try:
+                return url_bytes(value, self._limits)
+            except ParentStop as error:
+                self._stop_reason = error.reason
+                self._notify_stop_locked()
+                raise
+
+    def resolve_url(self, base: str, reference: str) -> str:
+        """Reuse bounded resolution before allocating a redirect target."""
+        with self._lock:
+            self._check_locked()
+            try:
+                return resolve_reference(base, reference, self._limits)
+            except ParentStop as error:
+                self._stop_reason = error.reason
+                self._notify_stop_locked()
+                raise
 
     def reserve(self, counter: Counter, amount: int = 1) -> Reservation:
         """Admit cumulative work atomically; an unused admission can roll back once."""

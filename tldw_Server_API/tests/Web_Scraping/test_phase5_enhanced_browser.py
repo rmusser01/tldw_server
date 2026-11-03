@@ -493,7 +493,7 @@ async def test_late_browser_scope_guard_cannot_continue_after_admission_closes()
     outcome = browser._AcquisitionOutcome()
     lifecycle = browser._CallbackLifecycle(outcome, lease, lambda: None)
     policy = browser._BrowserRequestPolicy(
-        URL, {"Authorization": "secret"}, SimpleNamespace(_decision_allowed=decision), outcome
+        URL, {"Authorization": "secret"}, SimpleNamespace(_decision_allowed=decision, _parent=None), outcome
     )
     callback = lifecycle.event_handler(lambda event: policy.handle(event, SimpleNamespace(send=send)))
     callback({"requestId": "request", "request": {"url": URL, "headers": {"Authorization": "secret"}}})

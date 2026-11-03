@@ -51,6 +51,7 @@ class DefaultFetchClient:
 
         started = time.monotonic()
         if self._parent is not None:
+            self._parent.check_url(request.url)
             reservation = self._parent.reserve("network_requests")
             try:
                 timeout = self._parent.cap_timeout(request.timeout)
@@ -71,12 +72,14 @@ class DefaultFetchClient:
                 except ResponseObserverAborted as exc:
                     raise exc._cause from None
                 self._parent.check()
-                return FetchResponse.from_raw(
+                response = FetchResponse.from_raw(
                     raw,
                     fallback_url=request.url,
                     fallback_backend=request.backend,
                     elapsed_seconds=max(0.0, time.monotonic() - started),
                 )
+                self._parent.check_url(response.url)
+                return response
             finally:
                 reservation.close()
         if request.max_response_bytes is not None:
