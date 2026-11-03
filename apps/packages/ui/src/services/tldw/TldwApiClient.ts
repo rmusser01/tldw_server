@@ -109,7 +109,6 @@ import {
   mapApiDetailToUi,
   mapApiListToUi,
   mapUiSourceToApi,
-  type ApiDataTableGenerateResponse,
   type ApiDataTableJobStatus
 } from "@/services/tldw/data-tables"
 import type { DataTableColumn } from "@/types/data-tables"
@@ -5336,30 +5335,6 @@ export class TldwApiClientBase {
   // ─────────────────────────────────────────────────────────────────────────
 
 
-  async getDataTable(
-    tableId: string,
-    params?: {
-      rows_limit?: number
-      rows_offset?: number
-      include_rows?: boolean
-      include_sources?: boolean
-    }
-  ): Promise<any> {
-    const id = encodeURIComponent(tableId)
-    const query = this.buildQuery({
-      rows_limit: params?.rows_limit,
-      rows_offset: params?.rows_offset,
-      include_rows: params?.include_rows,
-      include_sources: params?.include_sources
-    } as Record<string, any>)
-    const response = await bgRequest<any>({
-      path: `/api/v1/data-tables/${id}${query}`,
-      method: "GET"
-    })
-    return response?.table ? mapApiDetailToUi(response) : response
-  }
-
-
   async updateDataTable(
     tableId: string,
     payload: { name?: string; description?: string }
@@ -5391,20 +5366,6 @@ export class TldwApiClientBase {
     return response?.table ? mapApiDetailToUi(response) : response
   }
 
-
-
-  async regenerateDataTable(
-    tableId: string,
-    payload?: { prompt?: string; model?: string; max_rows?: number }
-  ): Promise<ApiDataTableGenerateResponse> {
-    const id = encodeURIComponent(tableId)
-    return await bgRequest<ApiDataTableGenerateResponse>({
-      path: `/api/v1/data-tables/${id}/regenerate`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload || {}
-    })
-  }
 
 
   // ─────────────────────────────────────────────────────────────────────────────

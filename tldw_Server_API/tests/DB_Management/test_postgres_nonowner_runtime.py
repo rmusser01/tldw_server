@@ -229,6 +229,20 @@ def test_nonowner_chacha_reopen_rejects_catalog_drift(migrated_runtime, drift):
         "ALTER POLICY media_visibility_access ON media WITH CHECK (true)",
         "GRANT UPDATE(version) ON schema_version TO {runtime}",
         "ALTER TABLE document_reading_progress DROP COLUMN cfi",
+        "ALTER TABLE document_annotations DROP COLUMN client_id CASCADE",
+        "DROP INDEX idx_annotations_client_id",
+        (
+            "DROP INDEX idx_annotations_client_id",
+            "CREATE INDEX idx_annotations_client_id ON document_annotations(user_id,media_id,client_id)",
+        ),
+        (
+            "DROP INDEX idx_annotations_client_id",
+            "CREATE UNIQUE INDEX idx_annotations_client_id ON document_annotations(user_id,client_id)",
+        ),
+        (
+            "DROP INDEX idx_annotations_client_id",
+            "CREATE UNIQUE INDEX idx_annotations_client_id ON document_annotations(user_id,media_id,client_id) WHERE client_id <> 'excluded-intent'",
+        ),
         "ALTER TABLE claims DROP COLUMN review_notes",
         "ALTER TABLE data_table_columns DROP COLUMN format",
         (
@@ -259,6 +273,11 @@ def test_nonowner_chacha_reopen_rejects_catalog_drift(migrated_runtime, drift):
         "weakened-write",
         "version-column-grant",
         "document-column",
+        "annotation-client-column",
+        "annotation-client-index",
+        "annotation-nonunique-index",
+        "annotation-wrong-key-index",
+        "annotation-partial-index",
         "claims-column",
         "data-column",
         "trigger-when",

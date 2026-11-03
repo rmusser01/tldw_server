@@ -186,7 +186,7 @@ export default function GenerateBoardDialog({
           Generate a draft, review its lists and cards, then select Save board
           to create a new board.
         </Typography.Paragraph>
-        <ModelSelect showSelectedName showPicker={!generating && !saving} />
+        {!generating && !saving && <ModelSelect showSelectedName />}
         {!ready && (
           <p role="status">Choose a configured model to generate a draft.</p>
         )}

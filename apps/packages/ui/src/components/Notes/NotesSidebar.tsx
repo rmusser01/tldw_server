@@ -405,16 +405,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
     </div>
   ) : null
 
-  const sidebarHidden = isMobileViewport ? !mobileSidebarOpen : sidebarCollapsed
-
   return (
       <aside
         ref={offCanvas.asideRef}
         id={NOTES_LIST_REGION_ID}
-        aria-hidden={sidebarHidden || undefined}
-        ref={(element) => {
-          if (element) element.toggleAttribute('inert', sidebarHidden)
-        }}
         tabIndex={-1}
         role={offCanvas.isModal ? 'dialog' : 'region'}
         aria-modal={offCanvas.isModal || undefined}

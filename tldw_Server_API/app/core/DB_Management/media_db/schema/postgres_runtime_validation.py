@@ -59,7 +59,7 @@ _REQUIRED_TABLES = set(_POSTGRES_REQUIRED_TABLES) | {
 _ADDITIVE_COLUMNS = {
     "media": _EXPECTED_MEDIA_COLUMNS,
     "document_reading_progress": {"cfi", "percentage"},
-    "document_annotations": {"chapter_title", "percentage"},
+    "document_annotations": {"chapter_title", "percentage", "client_id"},
     "claims": {
         "review_status",
         "reviewer_id",
@@ -206,6 +206,28 @@ _OWNER_OBSOLETE_INDEXES = {
 }
 
 
+def validate_postgres_annotation_replay_index(db: Any, conn: Any) -> None:
+    """Require the complete unique client-intent arbiter without changing schema."""
+    valid = db.backend.execute(
+        "SELECT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate "
+        "AND i.indpred IS NULL AND i.indexprs IS NULL AND i.indnatts=3 AND i.indnkeyatts=3 "
+        "AND am.amname='btree' "
+        # The JSON lookup supports PostgreSQL 13, before indnullsnotdistinct existed.
+        "AND NOT COALESCE((to_jsonb(i)->>'indnullsnotdistinct')::boolean,FALSE) "
+        "AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey::smallint[]) WITH ORDINALITY AS k(attnum,pos) "
+        "JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum ORDER BY k.pos) "
+        "= ARRAY[%s,%s,%s]::text[] "
+        "FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_am am ON am.oid=c.relam "
+        "WHERE n.nspname=current_schema() AND c.relname=%s "
+        "AND i.indrelid=to_regclass('document_annotations')",
+        ("user_id", "media_id", "client_id", "idx_annotations_client_id"),
+        connection=conn,
+    ).scalar
+    if valid is not True:
+        raise SchemaError("PostgreSQL annotation replay index requires schema-owner reconciliation")
+
+
 def canonical_policy_expression(expression: str, table: str) -> exp.Expression:
     """Normalize deparser decoration without changing Boolean or correlated scope."""
 
@@ -311,6 +333,7 @@ def validate_postgres_schema_catalog(db: Any, conn: Any) -> None:
             raise SchemaError(f"PostgreSQL runtime columns are incomplete for {table}")
     ensure_postgres_sync_log_contract(db, conn, validate_only=True)
     ensure_postgres_media_owner_identity(db, conn, validate_only=True)
+    validate_postgres_annotation_replay_index(db, conn)
 
     for alias, table, columns in _FTS:
         field = alias + "_tsv"
