@@ -1,7 +1,7 @@
 ---
 id: TASK-15417
 title: Implement killable stdlib re execution for Moderation
-status: In Progress
+status: Done
 labels:
 - moderation
 - security
@@ -20,9 +20,9 @@ Execute the requester-approved five-stage subagent-driven plan for bounded paren
 <!-- AC:BEGIN -->
 - [x] #1 Implement bounded protocol/worker and semantic parity including supervised and custom-template rules.
 - [x] #2 Implement parent deadlines, admission, cancellation, cleanup ownership, lifecycle, and independent adversarial process-tree harness.
-- [ ] #3 Implement report-once admin incidents including early admission failures and single neutral-phase migration/API/UI contracts.
+- [x] #3 Implement report-once admin incidents including early admission failures and single neutral-phase migration/API/UI contracts.
 - [x] #4 Activate all current callers with async-safe waits, preserved overrides, terminal streaming failures, and no fail-open retries or partial successes.
-- [ ] #5 Complete focused regression, packaging/platform evidence, touched-scope Bandit/lint/compile, task reviews and final whole-branch review; record limitations honestly.
+- [x] #5 Complete focused regression, packaging/platform evidence, touched-scope Bandit/lint/compile, task reviews and final whole-branch review; record limitations honestly.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -69,19 +69,21 @@ Final F1 checkpoint: compatibility self-review added RED/GREEN empty-Audio-field
 Final scoped review at0233b7ba09: F1 Audio batching, F3 degraded startup, M1 installed ASCII sensitivity and M2 warning correction independently ADDRESSED. F2 remains Important: cancellation after an earlier typed execution failure has already entered cleanup leaves shared scope cancelled/quarantine owned but caller_cancelled local predicate false, so neither reporter is invoked. Reviewer benign probe observed one entry/one offload lease/zero reports after650ms, then drained doubles. This is load-bearing, not parked as debt; task stays In Progress and incident AC3 reopened, AC5 incomplete. Single planned final fix wave/re-review exhausted; requester asked to authorize one narrowly targeted follow-up and scoped re-review. No code follow-up before approval, no completion/cleanup/publish/merge. Audio amendment expressly approved2026-11-03 and validated43.714ms/1 actual child/5099chars/100segments;917 affected host and329 selected Linux nodes pass with documented warnings/limits. Original failure evidence retained.
 User-approved targeted F2 ordering follow-up at clean BASE fab982faa4e8b80f3b6f0acfb465114f76c2ebf9. final-fix-review.md confirms F1/F3/M1/M2 addressed, F2 remains under cancellation during cleanup of an earlier typed failure. Sole agent fixes cleanup-owned reporting for any unconfirmed cleanup through existing shared claim/independent bounded reporter slot; no owner/cap/deadline or other runtime changes. TDD covers during-cleanup/after-quarantine cancellation, noncancelled failure, already-claimed primary, and quiet healthy cancellation. Evidence: local f2-followup-report.md; parent owns fresh scoped re-review and completion/cleanup.
 Targeted F2 ordering follow-up RED/GREEN: unclaimed cancellation-during-cleanup, cancellation-after-quarantine/offload wait, and noncancelled cleanup all failed before the fix; six claimed/unclaimed variants plus healthy cancellation now pass (7 targeted). Runner cleanup owner attempts cleanup_failed for any quarantine via unchanged shared claim/independent reporting slot; no local cancellation flag or new boundary. Aggregate metadata/privacy, original errors/Cancellation and retained leases/admission asserted. Independent containment15 passed before existing hostile child regressions; affected runner/async/incidents/service/lifecycle151 passed/315 warnings; task format4 passed. Three-path compile3.14/source3.12 and Ruff clean; production and B101-only-excluded test Bandit0 findings/0errors (not a reclassification of prior broader debt). Narrow operator/evidence notes and local f2-followup-report.md updated; scoped commit pending, task In Progress, parent owns fresh scoped re-review and final gates.
+Implementation review complete at source6b9d2c9b30. Fresh scoped follow-up independently accepted residual F2: report any unconfirmed cleanup via existing shared claim/independent bounded lease, preserving cancellation, original failure and actual ownership; no new findings. F1/F3/M1/M2 were previously accepted. Requester explicitly approved both Audio batching amendment and this targeted follow-up; no approval boundary bypassed. Controller fresh async/installed-wheel/task-format run44passed100warnings exit0; cumulative touched Python compile with SyntaxWarning-as-error exit0; cumulative production Bandit0findings0errors. F2 affected151/containment15/postcommit12 selected host results overlap, not unique totals. Earlier917host/329selectedLinux/F1timings and2049focused/UI37/browser3 remain revision-qualified; latestF2 has no fresh Linux runtime and Windows remains unverified. Full-project collection missinghttpx2, broader baseline warnings/heuristics, currentdev/requiredCI/human-ownedPRsummary and compatible neutral-phase rollout remain separate gates, not fabricated passes. Final record Docs/superpowers/reviews/moderation-backend/2026-11-03-killable-re-final-closure.md; detailed evidence2026-11-02-killable-re-validation.md. Existing ADR086/021 govern; approved spec and Audio amendment retained, only controller-owned completed main/amendment plans removed per AGENTS with history preserved; own SDD evidence archived/verified locally before cleanup. No PR/push/rebase/merge authorized or performed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented parent-owned killable stdlib-re runtime batches, fail-closed current service/Chat/Guardian/Audio/Workflow integration, safe neutral-phase operational incidents and migration/UI contracts. Independent-text Audio batching removes per-segment interpreter amplification without widening deadlines or aggregate caps. Final cleanup-owner reporting correction covers cancellation before/during/after error cleanup while retaining one safe incident and native resource ownership. Task and whole-branch reviews plus the explicitly approved follow-up are resolved; current fresh packaging/async/metadata and production security checks pass with documented environment/platform/CI/rollout limits. This AI-authored task summary is not the human Change summary required for a future PR merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
