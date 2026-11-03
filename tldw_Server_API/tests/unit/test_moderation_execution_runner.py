@@ -390,7 +390,7 @@ def test_pathological_re_child_is_killed_and_next_safe_request_succeeds():
     assert result.stdout.startswith(b"OK pathological")
 
 
-@pytest.mark.parametrize("mode", ["cancel-spawn", "fork", "nonzero", "posture", "blocked-write"])
+@pytest.mark.parametrize("mode", ["cancel-spawn", "fork", "nonzero", "posture", "blocked-write", "redact-many"])
 def test_independent_real_child_ownership_probes(mode):
     import os
     import sys
@@ -403,6 +403,8 @@ def test_independent_real_child_ownership_probes(mode):
     probe = Path(__file__).resolve().parents[1] / "helpers" / "moderation_supervisor_probe.py"
     result = run_isolated_probe([sys.executable, "-I", "-S", str(probe), mode])
     assert result.returncode == 0, result.stderr
+    if mode == "redact-many":
+        assert b"BATCH_PROVEN 102 launches 1" in result.stdout
 
 
 def test_fork_during_spawn_waits_for_descriptor_publication():

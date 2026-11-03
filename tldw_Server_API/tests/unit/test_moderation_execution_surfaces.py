@@ -85,9 +85,10 @@ async def test_compatibility_fallback_does_not_retry_failed_evaluation(reason):
 @pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
 async def test_transcript_failure_is_not_a_success_placeholder(monkeypatch, reason):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
+    from tldw_Server_API.tests.unit.test_moderation_execution_service import make_service
 
-    service = failing_service(reason)
-    service.redact_text.side_effect = ModerationExecutionError(reason)
+    service = make_service()
+    service.redact_text = Mock(side_effect=ModerationExecutionError(reason))
     monkeypatch.setattr(stt_policy, "get_moderation_service", lambda: service)
     policy = stt_policy.STTPolicy(None, True, 0.0, True, False, [])
     with pytest.raises(ModerationExecutionError):

@@ -15,6 +15,7 @@ Notes:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -23,7 +24,7 @@ import re
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 
 from loguru import logger
@@ -34,9 +35,11 @@ from tldw_Server_API.app.core.Moderation.execution_models import (
     BaseOperation,
     ExecutionBounds,
     ExecutionScope,
+    Operation,
+    OutputBudget,
     execution_scope,
 )
-from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_request
+from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request, snapshot_request
 from tldw_Server_API.app.core.Moderation.models import (
     ModerationEvaluationResult,
     ModerationPolicy,
@@ -651,7 +654,7 @@ class ModerationService:
 
     # --------------- Checking and transformations ---------------
     @contextlib.contextmanager
-    def _execution_boundary(self, operation: BaseOperation, text: str, phase: str | None) -> Iterator[ExecutionScope]:
+    def _execution_boundary(self, operation: Operation, text: str | Sequence[str], phase: str | None) -> Iterator[ExecutionScope]:
         """Keep overrides and nested batches inside one reporting/deadline scope."""
         from tldw_Server_API.app.core.Moderation.execution_incidents import report_execution_failure
 
@@ -661,7 +664,8 @@ class ModerationService:
             except ModerationExecutionError as error:
                 try:
                     report_execution_failure(
-                        error, operation=operation, phase=phase, scope=scope, input_chars=len(text)
+                        error, operation=operation, phase=phase, scope=scope,
+                        input_chars=len(text) if isinstance(text, str) else sum(len(item) for item in text if isinstance(item, str)),
                     )
                 except Exception:  # noqa: BLE001 - reporting must never replace enforcement.
                     with contextlib.suppress(Exception):
@@ -743,6 +747,45 @@ class ModerationService:
         ):
             return text, 0
         return self._execute_batch("redact_with_count", text, policy, phase)
+
+    def redact_texts(self, texts: Sequence[str], policy: ModerationPolicy, phase: str | None = None) -> list[str]:
+        """Redact independent fields atomically under one shared execution scope."""
+        from tldw_Server_API.app.core.Moderation.execution_runner import get_execution_runner
+
+        with self._execution_boundary("redact_many", texts, phase) as scope:
+            try:
+                request = snapshot_redaction_batch_request(texts, policy, phase, self._evaluation_limits(), ExecutionBounds())
+            except ModerationExecutionError:
+                raise
+            except (AttributeError, TypeError, ValueError, re.error):
+                raise ModerationExecutionError("invalid_response") from None
+            if getattr(self.redact_text, "__func__", None) is not ModerationService.redact_text:
+                results = []
+                remaining = request.bounds.max_output_chars
+                for text in request.text:
+                    if scope.cancelled.is_set():
+                        raise asyncio.CancelledError
+                    if time.monotonic() >= scope.deadline:
+                        raise ModerationExecutionError("deadline_exceeded")
+                    result = self.redact_text(text, policy, phase=phase)
+                    if type(result) is not str:
+                        raise ModerationExecutionError("invalid_response")
+                    OutputBudget(remaining).check(len(result))
+                    remaining -= len(result)
+                    results.append(result)
+                if scope.cancelled.is_set():
+                    raise asyncio.CancelledError
+                if time.monotonic() >= scope.deadline:
+                    raise ModerationExecutionError("deadline_exceeded")
+                return results
+            if (
+                not any(request.text) or not policy.block_patterns
+                or (phase == "input" and not policy.input_enabled)
+                or (phase == "output" and not policy.output_enabled)
+            ):
+                OutputBudget(request.bounds.max_output_chars).check(sum(map(len, request.text)))
+                return list(request.text)
+            return get_execution_runner().execute(request, scope).result
 
     # --------------- Decision helpers ---------------
     def evaluate_text(

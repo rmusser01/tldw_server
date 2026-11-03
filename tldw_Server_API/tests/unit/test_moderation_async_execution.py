@@ -254,7 +254,8 @@ async def test_normal_disconnect_is_not_reported(incident_store):
 
 
 @pytest.mark.parametrize("kill_fails", [False, True])
-async def test_cancelled_unconfirmed_cleanup_reports_once_and_keeps_ownership(incident_store, monkeypatch, kill_fails):
+@pytest.mark.parametrize("batch", [False, True])
+async def test_cancelled_unconfirmed_cleanup_reports_once_and_keeps_ownership(incident_store, monkeypatch, kill_fails, batch):
     from tldw_Server_API.app.core.exception_types import ModerationExecutionError
     from tldw_Server_API.app.core.Moderation import async_execution as execution
     from tldw_Server_API.app.core.Moderation import execution_incidents as incidents
@@ -282,11 +283,22 @@ async def test_cancelled_unconfirmed_cleanup_reports_once_and_keeps_ownership(in
 
     child.kill = kill
     owner = runner(factory)
+    submitted = request()
+    operation, chars = "custom_substitute", 5
+    if batch:
+        from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request
+        from tldw_Server_API.app.core.Moderation.models import ModerationPolicy
+        from tldw_Server_API.app.core.Moderation.policy_evaluator import EvaluationLimits
+
+        submitted = snapshot_redaction_batch_request(
+            ["hello", "world"], ModerationPolicy(), None, EvaluationLimits(100, 0, 1000, None), submitted.bounds
+        )
+        operation, chars = "redact_many", 10
     monkeypatch.setattr(incidents, "_persist_failure", record)
     monkeypatch.setattr(incidents, "log_counter", lambda name, **kw: metrics.append((name, kw)))
     with execution_scope() as shared:
         task = asyncio.create_task(execution.run_moderation_async(
-            lambda: owner.execute(request(), shared), metadata=FailureMetadata("custom_substitute", None, 5)
+            lambda: owner.execute(submitted, shared), metadata=FailureMetadata(operation, None, chars)
         ))
     try:
         async with asyncio.timeout(2):
@@ -301,7 +313,8 @@ async def test_cancelled_unconfirmed_cleanup_reports_once_and_keeps_ownership(in
                 await asyncio.sleep(0.005)
         [item] = incident_store.list_items()["items"]
         assert item["context"]["reason"] == "cleanup_failed"
-        assert item["context"]["operation"] == "custom_substitute"
+        assert item["context"]["operation"] == operation
+        assert item["context"]["input_chars"] == chars
         assert item["excerpt"] == incidents.ENGINE_FAILURE_EXCERPT
         assert "SECRET" not in str(item) + str(metrics)
         assert len(owner._entries) == 1

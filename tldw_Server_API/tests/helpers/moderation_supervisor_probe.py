@@ -82,7 +82,26 @@ def run(mode: str) -> None:
         assert all(child.stdin.closed and child.stdout.closed for child in children)
 
     try:
-        if mode in {"pathological", "heartbeat"}:
+        if mode == "redact-many":
+            import re
+
+            from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request
+            from tldw_Server_API.app.core.Moderation.models import ModerationPolicy
+            from tldw_Server_API.app.core.Moderation.policy_evaluator import EvaluationLimits
+
+            texts = [" ".join(["secret"] * 100)] + ["secret"] * 100 + [""]
+            request = snapshot_redaction_batch_request(
+                texts, ModerationPolicy(block_patterns=[re.compile("^secret$")], redact_replacement="[PII]"),
+                None, EvaluationLimits(200000, 4096, 800000, 1000), bounds,
+            )
+            started = time.monotonic()
+            with execution_scope() as scope:
+                response = owner.execute(request, scope)
+            assert response.result == [texts[0]] + ["[PII]"] * 100 + [""]
+            assert len(children) == 1
+            assert_clean()
+            print("BATCH_PROVEN", len(texts), "launches", len(children), "elapsed_ms", round((time.monotonic() - started) * 1000, 3))
+        elif mode in {"pathological", "heartbeat"}:
             # Only plain text is handled here. Compilation and adversarial
             # matching occur exclusively inside the owned regex worker child.
             hostile = snapshot_substitution_request(

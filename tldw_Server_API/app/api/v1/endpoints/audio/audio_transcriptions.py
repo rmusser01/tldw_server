@@ -51,9 +51,8 @@ from tldw_Server_API.app.core.Billing.enforcement import (
 from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
-    apply_transcript_text_policy,
+    apply_transcript_payload_policy_async,
     build_audio_retention_decision,
-    redact_timed_segments,
     resolve_effective_stt_policy,
     retain_stt_audio_artifact,
 )
@@ -65,8 +64,6 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
     emit_stt_request_total,
     observe_stt_latency_seconds,
 )
-from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
-from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
@@ -1174,25 +1171,11 @@ async def create_transcription(
         raw_transcribed_text = transcribed_text
         raw_timed_segments = _normalize_timed_segments(segments_for_timing)
 
-        def moderate_transcript():
-            return (
-                apply_transcript_text_policy(raw_transcribed_text, policy=effective_stt_policy, is_partial=False),
-                redact_timed_segments(raw_timed_segments, policy=effective_stt_policy),
-            )
-
-        transcribed_text, timed_segments = (
-            await run_moderation_async(
-                moderate_transcript,
-                metadata=FailureMetadata(
-                    "redact",
-                    "output",
-                    len(raw_transcribed_text)
-                    + sum(len(segment.get("text", "")) for segment in raw_timed_segments or []),
-                ),
-            )
-            if effective_stt_policy.redact_pii
-            else (raw_transcribed_text, raw_timed_segments)
+        moderated = await apply_transcript_payload_policy_async(
+            {"type": "final", "text": raw_transcribed_text, "segments": raw_timed_segments},
+            policy=effective_stt_policy,
         )
+        transcribed_text, timed_segments = moderated["text"], moderated["segments"]
         if not effective_stt_policy.redact_pii:
             redaction_outcome = "not_requested"
         elif transcribed_text != raw_transcribed_text or timed_segments != raw_timed_segments:

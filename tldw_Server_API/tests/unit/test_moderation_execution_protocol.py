@@ -604,3 +604,76 @@ def test_every_decision_rejects_non_null_redaction_text(action, eager_text):
     )
     with pytest.raises(ModerationExecutionError, match="invalid_response"):
         decode_response(encode_response(WorkerResponse("evaluate", result)), request)
+
+
+def batch_request(texts, **bounds):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request
+
+    return snapshot_redaction_batch_request(
+        texts, ModerationPolicy(), None, EvaluationLimits(100, 10, 1000, None), ExecutionBounds(**bounds)
+    )
+
+
+@given(st.lists(st.text(max_size=20), max_size=10))
+def test_redact_many_unicode_empty_round_trip_and_aggregate_metadata(texts):
+    from tldw_Server_API.app.core.Moderation.execution_models import request_input_chars
+
+    original = batch_request(texts)
+    assert original.text == tuple(texts)
+    assert decode_request(encode_request(original)) == original
+    assert request_input_chars(original) == sum(map(len, texts))
+    response = WorkerResponse("redact_many", texts)
+    assert decode_response(encode_response(response), original) == response
+
+
+def test_redact_many_empty_field_count_and_aggregate_input_caps():
+    assert len(batch_request([""] * 4096).text) == 4096
+    assert batch_request(["aa", "b"], max_input_chars=3).text == ("aa", "b")
+    for texts, bounds in [([""] * 4097, {}), (["aa", "bb"], {"max_input_chars": 3})]:
+        with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+            batch_request(texts, **bounds)
+
+
+@pytest.mark.parametrize("operation", _OPERATIONS + ("redact_many",))
+@pytest.mark.parametrize("bad", [None, 1, True, {}, ["a", 1]])
+def test_batch_and_single_text_variants_reject_incompatible_wire_text(operation, bad):
+    original = batch_request(["a"]) if operation == "redact_many" else schema_request(operation)
+    data = json.loads(encode_request(original)[4:])
+    data["text"] = bad
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_request(frame(data))
+
+
+def test_redact_many_discriminant_and_raw_flags_stay_strict(monkeypatch):
+    from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_redaction_batch_request
+
+    raw = re.compile("^hello$", re.I | re.M)
+    policy = ModerationPolicy(block_patterns=[raw, PatternRule(raw, replacement=r"\1")])
+    with monkeypatch.context() as guarded:
+        guarded.setattr(re, "compile", lambda *a, **k: pytest.fail("parent compilation"))
+        original = snapshot_redaction_batch_request(["hello"], policy, None, EvaluationLimits(1, 0, 1, None), ExecutionBounds())
+    assert decode_request(encode_request(original)) == original
+    assert original.policy["block_patterns"][0]["flags"] == int(raw.flags)
+    for changed in (replace(original, text="hello"), replace(original, text=["hello"]), replace(original, operation="redact")):
+        with pytest.raises(ModerationExecutionError, match="invalid_response"):
+            encode_request(changed)
+    data = json.loads(encode_request(original)[4:])
+    data["text"] = "hello"
+    with pytest.raises(ModerationExecutionError, match="invalid_response"):
+        decode_request(frame(data))
+
+
+@pytest.mark.parametrize("result", [None, "safe", [], ["a"], ["a", "b", "c"], ["a", 1], ["aa", "bb"]])
+def test_redact_many_rejects_wrong_count_type_or_aggregate_output(result):
+    original = batch_request(["a", "b"], max_output_chars=3)
+    with pytest.raises(ModerationExecutionError):
+        decode_response(encode_response(WorkerResponse("redact_many", result)), original)
+
+
+def test_redact_many_frame_limits_remain_independent_of_character_admission():
+    original = batch_request(["\u00e9" * 100], max_request_bytes=200)
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        encode_request(original)
+    original = batch_request(["a"], max_response_bytes=100)
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        decode_response(encode_response(WorkerResponse("redact_many", ["\u00e9" * 100])), original)

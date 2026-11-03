@@ -72,6 +72,7 @@ def main() -> None:
             print("CLEANUP_OWNER_PROVEN", failure, "invoker_loss" if disconnect else "recovery", flush=True)
         probe = Path(__file__).with_name("moderation_supervisor_probe.py")
         for mode in (
+            "redact-many",
             "fork-during-spawn",
             "pathological",
             "heartbeat",

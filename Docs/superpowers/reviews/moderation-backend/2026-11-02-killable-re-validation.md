@@ -356,3 +356,64 @@ The ignored `task-5-report.md` records scoped commits, final revision/commands a
 fresh postcommit results. Windows remains explicitly unverified. Cold wall-time
 scope expectations and residual baseline gates require parent review, not an
 unapproved runtime rewrite or a claim that every release gate is pristine.
+
+## Final Review Fix Wave
+
+TASK-15417, FIX_BASE `24b6e815076217abdeccbc9948992c75d851b06c`.
+F2/F3/M1/M2 were corrected in `bf56d370ef16eaf1b63c5707e3decb2c610efae3`:
+cancelled unconfirmed cleanup uses the shared independent incident slot without
+masking cancellation or releasing quarantine; unavailable pre-traffic incident
+preparation degrades reporting but retains API shutdown ownership; installed
+ASCII checks now distinguish Unicode behavior; closed-loop offload delivery no
+longer returns from finally. The earlier warning was added by this branch, not
+preexisting BASE debt. The prior evidence above is retained as history.
+
+Requester-approved F1 amendment and plan were recorded in `735fa65971`:
+`Docs/superpowers/specs/2026-11-03-moderation-audio-batch-amendment.md` and
+`Docs/superpowers/plans/2026-11-03-moderation-audio-batch-amendment-plan.md`.
+The new private `redact_many` variant handles at most4096 independent fields in
+one fresh child, reconstructing policy once. It retains aggregate1,000,000
+input/output characters, all existing byte/rule ceilings, independent anchors,
+per-field evaluator limits/literal replacements, shared2s, four-worker admission,
+and all-or-nothing mapping. Trusted single-field overrides remain dispatched.
+
+The original warmed100-segment/5099-character failure (~50 execute attempts)
+remains documented in final-review.md. A fresh actual payload test with11 built-in
+PII rules now reports43.714ms, one actual returned Popen child and one execute
+attempt, exact result/segment metadata preservation and zero retained ownership.
+This is not a universal wall-time SLA or an explanation of the older cold sample.
+
+- Final host focused manifest:917 passed/1873 warnings,67.81s, exit0;
+  `/tmp/moderation-f1-final-green.log`. Covers protocol/worker/runner/reporting,
+  service/overrides, installed-wheel flags/imports, Audio HTTP/WS/retention,
+  streaming/realtime and lifecycle. Initial seven obsolete Mock injection
+  failures and their stronger real-service override correction are retained in
+  `/tmp/moderation-f1-focused.log` and the local final-fix report.
+  Final self-review also added a RED/GREEN empty-field/dual-key regression to
+  preserve Audio's no-op guards before trusted override dispatch.
+- Fresh native containment15 passed BEFORE hostile probes. Current Linux3.12.13
+  source snapshot independently proves containment, failed-cleanup ownership,
+  one-launch independent-field batching, and existing runner probes. All required
+  Linux resource posture flags are true. Final batch probe102 fields/one launch
+  took118.466ms. `/tmp/moderation-f1-linux-preflight-final.log`.
+- SHA256 bytecheck covers9096 Python source files and6 selected copied suites,
+  zero mismatches after all Python changes;
+  `/tmp/moderation-f1-linux-bytecheck-complete.log`. The initial racing copy
+  check correctly failed and is not used as proof. Current selected Linux
+  protocol/worker/incident/migration/review suite:329 selected nodes/15 warnings,
+  10.91s, exit0, `/tmp/moderation-f1-linux-pytest-final.log`. Its consumed modules
+  are unchanged by the last Audio-only no-op correction. This remains source-suite
+  evidence, not an installed Linux wheel or full-application claim.
+- Whole-wave24 touched Python paths compile with SyntaxWarning as error.
+  Production Bandit0 findings/0errors. Raw Ruff5 findings, exact same-path
+  FIX_BASE baseline5, zero new. Test Bandit with only B101 excluded reports the
+  same19 non-assert findings as the pre-F1 scope: one dummy token_type fixture,
+  four subprocess imports, fourteen fixed-argv/no-shell subprocess heuristics.
+  `/tmp/moderation-final-wave-static-comparison.log` and the corresponding
+  `/tmp/bandit_moderation_final_wave_{prod,tests}.json`; no new suppression.
+
+Full RED/GREEN commands, failure provenance, actual interfaces, final commit and
+platform limits are in the original local `final-fix-report.md`. Parent owns one
+scoped independent re-review of all findings from FIX_BASE, plan statuses and
+global completion. Windows, whole-application collection, current-dev integration
+and eventual required CI/human Change summary gates remain unverified or pending.

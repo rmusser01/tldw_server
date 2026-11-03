@@ -658,10 +658,14 @@ async def test_moderation_failure_is_terminal_before_transcript_persistence(monk
     monkeypatch.setattr(audio_streaming, "upsert_transcript", save)
     monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: DummyMediaDB())
 
-    def fail(text, **kwargs):
+    def fail(*args, **kwargs):
         raise ModerationExecutionError(reason)
 
-    monkeypatch.setattr(stt_policy, "apply_transcript_text_policy", fail)
+    from tldw_Server_API.tests.unit.test_moderation_execution_service import make_service
+
+    moderation = make_service()
+    monkeypatch.setattr(moderation, "redact_text", fail)
+    monkeypatch.setattr(stt_policy, "get_moderation_service", lambda: moderation)
 
     async def handle(socket, config, **callbacks):
         if site == "callback":

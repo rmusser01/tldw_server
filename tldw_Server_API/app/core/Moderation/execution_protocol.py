@@ -10,10 +10,11 @@ import json
 import math
 import struct
 from collections.abc import Sequence
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 
 from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
 from tldw_Server_API.app.core.Moderation.execution_models import (
+    MAX_TEXT_FIELDS,
     OPERATIONS,
     BaseOperation,
     ExecutionBounds,
@@ -110,11 +111,25 @@ def _validate_pattern(rule: dict, bounds: ExecutionBounds) -> None:
     _integer(rule["flags"], 0, 511)
 
 
+def _text_fields(texts: Sequence[str], maximum: int) -> None:
+    _size(len(texts) > MAX_TEXT_FIELDS)
+    chars = 0
+    for text in texts:
+        _string(text)
+        chars += len(text)
+        _size(chars > maximum)
+
+
 def _validate_request(request: WorkerRequest) -> None:
     if type(request.operation) is not str or request.operation not in OPERATIONS:
         _invalid()
     bounds = request.bounds
-    _string(request.text, bounds.max_input_chars)
+    if request.operation == "redact_many":
+        if type(request.text) is not tuple:
+            _invalid()
+        _text_fields(request.text, bounds.max_input_chars)
+    else:
+        _string(request.text, bounds.max_input_chars)
     _string(request.phase, bounds.max_pattern_chars, nullable=True)
     policy = request.policy
     if request.operation in {"supervised_evaluate", "custom_substitute"}:
@@ -222,6 +237,19 @@ def snapshot_supervised_request(
     return request
 
 
+def snapshot_redaction_batch_request(
+    texts: Sequence[str], policy: ModerationPolicy, phase: str | None,
+    limits: EvaluationLimits, bounds: ExecutionBounds,
+) -> WorkerRequest:
+    """Bound independent fields before copying; reuse one data-only policy snapshot."""
+    if not isinstance(texts, Sequence) or isinstance(texts, (str, bytes)):
+        _invalid()
+    _text_fields(texts, bounds.max_input_chars)
+    request = replace(snapshot_request("redact", "", policy, phase, limits, bounds), operation="redact_many", text=tuple(texts))
+    _validate_request(request)
+    return request
+
+
 def snapshot_substitution_request(
     text: str, rules: Sequence[SubstitutionRuleSnapshot], phase: str | None, bounds: ExecutionBounds
 ) -> WorkerRequest:
@@ -252,7 +280,13 @@ def decode_request(frame: bytes) -> WorkerRequest:
     except (TypeError, ValueError, OverflowError):
         raise ModerationExecutionError("invalid_response") from None
     _size(len(frame) > bounds.max_request_bytes)
-    request = WorkerRequest(data["operation"], data["text"], data["phase"], data["policy"], data["limits"], bounds)
+    text = data["text"]
+    if data["operation"] == "redact_many":
+        if type(text) is not list:
+            _invalid()
+        _text_fields(text, bounds.max_input_chars)
+        text = tuple(text)
+    request = WorkerRequest(data["operation"], text, data["phase"], data["policy"], data["limits"], bounds)
     _validate_request(request)
     return request
 
@@ -344,6 +378,10 @@ def decode_response(frame: bytes, request: WorkerRequest) -> WorkerResponse:
         result = ModerationEvaluationResult(**result)
     elif request.operation == "redact":
         _string(result, maximum)
+    elif request.operation == "redact_many":
+        if type(result) is not list or len(result) != len(request.text):
+            _invalid()
+        _text_fields(result, maximum)
     elif request.operation == "redact_with_count":
         if type(result) is not list or len(result) != 2:
             _invalid()
