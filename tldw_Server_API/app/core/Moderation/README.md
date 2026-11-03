@@ -141,10 +141,12 @@ seven typed internal reasons are `deadline_exceeded`, `capacity_exhausted`,
 success markers, persistence and downstream continuation are withheld;
 already-emitted safe stream bytes cannot be recalled.
 
-Normal cancellation is quiet. If cancelled child cleanup cannot be confirmed
-within its bounded window, quarantine retains worker/offload ownership and the
-cleanup owner submits one sanitized `cleanup_failed` incident through the shared
-report-once claim and independent reporting slot, without masking cancellation.
+Normal cancellation is quiet. If child/pipe cleanup cannot be confirmed within
+its bounded window, quarantine retains worker/offload ownership and the cleanup
+owner attempts sanitized `cleanup_failed` reporting independently of the original
+failure or cancellation ordering. The shared report-once claim and independent
+reporting slot prevent duplicate primary incidents without masking cancellation
+or replacing the original error.
 
 One metadata-only incident uses category `moderation_engine_failure`, severity
 `high`, status `needs_review`, source `moderation_engine`, recommendation

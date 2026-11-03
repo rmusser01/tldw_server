@@ -417,3 +417,28 @@ platform limits are in the original local `final-fix-report.md`. Parent owns one
 scoped independent re-review of all findings from FIX_BASE, plan statuses and
 global completion. Windows, whole-application collection, current-dev integration
 and eventual required CI/human Change summary gates remain unverified or pending.
+
+### Targeted F2 Ordering Follow-Up
+
+The independent fix review found F2 incomplete: cancellation during cleanup of
+an earlier typed failure, or after quarantine while offload waits, did not set
+the runner's body-local cancellation flag. The earlier F2 success statements
+above are historical evidence, not approval of those remaining orderings.
+
+Explicitly approved follow-up from `fab982faa4e8b80f3b6f0acfb465114f76c2ebf9`
+removes that flag and attempts the existing bounded `cleanup_failed` report for
+every unconfirmed cleanup. The cleanup owner is the sole reporting trigger;
+the existing shared claim still deduplicates an already-reported primary error.
+Quarantine, offload ownership, caller cancellation/original error and all limits
+are retained. No new queue, reporting lease or production helper thread path.
+
+Event-controlled benign doubles reproduce all three unclaimed orderings RED,
+then all six claimed/unclaimed variants and healthy cancellation pass GREEN.
+Affected runner/async/incident/service/lifecycle suites:151 passed/315 warnings,
+19.76s. Independent containment:15 passed before existing hostile child cases.
+Touched scope: Ruff/compile clean; production Bandit0 findings/0errors, test
+Bandit0 findings/0errors with only B101 excluded. These narrow clean scans do
+not reclassify the earlier broader static debt or platform evidence as pristine.
+Full commands, metadata/ownership/privacy assertions, final SHA and remaining
+limits are in local `f2-followup-report.md`. Parent owns the fresh scoped review;
+no new whole-wave approval, current Linux/Windows run or global completion claim.

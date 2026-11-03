@@ -23,6 +23,19 @@ from tldw_Server_API.app.core.Moderation.execution_protocol import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def isolated_incident_reporting(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Moderation import execution_incidents as incidents
+
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
+    incidents.prepare_moderation_incident_store()
+    yield
+    thread = incidents._report_thread
+    if thread is not None:
+        thread.join(1)
+        assert not thread.is_alive()
+
+
 def request(bounds=None):
     return snapshot_substitution_request("hello", [], None, bounds or ExecutionBounds())
 
