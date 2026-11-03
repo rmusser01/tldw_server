@@ -281,6 +281,7 @@ jobs:
       # raised ceiling must carry a new reason in the PR diff.
       # The layering contract (TASK-13950.9) does the same for a raised import count.
       # The DB_Management logic-import ratchet (TASK-13950.16) does the same for its import counts.
+      # The test-mode branch ratchet (TASK-13950.19) does the same for its two ceilings.
       # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
@@ -318,6 +319,7 @@ jobs:
             tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
             tldw_Server_API/tests/lint/test_production_detector_single_source.py \
             tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
+            tldw_Server_API/tests/lint/test_test_mode_branch_ratchet.py \
             tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
             tldw_Server_API/tests/CI/test_check_backlog_task_ids.py \

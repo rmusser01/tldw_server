@@ -1520,12 +1520,13 @@ def test_backend_required_enforces_isolation_ratchets():
         assert suite in gate["run"]  # nosec B101 - regression assertion
 
 
-# TASK-13950.6: the production-detector and test-seam ratchets and the startup-guard /
+# TASK-13950.6 and .19: the production-detector, test-seam and test-mode branch ratchets and the startup-guard /
 # AuthNZ-refusal tests. The contract lives here, not in the files it guards, so dropping a
 # file from the step cannot also drop its own assertion.
 TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/lint/test_production_detector_single_source.py",
     "tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py",
+    "tldw_Server_API/tests/lint/test_test_mode_branch_ratchet.py",
     "tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py",
     "tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py",
     "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
