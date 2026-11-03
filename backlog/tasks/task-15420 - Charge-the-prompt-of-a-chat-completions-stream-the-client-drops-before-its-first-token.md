@@ -21,11 +21,13 @@ TASK-13953 records a /chat/completions stream however it ends once something was
 - [ ] #1 A /chat/completions stream the client drops or stops before its first token writes one usage row from the prompt estimate, and its Resource Governor reservation and billing commit those tokens, with a test
 - [ ] #2 An attempt the endpoint closes to retry it (OAuth refresh, fallback provider) is still refunded and writes no row: test_streaming_oauth_retry_records_one_usage_row_for_the_successful_attempt keeps passing, and a fallback-provider retry pin is added
 - [ ] #3 ADR-067 and Docs/Operations/Usage_Quotas.md say a drop before the first token is charged its prompt
+- [ ] #4 A client drop that lands on one of the two awaits in StreamingResponseHandler.safe_stream_generator's finally before the recorders (the provider stream's aclose, and before_success_callback, the mandatory moderation audit) still records or finalizes the stream once, with a test (TASK-13953 final review N1; safe_stream_generator is near its frozen size, so extract a helper)
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+TASK-13953's final review (N1, Minor, pre-existing on the base): a CancelledError delivered at either await in the handler's finally skips both the save and the finalize, so that stream writes no row, no commit and no refund (the reservation expires on its TTL). One loop tick each, not aimable by the client; fixed here because it touches the same finally.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
