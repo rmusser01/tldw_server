@@ -170,7 +170,7 @@ def test_moderation_test_guardian_overlay_returns_overlaid_effective_policy(monk
                 categories_enabled=base_policy.categories_enabled,
             )
 
-        def check_text(self, text, dependent_user_id, phase="input", chat_type=None):
+        async def check_text_async(self, text, dependent_user_id, phase="input", chat_type=None):
             from tldw_Server_API.app.core.Moderation.supervised_policy import SupervisedCheckResult
             return SupervisedCheckResult()
 

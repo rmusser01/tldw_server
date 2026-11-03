@@ -18,6 +18,7 @@ to apply guardian-imposed rules on supervised accounts.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 from dataclasses import dataclass
@@ -35,8 +36,17 @@ from tldw_Server_API.app.core.DB_Management.Guardian_DB import (
 from tldw_Server_API.app.core.DB_Management.guardian_db_resolver import (
     resolve_guardian_db_for_user_id,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
 from tldw_Server_API.app.core.Moderation.conflict_resolution import resolve_conflicts
-from tldw_Server_API.app.core.Moderation.execution_models import RegexRuleSnapshot
+from tldw_Server_API.app.core.Moderation.execution_models import (
+    ExecutionBounds,
+    FailureMetadata,
+    RegexRuleSnapshot,
+    SupervisedBatchResult,
+    execution_scope,
+)
+from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_supervised_request
 from tldw_Server_API.app.core.Moderation.governance_utils import (
     chat_type_matches,
     is_schedule_active,
@@ -45,7 +55,6 @@ from tldw_Server_API.app.core.Moderation.moderation_service import (
     ModerationPolicy,
     PatternRule,
 )
-from tldw_Server_API.app.core.Moderation.supervised_evaluator import evaluate_supervised
 
 _SUPERVISED_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -188,18 +197,71 @@ class SupervisedPolicyEngine:
 
         Returns the highest-priority result (block > redact > warn > notify > pass).
         """
-        if not text or not text.strip():
-            return SupervisedCheckResult()
+        with execution_scope():
+            if not text or not text.strip():
+                return SupervisedCheckResult()
+            compiled_policies = self._get_compiled_policies(dependent_user_id, chat_type=chat_type)
+            if not compiled_policies:
+                return SupervisedCheckResult()
+            rules = [
+                RegexRuleSnapshot(regex.pattern, int(regex.flags), pol.action, pol.phase)
+                for pol, regex, _gp in compiled_policies
+            ]
+            batch = self._execute_supervised_batch(text, rules, phase)
+            return self._assemble_result(text, compiled_policies, batch)
 
-        compiled_policies = self._get_compiled_policies(dependent_user_id, chat_type=chat_type)
-        if not compiled_policies:
-            return SupervisedCheckResult()
+    async def check_text_async(
+        self,
+        text: str,
+        dependent_user_id: str,
+        phase: str = "input",
+        chat_type: str | None = None,
+    ) -> SupervisedCheckResult:
+        """Resolve borrowed DB state here; offload only the copied regex batch."""
+        with execution_scope():
+            if not text or not text.strip():
+                return SupervisedCheckResult()
+            compiled_policies = self._get_compiled_policies(dependent_user_id, chat_type=chat_type)
+            if not compiled_policies:
+                return SupervisedCheckResult()
+            rules = [
+                RegexRuleSnapshot(regex.pattern, int(regex.flags), pol.action, pol.phase)
+                for pol, regex, _gp in compiled_policies
+            ]
+            execute_batch = self._execute_supervised_batch
+            batch = await run_moderation_async(
+                lambda: execute_batch(text, rules, phase),
+                metadata=FailureMetadata("supervised_evaluate", phase, len(text)),
+            )
+            return self._assemble_result(text, compiled_policies, batch)
 
-        rules = [
-            RegexRuleSnapshot(regex.pattern, int(regex.flags), pol.action, pol.phase)
-            for pol, regex, _gp in compiled_policies
-        ]
-        batch = evaluate_supervised(text, rules, phase)
+    @staticmethod
+    def _execute_supervised_batch(text: str, rules: list[RegexRuleSnapshot], phase: str) -> SupervisedBatchResult:
+        """Execute only copied matching data; keep governance/DB metadata outside."""
+        from tldw_Server_API.app.core.Moderation.execution_incidents import report_execution_failure
+        from tldw_Server_API.app.core.Moderation.execution_runner import get_execution_runner
+
+        with execution_scope() as scope:
+            try:
+                request = snapshot_supervised_request(text, rules, phase, ExecutionBounds())
+                return get_execution_runner().execute(request, scope).result
+            except ModerationExecutionError as error:
+                try:
+                    report_execution_failure(
+                        error, operation="supervised_evaluate", phase=phase, scope=scope, input_chars=len(text)
+                    )
+                except Exception:  # noqa: BLE001 - reporting must never replace enforcement.
+                    with contextlib.suppress(Exception):
+                        logger.warning("Moderation failure reporting unavailable")
+                raise error from None
+
+    def _assemble_result(
+        self,
+        text: str,
+        compiled_policies: list[tuple[SupervisedPolicy, re.Pattern, GovernancePolicy | None]],
+        batch: SupervisedBatchResult,
+    ) -> SupervisedCheckResult:
+        """Associate validated child indices with the exact submitted parent snapshot."""
         if batch.winner_index is None:
             return SupervisedCheckResult()
         pol, regex, gp = compiled_policies[batch.winner_index]
@@ -230,13 +292,13 @@ class SupervisedPolicyEngine:
     @staticmethod
     def _build_snippet(
         text: str,
-        match: re.Match | tuple[int, int],
+        match: tuple[int, int],
         policy: SupervisedPolicy,
     ) -> str | None:
         if policy.notify_context == "full_message":
             return text[:500] if len(text) > 500 else text
         if policy.notify_context == "snippet":
-            match_start, match_end = match if isinstance(match, tuple) else match.span()
+            match_start, match_end = match
             start = max(0, match_start - 30)
             end = min(len(text), match_end + 30)
             snippet = text[start:end].strip()
@@ -370,6 +432,8 @@ class GuardianModerationProxy:
                 base_policy,
                 chat_type=self._chat_type,
             )
+        except ModerationExecutionError:
+            raise
         except _SUPERVISED_NONCRITICAL_EXCEPTIONS:
             logger.debug("Guardian policy overlay skipped in proxy")
             return base_policy

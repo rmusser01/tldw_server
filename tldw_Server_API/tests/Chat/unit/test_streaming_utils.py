@@ -28,6 +28,20 @@ from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
 
 
+@pytest.mark.asyncio
+async def test_transform_helpers_await_future_results_and_preserve_sync():
+    def future_result(text):
+        result = asyncio.get_running_loop().create_future()
+        result.set_result(text.upper())
+        return result
+
+    future_result.flush = lambda: future_result("tail")
+    assert await streaming_utils._apply_text_transform(future_result, "safe") == "SAFE"
+    assert await streaming_utils._flush_text_transform(future_result) == "TAIL"
+    assert await streaming_utils._apply_text_transform(str.upper, "safe") == "SAFE"
+    assert await streaming_utils._flush_text_transform(object()) == ""
+
+
 def test_create_chat_streaming_response_forwards_request_fields():
     stream = object()
     save_callback = object()

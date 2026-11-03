@@ -49,6 +49,48 @@ def _setup_active_relationship(db, guardian="guardian1", dependent="child1"):
     return rel
 
 
+def test_supervised_notification_check_has_no_parent_regex_execution(db, engine, monkeypatch):
+    from tldw_Server_API.app.core.Moderation import supervised_evaluator
+
+    rel = _setup_active_relationship(db)
+    pol = db.create_policy(
+        relationship_id=rel.id, category="topic", pattern="secret", action="notify", notify_guardian=True
+    )
+    monkeypatch.setattr(
+        supervised_evaluator, "evaluate_supervised", lambda *a, **k: pytest.fail("parent regex execution")
+    )
+    result = engine.check_text("secret", "child1")
+    assert (result.action, result.matched_policy_id, result.notify_guardian) == ("notify", pol.id, True)
+
+
+@pytest.mark.asyncio
+async def test_supervised_async_keeps_db_resolution_on_owner_thread(db, engine, monkeypatch):
+    import threading
+
+    from tldw_Server_API.app.core.Moderation import execution_runner
+
+    rel = _setup_active_relationship(db)
+    db.create_policy(relationship_id=rel.id, category="topic", pattern="secret", action="notify")
+    owner_thread = threading.get_ident()
+    resolve = engine._get_compiled_policies
+    runner = execution_runner.get_execution_runner()
+    execute = runner.execute
+    observed = []
+
+    def resolve_owned(*args, **kwargs):
+        assert threading.get_ident() == owner_thread
+        return resolve(*args, **kwargs)
+
+    def execute_off_thread(request, scope):
+        observed.append(threading.get_ident() != owner_thread)
+        return execute(request, scope)
+
+    monkeypatch.setattr(engine, "_get_compiled_policies", resolve_owned)
+    monkeypatch.setattr(runner, "execute", execute_off_thread)
+    assert (await engine.check_text_async("secret", "child1")).action == "notify"
+    assert observed == [True]
+
+
 def test_pure_selection_retains_parent_metadata_and_first_notify_tie(db, engine, monkeypatch):
     from tldw_Server_API.app.core.Moderation.execution_models import RegexRuleSnapshot
     from tldw_Server_API.app.core.Moderation.supervised_evaluator import evaluate_supervised

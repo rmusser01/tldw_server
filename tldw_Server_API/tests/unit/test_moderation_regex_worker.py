@@ -50,7 +50,7 @@ def test_worker_matches_evaluator_characterization(operation, phase):
     request = replace(request, phase=phase)
     evaluator = PolicyEvaluator()
     if operation == "evaluate":
-        expected = evaluator.evaluate_text(request.text, policy, phase, LIMITS, include_redacted_text=True)
+        expected = evaluator.evaluate_text(request.text, policy, phase, LIMITS, include_redacted_text=False)
     else:
         method = evaluator.redact_text if operation == "redact" else evaluator.redact_text_with_count
         expected = method(request.text, policy, phase, LIMITS)
@@ -62,6 +62,30 @@ def test_worker_matches_evaluator_characterization(operation, phase):
 def test_literal_backslash_replacement_stays_literal():
     request, _ = base_request("redact", replacement=r"\1-literal")
     assert regex_worker.execute_request(request).result == r"\1-literal \1-literal"
+
+
+def test_decision_batch_never_eagerly_dispatches_redaction(monkeypatch):
+    request, _ = base_request()
+    monkeypatch.setattr(PolicyEvaluator, "redact_text", lambda *a, **k: pytest.fail("eager redaction"))
+    response = regex_worker.execute_request(request)
+    assert response.reason is None
+    assert response.result.action == "redact"
+    assert response.result.redacted_text is None
+
+
+def test_child_decision_succeeds_without_allocating_expanding_redaction():
+    request, _ = base_request(text="aa", pattern="a", replacement="zz", bounds=ExecutionBounds(max_output_chars=3))
+    child = subprocess.run(
+        [sys.executable, "-I", "-S", str(Path(regex_worker.__file__).resolve())],
+        input=encode_request(request),
+        capture_output=True,
+        timeout=10,
+        check=True,
+    )
+    response = decode_response(child.stdout, request)
+    assert response.reason is None
+    assert response.result.action == "redact"
+    assert response.result.redacted_text is None
 
 
 @pytest.mark.parametrize("raw_count", [None, 0, -1, 2, "2", "bad"])

@@ -339,7 +339,7 @@ def decode_response(frame: bytes, request: WorkerRequest) -> WorkerResponse:
             _invalid()
         if result["action"] != "pass" and result["matched_pattern"] is None:
             _invalid()
-        if (result["redacted_text"] is not None) != (result["action"] == "redact"):
+        if result["redacted_text"] is not None:
             _invalid()
         result = ModerationEvaluationResult(**result)
     elif request.operation == "redact":

@@ -38,6 +38,55 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTurnDone,
 )
 from tldw_Server_API.app.core.Audio.Realtime.session import RealtimeSession
+from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
+async def test_stt_moderation_failure_clears_cached_snapshot_and_stops_turn(reason):
+    class FailedPipeline(FakeRealtimePipeline):
+        async def transcribe_pcm16(self, *args, **kwargs):
+            raise ModerationExecutionError(reason)
+
+    pipeline = FailedPipeline()
+    session = RealtimeSession(pipeline=pipeline)
+    session._last_user_transcript = "earlier private snapshot"
+    session.input_audio_buffer.extend(b"\x00\x00")
+    events = await session.commit_audio(CommitAudioCommand(event_id="commit"))
+    errors = [event for event in events if isinstance(event, RealtimeErrorEvent)]
+    assert [event.code for event in errors] == ["moderation_unavailable"]
+    assert not any(isinstance(event, InputAudioCommittedEvent) for event in events)
+    assert session._last_user_transcript == ""
+    assert session.turn_index == 0
+    assert session.input_audio_buffer == b""
+    downstream = [event async for event in session.create_response(CreateResponseCommand(event_id="response"))]
+    assert not any(isinstance(event, ResponseCreatedEvent) for event in downstream)
+    assert pipeline.stream_requests == []
+
+
+@pytest.mark.asyncio
+async def test_response_moderation_failure_never_completes_or_persists():
+    from unittest.mock import AsyncMock
+
+    class FailedPipeline(FakeRealtimePipeline):
+        async def stream_turn(self, *args, **kwargs):
+            yield RealtimePipelineTextDelta("safe prefix")
+            raise ModerationExecutionError("worker_crashed")
+
+    persistence = AsyncMock()
+    session = RealtimeSession(
+        pipeline=FailedPipeline(),
+        persistence_adapter=persistence,
+        config=RealtimeSessionConfig(metadata={"tldw": {"persist": True, "conversation_id": "conversation"}}),
+    )
+    session._last_user_transcript = "private snapshot"
+    events = [event async for event in session.create_response(CreateResponseCommand(event_id="response"))]
+    assert [event.code for event in events if isinstance(event, RealtimeErrorEvent)] == ["moderation_unavailable"]
+    assert [event.status for event in events if isinstance(event, ResponseDoneEvent)] == ["failed"]
+    assert session._last_user_transcript == ""
+    assert session.active_response_id is None
+    assert "private snapshot" not in repr(events)
+    persistence.write_turn.assert_not_called()
 
 
 class FakeRealtimePipeline:
