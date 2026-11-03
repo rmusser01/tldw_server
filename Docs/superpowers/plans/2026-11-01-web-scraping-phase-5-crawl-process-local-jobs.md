@@ -1082,6 +1082,18 @@ capacity recovered only after its actual exit. This proof must pass before the
 owner-order fix is adopted. No startup hook or new subsystem is needed for this
 integration repair. Cost if wrong: narrow cleanup/route completion rework.
 
+**Failed-Close Retirement Evidence (2026-11-03):**
+Successful native close acknowledgment plus confirmed disconnection is sufficient,
+but not the only positive exit evidence: this acquisition's observed native
+`disconnected` event with `is_connected() is False` also proves actual exit if
+the close command rejected. A bare false state read plus failed close does not.
+Keep the guard installed and all physical ownership retained without that proof;
+a still-running close command retains its lease even after the native exit event.
+An early terminal route error waits on this same existing owner event before
+local framework completion. Native rejected/held-close and early-error barriers
+verify zero late I/O and actual-drain capacity recovery. No retry loop, poller,
+extra connection or startup hook. This refines exit evidence, not ownership rules.
+
 **Legacy Browser Availability Parity (B5):**
 Retain the enhanced wrapper's supported uninitialized-browser HTTP/trafilatura
 fallback. The old public `scrape_article(method="playwright")` with no initialized
