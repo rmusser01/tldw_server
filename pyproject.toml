@@ -524,6 +524,7 @@ tldw_Server_API = [
   "app/Setup_UI/*.html",
   "app/core/Evaluations/data/*.json",
   "app/core/Evaluations/data/**/*.json",
+  "app/core/Moderation/README.md",
   "app/core/DB_Management/migrations/*.sql",
   "app/core/Persona/assets/**/*.png",
   "app/core/Persona/assets/**/*.json",
