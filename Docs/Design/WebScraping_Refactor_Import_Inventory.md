@@ -178,6 +178,7 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 | `tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py` | 13 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.EnhancedWebScraper` |
 | `tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py` | 375 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping` |
 | `tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py` | 401 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping` |
+| `tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py` | 428 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping` |
 | `tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py` | 12 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.ScrapingJob` |
 | `tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py` | 12 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.ScrapingJobQueue` |
 | `tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py` | 321 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping` |

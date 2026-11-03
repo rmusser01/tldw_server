@@ -1168,6 +1168,14 @@
       },
       {
         "import_kind": "from",
+        "imported_name": "enhanced_web_scraping",
+        "line": 428,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
         "imported_name": "ScrapingJob",
         "line": 12,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",

@@ -131,13 +131,20 @@ async def _checkpoint_call(
     function: Callable[..., _T],
     *args: Any,
     loading: bool = False,
+    active: bool = False,
     background: bool = False,
     cleanup_deadline: float | None = None,
     **kwargs: Any,
 ) -> _T:
     """Await an owned file operation without conflating cancellation and drain."""
-    if not loading and not background and cleanup_deadline is None:
+    if not loading and not active and not background and cleanup_deadline is None:
         raise ValueError("checkpoint cleanup deadline required")
+    if active:
+        for previous in handles:
+            if not previous.drained.done():
+                await _bounded(asyncio.shield(previous.drained), context)
+        handles[:] = [item for item in handles if not item.drained.done()]
+        context.check()
     owned = _checkpoint_operation(context, function, *args, **kwargs)
     handles.append(owned)
 
@@ -145,7 +152,7 @@ async def _checkpoint_call(
         operation = asyncio.shield(future)
         if background:
             return await operation
-        if loading:
+        if loading or active:
             return await _bounded(operation, context)
         return await _within_cleanup(operation, cleanup_deadline)
 
@@ -163,6 +170,35 @@ async def _checkpoint_call(
     # the owner's structural API, not executor-global or private context state.
     context.owned_handles()
     return value
+
+
+async def _periodic_checkpoint(
+    plan: CrawlPlan,
+    context: CrawlControls,
+    frontier: Frontier,
+    count: int,
+    handles: list[WorkHandle[Any]],
+    checkpoint: CheckpointPort | None,
+    diagnostics: list[str],
+) -> None:
+    """Preserve literal legacy modulo cadence after the atomic disposition."""
+    if checkpoint is None or plan.profile != "legacy_recursive" or count % 10:
+        return
+    state = CheckpointState(
+        checkpoint.scope,
+        plan,
+        frontier.snapshot(),
+        replace(context.snapshot(), accounting_complete=False),
+        stop_reason=None,
+        accounting_complete=False,
+        pages_scraped=count,
+    )
+    try:
+        await _checkpoint_call(context, handles, checkpoint.save, state, active=True)
+    except (asyncio.CancelledError, ParentStop):
+        raise
+    except Exception:  # noqa: BLE001 - best-effort continuation cannot replace primary work
+        diagnostics.append("checkpoint_failed")
 
 
 async def _release_crawl(
@@ -189,6 +225,7 @@ async def _finalize_crawl(
     context: CrawlControls,
     frontier: Frontier,
     handles: list[WorkHandle[Any]],
+    checkpoint_handles: list[WorkHandle[Any]] | None = None,
     checkpoint: CheckpointPort | None,
     loading: bool,
     count: int,
@@ -198,9 +235,11 @@ async def _finalize_crawl(
     owned: tuple[object, ...] | None,
 ) -> tuple[CrawlReport, asyncio.CancelledError | None]:
     """Finalize checkpoint and writer ownership before the single publication."""
+    checkpoint_handles = checkpoint_handles or []
     cleanup_deadline = monotonic() + _CLEANUP_SECONDS
     # Policy/robots work may outlive awaiters without ever acquiring a page.
-    handles = list({id(item): item for item in (*handles, *context.owned_handles())}.values())
+    pending_io = any(not item.drained.done() for item in checkpoint_handles)
+    handles = list({id(item): item for item in (*handles, *checkpoint_handles, *context.owned_handles())}.values())
     normal = reason in {"frontier_exhausted", "page_cap_reached"}
     if not normal and cancellation is None:
         for handle in handles:
@@ -209,7 +248,7 @@ async def _finalize_crawl(
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 - preserve primary stop
                 diagnostics.append("execution_failed")
     snapshot = frontier.snapshot()
-    deferred_save = False
+    deferred_save = pending_io and not loading
 
     def continuation():
         budget = context.snapshot()
@@ -223,7 +262,7 @@ async def _finalize_crawl(
             pages_scraped=count,
         )
 
-    if checkpoint is not None and not loading:
+    if checkpoint is not None and not loading and not pending_io:
         try:
             if normal:
                 # Bound logical cleanup but retain writer/private graph if actual
@@ -295,6 +334,7 @@ async def run_crawl(
     """
     frontier = Frontier(plan)
     handles: list[WorkHandle[PageData]] = []
+    checkpoint_handles: list[WorkHandle[Any]] = []
     reason, diagnostics = "frontier_exhausted", []
     cancellation = None
     count = sequence = 0
@@ -342,7 +382,7 @@ async def run_crawl(
             if seeds is not None or plan.profile == "enhanced_batch":
                 raise ValueError("live multi-input continuation is unsupported")
             state = await _checkpoint_call(
-                context, handles, checkpoint.load, plan=plan, scope=checkpoint.scope, loading=True
+                context, checkpoint_handles, checkpoint.load, plan=plan, scope=checkpoint.scope, loading=True
             )
             if state is not None:
                 if state.scope != checkpoint.scope or state.plan != plan or state.schema_version != 1:
@@ -503,6 +543,7 @@ async def run_crawl(
                 if article.get("error") == "browser_transport_unavailable":
                     reason = "transport_unavailable"
                     break
+                await _periodic_checkpoint(plan, context, frontier, count, checkpoint_handles, checkpoint, diagnostics)
             if reason != "frontier_exhausted":
                 break
     except asyncio.CancelledError as exc:
@@ -526,6 +567,7 @@ async def run_crawl(
             context=context,
             frontier=frontier,
             handles=handles,
+            checkpoint_handles=checkpoint_handles,
             checkpoint=checkpoint,
             loading=loading,
             count=count,
@@ -537,7 +579,9 @@ async def run_crawl(
     if cancellation is not None:
         acquire = policy = hooks = seeds = handle = source = None
         handles.clear()
+        checkpoint_handles.clear()
         cancellation.__traceback__ = None
+        cancellation.report = report
         raise cancellation
     if report.outcome.state == "completed":
         if legacy and hooks and hooks.progress_callback:

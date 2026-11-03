@@ -363,6 +363,17 @@ def _probe(
     )
 
 
+def _policy_context(launcher, probe, options=None):
+    """Exercise the route policy port now driven by native Fetch, not pass-through.
+
+    Real Chromium redirect/count/lifecycle tests separately exercise installation
+    and the Fetch adapter; these unit cases inject accessor/action failures.
+    """
+    context = launcher.browser.contexts[0]
+    context.http_handler = probe._http_handler(options or BrowserProbeOptions())
+    return context
+
+
 @pytest.mark.asyncio
 async def test_browser_routes_before_page_and_blocks_service_workers() -> None:
     controls = _controls()
@@ -623,7 +634,7 @@ async def test_http_route_allows_navigation_redirect_and_subresource() -> None:
     probe = _probe(controls=controls, guard=guard, launcher=launcher)
 
     async with probe.open_page(BrowserProbeOptions()):
-        context = launcher.browser.contexts[0]
+        context = _policy_context(launcher, probe)
         routes = [
             await context.dispatch_http("https://start.example"),
             await context.dispatch_http("https://redirect.example"),
@@ -653,7 +664,7 @@ async def test_http_route_denial_and_guard_error_fail_closed(decision: object) -
     probe = _probe(controls=controls, guard=guard, launcher=launcher)
 
     async with probe.open_page(BrowserProbeOptions()):
-        route = await launcher.browser.contexts[0].dispatch_http("https://secret.example/?token=raw")
+        route = await _policy_context(launcher, probe).dispatch_http("https://secret.example/?token=raw")
     await controls.close()
 
     assert route.abort_calls == 1
@@ -672,7 +683,7 @@ async def test_http_route_guard_cancellation_propagates() -> None:
 
     async with probe.open_page(BrowserProbeOptions()):
         with pytest.raises(asyncio.CancelledError):
-            await launcher.browser.contexts[0].dispatch_http("https://allowed.example")
+            await _policy_context(launcher, probe).dispatch_http("https://allowed.example")
     await controls.close()
 
 
@@ -704,7 +715,7 @@ async def test_http_route_action_failures_are_contained_sanitized_and_fail_close
     probe = _probe(controls=controls, guard=guard, launcher=launcher)
     try:
         async with probe.open_page(BrowserProbeOptions(block_resource_types=("image",))):
-            context = launcher.browser.contexts[0]
+            context = _policy_context(launcher, probe, BrowserProbeOptions(block_resource_types=("image",)))
             assert context.http_handler is not None
             route = FakeBrowserRoute(
                 FakeBrowserRequest("https://secret.example/?token=raw", resource_type),
@@ -737,7 +748,7 @@ async def test_http_route_action_cancellation_propagates(action: str) -> None:
     )
 
     async with probe.open_page(BrowserProbeOptions()):
-        context = launcher.browser.contexts[0]
+        context = _policy_context(launcher, probe)
         assert context.http_handler is not None
         route = FakeBrowserRoute(
             FakeBrowserRequest("https://allowed.example"),
@@ -772,7 +783,7 @@ async def test_decision_allowed_accessor_failure_is_contained_and_sanitized() ->
     )
     try:
         async with probe.open_page(BrowserProbeOptions()):
-            context = launcher.browser.contexts[0]
+            context = _policy_context(launcher, probe)
             assert context.http_handler is not None
             route = FakeBrowserRoute(
                 FakeBrowserRequest("https://allowed.example"),
@@ -839,7 +850,7 @@ async def test_http_accessor_failure_is_contained_sanitized_and_aborted(
     route = RaisingRoute()
     try:
         async with probe.open_page(BrowserProbeOptions()):
-            context = launcher.browser.contexts[0]
+            context = _policy_context(launcher, probe)
             assert context.http_handler is not None
             await context.http_handler(route)  # type: ignore[arg-type]
         await controls.close()
@@ -874,7 +885,7 @@ async def test_http_accessor_cancellation_propagates() -> None:
     )
 
     async with probe.open_page(BrowserProbeOptions()):
-        context = launcher.browser.contexts[0]
+        context = _policy_context(launcher, probe)
         assert context.http_handler is not None
         with pytest.raises(asyncio.CancelledError):
             await context.http_handler(CancellingRoute())  # type: ignore[arg-type]
@@ -889,7 +900,9 @@ async def test_blocked_resource_type_aborts_without_guard_decision() -> None:
     probe = _probe(controls=controls, guard=guard, launcher=launcher)
 
     async with probe.open_page(BrowserProbeOptions(block_resource_types=("image",))):
-        route = await launcher.browser.contexts[0].dispatch_http(
+        route = await _policy_context(
+            launcher, probe, BrowserProbeOptions(block_resource_types=("image",))
+        ).dispatch_http(
             "https://cdn.example/image.png",
             "image",
         )
@@ -1221,7 +1234,8 @@ async def test_exhausted_deadline_reserves_once_but_prevents_launch() -> None:
     ],
 )
 async def test_each_startup_await_is_bounded_by_the_shared_deadline(
-    stage: str, monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _assert_selected_startup_deadline(stage, monkeypatch)
 
@@ -2053,7 +2067,7 @@ async def test_guard_and_cleanup_logs_never_include_urls_or_raw_errors() -> None
     )
     try:
         async with probe.open_page(BrowserProbeOptions()):
-            route = await launcher.browser.contexts[0].dispatch_http("https://secret.example/?token=raw")
+            route = await _policy_context(launcher, probe).dispatch_http("https://secret.example/?token=raw")
         await controls.close()
     finally:
         logger.remove(sink)
@@ -2154,16 +2168,18 @@ async def test_browser_force_cleanup_checks_native_operation_before_forcing(
             assert force_results == [None]
         await handle.force_close()
         await handle.close()
-        expected_warnings = ["Preflight cleanup failed for _BrowserCleanupHandle."] if (
-            not force_available and outcome == "failed"
-        ) else []
+        expected_warnings = (
+            ["Preflight cleanup failed for _BrowserCleanupHandle."]
+            if (not force_available and outcome == "failed")
+            else []
+        )
         assert [message.strip() for message in warnings] == expected_warnings
 
         expected_force_calls = int(force_available and outcome != "succeeded")
         assert resource.force_calls == expected_force_calls
-        expected_native_calls = [] if force_available and outcome == "absent" else [
-            "stop" if kind == "playwright" else "close"
-        ]
+        expected_native_calls = (
+            [] if force_available and outcome == "absent" else ["stop" if kind == "playwright" else "close"]
+        )
         assert resource.native_calls == expected_native_calls
         assert controls._start_force_cleanup((entry,)) == set()
         if operation is not None:

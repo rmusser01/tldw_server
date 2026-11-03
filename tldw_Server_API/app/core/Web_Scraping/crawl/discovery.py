@@ -11,15 +11,16 @@ from defusedxml.common import DefusedXmlException
 from .. import url_utils
 from ..contracts.execution import DiscoveredLink, DiscoveryResult
 from ..runtime.controls import ParentControls, ParentStop
-from .models import CrawlHooks, CrawlPlan
+from .models import CrawlHooks, CrawlLimits, CrawlPlan
 
 
-def url_bytes(value: str, plan: CrawlPlan) -> int:
+def url_bytes(value: str, plan: CrawlPlan | CrawlLimits) -> int:
     """Check codepoint length before bounded UTF-8 allocation, then exact bytes."""
-    if len(value) > plan.limits.max_url_bytes:
+    limits = plan.limits if isinstance(plan, CrawlPlan) else plan
+    if len(value) > limits.max_url_bytes:
         raise ParentStop("budget_exhausted")
     size = len(value.encode("utf-8"))
-    if size > plan.limits.max_url_bytes:
+    if size > limits.max_url_bytes:
         raise ParentStop("budget_exhausted")
     return size
 
@@ -36,7 +37,7 @@ def charge(controls: ParentControls, counter: str, amount: int = 1) -> None:
         reservation.close()
 
 
-def resolve_reference(base: str, reference: str, plan: CrawlPlan) -> str:
+def resolve_reference(base: str, reference: str, plan: CrawlPlan | CrawlLimits) -> str:
     """Pre-admit the derived shape before urllib allocates the resolved URL.
 
     Splitting bounded inputs only creates bounded components. Account the joined
@@ -78,7 +79,8 @@ def resolve_reference(base: str, reference: str, plan: CrawlPlan) -> str:
     size += (1 + url_bytes(query, plan) if query else 0) + (
         1 + url_bytes(target.fragment, plan) if target.fragment else 0
     )
-    if size > plan.limits.max_url_bytes:
+    limits = plan.limits if isinstance(plan, CrawlPlan) else plan
+    if size > limits.max_url_bytes:
         raise ParentStop("budget_exhausted")
     resolved = urljoin(base, reference)
     url_bytes(resolved, plan)

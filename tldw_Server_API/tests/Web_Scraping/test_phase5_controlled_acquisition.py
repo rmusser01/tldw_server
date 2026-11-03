@@ -249,7 +249,7 @@ async def test_browser_parent_transfer_stop_prevents_retry_and_keeps_reason():
         _profile,
     )
 
-    runtime = _FakeBrowserRuntime(cdp_events=[("Network.dataReceived", {"encodedDataLength": 4})])
+    runtime = _FakeBrowserRuntime(cdp_events=[("Network.dataReceived", {"requestId": "main", "encodedDataLength": 4})])
     parent = CrawlContext(CrawlLimits(transfer_bytes=3), clock=time.monotonic)
     browser = _adapter(runtime, _FakeGuard([True] * 10))
     browser.bind_parent(parent, RuntimeRequestContext())

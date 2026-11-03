@@ -8,7 +8,7 @@ import inspect
 import math
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -49,6 +49,120 @@ _HTTP_SCHEMES = frozenset({"http", "https"})
 _WEBSOCKET_POLICY_SCHEMES = {"ws": "http", "wss": "https"}
 _INTERNAL_BLANK_PAGE = "about:blank"
 _BROWSER_CLEANUP_GRACE_S = 2.0
+_FETCH_CALLBACK_CAPACITY = 64
+
+
+@dataclass(frozen=True)
+class _FetchRequest:
+    """Only the existing route policy's bounded request attributes."""
+
+    url: str
+    resource_type: str
+
+
+class _FetchRoute:
+    """Adapt public browser-scope Fetch to the existing preflight route port."""
+
+    def __init__(self, guard: _FetchGuard, event: dict[str, Any]) -> None:
+        identifier = event["requestId"]
+        if not isinstance(identifier, str) or len(identifier) > 1024:
+            raise ProbeError("probe_error", "Probe failed.")
+        self._guard, self._identifier = guard, identifier
+        self.request = _FetchRequest(event["request"]["url"], str(event.get("resourceType", "Other")).lower())
+
+    async def abort(self) -> None:
+        await self._guard.send("Fetch.failRequest", {"requestId": self._identifier, "errorReason": "BlockedByClient"})
+
+    async def continue_(self) -> None:
+        await self._guard.send("Fetch.continueRequest", {"requestId": self._identifier})
+
+
+class _FetchGuard:
+    """One cleanup resource owns the same-connection guard through native exit."""
+
+    def __init__(self, browser: Any, probe: GuardedPlaywrightBrowserProbe, options: BrowserProbeOptions) -> None:
+        self.browser, self.probe = browser, probe
+        self.session: Any = None
+        self._route = probe._http_handler(options)
+        self._callbacks: set[asyncio.Task] = set()
+        self._commands: set[asyncio.Task] = set()
+        self._exited = asyncio.Event()
+        self._retired = False
+        browser.on("disconnected", self._disconnected)
+
+    def _disconnected(self, *_args: Any) -> None:
+        if self.browser.is_connected() is False:
+            self._exited.set()
+
+    async def install(self) -> None:
+        if not callable(getattr(self.browser, "new_browser_cdp_session", None)):
+            raise ProbeUnavailable()
+        self.session = await self.browser.new_browser_cdp_session()
+        self.session.on("Fetch.requestPaused", self._paused)
+        await self.send("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]})
+
+    def _own(self, operation: Awaitable[Any], tasks: set[asyncio.Task], name: str) -> asyncio.Task:
+        try:
+            task = asyncio.create_task(operation, name=name)
+        except BaseException:
+            if inspect.iscoroutine(operation):
+                operation.close()
+            raise
+        tasks.add(task)
+        observe_physical(task)
+
+        def completed(done: asyncio.Task) -> None:
+            tasks.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(completed)
+        return task
+
+    def _paused(self, event: dict[str, Any]) -> None:
+        if self._retired:
+            return
+        if len(self._callbacks) >= _FETCH_CALLBACK_CAPACITY:
+            self.probe._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+            return
+
+        async def dispatch() -> None:
+            try:
+                await self._route(_FetchRoute(self, event))
+            except (asyncio.CancelledError, ParentStop, PreflightDeadlineExceeded, ProbeError) as error:
+                self.probe._stop_from_callback(error)
+            except Exception:  # noqa: BLE001 - malformed native events fail closed without payloads
+                self.probe._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+
+        try:
+            self._own(dispatch(), self._callbacks, "preflight-browser-fetch-callback")
+        except Exception:  # noqa: BLE001 - scheduling failure cannot leave admission open
+            self.probe._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+
+    async def send(self, method: str, params: dict[str, Any]) -> Any:
+        if len(self._commands) >= _FETCH_CALLBACK_CAPACITY:
+            raise ProbeError("probe_error", "Probe failed.")
+        task = self._own(self.session.send(method, params), self._commands, "preflight-browser-fetch-command")
+        return await asyncio.shield(task)
+
+    async def close(self) -> None:
+        # Reverse cleanup/force cleanup may arrive before close is acknowledged.
+        # Neither a rejected close nor logical cancellation retires this guard.
+        await self._exited.wait()
+        self._retired = True
+        if self._callbacks:
+            await asyncio.gather(*tuple(self._callbacks), return_exceptions=True)
+        if self._commands:
+            await asyncio.gather(*tuple(self._commands), return_exceptions=True)
+        if self.session is not None:
+            from playwright._impl._errors import TargetClosedError
+
+            try:
+                await self.session.detach()
+            except TargetClosedError:
+                pass
+            self.session.remove_listener("Fetch.requestPaused", self._paused)
+        self.browser.remove_listener("disconnected", self._disconnected)
 
 
 class _DefaultPlaywrightLauncher:
@@ -152,6 +266,7 @@ class _BrowserCleanupHandle:
         self._operation_task: asyncio.Task[None] | None = None
         self._terminal = False
         self._force_started = False
+        self.before_close: Callable[[], Awaitable[None]] | None = None
 
     @staticmethod
     def _consume_operation(task: asyncio.Task[None]) -> None:
@@ -165,8 +280,14 @@ class _BrowserCleanupHandle:
             if self._terminal:
                 return None, False
             if self._operation_task is None:
+
+                async def close_owned() -> None:
+                    if self.before_close is not None:
+                        await self.before_close()
+                    await _invoke_first(self._resource, self._close_methods)
+
                 self._operation_task = asyncio.create_task(
-                    _invoke_first(self._resource, self._close_methods),
+                    close_owned(),
                     name=f"preflight-browser-close-{self._kind}",
                 )
                 self._operation_task.add_done_callback(self._consume_operation)
@@ -185,6 +306,12 @@ class _BrowserCleanupHandle:
             if current is not None and current.cancelling():
                 raise
 
+    async def wait_closed(self) -> None:
+        """Await native completion even after force cleanup closed admission."""
+        await self.close()
+        if self._operation_task is not None:
+            await asyncio.shield(self._operation_task)
+
     async def force_close(self) -> None:
         async with self._force_lock:
             if self._force_started:
@@ -202,6 +329,8 @@ class _BrowserCleanupHandle:
                         and operation.exception() is None
                     ):
                         return
+                if self.before_close is not None:
+                    await self.before_close()
                 result = force_method()
                 if inspect.isawaitable(result):
                     await result
@@ -212,7 +341,7 @@ class _BrowserCleanupHandle:
                 return
             async with self._operation_lock:
                 self._terminal = True
-            await operation
+            await asyncio.shield(operation)
 
 
 def _cleanup_handle(resource: Any, *, kind: str) -> _BrowserCleanupHandle:
@@ -426,6 +555,8 @@ class GuardedPlaywrightBrowserProbe:
 
     async def _decision_allowed(self, url: str) -> bool:
         try:
+            if self._controls.parent is not None:
+                self._controls.parent.check_url(url)
             decision = await _await_shared_deadline(
                 self._controls,
                 lambda: self._guard.decide(
@@ -489,6 +620,8 @@ class GuardedPlaywrightBrowserProbe:
     def _http_handler(
         self,
         options: BrowserProbeOptions,
+        *,
+        native_dispatch: bool = True,
     ) -> Callable[[RuntimeBrowserRoute], Any]:
         generation = self._generation
 
@@ -503,6 +636,11 @@ class GuardedPlaywrightBrowserProbe:
                 request = route.request
                 if request.resource_type in options.block_resource_types:
                     await self._abort_http(route)
+                    return
+                if not native_dispatch:
+                    # Chromium redirects bypass context routing. The same browser's
+                    # Fetch callback is the single authoritative admission point.
+                    await self._continue_http(route)
                     return
                 if await self._decision_allowed(request.url):
                     if self._controls.parent is not None:
@@ -686,7 +824,7 @@ class GuardedPlaywrightBrowserProbe:
                 self._launcher.start,
                 check_after=False,
             )
-            self._register(handles, playwright, kind="playwright")
+            playwright_handle = self._register(handles, playwright, kind="playwright")
 
             launch_options: dict[str, Any] = {"headless": True}
             if self._no_sandbox:
@@ -696,7 +834,13 @@ class GuardedPlaywrightBrowserProbe:
                 lambda: playwright.chromium.launch(**launch_options),
                 check_after=False,
             )
-            self._register(handles, browser, kind="browser")
+            guard = _FetchGuard(browser, self, options)
+            guard_handle = self._register(handles, guard, kind="fetch")
+            # Forced cleanup is concurrent, but connection stop must not destroy
+            # the guard's native retirement evidence or command acknowledgements.
+            playwright_handle.before_close = guard_handle.wait_closed
+            self._context = self._register(handles, browser, kind="browser")
+            await _await_shared_deadline(self._controls, guard.install, check_after=False)
             startup_stage = "context"
 
             context_options: dict[str, Any] = {
@@ -713,13 +857,12 @@ class GuardedPlaywrightBrowserProbe:
                 lambda: browser.new_context(**context_options),
                 check_after=False,
             )
-            self._register(handles, context, kind="context")
-            self._context = context
+            self._context = self._register(handles, context, kind="context")
             await _await_shared_deadline(
                 self._controls,
                 lambda: context.route(
                     _HTTP_ROUTE_PATTERN,
-                    self._http_handler(options),
+                    self._http_handler(options, native_dispatch=False),
                 ),
                 check_after=False,
             )

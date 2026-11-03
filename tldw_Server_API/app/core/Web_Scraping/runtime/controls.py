@@ -96,6 +96,8 @@ class ParentControls(Protocol):
     def reserve(self, counter: Counter, amount: int = 1) -> Reservation: ...
     def charge_bytes(self, amount: int) -> None: ...
     def cap_timeout(self, requested: float | None) -> float: ...
+    def check_url(self, value: str) -> int: ...
+    def resolve_url(self, base: str, reference: str) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -248,6 +250,12 @@ class PageControls:
 
     def cap_timeout(self, requested: float | None) -> float:
         return self._call(self.parent.cap_timeout, requested)
+
+    def check_url(self, value: str) -> int:
+        return self._call(self.parent.check_url, value)
+
+    def resolve_url(self, base: str, reference: str) -> str:
+        return self._call(self.parent.resolve_url, base, reference)
 
 
 @dataclass(frozen=True)

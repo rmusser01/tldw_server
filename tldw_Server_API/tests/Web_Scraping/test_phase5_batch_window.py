@@ -392,6 +392,7 @@ async def test_owned_logical_completion_waits_on_its_drain_before_retrying_press
         second.finish(page(content="second result"))
         report = await task
         assert submissions == ["first", "second", "second", "second"]
+        assert context.snapshot().discovered_url_bytes == len("firstsecond")
         assert [item["content"] for item in report.articles] == ["first result", "second result"]
         assert other.cancellations == 0
     finally:

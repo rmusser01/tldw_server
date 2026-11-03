@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..contracts.execution import CrawlOutcome, CrawlReport, PageData, successful_article
+from ..crawl.discovery import charge
 from ..crawl.models import CrawlPlan, FrontierEntry
 from ..jobs.admission import QueueRejected
 from ..jobs.models import ScrapingJob
@@ -144,6 +145,13 @@ async def execute_batch(
     exhausted = False
     reason = "frontier_exhausted"
     cancellation = None
+
+    def consume() -> str:
+        value = next(source)
+        charge(context, "discovered_candidates")
+        charge(context, "discovered_url_bytes", context.check_url(value))
+        return value
+
     try:
         context.check()
         source = iter(urls)
@@ -160,7 +168,7 @@ async def execute_batch(
                 if next_job is None:
                     if next_url is None:
                         try:
-                            next_url = next(source)
+                            next_url = consume()
                         except StopIteration:
                             exhausted = True
                             break
@@ -183,7 +191,7 @@ async def execute_batch(
                     # from truncation. Never construct an over-budget job.
                     if next_job is None and next_url is None:
                         try:
-                            next(source)
+                            consume()
                         except StopIteration:
                             break
                     raise ParentStop("budget_exhausted")
@@ -193,7 +201,7 @@ async def execute_batch(
                 # waiting for final physical drain under the execution deadline.
                 if not exhausted and next_job is None and next_url is None:
                     try:
-                        next_url = next(source)
+                        next_url = consume()
                     except StopIteration:
                         exhausted = True
                 if exhausted:

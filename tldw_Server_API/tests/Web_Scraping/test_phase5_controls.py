@@ -5,7 +5,7 @@ import gc
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from threading import Barrier
+from threading import Barrier, Event
 
 import pytest
 from hypothesis import given
@@ -102,6 +102,85 @@ async def test_stop_signal_notifies_if_clock_expires_between_timeout_checks():
         context.cap_timeout(None)
     await asyncio.wait_for(asyncio.shield(signal), 1)
     assert signal.result() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["check_url", "resolve_url"])
+@pytest.mark.parametrize("before_binding", [False, True])
+async def test_url_bound_failure_latches_owner_and_rejects_reserved_and_future_dispatch(method, before_binding):
+    context = CrawlContext(CrawlLimits(max_url_bytes=32), clock=lambda: 0)
+    signal = None if before_binding else context.stop_signal()
+    pending = context.reserve("network_requests")
+    args = ("https://e.test/" + "x" * 33,) if method == "check_url" else ("https://e.test/a/", "x" * 30)
+    with pytest.raises(ParentStop, match="budget_exhausted"):
+        await asyncio.to_thread(getattr(context, method), *args)
+    notified = context.stop_signal()
+    if signal is not None:
+        assert notified is signal
+    await asyncio.sleep(0)
+    assert notified.done(), "URL exhaustion must notify the shared owner, not only throw locally"
+    try:
+        with pytest.raises(ParentStop, match="budget_exhausted"):
+            pending.commit()
+    finally:
+        pending.close()
+    with pytest.raises(ParentStop, match="budget_exhausted"):
+        context.reserve("network_requests").commit()
+    assert context.snapshot().network_requests == 0
+
+
+@pytest.mark.parametrize("method", ["check_url", "resolve_url"])
+@pytest.mark.parametrize("primary", ["cancel", "deadline"])
+def test_url_checks_preserve_existing_cancel_and_deadline_precedence(method, primary):
+    now = [0]
+    context = CrawlContext(CrawlLimits(max_url_bytes=32), clock=lambda: now[0])
+    if primary == "cancel":
+        context.cancel()
+    else:
+        now[0] = context._limits.execution_seconds
+    args = ("x" * 100,) if method == "check_url" else ("https://e.test/", "x" * 100)
+    with pytest.raises(asyncio.CancelledError if primary == "cancel" else ParentStop) as caught:
+        getattr(context, method)(*args)
+    if primary == "deadline":
+        assert caught.value.reason == "deadline_exhausted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,helper", [("check_url", "url_bytes"), ("resolve_url", "resolve_reference")])
+async def test_url_bound_operation_is_atomic_with_sibling_reservation(monkeypatch, method, helper):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import crawl_context as module
+
+    context = CrawlContext(CrawlLimits(max_url_bytes=32), clock=lambda: 0)
+    entered, release, sibling_started = Event(), Event(), Event()
+    original = getattr(module, helper)
+
+    def held(*args):
+        entered.set()
+        assert release.wait(3)
+        return original(*args)
+
+    def reserve():
+        sibling_started.set()
+        with pytest.raises(ParentStop, match="budget_exhausted"):
+            context.reserve("network_requests").commit()
+
+    def check():
+        args = ("x" * 100,) if method == "check_url" else ("https://e.test/", "x" * 100)
+        with pytest.raises(ParentStop, match="budget_exhausted"):
+            getattr(context, method)(*args)
+
+    monkeypatch.setattr(module, helper, held)
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        owner = loop.run_in_executor(pool, check)
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            sibling = loop.run_in_executor(pool, reserve)
+            assert await asyncio.to_thread(sibling_started.wait, 1)
+        finally:
+            release.set()
+        await asyncio.gather(owner, sibling)
+    assert context.snapshot().network_requests == 0
 
 
 def test_late_stop_after_owner_loop_closes_still_latches_without_cross_thread_future_mutation():
