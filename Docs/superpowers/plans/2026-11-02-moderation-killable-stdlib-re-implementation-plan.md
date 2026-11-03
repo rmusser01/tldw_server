@@ -613,6 +613,15 @@ or runtime guarantees passed based on this document alone.
 
 ## Review Corrections
 
+Whole-branch review on2026-11-03 demonstrated ordinary segmented Audio startup
+amplification under the shared budget. The requester explicitly approved the
+bounded multi-text amendment recorded in
+`Docs/superpowers/specs/2026-11-03-moderation-audio-batch-amendment.md`;
+`Docs/superpowers/plans/2026-11-03-moderation-audio-batch-amendment-plan.md`
+defines the implementation within the existing single final fix wave. Original
+deadline, worker count and aggregate size/frame ceilings remain unchanged.
+Final cleanup/re-review remains pending; Stage5 is not globally complete.
+
 | Finding | Resolution and required evidence |
 | --- | --- |
 | P1: Supervised/custom regex bypasses | Tasks 1/4 add distinct child batches and pure supervised extraction; preserve notify/ties and template replacements; direct-call audit plus failure/compatibility tests. |
