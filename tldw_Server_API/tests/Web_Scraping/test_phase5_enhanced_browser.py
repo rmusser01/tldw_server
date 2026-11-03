@@ -12,6 +12,305 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("already_disconnected", [False, True])
+async def test_native_disconnection_observed_before_retirement_is_not_missed_after_close_rejects(already_disconnected):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as browser
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import _adapter, _FakeBrowserRuntime, _FakeGuard
+
+    handlers, retired = {}, []
+
+    class Native:
+        connected = True
+
+        def on(self, name, callback):
+            handlers[name] = callback
+
+        def remove_listener(self, name, callback):
+            handlers.pop(name)
+
+        def is_connected(self):
+            return self.connected
+
+        async def close(self):
+            raise RuntimeError("exit was already observed")
+
+    async def retire():
+        retired.append(True)
+
+    native = Native()
+    outcome = browser._AcquisitionOutcome()
+    native.connected = not already_disconnected
+    outcome.watch_browser(native)
+    native.connected = False
+    if not already_disconnected:
+        handlers["disconnected"]()
+    pool = browser._BrowserAcquisitionPool(1)
+    lease = pool.acquire(callback_capacity=2)
+    lifecycle = browser._CallbackLifecycle(outcome, lease, lambda: None)
+    owners = {
+        "browser": browser._OwnedResource(native, "close", "browser"),
+        "requests": browser._OwnedResource(SimpleNamespace(retire=retire), "close", "requests"),
+    }
+    assert await asyncio.wait_for(
+        _adapter(_FakeBrowserRuntime(), _FakeGuard([]), cleanup_grace_s=0.02)._retire_browser_owner(
+            owners, lifecycle, lease
+        ),
+        1,
+    )
+    lease.seal()
+    lease.owner_finished()
+    if already_disconnected:
+        assert not outcome.native_browser_disconnected and retired == [] and pool.active_count == 1
+        handlers["disconnected"]()
+        for _ in range(100):
+            if pool.active_count == 0:
+                break
+            await asyncio.sleep(0.01)
+    assert retired == [True] and outcome.native_browser_disconnected and handlers == {} and pool.active_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["sealed", "creation_failure", "unobserved"])
+async def test_retirement_task_startup_disposes_listener_or_retains_native_work(monkeypatch, mode):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as browser
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import _adapter, _FakeBrowserRuntime, _FakeGuard
+
+    handlers, calls = {}, []
+    pool = browser._BrowserAcquisitionPool(1)
+    lease = pool.acquire(callback_capacity=2)
+
+    class Native:
+        def on(self, name, callback):
+            handlers[name] = callback
+
+        def remove_listener(self, name, callback):
+            handlers.pop(name)
+
+        def is_connected(self):
+            return False
+
+        async def close(self):
+            calls.append("native-closed")
+
+    class Unobserved(asyncio.Task):
+        def add_done_callback(self, *args, **kwargs):
+            raise RuntimeError("completion observation unavailable")
+
+    create = asyncio.create_task
+
+    def create_task(operation, *, name=None):
+        if name != "article-browser-owner-retirement":
+            return create(operation, name=name)
+        if mode == "creation_failure":
+            raise RuntimeError("cannot create task")
+        return Unobserved(operation, loop=asyncio.get_running_loop())
+
+    async def retire():
+        calls.append("retired")
+
+    monkeypatch.setattr(asyncio, "create_task", create_task)
+    if mode == "sealed":
+        lease.seal()
+    outcome = browser._AcquisitionOutcome()
+    lifecycle = browser._CallbackLifecycle(outcome, lease, lambda: None)
+    owners = {
+        "browser": browser._OwnedResource(Native(), "close", "browser"),
+        "requests": browser._OwnedResource(SimpleNamespace(retire=retire), "close", "requests"),
+    }
+    assert await _adapter(_FakeBrowserRuntime(), _FakeGuard([]))._retire_browser_owner(owners, lifecycle, lease)
+    if mode == "unobserved":
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert calls == ["native-closed", "retired"]
+        assert all(task.done() for task in lease._tasks)
+        lease.seal()
+        lease.owner_finished()
+        assert pool.active_count == 1, "unobservable task cannot refund its capacity"
+    else:
+        assert calls == []
+        lease.seal()
+        lease.owner_finished()
+        assert pool.active_count == 0
+    assert handlers == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("close_mode", ["failed", "held"])
+async def test_live_native_after_close_failure_keeps_guard_graph_and_lease_until_actual_exit(close_mode):
+    import weakref
+
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as browser
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import _adapter, _FakeBrowserRuntime, _FakeGuard
+
+    calls, handlers = [], {}
+    release_close = asyncio.Event()
+
+    class Native:
+        connected = True
+
+        def on(self, event, callback):
+            handlers[event] = callback
+
+        def remove_listener(self, event, callback):
+            handlers.pop(event, None)
+
+        def is_connected(self):
+            return self.connected
+
+        async def close(self):
+            calls.append("native-close")
+            if close_mode == "failed":
+                raise RuntimeError("native close rejected")
+            await release_close.wait()
+
+    class Requests:
+        def close(self):
+            calls.append("admission-closed")
+
+        async def detach(self):
+            calls.append("guard-detached")
+
+        async def retire(self):
+            assert not native.connected
+            calls.append("retired")
+
+    class Driver:
+        async def stop(self):
+            calls.append("driver-stopped")
+
+    native, policy = Native(), Requests()
+    retained = weakref.ref(policy)
+    pool = browser._BrowserAcquisitionPool(1)
+    lease = pool.acquire(callback_capacity=2)
+    outcome = browser._AcquisitionOutcome()
+    lifecycle = browser._CallbackLifecycle(outcome, lease, lambda: None)
+    adapter = _adapter(_FakeBrowserRuntime(), _FakeGuard([]), cleanup_grace_s=0.02)
+    resources = [
+        browser._OwnedResource(native, "close", "browser"),
+        browser._OwnedResource(policy, "close", "requests"),
+        browser._OwnedResource(Driver(), "stop", "playwright"),
+    ]
+    try:
+        assert await asyncio.wait_for(
+            adapter._teardown(resources, context=None, http_routing_started=False, lifecycle=lifecycle, lease=lease),
+            0.5,
+        )
+        lease.seal()
+        lease.owner_finished()
+        del policy, resources
+        assert pool.active_count == 1 and retained() is not None
+        assert calls == ["admission-closed", "native-close"] and not outcome.native_browser_disconnected
+        assert pool.acquire(callback_capacity=2) is None
+        native.connected = False
+        handlers["disconnected"]()
+        if close_mode == "held":
+            for _ in range(3):
+                await asyncio.sleep(0)
+            assert pool.active_count == 1, "actual close-command work must also drain"
+        release_close.set()
+        for _ in range(100):
+            if pool.active_count == 0:
+                break
+            await asyncio.sleep(0.01)
+        assert pool.active_count == 0 and outcome.native_browser_disconnected
+        assert calls == ["admission-closed", "native-close", "retired", "driver-stopped"]
+        assert retained() is None
+    finally:
+        native.connected = False
+        callback = handlers.get("disconnected")
+        if callback:
+            callback()
+        release_close.set()
+
+
+@pytest.mark.asyncio
+async def test_continue_failure_uses_terminal_route_completion_after_native_exit():
+    from types import SimpleNamespace
+
+    from playwright._impl._errors import TargetClosedError
+
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as browser
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import _adapter, _FakeBrowserRuntime, _FakeGuard
+
+    completed = []
+
+    class Route:
+        request = SimpleNamespace(url=URL)
+
+        async def continue_(self):
+            raise RuntimeError("in-flight continuation failed")
+
+        async def abort(self):
+            raise TargetClosedError("owned native browser exited")
+
+        async def fallback(self):
+            completed.append(True)
+
+    outcome = browser._AcquisitionOutcome()
+    outcome.native_browser_disconnected = True
+    await _adapter(_FakeBrowserRuntime(), _FakeGuard([True]))._http_handler(Route(), outcome)
+    assert completed == [True]
+
+
+@pytest.mark.asyncio
+async def test_terminal_route_error_waits_for_owned_native_exit_before_local_completion():
+    from types import SimpleNamespace
+
+    from playwright._impl._errors import TargetClosedError
+
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser as browser
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import _adapter, _FakeBrowserRuntime, _FakeGuard
+
+    handlers, completed = {}, []
+    aborted = asyncio.Event()
+
+    class Native:
+        connected = True
+
+        def on(self, name, callback):
+            handlers[name] = callback
+
+        def remove_listener(self, name, callback):
+            handlers.pop(name)
+
+        def is_connected(self):
+            return self.connected
+
+    class Route:
+        request = SimpleNamespace(url=URL)
+
+        async def continue_(self):
+            raise RuntimeError("continuation failed before native retirement")
+
+        async def abort(self):
+            aborted.set()
+            raise TargetClosedError("page closed before browser exit")
+
+        async def fallback(self):
+            completed.append(True)
+
+    native, outcome = Native(), browser._AcquisitionOutcome()
+    outcome.watch_browser(native)
+    task = asyncio.create_task(_adapter(_FakeBrowserRuntime(), _FakeGuard([True]))._http_handler(Route(), outcome))
+    try:
+        await asyncio.wait_for(aborted.wait(), 1)
+        assert not task.done() and completed == []
+        native.connected = False
+        handlers["disconnected"]()
+        await asyncio.wait_for(task, 1)
+        assert completed == [True]
+    finally:
+        native.connected = False
+        handlers["disconnected"]()
+        await asyncio.gather(task, return_exceptions=True)
+        outcome.unwatch_browser(native)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("retired", [False, True])
 async def test_terminal_http_route_completion_requires_owned_browser_retirement(retired):
     from playwright._impl._errors import TargetClosedError
@@ -42,6 +341,7 @@ async def test_failed_native_close_cannot_authorize_local_route_completion():
     from tldw_Server_API.tests.Web_Scraping.test_phase4_article_browser import _adapter, _FakeBrowserRuntime, _FakeGuard
 
     retired = []
+    handlers = {}
 
     class Requests:
         def close(self):
@@ -54,6 +354,12 @@ async def test_failed_native_close_cannot_authorize_local_route_completion():
             retired.append(True)
 
     class Native:
+        def on(self, event, callback):
+            handlers[event] = callback
+
+        def remove_listener(self, event, callback):
+            handlers.pop(event, None)
+
         async def close(self):
             raise RuntimeError("close did not acknowledge retirement")
 
@@ -64,7 +370,7 @@ async def test_failed_native_close_cannot_authorize_local_route_completion():
     lease = pool.acquire(callback_capacity=2)
     outcome = browser._AcquisitionOutcome()
     lifecycle = browser._CallbackLifecycle(outcome, lease, lambda: None)
-    adapter = _adapter(_FakeBrowserRuntime(), _FakeGuard([]))
+    adapter = _adapter(_FakeBrowserRuntime(), _FakeGuard([]), cleanup_grace_s=0.02)
     failed = await adapter._teardown(
         [browser._OwnedResource(Requests(), "close", "requests"), browser._OwnedResource(Native(), "close", "browser")],
         context=None,
@@ -75,6 +381,13 @@ async def test_failed_native_close_cannot_authorize_local_route_completion():
     lease.seal()
     lease.owner_finished()
     assert failed and not outcome.native_browser_disconnected and retired == []
+    assert pool.active_count == 1
+    handlers["disconnected"]()
+    for _ in range(100):
+        if pool.active_count == 0:
+            break
+        await asyncio.sleep(0.01)
+    assert pool.active_count == 0 and retired == [True]
 
 
 @pytest.mark.asyncio
