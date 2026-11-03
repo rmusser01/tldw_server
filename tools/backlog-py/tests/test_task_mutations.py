@@ -583,3 +583,104 @@ def test_mcp_rejects_non_text_values_instead_of_writing_their_repr(tmp_path: Pat
         task_edit(_project(repo), task_id="TASK-1", description=["not", "a", "string"])
 
     assert _snapshot_tasks(repo) == before
+
+
+def _move_to(repo: Path, task_path: Path, directory: str, name: str | None = None) -> Path:
+    target = repo / "backlog" / directory / (name or task_path.name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    task_path.rename(target)
+    return target
+
+
+def test_renumber_moves_one_of_two_files_with_the_same_id(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    first = repository.create_task(title="First", task_id="TASK-7")
+    second = first.path.parent / "task-7 - Second.md"
+    second.write_text(first.raw_source.replace("title: First", "title: Second"), encoding="utf-8")
+
+    moved = repository.renumber_task(second.relative_to(repo), "TASK-9", note="Renumbered from TASK-7.")
+
+    assert (moved.id, moved.path.name, moved.path.parent) == ("TASK-9", "task-9 - Second.md", second.parent)
+    assert not second.exists()
+    assert repository.get_task("TASK-7").title == "First"
+    notes = parse_task_markdown(moved.raw_source).sections["IMPLEMENTATION_NOTES"].content
+    assert notes.strip() == "Renumbered from TASK-7."
+
+
+def test_renumber_keeps_the_directory_and_the_file_name_tail(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    created = _repository(repo).create_task(title="Old title", task_id="TASK-3")
+    done = _move_to(repo, created.path, "completed", "task-3 - Tail-from-an-older-title.md")
+
+    moved = _repository(repo).renumber_task(done.relative_to(repo), "TASK-4")
+
+    assert moved.path == done.parent / "task-4 - Tail-from-an-older-title.md"
+    assert moved.title == "Old title"
+
+
+def test_renumber_refuses_an_id_any_task_file_holds(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    _move_to(repo, repository.create_task(title="Held", task_id="TASK-5").path, "archive/tasks")
+    other = repository.create_task(title="Other", task_id="TASK-6")
+
+    with pytest.raises(TaskMutationError, match="Task id already exists: TASK-5"):
+        repository.renumber_task(other.path.relative_to(repo), "TASK-5")
+    assert other.path.exists()
+
+
+@pytest.mark.parametrize(
+    "relative", ["backlog/docs/task-1 - Doc.md", "task-1 - Outside.md", "backlog/tasks/task-404 - Missing.md"]
+)
+def test_renumber_takes_only_existing_files_in_the_task_directories(tmp_path: Path, relative: str) -> None:
+    repo = _copy_fixture(tmp_path)
+    if "Missing" not in relative:
+        (repo / relative).parent.mkdir(parents=True, exist_ok=True)
+        (repo / relative).write_text(_task_file(repo).read_text(encoding="utf-8"), encoding="utf-8")
+    before = _snapshot_backlog_markdown(repo)
+
+    with pytest.raises(TaskMutationError, match="Not a task file"):
+        _repository(repo).renumber_task(Path(relative), "TASK-2")
+    assert _snapshot_backlog_markdown(repo) == before
+
+
+def test_edit_accepts_a_dependency_on_a_completed_task(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    _move_to(repo, repository.create_task(title="Finished", task_id="TASK-2").path, "completed")
+
+    edited = repository.edit_task("TASK-1", dependencies=["TASK-2"])
+
+    assert edited.parsed.frontmatter["dependencies"] == ["TASK-2"]
+
+
+def test_cli_task_renumber_appends_the_note(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    task = _task_file(repo).relative_to(repo)
+
+    result = CliRunner().invoke(
+        main, ["--cwd", str(repo), "task", "renumber", str(task), "--id", "TASK-12", "--append-notes", "Was TASK-1."]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("TASK-12 - ")
+    assert "Was TASK-1." in _task_file(repo, "task-12").read_text(encoding="utf-8")
+
+
+def test_create_refuses_an_id_held_in_completed(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    _move_to(repo, _task_file(repo), "completed")
+
+    with pytest.raises(TaskMutationError, match="Task id already exists: TASK-1"):
+        _repository(repo).create_task(title="Reused", task_id="TASK-1")
+
+
+def test_create_without_an_id_takes_the_next_id_above_completed_and_archived_tasks(tmp_path: Path) -> None:
+    # After the renumber, the top of the TASK-15000 block lives in completed/ and archive/tasks.
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+    _move_to(repo, repository.create_task(title="Done", task_id="TASK-30").path, "completed")
+    _move_to(repo, repository.create_task(title="Archived", task_id="TASK-40").path, "archive/tasks")
+
+    assert repository.create_task(title="Next").id == "TASK-41"

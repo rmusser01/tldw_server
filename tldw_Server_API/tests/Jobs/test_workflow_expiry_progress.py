@@ -1,0 +1,1215 @@
+"""Real acquisition episodes, retry-neutral expiry, and durable semantic proofs."""
+
+import base64
+import hashlib
+import json
+import secrets
+import sqlite3
+from asyncio import CancelledError
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from threading import Barrier, Event
+
+import pytest
+
+from tldw_Server_API.app.core.Jobs.operations.contracts import AcquireJobCommand, OperationOutcome
+from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
+    WorkflowAction,
+    WorkflowFenceError,
+    WorkflowOutcome,
+    WorkflowProgress,
+    WorkflowProgressKind,
+)
+from tldw_Server_API.app.core.Security.crypto import decrypt_json_blob
+
+
+@pytest.fixture(autouse=True, params=[False, True], ids=["two-step", "single-update"])
+def acquisition_mode(request, monkeypatch):
+    for backend in ("SQLITE", "PG"):
+        monkeypatch.setenv(f"JOBS_{backend}_SINGLE_UPDATE_ACQUIRE", str(request.param))
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    return request.param
+
+
+@pytest.fixture
+def workflow_encryption(monkeypatch):
+    monkeypatch.setenv("JOBS_ENCRYPT_EMBEDDINGS", "true")
+    monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+    monkeypatch.delenv("JOBS_CRYPTO_SECONDARY_KEY", raising=False)
+
+
+def _admit_encrypted(case):
+    assert case.admit().outcome is WorkflowOutcome.APPLIED
+    stored = case.job_row()["payload"]
+    envelope = json.loads(stored) if isinstance(stored, str) else stored
+    assert envelope["_encrypted"]["_enc"] == "aesgcm:v1"
+    assert case.root.reference_id not in json.dumps(envelope)
+    assert decrypt_json_blob(envelope["_encrypted"]) == {"workflow_id": case.root.reference_id}
+    assert case.capability.lookup(case.root).outcome is WorkflowOutcome.ACTIVE
+    return stored
+
+
+def _seed_expired_encrypted_episode(case):
+    """Isolate recovery RED even when the separate public acquisition is broken."""
+    lease = "00000000-0000-4000-8000-000000000003"
+    digest = hashlib.sha256(
+        json.dumps(["jobs_workflow_lease_v1", "worker-a", lease], separators=(",", ":")).encode()
+    ).hexdigest()
+    with case.connection() as conn:
+        case.execute(
+            conn,
+            "UPDATE jobs SET status='processing',worker_id='worker-a',lease_id=?,leased_until='2020-01-01 00:00:00' WHERE uuid=?",
+            (lease, case.root.job_uuid),
+        )
+        case.execute(
+            conn,
+            "UPDATE job_workflow_roots SET current_epoch=1,lease_digest=? WHERE job_uuid=?",
+            (digest, case.root.job_uuid),
+        )
+        conn.execute("UPDATE job_counters SET ready_count=0,processing_count=1")
+        conn.commit()
+
+
+def _encrypted_snapshot(case):
+    with case.connection() as conn:
+        durable = tuple(
+            tuple(tuple(row) for row in conn.execute(statement))
+            for statement in (
+                "SELECT * FROM job_counters",
+                "SELECT * FROM job_events ORDER BY id",
+                "SELECT * FROM workflow_effect_domain",
+            )
+        )
+    return case.job_row(), case.serialized_support(), durable
+
+
+def _generic_renew(case, lease, *, batch, enforce, seconds=240):
+    claims = {"worker_id": lease.worker_id, "lease_id": lease.lease_id}
+    with case.owner_scope(case.root.owner_user_id):
+        if batch:
+            return case.manager.batch_renew_leases(
+                [{"job_id": case.root.job_id_hint, "seconds": seconds, **claims}], enforce=enforce
+            )
+        return case.manager.renew_job_lease(
+            case.root.job_id_hint,
+            seconds=seconds,
+            enforce=enforce,
+            progress_percent=42,
+            progress_message="heartbeat",
+            **claims,
+        )
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+@pytest.mark.parametrize("enforce", [True, False, None])
+def test_generic_expired_renewal_cannot_restore_authority(workflow_case, monkeypatch, batch, enforce):
+    case = workflow_case
+    monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", "false")
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    case.expire_current_lease(fractional=True)
+    with pytest.raises(WorkflowFenceError) as error:
+        with case.capability.transaction(case.root.owner_user_id) as tx:
+            tx.lock_live_root(case.root, lease)
+    assert error.value.outcome is WorkflowOutcome.STALE_LEASE
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    before = _encrypted_snapshot(case)
+    assert not _generic_renew(case, lease, batch=batch, enforce=enforce)
+    assert _encrypted_snapshot(case) == before
+    assert observed == []
+    case.recover("sweep")
+    assert case.no_progress_count() == 1
+    assert case.support_row()["last_closed_epoch"] == 1
+    fresh = case.acquire()
+    assert fresh != lease
+    assert case.support_row()["current_epoch"] == 2
+    assert case.retry_count() == 0
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_generic_live_renewal_requires_exact_nonmissing_claims(workflow_case, monkeypatch, batch):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    before = _encrypted_snapshot(case)
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    for env in ("false", "true"):
+        monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", env)
+        for enforce in (True, False, None):
+            for worker, token in (
+                (None, None),
+                (None, lease.lease_id),
+                (lease.worker_id, None),
+                ("", lease.lease_id),
+                ("stale", lease.lease_id),
+                (lease.worker_id, "stale"),
+            ):
+                item = {"job_id": case.root.job_id_hint, "seconds": 240, "worker_id": worker, "lease_id": token}
+                with case.owner_scope(case.root.owner_user_id):
+                    if batch:
+                        renewed = case.manager.batch_renew_leases([item], enforce=enforce)
+                    else:
+                        renewed = case.manager.renew_job_lease(
+                            case.root.job_id_hint, seconds=240, worker_id=worker, lease_id=token, enforce=enforce
+                        )
+                assert not renewed
+                assert _encrypted_snapshot(case) == before
+    assert observed == []
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+@pytest.mark.parametrize("year", [2000, 2100], ids=["behind", "ahead"])
+def test_generic_live_renewal_uses_database_time_without_shortening(workflow_case, monkeypatch, batch, year):
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    before = case.observe()
+    monkeypatch.setattr(case.manager._clock, "now_utc", lambda: datetime(year, 1, 1, tzinfo=timezone.utc))
+    with case.connection() as conn:
+        now = workflow_store(case.manager.backend).database_now(conn)
+    assert _generic_renew(case, lease, batch=batch, enforce=False, seconds=300)
+    deadline = case.job_row()["leased_until"]
+    actual = datetime.fromisoformat(deadline).replace(tzinfo=timezone.utc) if isinstance(deadline, str) else deadline
+    assert 299 <= (actual - now).total_seconds() <= 310
+    assert _generic_renew(case, lease, batch=batch, enforce=None, seconds=1)
+    assert case.job_row()["leased_until"] == deadline
+    assert case.observe() == before
+    with case.capability.transaction(case.root.owner_user_id) as tx:
+        tx.lock_live_root(case.root, lease)
+
+
+def test_generic_release_rejects_enrolled_episode_without_side_effects(workflow_case, monkeypatch):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    monkeypatch.setattr(case.manager, "_update_gauges", lambda **kw: observed.append(kw))
+    before = _encrypted_snapshot(case)
+    for env in ("false", "true"):
+        monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", env)
+        for enforce in (True, False, None):
+            for worker, token in (
+                (lease.worker_id, lease.lease_id),
+                (None, None),
+                (None, lease.lease_id),
+                (lease.worker_id, None),
+                ("stale", lease.lease_id),
+                (lease.worker_id, "stale"),
+            ):
+                with case.owner_scope(case.root.owner_user_id):
+                    assert not case.manager.release_job(
+                        case.root.job_id_hint,
+                        worker_id=worker,
+                        lease_id=token,
+                        enforce=enforce,
+                        reason="guard-rejected",
+                    )
+                assert _encrypted_snapshot(case) == before
+    assert observed == []
+    assert case.apply(case.effect("a" * 64, WorkflowAction.CONTINUE), lease).outcome is WorkflowOutcome.APPLIED
+    assert case.support_row()["last_closed_epoch"] == 1
+    assert case.acquire() != lease
+    for episode in range(2, 6):
+        case.expire_current_lease()
+        case.recover("sweep")
+        assert case.no_progress_count() == episode
+        assert case.retry_count() == 0
+        assert case.support_row()["last_closed_epoch"] == episode
+        if episode < 5:
+            assert case.acquire() is not None
+    assert case.status() == "failed"
+    assert case.acquire(replace_current=False) is None
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_generic_renewal_rechecks_expiry_at_update_boundary(workflow_case, monkeypatch, batch):
+    from tldw_Server_API.app.core.Jobs.operations.postgres import lifecycle as pg_lifecycle
+    from tldw_Server_API.app.core.Jobs.operations.sqlite import lifecycle as sqlite_lifecycle
+
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    lifecycle = pg_lifecycle if case.manager.backend == "postgres" else sqlite_lifecycle
+    build = lifecycle._renew_lease_statement
+
+    def expire_after_build(*args, **kwargs):
+        statement = build(*args, **kwargs)
+        # A separate committed writer revokes authority after any caller-side
+        # validation but immediately before the actual renewal UPDATE.
+        case.expire_current_lease()
+        return statement
+
+    monkeypatch.setattr(lifecycle, "_renew_lease_statement", expire_after_build)
+    assert not _generic_renew(case, lease, batch=batch, enforce=True)
+    assert case.no_progress_count() == 0
+    case.recover("sweep")
+    assert case.no_progress_count() == 1
+    assert case.acquire() != lease
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_generic_renewal_cannot_outwait_database_deadline(workflow_pg_case, monkeypatch, batch):
+    from tldw_Server_API.app.core.Jobs.operations.postgres import lifecycle
+
+    case = workflow_pg_case
+    case.admit()
+    lease = case.acquire()
+    starting = Event()
+    build = lifecycle._renew_lease_statement
+
+    def signal_update(*args, **kwargs):
+        statement = build(*args, **kwargs)
+        starting.set()
+        return statement
+
+    monkeypatch.setattr(lifecycle, "_renew_lease_statement", signal_update)
+    with case.connection() as conn:
+        case.execute(
+            conn,
+            "UPDATE jobs SET leased_until=clock_timestamp()+interval '1 second' WHERE uuid=?",
+            (case.root.job_uuid,),
+        )
+        conn.commit()
+        case.execute(conn, "SELECT id FROM jobs WHERE uuid=? FOR UPDATE", (case.root.job_uuid,))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(_generic_renew, case, lease, batch=batch, enforce=True)
+            try:
+                assert starting.wait(10)
+                # Hold a real row lock without changing the tuple: a volatile
+                # predicate evaluated before the wait must not retain authority.
+                conn.execute("SELECT pg_sleep(1.1)")
+            finally:
+                conn.commit()
+            assert not pending.result(timeout=10)
+    assert case.no_progress_count() == 0
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+@pytest.mark.parametrize("deadline", ["null", "equal"])
+def test_generic_renewal_rejects_nonlive_deadlines(workflow_case, batch, deadline):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    with case.connection() as conn:
+        value = (
+            "NULL"
+            if deadline == "null"
+            else ("clock_timestamp()" if case.manager.backend == "postgres" else "STRFTIME('%Y-%m-%d %H:%M:%f','now')")
+        )
+        case.execute(conn, f"UPDATE jobs SET leased_until={value} WHERE uuid=?", (case.root.job_uuid,))
+        conn.commit()
+    before = case.job_row(), case.serialized_support()
+    assert not _generic_renew(case, lease, batch=batch, enforce=False)
+    assert (case.job_row(), case.serialized_support()) == before
+
+
+def test_generic_lifecycle_unknown_markers_fail_closed(workflow_case):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    case.install_effect_guard()
+    with case.connection() as conn:
+        if case.manager.backend == "postgres":
+            conn.execute("ALTER TABLE jobs DROP CONSTRAINT wf_jobs_enrollment")
+        else:
+            conn.execute("PRAGMA ignore_check_constraints=ON")
+        conn.commit()
+    markers = (2,) if case.manager.backend == "postgres" else (2, "corrupt", 1.5)
+    for marker in markers:
+        with case.connection() as conn:
+            if case.manager.backend == "sqlite":
+                conn.execute("PRAGMA ignore_check_constraints=ON")
+            case.execute(
+                conn, "UPDATE jobs SET workflow_capability_version=? WHERE uuid=?", (marker, case.root.job_uuid)
+            )
+            conn.commit()
+        before = _encrypted_snapshot(case)
+        assert not _generic_renew(case, lease, batch=False, enforce=False)
+        assert not _generic_renew(case, lease, batch=True, enforce=False)
+        with case.owner_scope(case.root.owner_user_id):
+            assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
+        assert _encrypted_snapshot(case) == before
+
+
+@pytest.mark.parametrize("action", [WorkflowAction.CANCEL, WorkflowAction.COMPLETE, WorkflowAction.FAIL])
+def test_generic_lifecycle_cannot_revive_terminal_root(workflow_case, action):
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    effect = case.effect("b" * 64, action, "permanent" if action is WorkflowAction.FAIL else None)
+    assert case.apply(effect, lease).outcome is WorkflowOutcome.APPLIED
+    before = _encrypted_snapshot(case)
+    assert not _generic_renew(case, lease, batch=False, enforce=False)
+    assert not _generic_renew(case, lease, batch=True, enforce=False)
+    with case.owner_scope(case.root.owner_user_id):
+        assert not case.manager.release_job(case.root.job_id_hint, enforce=False)
+    assert _encrypted_snapshot(case) == before
+    case.recover("sweep")
+    assert case.acquire(replace_current=False) is None
+    assert (case.job_row(), case.serialized_support()) == before[:2]
+
+
+@pytest.mark.parametrize("installed", [False, True], ids=["uninstalled", "null-marker-no-support"])
+def test_generic_legacy_renew_release_keep_permissive_behavior(uninstalled_workflow_case, monkeypatch, installed):
+    from tldw_Server_API.app.core.Jobs.operations.contracts import ReleaseJobCommand
+    from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import release_job as pg_release
+    from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import release_job as sqlite_release
+
+    case = uninstalled_workflow_case
+    monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", "false")
+    if installed:
+        case.install()
+    uuid = "00000000-0000-4000-8000-000000000021"
+    with case.connection() as conn:
+        if installed:
+            for table in ("job_workflow_effect_receipts", "job_workflow_roots", "job_workflow_schema"):
+                conn.execute(f"DROP TABLE {table}")
+        case.insert(
+            conn,
+            "jobs",
+            {
+                "uuid": uuid,
+                "domain": "embeddings",
+                "queue": "workflow",
+                "job_type": "legacy",
+                "owner_user_id": case.command.owner_user_id,
+                "payload": "{}",
+                "status": "processing",
+                "leased_until": "2020-01-01 00:00:00",
+            },
+        )
+        job_id = case.execute(conn, "SELECT id FROM jobs WHERE uuid=?", (uuid,)).fetchone()[0]
+        conn.commit()
+    command = ReleaseJobCommand(job_id, enforce=True, worker_id="stale", lease_id="stale")
+    with case.owner_scope(case.command.owner_user_id), closing(case.manager._connect()) as conn:
+        result = (
+            pg_release(conn, case.manager._pg_cursor, command=command, counters_enabled=False)
+            if case.manager.backend == "postgres"
+            else sqlite_release(conn, command=command, counters_enabled=False)
+        )
+    assert result.outcome is OperationOutcome.NO_TRANSITION
+    assert result.row["id"] == job_id
+    assert set(result.row) <= {
+        "id",
+        "domain",
+        "queue",
+        "job_type",
+        "status",
+        "worker_id",
+        "lease_id",
+        "workflow_capability_version",
+    }
+    with case.owner_scope(case.command.owner_user_id):
+        assert case.manager.renew_job_lease(job_id, seconds=240, enforce=False)
+        assert case.manager.batch_renew_leases([{"job_id": job_id, "seconds": 300}], enforce=None) == 1
+        assert case.manager.release_job(job_id, enforce=False)
+    with case.connection() as conn:
+        assert case.execute(conn, "SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()[0] == "queued"
+
+
+@pytest.mark.parametrize("fail_later", [False, True], ids=["counts-order", "rollback"])
+def test_generic_mixed_batch_counts_order_and_rollback(workflow_case, fail_later):
+    case = workflow_case
+    case.admit()
+    live = case.acquire()
+    expired = replace(case, root=case.admit_new_reference().root, current_lease=None)
+    old = expired.acquire()
+    expired.expire_current_lease()
+    with case.connection() as conn:
+        case.insert(
+            conn,
+            "jobs",
+            {
+                "uuid": "00000000-0000-4000-8000-000000000022",
+                "domain": "embeddings",
+                "queue": "workflow",
+                "job_type": "legacy",
+                "owner_user_id": case.command.owner_user_id,
+                "payload": "{}",
+                "status": "processing",
+                "leased_until": "2020-01-01 00:00:00",
+            },
+        )
+        legacy_id = conn.execute("SELECT id FROM jobs WHERE job_type='legacy'").fetchone()[0]
+        if fail_later:
+            if case.manager.backend == "sqlite":
+                conn.execute(
+                    "CREATE TRIGGER fail_batch BEFORE UPDATE ON jobs WHEN OLD.job_type='legacy' "
+                    "BEGIN SELECT RAISE(ABORT,'forced renewal failure'); END"
+                )
+                error_type = sqlite3.IntegrityError
+            else:
+                import psycopg
+
+                conn.execute(
+                    "CREATE FUNCTION fail_batch() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                    "BEGIN RAISE EXCEPTION 'forced renewal failure'; END; $$"
+                )
+                conn.execute(
+                    "CREATE TRIGGER fail_batch BEFORE UPDATE ON jobs FOR EACH ROW "
+                    "WHEN (OLD.job_type='legacy') EXECUTE FUNCTION fail_batch()"
+                )
+                error_type = psycopg.Error
+        conn.commit()
+    items = [
+        {"job_id": case.root.job_id_hint, "worker_id": live.worker_id, "lease_id": live.lease_id, "seconds": 300},
+        {"job_id": expired.root.job_id_hint, "worker_id": old.worker_id, "lease_id": old.lease_id, "seconds": 300},
+        {"job_id": legacy_id, "seconds": 300},
+        {"job_id": case.root.job_id_hint, "worker_id": live.worker_id, "lease_id": live.lease_id, "seconds": 1},
+    ]
+    before = case.job_row(), expired.job_row(), case.serialized_support()
+    with case.owner_scope(case.root.owner_user_id):
+        if fail_later:
+            with pytest.raises(error_type, match="forced renewal failure"):
+                case.manager.batch_renew_leases(items, enforce=False)
+            assert (case.job_row(), expired.job_row(), case.serialized_support()) == before
+        else:
+            assert case.manager.batch_renew_leases(items, enforce=False) == 3
+            assert expired.job_row() == before[1]
+            assert case.serialized_support() == before[2]
+            deadline = case.job_row()["leased_until"]
+            assert case.manager.batch_renew_leases(items[-1:], enforce=True) == 1
+            assert case.job_row()["leased_until"] == deadline
+
+
+@pytest.mark.parametrize("via", ["acquire", "sweep"])
+def test_encrypted_root_public_acquire_recovery_and_terminal(workflow_case, workflow_encryption, via):
+    case = workflow_case
+    stored = _admit_encrypted(case)
+    root = case.root
+    assert case.admit().outcome is WorkflowOutcome.ALREADY_APPLIED
+    assert case.root == root
+    assert case.admit(max_retries=2).outcome is WorkflowOutcome.CONFLICT
+    assert case.capability.lookup(replace(root, owner_user_id="other-owner")).outcome in {
+        WorkflowOutcome.MISSING,
+        WorkflowOutcome.CONFLICT,
+    }
+    for episode in range(1, 6):
+        assert case.acquire() is not None
+        assert case.support_row()["current_epoch"] == episode
+        case.expire_current_lease(fractional=True)
+        case.recover(via)
+        assert case.no_progress_count() == episode
+        assert case.retry_count() == 0
+        assert case.job_row()["failure_streak_count"] in (None, 0)
+        assert case.job_row()["payload"] == stored
+    assert case.status() == "failed"
+    assert case.failure_reason() == "no_progress_exhausted"
+    assert case.support_row()["last_closed_epoch"] == 5
+    before = case.observe()
+    assert case.acquire(replace_current=False) is None
+    case.recover("sweep")
+    assert case.observe() == before
+    assert case.job_row()["payload"] == stored
+
+
+@pytest.mark.parametrize("via", ["acquire", "sweep"])
+def test_encrypted_expired_root_public_recovery(workflow_case, workflow_encryption, via):
+    case = workflow_case
+    stored = _admit_encrypted(case)
+    _seed_expired_encrypted_episode(case)
+    case.recover(via)
+    assert case.no_progress_count() == 1
+    assert case.retry_count() == 0
+    assert case.support_row()["last_closed_epoch"] == 1
+    assert case.acquire() is not None
+    assert case.support_row()["current_epoch"] == 2
+    assert case.job_row()["payload"] == stored
+
+
+@pytest.mark.parametrize("operation", ["acquire", "reacquire", "sweep"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "tampered",
+        "wrong-reference",
+        "extra-field",
+        "missing-key",
+        "wrong-key",
+        "decrypt-failure",
+        "oversized",
+        "owner",
+        "controls",
+    ],
+)
+def test_encrypted_authority_failure_is_atomic(workflow_case, workflow_encryption, monkeypatch, operation, failure):
+    case = workflow_case
+    _admit_encrypted(case)
+    case.install_effect_guard()
+    if operation != "acquire":
+        _seed_expired_encrypted_episode(case)
+    if failure in {"tampered", "oversized", "wrong-reference", "extra-field"}:
+        stored = case.job_row()["payload"]
+        envelope = json.loads(stored) if isinstance(stored, str) else stored
+        if failure in {"wrong-reference", "extra-field"}:
+            payload = {"workflow_id": "00000000-0000-4000-8000-000000000099"}
+            if failure == "extra-field":
+                payload = {"workflow_id": case.root.reference_id, "extra": "not-authorized"}
+            envelope = case.manager._maybe_encrypt_json(payload, "embeddings")
+            assert decrypt_json_blob(envelope["_encrypted"]) == payload
+        else:
+            envelope["_encrypted"]["ct"] = "AAAA" if failure == "tampered" else "A" * 8192
+        with case.connection() as conn:
+            case.execute(conn, "UPDATE jobs SET payload=? WHERE uuid=?", (json.dumps(envelope), case.root.job_uuid))
+            conn.commit()
+    elif failure == "missing-key":
+        monkeypatch.delenv("WORKFLOWS_ARTIFACT_ENC_KEY")
+    elif failure == "wrong-key":
+        monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+    elif failure == "decrypt-failure":
+        monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.decrypt_json_blob", lambda _: None)
+    else:
+        with case.connection() as conn:
+            statement = (
+                "UPDATE jobs SET owner_user_id='other-owner' WHERE uuid=?"
+                if failure == "owner"
+                else "UPDATE jobs SET max_retries=2 WHERE uuid=?"
+            )
+            case.execute(conn, statement, (case.root.job_uuid,))
+            conn.commit()
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.observe_queue_latency", lambda *a: observed.append(a))
+    if failure == "oversized":
+
+        def forbidden_decoder(*args, **kwargs):
+            raise AssertionError("oversized envelope reached decryption")
+
+        monkeypatch.setattr(case.manager, "_maybe_decrypt_json", forbidden_decoder)
+    before = _encrypted_snapshot(case)
+    owner = "other-owner" if failure == "owner" else case.root.owner_user_id
+    with case.owner_scope(owner), pytest.raises(WorkflowFenceError) as error:
+        if operation == "sweep":
+            case.manager.integrity_sweep(fix=True, domain="embeddings", queue="workflow", job_type="embedding_workflow")
+        else:
+            # Scope to the stored owner so exact enrollment, not RLS invisibility,
+            # rejects changed ownership. No SQL owner filter hides the candidate.
+            case.manager.acquire_next_job(
+                domain="embeddings", queue="workflow", worker_id="worker-a", lease_seconds=120
+            )
+    assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+    assert _encrypted_snapshot(case) == before
+    assert observed == []
+
+
+@pytest.mark.parametrize("operation", ["acquire", "reacquire", "sweep"])
+@pytest.mark.parametrize("error_type", [RuntimeError, CancelledError])
+def test_encrypted_decoder_programming_and_cancellation_errors_propagate(
+    workflow_case, workflow_encryption, monkeypatch, operation, error_type
+):
+    case = workflow_case
+    _admit_encrypted(case)
+    case.install_effect_guard()
+    if operation != "acquire":
+        _seed_expired_encrypted_episode(case)
+    error = error_type("decoder sentinel")
+
+    def broken_decoder(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(case.manager, "_maybe_decrypt_json", broken_decoder)
+    before = _encrypted_snapshot(case)
+    with pytest.raises(error_type) as caught:
+        case.recover("sweep") if operation == "sweep" else case.acquire(replace_current=False)
+    assert caught.value is error
+    assert _encrypted_snapshot(case) == before
+
+
+@pytest.mark.parametrize("via", ["acquire", "sweep"])
+def test_pre_handler_expiry_fails_at_fifth_episode_without_retry(via, workflow_case):
+    case = workflow_case
+    case.admit()
+    for episode in range(1, 6):
+        assert case.acquire() is not None
+        case.expire_current_lease(fractional=True)
+        case.recover(via)
+        assert case.no_progress_count() == episode
+        assert case.retry_count() == 0
+        assert case.job_row()["failure_streak_count"] in (None, 0)
+    assert case.status() == "failed"
+    assert case.failure_reason() == "no_progress_exhausted"
+    with case.connection() as conn:
+        assert (
+            case.execute(
+                conn,
+                "SELECT COUNT(*) FROM job_events WHERE job_id=? AND event_type='job.failed'",
+                (case.root.job_id_hint,),
+            ).fetchone()[0]
+            == 1
+        )
+    case.recover("sweep")
+    assert case.no_progress_count() == 5
+
+
+def test_deferral_ack_cannot_reset_no_progress(workflow_case):
+    case = workflow_case
+    case.admit()
+    for episode in range(1, 6):
+        effect = case.effect(f"{episode:064x}", WorkflowAction.CONTINUE)
+        result = case.apply(effect, case.acquire())
+    assert result.outcome is WorkflowOutcome.EXHAUSTED
+    assert case.status() == "failed"
+    assert case.no_progress_count() == 5
+    assert case.effect_receipt(case.root, effect.effect_key) is None
+    key = hashlib.sha256(
+        json.dumps(["jobs_workflow_no_progress_v1", case.root.job_uuid, 5], separators=(",", ":")).encode()
+    ).hexdigest()
+    assert case.effect_receipt(case.root, key)["action"] == "fail"
+    assert case.retry_count() == 0
+    with case.connection() as conn:
+        assert conn.execute("SELECT applications FROM workflow_effect_domain").fetchone()[0] == 5
+
+
+def test_progress_proof_resets_only_once_across_restart(workflow_case):
+    case = workflow_case
+    case.admit()
+    case.close_empty_episode()
+    case.acquire()
+    assert case.progress("a" * 64, WorkflowProgressKind.OUTPUT_RECEIPT, "b" * 64).reset
+    assert case.no_progress_count() == 0
+    case.expire_current_lease()
+    case.recover("sweep")
+    case.restart()
+    case.close_empty_episode()
+    case.acquire()
+    replay = case.progress("a" * 64, WorkflowProgressKind.OUTPUT_RECEIPT, "b" * 64)
+    assert replay.outcome is WorkflowOutcome.ALREADY_APPLIED
+    assert not replay.reset
+    assert case.no_progress_count() == 1
+    assert case.support_row()["progress_flag"] == 0
+    case.expire_current_lease()
+    case.recover("sweep")
+    assert case.no_progress_count() == 2
+
+
+@pytest.mark.parametrize("kind", list(WorkflowProgressKind))
+def test_new_progress_closes_expired_episode_without_charge(workflow_case, kind):
+    case = workflow_case
+    case.admit()
+    case.close_empty_episode()
+    case.acquire()
+    assert case.progress("a" * 64, kind, "b" * 64).reset
+    case.expire_current_lease()
+    case.recover("sweep")
+    assert case.no_progress_count() == 0
+    assert case.support_row()["last_closed_epoch"] == 2
+
+
+def test_same_progress_key_changed_facts_conflicts(workflow_case):
+    case = workflow_case
+    case.admit()
+    case.acquire()
+    case.progress("a" * 64, WorkflowProgressKind.CURSOR, "b" * 64)
+    case.expire_current_lease()
+    case.recover("sweep")
+    case.close_empty_episode()
+    case.acquire()
+    assert case.progress("a" * 64, WorkflowProgressKind.CURSOR, "c" * 64).outcome is WorkflowOutcome.CONFLICT
+    assert case.no_progress_count() == 1
+    assert case.support_row()["progress_flag"] == 0
+
+
+def test_late_proof_from_prior_epoch_cannot_reset_current_count(workflow_case):
+    case = workflow_case
+    case.admit()
+    old = case.acquire()
+    case.expire_current_lease()
+    case.recover("sweep")
+    case.acquire()
+    with pytest.raises(WorkflowFenceError) as error:
+        with case.capability.transaction(case.root.owner_user_id) as tx:
+            fence = tx.lock_live_root(case.root, old)
+            tx.record_progress(fence, WorkflowProgress("a" * 64, WorkflowProgressKind.CURSOR, "b" * 64))
+    assert error.value.outcome is WorkflowOutcome.STALE_LEASE
+    assert case.no_progress_count() == 1
+
+
+@pytest.mark.parametrize("encrypted", [False, True])
+def test_acquire_and_sweep_race_charge_same_epoch_once(workflow_case, encrypted, request):
+    case = workflow_case
+    if encrypted:
+        request.getfixturevalue("workflow_encryption")
+        stored = _admit_encrypted(case)
+    else:
+        case.admit()
+    case.acquire()
+    case.expire_current_lease()
+    barrier = Barrier(2)
+
+    def recover(via):
+        barrier.wait()
+        return case.recover(via)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(recover, ["acquire", "sweep"]))
+    assert case.no_progress_count() == 1
+    assert case.retry_count() == 0
+    if encrypted:
+        assert case.job_row()["payload"] == stored
+    with case.connection() as conn:
+        assert (
+            case.execute(
+                conn,
+                "SELECT COUNT(*) FROM job_events WHERE job_id=? AND event_type='job.deferred'",
+                (case.root.job_id_hint,),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_fractional_deadline_is_not_expired_early(workflow_case):
+    case = workflow_case
+    case.admit()
+    case.acquire()
+    with case.connection() as conn:
+        statement = (
+            "SELECT clock_timestamp()+interval '30.75 seconds'"
+            if case.manager.backend == "postgres"
+            else "SELECT STRFTIME('%Y-%m-%dT%H:%M:%f+00:00','now','+30.75 seconds')"
+        )
+        deadline = conn.execute(statement).fetchone()[0]
+        case.execute(conn, "UPDATE jobs SET leased_until=? WHERE uuid=?", (deadline, case.root.job_uuid))
+        conn.commit()
+    before = case.snapshot()
+    case.recover("sweep")
+    assert case.acquire(replace_current=False) is None
+    after = case.snapshot()
+    assert (after[:2], after[3:]) == (before[:2], before[3:])
+    with case.connection() as conn:
+        assert (
+            case.execute(
+                conn,
+                "SELECT COUNT(*) FROM job_events WHERE job_id=? AND event_type IN ('job.deferred','job.failed')",
+                (case.root.job_id_hint,),
+            ).fetchone()[0]
+            == 0
+        )
+    assert case.no_progress_count() == 0
+
+
+def test_cancel_wins_over_expiry_terminal_disposition(workflow_case):
+    case = workflow_case
+    case.admit()
+    for _ in range(4):
+        case.close_empty_episode()
+    lease = case.acquire()
+    case.apply(case.effect("c" * 64, WorkflowAction.CANCEL), lease)
+    case.recover("sweep")
+    assert case.status() == "cancelled"
+    assert case.no_progress_count() == 4
+    assert case.failure_reason() is None
+
+
+def test_schema_loss_blocks_enrolled_acquire(workflow_case):
+    case = workflow_case
+    case.admit()
+    with case.connection() as conn:
+        conn.execute("DROP TABLE job_workflow_effect_receipts")
+        conn.commit()
+    with pytest.raises(WorkflowFenceError) as error:
+        case.acquire()
+    assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+    assert case.status() == "queued"
+    assert case.job_row()["lease_id"] is None
+
+
+@pytest.mark.parametrize("check", ["native", "precommit", "new-progress", "new-effect"])
+def test_rolled_back_progress_cannot_leave_python_reset_authority(workflow_case, check):
+    case = workflow_case
+    case.admit()
+    case.close_empty_episode()
+    lease = case.acquire()
+    with pytest.raises(WorkflowFenceError):
+        with case.capability.transaction(case.root.owner_user_id) as tx:
+            fence = tx.lock_live_root(case.root, lease)
+            conn = tx.connection
+            conn.execute("SAVEPOINT before_progress")
+            tx.record_progress(fence, WorkflowProgress("a" * 64, WorkflowProgressKind.CURSOR, "b" * 64))
+            conn.execute("ROLLBACK TO SAVEPOINT before_progress")
+            if check == "native":
+                _ = tx.connection
+            elif check == "new-progress":
+                tx.record_progress(fence, WorkflowProgress("a" * 64, WorkflowProgressKind.CURSOR, "b" * 64))
+            elif check == "new-effect":
+                tx.apply_effect(fence, case.effect("c" * 64, WorkflowAction.COMPLETE), "e" * 64)
+    assert case.no_progress_count() == 1
+    assert case.receipt_count() == 1
+
+
+def test_legacy_and_admin_webhook_expiry_behavior_unchanged(uninstalled_workflow_case):
+    case = uninstalled_workflow_case
+    with case.connection() as conn:
+        for number, domain, queue in [(1, "legacy", "default"), (2, "admin_webhooks", "delivery")]:
+            case.insert(
+                conn,
+                "jobs",
+                {
+                    "uuid": f"00000000-0000-4000-8000-{number:012d}",
+                    "domain": domain,
+                    "queue": queue,
+                    "job_type": "admin_webhook_delivery" if number == 2 else "delivery",
+                    "payload": "{}",
+                    "status": "processing",
+                    "retry_count": 0,
+                    "max_retries": 3,
+                    "priority": 5,
+                    "quarantine_threshold": 5 if number == 2 else None,
+                    "leased_until": "2020-01-01 00:00:00",
+                },
+            )
+        conn.commit()
+    case.installer.integrity_sweep(fix=True)
+    with case.connection() as conn:
+        assert [tuple(row) for row in conn.execute("SELECT status,retry_count FROM jobs ORDER BY id")] == [
+            ("queued", 1),
+            ("queued", 1),
+        ]
+
+
+def test_expiry_requeues_ready_and_reacquisition_balances_counters(workflow_case):
+    case = workflow_case
+    case.admit()
+    case.acquire()
+    case.expire_current_lease()
+    case.recover("sweep")
+    assert case.counters() == (1, 0)
+    case.acquire()
+    assert case.counters() == (0, 0)
+
+
+def test_enrolled_acquisition_uses_database_lease_clock(workflow_case, monkeypatch):
+    case = workflow_case
+    case.admit()
+    monkeypatch.setattr(case.manager._clock, "now_utc", lambda: datetime(2000, 1, 1, tzinfo=timezone.utc))
+    assert case.acquire() is not None
+    assert case.lease_deadline().year != 2000
+    assert case.support_row()["current_epoch"] == 1
+
+
+@pytest.mark.parametrize("future", [True, False], ids=["future-ahead-clock", "due-behind-clock"])
+def test_enrolled_continuation_schedule_uses_database_clock(workflow_case, monkeypatch, future):
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+
+    case = workflow_case
+    case.admit()
+    lease = case.acquire()
+    with case.connection() as conn:
+        now = workflow_store(case.manager.backend).database_now(conn)
+    effect = replace(
+        case.effect("8" * 64, WorkflowAction.CONTINUE), not_before_at=now + timedelta(days=1 if future else -1)
+    )
+    case.apply(effect, lease)
+    before = case.snapshot()
+    monkeypatch.setattr(
+        case.manager._clock, "now_utc", lambda: datetime(2100 if future else 2000, 1, 1, tzinfo=timezone.utc)
+    )
+    acquired = case.acquire(replace_current=False)
+    if future:
+        assert acquired is None
+        assert case.snapshot() == before
+        assert case.support_row()["current_epoch"] == 1
+    else:
+        assert acquired is not None
+        assert case.status() == "processing"
+        assert case.support_row()["current_epoch"] == 2
+
+
+@pytest.mark.parametrize("installed", [False, True], ids=["uninstalled", "null-marker"])
+@pytest.mark.parametrize("future", [True, False], ids=["future-ahead-clock", "due-behind-clock"])
+def test_legacy_schedule_clock_behavior_is_preserved(uninstalled_workflow_case, monkeypatch, installed, future):
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+
+    case = uninstalled_workflow_case
+    if installed:
+        case.install()
+    with case.connection() as conn:
+        now = workflow_store(case.manager.backend).database_now(conn)
+        schedule = now + timedelta(days=1 if future else -1)
+        if case.manager.backend == "sqlite":
+            schedule = schedule.strftime("%Y-%m-%d %H:%M:%S.%f")
+        case.insert(
+            conn,
+            "jobs",
+            {
+                "uuid": "00000000-0000-4000-8000-000000000011",
+                "owner_user_id": "owner-a",
+                "domain": "embeddings",
+                "queue": "workflow",
+                "job_type": "embedding_workflow",
+                "payload": "{}",
+                "status": "queued",
+                "available_at": schedule,
+            },
+        )
+        conn.commit()
+    monkeypatch.setattr(
+        case.manager._clock, "now_utc", lambda: datetime(2100 if future else 2000, 1, 1, tzinfo=timezone.utc)
+    )
+    with case.owner_scope(case.command.owner_user_id):
+        row = case.manager.acquire_next_job(
+            domain="embeddings",
+            queue="workflow",
+            job_type="embedding_workflow",
+            worker_id="legacy",
+            lease_seconds=120,
+        )
+    eligible = future if case.manager.backend == "sqlite" else not future
+    assert (row is not None) == eligible
+    if row is not None:
+        assert row.get("workflow_capability_version") is None
+
+
+@pytest.mark.parametrize("mixed_existing", [False, True], ids=["empty-quota", "mixed-inflight"])
+def test_concurrent_enrolled_acquire_enforces_inflight_quota_with_clock_skew(
+    workflow_case, monkeypatch, mixed_existing
+):
+    case = workflow_case
+    limit = 3 if mixed_existing else 1
+    if mixed_existing:
+        case.admit()
+        assert case.acquire() is not None
+        with case.connection() as conn:
+            case.insert(
+                conn,
+                "jobs",
+                {
+                    "uuid": "00000000-0000-4000-8000-000000000012",
+                    "owner_user_id": "owner-a",
+                    "domain": "embeddings",
+                    "queue": "workflow",
+                    "job_type": "legacy",
+                    "payload": "{}",
+                    "status": "processing",
+                    "worker_id": "legacy-worker",
+                    "lease_id": "legacy-lease",
+                    "leased_until": "2200-01-01 00:00:00+00:00",
+                },
+            )
+            conn.commit()
+    candidates = [case.admit_new_reference().root for _ in range(2)]
+    assert all(root is not None for root in candidates)
+    monkeypatch.setenv("JOBS_QUOTA_MAX_INFLIGHT", str(limit))
+    assert case.manager._quota_get("JOBS_QUOTA_MAX_INFLIGHT", "embeddings", "owner-a") == limit
+    monkeypatch.setattr(case.manager._clock, "now_utc", lambda: datetime(2100, 1, 1, tzinfo=timezone.utc))
+    passed_prechecks = []
+    barrier = Barrier(2, timeout=30)
+    recover = case.manager._recover_expired_processing_jobs
+
+    def recover_then_synchronize(**scope):
+        result = recover(**scope)
+        # Public acquisition reaches this only after its actual outer quota
+        # check; neither caller can begin its acquiring transaction yet.
+        passed_prechecks.append(barrier.wait())
+        return result
+
+    monkeypatch.setattr(case.manager, "_recover_expired_processing_jobs", recover_then_synchronize)
+
+    def acquire(number):
+        with case.owner_scope(case.command.owner_user_id):
+            return case.manager.acquire_next_job(
+                domain="embeddings",
+                queue="workflow",
+                owner_user_id="owner-a",
+                job_type="embedding_workflow",
+                lease_seconds=120,
+                worker_id=f"quota-worker-{number}",
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(acquire, range(2)))
+    assert sorted(passed_prechecks) == [0, 1]
+    with case.connection() as conn:
+        count_sql = (
+            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' AND leased_until>clock_timestamp()"
+            if case.manager.backend == "postgres"
+            else "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' AND JULIANDAY(leased_until)>JULIANDAY('now')"
+        )
+        live_count = case.execute(conn, count_sql, ("embeddings", "owner-a")).fetchone()[0]
+        epochs = sorted(
+            case.execute(
+                conn, "SELECT current_epoch FROM job_workflow_roots WHERE job_uuid=?", (root.job_uuid,)
+            ).fetchone()[0]
+            for root in candidates
+        )
+    assert (sum(row is not None for row in results), live_count, epochs) == (1, limit, [0, 1])
+
+
+@pytest.mark.parametrize("installed", [False, True], ids=["uninstalled", "null-marker-no-support"])
+@pytest.mark.parametrize("ahead", [True, False], ids=["ahead", "behind"])
+def test_atomic_legacy_inflight_quota_preserves_clock_and_schema_behavior(
+    uninstalled_workflow_case, acquisition_mode, installed, ahead
+):
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+    from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import acquire_job as pg_acquire
+    from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import acquire_job as sqlite_acquire
+
+    case = uninstalled_workflow_case
+    if installed:
+        case.install()
+    with case.connection() as conn:
+        if installed:
+            conn.execute("DROP TABLE job_workflow_effect_receipts")
+            conn.execute("DROP TABLE job_workflow_roots")
+            conn.execute("DROP TABLE job_workflow_schema")
+        now = workflow_store(case.manager.backend).database_now(conn)
+        deadline = now + timedelta(minutes=10 if ahead else -10)
+        if case.manager.backend == "sqlite":
+            deadline = deadline.strftime("%Y-%m-%d %H:%M:%S.%f")
+        for number, status, job_type in [(13, "processing", "legacy"), (14, "queued", "embedding_workflow")]:
+            case.insert(
+                conn,
+                "jobs",
+                {
+                    "uuid": f"00000000-0000-4000-8000-{number:012d}",
+                    "owner_user_id": "owner-a",
+                    "domain": "embeddings",
+                    "queue": "workflow",
+                    "job_type": job_type,
+                    "payload": "{}",
+                    "status": status,
+                    "leased_until": deadline if status == "processing" else None,
+                },
+            )
+        conn.commit()
+    command = AcquireJobCommand(
+        domain="embeddings",
+        queue="workflow",
+        owner_user_id="owner-a",
+        job_type="embedding_workflow",
+        lease_seconds=120,
+        worker_id="legacy-quota-worker",
+        lease_id="legacy-quota-lease",
+        max_inflight_quota=1,
+        single_update=acquisition_mode,
+    )
+    statements = []
+    with case.owner_scope(case.command.owner_user_id), closing(case.manager._connect()) as conn:
+        kwargs = {
+            "command": command,
+            "counters_enabled": False,
+            "now": datetime(2100 if ahead else 2000, 1, 1, tzinfo=timezone.utc),
+        }
+        if case.manager.backend == "postgres":
+            result = pg_acquire(conn, case.manager._pg_cursor, **kwargs)
+        else:
+            conn.set_trace_callback(statements.append)
+            result = sqlite_acquire(conn, **kwargs)
+    expected = not ahead if case.manager.backend == "postgres" else ahead
+    assert (result.outcome is OperationOutcome.APPLIED) == expected
+    if case.manager.backend == "sqlite":
+        quota_sql = [statement for statement in statements if statement.startswith("SELECT COUNT(*) FROM jobs")]
+        assert len(quota_sql) == 1
+        if not installed:
+            assert "leased_until > DATETIME(" in quota_sql[0]
+            assert "workflow_capability_version" not in quota_sql[0]
+        assert all("job_workflow_" not in statement for statement in statements)
+    assert not {"job_workflow_roots", "job_workflow_schema", "job_workflow_effect_receipts"} & case.table_names()
+
+
+@pytest.mark.parametrize("via", ["acquire", "sweep"])
+def test_schema_loss_blocks_enrolled_recovery_without_legacy_fallback(workflow_case, via):
+    case = workflow_case
+    case.admit()
+    case.acquire()
+    case.expire_current_lease()
+    before = case.job_row()
+    with case.connection() as conn:
+        conn.execute("DROP TABLE job_workflow_effect_receipts")
+        conn.commit()
+    with pytest.raises(WorkflowFenceError) as error:
+        case.recover(via)
+    assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+    assert case.job_row() == before
+    assert case.no_progress_count() == 0
+
+
+def test_null_marker_never_accesses_missing_support(workflow_case):
+    case = workflow_case
+    with case.connection() as conn:
+        conn.execute("DROP TABLE job_workflow_effect_receipts")
+        conn.execute("DROP TABLE job_workflow_roots")
+        case.insert(
+            conn,
+            "jobs",
+            {
+                "uuid": "00000000-0000-4000-8000-000000000010",
+                "owner_user_id": "owner-a",
+                "domain": "embeddings",
+                "queue": "workflow",
+                "job_type": "embedding_workflow",
+                "payload": "{}",
+                "status": "processing",
+                "retry_count": 0,
+                "max_retries": 3,
+                "leased_until": "2020-01-01 00:00:00",
+            },
+        )
+        conn.commit()
+    with case.owner_scope(case.command.owner_user_id):
+        row = case.manager.acquire_next_job(
+            domain="embeddings", queue="workflow", worker_id="legacy", lease_seconds=120
+        )
+    assert row["status"] == "processing"
+    assert row["retry_count"] == 1
+    assert row["workflow_capability_version"] is None
+
+
+@pytest.mark.pg_jobs
+def test_pg_recovery_scope_is_explicit_and_restored(workflow_pg_case):
+    case = workflow_pg_case
+    case.admit()
+    case.acquire()
+    case.expire_current_lease()
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import recover_workflow_expiry_in_transaction
+    from tldw_Server_API.app.core.Jobs.operations.workflow_bindings import workflow_backend_hooks
+
+    with case.connection(runtime=True) as conn:
+        conn.execute(
+            "SELECT set_config('app.owner_user_id','surrounding-owner',true),set_config('app.is_admin','true',true),set_config('app.domain_allowlist','embeddings',true)"
+        )
+        before = conn.execute(
+            "SELECT current_user,current_setting('app.owner_user_id'),current_setting('app.is_admin'),current_setting('app.domain_allowlist')"
+        ).fetchone()
+        assert conn.execute("SELECT COUNT(*) FROM job_workflow_roots").fetchone()[0] == 0
+        cursor = case.execute(conn, "SELECT * FROM jobs WHERE uuid=? FOR UPDATE", (case.root.job_uuid,))
+        row = dict(zip([column[0] for column in cursor.description], cursor.fetchone()))
+        assert (
+            recover_workflow_expiry_in_transaction(
+                conn, backend="postgres", locked_root=row, hooks=workflow_backend_hooks("postgres")
+            ).outcome
+            is WorkflowOutcome.APPLIED
+        )
+        assert (
+            conn.execute(
+                "SELECT current_user,current_setting('app.owner_user_id'),current_setting('app.is_admin'),current_setting('app.domain_allowlist')"
+            ).fetchone()
+            == before
+        )
+        assert conn.execute("SELECT COUNT(*) FROM job_workflow_roots").fetchone()[0] == 0
+        conn.commit()
+    assert case.no_progress_count() == 1
+
+
+@pytest.mark.pg_jobs
+def test_pg_enrolled_recovery_rejects_privileged_role(workflow_pg_case):
+    case = workflow_pg_case
+    case.admit()
+    case.acquire()
+    case.expire_current_lease()
+    with pytest.raises(WorkflowFenceError) as error:
+        case.installer.integrity_sweep(fix=True)
+    assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+    assert case.no_progress_count() == 0
+    assert case.status() == "processing"

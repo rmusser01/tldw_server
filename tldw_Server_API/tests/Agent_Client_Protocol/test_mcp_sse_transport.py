@@ -534,8 +534,11 @@ async def test_sse_transport_private_opt_in_reaches_loopback_server(mcp_http_egr
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_refuses_redirect_to_private_address_at_the_hop(mcp_http_egress):
+async def test_sse_transport_refuses_redirect_to_private_address_at_the_hop(mcp_http_egress, monkeypatch):
     """A redirect from the SSE URL into link-local metadata is refused before it is requested."""
+    # Reach address validation rather than an unrelated CI host allowlist denial.
+    monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWLIST", raising=False)
+    monkeypatch.delenv("EGRESS_ALLOWLIST", raising=False)
     t = MCPSSETransport(sse_url=_SSE_URL)
     requested: list[str] = []
 

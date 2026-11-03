@@ -1,6 +1,7 @@
 """Benchmark evidence records the actual bounded PostgreSQL resource budget."""
 
 from contextlib import nullcontext
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -56,13 +57,20 @@ def test_settings_evidence_reads_live_transaction_memory_budget(pg_database_conf
 @pytest.mark.integration
 @pytest.mark.postgres
 def test_full_parity_verification_preserves_benchmark_parallel_budget(pg_database_config, monkeypatch):
-    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    from psycopg.conninfo import make_conninfo
+
+    # Pool check-in resets session SETs; the benchmark baseline must survive that reset.
+    config = replace(
+        pg_database_config,
+        connection_string=make_conninfo(
+            pg_database_config.postgres_connection_string(),
+            options="-c work_mem=64MB -c max_parallel_workers_per_gather=2",
+        ),
+    )
+    backend = DatabaseBackendFactory.create_backend(config)
     db = MediaDatabase(":memory:", client_id="42", backend=backend)
     try:
         with scoped_context(user_id=42):
-            with db.transaction() as conn:
-                backend.execute("SET max_parallel_workers_per_gather = 2", connection=conn)
-                backend.execute("SET work_mem = '64MB'", connection=conn)
             original = db._fetchone_with_connection
             parity_workers = []
 

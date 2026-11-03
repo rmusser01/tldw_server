@@ -175,12 +175,19 @@ async def test_endpoint_requests_field_types_and_source_cards_without_copyable_s
     assert all(f"Question: {card['front']}\nAnswer: {card['back']}" in {call["claim"] for call in llm_seams.judge_calls} for card in llm_seams.cards)  # nosec B101 - pytest contract assertion.
 
 
-@pytest.mark.parametrize(("label", "verdict"), [("nei", "failed"), ("refuted", "failed")])
+@pytest.mark.parametrize(("label", "verdict"), [("nei", "needs_revision"), ("refuted", "failed")])
 @pytest.mark.asyncio
 async def test_endpoint_retains_real_claims_refusal_for_unsupported_drafts(
     llm_seams: LlmSeams, label: str, verdict: str
 ) -> None:
-    llm_seams.cards = [{"front": "Q", "back": "A", "tags": []} for _ in range(5)]
+    llm_seams.cards = [
+        {
+            "front": f"Which unsupported conclusion belongs to card {index}?",
+            "back": f"Unsupported conclusion number {index} is true.",
+            "tags": [],
+        }
+        for index in range(5)
+    ]
     llm_seams.judge_label = label
     with pytest.raises(HTTPException) as raised:
         await generate_flashcards(
@@ -192,8 +199,8 @@ async def test_endpoint_retains_real_claims_refusal_for_unsupported_drafts(
     assert raised.value.detail["code"] == "claim_verification_failed"  # nosec B101 - pytest refusal assertion.
     verification = raised.value.detail["claimVerification"]
     assert verification["verdict"] == verdict  # nosec B101 - pytest refusal assertion.
-    assert len(verification["unitResults"]) == len(llm_seams.judge_calls) == 10  # nosec B101 - pytest refusal assertion.
-    assert all(unit["verdict"] != "grounded" for unit in verification["unitResults"])  # nosec B101 - pytest refusal assertion.
+    assert len(verification["unitResults"]) == len(llm_seams.judge_calls) == 5  # nosec B101 - pytest refusal assertion.
+    assert all(unit["verdict"] == verdict and unit["unit_id"].endswith(":back") for unit in verification["unitResults"])  # nosec B101 - pytest refusal assertion.
     assert all(SOURCE in call["prompt"] for call in llm_seams.judge_calls)  # nosec B101 - pytest refusal assertion.
 
 

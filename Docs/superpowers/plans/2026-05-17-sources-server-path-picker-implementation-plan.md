@@ -83,7 +83,7 @@ Run the focused SourceForm test file.
 ## Task 4: Verification and Closeout
 
 **Files:**
-- Modify: `backlog/tasks/task-406 - Add-Sources-server-path-picker.md`
+- Modify: `backlog/tasks/task-15004 - Add-Sources-server-path-picker.md`
 - Modify: this plan
 
 - [x] **Step 1: Run focused backend tests**

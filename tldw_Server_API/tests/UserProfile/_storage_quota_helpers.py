@@ -5,6 +5,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import add_org_member, add_team_member, create_organization, create_team
 from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.services.storage_quota_service import resolved_storage_quota_mb
@@ -115,10 +119,13 @@ def org_and_team_with_member(user_id: int) -> tuple[int, int]:
 
     async def _go() -> tuple[int, int]:
         """Create and join."""
+        context = TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        )
         org = await create_organization(name=f"Storage Org {suffix}", owner_user_id=None)
         team = await create_team(org_id=int(org["id"]), name=f"Storage Team {suffix}")
-        await add_org_member(org_id=int(org["id"]), user_id=user_id)
-        await add_team_member(team_id=int(team["id"]), user_id=user_id)
+        await add_org_member(org_id=int(org["id"]), user_id=user_id, context=context)
+        await add_team_member(team_id=int(team["id"]), user_id=user_id, context=context)
         return int(org["id"]), int(team["id"])
 
     return asyncio.run(_go())

@@ -65,6 +65,10 @@ async def characterize_takeover(
     )
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile, setup_database
+    from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+        TrustedMembershipReason,
+        TrustedMembershipWriteContext,
+    )
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
     from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
@@ -96,7 +100,13 @@ async def characterize_takeover(
         files = await storage.get_generated_files_repo()
         users = AuthnzUsersRepo(pool)
         orgs = AuthnzOrgsTeamsRepo(pool)
-        organization = await orgs.create_organization(name="lease-storage", owner_user_id=owner)
+        organization = await orgs.create_organization_with_owner_membership(
+            name="lease-storage",
+            owner_user_id=owner,
+            context=TrustedMembershipWriteContext(
+                trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+            ),
+        )
         team = await orgs.create_team(org_id=organization["id"], name="lease-storage-team")
         org_id, team_id = int(organization["id"]), int(team["id"])
         quotas = AuthnzStorageQuotasRepo(pool)

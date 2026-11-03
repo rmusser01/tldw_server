@@ -34,7 +34,9 @@ class _ErroringMcpServer:
         *,
         user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        server_auth_scope: Any | None = None,
     ) -> MCPResponse:
+        _ = server_auth_scope
         self.requests.append((request, user_id, metadata))
         return MCPResponse(
             id=getattr(request, "id", None),
@@ -65,7 +67,9 @@ class _SuccessfulMcpServer:
         client_id: str | None = None,
         user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        server_auth_scope: Any | None = None,
     ) -> MCPResponse:
+        _ = server_auth_scope
         self.metadata = metadata
         return MCPResponse(id=getattr(request, "id", None), result={"ok": True})
 
@@ -76,7 +80,9 @@ class _SuccessfulMcpServer:
         client_id: str | None = None,
         user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        server_auth_scope: Any | None = None,
     ) -> list[MCPResponse]:
+        _ = server_auth_scope
         self.metadata = metadata
         return [MCPResponse(id=getattr(request, "id", None), result={"ok": True}) for request in requests]
 

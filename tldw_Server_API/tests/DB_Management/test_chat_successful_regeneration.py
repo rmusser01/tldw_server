@@ -189,7 +189,7 @@ def test_regeneration_rejection_never_creates_an_empty_conversation(saved_chat, 
                     metrics=get_chat_metrics(), default_save_to_db=True,
                     final_conversation_id=conversation, save_message_fn=_save_message_turn_to_db,
                 )
-            assert rejected.value.status_code in {409, 422}
+            assert rejected.value.status_code == (400 if case == "malformed-marker" else 409)
 
     asyncio.run(run())
     assert {row["id"] for row in saved_chat.db.get_conversations_for_user("1")} == before

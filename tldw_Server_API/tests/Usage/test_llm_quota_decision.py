@@ -262,8 +262,30 @@ async def test_users_own_key_serves_mirrors_the_first_test_of_credential_resolut
 
     snapshot = {"openai_api": {"api_base_url": base_url}} if base_url else {}
     monkeypatch.setattr(byok_helpers, "is_byok_enabled", lambda: byok_on)
-    monkeypatch.setattr(byok_helpers, "is_provider_allowlisted", lambda _provider: allowlisted)
+    monkeypatch.setattr(byok_helpers, "is_provider_allowlisted", lambda provider: allowlisted and provider == "openai")
     monkeypatch.setattr(byok_helpers, "load_server_config_snapshot", lambda: snapshot)
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _pool)
     monkeypatch.setattr(AuthnzUserProviderSecretsRepo, "fetch_secret_for_active_user", _fetch)
     assert await usage_quota_deps.users_own_key_serves("7", requested) is expected
+
+
+@pytest.mark.parametrize("lost", [None, "revoked", "user-deactivated"])
+async def test_users_own_key_serves_reads_the_users_stored_key(tmp_path, monkeypatch: pytest.MonkeyPatch, lost) -> None:
+    """On real BYOK storage, a stored key serves; once revoked, or once its user is deactivated, it does not."""
+    from tldw_Server_API.app.core.AuthNZ import byok_helpers
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
+    from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import set_authnz_test_user_active
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_endpoints_sqlite import _setup_byok_sqlite
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_byok_runtime_sqlite import _upsert_user_key
+
+    state = await _setup_byok_sqlite(tmp_path, monkeypatch)
+    user_id = int(state["user"]["id"])
+    repo = AuthnzUserProviderSecretsRepo(state["pool"])
+    await _upsert_user_key(repo, user_id, "openai", "sk-own")
+    if lost == "revoked":
+        await repo.delete_secret(user_id, "openai")
+    elif lost == "user-deactivated":
+        await set_authnz_test_user_active(state["pool"], user_id, False)
+    # The vendor's default host, whatever base URL this machine's config.txt or environment sets.
+    monkeypatch.setattr(byok_helpers, "load_server_config_snapshot", dict)
+    assert await usage_quota_deps.users_own_key_serves(user_id, "openai") is (lost is None)

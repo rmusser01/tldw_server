@@ -111,10 +111,10 @@ class MutableRepository(ReadOnlyRepository):
         _reject_on_status_change(on_status_change)
         normalized_id = _normalize_task_id(task_id or self._next_task_id())
         tasks = self.list_tasks()
-        if _task_exists(tasks, normalized_id):
+        if normalized_id in self._all_task_ids():
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
         normalized_dependencies = [_normalize_task_id(dependency) for dependency in dependencies or ()]
-        _reject_missing_dependencies(normalized_dependencies, tasks)
+        _reject_missing_dependencies(normalized_dependencies, self._all_task_ids())
         _reject_circular_dependencies(normalized_id, normalized_dependencies, tasks)
         current_config = load_config(self.project.config_path)
         task_status = status or current_config.default_status
@@ -176,7 +176,7 @@ class MutableRepository(ReadOnlyRepository):
         if dependencies is not None:
             tasks = self.list_tasks()
             normalized_dependencies = [_normalize_task_id(dependency) for dependency in dependencies]
-            _reject_missing_dependencies(normalized_dependencies, tasks)
+            _reject_missing_dependencies(normalized_dependencies, self._all_task_ids())
             _reject_circular_dependencies(task.id, normalized_dependencies, tasks)
         # Edits always leave the file canonical, so backlog-py never writes a second notes block.
         try:
@@ -192,12 +192,7 @@ class MutableRepository(ReadOnlyRepository):
             parsed = parse_task_markdown(source)
         appends = [append_notes] if isinstance(append_notes, str) else list(append_notes or ())
         for append in appends:
-            existing_notes = parsed.sections.get("IMPLEMENTATION_NOTES")
-            existing_content = "" if existing_notes is None else existing_notes.content.rstrip()
-            appended = _normalize_block(append)
-            notes_content = appended if not existing_content else f"{existing_content}\n{appended}"
-            source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", notes_content)
-            parsed = parse_task_markdown(source)
+            source, parsed = _append_notes(source, parsed, append)
         if final_summary is not None:
             source = _replace_section(source, parsed, "FINAL_SUMMARY", _normalize_block(final_summary))
             parsed = parse_task_markdown(source)
@@ -240,6 +235,52 @@ class MutableRepository(ReadOnlyRepository):
             current_path.unlink()
         return _load_task(target)
 
+    def renumber_task(self, path: Path, new_id: str, *, note: str | None = None) -> TaskRecord:
+        """Give the task file at ``path`` (relative to the project root) a new id, in place.
+
+        Takes a path because two files can share an id, which ``edit_task`` cannot tell apart. The
+        file keeps its directory and its file-name tail, and is normalized like every edit. Refuses
+        an id that any task file in backlog/tasks, backlog/completed or backlog/archive/tasks holds.
+        """
+        candidate = self.project.root / Path(path)
+        if candidate.parent.resolve() not in {d.resolve() for d in self._task_dirs()} or not candidate.is_file():
+            raise TaskMutationError(
+                f"Not a task file in backlog/tasks, backlog/completed or backlog/archive/tasks: {path}"
+            )
+        current_path = _mutation_path(candidate.parent, candidate)
+        normalized_id = _normalize_task_id(new_id)
+        if normalized_id in self._all_task_ids():
+            raise TaskMutationError(f"Task id already exists: {normalized_id}")
+        with current_path.open("r", encoding="utf-8", newline="") as task_file:
+            raw = task_file.read()
+        try:
+            source = normalize_task_markdown(raw)
+        except ValueError as exc:
+            raise TaskMutationError(f"{current_path.name}: {exc}") from exc
+        parsed = parse_task_markdown(source)
+        if note:
+            source, parsed = _append_notes(source, parsed, note)
+        source = _replace_frontmatter_values(source, parsed, {"id": normalized_id})
+        parse_task_markdown(source)
+        tail = current_path.name.split(" - ", 1)[1] if " - " in current_path.name else "Task.md"
+        target = _mutation_path(current_path.parent, current_path.parent / f"{normalized_id.lower()} - {tail}")
+        _atomic_write_text(target, source)
+        current_path.unlink()
+        return _load_task(target)
+
+    def _task_dirs(self) -> tuple[Path, Path, Path]:
+        backlog = self.project.backlog_dir
+        return backlog / "tasks", backlog / "completed", backlog / "archive" / "tasks"
+
+    def _all_task_ids(self) -> set[str]:
+        """Ids of every task file, active, completed and archived, from their file names."""
+        return {
+            _id_from_filename(path)
+            for directory in self._task_dirs()
+            if directory.is_dir()
+            for path in directory.glob("task-*.md")
+        }
+
     def normalize_tasks(self, paths: Sequence[Path] | None = None, *, check: bool = False) -> list[Path]:
         """Rewrite task files into canonical form; return the files that changed (or would).
 
@@ -267,8 +308,8 @@ class MutableRepository(ReadOnlyRepository):
 
     def _next_task_id(self) -> str:
         max_id = 0
-        for task in self.list_tasks():
-            match = re.fullmatch(r"TASK-(\d+)", task.id.upper())
+        for task_id in self._all_task_ids():
+            match = re.fullmatch(r"TASK-(\d+)", task_id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
         return f"TASK-{max_id + 1}"
@@ -368,6 +409,16 @@ def _mutation_path(base: Path, candidate: Path) -> Path:
         return assert_path_within_base(base, candidate)
     except PathContainmentError as exc:
         raise TaskMutationError(str(exc)) from exc
+
+
+def _append_notes(source: str, parsed: ParsedTaskMarkdown, text: str) -> tuple[str, ParsedTaskMarkdown]:
+    """Append one block to the Implementation Notes, adding the section when it is missing."""
+    existing_notes = parsed.sections.get("IMPLEMENTATION_NOTES")
+    existing_content = "" if existing_notes is None else existing_notes.content.rstrip()
+    appended = _normalize_block(text)
+    notes_content = appended if not existing_content else f"{existing_content}\n{appended}"
+    source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", notes_content)
+    return source, parse_task_markdown(source)
 
 
 def _replace_section(source: str, parsed: ParsedTaskMarkdown, name: str, content: str) -> str:
@@ -528,11 +579,6 @@ def _normalize_task_id(task_id: str) -> str:
     return normalized
 
 
-def _task_exists(tasks: Iterable[TaskRecord], task_id: str) -> bool:
-    normalized_id = task_id.casefold()
-    return any(task.id.casefold() == normalized_id for task in tasks)
-
-
 def _reject_circular_dependencies(
     task_id: str,
     dependencies: Sequence[str],
@@ -566,8 +612,8 @@ def _reject_circular_dependencies(
         raise TaskMutationError(f"Circular dependency detected for {task_id}")
 
 
-def _reject_missing_dependencies(dependencies: Sequence[str], tasks: Sequence[TaskRecord]) -> None:
-    existing_ids = {task.id.upper() for task in tasks}
+def _reject_missing_dependencies(dependencies: Sequence[str], existing_ids: set[str]) -> None:
+    """A dependency may name any task file's id, including a completed or archived task."""
     for dependency in dependencies:
         if dependency.upper() not in existing_ids:
             raise TaskMutationError(f"Dependency not found: {dependency}")

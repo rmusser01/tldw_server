@@ -1142,7 +1142,7 @@ git commit -m "fix: harden watchlists accessibility and layout"
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx`
 - Modify: `apps/packages/ui/src/assets/locale/en/watchlists.json`
 - Modify: `Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md`
-- Modify: `backlog/tasks/task-12946 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md`
+- Modify: `backlog/tasks/task-15118 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md`
 
 **Interfaces:**
 - Produces repeatable UAT evidence for daily news briefing and two-host sportscast/culture roundtable.
@@ -1269,7 +1269,7 @@ Use `superpowers:requesting-code-review` with the approved specification, this p
 - [ ] **Step 13: Commit Task 10**
 
 ```bash
-git add apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts apps/extension/tests/e2e/watchlists.spec.ts Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md "backlog/tasks/task-12946 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md"
+git add apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts apps/extension/tests/e2e/watchlists.spec.ts Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md "backlog/tasks/task-15118 - Unify-Watchlists-briefing-pipeline-contract-and-harden-latest-briefing-UX.md"
 git commit -m "test: verify watchlists briefing acceptance"
 ```
 
