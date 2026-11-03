@@ -5,7 +5,7 @@
 **Backfilled from:** not backfilled
 **Decision owner:** UAT repair session, under the requester's authorization to fix the selected workflows
 **Related task:** TASK-13260.278.18.83.45
-**Related spec/plan:** ../Design/Persona_Session_Transcript_Durability_20261102.md; ../Plans/IMPLEMENTATION_PLAN_uat_s06_specialized_tools_discovery_20261101.md
+**Related spec/plan:** ../Design/Persona_Session_Transcript_Durability_20261102.md; ../Plans/IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#s06-specialized-tools-and-discovery-selected-closure--2026-11-02
 
 ## Decision
 
