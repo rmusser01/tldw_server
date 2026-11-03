@@ -1,7 +1,7 @@
 ---
 id: TASK-13953
 title: A dropped or failed /chat/completions stream writes no usage row
-status: To Do
+status: In Progress
 labels:
 - quotas
 - backend
@@ -25,6 +25,8 @@ Found by TASK-13951 (verified 2026-10-26 with a throwaway test: a client dropped
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-03-stream-usage-on-early-end.md. Owner answers (2026-11-03): ADR-004 Change summary waiver covers this PR; Decision 2 (nothing received refunds; follow-up filed) accept and file the follow-up.
+Follow-up for Decision 2's residual (charge the prompt of a drop before the first token): TASK-15420.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
