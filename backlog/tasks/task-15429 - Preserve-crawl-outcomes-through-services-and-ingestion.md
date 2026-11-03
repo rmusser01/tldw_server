@@ -34,6 +34,7 @@ I1 repair complete for narrow re-review, not accepted. BASE2987eec27f; original 
 Task10 independently accepted: fullreview9feeaee6c7..2987eec27f coherent spec/quality exceptI1; freshI1review2987eec27f..a864ccb315 ADDRESSED/no new findings. Final-source270pass,amended355pass,postcommit87pass beforefix; finalfixcovering195pass3682warnings141.33s andpostcommit15pass85warnings10.84s,0skips. AllscopedRuff/format/compile/diff/hooks/Bandit0. All owned service size ceilings restored without raising. Current sourcea864ccb315; page-job ownership clarification accepted, no invented registry. Stage4remainsTask11 integration/certification; oldarxiv/httpx2 failures alreadyfixedonfreshdev not duplicated. No publish/merge.
 Namespace migration before fresh-dev integration: original identifier TASK-15417; current identifier TASK-15429. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+Final controller tracking synchronization after all Task10 reviews and whole-branch fix review accepted. Existing final summary and historical evidence preserved. Integrated source e05c3b7dbad4bf2da5bfe7d8f6b9fdc48602e80c passed final receipt gates: scraping/sharedHTTP4158 (28 optional/environment skips), native51 (no skips), services117 including both official PostgreSQL cases (no skips), consumers770 (12 optional skips), quality64. Recursive cancellation is verified through the real engine, adapter and service with the original cancellation object and finalized partial report. Independent scoped review closed all four whole-branch findings with no new findings. Fresh controller regression71 passed, no skips,227 known warnings18.01s (/tmp/web-phase5-controller-final-focused.log). Endpoint-complete Bandit8 unchanged LOW,0MEDIUM/HIGH,0scanerrors. Whole-repo collection remains blocked by unrelated duplicate Meetings test module basenames; optional curl/live providers/native Windows unverified. Final acceptance details and limitations in parent TASK-15421 and approved plan. No push/PR/merge authorized or performed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -44,10 +45,10 @@ Services consume canonical reports before summaries/storage and preserve immutab
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -1,7 +1,7 @@
 ---
 id: TASK-15421
 title: Implement Web Scraping Phase 5 crawl and process-local jobs
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - refactor
@@ -15,9 +15,9 @@ Execute the approved Phase 5 implementation plan using fresh implementers and ta
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All eleven plan tasks pass task-level spec and quality review with recorded TDD evidence.
-- [ ] #2 Combined compatibility, security, browser, lifecycle and consumer certification passes with exact results and justified skips.
-- [ ] #3 Whole-branch review is addressed and the human change-summary merge gate is preserved.
+- [x] #1 All eleven plan tasks pass task-level spec and quality review with recorded TDD evidence.
+- [x] #2 Combined compatibility, security, browser, lifecycle and consumer certification passes with exact results and justified skips.
+- [x] #3 Whole-branch review is addressed and the human change-summary merge gate is preserved.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -42,20 +42,22 @@ Fix-wave progress: I2 real engine->adapter->service cancellation RED2 missing re
 Controller same-wave I3 follow-up proof read before commit: stateless check_url/resolve_url did not latch shared stop, allowing accepted siblings. Valid RED6fail/4pass actual owner/real-queue tests; correction holds EXISTING admission lock across bounded operation, checks cancel/deadline first, latches original budget reason and notifies current shared stop before unlock. check_url returns existing bounded byte size, and actual batch consumption uses this owner-latching boundary to avoid a stateless producer bypass/double charge. GREEN245 affected tests and140 controls/queue/native tests including concurrent reservation races and actual direct/enhanced browser owner-stop assertions. No new manager/flag or guard disable. Earlier frozen4145/native51/consumer770/service117 results are PRE-LATCH, explicitly not amended-code certification. Final POST-LATCH broad/native/services/consumers, inventory/quality/Bandit/hooks now running; reports retain exact chronology and parent remains In Progress pending fresh scoped review.
 Post-latch broad source gate correctly recorded FAILED1/4156passed/28skip/13163warnings/283.37s: held-command native owner did not drain after release. Reassessed actual prerequisite graph and Python3.14 shield, no budget/timeout increase. Deterministic actual preflight graph RED1 proved terminal guard.close invocation returned before _operation_task completed, allowing connection stop. Narrow existing-handle wait_closed receipt now used ONLY for connection prerequisite; established terminal close semantics retained. Native harness explicitly returns and asserts real ProbeError outcome so canceled shield cannot log a discarded inner exception; zero dispatch and held-command ownership assertions retained. GREEN172 cleanup/native tests528warnings11.69s. Final receipt-snapshot broad/native/services/consumers/quality/inventory/Bandit/hooks running; no final green/commit claim until collected. Detailed reassessment and chronology in interim/report. Parent In Progress; no controller metadata touched.
 Final receipt-snapshot verification complete BEFORE commit: broad scraping/WebScraping/sharedHTTP4158passed28optional skips13166warnings281.55s; mandatory real native51passed0skip166warnings81.07s; actual consumers770passed12optional skips6913warnings204.23s; services117passed0skip incl2official PostgreSQL cases401warnings9.14s; architecture/inventory/function/taskformat64passed205warnings65.55s. Literal logs /tmp/web-phase5-fix-*-receipt.log. Earlier gates explicitly superseded in report, not mislabelled final. Final logs zero unsafe-fork/unraisable/never-awaited/shielded-uncollected-future diagnostics; existing warning sites/optional skips detailed. Ruff/format/compile all21 changedPython pass; endpoint-complete Bandit8knownLOW0new0errors, both endpoints included; frozen ceilings unchanged, newfunctions<=300; actual inventory refreshed after last source edit; normal explicit hooks, normalization, duplicateIDs and diffcheck pass. All I1-I4 plus controller shared-owner latch and actual-close receipt repairs self-reviewed with actual affected callers; no new connection/dependency/subsystem/budget increase/functionality drop. Commit explicit25-file scope via normal task-9-hooks next; parent stays In Progress awaiting ONE fresh scoped fix review. Human-written Change summary merge gate unchanged; no push/PR/merge. Reports in Phase5 SDD whole-branch-fix-interim.md / whole-branch-fix-report.md.
+Final execution acceptance at source e05c3b7dbad4bf2da5bfe7d8f6b9fdc48602e80c. All eleven children independently accepted: TASK-15408,15409,15422,15423,15424,15425,15426,15427,15428,15429,15430. Whole-branch review identified four Important findings; one fix wave plus fresh scoped independent review now closes I1 native preflight redirect admission/actual retirement, I2 original recursive cancellation finalized-report propagation, I3 real batch/raw-resolved-final URL boundaries and atomic shared-owner stop, I4 literal legacy modulo-ten periodic checkpoint behavior including zero/failed dispositions. No new findings. No startup hook/library patch/additional browser connection/dependency/control subsystem or intended functionality removal. Governing ADR-093 unchanged; final plan stages and Task11 checkboxes complete, Task9/10 DoD boxes synchronized without rewriting their final summaries or history. Fresh controller final test command is the author postcommit regression command plus actual native preflight integration file:71passed0skip227knownwarnings18.01s, exit0, /tmp/web-phase5-controller-final-focused.log. Final-source author receipt gates independently inspected:4158scraping+HTTPpassed28optional/environment skips;51nativepassed0skip;117servicespassed0skip including2officialPG;770consumerspassed12optional skips;64qualitypassed0skip. No counts are summed across overlapping gates. Logs /tmp/web-phase5-fix-{scraping-http,native,services,consumers,quality}-receipt.log; detailed node IDs/warning/skip provenance in TASK-15430 and SDD whole-branch-fix-report.md. Fresh controller endpoint-complete Bandit /tmp/bandit_web_phase5_controller_final.json:8unchangedLOW0MEDHIGH0errors, both endpoints in metrics; exit1 is the known LOW-findings status, not a scan failure. Full branch added/modified Python Ruff JSON[] and compileexit0 on same source. Normal explicit-file hook commit and final metadata checks recorded next. Known scope limits: bare repository collection fails on unchanged duplicate Meetings test module basenames, not obsolete httpx2; optional curl/live providers/native Windows unverified; no throughput-parity/crash-proof/exactly-once claim. Warning provenance includes existing nine-ceiling ratchet advisory, no suppression/ceiling tightening. All implementation/review processes collected and agents closed. Execution complete locally only: no push/PR/merge, no PR readiness assertion; future publication must refresh dev/review state and preserve the requester-written Change summary merge gate. Main user work left untouched.
+Final controller metadata gates: architecture/import-inventory/task-format51passed0skip165knownwarnings38.03s (/tmp/web-phase5-controller-final-metadata.log); canonical normalization check on all three edited task files exit0; duplicate-ID CI exit0; MarkdownIt parsed17plan/spec/ADR/current-task files,20relative links,0missing; Task9 and Task10 final-summary blocks byte-identical to source HEAD; git diff --check exit0. Only approved plan and parent/Task9/Task10 records changed by controller finalization, no source changes. Normal explicit-file hook metadata commit follows; all verification sessions collected.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Completed Phase5 crawl and process-local job ownership under ADR-093. Canonical page acquisition, immutable parent controls and outcomes, bounded queue/batch work, versioned continuation checkpoints, compatibility adapters and report-first services preserve analyzer advice/results, public APIs and existing metadata/cookie/progress/persistence behavior. Existing browser/queue/executor owners retain physical work through cancellation and cleanup rather than releasing capacity early. Final review corrections close native preflight redirects, recursive cancellation reports, URL-budget stop propagation and literal periodic checkpoint cadence using the existing architecture, with no startup hook, new connection, dependency or control subsystem. All eleven child tasks and scoped final fix review accepted. Final-source scoped gates4158/51native/117services/770consumers/64quality pass with documented optional skips; fresh controller71pass, Bandit8unchangedLOW0new, full changed-Python Ruff/compile pass. Unrelated Meetings collection blocker and unverified optional/platform paths remain explicit. Plan retained as approved historical record; branch/worktree kept local, not pushed or merged. Human-written Change summary remains a future publication/merge gate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
