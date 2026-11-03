@@ -407,7 +407,7 @@ the implementation evidence.
 **Goal:** All current moderation callers use isolated execution without fail-open fallback or event-loop blocking.
 **Success Criteria:** Sync API compatibility, correct override dispatch, awaited streaming transforms, terminal failure propagation, and no affected success/save.
 **Tests:** Cross-surface failures plus existing moderation, streaming, Workflow and Audio regressions.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4: Activate Facade, Async Callers, and Stream Stop
 
@@ -420,6 +420,22 @@ Chat
 `core/Workflows/adapters/llm/moderation.py`;
 `core/Ingestion_Media_Processing/Audio/stt_policy.py`;
 `core/Audio/Realtime/default_pipeline.py`.
+Also modify `Moderation/regex_worker.py` and its owned worker tests so the
+evaluate batch is decision-only; redaction stays in the separate batch reached
+through public service override dispatch. The wire schema remains unchanged.
+Align `Moderation/execution_protocol.py` and its owned protocol/property tests
+with that decision-only contract: evaluate responses never carry redacted text;
+retain all other validation and the distinct supervised redaction contract.
+The indirect Audio audit additionally owns the typed-failure catch boundaries
+in `core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py` and
+`core/Audio/Realtime/session.py`, with focused callback/session regressions.
+The real Workflow-chain audit also owns narrowly typed moderation-failure
+propagation in `core/Workflows/engine.py` and its `adapters/control/flow.py`,
+`state.py`, and `orchestration.py` boundaries as needed. Start/resume, nested
+retry/parallel/workflow calls, and failure routing must not turn this operational
+failure into continued execution, successful output, or a raw-content webhook.
+Preserve unrelated Workflow errors, retry policies, quotas and control behavior;
+add focused real-engine/control regressions and run their existing coverage.
 Create `tests/unit/test_moderation_execution_service.py`,
 `tests/unit/test_moderation_execution_surfaces.py`,
 `tests/Chat/unit/test_streaming_moderation_execution_failure.py`.
@@ -454,7 +470,7 @@ Accept existing synchronous transforms and await actual awaitables. Change the
 pipeline request type to `Callable[[str], str | Awaitable[str]] | None`.
 Make `_absorb_transform_tail()` async and await it at every call site.
 
-- [ ] **Step 1: Write failing service/caller/stream tests.**
+- [x] **Step 1: Write failing service/caller/stream tests.**
 For every seven execution reasons, assert `test_input_failure_never_calls_provider`,
 `test_output_failure_never_returns_or_saves_affected_reply`,
 `test_compatibility_fallback_does_not_retry_failed_evaluation`,
@@ -481,10 +497,10 @@ prefix plus structured `moderation_unavailable` error, never success completion;
 representations; `test_sync_transform_remains_compatible` keeps existing behavior.
 Audio/Workflow tests assert failure envelopes contain no original text, timed
 segment, cached snapshot, or success marker; no downstream continuation.
-- [ ] **Step 2: Run the three new suites red.**
+- [x] **Step 2: Run the three new suites red.**
 Run `python -m pytest tldw_Server_API/tests/unit/test_moderation_execution_service.py tldw_Server_API/tests/unit/test_moderation_execution_surfaces.py tldw_Server_API/tests/Chat/unit/test_streaming_moderation_execution_failure.py -q`.
 Expected: current inline service/caller behavior fails the new assertions.
-- [ ] **Step 3: Implement facade routing and all caller adaptations together.** Replace direct evaluator execution in the default service with Task 2 runner batches. Preserve decision/redaction as two batches under one deadline and public overrides. Re-raise `ModerationExecutionError` before broad noncritical catches; callers must not fall back through `check_text()` or reinterpret failure as a content match. Async callers invoke methods via `await run_moderation_async(lambda: ..., metadata=FailureMetadata(operation=..., phase=..., input_chars=len(text)))`, supplying explicit validated metadata before admission, including whole transcript/payload operations where necessary. Preserve the original operational failure even if reporting fails.
+- [x] **Step 3: Implement facade routing and all caller adaptations together.** Replace direct evaluator execution in the default service with Task 2 runner batches. Preserve decision/redaction as two batches under one deadline and public overrides. Re-raise `ModerationExecutionError` before broad noncritical catches; callers must not fall back through `check_text()` or reinterpret failure as a content match. Async callers invoke methods via `await run_moderation_async(lambda: ..., metadata=FailureMetadata(operation=..., phase=..., input_chars=len(text)))`, supplying explicit validated metadata before admission, including whole transcript/payload operations where necessary. Preserve the original operational failure even if reporting fails.
 
 Route supervised matching/redaction through the extracted pure child operation;
 its DB/governance resolution and guardian notifications remain parent-only.
@@ -503,7 +519,7 @@ with the safe operational code, and prevent partial save or final success. Typed
 failure must reach audio HTTP/WebSocket adapters before the existing generic STT
 catch can convert it into a successful placeholder transcript. Do not change
 unrelated STT fallback behavior or partial-transcript opt-out policy.
-- [ ] **Step 4: Run focused suites green and audit call sites.**
+- [x] **Step 4: Run focused suites green and audit call sites.**
 Run the Step 2 command plus existing evaluator-delegation, Chat_NEW moderation,
 `tests/Chat/unit/test_streaming_utils.py`, `tests/Audio/test_stt_policy_payloads.py`,
 `tests/Audio/test_audio_transcription_retention_and_redaction.py`, and
@@ -517,14 +533,19 @@ Also run `rg -n '\.(search|finditer|sub|subn)\(' tldw_Server_API/app/core/Modera
 Classify each content-regex operation: live execution must occur in a child,
 including supervised and custom/simulation rules. Compilation/safety parsing
 remains the explicit initial-compiler exception; a thread is not an isolation boundary.
-- [ ] **Step 5: Review the complete activation diff and commit** as `feat(moderation): enforce isolated fail-closed execution across current callers (<implementation task ID>)`. No partial activation release.
+- [x] **Step 5: Review the complete activation diff and commit** as `feat(moderation): enforce isolated fail-closed execution across current callers (<implementation task ID>)`. No partial activation release.
+
+Task4 committed at `8cb6c20d14` and independently approved for spec/quality.
+Required suites152 passed; expanded manifest1946 passed with2 preexisting skips.
+Production Bandit clean, compile and new-findings Ruff comparison clean; existing
+warnings/test heuristics and unexecuted release/platform gates remain explicit.
 
 ## Stage 5: Release Evidence and Final Review
 
 **Goal:** Verify semantics, failure containment, packaging, platforms, and operational cost.
 **Success Criteria:** All changed-scope checks pass; residual limitations are explicit; independent whole-branch review has no unresolved issues.
 **Tests:** Full focused regression manifest, platform/packaging probes, UI smoke and touched-scope security checks.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 5: Validation and Documentation
 
