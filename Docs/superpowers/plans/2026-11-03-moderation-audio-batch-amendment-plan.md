@@ -27,7 +27,7 @@
 **Goal:** Add the smallest typed redaction batch to existing execution data/protocol/worker.
 **Success Criteria:** Strict valid round trips, independent semantics and aggregate caps.
 **Tests:** Protocol/worker unit and schema-aware property coverage.
-**Status:** Not Started
+**Status:** Complete
 
 **Files:** `Moderation/execution_models.py`, `execution_protocol.py`, `regex_worker.py`, owned protocol/worker tests.
 **Interfaces:** Add `redact_many` to Operation, not the single-text BaseOperation. Add constant `MAX_TEXT_FIELDS=4096`. Extend WorkerRequest.text to `str | tuple[str, ...]`; only redact_many uses a tuple internally/list on the wire, keeping existing single-text variants strict. Add `request_input_chars(request: WorkerRequest) -> int` for accurate aggregate ownership/reporting metadata. Add `snapshot_redaction_batch_request(texts: Sequence[str], policy: ModerationPolicy, phase: str | None, limits: EvaluationLimits, bounds: ExecutionBounds) -> WorkerRequest`. Batch responses contain one string per input field in order, strictly validated against count and aggregate limits. Existing private version/field structure stays otherwise unchanged; incompatible operation/type combinations fail closed.
@@ -40,7 +40,7 @@
 **Goal:** Batch checked Audio fields under one existing outer scope.
 **Success Criteria:** Atomic Audio results, supported dispatch and bounded launches.
 **Tests:** Service/payload/HTTP/WS and real many-segment success regressions.
-**Status:** Not Started
+**Status:** Complete
 
 **Files:** `Moderation/moderation_service.py`, runner/reporting metadata sites as required by the new variant, `Audio/stt_policy.py`, existing Audio HTTP aggregate call site, owned service/Audio tests.
 **Interface:** `ModerationService.redact_texts(self, texts: Sequence[str], policy: ModerationPolicy, phase: str | None = None) -> list[str]`. The default path submits one shared-policy child batch and inherits the reporting/deadline scope. Existing public single-text signatures and tuple dispatch stay intact. A trusted overridden `redact_text` must still be honored rather than silently bypassed; preserve its dispatch without introducing a default inline evaluator fallback.
@@ -54,7 +54,7 @@
 **Goal:** Prove the representative workload is repaired under unchanged budgets.
 **Success Criteria:** Actual isolated execution, updated packaging/platform/security evidence and one final scoped re-review.
 **Tests:** Representative real batch and affected regression/security/metadata gates.
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ] After independent containment prerequisites, run the warmed actual100-segment5099-character workload, record elapsed time, actual batch count, aggregate counts, result correctness and settled ownership. Keep earlier failure evidence. Do not widen caps if it still fails.
 - [ ] Update installed-worker/flags/import tests and actual Linux3.12 source snapshot/probes for the new variant; preserve Windows unverified status. Update README/validation evidence and TASK-15417 notes with amendment/ADR links.
@@ -62,6 +62,14 @@
 - [ ] Commit working code normally under TASK-15417 and append all F1-F3/M1-M2 evidence/interfaces/SHA to final-fix-report.md. Parent owns exactly ONE scoped independent re-review for the complete final fix wave.
 
 ## Self-Review And Handoff
+
+Implementation at `0233b7ba09` passed the representative100-segment workload
+(43.714ms, one actual child),917 affected host nodes and329 selected Linux3.12
+nodes. Scoped final review accepted F1 batching and its caps/semantics, plus
+F3/M1/M2; the separate F2 cancellation-during-cleanup reporting race remains
+Important and blocks global completion. The original single fix-wave budget is
+exhausted; explicit requester authorization for a targeted follow-up is pending.
+Do not remove either plan or claim integration readiness before that disposition.
 
 Spec coverage: field count, aggregate characters/bytes, child-only semantics,
 deadline/ownership, all-or-nothing Audio/HTTP/WS and compatibility each have named
