@@ -362,8 +362,9 @@ def test_completion_serialization_and_connection_error_precedence(completion_man
         phases.append("transform")
         return transformed
 
-    monkeypatch.setattr(manager_module, "json", SimpleNamespace(**vars(manager_module.json)))
-    monkeypatch.setattr(manager_module.json, "dumps", serialize)
+    monkeypatch.setattr(
+        manager_module, "json", SimpleNamespace(**{**vars(manager_module.json), "dumps": serialize})
+    )
     monkeypatch.setattr(manager, "_connect", connect)
     monkeypatch.setattr(manager, "_maybe_encrypt_json", transform)
     if scenario.endswith("-connect"):
