@@ -6,22 +6,22 @@ import { ExternalLink } from "lucide-react"
 
 import { Alert as DSAlert } from "@/components/ui/primitives"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { bgRequest } from "@/services/background-proxy"
+import {
+  getWorkspaceTaskDetail,
+  listCanonicalWorkspaceProjects,
+  listCanonicalWorkspaceSessions,
+  listWorkspaceProjectTasks,
+  type WorkspaceHistoryRequestOptions
+} from "@/services/workspace-acp-history"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { formatErrorMessage } from "@/utils/format-error-message"
-import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import type {
-  ACPSessionListItem,
-  ACPSessionListResponse
+  ACPSessionListItem
 } from "@/services/acp/types"
 
-const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
-const PROJECTS_PATH = `${AGENT_ORCHESTRATION_BASE_PATH}/projects`
-const ACP_SESSIONS_PATH = "/api/v1/acp/sessions"
-const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE =
   "Agent orchestration is not available on this server."
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE =
@@ -158,22 +158,6 @@ const getCanonicalWorkspaceId = (
   normalizeWorkspaceId(item.canonical_workspace?.canonical_workspace_id) ||
   normalizeWorkspaceId(item.metadata?.canonical_workspace_id)
 
-const buildCanonicalProjectsPath = (canonicalWorkspaceId: string): string => {
-  const params = new URLSearchParams({
-    canonical_workspace_id: canonicalWorkspaceId,
-    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
-  })
-  return `${PROJECTS_PATH}?${params.toString()}`
-}
-
-const buildWorkspaceSessionsPath = (canonicalWorkspaceId: string): string => {
-  const params = new URLSearchParams({
-    workspace_id: canonicalWorkspaceId,
-    limit: String(MAX_RECENT_RUNS)
-  })
-  return `${ACP_SESSIONS_PATH}?${params.toString()}`
-}
-
 const getRunTimestamp = (run: RunItem): number => {
   const candidate = run.completed_at || run.started_at
   if (!candidate) return 0
@@ -285,11 +269,13 @@ export const WorkspaceACPHistoryModal: React.FC<
     const stopAccountWatch = watchChatAccountChanges((invalidated) => {
       if (invalidated) { retired = true; abortController.abort(); retire() }
     })
-    const fetchJson = async <T,>(path: string): Promise<T> => {
+    const fetchJson = async <T,>(
+      request: (options: WorkspaceHistoryRequestOptions) => Promise<T>,
+      projectsRequest = false
+    ): Promise<T> => {
       if (!isCurrent()) throw createServicePromptScopeChangedError()
       try {
-        const payload = await bgRequest<T>({
-          path: path as AllowedPath, method: "GET",
+        const payload = await request({
           ...requestScopeFields(scope!.requestScope),
           abortSignal: abortController.signal,
           timeoutMs: Math.max(1, Math.ceil(deadline - performance.now()))
@@ -298,7 +284,7 @@ export const WorkspaceACPHistoryModal: React.FC<
         return payload
       } catch (err) {
         if ((err as { status?: number })?.status === 404 &&
-          (path === PROJECTS_PATH || path.startsWith(PROJECTS_PATH + "?")) &&
+          projectsRequest &&
           ((err as { details?: { detail?: unknown } })?.details?.detail === "Not Found" ||
             (err instanceof Error && err.message === "Not Found"))) throw createUnsupportedError()
         throw err
@@ -331,7 +317,7 @@ export const WorkspaceACPHistoryModal: React.FC<
           WorkspaceRunHistoryEntry[]
         > => {
           const projectsPayload = await fetchJson<unknown>(
-            buildCanonicalProjectsPath(canonicalWorkspaceId)
+            (options) => listCanonicalWorkspaceProjects(canonicalWorkspaceId, options), true
           )
           const projects = normalizeListPayload<ProjectSummary>(
             projectsPayload,
@@ -345,7 +331,7 @@ export const WorkspaceACPHistoryModal: React.FC<
             await Promise.all(
               matchingProjects.map(async (project) => {
                 const tasksPayload = await fetchJson<unknown>(
-                  `${PROJECTS_PATH}/${project.id}/tasks`
+                  (options) => listWorkspaceProjectTasks(project.id, options)
                 )
                 const tasks = normalizeListPayload<TaskSummary>(
                   tasksPayload,
@@ -365,7 +351,7 @@ export const WorkspaceACPHistoryModal: React.FC<
               .slice(0, MAX_TASK_DETAILS)
               .map(async ({ project, task }) => {
                 const detail = await fetchJson<TaskDetail>(
-                  `${AGENT_ORCHESTRATION_BASE_PATH}/tasks/${task.id}`
+                  (options) => getWorkspaceTaskDetail<TaskDetail>(task.id, options)
                 )
                 return { project, task: detail }
               })
@@ -386,8 +372,8 @@ export const WorkspaceACPHistoryModal: React.FC<
         })()
 
         const directSessionsPromise = (async (): Promise<ACPSessionListItem[]> => {
-          const sessionsPayload = await fetchJson<ACPSessionListResponse | unknown>(
-            buildWorkspaceSessionsPath(canonicalWorkspaceId)
+          const sessionsPayload = await fetchJson<unknown>(
+            (options) => listCanonicalWorkspaceSessions(canonicalWorkspaceId, MAX_RECENT_RUNS, options)
           )
           return normalizeListPayload<ACPSessionListItem>(
             sessionsPayload,

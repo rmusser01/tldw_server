@@ -43,7 +43,7 @@ import { flushWorkspacePersistence, useWorkspaceStore } from "@/store/workspace"
 import {
   readMigratedResearchWorkspaceId,
   restoreMigratedResearchWorkspace,
-} from "../workspace-server-restore";
+} from "@/services/workspace-server-restore";
 import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error";
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";

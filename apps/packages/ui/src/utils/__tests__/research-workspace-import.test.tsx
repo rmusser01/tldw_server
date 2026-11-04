@@ -762,7 +762,7 @@ it.each([false, true])(
   "retains canonical Quick Notes and reused source evidence through reconcile and tombstoned reload (lost response=%s)",
   async (loseResponse) => {
     const { restoreMigratedResearchWorkspace } =
-      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+      await import("@/services/workspace-server-restore")
     const { reconcileResearchWorkspaceServerState } =
       await import("@/components/Option/ResearchWorkspace/workspace-server-reconcile")
     localStorage.setItem(
@@ -1209,7 +1209,7 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
   "acknowledges a restored legacy numeric note only while owned (%s) and saves its canonical UUID",
   async (change) => {
     const { restoreMigratedResearchWorkspace } =
-      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+      await import("@/services/workspace-server-restore")
     const { QuickNotesSection } =
       await import("@/components/Option/ResearchWorkspace/StudioPane/QuickNotesSection")
     localStorage.setItem(
@@ -1668,7 +1668,7 @@ it.each([false, true])(
       selectedSourceIds: [],
     })
     const { restoreMigratedResearchWorkspace } =
-      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+      await import("@/services/workspace-server-restore")
     await restoreMigratedResearchWorkspace({
       signal: new AbortController().signal,
       apply: useWorkspaceStore.getState().restoreServerWorkspace,

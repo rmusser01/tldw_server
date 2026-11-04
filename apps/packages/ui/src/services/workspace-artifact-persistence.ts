@@ -1,5 +1,5 @@
 import { mapServerArtifactToLocal } from '@/store/workspace-api';
-import { bgRequest } from '@/services/background-proxy';
+import { bgRequest, type BgRequestInit } from '@/services/background-proxy';
 import type { ServicePromptSnapshot } from '@/services/service-prompts';
 import { requestScopeFields } from '@/services/tldw/domains/service-prompts';
 import type {
@@ -210,3 +210,11 @@ export const persistWorkspaceArtifact = async (
     if (pending.get(key) === operation) pending.delete(key);
   }
 };
+
+export const loadWorkspaceArtifacts = (
+  workspaceId: string,
+  options: Pick<BgRequestInit, "headers" | "servicePromptConfig" | "abortSignal" | "timeoutMs">
+): Promise<WorkspaceArtifactApiResponse[]> => bgRequest<WorkspaceArtifactApiResponse[]>({
+  path: `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts`,
+  method: "GET", ...options,
+});

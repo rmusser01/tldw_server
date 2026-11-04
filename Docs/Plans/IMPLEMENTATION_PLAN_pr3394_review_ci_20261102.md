@@ -446,3 +446,60 @@ The official Jobs-scoped ratchet first failed with the exact hosted offense, the
 All 16 affected cases pass on supported Python 3.12.13: ten precedence cases, four unrelated-JSON controls and two oversize controls, across SQLite and official isolated PostgreSQL fixtures, no skips (351 warnings; 32.23 pytest seconds, 36.924 outer seconds). The exact formerly failed full-baseline ratchet node exited zero in 38.573 outer seconds. Its bounded combined-output tail retained startup diagnostics instead of the pytest summary; no exact pytest duration or warning count is claimed for that node.
 
 Compile, explicit no-cache Ruff and diff checks pass. Bandit remains 109/109 inherited findings, with no errors/new findings and identical finding fingerprints. Independent actual source review is CLEAR: constructing the complete local namespace before its single module binding removes redundant mutation/undo while preserving real delegation, both final encodings, isolation, connection/transform probes and every verdict. Stages 1–2 are complete; Stage 3 proceeds through hooks, final staged review and exact-lease publication. Fresh-head hosted qualification and all broader gates remain open.
+
+
+## 2026-11-04 17:06 UTC ratchet repair publication
+
+Published `93bd3d38d24af8b726a42abf75cfd1ce58a4b784` as one normal commit after `57fc574e570d45259100e89635bbca47c32514dd`, with the exact parent lease and normal pre-push. The three-file committed patch (62 insertions, two deletions; 26765 bytes) matches actual/final-staged independent review CLEAR and staged SHA256 `0432d0a051c7949f729ee35fb6a877d0914f2b181f809324828495027168a634`. Configured hooks passed in 1.900 seconds with source/index unchanged; explicit Ruff was separate from skipped wizard-only hooks. The diagnosed redundant setup mutation is removed without application/assertion/classifier/baseline/admission/budget changes.
+
+Fresh local/remote/REST/GraphQL heads agree. PR remains open/ready, auto-merge disabled and mergeable/behind. Live dev `eed9e1c01cf602053dc115e9165cea9bcef764ef` and reported base `c46b4850057cc0cc711889894c6672d171eca0fd`/dev are verified separately. Authored PR prefix/Change summary is byte-exact; only Cubic's generated suffix changed (fresh full-body SHA256 `8a619c53ca9857b9712e60ed4ba3b4bcbc698fd552ad4385f5f8b06d6316aeaa`), and the fresh body is preserved.
+
+The one new-head census contains 52 checks on one page: 22 queued, two running, 23 skipped, three successful, one neutral and one cancelled. Statuses and feedback are completely paginated (three statuses; zero reviews/inline comments; two unchanged bot comments apart from CodeRabbit skip-run metadata; zero review threads). Main CI `41873692204` is pending on exact93bd/pull_request/attempt1/ci.yml with zero jobs. No completed executable test failure or actionable source feedback is present, and no93bd log has been read.
+
+The cancelled audit `126727284386`/run `41873687117` is independently verified as superseded **after execution**: runner `1000766895`, all seven steps successful, 17:03:23–17:03:59 UTC, higher-priority waiting request annotation. It must not be called unexecuted or an application failure. Successor `41873766876`/job `126727782652` actually passed on exact93bd/pull_request_target/attempt1/frontend-license-gate.yml, runner `1000766913`, all seven steps successful at 17:04:26–17:05:16 UTC. This qualifies the prerequisite only; no audit log was read.
+
+Old57fc's consumed gap log, actual container success and successful single macOS retry remain historical. Every current-head required gate and admitted suite still needs its own execution. Ratchet Stage 3, the original UI cause, latest-dev integration, native/installer/release/human-summary/merge gates remain open. Only these subsequent owned task/plan notes are dirty; source/index, backup and unrelated work are preserved. Monitoring remains active every 15 minutes.
+
+
+## 2026-11-04 17:24 UTC browser-install diagnostic
+
+The one complete current-head census has 356 checks/four pages (70 successful, 28 running, 215 queued, 40 skipped, one failed, one neutral and the known superseded audit cancellation). Statuses and feedback are fully paginated and unchanged. Main CI `41873692204` has 233 jobs/three pages; required gates and admitted Jobs/UI/Auth/Writing suites remain pending.
+
+Critical browser E2E job `126735216414`/run `41873692003` was verified exact93bd/pull_request/attempt1/frontend-e2e-tiers.yml/runner1000767022/steps/annotations before its single log GET (165324 bytes, 2230 lines). The log is consumed and must never be refetched. Playwright installation failed at 17:20:40–17:20:57 UTC; backend/dependency/provider/startup steps passed, then frontend build and all critical browser tests were skipped. Actual runner image was Ubuntu 24.04, not the version mentioned in the migration notice.
+
+The diagnostic filter incorrectly gave unrelated error contexts priority and dropped all installer-section error rows while bounding output. The precise installer cause remains unconfirmed. No network/CDN/package/OS incompatibility or flaky classification is justified. The Node-only UX sibling installer succeeded, but it does not prove the critical job's separate Python installer succeeded. A corrected in-memory selector prioritizes the failed-step tail and passes synthetic noisy-prefix/long-section/redaction/missing-section checks; those checks qualify the diagnostic helper only, with no repository helper or product change.
+
+The normal job-specific retry API was requested once after exact remote-head and inert queue-tick guards (MERGE_QUEUE read-only result: unset). GitHub refused with HTTP403: “The workflow run containing this job is already running.” No retry was accepted or started. Do not repeat the POST while the run is unchanged; after actual completion, request one diagnostic retry with fresh head and queue guards. No whole-run dispatch, cancellation, queue action, setting change, source edit or local browser/runtime start.
+
+On this exact head, worker `126730196897`/runner `1000766967` and audio-worker `126730196993`/runner `1000766973` have successful SDK-preparation, full image build/load and isolated import steps in container run `41873692480`. The protected gate `126738498782` is still queued with no runner. No all-image/protected/full-CI qualification follows. Original UI cause, latest-dev/native/installer/release/human-summary/merge gates remain open; source/index and unrelated work are preserved apart from these owned tracking notes. Monitoring stays active every 15 minutes.
+
+
+## Frontend repair unit — 2026-11-04 17:54 UTC
+
+**ADR assessment:** No new ADR. This enforces the existing service boundary and frozen complexity limits while preserving current authorization, cancellation, receipt, and recovery behavior. ADR-069 remains Proposed; no accepted rationale changes.
+
+### Stage 1: Bind and reproduce current frontend failures
+**Goal:** Establish the actual lint offenses and characterize the separate quiz failure before changing behavior.
+**Success Criteria:** Exact head/run/job/runner/steps verified; each new failed log consumed once; configured local lint RED; unchanged quiz case and full-file outcomes retained.
+**Tests:** Configured focused ESLint reproduced all 10 errors. Unchanged quiz case passed; full 19-case file passed with scoped V8 coverage. The hosted checkbox/feedback cause remains unconfirmed. Targeted critical-browser attempt 2 actually passed installation, build, and critical tests; original installer cause remains unknown.
+**Status:** Complete
+
+### Stage 2: Preserve behavior while correcting ownership and size
+**Goal:** Move business transport to services and the existing image metadata callback to its owning module.
+**Success Criteria:** Restore module byte-exact after move; all caller paths updated; existing account/deadline/404 guards and image/partial-ACK handling retained; frozen suppression entries only shrink through normal pruning. Add only bounded failure evidence for the quiz if a real-component probe cannot establish a causal behavior repair.
+**Tests:** AST/body comparisons, existing workspace/header/import and image-sync/lifetime suites, bounded quiz diagnostic red/green if needed.
+**Status:** Complete
+
+### Stage 3: Qualify the affected frontend scope
+**Goal:** Verify real affected behavior and configured static boundaries.
+**Success Criteria:** Affected tests and scoped coverage pass; configured shared-UI lint/hook and import-cycle/boundary/type checks pass; no classifier, ceiling, or suppression growth; no new scoped security findings where applicable.
+**Tests:** Existing package-local Vitest/TypeScript/ESLint tools, both configured client typechecks, normal suppression pruning, baseline/current comparison, independent actual review.
+**Status:** Complete
+
+### Stage 4: Review and publish the bounded repair
+**Goal:** Publish only independently reviewed, normally committed changes to this same PR.
+**Success Criteria:** Actual and final staged review clear; normal hooks pass; source/dev/remote/body guards hold; exact-93bd-lease publication and new-head census. Preserve all wider native/release/human-summary/latest-dev/merge gates as open.
+**Tests:** Final diff/AST/source/index guards, configured hooks, exact committed patch comparison and hosted metadata.
+**Status:** In Progress
+
+Qualification: configured lint RED10; normal full prune removed only seven stale counts (775→768) across two entries. Full shared-hook enforcement 0/6185 files; runtime cycles unchanged 4/4 across 6015 files; configured strict boundary/WebUI/extension typechecks all 0. Restore bytes and original strong image callback body exact; all other chat-action bytes exact under inverse extraction. All 205 original quiz assertion/action/wait call texts exact; twelve touched TypeScript files parse. Existing 276 workspace/header/import/image cases passed with scoped V8 (24.96s Vitest/25.377s outer), then 36 quiz/artifact cases passed with scoped V8 (14.86s/15.127s). Independent actual source review CLEAR. Bandit normal invocation scans zero Python lines in this TypeScript scope, so it supplies no frontend security qualification. No dependencies, runtime, browser, cache, CI admission, timeout or classifier changes. The quiz cause and original browser installer cause remain unconfirmed. Staged review, normal hooks and exact-lease publication remain pending.

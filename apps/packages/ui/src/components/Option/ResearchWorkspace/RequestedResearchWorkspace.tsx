@@ -6,7 +6,7 @@ import { Button } from "@/components/Common/Button";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { useWorkspaceStore } from "@/store/workspace";
 import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key";
-import { restoreMigratedResearchWorkspace } from "./workspace-server-restore";
+import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore";
 
 const LocalWorkspace = React.lazy(() =>
   import("./index").then((module) => ({ default: module.ResearchWorkspace })),
