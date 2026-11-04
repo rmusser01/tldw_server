@@ -392,3 +392,57 @@ Consumed audio-worker job `126665011333`/run `41824813477` once (355695 bytes, 3
 The actual condition regression was red for audio-worker (one failure, five passes; 2.541 outer seconds) before editing the workflow. The repair changes only the existing preparation condition to worker OR audio-worker; reversing that value restores the entire original workflow byte-exact. The shared SDK cleanup shell and all Dockerfiles, image build/load/import checks, matrix admission, protected gate and budgets remain unchanged.
 
 All 200 connected release, worker-packaging, PyPI, required, frontend-license and merge-queue workflow cases pass on Python 3.12.13 (six warnings; 13.45 pytest seconds; 15.551 outer seconds). Existing real private-filesystem cleanup/error propagation tests remain intact and pass. Compile and explicit static Ruff pass. Bandit baseline/current is 43/43 inherited with no errors or new findings; Ruff's initial sandbox cache-write error was resolved by its no-cache mode without deleting a cache or disabling validation. Independent actual review is CLEAR. These checks prove selection and cleanup semantics; actual hosted capacity and image load/import success remain open.
+
+
+## 2026-11-04 16:01 UTC audio repair publication
+
+Published `57fc574e570d45259100e89635bbca47c32514dd` as one normal commit after `cba2660ea79b90d491acf00398f4d1497822f0a7`, using the exact parent lease and normal pre-push. The four-file committed patch equals independently reviewed staged SHA256 `d6a548ffcb9912d4b2d62798465c22c34fd97fefa757561a6a17eafa25a1e35c`. Configured hooks passed in 2.012 seconds with source/index unchanged; explicit scoped Ruff was separate from skipped wizard-only hooks. The one-line preparation condition repair is published; actual hosted capacity, audio build/load/import smoke and the protected container gate remain open.
+
+Fresh local/remote/REST/GraphQL heads agree. PR remains open/ready, auto-merge disabled and mergeable/behind. Live dev `eed9e1c01cf602053dc115e9165cea9bcef764ef` and reported PR base `c46b4850057cc0cc711889894c6672d171eca0fd`/dev remain distinct. Authored PR prefix/Change summary is byte-exact; only Cubic's suffix changed (full body SHA256 `5cb12e75663f8c4c3f076d87f0683947cb0899225e82630eef9f5c5f12592432`). No latest-dev integration or broader acceptance claim.
+
+One complete new-head census: 43 checks/one page (22 queued, 20 skipped, one neutral; no negative), one status, fully paginated feedback with no actionable finding. Main CI `41863200945` is queued on exact57fc/pull_request/attempt1/ci.yml, three jobs (two queued, one skipped). No new-head logs read. Every current-head required gate, actual worker/audio image preparation/build/load/import, Jobs/UI and admitted Linux qualification still awaits execution. Audio Stage 3 remains in progress through hosted monitoring; the earlier UI cause and independent native/installer/release/human-summary/latest-dev/merge gates remain open. Only subsequent owned tracking notes are dirty; source/index, all unrelated work and the backup are preserved. Monitoring stays active every 15 minutes.
+
+
+## 2026-11-04 16:34 UTC hosted capacity checkpoint
+
+The complete current-head census observed 355 check rows across four pages: 72 successes, 15 running, 226 queued, 39 skipped, two cancelled and one neutral. Main CI `41863200945` has 233 jobs across three pages (11 successful, nine skipped, six running, 207 queued). Feedback remains fully paginated and unchanged with no actionable source finding. Expanded job-step output exceeded the tool output budget; the intact census summary, feedback and targeted bindings were recovered without replaying the census. Future in-memory output is bounded.
+
+Container run `41863200912` is actually successful on exact `57fc574`, pull_request/attempt 1/container-build-check.yml. Worker `126697326472` on runner `1000766619` and audio-worker `126697326636` on runner `1000766637` completed SDK preparation, full image build/load and isolated package-import verification. All five images and the three backend import checks passed; SDK preparation was skipped for the other three images. Protected container job `126707317177` on runner `1000766735` passed. No log or free-byte measurement was read. This qualifies container scope only; Audio Stage 3 and full PR qualification remain open while other required checks and suites are pending.
+
+Fresh macOS smoke cancellation `126692231607`/run `41863200821` is bound to exact57fc/pull_request/attempt 1/e2e-smoke.yml, runner zero and empty steps. Its annotation says GitHub could not acquire a hosted runner after multiple attempts and reports macOS arm64 capacity constraints. No application test executed or log was read. One job-specific retry returned HTTP 201 at 16:38:26 UTC after an exact remote-head guard. Immediate metadata still showed attempt 1, so retry admission is recorded without claiming a new runner, execution or pass. Verify the changed attempt/job on the next wake; do not retry again unchanged. No new ADR is needed for this bounded infrastructure retry.
+
+The separate frontend license cancellation `126690451981`/run `41863196124` is independently verified as superseded before execution (runner zero, empty steps, higher-priority waiting request annotation); the trusted policy status has succeeded. Jobs PostgreSQL `126707566817`/run `41863200833` is genuinely running its test step on runner `1000766742`; frontend-required `41863201061` remains queued. Writing DB-services is assigned to runner `1000766722`, with the other observed Writing/Auth partitions queued. No old head qualifies this one, and the original UI cause, latest-dev integration, native/installer/release/human-summary/merge gates stay open. Only owned task/plan tracking notes change; no source repair, local test replay or tracking-only publication. Monitoring remains active every 15 minutes.
+
+
+## 2026-11-04 16:49 UTC test-quality repair
+
+### Ratchet Stage 1: Diagnose and reproduce
+**Goal**: Bind the new Linux failure and reproduce its single test-quality offense.
+**Success Criteria**: One consumed log and the existing ratchet fail on the published source.
+**Tests**: Exact hosted gap-verified-12 result; official Jobs-scoped quality-triage enforcement.
+**Status**: Complete
+
+### Ratchet Stage 2: Remove redundant observation setup
+**Goal**: Bind the completed module-local JSON probe in one patch operation in the offending precedence test.
+**Success Criteria**: Existing isolation, real JSON delegation, all assertions, case admission, baseline and classifier remain intact.
+**Tests**: Same scoped ratchet; full committed quality ratchet; affected SQLite/official PostgreSQL precedence and unrelated-JSON/oversize controls; AST equivalence; compile/Ruff/Bandit comparison.
+**Status**: Complete
+
+### Ratchet Stage 3: Review and publication
+**Goal**: Independent actual/final-staged review, normal hooks/commit and exact-lease publication to this PR.
+**Success Criteria**: Exact reviewed patch and body/source/remote/dev preservation; fresh hosted qualification remains open.
+**Tests**: Normal hooks and final guards; newly published head receives its own census.
+**Status**: In Progress
+
+Job `126705111819`/run `41863200945` was verified exact57fc/pull_request/attempt1/ci.yml/runner1000766725, then its log was consumed once (183911 bytes, 2288 lines). Actual result: one failed, 1304 passed, one skipped, 2095 warnings, 275.69 seconds. The sole failed quality gate correctly identifies one new integration mock-density offense in the serialization/connection-error precedence test. Local existing Jobs-scoped enforcement also fails with exactly that offense (181 files, exit 1). The earlier JSON isolation repair added a separate module binding plus a dumps patch, making four patch calls in this one function. Combining the local probe construction with its module binding removes a redundant mutation; no baseline, classifier, assertion or application change is warranted. No new ADR is needed for test observation setup.
+
+The single macOS retry is now verified as actual successful attempt 2, job `126712797463`/runner `1000766772`, 16:39:57–16:48:20 UTC, exact57fc/pull_request/e2e-smoke.yml. No log read or additional retry. The 16:49 complete census has 359 checks/four pages; the other required checks, Jobs PostgreSQL, UI and admitted Linux suites remain pending. Native/installer/release/human-summary/latest-dev integration/merge gates stay open.
+
+
+### Ratchet local qualification
+
+The official Jobs-scoped ratchet first failed with the exact hosted offense, then passed after the single test setup change (181 scanned files; one fewer actual patch call and no baseline/classifier edit). The entire module AST is unchanged after expanding the one new binding expression back to its original two setup expressions.
+
+All 16 affected cases pass on supported Python 3.12.13: ten precedence cases, four unrelated-JSON controls and two oversize controls, across SQLite and official isolated PostgreSQL fixtures, no skips (351 warnings; 32.23 pytest seconds, 36.924 outer seconds). The exact formerly failed full-baseline ratchet node exited zero in 38.573 outer seconds. Its bounded combined-output tail retained startup diagnostics instead of the pytest summary; no exact pytest duration or warning count is claimed for that node.
+
+Compile, explicit no-cache Ruff and diff checks pass. Bandit remains 109/109 inherited findings, with no errors/new findings and identical finding fingerprints. Independent actual source review is CLEAR: constructing the complete local namespace before its single module binding removes redundant mutation/undo while preserving real delegation, both final encodings, isolation, connection/transform probes and every verdict. Stages 1–2 are complete; Stage 3 proceeds through hooks, final staged review and exact-lease publication. Fresh-head hosted qualification and all broader gates remain open.
