@@ -238,8 +238,26 @@ describe("TakeQuizTab study modes", () => {
 
     expect(await screen.findByRole("checkbox", { name: "2" })).toBeInTheDocument()
 
+    const firstOption = screen.getByRole("checkbox", { name: "2" }) as HTMLInputElement
+    const checkedBefore = firstOption.checked
+    const disabledBefore = firstOption.disabled
     fireEvent.click(screen.getByRole("checkbox", { name: "2" }))
-    expect(await screen.findByText("Incorrect")).toBeInTheDocument()
+    try {
+      expect(await screen.findByText("Incorrect")).toBeInTheDocument()
+    } catch (error) {
+      const question = screen.queryAllByTestId("quiz-question-19")[0]
+      console.error("[TakeQuizTab practice multi-select diagnostic]", {
+        checkedBefore,
+        disabledBefore,
+        checkedAfter: firstOption.checked,
+        disabledAfter: firstOption.disabled,
+        questionMounted: Boolean(question),
+        checkedCount: question
+          ? within(question).queryAllByRole("checkbox", { checked: true }).length
+          : null
+      })
+      throw error
+    }
 
     fireEvent.click(screen.getByRole("checkbox", { name: "5" }))
     expect(await screen.findByText("Correct")).toBeInTheDocument()

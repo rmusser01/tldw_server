@@ -138,7 +138,7 @@ import {
 } from "@/services/web-clipper/agent-task-handoff"
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
-import { restoreMigratedResearchWorkspace } from "./workspace-server-restore"
+import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))

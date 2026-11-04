@@ -1,3 +1,4 @@
+import { updateImageEventSyncMetadataForPayload } from "./useImageEventSync"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import type { NativeHistoryEditResend, NativeHistoryRegenerate, HistoryEditAndSendBoundary, HistoryRegenerateBoundary } from "@/types/chat-modes"
 import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
@@ -28,7 +29,6 @@ import {
   saveMessage,
   updateHistory,
   updateMessage,
-  updateMessageMedia,
   removeMessageById,
   updateMessageById,
   formatToChatHistory,
@@ -921,117 +921,11 @@ export const useChatActions = ({
   )
 
   const updateImageEventSyncMetadata = React.useCallback(
-    async (
+    (
       payload: SaveMessagePayload,
-      update: {
-        status: "pending" | "synced" | "failed"
-        policy: ImageGenerationEventSyncPolicy
-        mode: ImageGenerationEventSyncMode
-        serverMessageId?: string
-        error?: string
-      },
+      update: Parameters<typeof updateImageEventSyncMetadataForPayload>[1],
       sourceIsCurrent: () => boolean
-    ) => {
-      const targetMessageId = payload.assistantMessageId
-      if (!targetMessageId) return
-      const targetEventId = resolveImageGenerationEventId({
-        messageId: targetMessageId,
-        messageGenerationInfo: payload.generationInfo
-      })
-      const now = Date.now()
-
-      const generationInfo =
-        payload.generationInfo &&
-        typeof payload.generationInfo === "object" &&
-        !Array.isArray(payload.generationInfo)
-          ? (payload.generationInfo as Record<string, unknown>)
-          : {}
-      const imageGeneration =
-        generationInfo.image_generation &&
-        typeof generationInfo.image_generation === "object" &&
-        !Array.isArray(generationInfo.image_generation)
-          ? (generationInfo.image_generation as Record<string, unknown>)
-          : {}
-      let nextGenerationInfo: Record<string, unknown> = {
-        ...generationInfo,
-        image_generation: {
-          ...imageGeneration,
-          sync: {
-            mode: update.mode,
-            policy: update.policy,
-            status: update.status,
-            serverMessageId: update.serverMessageId,
-            error: update.error,
-            lastAttemptAt: now,
-            mirroredAt: update.status === "synced" ? now : undefined
-          }
-        }
-      }
-      let nextImages = Array.isArray(payload.assistantImages)
-        ? payload.assistantImages.filter(
-            (image): image is string =>
-              typeof image === "string" && image.length > 0
-          )
-        : []
-      // A late acknowledgement belongs to its original payload, even after same-ID reopening.
-      const publishSyncToCurrentEvent = () => {
-        if (sourceIsCurrent())
-          setMessages((prev) => {
-            if (!sourceIsCurrent()) return prev
-            return prev.map((entry) => {
-              if (
-                entry.id !== targetMessageId &&
-                (entry.messageType !== IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE ||
-                  resolveImageGenerationEventId({
-                    messageId: entry.id,
-                    messageGenerationInfo: entry.generationInfo,
-                    variants: entry.variants
-                  }) !== targetEventId)
-              )
-                return entry
-              const currentInfo =
-                entry.generationInfo &&
-                typeof entry.generationInfo === "object" &&
-                !Array.isArray(entry.generationInfo)
-                  ? (entry.generationInfo as Record<string, unknown>)
-                  : generationInfo
-              const currentGeneration =
-                currentInfo.image_generation &&
-                typeof currentInfo.image_generation === "object" &&
-                !Array.isArray(currentInfo.image_generation)
-                  ? (currentInfo.image_generation as Record<string, unknown>)
-                  : imageGeneration
-              nextGenerationInfo = {
-                ...currentInfo,
-                image_generation: {
-                  ...currentGeneration,
-                  sync: (
-                    nextGenerationInfo.image_generation as Record<string, unknown>
-                  ).sync
-                }
-              }
-              nextImages = Array.isArray(entry.images)
-                ? entry.images.filter(
-                    (image): image is string =>
-                      typeof image === "string" && image.length > 0
-                  )
-                : nextImages
-              return { ...entry, generationInfo: nextGenerationInfo }
-            })
-          })
-      }
-      publishSyncToCurrentEvent()
-
-      await updateMessageMedia(targetMessageId, {
-        images: nextImages,
-        generationInfo: nextGenerationInfo
-      }).catch(() => null)
-      publishSyncToCurrentEvent()
-      return {
-        generationInfo: nextGenerationInfo,
-        assistantImages: nextImages
-      }
-    },
+    ) => updateImageEventSyncMetadataForPayload(payload, update, sourceIsCurrent, setMessages),
     [setMessages]
   )
 

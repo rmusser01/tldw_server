@@ -56,13 +56,10 @@ import {
 } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api"
 import { useWorkspaceStore } from "@/store/workspace"
-import { bgRequest } from "@/services/background-proxy"
-import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
-import { persistWorkspaceArtifact, rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import { loadWorkspaceArtifacts, persistWorkspaceArtifact, rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
 import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
 import { mapServerArtifactToLocal } from "@/store/workspace-api"
-import type { WorkspaceArtifactApiResponse } from "@/services/tldw/domains/workspace-api"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useConnectionStore } from "@/store/connection"
@@ -776,9 +773,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       }
       let draft = pending?.draft
       if (!draft) {
-        const rows = await bgRequest<WorkspaceArtifactApiResponse[]>({
-          path: ("/api/v1/workspaces/" + encodeURIComponent(input.workspaceId) + "/artifacts") as AllowedPath,
-          method: "GET", ...requestScopeFields(input.scope.requestScope),
+        const rows = await loadWorkspaceArtifacts(input.workspaceId, {
+          ...requestScopeFields(input.scope.requestScope),
           abortSignal: AbortSignal.any([input.scope.scopeSignal, input.scope.scopeInvalidatedSignal, AbortSignal.timeout(15000)]),
           timeoutMs: Math.max(1, Math.ceil(deadline - performance.now()))
         })
