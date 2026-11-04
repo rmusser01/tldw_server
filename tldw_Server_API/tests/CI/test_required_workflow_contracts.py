@@ -1930,6 +1930,49 @@ def test_db_management_partitions_cover_each_file_once() -> None:
         assert set(covered) == files
 
 
+
+def test_writing_partitions_isolate_app_setup_and_preserve_every_module() -> None:
+    """Keep repeated real-app setup within independent existing shard budgets."""
+    from Helper_Scripts.ci.check_shard_coverage import is_covered
+
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests/Writing")
+    files = {path.as_posix() for path in root.glob("test*.py")}
+    groups = {
+        "writing-manuscript-api": {
+            (root / "test_manuscript_endpoint_integration.py").as_posix(),
+            (root / "test_manuscript_phase2_integration.py").as_posix(),
+        },
+        "writing-annotations-api": {
+            (root / "test_manuscript_annotations_api.py").as_posix(),
+        },
+        "writing-session-analysis-api": {
+            (root / "test_writing_endpoint_integration.py").as_posix(),
+            (root / "test_manuscript_analysis_integration.py").as_posix(),
+        },
+    }
+    groups["writing-db-services"] = files - set().union(*groups.values())
+    for job in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        assert all(shard["name"] != "gap-verified-10" for shard in shards)  # nosec B101 -- Old combined budget is retired.
+        owners: dict[str, list[str]] = {path: [] for path in files}
+        for shard in shards:
+            paths = str(shard["paths"]).split()
+            if shard["name"] in groups:
+                assert set(paths) == groups[shard["name"]], (job, shard)  # nosec B101 -- Exact complete workload.
+            for pattern in paths:
+                for path in files:
+                    if is_covered(path, [pattern]):
+                        owners[path].append(shard["name"])
+        assert files and all(len(names) == 1 for names in owners.values()), (  # nosec B101 -- No test loss or duplication.
+            job,
+            {path: names for path, names in owners.items() if len(names) != 1},
+        )
+        assert {names[0] for names in owners.values()} == set(groups), (  # nosec B101 -- Distinct app/DB budgets.
+            job,
+            owners,
+        )
+
 def test_auth_integration_separates_expensive_suites_and_preserves_every_file() -> None:
     """Keep the four expensive auth families independent under existing job budgets."""
     workflow = _load(".github/workflows/ci.yml")

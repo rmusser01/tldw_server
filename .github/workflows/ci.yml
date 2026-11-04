@@ -612,9 +612,35 @@ jobs:
           - name: gap-verified-9
             paths: >-
               tldw_Server_API/tests/Docs              tldw_Server_API/tests/performance
-          - name: gap-verified-10
+          - name: writing-manuscript-api
             paths: >-
-              tldw_Server_API/tests/Writing
+              tldw_Server_API/tests/Writing/test_manuscript_endpoint_integration.py
+              tldw_Server_API/tests/Writing/test_manuscript_phase2_integration.py
+          - name: writing-annotations-api
+            paths: >-
+              tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py
+          - name: writing-session-analysis-api
+            paths: >-
+              tldw_Server_API/tests/Writing/test_writing_endpoint_integration.py
+              tldw_Server_API/tests/Writing/test_manuscript_analysis_integration.py
+          - name: writing-db-services
+            paths: >-
+              tldw_Server_API/tests/Writing/test_llm_providers_tokenizer_metadata.py
+              tldw_Server_API/tests/Writing/test_manuscript_analysis_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_analysis_service.py
+              tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py
+              tldw_Server_API/tests/Writing/test_manuscript_annotations_anchor.py
+              tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_characters_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_module_import.py
+              tldw_Server_API/tests/Writing/test_manuscript_schema_contract.py
+              tldw_Server_API/tests/Writing/test_manuscript_world_plot_db.py
+              tldw_Server_API/tests/Writing/test_tokenizer_resolver_unit.py
+              tldw_Server_API/tests/Writing/test_writing_error_mapping.py
+              tldw_Server_API/tests/Writing/test_writing_manuscripts_import.py
+              tldw_Server_API/tests/Writing/test_writing_owner_postgres.py
+              tldw_Server_API/tests/Writing/test_writing_tokenizer_sanitizers.py
           - name: gap-verified-11
             paths: >-
               tldw_Server_API/tests/Sharing
@@ -2328,9 +2354,35 @@ jobs:
           - name: gap-verified-9
             paths: >-
               tldw_Server_API/tests/Docs              tldw_Server_API/tests/performance
-          - name: gap-verified-10
+          - name: writing-manuscript-api
             paths: >-
-              tldw_Server_API/tests/Writing
+              tldw_Server_API/tests/Writing/test_manuscript_endpoint_integration.py
+              tldw_Server_API/tests/Writing/test_manuscript_phase2_integration.py
+          - name: writing-annotations-api
+            paths: >-
+              tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py
+          - name: writing-session-analysis-api
+            paths: >-
+              tldw_Server_API/tests/Writing/test_writing_endpoint_integration.py
+              tldw_Server_API/tests/Writing/test_manuscript_analysis_integration.py
+          - name: writing-db-services
+            paths: >-
+              tldw_Server_API/tests/Writing/test_llm_providers_tokenizer_metadata.py
+              tldw_Server_API/tests/Writing/test_manuscript_analysis_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_analysis_service.py
+              tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py
+              tldw_Server_API/tests/Writing/test_manuscript_annotations_anchor.py
+              tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_characters_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_db.py
+              tldw_Server_API/tests/Writing/test_manuscript_module_import.py
+              tldw_Server_API/tests/Writing/test_manuscript_schema_contract.py
+              tldw_Server_API/tests/Writing/test_manuscript_world_plot_db.py
+              tldw_Server_API/tests/Writing/test_tokenizer_resolver_unit.py
+              tldw_Server_API/tests/Writing/test_writing_error_mapping.py
+              tldw_Server_API/tests/Writing/test_writing_manuscripts_import.py
+              tldw_Server_API/tests/Writing/test_writing_owner_postgres.py
+              tldw_Server_API/tests/Writing/test_writing_tokenizer_sanitizers.py
           - name: gap-verified-11
             paths: >-
               tldw_Server_API/tests/Sharing

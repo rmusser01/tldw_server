@@ -1,4 +1,4 @@
-# ADR-082: PostgreSQL Media Source Owner Identity
+# ADR-093: PostgreSQL Media Source Owner Identity
 
 **Status:** Proposed
 **Date:** 2026-10-23
