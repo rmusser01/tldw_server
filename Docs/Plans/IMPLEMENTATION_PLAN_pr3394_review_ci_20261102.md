@@ -282,3 +282,67 @@ ADR assessment: no new durable architecture rule. This restores ephemeral CI cap
 
 
 Worker disk local qualification: Worker126359507536/run41748027271 causalrepair localqualification: confirmed hostedErrno28/0MB during originalpipinstall, notdependencyconflict or timeout. AddedONLY8line worker-scopedunusedSDKpreparation afterCheckout/beforeBuildx: df /, fixed sudo rm-rf -- /usr/share/dotnet /usr/local/lib/android, df /. Officialrunner-imageinstallerprimarysources verify SDKlocations; no repoexistingcleanuphelper/action. EntireoriginalworkflowYAML exactafterremovingnewstep andDockerfile.workerbyteexact, allmatrixmembers/buildactions/load/importsmoke/admission/45mworker/30motherbudgets unchanged; noCPU/GPUdependenciesstripped, noDocker/cache/modelcleanup. Newscope/orderandrealBashfilesystem/errorregressions actualRED3missingprep/4.633outer, then fullconnectedrelease+workerpackaging+required+license+mergequeue243passed6warnings22.98pytest24.996outer; originaltest/helperASTexact, supported3.12compilePASS. Realprivilegeddeletionboundary mappedonlytwoexactargvpaths toprivatefixtureSDKdirs, cleanup0andrefusal73 pluspostdfcount andunrelatedfilepreservationverified; nohostSDKdeletion/localDocker/native/modelaction. Ruff0; baseline/currentBandit43/43inherited0errors0new afterexplicitreviewedB404trustedtest-shellimportannotation, completeASTunchanged; trustedsubprocessB603/B607annotationsnarrow. No actualhostedcapacity/buildsuccessclaim; independentactual/stagedreview,normalhooks/commit/exactleasepublicationandnewheadhostedqualificationremainrequired.
+
+
+## 2026-11-04 06:34 UTC worker repair publication
+
+2026-11-04 06:34UTC workerrepairPUBLISHED as4cfdbdca61b7291d1f3f00f5f6b2ae8581edade7 normalfastforwardfrom363233 with exact363233lease/normalLFSpre-push. Actual+finalstagedindependentreviewCLEAR onexact4filefull-indexSHA6f841fa82b0fb90bf93220704fb9e45b4c7a684ab4eaae9583346775eeec7154; configuredpre_commit0/2.894outer,index/sourceunchanged,normalcommitpatchSHAexact. Localsource/remote/REST/GraphQLexact4cf,devc46unchanged,PRopen/ready/auto-mergenull/mergeabletrueblocked. Authoredprefixbyteexact; onlyCubicgeneratedsuffixupdated,currentfullbodySHAd5bfe8d9eeb641f60d02bfdb470f464bcad6f80dbe7ee3aa2d7967add6624c09. Freshnewheadcensus53checks1page/1status1page,formal0/inline0/issues2fullypaged/threads0oneouterpage; no executablefailure/actionablereviewfeedback. Soleaudit126429152777/run41786315397cancelboundexact4cf/pull_request_target/attempt1/frontend-license-gate.yml,runner0/emptystepsBEFOREEXECUTION; successor41786362154queued. MainCI41786318874 exact4cf/pull_request/attempt1/ci.ymlqueued3jobs2queued1skipped; container41786318926/backend41786318958/actionlint41786319108queued. No4cfjoblogread. Consumed363worker126359507536/run41748027271neverrefetch; itsactualErrno28and0MBestablished, but newhostedreclaimedcapacity/fullimagebuild/importsmoke success NOTyetqualified. Priorcomposedbackend/Writing/auth/Jobs/native/UATevidenceretainsoriginalsourceversionsandlimits; newheadrequiredandadmittedLinuxgatesOPEN. ACTIVE15minsamechatmonitorpreserved; no merge/queue/auto-merge/runtime/model/localDockeraction. Onlypostpublicationownedtask/plannotesdirty; no tracking-onlypush/wholecheckoutcleanclaim.
+
+
+## 2026-11-04 06:40 UTC base advancement metadata
+
+2026-11-04 06:40UTC singlecurrent4cfcensus55checks1page/1status1page,formal0/inline0/issues2unchanged/threads0fullypaged: no newexecutablefailure/actionablereviewfeedback, main41786318874exact4cf/pull_request/attempt1/ci.ymlqueued3jobs2queued1skipped,knownbeforeexecutionauditcancelunchanged. Local/remote/REST/GraphQLhead4cf/indexsourcepreserved/bodyd5bfe8unchanged. LIVEDEVadvancedc46toeed9e1c01cf602053dc115e9165cea9bcef764ef by9commitsincludingmergedPR3412 Backlogreparenting/tooling. Completecomparecommitmetadata verifiedahead9/behind0; changed-pathmetadataincludesAGENTS,Backlogdocs/tasks,backlog-pyCLI/repository/tests. Fullincomingsourcediff/semanticqualificationnotperformed; no exactpathcountclaimfromboundedoutput. PRmergeablecurrentlynull/unknown afteradvance: this establishesNEITHERconflictnorreadiness. Preserveongoing4cfCI/currentWIP; no fetch/rebase/integration merelybaseadvance. Independentlatestdevqualificationremainsopenpendingactualintegrationneed. No4cflogread, no runtime/model/browser/nativeaction; ACTIVE15minmonitorcontinuesquietly.
+
+
+## 2026-11-04 07:55 UTC hosted prerequisite
+
+2026-11-04 07:55UTC singlecensus onexact4cf:62checkrows/1page (26queued,1running,26skipped,7success,1neutral,1supersededcancel),3statuses/1page,reviews0/inline0/issues2unchanged/threads0fullypaged. TrustedlicensepolicySUCCESS; focusedactualbinding41786362154/job126429302348 exact4cf/pull_request_target/attempt1/frontend-license-gate.yml/realrunner1000764343/all7stepsSUCCESS07:39:52–07:40:15UTC,0logsread. Superseded126429152777cancelbeforeexecutionremainsnonfailure. Main41786318874queued3jobs1success1queued1skipped; realworkerbuild/importsmoke/backend/auth/Writing/requiredqualificationPENDING. PRnowmergeabletrue/behind, ratherthanpreviousnullunknown; no reportedtextualconflict,devstill eed9(basec46 plus9PR3412commits) notintegrated/semanticallyqualified. PreserveongoingCIandoriginalsource,donotrebasemerelyadvance. Local/remote/REST/GraphQLhead/bodyd5bfe8unchanged,PRopen/ready/auto-mergenull. RecordpartialprerequisitewithoutfullCIclaim orroutineusernotification;ACTIVE15minmonitor/onlyownedtrackingnotesdirty.
+
+
+## 2026-11-04 09:55 UTC actual hosted worker qualification
+
+2026-11-04 09:55UTC NEW hosted worker disk-repair qualification onexact4cf: actualrun41786318926/pull_request/attempt1/container-build-check.yml bound; workerjob126472124598/realrunner1000764855 SUCCESS09:18:27–09:29:28UTC. ActualSDKprepSUCCESS09:18:59–09:20:31, fullunchangedbuild/loadstepSUCCESS09:20:36–09:29:10, isolatedbackendimportsmokeSUCCESS09:29:10–09:29:11. Dockerimagebuild+loadisrequiredbyunchangedactionwithmatrixbackendtrueandworkingimageinspect/smoke, nofree-byteamountclaim/logread. AllfiveimagejobsSUCCESS: app126472124643(withsmoke),worker126472124598(withsmoke),audio126472124747(withsmoke),webui126472124687,admin126472124933; SDKprepSKIPPEDonnonworkersasdesigned. Protectedcontainergate126507441797stillQUEUED,soentirecontainergate/repairStage3remainsOPENdespiteworkerbuildscopequalified. Singlefullcensus353checks4pages,3statuses1page,reviews0/inline0/issues2unchanged/threads0fullypaged; no executablefailure/actionablereviewfeedback, soleknownauditcancelbeforeexecution. Main41786318874exact4cf/pull_request/attempt1/ci.yml233jobs3pages10success9skipped214queued. All8required-to-verifyLinuxpartitionsnowcreated/QUEUED:writing-session-analysis-api126505816357,db-services126505816419,manuscript-api126505816954,annotations-api126505824922;authb-o126505832172,prompts-providers126505834248,s-z126505834562,postgres-profiles126505843046. Local/remote/REST/GraphQL4cf/bodyd5bfe8preserved,dev eed9/PRmergeabletruebehind/unintegratedqualifiedbasec46. Onlytask/plannotesdirty; no4cflogread/sourceedit/testreplay/commit/push/runtimeaction. Notifyworkeractualhostedqualificationonce;do notrepeatunchanged. Broaderrequired/auth/Writing/native/release/latestdev/mergegatesOPEN; ACTIVE15minmonitor.
+
+
+## 2026-11-04 10:55 UTC metadata read recovery
+
+2026-11-04 10:55UTC metadata-monitor gap: initialcurrent4cfcensus failed ghHTTPread on check-runs page3; no failedjoblogread. FocusedONLYthatpage recovered100rows(40queued8skipped51success1running),noexecutablefailureonthatpage; originalotherresponseswerenotretained,soFULLcensusNOTclaimedverified orreplayed. Similar09:40statusesreadfailuremotivatesminimalin-memorymetadatahelpercorrection: successstilloneGET, failedpageonlyONEretry(max2requests),persistentfailurestillraises. ThreepurecontrolledselfcheckcasesandfullcensusscriptcompilePASS; norepositorysource/helperfile/newdependency/download/runtimeaction. Futurestored4cfcensususesboundedfailed-pagehelper; no passingendpoint/fullcensusreplay or logrefetch. Actualapplicationheadunchanged4cf/indexempty;onlyexistingownedtask/plannotesdirty. Thisisinfrastructure-readhandling,notproduct/CIqualification;required/Linux/latestdev/mergegatesremainOPEN,ACTIVE15minmonitor.
+
+
+## 2026-11-04 11:10 UTC complete hosted checkpoint
+
+The full census recovered after the prior wake's metadata gap: exact head `4cfdbdca61b7291d1f3f00f5f6b2ae8581edade7`, 356 check rows across four pages, three statuses, fully paginated feedback (zero formal/inline reviews, two unchanged issue comments, zero GraphQL threads). No completed executable failure or actionable source feedback. Main CI still has 214 queued jobs; the eight Writing/auth partitions have no assigned runners.
+
+Bound run/job/step metadata confirms actual global/AuthNZ coverage floors, first-attempt critical e2e, hosted actionlint, and the backend non-UTC prerequisite passed on this head. Protected backend `126530432728`, container `126507441797`, and security `126502389987` remain queued. No logs were read. Existing hosted/worker stages remain open pending all configured gates and admitted Linux suites; latest-dev integration and independent native/installer/release/human-summary/merge acceptance remain open. Source and index are unchanged; only the existing owned tracking notes are dirty. Monitoring remains active every 15 minutes, with no partial-green notification.
+
+
+## 2026-11-04 11:25 UTC Jobs and shared UI failures
+
+### Stage 1: Bind and diagnose the two new failures
+**Goal**: Reproduce the serialization-count contamination and trace the empty-result rerun failure.
+**Success Criteria**: Each cause has bounded causal evidence; consumed logs are never fetched again.
+**Tests**: Exact failing characterization case plus deterministic unrelated-JSON interleaving; focused ChunkingPlayground export cases.
+**Status**: In Progress
+
+### Stage 2: Repair the confirmed causes
+**Goal**: Make the smallest changes while retaining all existing behavioral verdicts, real database fixtures, and CI budgets.
+**Success Criteria**: Real red/green reproduction and affected checks pass without baseline or security weakening.
+**Tests**: Affected characterization matrices and UI export/adjacent tests; scoped lint, compile, baseline/current Bandit.
+**Status**: In Progress
+
+### Stage 3: Review and publish the repair
+**Goal**: Independently review actual/staged changes, run normal hooks, and publish to the same PR with exact guards and lease.
+**Success Criteria**: Reviewer clear; committed patch matches reviewed patch; PR state/body and all unrelated work preserved.
+**Tests**: Final source/index/dev/remote/body guards and fresh-head hosted monitoring.
+**Status**: In Progress
+
+Consumed once: Jobs PostgreSQL `126495357822`/run `41786318982` (one failed serialization-count assertion among 1312 executed cases); shared UI `126496572777`/run `41786319067` (one failed empty-result rerun assertion among 2000 tests). Exact bindings and concise log evidence are recorded in TASK-13260.278.18.83.45. The UI root cause remains under investigation. No new ADR: these bounded test observation/synchronization repairs do not change an architecture rule. All broader qualification and merge gates remain open.
+
+
+## 2026-11-04 11:50 UTC repair and diagnostic candidate
+
+The confirmed PostgreSQL repair is locally qualified: all 194 characterization cases passed on supported Python 3.12.13 with coverage, including SQLite and the official isolated PostgreSQL fixtures (399.72 pytest seconds; 405.731 outer seconds; 4743 warnings; no skips). The two deterministic unrelated-JSON regressions first failed the original count assertion at two calls versus one. Each of the three spies now receives a module-local namespace; every original test function/class retains its AST after removing only that setup. Compile and Ruff pass; scoped Bandit is 109/109 inherited findings with no errors or new findings after a narrow pytest-only B101 explanation.
+
+The UI cause remains unconfirmed. The exact unchanged test and unchanged 13-case file passed locally, including V8 coverage. A bounded real-component probe admitted request two correctly. The candidate adds only failure-path loading/request-count metadata and rethrows the original error. An unresolved-transport control verified that the original empty-state assertion still fails and emits the diagnostic. All 13 final UI cases pass with scoped V8 coverage (30.11 Vitest seconds; 30.368 outer seconds; 28 inherited CSS parse notices). Scoped configured ESLint passes with its suppression file unchanged, and all 47 original expect/text-wait call texts remain exact. No UI repair or flaky diagnosis is claimed.
+
+Stage 1 remains open for the UI's actual hosted cause. Stage 2's confirmed PostgreSQL repair and bounded UI diagnostics are qualified. Stage 3 is now in progress for final independent review, normal hooks, and exact-lease publication. No application implementation, admission, assertion, timeout, security rule, or baseline changed. Hosted qualification, latest-dev integration and independent native/installer/release/human-summary/merge gates remain open.

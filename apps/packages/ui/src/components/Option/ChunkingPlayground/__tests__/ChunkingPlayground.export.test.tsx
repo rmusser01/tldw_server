@@ -153,8 +153,21 @@ describe("ChunkingPlayground completed output export", () => {
     await complete()
     expect(screen.getByRole("button", { name: /Export JSON$/ })).toBeEnabled()
     chunkResult.mockResolvedValueOnce({ ...RESPONSE, chunks: [] })
-    fireEvent.click(screen.getByRole("button", { name: /Chunk Text$/ }))
-    await screen.findByText("Enter text and click 'Chunk Text' to see results")
+    const rerunButton = screen.getByRole("button", { name: /Chunk Text$/ })
+    const loadingBeforeClick = rerunButton.classList.contains("ant-btn-loading")
+    const requestsBeforeClick = chunkResult.mock.calls.length
+    fireEvent.click(rerunButton)
+    try {
+      await screen.findByText("Enter text and click 'Chunk Text' to see results")
+    } catch (error) {
+      console.error("Chunking rerun diagnostics", JSON.stringify({
+        loadingBeforeClick,
+        loadingAfterWait: rerunButton.classList.contains("ant-btn-loading"),
+        requestsBeforeClick,
+        requestsAfterWait: chunkResult.mock.calls.length
+      }))
+      throw error
+    }
     expect(screen.queryByRole("button", { name: /Export JSON$/ })).not.toBeInTheDocument()
     expect(downloads).toHaveLength(0)
   }, 30000)

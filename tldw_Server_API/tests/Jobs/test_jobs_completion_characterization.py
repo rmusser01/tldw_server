@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -189,6 +191,7 @@ def test_completion_identity_short_circuits_result_work(
             serialization_errors.append(type(error))
             raise
 
+    monkeypatch.setattr(manager_module, "json", SimpleNamespace(**vars(manager_module.json)))
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
     original_getattribute = JobManager.__getattribute__
 
@@ -224,6 +227,29 @@ def test_completion_identity_short_circuits_result_work(
     assert serialization_errors == ([] if serialization_error is None else [serialization_error])
     assert calls == []
     assert durable_state(reader, job["id"]) == before
+
+
+@pytest.mark.parametrize("probe", ["identity", "early-exit"])
+def test_completion_json_probe_ignores_unrelated_serialization(completion_manager, monkeypatch, probe):
+    """Unrelated template JSON must not become a completion serialization."""
+    manager = completion_manager
+    original_connect = manager._connect
+    unrelated: list[str] = []
+
+    def connect():
+        unrelated.append(json.dumps({"body": "unrelated template"}))
+        return original_connect()
+
+    monkeypatch.setattr(manager, "_connect", connect)
+    if probe == "identity":
+        test_completion_identity_short_circuits_result_work(
+            manager, monkeypatch, "  NONcanonical-UUID  ", True, "object", TypeError
+        )
+    else:
+        test_completion_early_exit_never_prepares_result(
+            manager, monkeypatch, "missing", "object", TypeError
+        )
+    assert unrelated and set(unrelated) == {'{"body": "unrelated template"}'}  # nosec B101 -- Pytest verdict, never a runtime security guard.
 
 
 @pytest.mark.parametrize("state", ["missing", "stale", "failed", "cancelled", "quarantined", "completed-no-token"])
@@ -276,6 +302,7 @@ def test_completion_early_exit_never_prepares_result(
             serialization_errors.append(type(error))
             raise
 
+    monkeypatch.setattr(manager_module, "json", SimpleNamespace(**vars(manager_module.json)))
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
     original_getattribute = JobManager.__getattribute__
 
@@ -345,6 +372,7 @@ def test_completion_serialization_and_connection_error_precedence(completion_man
         phases.append("transform")
         return transformed
 
+    monkeypatch.setattr(manager_module, "json", SimpleNamespace(**vars(manager_module.json)))
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
     monkeypatch.setattr(manager, "_connect", connect)
     monkeypatch.setattr(manager, "_maybe_encrypt_json", transform)
