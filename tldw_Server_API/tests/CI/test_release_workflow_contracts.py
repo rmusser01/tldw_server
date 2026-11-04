@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tldw_Server_API.tests.CI.test_merge_queue_gate_workflows import _evaluate
+
 
 def _load(path: str) -> dict:
     return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
@@ -172,15 +174,22 @@ def test_worker_container_build_has_a_finite_cold_image_budget() -> None:
 
 
 
-def test_worker_disk_preparation_precedes_builder_and_keeps_other_images_scoped() -> None:
-    """Do not spend the worker's build budget before reclaiming unused host SDKs."""
+@pytest.mark.parametrize(
+    "image,should_prepare",
+    [("worker", True), ("audio-worker", True), ("app", False), ("webui", False),
+     ("admin-ui", False), ("other-worker", False)],
+)
+def test_worker_disk_preparation_precedes_builder_and_keeps_other_images_scoped(
+    image: str, should_prepare: bool,
+) -> None:
+    """Prepare both worker images while preserving all other runner SDKs."""
     workflow = _load(".github/workflows/container-build-check.yml")
     job = workflow["jobs"]["build"]
     steps = job["steps"]
     preparation = _get_step(steps, "Reclaim unused worker runner SDKs")
 
     assert job["runs-on"] == "ubuntu-latest"  # nosec B101 -- This cleanup belongs to the disposable hosted runner.
-    assert preparation["if"] == "matrix.name == 'worker'"  # nosec B101 -- Preserve other image jobs.
+    assert _evaluate(preparation["if"], {"matrix.name": image}) is should_prepare  # nosec B101 -- Select only the two worker images.
     assert steps.index(_get_step(steps, "Checkout")) < steps.index(preparation)  # nosec B101 -- Checkout is preserved.
     assert steps.index(preparation) < steps.index(_get_step(steps, "Set up Docker Buildx"))  # nosec B101 -- Reclaim capacity before builder storage exists.
     assert not preparation.get("continue-on-error", False)  # nosec B101 -- Failed cleanup must fail the worker job.

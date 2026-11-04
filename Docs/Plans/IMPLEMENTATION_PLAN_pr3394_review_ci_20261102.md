@@ -346,3 +346,49 @@ The confirmed PostgreSQL repair is locally qualified: all 194 characterization c
 The UI cause remains unconfirmed. The exact unchanged test and unchanged 13-case file passed locally, including V8 coverage. A bounded real-component probe admitted request two correctly. The candidate adds only failure-path loading/request-count metadata and rethrows the original error. An unresolved-transport control verified that the original empty-state assertion still fails and emits the diagnostic. All 13 final UI cases pass with scoped V8 coverage (30.11 Vitest seconds; 30.368 outer seconds; 28 inherited CSS parse notices). Scoped configured ESLint passes with its suppression file unchanged, and all 47 original expect/text-wait call texts remain exact. No UI repair or flaky diagnosis is claimed.
 
 Stage 1 remains open for the UI's actual hosted cause. Stage 2's confirmed PostgreSQL repair and bounded UI diagnostics are qualified. Stage 3 is now in progress for final independent review, normal hooks, and exact-lease publication. No application implementation, admission, assertion, timeout, security rule, or baseline changed. Hosted qualification, latest-dev integration and independent native/installer/release/human-summary/merge gates remain open.
+
+
+## 2026-11-04 11:58 UTC published checkpoint
+
+Published `cba2660ea79b90d491acf00398f4d1497822f0a7` as one normal commit after `4cfdbdca61b7291d1f3f00f5f6b2ae8581edade7`, using the exact parent lease and normal pre-push. The four-file committed patch matches independently reviewed staged SHA256 `8238bb97d7dd0f8be07a6bc018408a3a06375bc1d18b60b5e871eae547840c93`. Configured pre-commit checks passed in 1.621 seconds without source/index changes. The confirmed Jobs observation repair and failure-only UI diagnostic are published; the UI's original hosted cause is still unconfirmed.
+
+Fresh local, remote, REST and GraphQL heads agree. PR remains open/ready, auto-merge disabled, mergeable/behind. Live dev is `eed9e1c01cf602053dc115e9165cea9bcef764ef`; GitHub reports PR base `c46b4850057cc0cc711889894c6672d171eca0fd`. The publication guard checks those distinct refs separately. No latest-dev integration or merge readiness is claimed. Authored PR prefix and Change summary remain byte-exact; only Cubic's generated suffix changed (full body SHA256 `2ecfab90c6e31088b55255eb5835a049c066de139f4d5d0085b3c7db266c33ce`).
+
+The one new-head census has 52 checks on one page: 25 queued, 25 skipped, one neutral, one cancelled audit. The cancelled audit is verified before execution (runner zero, no steps); successor `41824887900` is queued. Main CI `41824813511` is pending on this exact head with zero jobs yet. Feedback is fully paginated with no actionable source finding. No new-head logs were read. All current-head hosted gates and admitted Linux suites remain open; earlier partial greens do not qualify this head. Stage 3 continues through hosted monitoring. The heartbeat remains active every 15 minutes. Only these subsequent owned tracking notes are dirty; source/index and all unrelated work are preserved.
+
+
+## 2026-11-04 14:17 UTC hosted prerequisite checkpoint
+
+The complete current-head census has 55 checks on one page (25 queued, 26 skipped, two success, one neutral, one previously verified pre-execution cancellation), three statuses, and unchanged fully paginated feedback. Main CI `41824813511` remains queued with three jobs (one success, one queued, one skipped). No executable failure or actionable source feedback.
+
+Metadata verifies license successor `41824887900`/job `126556980899` actually succeeded on exact `cba2660ea79b90d491acf00398f4d1497822f0a7`, pull_request_target/attempt 1/frontend-license-gate.yml, runner `1000765946`, all seven steps successful at 14:10:01–14:10:21 UTC. No log was read. This is a prerequisite only; full hosted, worker/container, Jobs/UI and admitted Linux qualification remain open. The superseded audit remains an unexecuted cancellation. No partial-green notification, tests/review replay, runtime action, or tracking-only publication. Source/index, PR body/state, distinct dev/base refs and backup remain preserved; monitoring stays active every 15 minutes.
+
+
+## 2026-11-04 15:47 UTC audio-worker capacity repair
+
+### Audio Stage 1: Bound failure and red regression
+**Goal**: Verify the new-head audio-worker failure and exercise SDK-preparation selection for both worker images while excluding all other images.
+**Success Criteria**: Actual causal log consumed once and recorded; a real red policy case precedes configuration edits.
+**Tests**: Existing fail-closed Actions expression evaluator with independently specified matrix admission cases.
+**Status**: Complete
+
+### Audio Stage 2: Minimal preparation repair and qualification
+**Goal**: Extend only the existing SDK-preparation condition to the audio worker.
+**Success Criteria**: Original SDK paths/shell/order, image builds/load/import smoke, admission and time budgets remain intact; connected checks and static comparisons pass.
+**Tests**: Release/packaging/required/license/queue workflow contracts; actual private-filesystem SDK cleanup/error-propagation cases; scoped baseline/current Bandit and Ruff.
+**Status**: Complete
+
+### Audio Stage 3: Review, publish and monitor
+**Goal**: Obtain independent actual/final-staged review, normal hooks/commit and exact-lease publication to the same PR.
+**Success Criteria**: Reviewed patch equals committed patch; source/dev/remote/body/state guards preserved; fresh-head hosted qualification remains open until executed.
+**Tests**: Final guards and current-head hosted SDK preparation/full build/load/import-smoke/protected container gate.
+**Status**: In Progress
+
+Consumed audio-worker job `126665011333`/run `41824813477` once (355695 bytes, 3466 lines), after exact head/event/attempt/workflow/runner/step/annotation binding. Dependency installation and in-image imports succeeded; Docker export/loading failed for lack of space after a 94 MB warning. The existing SDK preparation was skipped for this matrix entry. No package/import/timeout defect or 0 MB claim. No new ADR: this is hosted-runner capacity preparation, with no application architecture decision. All unrelated WIP, runtime state and broader gates remain preserved.
+
+
+### Audio local qualification
+
+The actual condition regression was red for audio-worker (one failure, five passes; 2.541 outer seconds) before editing the workflow. The repair changes only the existing preparation condition to worker OR audio-worker; reversing that value restores the entire original workflow byte-exact. The shared SDK cleanup shell and all Dockerfiles, image build/load/import checks, matrix admission, protected gate and budgets remain unchanged.
+
+All 200 connected release, worker-packaging, PyPI, required, frontend-license and merge-queue workflow cases pass on Python 3.12.13 (six warnings; 13.45 pytest seconds; 15.551 outer seconds). Existing real private-filesystem cleanup/error propagation tests remain intact and pass. Compile and explicit static Ruff pass. Bandit baseline/current is 43/43 inherited with no errors or new findings; Ruff's initial sandbox cache-write error was resolved by its no-cache mode without deleting a cache or disabling validation. Independent actual review is CLEAR. These checks prove selection and cleanup semantics; actual hosted capacity and image load/import success remain open.
