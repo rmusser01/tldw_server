@@ -536,6 +536,42 @@ Publication 2026-11-04 18:32 UTC: actual and final staged review CLEAR; configur
 **Goal:** Normally publish the reviewed repair to this same PR with exact lease.
 **Success Criteria:** Source/index/backup/dev/remote/body guards hold, staged/committed patch exact, new-head census retained once. Keep full hosted/native/release/human-summary/latest-dev/merge gates open until actually qualified.
 **Tests:** Normal hooks/commit/push and fresh REST/GraphQL/run bindings; no tracking-only publication or queue action.
-**Status:** In Progress
+**Status:** Complete
 
 Qualified test-only repair: unchanged WebUI reproduced 14 failures/two passes; repaired16 pass with external scoped V8 (2.24s Vitest/2.71s outer), plus36 UI/owner controls pass with scoped V8 (3.72s/4.065s). Held real persisted layout caused the same two missing-Resume-Work verdicts before repair and both pass with the complete predicate wait. Forwarding-only real DOM probe observed checkbox available unchecked before default initialization, then checked; temporary probes removed byte-exact. No production behavior change. Inverse edits restore all four original test files byte-exact; all original auth/permission/text/absence/selection verdicts and timeouts retained, with additional nonaborted-signal checks. Scoped ESLint0errors0warnings/1.352s; full shared hook enforcement0/6185files/768unchangedinherited/30.975s; configured WebUI typecheck0/57.388s. Four changed TS files parse; frozen suppression/config/classifier unchanged. Bandit0 on zero applicable Python lines supplies no frontend-security claim. Actual source review CLEAR. First external coverage attempt was0/0 and is not coverage qualification; corrected allowExternal scope produced measured coverage. Final staged review/normal hooks/publication pending.
+
+Publication19:08UTC: normal commit `326acb1c0c6bb81ddf0850bb1c09bec334a9d4a0`, parent1dbd, six files65insertions13deletions; actual/final staged reviews CLEAR, configured hooks0/1.574s and source/index unchanged. Exact staged/committed full-index binary patch29392bytes SHA256 `ea1694e4d48b7d3f763235178f669020a8efce53385a0b38a3b564fd88f44055`; normal exact-1dbd-lease fast-forward push to samePR. Fresh local/remote/REST/GraphQL head matches; backup/branch and distinct live-dev/reported-base refs preserved. Authored prefix unchanged, only generated Cubic suffix changed, full-body hash `08e4df030bcb088555953449c17526748522db3d2ba6f9e88a5ae1bbc14476de`. One new-head fully retained census83checks/onepage,3statuses/onepage;reviews0/inline0/issues2fullypaginated/threads0oneouterpage. No executable failure/actionable feedback. MainCI41893694860 exacthead/pull_request/attempt1/ci.yml pending with zerojobs; no execution claim. Independently verified audit cancellation126797410624 AFTER seven successful executed steps, superseded by higher-priority waiting request; no log read. All fresh hosted/native/release/latest-dev/human-summary/merge gates remain open; ACTIVE fifteen-minute monitoring continues. Subsequent owned tracking notes remain dirty; no tracking-only publication.
+
+
+19:12UTC monitor: fresh local/remote/REST/GraphQL326 exact; distinct dev/base refs,state,body,backup,source/index preserved,onlyownedtrackingdirty. One complete retained census129checks/two pages:51success39running8queued29skipped1neutral1knownsupersededcancel;five statuses,formalreviews0/inline0/issues2unchanged/threads0 fullypaginated. No executable failure/actionablefeedback. Main41893694860 exacthead/pull_request/attempt1/ci.yml inprogress11jobs/onepage:5success1skipped5running. Focused actual container41893695156 binds worker126797566331/runner1000767516 and audio126797566259/runner1000767504:SDKprep succeeded,builds executing,imports pending. Frontend41893695140 binds UI1/16 job126798066190/runner1000767532 executing tests and UI9/16 job126798067005 queued/runnernull. No log read,retry,source change or partial-green notification. Wider qualification remains open; ACTIVE fifteen-minute monitor unchanged.
+
+
+## Log-lock fixture and ACP retry investigation — 2026-11-04 19:25 UTC
+
+**ADR assessment:** No new ADR for bounded test namespace isolation/readiness/evidence changes. Preserve actual lock/receipt/authorization implementation, all original verdicts and limits; reassess if production behavior must change. Accepted rationale remains untouched.
+
+### Stage 1: Establish actual causal mechanisms
+**Goal:** Consume the four verified new logs once and reproduce the failing mechanisms.
+**Success Criteria:** Record exact bindings; distinguish two signing-key SSL setup timeouts before tests from application verdicts; reproduce live-module initialization interleaving or leave cause unconfirmed; observe actual ACP retry admission.
+**Tests:** Unchanged log-lock node and full21file pass locally; deterministic configured pytest reload interleaving pending. Unchanged exact ACP case and bounded real-button request-count probe pending.
+**Status:** Complete
+
+### Stage 2: Apply the smallest supported repair or diagnostic
+**Goal:** Correct only confirmed fixture/admission mistakes; add bounded failure evidence if UI cause remains unconfirmed.
+**Success Criteria:** Real file locks and all original timeout/receipt/identity/one-POST/retirement assertions preserved, no production behavior/classifier/budget weakening. Do not force timeout values or disable background safety to hide a failure.
+**Tests:** Same causal RED/GREEN experiment and affected cases; controlled failure evidence/rethrow if needed.
+**Status:** Complete
+
+### Stage 3: Qualify and independently review
+**Goal:** Complete affected supported Python/UI checks and applicable security/static validation.
+**Success Criteria:** Affected files/controls pass; scoped baseline/current Bandit has no new findings; original verdicts retained; actual and staged independent reviews clear.
+**Tests:** Configured pytest/Vitest with private temp paths and unchanged guards, Ruff/compile/lint, inverse AST checks and normal hooks.
+**Status:** Complete
+
+### Stage 4: Publish and preserve hosted monitoring
+**Goal:** Normally publish only a qualified causal repair to this same PR with exact lease.
+**Success Criteria:** Source/dev/remote/body/backup guards hold, staged/committed patch matches, fresh census retained once. Keep all wider gates open and monitor external PG setup outcomes without speculative product changes.
+**Tests:** Final staged review, normal commit/pre-push/LFS, exact published bindings and ACTIVE fifteen-minute monitor.
+**Status:** In Progress
+
+Causal qualification: admitted real append during canonical reload reproduces initializedTrue/timeout0.2 followed by initializedTrue/timeout5.0 and the ORIGINAL elapsed<0.5 failure (5.004879s;1failed/6.21s pytest/7.52s outer). SAME experiment after private fallback-fixture globals passes original verdict (1passed/1.21s/2.434s). Full21log-buffer tests pass with84%actualmodulecoverage/9warnings/2.38s pytest/4.578s outer; canonical queue/worker reuse remains unchanged. All23originalfunction/classASTs except fixture exact, all21testcases unchanged. ScopedBandit59baseline59current/0errors/new with identical fingerprints;compilePASS/Ruff0;officialLoggingratchet10files/0new. Unchanged real ACP retry was admitted locally (GET3→4/POST1 unchanged), so hosted cause remains UNCONFIRMED. Added only eight primitive failure fields around original wait and same error rethrow. Controlled blocked retry fails original addArtifact verdict and emits bounded metadata; blocker removed byte-exact. Full79Header cases pass with scopedV8/15.72s Vitest/15.978s outer,0CSS notices/four inherited navigation notices; all846originalassert/action/waittexts exact. ScopedESLint0errors/four inherited warnings (baseline identical); fullsharedhooks0/6185files/768unchangedinherited/31.45s;configuredWebUItypecheck0/58.669s. Frozen suppressions/config/classifiers/budgets unchanged. Actual independent review CLEAR. Final staged review/hooks/publication pending; external PG signing-key SSL setup failures remain open for fresh hosted execution, no speculative app/workflow change or flaky label.

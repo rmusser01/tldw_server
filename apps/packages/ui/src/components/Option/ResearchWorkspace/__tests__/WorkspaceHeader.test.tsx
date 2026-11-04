@@ -3310,8 +3310,27 @@ describe("WorkspaceHeader workspace browser modal", () => {
     const post = acpPersistence.request.mock.calls.find(([request]) => request.method === "POST")![0]
     acpPersistence.rows.push({ ...post.body, workspace_id: "workspace-alpha", version: 1 })
     acpPersistence.failSave = false
+    const retryButton = within(modal).getByRole("button", { name: "Save to Studio" }) as HTMLButtonElement
+    const retryState = () => ({
+      disabled: retryButton.disabled,
+      loading: retryButton.classList.contains("ant-btn-loading"),
+      artifactGets: acpPersistence.request.mock.calls.filter(([r]) => r.method === "GET" && r.path.endsWith("/artifacts")).length,
+      posts: acpPersistence.request.mock.calls.filter(([r]) => r.method === "POST").length
+    })
+    const beforeRetry = retryState()
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
-    await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
+    try {
+      await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
+    } catch (error) {
+      const afterRetry = retryState()
+      console.error("[WorkspaceHeader ACP receipt retry diagnostic]", {
+        disabledBefore: beforeRetry.disabled, disabledAfter: afterRetry.disabled,
+        loadingBefore: beforeRetry.loading, loadingAfter: afterRetry.loading,
+        artifactGetsBefore: beforeRetry.artifactGets, artifactGetsAfter: afterRetry.artifactGets,
+        postsBefore: beforeRetry.posts, postsAfter: afterRetry.posts
+      })
+      throw error
+    }
     expect(acpPersistence.request.mock.calls.filter(([request]) => request.method === "POST")).toHaveLength(1)
     expect(mockAddArtifact.mock.calls[0][0].workspaceArtifactId).toBe(post.body.id)
     expect(mockAddArtifact.mock.calls[0][0].artifactVersionId).toBe("acp-run-99-v1")

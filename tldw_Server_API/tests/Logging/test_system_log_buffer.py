@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import importlib
+import importlib.util
 import threading
 import time
 from collections.abc import Iterator
@@ -591,7 +592,13 @@ def fallback_log_lock(
     monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(log_path))
     monkeypatch.setenv("SYSTEM_LOG_FILE_MAX_ENTRIES", "100")
     monkeypatch.setenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", "10")
-    log_buffer = _reload_log_buffer()
+    # A live queue writer must not initialize this probe's globals during reload.
+    source = importlib.import_module("tldw_Server_API.app.core.Logging.system_log_buffer")
+    spec = source.__spec__
+    if spec is None or spec.loader is None:
+        raise RuntimeError("System log buffer module spec is unavailable")
+    log_buffer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(log_buffer)
     monkeypatch.setattr(log_buffer, "_HAS_FCNTL", False)
     return log_buffer, log_path.with_suffix(log_path.suffix + ".lock")
 
