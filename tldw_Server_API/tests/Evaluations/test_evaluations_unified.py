@@ -43,7 +43,6 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import Evalua
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
 # Use configuration from test_config
-DEFAULT_API_KEY = test_config.TEST_API_KEY
 TEST_SK_KEY = test_config.TEST_SK_KEY
 
 

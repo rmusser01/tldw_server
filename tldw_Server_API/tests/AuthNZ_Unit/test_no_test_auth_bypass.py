@@ -23,3 +23,4 @@ async def test_get_request_user_has_no_testing_bypass_under_pytest(monkeypatch):
         reset_settings()
 
     assert exc.value.status_code == 401
+    assert exc.value.detail == "Not authenticated (provide Bearer token or X-API-KEY)"

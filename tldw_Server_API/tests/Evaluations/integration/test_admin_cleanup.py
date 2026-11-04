@@ -11,9 +11,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.evaluations]
 
 @pytest.fixture(autouse=True)
 def _setup_env(monkeypatch):
-     # Bypass admin gating for tests and enable testing auth bypass
+    # Open the admin gate; requests authenticate with the real single-user key.
     monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
-    monkeypatch.setenv("TESTING", "true")
 
 
 def test_admin_idempotency_cleanup_basic():

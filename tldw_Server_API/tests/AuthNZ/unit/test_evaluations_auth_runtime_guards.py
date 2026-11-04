@@ -80,6 +80,7 @@ async def test_verify_api_key_has_no_testing_bypass_under_pytest(monkeypatch: py
     with pytest.raises(HTTPException) as exc:
         await eval_auth.verify_api_key(credentials=None, x_api_key=None, request=_request())
     assert exc.value.status_code == 401
+    assert exc.value.detail["error"]["code"] == "missing_credentials"
 
 
 @pytest.mark.asyncio
@@ -96,6 +97,7 @@ async def test_verify_api_key_rejects_a_wrong_single_user_key_in_test_mode_under
         await eval_auth.verify_api_key(credentials=None, x_api_key="different-key", request=_request())
 
     assert exc.value.status_code == 401
+    assert exc.value.detail["error"]["code"] == "invalid_credentials"
 
 
 @pytest.mark.asyncio

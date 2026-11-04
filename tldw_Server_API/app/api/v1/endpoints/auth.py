@@ -72,9 +72,6 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
-    global_settings as _csrf_globals,
-)
-from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
@@ -1420,9 +1417,8 @@ async def _register_runtime_diag(request: Request, response: Response):
         db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
         response.headers["X-TLDW-DB"] = db_backend
 
-        # Reflect runtime CSRF state exposed via global settings
-        csrf_enabled = _csrf_globals.get("CSRF_ENABLED", None)
-        response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(csrf_enabled) else "false"
+        # Reflect the effective CSRF state
+        response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
     finally:
         # Use a background callback via request.state to add duration later
         request.state._register_diag_start = start_ts
@@ -1454,8 +1450,7 @@ async def _login_runtime_diag(request: Request, response: Response):
         pool = await get_db_pool()
         db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
         response.headers["X-TLDW-DB"] = db_backend
-        csrf_enabled = _csrf_globals.get("CSRF_ENABLED", None)
-        response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(csrf_enabled) else "false"
+        response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
     finally:
         request.state._login_diag_start = _t.perf_counter()
 
@@ -2347,9 +2342,8 @@ async def refresh_token(
                 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_pool
                 pool = await _get_pool()
                 db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
-                from tldw_Server_API.app.core.AuthNZ.csrf_protection import global_settings as _csrf_globals
                 response.headers["X-TLDW-DB"] = db_backend
-                response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(_csrf_globals.get("CSRF_ENABLED", None)) else "false"
+                response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 pass
 
@@ -3939,7 +3933,7 @@ async def register(
                 content={"detail": "An error occurred during registration"},
                 headers={
                     "X-TLDW-DB": db_backend,
-                    "X-TLDW-CSRF-Enabled": "true" if bool(_csrf_globals.get("CSRF_ENABLED", None)) else "false",
+                    "X-TLDW-CSRF-Enabled": "true" if resolve_effective_csrf_enabled() else "false",
                     "X-TLDW-Register-Error": "internal-error",
                     "X-TLDW-Register-Duration-ms": str(int(duration * 1000)),
                 },
