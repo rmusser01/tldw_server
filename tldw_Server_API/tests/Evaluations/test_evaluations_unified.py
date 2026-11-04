@@ -1300,7 +1300,7 @@ class TestAuthentication:
     def test_x_api_key_auth(self, client):
 
         """Test authentication with X-API-KEY header"""
-        headers = {"X-API-KEY": DEFAULT_API_KEY}
+        headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
         response = client.get("/api/v1/evaluations", headers=headers)
         assert response.status_code == 200
 

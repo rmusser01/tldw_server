@@ -30,7 +30,6 @@ from tldw_Server_API.app.core.Evaluations.identity import (
     EvaluationIdentity,
     evaluations_identity_from_user,
 )
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 security = HTTPBearer(auto_error=False)
@@ -44,14 +43,6 @@ def _env_truthy(name: str, default: str = "") -> bool:
 
 def _evals_heavy_admin_only_enabled() -> bool:
     return _env_truthy("EVALS_HEAVY_ADMIN_ONLY", "true")
-
-
-def _evals_testing_bypass_enabled() -> bool:
-    return is_explicit_pytest_runtime() and _env_truthy("TESTING") and not _evals_heavy_admin_only_enabled()
-
-
-def _evals_test_mode_bypass_enabled() -> bool:
-    return is_explicit_pytest_runtime() and _env_truthy("TEST_MODE")
 
 
 def sanitize_error_message(error: Exception, context: str = "") -> str:
@@ -105,10 +96,6 @@ async def verify_api_key(
     """Verify API key or JWT token based on auth mode (single_user|multi_user)."""
     settings = get_settings()
 
-    # Test-only bypass: must run under explicit pytest runtime.
-    if _evals_testing_bypass_enabled():
-        return "test_user"
-
     token = None
     if settings.AUTH_MODE == "single_user" and x_api_key and isinstance(x_api_key, str):
         token = x_api_key
@@ -155,10 +142,6 @@ async def verify_api_key(
         )
         return f"user_{user.id_str}"
 
-    # Test-mode convenience (single-user): must run under explicit pytest runtime.
-    if _evals_test_mode_bypass_enabled() and settings.AUTH_MODE == "single_user":
-        return token
-
     if settings.AUTH_MODE == "single_user":
         expected_token = (
             os.getenv("SINGLE_USER_API_KEY")
@@ -178,11 +161,6 @@ async def verify_api_key(
         if token == expected_token:
             return token
     elif settings.AUTH_MODE == "multi_user":
-        # In TEST_MODE, allow SINGLE_USER_API_KEY bearer only under explicit pytest runtime.
-        if _evals_test_mode_bypass_enabled():
-            env_key = os.getenv("SINGLE_USER_API_KEY") or getattr(settings, "SINGLE_USER_API_KEY", None)
-            if env_key and token == env_key:
-                return "test_user"
         try:
             jwt_service = get_jwt_service()
             # Decode early to surface token-specific errors before user lookup.

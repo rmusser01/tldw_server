@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.main import app
 
 pytestmark = [pytest.mark.integration, pytest.mark.evaluations]
@@ -17,7 +18,7 @@ def _setup_env(monkeypatch):
 
 @pytest.fixture(scope="function")
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-API-KEY": get_settings().SINGLE_USER_API_KEY}) as c:
         yield c
 
 

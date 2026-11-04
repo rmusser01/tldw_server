@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.main import app
 
 pytestmark = [pytest.mark.integration, pytest.mark.evaluations]
@@ -18,7 +19,7 @@ def _setup_env(monkeypatch):
 def test_admin_idempotency_cleanup_basic():
 
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-API-KEY": get_settings().SINGLE_USER_API_KEY})
 
     # Trigger cleanup with a short TTL (still safe; DB may be empty)
     r = client.post("/api/v1/evaluations/admin/idempotency/cleanup", params={"ttl_hours": 1})
