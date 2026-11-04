@@ -27,7 +27,7 @@
 - `utils/compress.ts:36-43`: chunked base64 (`String.fromCharCode.apply` over 8 KB slices) or send `ArrayBuffer` over the port (structured clone) instead of JSON+base64 at `entries/background.ts:4021-4026` (`grep -n "String.fromCharCode" utils/compress.ts`).
 **Success Criteria:** A 2,000-chunk stream performs O(chunks) DOM text-node appends and 0 full-text rewrites; per-audio-chunk encode is O(n) with no per-byte string concat.
 **Tests:** Unit: stream 1000 chunks into a fake element — assert appendChild called 1000×, textContent assigned ≤ once per rAF flush; base64 helper output identical to `btoa` for random byte arrays across sizes (property test).
-**Status:** Not Started
+**Status:** Complete (Stage 2, TASK-13525: the stream loop appends one text node per chunk via `appendResponseText`; `setResponseText` skips the full rewrite when the append path already rendered the accumulated text (same rendered length), so stop/done paths no-op instead of rewriting; `schedulePositionUpdate` rAF-coalescing unchanged. `arrayBufferToBase64` converts in 8 KB `String.fromCharCode.apply` slices — output byte-identical to `btoa`; the STT WebSocket JSON wire format is unchanged (the content-script port already carries binary; the base64 hop is protocol-required). Pinned by `entries/__tests__/copilot-popup.content.test.ts` (MutationObserver append proof, zero per-chunk layout reads, stop-path preservation), `utils/__tests__/compress.test.ts` (property parity + round-trip, sizes 0..65536), and the multi-slice frame case in `entries/__tests__/background.stt-protocol.test.ts`.)
 
 ## Stage 3: Background warm/keep-alive hygiene (WP-60, WP-61, WP-62, WP-63)
 
