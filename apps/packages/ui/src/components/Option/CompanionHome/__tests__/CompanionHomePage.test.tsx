@@ -497,17 +497,19 @@ describe("CompanionHomePage", () => {
     renderPage()
 
     const notice = await screen.findByTestId("companion-home-waiting-on-setup")
-    for (const title of [
-      "Inbox Preview",
-      "Needs Attention",
-      "Resume Work",
-      "Goals / Focus",
-      "Recent Activity",
-      "Reading Queue"
-    ]) {
-      expect(notice).toHaveTextContent(title)
-      expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument()
-    }
+    await waitFor(() => {
+      for (const title of [
+        "Inbox Preview",
+        "Needs Attention",
+        "Resume Work",
+        "Goals / Focus",
+        "Recent Activity",
+        "Reading Queue"
+      ]) {
+        expect(notice).toHaveTextContent(title)
+        expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument()
+      }
+    })
     expect(screen.queryByText("Registry setup required")).not.toBeInTheDocument()
     expect(screen.getAllByText("Companion setup required")).toHaveLength(1)
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()

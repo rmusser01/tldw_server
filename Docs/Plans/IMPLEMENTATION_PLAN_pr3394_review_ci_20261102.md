@@ -500,6 +500,42 @@ On this exact head, worker `126730196897`/runner `1000766967` and audio-worker `
 **Goal:** Publish only independently reviewed, normally committed changes to this same PR.
 **Success Criteria:** Actual and final staged review clear; normal hooks pass; source/dev/remote/body guards hold; exact-93bd-lease publication and new-head census. Preserve all wider native/release/human-summary/latest-dev/merge gates as open.
 **Tests:** Final diff/AST/source/index guards, configured hooks, exact committed patch comparison and hosted metadata.
-**Status:** In Progress
+**Status:** Complete
 
 Qualification: configured lint RED10; normal full prune removed only seven stale counts (775→768) across two entries. Full shared-hook enforcement 0/6185 files; runtime cycles unchanged 4/4 across 6015 files; configured strict boundary/WebUI/extension typechecks all 0. Restore bytes and original strong image callback body exact; all other chat-action bytes exact under inverse extraction. All 205 original quiz assertion/action/wait call texts exact; twelve touched TypeScript files parse. Existing 276 workspace/header/import/image cases passed with scoped V8 (24.96s Vitest/25.377s outer), then 36 quiz/artifact cases passed with scoped V8 (14.86s/15.127s). Independent actual source review CLEAR. Bandit normal invocation scans zero Python lines in this TypeScript scope, so it supplies no frontend security qualification. No dependencies, runtime, browser, cache, CI admission, timeout or classifier changes. The quiz cause and original browser installer cause remain unconfirmed. Staged review, normal hooks and exact-lease publication remain pending.
+
+Publication 2026-11-04 18:32 UTC: actual and final staged review CLEAR; configured hooks 0/1.658s, final source/index unchanged. Normal commit `1dbd4be898237ff23057aea9f7daa539698798c1`, parent `93bd3d38d24af8b726a42abf75cfd1ce58a4b784`, exact-lease fast-forward publication to the same PR. Staged/committed patch 60130 bytes SHA256 `4b40616a2cd1aed7d3f0acb1eac40501d80c02e06ff4ed80455d04c0a71e1653`. Fresh authored body prefix unchanged; only generated Cubic suffix changed. New-head CI remains pending. One census returned 86 checks/one page; a small tool wait budget truncated the completion output, so feedback/thread details were not retained and no complete retained-feedback claim is made. No same-wake census replay; focused metadata bound main CI `41887625336` and independently verified superseded license cancellation `126776211883` after seven successful steps. No new-head logs consumed. Next scheduled wake must retain the full fresh census before showing a compact summary. Wider hosted/native/release/latest-dev/human-summary/merge gates remain open.
+
+
+18:35 UTC scheduled monitor: fresh local/remote/REST/GraphQL exact `1dbd4be898237ff23057aea9f7daa539698798c1`; source/index/backup unchanged, only owned tracking notes dirty. One fully retained census: 130 checks/two pages (57 success, 33 running, 8 queued, 30 skipped, 1 neutral, 1 known superseded audit cancellation); five statuses/one page with trusted policy success. Reviews/inline/issue comments fully paginated 0/0/2; GraphQL threads 0/one outer page. Only CodeRabbit generated run ID changed, Qodo unchanged. This complete retained checkpoint supersedes the prior output-retention gap. Main CI `41887625336` exact head/pull_request/attempt1/ci.yml in progress, eleven jobs/one page: eight success, one skipped, two running. No new executable failure, actionable feedback, log read, retry or source edit. Broader hosted/native/release/latest-dev/human-summary/merge gates remain open; heartbeat stays active at fifteen minutes.
+
+
+## Frontend fixture/readiness repair — 2026-11-04 18:49 UTC
+
+**ADR assessment:** No new ADR. Correct stale test fixtures and await existing observable readiness; retain all production cancellation, authority, permission and protected-data guards. No new durable architecture rule or accepted rationale change.
+
+### Stage 1: Establish failure causes
+**Goal:** Bind and consume each new failed log once and reproduce the same verdicts.
+**Success Criteria:** Exact job/head/run/attempt/workflow/runner/steps verified; stale signal and missing owner fixtures reproduce locally; bounded real-component probes establish asynchronous layout/default readiness windows.
+**Tests:** Hosted14 WebUI failures reproduced locally14failed2passed; unmodified sharedUI31passed locally (not flaky/fixed). Held-layout and checkbox phase probes pending.
+**Status:** Complete
+
+### Stage 2: Correct only the test contracts
+**Goal:** Supply the existing cancellation/owner prerequisites and wait for the original complete UI predicates.
+**Success Criteria:** Exact request/auth expectations remain; real Claims authority hook/route remain; original UI checked/text/absence assertions and timeouts retained; no application source, classifier, suppression or dependency changes.
+**Tests:** Same formerly failed cases, all four affected files, existing Claims authority controls.
+**Status:** Complete
+
+### Stage 3: Qualify and independently review
+**Goal:** Verify affected behavior and configured static requirements.
+**Success Criteria:** Affected tests with scoped V8 and applicable lint/type checks pass; original verdicts preserved; no baseline growth; actual and staged reviews clear.
+**Tests:** Package-local configured tools, task normalization, Python applicability/Bandit assessment, diff/AST/verdict checks and normal hooks.
+**Status:** Complete
+
+### Stage 4: Publish and resume exact-head monitoring
+**Goal:** Normally publish the reviewed repair to this same PR with exact lease.
+**Success Criteria:** Source/index/backup/dev/remote/body guards hold, staged/committed patch exact, new-head census retained once. Keep full hosted/native/release/human-summary/latest-dev/merge gates open until actually qualified.
+**Tests:** Normal hooks/commit/push and fresh REST/GraphQL/run bindings; no tracking-only publication or queue action.
+**Status:** In Progress
+
+Qualified test-only repair: unchanged WebUI reproduced 14 failures/two passes; repaired16 pass with external scoped V8 (2.24s Vitest/2.71s outer), plus36 UI/owner controls pass with scoped V8 (3.72s/4.065s). Held real persisted layout caused the same two missing-Resume-Work verdicts before repair and both pass with the complete predicate wait. Forwarding-only real DOM probe observed checkbox available unchecked before default initialization, then checked; temporary probes removed byte-exact. No production behavior change. Inverse edits restore all four original test files byte-exact; all original auth/permission/text/absence/selection verdicts and timeouts retained, with additional nonaborted-signal checks. Scoped ESLint0errors0warnings/1.352s; full shared hook enforcement0/6185files/768unchangedinherited/30.975s; configured WebUI typecheck0/57.388s. Four changed TS files parse; frozen suppression/config/classifier unchanged. Bandit0 on zero applicable Python lines supplies no frontend-security claim. Actual source review CLEAR. First external coverage attempt was0/0 and is not coverage qualification; corrected allowExternal scope produced measured coverage. Final staged review/normal hooks/publication pending.

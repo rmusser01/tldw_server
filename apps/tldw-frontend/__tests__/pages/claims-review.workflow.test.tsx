@@ -21,6 +21,10 @@ vi.mock("@/components/Common/RouteErrorBoundary", () => ({
 vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
   useCanonicalConnectionConfig: () => ({ config: mocks.config, loading: false, authorityLoading: mocks.authorityLoading })
 }))
+vi.mock("@/services/prompt-local-owner", () => ({
+  resolvePromptOwnerId: async () =>
+    "recipe-owner:sha256:" + (mocks.config.apiKey === "other-account" ? "b" : "a").repeat(64)
+}))
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => mocks.request(...args)
 }))
