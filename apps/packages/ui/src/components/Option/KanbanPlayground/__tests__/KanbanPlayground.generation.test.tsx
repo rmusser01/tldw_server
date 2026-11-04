@@ -475,7 +475,7 @@ describe("generated Kanban drafts", () => {
       within(dialog).getByRole("region", { name: "Generated board preview" }),
     ).toHaveTextContent("Calibrate Selene");
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save board", exact: true }),
+      await within(dialog).findByRole("button", { name: "Save board", exact: true }),
     );
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(chats()).toHaveLength(1);
