@@ -106,7 +106,7 @@ jobs:
 
       # These preinstalled host SDKs are unused by the unchanged Docker build.
       - name: Reclaim unused worker runner SDKs
-        if: matrix.name == 'worker'
+        if: matrix.name == 'worker' || matrix.name == 'audio-worker'
         run: |
           df -h /
           sudo rm -rf -- /usr/share/dotnet /usr/local/lib/android
