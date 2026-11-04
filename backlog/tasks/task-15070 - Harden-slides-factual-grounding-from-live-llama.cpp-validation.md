@@ -5,7 +5,7 @@ status: Done
 references:
 - 'GitHub issue #2605'
 - 'PR #2633'
-- TASK-12146
+- TASK-15069
 modified_files:
 - tldw_Server_API/app/api/v1/endpoints/slides.py
 - tldw_Server_API/app/core/Slides/slides_generator.py
