@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { ASSERTION_REASONING_OPTIONS, TakeQuizTab } from "../TakeQuizTab"
 import {
@@ -212,6 +213,7 @@ describe("TakeQuizTab study modes", () => {
   }, 15000)
 
   it("grades multi-select answers in practice mode using full-set matching", async () => {
+    const user = userEvent.setup()
     window.sessionStorage.setItem(
       TAKE_QUIZ_LIST_PREFS_KEY,
       JSON.stringify({ modePreference: "practice" })
@@ -241,7 +243,7 @@ describe("TakeQuizTab study modes", () => {
     const firstOption = screen.getByRole("checkbox", { name: "2" }) as HTMLInputElement
     const checkedBefore = firstOption.checked
     const disabledBefore = firstOption.disabled
-    fireEvent.click(screen.getByRole("checkbox", { name: "2" }))
+    await user.click(screen.getByRole("checkbox", { name: "2" }))
     try {
       expect(await screen.findByText("Incorrect")).toBeInTheDocument()
     } catch (error) {
@@ -259,7 +261,7 @@ describe("TakeQuizTab study modes", () => {
       throw error
     }
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "5" }))
+    await user.click(screen.getByRole("checkbox", { name: "5" }))
     expect(await screen.findByText("Correct")).toBeInTheDocument()
   }, 15000)
 
