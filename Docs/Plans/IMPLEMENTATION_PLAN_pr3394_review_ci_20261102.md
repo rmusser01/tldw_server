@@ -203,20 +203,48 @@ Backend local qualification: the causal resource regression failed on the origin
 **Goal**: Preserve the reviewed backend unit, then assess exact incoming devc46.
 **Success Criteria**: Normal hooks/final staged review/local commit, backup ref, exact remote/dev guards; no WIP lost. Incoming27path semantic changed-source/test review, not only metadata.
 **Tests**: Exact patch/source preservation; independent incoming review; compare history/paths.
-**Status**: In Progress
+**Status**: Complete
 
 ## Necessary repaired-head integration Stage2: Rebase and validate
 **Goal**: Resolve the actual c46 base conflicts so normal pull_request CI can run on the repaired head.
 **Success Criteria**: Rebase reviewed commits onto verified latest dev, preserve all owned changes and incoming contract behavior, qualify affected combined Jobs/completion/fixtures/ADR/security-coordinate/workflow scope. No baseline growth, timeout increase, assertion weakening, environment/model reconstruction or new worktree.
 **Tests**: Causal conflict/source assessment, range-diff and whole combined affected checks, supported3.12/official isolated restricted PG if applicable; scoped baseline/current lint/Bandit; no unchanged heavy707/native replay.
-**Status**: Not Started
+**Status**: Complete
 
 ## Necessary repaired-head integration Stage3: Review and publish
 **Goal**: Final actual/staged combined review and exact-lease update to existingPR3394.
 **Success Criteria**: Normal hooks/commits, exact source/dev/remote/body guards and final remote readback. Newly resulting head needs fresh hosted gates and formerly failing Linux jobs; no merge/queue actions.
 **Tests**: Actual/staged review, normal hooks, committed patch preservation, exact lease/readback, new-head hosted qualification.
-**Status**: Not Started
+**Status**: In Progress
 
 Integration is now necessary for the confirmed CI repair: https://docs.github.com/en/actions/how-tos/troubleshoot-workflows states pull_request workflows do not run with a merge conflict. This supersedes deferring integration while merely watching067cb. It does not accept the existing Full Suite outcome or authorize a merge. ADR assessment: reuse existing required-gate/admission and Jobs persistence decisions; reassess only if resolving source conflicts would change a durable rule.
 
 Normal configured pre_commit on exact5files passed natural0/14.718outer after declared hook setup. YAML/private-key/conflict/task-format/body/http-client/syntax guards passed; wizard-only Ruff/Black skipped, separate scoped Ruff clean. Existing hook path unchanged, no bypass. Final staged review and normal local commit precede required c46 integration; no unchanged execution follows merely from these notes.
+
+
+## Writing timeout Stage1: Measure the actual failing workload
+**Goal**: Identify whether the bound gap-verified-10 exit124 reflects cumulative setup or a single blocked operation.
+**Success Criteria**: Preserve consumed job126238047242/run41695312354 evidence; no log refetch or exact-stack claim beyond the retained fixture frame. Compare six unchanged DB/API cases with normal CI plugins and real fixture startup, then reassess measured evidence.
+**Tests**: At most three diagnostic/changed-source invocations, each600s outer/300s case; no full484-case local replay or provider/model actions.
+**Status**: Complete
+
+## Writing timeout Stage2: Repair the demonstrated cause
+**Goal**: Apply the smallest causal correction while preserving all21 modules/cases and existing55m/300s budgets.
+**Success Criteria**: Real red/green and affected checks, exact coverage/admission/fixture/assertion preservation. Do not assume the historical abort is fully explained by a small sample.
+**Tests**: Evidence-selected tests and independent actual source review; no baseline growth or assertion weakening.
+**Status**: Complete
+
+## Writing timeout Stage3: Review, publish and qualify the combined head
+**Goal**: Publish reviewed backend, necessary dev integration and Writing repairs to the existing PR.
+**Success Criteria**: Scoped security/lint, normal hooks/commits, exact source/dev/remote/body preservation and exact-lease publication. Resulting hosted required/Linux checks remain open until actually passing.
+**Tests**: Final staged review, publication readback and new-head hosted qualification. No merge or queue action.
+**Status**: In Progress
+
+ADR assessment: the current diagnostic changes no durable architecture rule. A later workload partition must retain existing required-gate/admission and case-budget policy; a production behavior change requires reassessment first.
+
+
+## Combined integration and Writing local qualification
+
+Repaired-head integration local qualification: normal rebase of165commits from576feef onto livec46 produced4b0f514, preserving163exact range-diff entries and the two causally reviewed conflict resolutions. Backupcodex/pr3394-before-c46-20261103-db9945e retains pre-rebase source. All22nonoverlap incomingfiles exactc46, entire ownedJobManager funcs/classAST exactdb994, AudioJobs smoke byteexactdb994,28predicate signatures unchanged. IncomingAcceptedJobsADR082 staysbyteexact; ourProposedmediaownerADR renumbered093 with rationale/status unchanged and normalPublishedrefresh. Docs/predicate49composed passing after stagingrename; strictMkDocs0. Combined supported3.12 qualification:121contracts/helpers/RLS;142SQLitecompletion;102SQLitelifecycle/counters/admin/payload;115nativePGcompletion;117nativePGlifecycle;25PG/RLS/parity/payload;93AudioJobs/Parakeet/TTS(oneoptionalheavyskip);94quality/layering/import;14Python compile, Bandit533/533inherited/noerrors/new0. Do not sum as freshfullsuite or native43UAT acceptance. Outbox2opt-ins initiallyskipped, thenactualcausalAuthStartupError exposedmissingAuthNZprep; privateSQLiteURL/authmode before sharedschemafixture preservesstrictstartup/officialJobsPGDB/alloriginaltestASTs. Actualenabled2passed359warnings20.07pytest25.255outer; Bandit11/11inherited0new,Ruff5inherited0new. Static comparator initiallytreatedlineoffset/contextterminalnewline asnew; normalization fixesreportingonly, no source/security suppression. Independentactualincoming/ADR/outboxreviewCLEAR; finalstagedcombinedreviewstillrequired.
+
+Writing126238047242 consumed-log repair: six unchanged normalfixture cases PASS6/47.95pytest56.458outer. FullAPIsetup20.76/11.64/10.35seconds versus calls.05/.04/.03, freshDB.78/.60; real repeatedsetup dominates sample. Collection-only confirmed484tests2.69pytest5.567outer; parsermissedtree perfilecounts, no perfile runtimeclaim. Partitionaddressesdemonstratedaggregatecostwithoutclaimingexact55mabortreproduced/fullyexplained. NewguardrealREDontheoriginalroot5.346outer, then4groups in ONLYexistingLinux312/313 matrices,214/212rows: manuscriptAPI2files,annotationsAPI1,writing+analysisAPI2,DB/services16. All21originaltestfilesbyteexact/all484samecollectionsource, eachassignedonce; everyothermatrix/job/command/env/plugin/admission/55m/300slimitexact. Connectedworkflow223passed6warnings23.47pytest26.025outer; officialcoverage5445files907tokensnewuncovered0/baseline44unchanged. CItestBandit386/386inherited0new/Ruff0. No productionWriting/fixturechange, model/provider/native/runtimeaction, logrefetch or casebudgetincrease. HostednewheadWriting/auth/backendqualificationstillOPEN. Officialtask/plan updatedbeforefinalreview/hooks/commit/exactleasepublication.
