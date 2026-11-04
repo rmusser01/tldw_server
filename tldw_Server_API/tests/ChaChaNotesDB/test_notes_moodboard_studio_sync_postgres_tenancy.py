@@ -922,7 +922,17 @@ def test_current_postgres_ordinary_runtime_still_rejects_writable_migration_vers
     ident = backend.escape_identifier
     role = f"v61_runtime_authority_{uuid4().hex[:8]}"
     created = False
-    tables = ("notes", "moodboards", "moodboard_notes", "note_studio_documents", "db_schema_version")
+    # Current runtime checks need product reads while the migration journal stays private.
+    tables = (
+        "notes", "moodboards", "moodboard_notes", "note_studio_documents", "db_schema_version",
+        "note_attachments", "note_task_scope_authority", "note_tasks", "task_note_projections",
+        "task_events", "task_event_read_state", "note_task_reconciliation_state", "task_projection_drifts",
+        "note_semantic_index_configs", "note_semantic_generations", "note_semantic_note_state",
+        "note_semantic_chunks", "note_semantic_work", "note_semantic_obsolete_vectors",
+        "note_semantic_operation_receipts", "chat_dictionaries", "dictionary_entries",
+        "dictionary_transform_activity", "dictionary_version_history", "persona_sessions",
+        "persona_session_transcripts", "skill_registry",
+    )
     try:
         with backend.transaction() as conn:
             backend.execute(f"CREATE ROLE {ident(role)} NOLOGIN NOSUPERUSER NOBYPASSRLS", connection=conn)  # nosec B608 -- identifier escaped by actual PostgreSQL backend.
@@ -949,9 +959,9 @@ def test_current_postgres_ordinary_runtime_still_rejects_writable_migration_vers
                 assert authority == [{"owner_authority": False, "writable_version": writable, "journal_read": False}]  # nosec B101 -- real nonowner privileges and private-journal denial.
                 if writable:
                     with pytest.raises(SchemaError, match="runtime migration-version authority is unsafe"):
-                        db._verify_notes_moodboard_studio_schema_postgres(conn, runtime=True)
+                        db._postgres_schema_is_current(conn)
                 else:
-                    db._verify_notes_moodboard_studio_schema_postgres(conn, runtime=True)
+                    assert db._postgres_schema_is_current(conn) is True  # nosec B101 -- real read-only nonowner passes the complete current-runtime boundary.
     finally:
         if created:
             with backend.transaction() as conn:
