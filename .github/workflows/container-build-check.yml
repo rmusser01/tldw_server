@@ -104,6 +104,14 @@ jobs:
           ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      # These preinstalled host SDKs are unused by the unchanged Docker build.
+      - name: Reclaim unused worker runner SDKs
+        if: matrix.name == 'worker'
+        run: |
+          df -h /
+          sudo rm -rf -- /usr/share/dotnet /usr/local/lib/android
+          df -h /
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
