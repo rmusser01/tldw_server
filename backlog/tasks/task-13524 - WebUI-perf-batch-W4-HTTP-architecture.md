@@ -1,7 +1,7 @@
 ---
 id: TASK-13524
 title: 'WebUI perf batch W4: HTTP architecture'
-status: To Do
+status: In Progress
 created_date: 2026-10-07 04:14
 ---
 
@@ -18,7 +18,7 @@ WebUI/extension perf program. Index: Docs/Plans/2026-10-06-webui-perf-remediatio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Stage 1 (WP-36/37/38, extension quick-ingest batching) implemented in worktree codex/webui-perf-w4_http-arch: same-config URL/file submission grouping into single /media/ingest/jobs requests, bounded pool (4) for heterogeneous submissions and conference planning POSTs, parallel poll rounds (per-job session poll + multi-batch tracker rounds), concurrent terminal PATCH / batch-cancel / per-job DELETE fan-out. Per-item progress events preserved (order + shape pinned by test). Overlap check found batched per-batch status polling already landed (PR #3210 follow-up); only real gaps closed. Full flow map + verdicts in .superpowers/sdd/2026-10-06-webui-perf-batch-4-http-architecture-implementation-plan/task-1-report.md
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
