@@ -1156,7 +1156,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 26
+    assert setup_helper_count == 27
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7
