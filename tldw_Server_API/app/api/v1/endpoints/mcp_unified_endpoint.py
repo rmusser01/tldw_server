@@ -80,7 +80,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
     get_app_standalone_html_validation_pool,
 )
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_production_like_env, is_test_mode
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
 
 _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS = (
@@ -285,46 +285,6 @@ def _should_use_single_user_api_key_compat() -> bool:
         return False
 
 
-def _single_user_test_key_compat_allowed() -> bool:
-    """Return True when SINGLE_USER_TEST_API_KEY may be used by mounted HTTP auth."""
-    if not is_test_mode():
-        return False
-    try:
-        cfg = get_config()
-    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        cfg = None
-    env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
-    prod_flag = is_production_like_env()
-    is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
-    if os.getenv("PYTEST_CURRENT_TEST") is not None:
-        is_dev_ctx = True
-    try:
-        import sys as _sys
-
-        if "pytest" in _sys.modules:
-            is_dev_ctx = True
-    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug(
-            "MCP unified test key compatibility pytest detection failed",
-            exc_info=True,
-        )
-    if env in {"dev", "development", "test", "ci"}:
-        is_dev_ctx = True
-    if prod_flag:
-        is_dev_ctx = False
-    if not is_dev_ctx:
-        logger.error(
-            "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
-            extra={
-                "audit": True,
-                "env": env,
-                "debug_mode": bool(cfg and getattr(cfg, "debug_mode", False)),
-            },
-        )
-        return False
-    return True
-
-
 def _require_demo_auth_enabled(request: Request) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     """Require the direct MCP demo-auth surface to be explicitly enabled."""
     if not env_flag_enabled("MCP_ENABLE_DEMO_AUTH"):
@@ -450,8 +410,7 @@ async def _resolve_token_data_compat(
     1) AuthNZ access JWT (multi-user).
     2) MCP JWT (for tools integrations).
     3) API key:
-       - Single-user mode: treat SINGLE_USER_API_KEY (and, in TEST_MODE,
-         SINGLE_USER_TEST_API_KEY) as an admin-style principal.
+       - Single-user mode: treat SINGLE_USER_API_KEY as an admin-style principal.
        - Multi-user: validate via APIKeyManager and map to a user id.
 
     When the multi-user API key path succeeds, this helper also attaches the
@@ -540,29 +499,21 @@ async def _resolve_token_data_compat(
             try:
                 if _should_use_single_user_api_key_compat():
                     settings = get_settings()
-                    test_mode = _single_user_test_key_compat_allowed()
                     allowed: set[str] = set()
                     if settings.SINGLE_USER_API_KEY:
                         allowed.add(settings.SINGLE_USER_API_KEY)
-                    if test_mode:
-                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                        if test_key:
-                            allowed.add(test_key)
                     if x_api_key in {a for a in allowed if a}:
                         client_ip = _get_client_ip(request)
                         if not is_single_user_ip_allowed(client_ip, settings):
                             return None
                         auth_via = "single_user_api_key"
-                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY") if test_mode else None
-                        if test_key and secrets.compare_digest(x_api_key, test_key):
-                            auth_via = "single_user_test_api_key"
                         if request is not None:
                             request.state.mcp_compat_auth_metadata = _trusted_compat_claims_metadata(
                                 auth_via=auth_via,
                                 compat_claims_source="mounted_http",
                             )
                         roles = [UserRole.ADMIN.value]
-                        perms = ["*"] if test_mode else []
+                        perms = []
                         return TokenData(
                             sub=str(settings.SINGLE_USER_FIXED_ID),
                             username="single_user",
