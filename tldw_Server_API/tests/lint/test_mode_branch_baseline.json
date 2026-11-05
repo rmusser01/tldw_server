@@ -50,7 +50,6 @@
   "api/v1/router_groups/content.py": {"lines": 5, "predicates": 0, "reason": null},
   "api/v1/router_groups/core.py": {"lines": 1, "predicates": 0, "reason": null},
   "api/v1/router_groups/minimal.py": {"lines": 2, "predicates": 0, "reason": null},
-  "core/Audit/unified_audit_service.py": {"lines": 9, "predicates": 0, "reason": null},
   "core/AuthNZ/User_DB_Handling.py": {"lines": 15, "predicates": 2, "reason": null},
   "core/AuthNZ/crypto_utils.py": {"lines": 6, "predicates": 0, "reason": null},
   "core/AuthNZ/csrf_protection.py": {"lines": 1, "predicates": 0, "reason": null},

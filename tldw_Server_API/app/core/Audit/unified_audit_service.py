@@ -23,7 +23,8 @@ Environment Variables:
 - AUDIT_ACTION_RISK_BONUS: Dict of action names to risk score bonuses (via settings)
 - AUDIT_HIGH_RISK_OPERATIONS: Comma-separated list of high-risk operation keywords
 - AUDIT_SUSPICIOUS_THRESHOLDS: Dict of threshold overrides (failed_auth, data_export, etc.)
-- TEST_MODE/TLDW_TEST_MODE: Enable test mode (disables background tasks)
+- inline_io (constructor argument): when True, flush inline and start no background tasks;
+  defaults to UnifiedAuditService.inline_io_default (False in production, set by the test suite)
 """
 #
 # Imports
@@ -44,7 +45,7 @@ from decimal import Decimal
 from enum import Enum
 from io import StringIO
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 from uuid import uuid4
 
 #
@@ -55,7 +56,7 @@ from tldw_Server_API.app.core.AuthNZ.audit_integrity import compute_event_hash
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
 )
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
+from tldw_Server_API.app.core.testing import is_truthy
 
 _AUDIT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -972,6 +973,9 @@ class UnifiedAuditService:
       centralizing shared PII utilities across the codebase.
     """
 
+    # Default for the ``inline_io`` constructor argument. The root test conftest sets it.
+    inline_io_default: ClassVar[bool] = False
+
     def __init__(
         self,
         db_path: Optional[str] = None,
@@ -984,6 +988,7 @@ class UnifiedAuditService:
         max_db_mb: Optional[int] = None,
         system_tenant_id: Optional[str] = None,
         unidentified_tenant_id: Optional[str] = None,
+        inline_io: Optional[bool] = None,
     ):
         """
         Initialize unified audit service.
@@ -1051,17 +1056,9 @@ class UnifiedAuditService:
         self._owner_loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_used_ts = time.monotonic()
 
-        # Detect test environments to avoid spawning busy background loops when
-        # tests monkeypatch asyncio.sleep globally (common in our Workflows tests).
-        # In these contexts we disable background tasks entirely and prefer
-        # direct/on-demand flushing via log_event/flush.
-        try:
-            self._test_mode = any(
-                env_flag_enabled(k)
-                for k in ("TEST_MODE", "TLDW_TEST_MODE")
-            ) or (os.getenv("PYTEST_CURRENT_TEST") is not None)
-        except _AUDIT_NONCRITICAL_EXCEPTIONS:
-            self._test_mode = False
+        # inline_io: flush directly from log_event/flush, use ephemeral connections and start
+        # no background loops. Tests that patch asyncio.sleep would otherwise spin the loops.
+        self._inline_io = type(self).inline_io_default if inline_io is None else inline_io
 
         # Components
         # Configure PII detector and scan fields
@@ -1142,12 +1139,12 @@ class UnifiedAuditService:
         # In test mode, avoid opening a persistent pooled connection to prevent
         # lingering aiosqlite worker threads that can keep the interpreter alive.
         # Non-test mode uses a pooled connection for performance.
-        if not self._test_mode:
+        if not self._inline_io:
             await self._ensure_db_pool()
         # Avoid starting background tasks in test environments where asyncio.sleep
         # may be monkeypatched to return immediately, which would otherwise cause
         # tight loops and starve the event loop.
-        if start_background_tasks and not self._test_mode:
+        if start_background_tasks and not self._inline_io:
             await self.start_background_tasks()
 
     async def _load_last_chain_hash(self) -> str:
@@ -2030,9 +2027,9 @@ class UnifiedAuditService:
 
     async def _ensure_db_pool(self) -> aiosqlite.Connection:
         """Ensure a persistent aiosqlite connection is available."""
-        # In test mode, prefer ephemeral connections; callers of this method are
-        # adjusted to bypass pooling when self._test_mode is True. Keep behavior
-        # here for non-test callers.
+        # With inline_io, prefer ephemeral connections; callers of this method are
+        # adjusted to bypass pooling when self._inline_io is True. Keep behavior
+        # here for callers without inline_io.
         async with self._pool_lock:
             if self._db_pool is None:
                 conn = await aiosqlite.connect(self.db_path)
@@ -2382,7 +2379,7 @@ class UnifiedAuditService:
             should_flush = len(self.event_buffer) >= self.buffer_size or event.risk_score >= HIGH_RISK_SCORE
 
         # In test mode we avoid background tasks; flush only when needed.
-        if self._test_mode:
+        if self._inline_io:
             if should_flush:
                 await self.flush()
         elif should_flush:
@@ -2515,7 +2512,7 @@ class UnifiedAuditService:
             backoff_base = 0.05  # 50ms base
             for attempt in range(max_retries):
                 try:
-                    if self._test_mode:
+                    if self._inline_io:
                         # Ephemeral connection per flush in tests to avoid persistent threads
                         async with aiosqlite.connect(self.db_path) as db:
                             try:
@@ -3126,7 +3123,7 @@ class UnifiedAuditService:
                 return inserted
 
             try:
-                if self._test_mode:
+                if self._inline_io:
                     async with aiosqlite.connect(self.db_path) as db:
                         db.row_factory = aiosqlite.Row
                         inserted = await _replay_stream(db, use_db_lock=False)
