@@ -62,7 +62,11 @@ SECURITY_FUNCTIONS: frozenset[str] = frozenset(
         "core/Utils/egress.py:evaluate_url_policy",
         "core/http_client.py:_validate_egress_or_raise",
         "services/workflows_webhook_dlq_service.py:_host_allowed",
-        # TASK-13950.19 Task 4 deletes the test-key arm and re-adds MCPServer._single_user_compat_auth_via.
+        "api/v1/API_Deps/auth_deps.py:_authenticate_api_key_from_request",
+        "api/v1/endpoints/mcp_unified_endpoint.py:_resolve_token_data_compat",
+        "core/AuthNZ/auth_principal_resolver.py:get_auth_principal",
+        "core/AuthNZ/initialize.py:bootstrap_single_user_profile",
+        "core/MCP_unified/server.py:MCPServer._single_user_compat_auth_via",
     }
 )
 

@@ -4,23 +4,20 @@ title: Implement character expression editor onboarding
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-07 19:56'
+updated_date: 2026-07-07 19:56
 labels:
-  - frontend
-  - characters
-  - emotes
-  - implementation
+- frontend
+- characters
+- emotes
+- implementation
 dependencies: []
 references:
-  - TASK-12905
-  - TASK-12164
-  - >-
-    Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
+- TASK-12905
+- TASK-15084
+- Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
-  - >-
-    Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
+- Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
+- Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
 priority: medium
 ---
 

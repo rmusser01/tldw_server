@@ -46,7 +46,8 @@ A task id belongs to one file across `backlog/tasks`, `backlog/completed` and
 without `--id`, takes the next id above all of them, and a dependency may name
 any of them. `task renumber PATH --id NEW_ID` gives one file a new id in place.
 It takes a path because two files can share an id, keeps the directory and the
-file-name tail, and `--append-notes` records why. The `changes` job of
+file-name tail, and `--append-notes` records why. A subtask id (`P.n`) also sets
+`parent_task_id` to `P`, which re-parents a subtask. The `changes` job of
 `backend-required` fails a PR that leaves two task files with one id (TASK-13960).
 TASK-15000 to TASK-15281 are the block the 2026-10-31 renumbering used, so new
 ids continue above TASK-15281.

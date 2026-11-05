@@ -9,65 +9,10 @@ Tests cover:
 - Input validation XSS prevention
 """
 import pytest
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-
-
-class TestTestModeProductionGuard:
-    """Tests for TEST_MODE production environment protection."""
-
-    @pytest.mark.asyncio
-    async def test_test_mode_blocked_in_production(self, monkeypatch):
-        """TEST_MODE should be blocked when ENVIRONMENT=production."""
-        reset_settings()
-        monkeypatch.setenv("TEST_MODE", "1")
-        monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.delenv("ALLOW_TEST_MODE_IN_PRODUCTION", raising=False)
-
-        # Import after setting env vars
-        from fastapi import Request
-        from fastapi.testclient import TestClient
-
-        # The production guard should raise an HTTPException
-        # This tests that the guard is in place
-        with pytest.raises(Exception):
-            # Simulate the check that happens in auth_deps
-            test_mode = os.getenv("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "y", "on"}
-            allow_test_in_prod = os.getenv("ALLOW_TEST_MODE_IN_PRODUCTION", "").strip().lower() in {"1", "true", "yes", "y", "on"}
-            environment = os.getenv("ENVIRONMENT", "").strip().lower()
-            if test_mode and environment in {"production", "prod"} and not allow_test_in_prod:
-                raise RuntimeError("TEST_MODE cannot be enabled in production environment")
-
-    def test_test_mode_allowed_with_override(self, monkeypatch):
-
-        """TEST_MODE should work with explicit production override."""
-        monkeypatch.setenv("TEST_MODE", "1")
-        monkeypatch.setenv("ENVIRONMENT", "production")
-        monkeypatch.setenv("ALLOW_TEST_MODE_IN_PRODUCTION", "1")
-
-        test_mode = os.getenv("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "y", "on"}
-        allow_test_in_prod = os.getenv("ALLOW_TEST_MODE_IN_PRODUCTION", "").strip().lower() in {"1", "true", "yes", "y", "on"}
-        environment = os.getenv("ENVIRONMENT", "").strip().lower()
-
-        # Should not raise
-        if test_mode and environment in {"production", "prod"} and not allow_test_in_prod:
-            pytest.fail("Should not have reached this check with override enabled")
-
-    def test_test_mode_allowed_in_dev(self, monkeypatch):
-
-        """TEST_MODE should work in non-production environments."""
-        monkeypatch.setenv("TEST_MODE", "1")
-        monkeypatch.setenv("ENVIRONMENT", "development")
-        monkeypatch.delenv("ALLOW_TEST_MODE_IN_PRODUCTION", raising=False)
-
-        test_mode = os.getenv("TEST_MODE", "").strip().lower() in {"1", "true", "yes", "y", "on"}
-        environment = os.getenv("ENVIRONMENT", "").strip().lower()
-
-        # Non-production should not be blocked
-        assert environment not in {"production", "prod"}
 
 
 class TestPasswordHistoryFailClosed:
