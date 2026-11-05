@@ -211,79 +211,6 @@ def _public_user_dict(user: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def _authenticate_api_key_from_request(request: Request, api_key: str) -> dict[str, Any]:
-    test_mode = _is_test_mode()
-    if test_mode:
-        # SECURITY: Warn loudly about TEST_MODE and block in production unless explicitly allowed
-        allow_test_in_prod = _env_flag_enabled("ALLOW_TEST_MODE_IN_PRODUCTION")
-        if _is_production_like_env():
-            if not allow_test_in_prod:
-                logger.critical(
-                    "TEST_MODE is enabled in production environment! "
-                    "This is a SEVERE security risk. Set ALLOW_TEST_MODE_IN_PRODUCTION=1 to override (NOT recommended)."
-                )
-                raise HTTPException(
-                    status_code=500,
-                    detail="Server configuration error"
-                )
-            else:
-                logger.warning(
-                    "TEST_MODE is enabled in production with explicit override. "
-                    "This bypasses normal authentication and should only be used for debugging."
-                )
-        else:
-            logger.debug("TEST_MODE is enabled for non-production environment")
-        try:
-            settings = get_settings()
-        except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-            settings = None
-        allowed_keys: set[str] = set()
-        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-        if test_key:
-            allowed_keys.add(test_key)
-        if settings and settings.SINGLE_USER_API_KEY:
-            allowed_keys.add(settings.SINGLE_USER_API_KEY)
-        if api_key in allowed_keys:
-            client_ip = resolve_client_ip(request, settings)
-            if settings and settings.AUTH_MODE == "single_user":
-                if not is_single_user_ip_allowed(client_ip, settings):
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid or missing API Key",
-                    )
-            try:
-                if settings and isinstance(settings.DATABASE_URL, str) and settings.DATABASE_URL.startswith("sqlite:///"):
-                    from pathlib import Path as _Path
-
-                    from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables as _ensure_authnz_tables
-                    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-                    _ensure_authnz_tables(_Path(db_path))
-            except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as _ensure_err:
-                logger.debug(
-                    "AuthNZ test fallback: ensure_authnz_tables skipped/failed: error_type={}",
-                    type(_ensure_err).__name__,
-                )
-            fixed_id = getattr(settings, "SINGLE_USER_FIXED_ID", 1)
-            user = {
-                "id": fixed_id,
-                "username": "single_user",
-                "email": None,
-                "role": "admin",
-                "roles": ["admin"],
-                "permissions": ["*"],
-                "is_active": True,
-                "is_verified": True,
-            }
-            user = _public_user_dict(user)
-            try:
-                request.state.user_id = fixed_id
-                request.state.team_ids = []
-                request.state.org_ids = []
-            except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as state_exc:
-                logger.debug(
-                    "API key test-mode path: unable to attach state context: {}",
-                    state_exc,
-                )
-            return user
     try:
         # Force API key manager resolution through this module so tests can
         # monkeypatch `auth_deps.get_api_key_manager` and assert error logging
@@ -304,13 +231,10 @@ async def _authenticate_api_key_from_request(request: Request, api_key: str) -> 
         # Propagate explicit HTTP errors unchanged (401/403, etc.)
         raise
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as e:
-        if _is_test_mode():
-            logger.exception("API key authentication error in get_current_user (TEST_MODE)")
-        else:
-            logger.error(
-                "API key authentication error in get_current_user (type={})",
-                type(e).__name__,
-            )
+        logger.error(
+            "API key authentication error in get_current_user (type={})",
+            type(e).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate API key",
@@ -2587,10 +2511,6 @@ def require_token_scope(
                     env_primary_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
                     if env_primary_key:
                         allowed_keys.add(env_primary_key)
-                    if _is_test_mode():
-                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                        if test_key:
-                            allowed_keys.add(test_key)
                     if api_key in allowed_keys:
                         client_ip = resolve_client_ip(request, settings)
                         if not is_single_user_ip_allowed(client_ip, settings):
