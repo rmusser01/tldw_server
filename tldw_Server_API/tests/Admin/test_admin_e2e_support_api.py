@@ -47,6 +47,8 @@ def _admin_e2e_headers(
 async def client_without_e2e_support(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / 'authnz_no_e2e.db'
     monkeypatch.setenv('AUTH_MODE', 'multi_user')
+    # These tests exercise the admin E2E support API, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv('CSRF_ENABLED', 'false')
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
     monkeypatch.setenv('JWT_SECRET_KEY', 'playwright-test-secret-1234567890')
     monkeypatch.setenv('JWT_ALGORITHM', 'HS256')
@@ -73,6 +75,8 @@ async def e2e_client(tmp_path, monkeypatch, fresh_services):
     backup_root = tmp_path / 'backups'
     user_db_base_dir = tmp_path / 'user_dbs'
     monkeypatch.setenv('AUTH_MODE', 'multi_user')
+    # These tests exercise the admin E2E support API, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv('CSRF_ENABLED', 'false')
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
     monkeypatch.setenv('JOBS_DB_PATH', str(jobs_db_path))
     monkeypatch.setenv('JWT_SECRET_KEY', 'playwright-test-secret-1234567890')
@@ -105,6 +109,8 @@ async def e2e_client_without_support_key(tmp_path, monkeypatch, fresh_services):
     backup_root = tmp_path / 'backups'
     user_db_base_dir = tmp_path / 'user_dbs'
     monkeypatch.setenv('AUTH_MODE', 'multi_user')
+    # These tests exercise the admin E2E support API, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv('CSRF_ENABLED', 'false')
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
     monkeypatch.setenv('JOBS_DB_PATH', str(jobs_db_path))
     monkeypatch.setenv('JWT_SECRET_KEY', 'playwright-test-secret-1234567890')
@@ -171,6 +177,8 @@ async def e2e_client_without_fixture_passwords(tmp_path, monkeypatch, fresh_serv
     backup_root = tmp_path / 'backups'
     user_db_base_dir = tmp_path / 'user_dbs'
     monkeypatch.setenv('AUTH_MODE', 'multi_user')
+    # These tests exercise the admin E2E support API, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv('CSRF_ENABLED', 'false')
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
     monkeypatch.setenv('JOBS_DB_PATH', str(jobs_db_path))
     monkeypatch.setenv('JWT_SECRET_KEY', 'playwright-test-secret-1234567890')
@@ -207,6 +215,8 @@ async def e2e_client_with_unsafe_backup_path(tmp_path, monkeypatch, fresh_servic
     user_db_base_dir = tmp_path / 'user_dbs'
     unsafe_backup_root = Path.cwd() / 'unsafe-admin-e2e-backups'
     monkeypatch.setenv('AUTH_MODE', 'multi_user')
+    # These tests exercise the admin E2E support API, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv('CSRF_ENABLED', 'false')
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
     monkeypatch.setenv('JOBS_DB_PATH', str(jobs_db_path))
     monkeypatch.setenv('JWT_SECRET_KEY', 'playwright-test-secret-1234567890')

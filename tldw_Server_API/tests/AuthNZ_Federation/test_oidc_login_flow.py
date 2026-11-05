@@ -32,6 +32,8 @@ def test_build_federation_redirect_uri_uses_public_base_without_request_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    # These tests exercise the OIDC login flow, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
     monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.com")
     reset_settings()
@@ -56,6 +58,8 @@ def federation_client(
 ):
     db_path = tmp_path / "oidc_login_flow.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    # These tests exercise the OIDC login flow, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_FEDERATION_ENABLED", "true")
