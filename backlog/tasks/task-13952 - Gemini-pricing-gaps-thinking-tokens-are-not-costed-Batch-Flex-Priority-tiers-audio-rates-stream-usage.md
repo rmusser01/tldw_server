@@ -2,7 +2,7 @@
 id: TASK-13952
 title: 'Gemini pricing gaps: thinking tokens are not costed; Batch/Flex/Priority tiers,
   audio rates, stream usage'
-status: To Do
+status: In Progress
 labels:
 - quotas
 - backend
@@ -26,6 +26,7 @@ Found by TASK-13936 (ai.google.dev, fetched 2026-10-26). High priority because o
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 From TASK-13951 (2026-10-26), on item 5: until it lands, a streamed Gemini /chat/completions reply is still costed from the stream estimate (TASK-13951's AC #2 path), because GoogleAdapter.stream drops usageMetadata. When the stream ends with one chunk {"choices": [], "usage": <the block _normalize_to_openai_shape builds, cachedContentTokenCount included>} (Gemini's usageMetadata is cumulative, so the last one is the total), both recorders read it with no other change: StreamingResponseHandler feeds it to _StreamUsage, and the selected provider 'google' takes the normalizer's Gemini branch. Test it with a Gemini case in test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_sends (tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py).
+Plan: Docs/superpowers/plans/2026-11-03-gemini-pricing-gaps.md. Owner answers: ADR-004 Change summary waived (owner, 2026-11-03: "Yes, waiver covers it"); Decision 3 (audio not priced here, follow-up TASK-15422) agreed 2026-11-03 (plan approved as recommended); Decision 4 (today's rates, dated follow-up TASK-15423 labelled high, reminders on 2026-11-30 and 2026-12-31) agreed 2026-11-03; Decision 6 (a stopped or dropped stream's thinking tokens, follow-up TASK-15424) agreed 2026-11-03.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
