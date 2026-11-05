@@ -110,3 +110,14 @@ async def enforce_llm_quota(
 async def require_llm_quota(current_user: User = Depends(get_request_user)) -> None:
     """``enforce_llm_quota`` as a dependency, for endpoints that always do LLM work."""
     await enforce_llm_quota(getattr(current_user, "id", None))
+
+
+async def enforce_llm_quota_if_the_router_was_refused(user_id: Any, routing_debug: Any) -> None:
+    """The 402 when auto-routing found candidates but no route because its router call was refused at the call.
+
+    The quota refused the router call, so the request gets the 402, not ``503 auto_routing_failed``
+    (TASK-13956). A router call that failed for any other reason keeps the 503, for every user.
+    """
+    router = routing_debug.get("llm_router") if isinstance(routing_debug, dict) else None
+    if isinstance(router, dict) and router.get("error") == LLMQuotaExceededError.__name__:
+        await enforce_llm_quota(user_id)
