@@ -740,7 +740,12 @@ async def _revoke_stale_single_user_test_keys(api_repo: Any, user_id: int, prima
 
         revoked: list[Any] = []
         for row in await api_repo.list_user_keys(user_id=user_id):
-            if row.get("name") != "single-user test key" or row.get("is_virtual"):
+            if (
+                row.get("name") != "single-user test key"
+                or row.get("scope") != "admin"
+                or row.get("description") != "Deterministic API key for test automation"
+                or row.get("is_virtual")
+            ):
                 continue
             if primary_key_hash and row.get("key_hash") == primary_key_hash:
                 continue
