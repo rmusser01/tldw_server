@@ -83,6 +83,17 @@ def _isolate_authnz_daily_ledger(monkeypatch, _evaluations_authnz_db_url):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _configured_key_is_the_test_key(monkeypatch):
+    """Single-user auth accepts only the configured key; the suite sends the test key."""
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.tests.test_config import test_config
+
+    monkeypatch.setenv("SINGLE_USER_API_KEY", test_config.TEST_API_KEY)
+    reset_settings()
+    yield
+
+
 # ============================================================================
 # Database Fixtures with Full Schema
 # ============================================================================

@@ -4,7 +4,6 @@
 # Imports
 import asyncio
 import contextlib
-import os
 from typing import Any, Optional, Union
 from uuid import UUID
 
@@ -1003,9 +1002,8 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
     This helper centralizes API-key authentication so that both legacy
     dependencies (get_request_user) and the AuthPrincipal resolver can
     share the same behavior and context population. In single-user mode,
-    it also supports the bootstrapped SINGLE_USER_API_KEY /
-    SINGLE_USER_TEST_API_KEY without requiring a backing AuthNZ database
-    row.
+    it also supports the bootstrapped SINGLE_USER_API_KEY without requiring a
+    backing AuthNZ database row.
     """
     settings = get_settings()
 
@@ -1017,10 +1015,6 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
             primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
             if primary_key:
                 allowed_keys.add(primary_key)
-            if _is_test_context():
-                test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                if test_key:
-                    allowed_keys.add(test_key)
             if api_key in allowed_keys:
                 client_ip = resolve_client_ip(request, settings)
                 if not is_single_user_ip_allowed(client_ip, settings):

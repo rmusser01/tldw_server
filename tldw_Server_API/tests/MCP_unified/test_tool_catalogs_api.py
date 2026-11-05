@@ -159,7 +159,9 @@ def test_tool_catalogs_flow():
     _ensure_single_user_row()
 
     # Use configured test API key
-    api_key = os.getenv("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    api_key = get_settings().SINGLE_USER_API_KEY
     headers = {"X-API-KEY": api_key}
 
     # Assign admin role to single user to satisfy module read checks where applicable

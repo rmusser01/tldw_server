@@ -460,31 +460,6 @@ class MCPServer:
             logger.debug("MCP WS single-user profile detection failed closed", exc_info=True)
             return False
 
-    def _single_user_test_key_compat_allowed(self) -> bool:
-        """Return True when SINGLE_USER_TEST_API_KEY may be accepted by mounted WS."""
-        if not self._is_test_mode():
-            return False
-        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
-        prod_flag = self._env_flag_enabled("tldw_production")
-        is_dev_ctx = bool(getattr(self.config, "debug_mode", False))
-        if self._is_explicit_pytest_runtime():
-            is_dev_ctx = True
-        if env in {"dev", "development", "test", "ci"}:
-            is_dev_ctx = True
-        if prod_flag:
-            is_dev_ctx = False
-        if not is_dev_ctx:
-            logger.error(
-                "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
-                extra={
-                    "audit": True,
-                    "env": env,
-                    "debug_mode": bool(getattr(self.config, "debug_mode", False)),
-                },
-            )
-            return False
-        return True
-
     def _single_user_compat_auth_via(self, api_key: Optional[str], *, client_ip: Optional[str]) -> Optional[str]:
         """Return mounted WS single-user compatibility auth source for an API key."""
         if not api_key or not self._should_use_single_user_api_key_compat():
@@ -492,12 +467,9 @@ class MCPServer:
         try:
             settings = get_settings()
             primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-            test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
             auth_via: Optional[str] = None
             if primary_key and secrets.compare_digest(api_key, str(primary_key)):
                 auth_via = "single_user_api_key"
-            elif test_key and self._single_user_test_key_compat_allowed() and secrets.compare_digest(api_key, test_key):
-                auth_via = "single_user_test_api_key"
             if auth_via is None:
                 return None
             if not is_single_user_ip_allowed(client_ip, settings):
@@ -1673,10 +1645,6 @@ class MCPServer:
                 roles = metadata.setdefault("roles", [])
                 if "admin" not in roles:
                     roles.append("admin")
-                if compat_auth_via == "single_user_test_api_key":
-                    perms = metadata.setdefault("permissions", [])
-                    if "*" not in perms:
-                        perms.append("*")
                 logger.info("WebSocket authenticated via mounted single-user compatibility key")
             else:
                 try:

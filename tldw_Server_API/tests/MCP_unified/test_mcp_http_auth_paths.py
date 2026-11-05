@@ -944,6 +944,32 @@ async def test_mcp_single_user_api_key_respects_ip_allowlist(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mcp_single_user_api_key_grants_no_wildcard_permissions_in_test_mode(monkeypatch):
+    """TEST_MODE must not widen the single-user compat principal to ["*"]."""
+    from starlette.requests import Request
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "1")
+    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+
+    class _Settings:
+        SINGLE_USER_API_KEY = "single-user-admin-key"
+        SINGLE_USER_FIXED_ID = 999
+        SINGLE_USER_ALLOWED_IPS = ["203.0.113.10"]
+
+    monkeypatch.setattr(mcp_ep, "get_settings", lambda: _Settings())
+
+    request_allowed = Request({"type": "http", "client": ("203.0.113.10", 12345)})
+    user_allowed = await mcp_ep._resolve_token_data_compat(
+        credentials=None,
+        x_api_key="single-user-admin-key",
+        request=request_allowed,
+    )
+    assert isinstance(user_allowed, mcp_ep.TokenData)
+    assert user_allowed.permissions == []
+
+
+@pytest.mark.asyncio
 async def test_mcp_single_user_api_key_flag_disabled_uses_api_key_manager(monkeypatch):
     """
     When MCP_SINGLE_USER_COMPAT_SHIM is disabled, even in single-user runtime
@@ -1129,56 +1155,6 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
         "team_id": 7,
         "scope": ["read"],
     }
-
-
-@pytest.mark.asyncio
-async def test_single_user_test_api_key_allowed_in_test_mode_dev_context(monkeypatch):
-    """
-    In TEST_MODE with a clear dev/test context, SINGLE_USER_TEST_API_KEY should
-    be accepted via the single-user compat shim and produce an admin-style TokenData.
-    """
-    from starlette.requests import Request
-
-    test_key = "test-key-dev-123"
-
-    # Enable compat shim and single-user profile.
-    monkeypatch.delenv("MCP_SINGLE_USER_COMPAT_SHIM", raising=False)
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
-
-    # TEST_MODE enabled and explicit test key configured.
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", test_key)
-
-    # Dev-like config: debug_mode True.
-    class _Cfg:
-        debug_mode = True
-
-    monkeypatch.setattr(mcp_ep, "get_config", lambda: _Cfg())
-
-    # Single-user settings.
-    class _Settings:
-        SINGLE_USER_API_KEY = "real-single-user-key"
-        SINGLE_USER_FIXED_ID = 999
-
-    monkeypatch.setattr(mcp_ep, "get_settings", lambda: _Settings())
-
-    # Guard that multi-user API key manager is not used in this path.
-    async def _fail_get_api_key_manager():
-        raise AssertionError("API key manager should not be used for SINGLE_USER_TEST_API_KEY in dev TEST_MODE")
-
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fail_get_api_key_manager)
-
-    scope = {"type": "http", "client": ("127.0.0.1", 8000)}
-    request = Request(scope)
-
-    user = await mcp_ep._resolve_token_data_compat(credentials=None, x_api_key=test_key, request=request)
-
-    assert isinstance(user, mcp_ep.TokenData)
-    assert user.sub == str(_Settings.SINGLE_USER_FIXED_ID)
-    assert user.username == "single_user"
-    # Admin-style role and wildcard permissions in TEST_MODE.
-    assert user.roles == [UserRole.ADMIN.value]
-    assert user.permissions == ["*"]
 
 
 @pytest.mark.asyncio

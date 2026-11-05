@@ -8,8 +8,10 @@ and "keep endpoints thin, push logic into core modules". A core module importing
 from app/api/ inverts that. The 2026-09-21 core-module review found two distinct
 shapes, which are not equally bad:
 
-* Schema-only imports from ``api/v1/schemas/*`` -- the common case. The honest reading
-  is that those schemas are in the wrong package, not that core is wrong to need them.
+* Schema-only imports from ``api/v1/schemas/*``. Since TASK-13950.15 core reads no api
+  schema at runtime: the models moved into core and the api modules re-export them. The
+  one exception is type-only, ``ChaChaNotes_DB.py:63`` under ``TYPE_CHECKING``, which
+  creates no runtime edge. The remaining core -> api pairs are true inversions.
 * True inversions: core importing ``api/v1/endpoints/*`` or ``api/v1/API_Deps/*``.
   ``Ingestion_Media_Processing/persistence.py`` has one: the background embedding task
   that ``schedule_media_add_embeddings`` schedules (``generate_embeddings_task``) lazily
