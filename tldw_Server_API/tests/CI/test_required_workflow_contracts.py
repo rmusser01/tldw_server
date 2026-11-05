@@ -2470,3 +2470,45 @@ def test_release_python313_platforms_keep_the_same_complete_suite() -> None:
             assert job[key] == reference[key], key
     assert sorted(platforms) == ["macos-latest", "windows-latest"]
     assert sum(job["strategy"]["max-parallel"] for job in release) == 20
+
+
+
+def test_gap5_partitions_preserve_workload_pgvector_and_admission() -> None:
+    """Give the large Notes/Slides workloads separate unchanged Linux budgets."""
+    from Helper_Scripts.ci.check_shard_coverage import is_covered
+
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests")
+    groups = {
+        "gap5-notes-graph": {(root / "Notes_Graph").as_posix()},
+        "gap5-slides": {(root / "Slides").as_posix()},
+        "gap5-agent-chat-text-wizard": {
+            (root / directory).as_posix()
+            for directory in ("Agent_Orchestration", "Chat_Workflows", "Text2SQL", "wizard")
+        },
+    }
+    files = {
+        path.as_posix()
+        for directory in set().union(*groups.values())
+        for path in Path(directory).rglob("*.py")
+        if path.name.startswith("test_") or path.name.endswith("_test.py")
+    }
+    for job in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        assert len(shards) <= 256  # nosec B101 -- Preserve GitHub matrix admission.
+        assert all(shard["name"] != "gap-verified-5" for shard in shards)  # nosec B101 -- Retire the combined budget.
+        owners: dict[str, list[str]] = {path: [] for path in files}
+        for shard in shards:
+            paths = str(shard["paths"]).split()
+            if shard["name"] in groups:
+                assert set(paths) == groups[shard["name"]], (job, shard)  # nosec B101 -- Exact workload.
+                expected = (
+                    {"postgres_image": "pgvector/pgvector:pg18", "pgvector_required": "1"}
+                    if job == "full-suite-linux-312-shards" else {}
+                )
+                assert {key: value for key, value in shard.items() if key not in {"name", "paths"}} == expected  # nosec B101 -- Original per-matrix database requirements.
+            for path in files:
+                if is_covered(path, paths):
+                    owners[path].append(shard["name"])
+        assert files and all(len(names) == 1 for names in owners.values()), (job, owners)  # nosec B101 -- No omission or duplication.
+        assert {names[0] for names in owners.values()} == set(groups)  # nosec B101 -- Three independent budgets.

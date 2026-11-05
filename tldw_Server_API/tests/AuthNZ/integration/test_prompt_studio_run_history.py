@@ -28,6 +28,23 @@ def private_history_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(tmp_path / "system.log"))
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
 
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
+
+    load_failures = []
+    list_overrides = llm_provider_overrides.AuthnzLLMProviderOverridesRepo.list_overrides
+
+    async def observed_overrides(repo, *args, **kwargs):
+        """Forward the real loader and retain only bounded exception types."""
+        try:
+            return await list_overrides(repo, *args, **kwargs)
+        except BaseException as exc:
+            if len(load_failures) < 3:
+                load_failures.append(type(exc).__name__)
+            raise
+
+    monkeypatch.setattr(llm_provider_overrides.AuthnzLLMProviderOverridesRepo, "list_overrides", observed_overrides)
+    return load_failures
+
 
 @pytest.fixture
 def history_accounts(private_history_paths, single_user_cookie_client, monkeypatch):
@@ -75,7 +92,7 @@ def history_accounts(private_history_paths, single_user_cookie_client, monkeypat
                                          test_case_id=foreign_case["id"], model_name="private", inputs={}, outputs={})
         yield SimpleNamespace(client=client, owners=owners, headers=owner["headers"], db=db,
                               project=project, prompt=prompt, case=case, foreign=foreign,
-                              foreign_run=foreign_run)
+                              foreign_run=foreign_run, provider_override_load_failures=private_history_paths)
     client.portal.call(prompt_studio_deps.shutdown_prompt_studio_deps)
 
 
@@ -102,6 +119,17 @@ def test_real_run_then_revision_reads_original_snapshots_without_provider_replay
     result = context.client.post(ROOT + "/test-cases/run", headers=context.headers,
         json={"prompt_id": context.prompt["id"], "test_case_ids": [context.case["id"]],
               "provider": "ollama", "model": "qwen2.5:0.5b"})
+    if result.status_code != 200:
+        from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
+
+        with llm_provider_overrides._OVERRIDE_LOCK:
+            print("Prompt history provider readiness:", {
+                "load_failure_types": context.provider_override_load_failures,
+                "cache_healthy": llm_provider_overrides._OVERRIDE_CACHE_HEALTHY,
+                "refresh_pending": llm_provider_overrides._OVERRIDE_RECOVERY_IN_FLIGHT,
+                "ttl_disabled": llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS,
+                "response_status": result.status_code,
+            })
     assert result.status_code == 200, result.text  # nosec B101 - pytest contract
     run_id = result.json()["results"][0]["id"]
     assert len(calls) == 1  # nosec B101 - pytest contract
