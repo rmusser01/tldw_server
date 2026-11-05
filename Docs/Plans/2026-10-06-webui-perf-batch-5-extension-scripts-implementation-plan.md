@@ -38,7 +38,7 @@
 - Effective-config per-request reads: covered by W4 Stage 5 (`single-user-credential.ts`); no duplicate work here.
 **Success Criteria:** Idle hour with sidepanel already open: 0 forced catalog fetches, 0 redundant `sidePanel.setOptions/open` calls, config-watcher refreshes only on URL change.
 **Tests:** Unit: alarm handler with warm cache performs 0 network calls; two broadcasts for one funnel call `setOptions` once; context-menu sync no-ops on unrelated config key change.
-**Status:** Not Started
+**Status:** Complete (Stage 3, TASK-13525: `emitBackgroundMessage` is now `createBackgroundStatusBroadcaster` (services/background-helpers.ts) — it opens the sidepanel at most once per correlated funnel/session (first status emit still opens from closed; uncorrelated broadcasts keep legacy behavior) and never suppresses the runtime message; funnel metrics append to an in-memory pending array flushed by a coalescing serialize-on-drain writer (hydrate-on-first-flush merge with persisted history, bounded 200, single write per drain window) instead of read-modify-write per event; `syncWebClipperContextMenu` re-syncs only when the config write changes the server URL. Alarm non-forcing and the 5-min capabilities TTL were already landed by W2 (verified, no duplicate work). Effective-config per-request reads remain W4 Stage 5 scope (WP-63; not landed at time of writing). Pinned by `services/__tests__/background-helpers.broadcast.test.ts`, `entries/__tests__/background.funnel-metrics.test.ts`, and the URL-gate cases in `entries/shared/__tests__/background-init.test.ts`.)
 
 ## Verification & DoD
 
