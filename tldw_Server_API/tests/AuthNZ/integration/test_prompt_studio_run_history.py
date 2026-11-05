@@ -1,5 +1,7 @@
 """Read durable Prompt Studio snapshots with real authentication and transport."""
 
+import time
+import traceback
 from types import SimpleNamespace
 
 import httpx
@@ -34,12 +36,21 @@ def private_history_paths(tmp_path, monkeypatch):
     list_overrides = llm_provider_overrides.AuthnzLLMProviderOverridesRepo.list_overrides
 
     async def observed_overrides(repo, *args, **kwargs):
-        """Forward the real loader and retain only bounded exception types."""
+        """Forward the real loader and retain bounded failure timing and frames."""
+        started = time.monotonic()
         try:
             return await list_overrides(repo, *args, **kwargs)
         except BaseException as exc:
             if len(load_failures) < 3:
-                load_failures.append(type(exc).__name__)
+                load_failures.append(
+                    {
+                        "type": type(exc).__name__,
+                        "elapsed_seconds": round(time.monotonic() - started, 3),
+                        "frames": [
+                            (frame.name, frame.lineno) for frame in traceback.extract_tb(exc.__traceback__)[-8:]
+                        ],
+                    }
+                )
             raise
 
     monkeypatch.setattr(llm_provider_overrides.AuthnzLLMProviderOverridesRepo, "list_overrides", observed_overrides)
@@ -123,13 +134,17 @@ def test_real_run_then_revision_reads_original_snapshots_without_provider_replay
         from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides
 
         with llm_provider_overrides._OVERRIDE_LOCK:
-            print("Prompt history provider readiness:", {
-                "load_failure_types": context.provider_override_load_failures,
-                "cache_healthy": llm_provider_overrides._OVERRIDE_CACHE_HEALTHY,
-                "refresh_pending": llm_provider_overrides._OVERRIDE_RECOVERY_IN_FLIGHT,
-                "ttl_disabled": llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS,
-                "response_status": result.status_code,
-            })
+            print(
+                "Prompt history provider readiness:",
+                {
+                    "load_failure_types": [failure["type"] for failure in context.provider_override_load_failures],
+                    "load_failures": context.provider_override_load_failures,
+                    "cache_healthy": llm_provider_overrides._OVERRIDE_CACHE_HEALTHY,
+                    "refresh_pending": llm_provider_overrides._OVERRIDE_RECOVERY_IN_FLIGHT,
+                    "ttl_disabled": llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS,
+                    "response_status": result.status_code,
+                },
+            )
     assert result.status_code == 200, result.text  # nosec B101 - pytest contract
     run_id = result.json()["results"][0]["id"]
     assert len(calls) == 1  # nosec B101 - pytest contract

@@ -26,7 +26,14 @@ def _fresh_catalogs(monkeypatch: pytest.MonkeyPatch):
     chat_service.invalidate_model_alias_caches()
 
 
-_LISTED = ("claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1", "claude-opus-4-5")
+_LISTED = (
+    "claude-sonnet-4-5",
+    "claude-haiku-4-5",
+    "claude-opus-4-1",
+    "claude-opus-4-5",
+    "claude-3-5-haiku-20241022",
+    "claude-3-7-sonnet-20250219",
+)
 
 
 @pytest.fixture
@@ -282,7 +289,7 @@ def test_the_allowlist_check_returns_false_instead_of_raising_on_unhashable_or_o
     ids=["legacy-haiku", "legacy-sonnet"],
 )
 def test_saved_three_series_names_keep_price_selection_allowlist_and_native_payload(
-    saved, canonical, prompt, completion
+    saved, canonical, prompt, completion, anthropic_inventory
 ):
     """Old saved spellings still reach the catalog IDs introduced by the pricing refresh."""
     from types import SimpleNamespace
@@ -295,11 +302,14 @@ def test_saved_three_series_names_keep_price_selection_allowlist_and_native_payl
     assert canonical_anthropic_model_id(saved.upper()) == canonical  # nosec B101 -- stored case variants remain usable.
     rates, _ = PricingCatalog().get_rate_details("anthropic", saved)
     assert (rates["prompt"], rates["completion"]) == (prompt, completion)  # nosec B101 -- actual catalog rates.
-    assert chat_service.is_model_known_for_provider("anthropic", saved) is True  # nosec B101 -- strict model selection.
-    assert (
-        chat_service.infer_provider_from_model_catalog(provider="openai", model=saved, provider_explicit=False)[0]
-        == "anthropic"
-    )  # nosec B101 -- retained routing.
+    assert _known_with_credentials(saved) is True  # nosec B101 -- strict model selection.
+    inferred, debug = chat_service.infer_provider_from_model_catalog(
+        provider="openai",
+        model=saved,
+        provider_explicit=False,
+    )
+    assert inferred == "openai"  # nosec B101 -- commercial inventory requires credentials.
+    assert debug["reason"] == "commercial_inventory_requires_credentials"  # nosec B101 -- retain routing authority.
     assert allowlist_has_model([saved], canonical) and allowlist_has_model(
         [canonical], saved
     )  # nosec B101 -- exact alias, both directions.
