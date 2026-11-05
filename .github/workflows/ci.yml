@@ -580,14 +580,23 @@ jobs:
               tldw_Server_API/tests/VN_Play
               tldw_Server_API/tests/VN_Policy
               tldw_Server_API/tests/scripts
-          - name: gap-verified-5
+          - name: gap5-notes-graph
+            postgres_image: pgvector/pgvector:pg18
+            pgvector_required: '1'
+            paths: >-
+              tldw_Server_API/tests/Notes_Graph
+          - name: gap5-slides
+            postgres_image: pgvector/pgvector:pg18
+            pgvector_required: '1'
+            paths: >-
+              tldw_Server_API/tests/Slides
+          - name: gap5-agent-chat-text-wizard
             postgres_image: pgvector/pgvector:pg18
             pgvector_required: '1'
             paths: >-
               tldw_Server_API/tests/Agent_Orchestration
               tldw_Server_API/tests/Chat_Workflows
-              tldw_Server_API/tests/Notes_Graph
-              tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
+              tldw_Server_API/tests/Text2SQL
               tldw_Server_API/tests/wizard
           - name: gap-verified-6
             paths: >-
@@ -2324,12 +2333,17 @@ jobs:
               tldw_Server_API/tests/VN_Play
               tldw_Server_API/tests/VN_Policy
               tldw_Server_API/tests/scripts
-          - name: gap-verified-5
+          - name: gap5-notes-graph
+            paths: >-
+              tldw_Server_API/tests/Notes_Graph
+          - name: gap5-slides
+            paths: >-
+              tldw_Server_API/tests/Slides
+          - name: gap5-agent-chat-text-wizard
             paths: >-
               tldw_Server_API/tests/Agent_Orchestration
               tldw_Server_API/tests/Chat_Workflows
-              tldw_Server_API/tests/Notes_Graph
-              tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
+              tldw_Server_API/tests/Text2SQL
               tldw_Server_API/tests/wizard
           - name: gap-verified-6
             paths: >-
