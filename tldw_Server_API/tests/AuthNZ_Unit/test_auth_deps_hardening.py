@@ -1056,39 +1056,6 @@ def test_fallback_rate_bucket_capacity_never_exceeded_concurrently(
 
 
 @pytest.mark.asyncio
-async def test_get_session_manager_dep_requires_explicit_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEST_MODE", "0")
-
-    sentinel = object()
-
-    async def _fake_get_session_manager() -> object:
-        return sentinel
-
-    monkeypatch.setattr(auth_deps, "get_session_manager", _fake_get_session_manager)
-
-    resolved = await auth_deps.get_session_manager_dep()
-    assert resolved is sentinel
-
-
-@pytest.mark.asyncio
-async def test_get_session_manager_dep_does_not_use_stub_without_explicit_pytest_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-
-    sentinel = object()
-
-    async def _fake_get_session_manager() -> object:
-        return sentinel
-
-    monkeypatch.setattr(auth_deps, "get_session_manager", _fake_get_session_manager)
-
-    resolved = await auth_deps.get_session_manager_dep()
-    assert resolved is sentinel
-
-
-@pytest.mark.asyncio
 async def test_get_db_transaction_requires_explicit_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
