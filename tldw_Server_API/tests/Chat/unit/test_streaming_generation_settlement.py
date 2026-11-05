@@ -10,6 +10,7 @@ from typing import Any
 import anyio
 import pytest
 
+from tldw_Server_API.app.core.Chat import streaming_utils
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     StopStreamWithError,
     StreamingResponseHandler,
@@ -107,13 +108,14 @@ async def test_complete_reply_passes_finish_reason_and_provider_usage_to_save():
     ]
 
 
-async def test_complete_reply_passes_the_whole_provider_usage_block_to_a_save_that_takes_it():
-    """The usage record needs the tier, cache counts and cost; generation metadata keeps the counts (TASK-13951)."""
+async def test_complete_reply_passes_what_the_stream_received_to_a_save_that_takes_it():
+    """The usage record needs the whole block (tier, cache counts, cost) and the characters received;
+    generation metadata keeps the counts (TASK-13951, TASK-13953)."""
     handler = StreamingResponseHandler("conv", "model")
     saves: list[dict[str, Any]] = []
 
-    async def save(text, tool_calls=None, function_call=None, *, generation=None, provider_usage=None):
-        saves.append({"generation": generation, "provider_usage": provider_usage})
+    async def save(text, tool_calls=None, function_call=None, *, generation=None, stream_usage=None):
+        saves.append({"generation": generation, "stream_usage": stream_usage})
         return "saved-complete"
 
     usage = {
@@ -136,8 +138,81 @@ async def test_complete_reply_passes_the_whole_provider_usage_block_to_a_save_th
         pass
 
     (saved,) = saves
-    assert saved["provider_usage"] == {**usage, "service_tier": "flex"}
+    assert saved["stream_usage"].usage == {**usage, "service_tier": "flex"}
+    assert saved["stream_usage"].chars == len("Hi")
     assert saved["generation"]["usage"] == {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+
+
+@pytest.mark.parametrize("ending", ["stop", "disconnect", "provider_error"])
+async def test_an_early_end_passes_what_the_stream_received_to_finalize(monkeypatch, ending):
+    """The usage row of a stream that ends early needs its usage chunk and character count (TASK-13953)."""
+    handlers: list[StreamingResponseHandler] = []
+
+    class _Captured(StreamingResponseHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            handlers.append(self)
+
+    monkeypatch.setattr(streaming_utils, "StreamingResponseHandler", _Captured)
+    finalized: list[dict[str, Any]] = []
+    delivered = asyncio.Event()
+
+    async def finalize(*, success, cancelled, error, stream_usage=None):
+        finalized.append({"cancelled": cancelled, "error": error, "stream_usage": stream_usage})
+
+    async def provider() -> AsyncIterator[str]:
+        yield _sse({"choices": [{"delta": {"content": "Half "}}], "usage": {"prompt_tokens": 5, "completion_tokens": 1}})
+        yield _content("done")
+        if ending == "stop":
+            handlers[0].request_stop()
+            yield _content(" never")
+        if ending == "provider_error":
+            raise RuntimeError("upstream reset")
+        await asyncio.Event().wait()
+
+    async def consume() -> None:
+        async for frame in create_streaming_response_with_timeout(
+            provider(), "conv", "model", finalize_callback=finalize, heartbeat_interval=0
+        ):
+            if "done" in frame:
+                delivered.set()
+
+    consumer = asyncio.ensure_future(consume())
+    await asyncio.wait_for(delivered.wait(), timeout=10)
+    if ending == "disconnect":
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+    else:
+        await asyncio.wait_for(consumer, timeout=10)
+    deadline = asyncio.get_running_loop().time() + 10
+    while not finalized and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)  # the stream's own task finishes after the consumer
+
+    (call,) = finalized
+    assert (call["cancelled"], call["error"]) == (ending != "provider_error", ending == "provider_error")
+    assert call["stream_usage"].usage == {"prompt_tokens": 5, "completion_tokens": 1}
+    assert call["stream_usage"].chars == len("Half done")
+
+
+async def test_plain_text_chunks_count_toward_what_the_stream_received():
+    """A provider that streams bare text, not SSE, is not estimated at nothing (TASK-13953)."""
+    handler = StreamingResponseHandler("conv", "model")
+    saves: list[Any] = []
+
+    async def save(text, tool_calls=None, function_call=None, *, stream_usage=None):
+        saves.append(stream_usage)
+        return "saved-complete"
+
+    async def provider() -> AsyncIterator[str]:
+        yield "Plain "
+        yield "text reply"
+
+    async for _frame in handler.safe_stream_generator(provider(), save_callback=save):
+        pass
+
+    (received,) = saves
+    assert (received.usage, received.chars) == (None, len("Plain text reply"))
 
 
 async def test_length_finish_reason_settles_as_length():
