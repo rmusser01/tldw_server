@@ -24,6 +24,7 @@ pytestmark = pytest.mark.unit
 _SCRIPT = "import importlib, json, sys; importlib.import_module(sys.argv[1]); print(json.dumps(sorted(sys.modules)))"
 CASES = [
     ("tldw_Server_API.app.core.Chat", "tldw_Server_API.app.api"),
+    ("tldw_Server_API.app.core.Chat.chat_request_schemas", "tldw_Server_API.app.api"),
     ("tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter", "tldw_Server_API.app.core.Chat"),
     ("tldw_Server_API.app.core.LLM_Calls.gateway", "tldw_Server_API.app.core.Chat"),
 ]
@@ -58,5 +59,5 @@ def test_importing_does_not_load(module: str, forbidden: str) -> None:
 
 
 def test_the_guard_sees_a_forbidden_load() -> None:
-    # chat_target_resolution loads api.v1.schemas.chat_request_schemas through chat_helpers: a known violator.
-    assert forbidden_loads("tldw_Server_API.app.core.Chat.chat_target_resolution", "tldw_Server_API.app.api")
+    # The api module is now a re-export that must load the core-owned model: a known violator.
+    assert forbidden_loads("tldw_Server_API.app.api.v1.schemas.chat_request_schemas", "tldw_Server_API.app.core.Chat")

@@ -11,7 +11,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+from tldw_Server_API.app.core.Chat.chat_request_schemas import ChatCompletionRequest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,

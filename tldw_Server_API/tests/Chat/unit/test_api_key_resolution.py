@@ -1,6 +1,6 @@
 import pytest
 
-from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+from tldw_Server_API.app.core.Chat import chat_request_schemas
 from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     LLMProviderOverride,
