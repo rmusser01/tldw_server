@@ -1156,8 +1156,26 @@ async def _save_nothing(*_args: Any, **_kwargs: Any) -> str:
             (2_000 * 0.30 + 8_000 * 0.03 + 1_000 * 2.50) / 1_000_000,
             False,
         ),
+        (
+            "google",
+            "gemini-2.5-flash",
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "thoughtsTokenCount": 400,
+                    "cachedContentTokenCount": 8_000,
+                    "service_tier": "flex",
+                },
+            },
+            "flex",
+            (2_000 * 0.15 + 8_000 * 0.03 + 1_000 * 1.25) / 1_000_000,
+            False,
+        ),
     ],
-    ids=["openai-fast-cached", "openrouter-reported-cost", "gemini-cached-thinking"],
+    ids=["openai-fast-cached", "openrouter-reported-cost", "gemini-cached-thinking", "gemini-flex"],
 )
 async def test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_sends(
     stream_usage_rows, provider, model, usage_chunk, tier, total_cost, forwarded
