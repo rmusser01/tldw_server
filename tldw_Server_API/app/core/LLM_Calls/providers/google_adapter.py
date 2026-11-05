@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import ChatBadRequestError
+from tldw_Server_API.app.core.exceptions import ChatAPIError, ChatBadRequestError
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
@@ -482,7 +482,15 @@ class GoogleAdapter(ChatProvider):
         return usage
 
     @staticmethod
-    def _stream_event_deltas(event: Any, state: dict[str, int] | None = None) -> Iterable[str]:
+    def _usage_chunk(state: dict[str, Any]) -> Iterable[str]:
+        """The stream's one usage chunk, from the last ``usageMetadata`` seen: Gemini's counts are cumulative.
+        An empty ``usageMetadata`` (every count ``None``) sends none."""
+        usage = state.pop("usage", None) or {}
+        if any(value is not None for value in usage.values()):
+            yield sse_data({"choices": [], "usage": usage})
+
+    @staticmethod
+    def _stream_event_deltas(event: Any, state: dict[str, Any] | None = None) -> Iterable[str]:
         if state is None:
             state = {}
         if isinstance(event, list):
@@ -491,6 +499,8 @@ class GoogleAdapter(ChatProvider):
             return
         if not isinstance(event, dict):
             return
+        if isinstance(event.get("usageMetadata"), dict):
+            state["usage"] = GoogleAdapter._usage_block(event["usageMetadata"])
         cands = event.get("candidates") or []
         tool_index = int(state.get("tool_index", 0))
         for idx, cand in enumerate(cands):
@@ -641,15 +651,14 @@ class GoogleAdapter(ChatProvider):
         payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
         payload = merge_extra_body(payload, request)
         headers = merge_extra_headers(headers, request)
+        tool_state: dict[str, Any] = {"tool_index": 0}  # the next tool-call index and the last usage block
         try:
             resolved_timeout = self._resolve_timeout(request, timeout)
             with http_client_factory(timeout=resolved_timeout) as client:
                 with client.stream("POST", url, headers=headers, json=payload) as resp:
                     resp.raise_for_status()
                     debug_stream = _stream_debug_enabled(self.name)
-                    seen_done = False
                     buffer = ""
-                    tool_state = {"tool_index": 0}
                     # Own loop (TASK-13373): translates Gemini events and JSON arrays into
                     # OpenAI deltas; the shared SSE helpers only pass lines through.
                     for raw in resp.iter_lines():
@@ -666,10 +675,10 @@ class GoogleAdapter(ChatProvider):
                             phase="stream_response",
                         )
                         if is_done_line(line):
-                            if not seen_done:
-                                seen_done = True
-                                yield sse_done()
-                            continue
+                            # A proxy's [DONE] ends the stream: the usage chunk, then [DONE], once (TASK-13952).
+                            yield from self._usage_chunk(tool_state)
+                            yield sse_done()
+                            return
                         stripped = line.strip()
                         if stripped.startswith("data:"):
                             payload_text = stripped[len("data:"):].strip()
@@ -699,9 +708,17 @@ class GoogleAdapter(ChatProvider):
                         normalized = normalize_provider_line(line)
                         if normalized is not None:
                             yield normalized
-                    yield from finalize_stream(response=resp, done_already=seen_done)
+                    # Gemini sends no [DONE]: the usage chunk goes out here, before finalize_stream's (TASK-13952).
+                    yield from self._usage_chunk(tool_state)
+                    yield from finalize_stream(response=resp)
             return
+        except ChatAPIError:
+            # An in-band error event mid-way: the usage seen so far goes out first, so the stream is recorded from
+            # it, thinking tokens included (TASK-13952).
+            yield from self._usage_chunk(tool_state)
+            raise
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS as e:
+            yield from self._usage_chunk(tool_state)  # a transport error mid-way: likewise
             self._raise_sanitized_provider_failure(e, phase="stream")
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:

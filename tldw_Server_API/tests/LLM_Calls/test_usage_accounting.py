@@ -733,3 +733,39 @@ async def test_the_service_tier_a_response_reports_is_recorded_with_its_usage(ro
     assert chat_row["usage_metadata"] == {**USAGE, "service_tier": "flex"}
     assert stream_row["usage_metadata"] == {"prompt_tokens": 5, "completion_tokens": 2, "service_tier": "flex"}
     assert response["usage"] == USAGE
+
+
+async def test_a_gemini_stream_is_recorded_from_the_usage_chunk_the_adapter_emits(rows, monkeypatch) -> None:
+    """GoogleAdapter.stream ends with one usage chunk built from Gemini's last (cumulative) usageMetadata, thinking
+    tokens counted as output; this recorder reads it like any provider's, so the row is not an estimate (TASK-13952)."""
+    import httpx
+
+    from tldw_Server_API.app.core.LLM_Calls.providers import google_adapter as gmod
+
+    body = (
+        b'data: {"candidates":[{"content":{"parts":[{"text":"Hel"}]}}],'
+        b'"usageMetadata":{"promptTokenCount":80,"candidatesTokenCount":2,"totalTokenCount":82}}\n\n'
+        b'data: {"candidates":[{"content":{"parts":[{"text":"lo"}]},"finishReason":"STOP"}],'
+        b'"usageMetadata":{"promptTokenCount":80,"candidatesTokenCount":30,"totalTokenCount":115,'
+        b'"cachedContentTokenCount":50,"thoughtsTokenCount":5}}\n\n'
+    )
+    monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_GOOGLE", "1")
+    monkeypatch.setattr(
+        gmod,
+        "http_client_factory",
+        lambda *_a, **_k: httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(200, content=body))),
+    )
+
+    with llm_call_context(user_id=7):
+        list(gmod.GoogleAdapter().stream({**REQUEST, "model": "gemini-2.5-flash", "api_key": "sk-test"}))
+
+    (row,) = await _settled(rows)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (80, 35)
+    assert row["usage_metadata"] == {
+        "prompt_tokens": 80,
+        "completion_tokens": 35,
+        "total_tokens": 115,
+        "thoughtsTokenCount": 5,
+        "cachedContentTokenCount": 50,
+    }
+    assert (row["estimated"], row["estimate_source"]) == (None, None)

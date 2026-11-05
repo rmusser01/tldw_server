@@ -1136,8 +1136,28 @@ async def _save_nothing(*_args: Any, **_kwargs: Any) -> str:
             0.0042,
             True,
         ),
+        # Gemini: the chunk GoogleAdapter.stream ends with (TASK-13952), 8,000 of 10,000 prompt tokens cached and
+        # the thinking share inside completion_tokens, at gemini-2.5-flash's standard rates ($0.30, $0.03, $2.50
+        # per million), then at its flex rates ($0.15, $0.03, $1.25) when usageMetadata.serviceTier says so.
+        (
+            "google",
+            "gemini-2.5-flash",
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "thoughtsTokenCount": 400,
+                    "cachedContentTokenCount": 8_000,
+                },
+            },
+            None,
+            (2_000 * 0.30 + 8_000 * 0.03 + 1_000 * 2.50) / 1_000_000,
+            False,
+        ),
     ],
-    ids=["openai-fast-cached", "openrouter-reported-cost"],
+    ids=["openai-fast-cached", "openrouter-reported-cost", "gemini-cached-thinking"],
 )
 async def test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_sends(
     stream_usage_rows, provider, model, usage_chunk, tier, total_cost, forwarded
