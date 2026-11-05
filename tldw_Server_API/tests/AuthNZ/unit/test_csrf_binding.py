@@ -183,8 +183,7 @@ def test_csrf_middleware_rotates_unbound_cookie(monkeypatch):
     from fastapi import FastAPI, Request
     from fastapi.testclient import TestClient
 
-    from tldw_Server_API.app.core.AuthNZ.csrf_protection import CSRFProtectionMiddleware
-    from tldw_Server_API.app.core.config import settings as global_settings
+    from tldw_Server_API.app.core.AuthNZ.csrf_protection import CSRFProtectionMiddleware, global_settings
 
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("CSRF_BIND_TO_USER", "true")

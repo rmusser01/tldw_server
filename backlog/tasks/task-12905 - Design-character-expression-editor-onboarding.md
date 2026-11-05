@@ -9,7 +9,7 @@ labels:
 - design
 priority: Medium
 references:
-- TASK-12164
+- TASK-15084
 - Docs/superpowers/specs/2026-07-06-character-chat-streaming-emote-directives-design.md
 documentation:
 - Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md

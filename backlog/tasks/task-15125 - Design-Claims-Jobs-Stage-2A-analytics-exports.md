@@ -10,7 +10,7 @@ labels:
 priority: high
 references:
 - TASK-9935
-- TASK-9937
+- TASK-15031
 - Docs/superpowers/specs/2026-06-24-claims-jobs-operational-control-plane-design.md
 documentation:
 - Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
