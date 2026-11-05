@@ -54,17 +54,6 @@ ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
         "staging tier only (ENVIRONMENT=staging); production comes from is_production_like_env()",
         frozenset({"ENVIRONMENT"}),
     ),
-    "tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py": (
-        "dev label only: ENVIRONMENT/APP_ENV/ENV = dev|development|test|ci widens the "
-        "SINGLE_USER_TEST_API_KEY dev context; production comes from is_production_like_env()",
-        _ENV_LABELS,
-    ),
-    "tldw_Server_API/app/core/MCP_unified/server.py": (
-        "standalone package boundary (apps/mcp-unified): host flags arrive through "
-        "EnvironmentFlagsProvider, which has no production hook; startup already refuses "
-        "SINGLE_USER_TEST_API_KEY and TEST_MODE in a production-like runtime",
-        _ENV_LABELS | {"tldw_production"},
-    ),
     "tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_optimization.py": (
         "dev label only: the MCTS canary runs when ENVIRONMENT/APP_ENV/ENV names a dev tier",
         _ENV_LABELS,
