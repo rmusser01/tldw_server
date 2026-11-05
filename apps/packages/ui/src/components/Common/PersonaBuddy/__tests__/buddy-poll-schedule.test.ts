@@ -67,4 +67,81 @@ describe("Buddy poll schedule (XP-16)", () => {
     setVisibility("visible")
     expect(read).toHaveBeenCalledTimes(1)
   })
+
+  it("issues no reads at all while the page stays hidden", () => {
+    setVisibility("hidden")
+    const read = vi.fn()
+    const poll = startBuddyPoll(read)
+    vi.advanceTimersByTime(60_000)
+    expect(read).not.toHaveBeenCalled()
+    setVisibility("visible")
+    expect(read).toHaveBeenCalledTimes(1)
+    poll.stop()
+  })
+
+  it("reads only once a minute while the buddy panel is closed (WP-39)", () => {
+    const readAt: number[] = []
+    let now = 0
+    let poll: BuddyPoll | undefined
+    poll = startBuddyPoll(
+      () => {
+        readAt.push(now)
+        poll?.settle("same")
+      },
+      { isActive: () => false }
+    )
+    for (let tick = 0; tick < 26; tick += 1) {
+      now += BUDDY_POLL_TICK_MS
+      vi.advanceTimersByTime(BUDDY_POLL_TICK_MS)
+    }
+    poll.stop()
+    expect(readAt).toEqual([0, 60_000, 120_000])
+  })
+
+  it("keeps the 5 s cadence while the buddy panel is open and reads change", () => {
+    const readAt: number[] = []
+    let now = 0
+    let poll: BuddyPoll | undefined
+    poll = startBuddyPoll(
+      () => {
+        readAt.push(now)
+        poll?.settle(`changed-${readAt.length}`)
+      },
+      { isActive: () => true }
+    )
+    for (let tick = 0; tick < 4; tick += 1) {
+      now += BUDDY_POLL_TICK_MS
+      vi.advanceTimersByTime(BUDDY_POLL_TICK_MS)
+    }
+    poll.stop()
+    expect(readAt).toEqual([0, 5_000, 10_000, 15_000, 20_000])
+  })
+
+  it("re-reads when the window regains focus after a tick has passed", () => {
+    const read = vi.fn()
+    const poll = startBuddyPoll(read)
+    // Report the initial read as quiet twice so the interval backs off
+    // (two ticks of unchanged data => next read four ticks out).
+    poll.settle("same")
+    poll.settle("same")
+    expect(read).toHaveBeenCalledTimes(1)
+    window.dispatchEvent(new Event("focus"))
+    expect(read).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(BUDDY_POLL_TICK_MS)
+    // The quiet-read backoff postpones the next interval read...
+    expect(read).toHaveBeenCalledTimes(1)
+    // ...and focus brings it forward.
+    window.dispatchEvent(new Event("focus"))
+    expect(read).toHaveBeenCalledTimes(2)
+    poll.stop()
+  })
+
+  it("stops listening for focus once stopped", () => {
+    const read = vi.fn()
+    const poll = startBuddyPoll(read)
+    poll.stop()
+    vi.advanceTimersByTime(BUDDY_POLL_TICK_MS)
+    window.dispatchEvent(new Event("focus"))
+    expect(read).toHaveBeenCalledTimes(1)
+  })
 })

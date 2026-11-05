@@ -100,6 +100,13 @@ export const IndependentBuddySession = ({
       alive.current = false
     }
   }, [])
+  // WP-39: the poll back off to once a minute while neither the interaction
+  // panel nor the management modal is open. Kept in a ref so panel changes do
+  // not restart the polling effect (and its immediate read).
+  const panelActiveRef = React.useRef(false)
+  React.useEffect(() => {
+    panelActiveRef.current = open || management.open
+  }, [open, management.open])
   const setPosition = usePersonaBuddyShellStore((s) => s.setPosition)
   const resetPosition = usePersonaBuddyShellStore((s) => s.resetPosition)
   React.useEffect(() => {
@@ -235,7 +242,9 @@ export const IndependentBuddySession = ({
         }
       }
     }
-    poll = startBuddyPoll(() => void refresh())
+    poll = startBuddyPoll(() => void refresh(), {
+      isActive: () => panelActiveRef.current
+    })
     return () => {
       active = false
       poll?.stop()
