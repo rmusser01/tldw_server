@@ -1,7 +1,7 @@
 ---
 id: TASK-13956
 title: 'Own-key LLM calls: the router''s usage row and the other quota boundaries'
-status: To Do
+status: In Progress
 labels:
 - quotas
 - backend
@@ -24,6 +24,7 @@ Follow-up of TASK-13955, which made a call on the user's own provider key (on a 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan, PR A of 3: Docs/superpowers/plans/2026-11-05-own-key-character-chat-router-rows.md (character chat, the router's row, the no-route 402). PR B: evaluations, chat documents, RAG. PR C: the boundaries whose calls never use a stored key, ADR-083 amendment, close-out.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
