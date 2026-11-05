@@ -438,24 +438,48 @@ class GoogleAdapter(ChatProvider):
                     "finish_reason": finish_reason,
                 })
 
-            usage_src = data.get("usageMetadata") or {}
-            usage = {
-                "prompt_tokens": usage_src.get("promptTokenCount"),
-                "completion_tokens": usage_src.get("candidatesTokenCount"),
-                "total_tokens": usage_src.get("totalTokenCount"),
-            }
-            if isinstance(usage_src.get("cachedContentTokenCount"), int):
-                # The cached part of prompt_tokens, costed at the cache-read rate (TASK-13936).
-                usage["cachedContentTokenCount"] = usage_src["cachedContentTokenCount"]
             return {
                 "id": data.get("id") or data.get("responseId"),
                 "object": "chat.completion",
                 "choices": choices or [{"index": 0, "message": {"role": "assistant", "content": None}, "finish_reason": None}],
-                "usage": usage,
+                "usage": GoogleAdapter._usage_block(data.get("usageMetadata")),
                 "provider_response": data,
             }
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS:
             return data
+
+    @staticmethod
+    def _usage_block(usage_src: Any) -> dict[str, Any]:
+        """The OpenAI-shaped usage block of one Gemini ``usageMetadata``; the reply's and the stream's (TASK-13952).
+
+        Thinking tokens (``thoughtsTokenCount``) are billed as output and counted apart from the candidates, so they
+        are in ``completion_tokens``; tool-use prompt tokens are outside ``promptTokenCount`` and join ``prompt_tokens``.
+        Both keep their Gemini name too (the row's ``reasoning_tokens``; the audit JSON). ``total_tokens`` is Gemini's
+        ``totalTokenCount``, which sums all four. ``cachedContentTokenCount`` is the cached share of ``prompt_tokens``,
+        costed at the cache-read rate (TASK-13936), and ``service_tier`` the tier the call ran on (``flex``, ``priority``).
+        """
+        src = usage_src if isinstance(usage_src, dict) else {}
+
+        def _count(key: str) -> int | None:
+            value = src.get(key)
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+        usage: dict[str, Any] = {
+            "prompt_tokens": src.get("promptTokenCount"),
+            "completion_tokens": src.get("candidatesTokenCount"),
+            "total_tokens": src.get("totalTokenCount"),
+        }
+        for extra, side in (("thoughtsTokenCount", "completion_tokens"), ("toolUsePromptTokenCount", "prompt_tokens")):
+            count = _count(extra)
+            if count is not None:
+                usage[side] = (_count("promptTokenCount" if side == "prompt_tokens" else "candidatesTokenCount") or 0) + count
+                usage[extra] = count
+        if _count("cachedContentTokenCount") is not None:
+            usage["cachedContentTokenCount"] = src["cachedContentTokenCount"]
+        tier = src.get("serviceTier")
+        if isinstance(tier, str) and tier.strip():
+            usage["service_tier"] = tier.strip().lower().removeprefix("service_tier_")
+        return usage
 
     @staticmethod
     def _stream_event_deltas(event: Any, state: dict[str, int] | None = None) -> Iterable[str]:

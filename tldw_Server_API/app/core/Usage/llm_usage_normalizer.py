@@ -163,6 +163,10 @@ def normalize_llm_usage(
     elif "google" in provider_key or "gemini" in provider_key:
         cache_read_input_tokens = _usage_int(usage_mapping, "cachedContentTokenCount", "cached_content_token_count")
         cached_input_tokens = cache_read_input_tokens
+        if completion_tokens is None and _usage_int(usage_mapping, "completion_tokens", "output_tokens") == 0:
+            # Raw usageMetadata keys: candidatesTokenCount leaves out the thoughts, which Google bills as output.
+            # The Google adapter's block already counts them in completion_tokens (TASK-13952).
+            output_tokens += reasoning_tokens
     else:
         cached_input_tokens = _usage_int(
             usage_mapping,

@@ -476,3 +476,43 @@ def test_a_reported_cost_is_split_by_the_catalog_shares() -> None:
     # Catalog: 1,000 x $0.005 + 200 x $0.03 per 1K = $0.005 + $0.006.
     assert (prompt_cost, completion_cost, total) == pytest.approx((0.01, 0.012, 0.022))
     assert estimated is False
+
+
+# --- Gemini thinking tokens, service tiers and the newer models (TASK-13952) ---
+
+
+@pytest.mark.parametrize(
+    ("tier", "prices"),
+    [
+        (None, GEMINI_PRICES["gemini-2.5-flash"]),
+    ],
+    ids=["standard"],
+)
+async def test_a_gemini_reply_costs_its_thinking_tokens_as_output_at_the_tier_it_reports(
+    costed_rows: list[dict[str, Any]], tier: str | None, prices: tuple[float, float, float | None]
+) -> None:
+    """thoughtsTokenCount is billed as output, apart from candidatesTokenCount, at the rates of the tier
+    usageMetadata.serviceTier names; the cached prompt share keeps the tier's cache rate (AC #1, AC #3)."""
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_adapter import GoogleAdapter
+
+    usage_metadata: dict[str, Any] = {
+        "promptTokenCount": 10_000,
+        "candidatesTokenCount": 100,
+        "thoughtsTokenCount": 20,
+        "totalTokenCount": 10_120,
+        "cachedContentTokenCount": 8_000,
+    }
+    if tier is not None:
+        usage_metadata["serviceTier"] = tier
+    usage = GoogleAdapter._normalize_to_openai_shape(
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}], "usageMetadata": usage_metadata}
+    )["usage"]
+
+    await _log("google", "gemini-2.5-flash", usage, usage["prompt_tokens"], usage["completion_tokens"])
+
+    (row,) = costed_rows
+    prompt, completion, cached = prices
+    assert (row["completion_tokens"], row["reasoning_tokens"], row["total_tokens"]) == (120, 20, 10_120)
+    assert row["completion_cost_usd"] == pytest.approx(120 * completion / 1_000_000)
+    assert row["prompt_cost_usd"] == pytest.approx((2_000 * prompt + 8_000 * cached) / 1_000_000)
+    assert row["estimated"] is False
