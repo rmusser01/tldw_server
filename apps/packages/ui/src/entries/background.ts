@@ -55,6 +55,7 @@ import {
   extractTranscriptionPieces,
   clampText,
   notify,
+  createBackgroundStatusBroadcaster,
 } from "@/services/background-helpers";
 import { buildClipDraft } from "@/services/web-clipper/draft-builder";
 import {
@@ -1012,58 +1013,85 @@ export default defineBackground({
       return `/api/v1/media/metadata-search?${query.toString()}`;
     };
 
+    // WP-61: funnel events append to an in-memory pending array and flush
+    // through a coalescing drain — the same serialize-on-drain discipline as
+    // the WP-19 session writer — instead of read-modify-writing storage per
+    // event. The drain merges the pending burst into the persisted history
+    // exactly once (hydrate-on-first-flush), so a burst of events in one
+    // drain window costs a single bounded write.
+    type IngestFunnelMetricEntry = {
+      event: IngestFunnelEvent;
+      funnelId: string;
+      timestamp: string;
+      metadata: Record<string, unknown>;
+    };
+    const pendingFunnelMetrics: IngestFunnelMetricEntry[] = [];
+    let funnelMetricsHistory: IngestFunnelMetricEntry[] | null = null;
+    let ingestFunnelMetricsDirty = false;
+    let ingestFunnelMetricsFlush: Promise<void> | null = null;
+
+    const drainIngestFunnelMetrics = async (): Promise<void> => {
+      // Yield one microtask so a synchronous burst of funnel events is fully
+      // absorbed before the snapshot is written: one drain window, one write.
+      await Promise.resolve();
+      while (ingestFunnelMetricsDirty) {
+        ingestFunnelMetricsDirty = false;
+        try {
+          if (funnelMetricsHistory === null) {
+            const current = await storage.get<any>(INGEST_FUNNEL_METRICS_KEY);
+            funnelMetricsHistory = Array.isArray(current)
+              ? (current as IngestFunnelMetricEntry[])
+              : [];
+          }
+          funnelMetricsHistory.push(...pendingFunnelMetrics);
+          pendingFunnelMetrics.length = 0;
+          if (funnelMetricsHistory.length > INGEST_FUNNEL_METRICS_LIMIT) {
+            funnelMetricsHistory.splice(
+              0,
+              funnelMetricsHistory.length - INGEST_FUNNEL_METRICS_LIMIT,
+            );
+          }
+          await storage.set(INGEST_FUNNEL_METRICS_KEY, funnelMetricsHistory);
+        } catch (error) {
+          logBackgroundError("append ingest funnel metric", error);
+        }
+      }
+      ingestFunnelMetricsFlush = null;
+    };
+
     const appendIngestFunnelMetric = async (
       event: IngestFunnelEvent,
       funnelId: string,
       metadata?: Record<string, unknown>,
     ) => {
       try {
-        const current = await storage.get<any>(INGEST_FUNNEL_METRICS_KEY);
-        const entries = Array.isArray(current) ? current : [];
-        entries.push({
+        pendingFunnelMetrics.push({
           event,
           funnelId,
           timestamp: new Date().toISOString(),
           metadata: metadata || {},
         });
-        if (entries.length > INGEST_FUNNEL_METRICS_LIMIT) {
-          entries.splice(0, entries.length - INGEST_FUNNEL_METRICS_LIMIT);
+        ingestFunnelMetricsDirty = true;
+        if (ingestFunnelMetricsFlush === null) {
+          ingestFunnelMetricsFlush = drainIngestFunnelMetrics();
         }
-        await storage.set(INGEST_FUNNEL_METRICS_KEY, entries);
+        // Awaiting the in-flight drain guarantees the event is durable when
+        // the call resolves: events pushed mid-drain are picked up by the
+        // drain loop's dirty re-check.
+        await ingestFunnelMetricsFlush;
       } catch (error) {
         logBackgroundError("append ingest funnel metric", error);
       }
     };
 
-    const emitBackgroundMessage = async (
-      tabId: number | undefined,
-      type: string,
-      payload?: Record<string, unknown>,
-    ) => {
-      void ensureSidepanelOpen(tabId).catch((error) =>
-        logBackgroundError("open sidebar", error),
-      );
-      try {
-        await browser.runtime.sendMessage({
-          from: "background",
-          type,
-          payload,
-        });
-      } catch (error) {
-        logBackgroundError(`send ${type}`, error);
-        setTimeout(() => {
-          try {
-            browser.runtime.sendMessage({
-              from: "background",
-              type,
-              payload,
-            });
-          } catch (retryError) {
-            logBackgroundError(`send ${type} (retry)`, retryError);
-          }
-        }, 500);
-      }
-    };
+    // WP-60: opens the sidepanel at most once per funnel (first status emit
+    // still opens it when the panel is closed) and retries failed sends once
+    // after 500ms. See `createBackgroundStatusBroadcaster`.
+    const emitBackgroundMessage = createBackgroundStatusBroadcaster({
+      openSidepanel: ensureSidepanelOpen,
+      sendMessage: (message) => browser.runtime.sendMessage(message),
+      logError: logBackgroundError,
+    });
 
     const emitIngestStatus = async (
       session: IngestSession,
