@@ -56,6 +56,8 @@ SECURITY_FUNCTIONS: frozenset[str] = frozenset(
     {
         "api/v1/endpoints/evaluations/evaluations_auth.py:get_eval_request_user",
         "core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py:_raise_if_url_blocked",
+        "api/v1/API_Deps/auth_deps.py:get_db_transaction",
+        "api/v1/API_Deps/auth_deps.py:_enforce_auth_deps_ingress_guard",
         # TASK-13950.19 Task 4 deletes the test-key arm and re-adds MCPServer._single_user_compat_auth_via.
     }
 )

@@ -26,66 +26,6 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPri
 from tldw_Server_API.app.services import admin_audit_service
 
 
-class _FailingCommitConn:
-    async def execute(self, query: str, params: Any) -> Any:
-        return SimpleNamespace()
-
-    async def commit(self) -> None:
-        raise RuntimeError("sqlite commit failed")
-
-
-class _AcquireCM:
-    async def __aenter__(self) -> _FailingCommitConn:
-        return _FailingCommitConn()
-
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
-        return False
-
-
-class _FakeDBPool:
-    def acquire(self) -> _AcquireCM:
-        return _AcquireCM()
-
-
-class _BlockingCleanupConn:
-    def __init__(self) -> None:
-        self.rollback_started = asyncio.Event()
-        self.allow_rollback = asyncio.Event()
-        self.rollback_finished = asyncio.Event()
-
-    async def rollback(self) -> None:
-        self.rollback_started.set()
-        await self.allow_rollback.wait()
-        self.rollback_finished.set()
-
-
-class _BlockingCleanupAcquire:
-    def __init__(self, conn: _BlockingCleanupConn) -> None:
-        self.conn = conn
-        self.release_started = asyncio.Event()
-        self.allow_release = asyncio.Event()
-        self.release_finished = asyncio.Event()
-
-    async def __aenter__(self) -> _BlockingCleanupConn:
-        return self.conn
-
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
-        del exc_type, exc, tb
-        self.release_started.set()
-        await self.allow_release.wait()
-        self.release_finished.set()
-        return False
-
-
-class _BlockingCleanupPool:
-    def __init__(self) -> None:
-        self.conn = _BlockingCleanupConn()
-        self.acquire_context = _BlockingCleanupAcquire(self.conn)
-
-    def acquire(self) -> _BlockingCleanupAcquire:
-        return self.acquire_context
-
-
 class _ExplodingPoolProperty:
     @property
     def pool(self) -> object:
@@ -175,75 +115,6 @@ async def test_expected_user_guard_rejects_mismatch_without_caching() -> None:
         "code": "request_config_scope_changed",
         "message": "The server or authenticated account changed before the request was sent.",
     }
-
-
-@pytest.mark.asyncio
-async def test_test_db_adapter_execute_propagates_sqlite_commit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _fake_get_db_pool() -> _FakeDBPool:
-        return _FakeDBPool()
-
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    agen = auth_deps.get_db_transaction()
-    adapter = await agen.__anext__()
-    await adapter.execute("SELECT 1")
-    with pytest.raises(RuntimeError, match="sqlite commit failed"):
-        await agen.__anext__()
-
-
-@pytest.mark.asyncio
-async def test_test_db_adapter_commit_propagates_sqlite_commit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _fake_get_db_pool() -> _FakeDBPool:
-        return _FakeDBPool()
-
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    agen = auth_deps.get_db_transaction()
-    adapter = await agen.__anext__()
-    await adapter.commit()
-    with pytest.raises(RuntimeError, match="sqlite commit failed"):
-        await agen.__anext__()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("cancel_at", ["rollback", "release"])
-async def test_test_db_adapter_drains_cleanup_before_propagating_cancellation(
-    monkeypatch: pytest.MonkeyPatch,
-    cancel_at: str,
-) -> None:
-    pool = _BlockingCleanupPool()
-
-    async def _fake_get_db_pool() -> _BlockingCleanupPool:
-        return pool
-
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    async def _exercise_dependency() -> None:
-        generator = auth_deps.get_db_transaction()
-        await generator.__anext__()
-        await generator.athrow(RuntimeError("body failed"))
-
-    cleanup_task = asyncio.create_task(_exercise_dependency())
-
-    await pool.conn.rollback_started.wait()
-    if cancel_at == "rollback":
-        cleanup_task.cancel()
-        pool.conn.allow_rollback.set()
-        await pool.acquire_context.release_started.wait()
-    else:
-        pool.conn.allow_rollback.set()
-        await pool.acquire_context.release_started.wait()
-        cleanup_task.cancel()
-
-    pool.acquire_context.allow_release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await cleanup_task
-
-    assert pool.conn.rollback_finished.is_set()
-    assert pool.acquire_context.release_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -1149,10 +1020,7 @@ async def test_get_session_manager_dep_does_not_use_stub_without_explicit_pytest
 
 
 @pytest.mark.asyncio
-async def test_get_db_transaction_requires_explicit_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "0")
-
+async def test_get_db_transaction_uses_the_pool_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
     sentinel = object()
 
     class _TxnCM:
@@ -1172,7 +1040,7 @@ async def test_get_db_transaction_requires_explicit_test_mode(monkeypatch: pytes
             return _TxnCM()
 
         def acquire(self) -> object:
-            raise AssertionError("adapter path should not be used when TEST_MODE=0")
+            raise AssertionError("get_db_transaction uses pool.transaction(), never pool.acquire()")
 
     async def _fake_get_db_pool() -> _Pool:
         return _Pool()
@@ -1446,43 +1314,3 @@ async def test_get_db_transaction_maps_pool_exhaustion_to_exact_busy_response(
     assert exc_info.value.detail == "Authentication database is busy. Please retry shortly."
     assert exc_info.value.headers == {"Retry-After": "4"}
 
-
-@pytest.mark.asyncio
-async def test_get_db_transaction_uses_adapter_when_tldw_test_mode_is_y(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "y")
-
-    class _Conn:
-        async def execute(self, query: str, params: Any) -> Any:
-            return SimpleNamespace()
-
-        async def commit(self) -> None:
-            return None
-
-    class _Acquire:
-        async def __aenter__(self) -> _Conn:
-            return _Conn()
-
-        async def __aexit__(self, exc_type, exc, tb) -> bool:
-            return False
-
-    class _Pool:
-        def acquire(self) -> _Acquire:
-            return _Acquire()
-
-        def transaction(self) -> object:
-            raise AssertionError("transaction() path should not be used when TLDW_TEST_MODE=y")
-
-    async def _fake_get_db_pool() -> _Pool:
-        return _Pool()
-
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    agen = auth_deps.get_db_transaction()
-    try:
-        conn = await agen.__anext__()
-        assert hasattr(conn, "execute")
-    finally:
-        await agen.aclose()
