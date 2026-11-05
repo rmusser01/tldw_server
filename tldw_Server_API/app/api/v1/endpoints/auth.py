@@ -3511,7 +3511,7 @@ async def mfa_login(
     data: MFALoginRequest,
     request: Request,
     response: Response,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
