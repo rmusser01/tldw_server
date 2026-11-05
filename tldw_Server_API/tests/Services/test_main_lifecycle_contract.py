@@ -1198,7 +1198,7 @@ def test_lifespan_startup_delegates_evaluations_warmup(
     assert recorded_calls[0]["route_enabled"] is main_module.route_enabled
     assert recorded_calls[0]["logger"] is main_module.logger
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert recorded_calls[0]["test_mode"] is main_module._shared_is_explicit_pytest_runtime()
+    assert recorded_calls[0]["test_mode"] is True
 
 
 @pytest.mark.integration

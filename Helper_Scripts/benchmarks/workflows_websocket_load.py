@@ -114,8 +114,8 @@ async def _serve(runtime: Path) -> None:
                 return
             await asyncio.sleep(0.01)
         server_info.update(
-            test_mode=bool(application._TEST_MODE or application._runtime_test_mode_active()),
-            explicit_pytest_runtime=bool(application._EXPLICIT_PYTEST_RUNTIME),
+            test_mode=bool(application._shared_is_explicit_pytest_runtime()),
+            explicit_pytest_runtime=bool(application._shared_is_explicit_pytest_runtime()),
             threadpool_tokens=current_default_thread_limiter().total_tokens,
         )
         (runtime / "server.json").write_text(json.dumps(server_info))
