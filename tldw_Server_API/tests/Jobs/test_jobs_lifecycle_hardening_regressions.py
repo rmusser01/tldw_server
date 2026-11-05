@@ -784,8 +784,10 @@ def test_terminal_lifecycle_reconciles_a_missing_counter_from_current_jobs(
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)
+@pytest.mark.parametrize("operation", ("complete", "terminal_fail"))
 def test_completion_missing_counter_reconciliation_failure_rolls_back_everything(
     backend: str,
+    operation: str,
     request: pytest.FixtureRequest,
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -795,9 +797,7 @@ def test_completion_missing_counter_reconciliation_failure_rolls_back_everything
     monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
     manager = _manager(backend, request, tmp_path, "counter-reconciliation-failure")
-    acquired = _acquire(
-        manager, _create_job(manager, domain="counter-reconciliation-failure")
-    )
+    acquired = _acquire(manager, _create_job(manager, domain="counter-reconciliation-failure"))
     reader = _clone_manager(manager)
     before = _job_snapshot(reader, int(acquired["id"]))
     _delete_counter(manager, acquired)
@@ -808,9 +808,7 @@ def test_completion_missing_counter_reconciliation_failure_rolls_back_everything
     monkeypatch.setattr(
         manager,
         "_connect",
-        lambda: _FailCounterConnection(
-            original_connect(), backend, "INSERT INTO JOB_COUNTERS", flags
-        ),
+        lambda: _FailCounterConnection(original_connect(), backend, "INSERT INTO JOB_COUNTERS", flags),
     )
     expected_error = sqlite3.OperationalError
     if backend == "postgres":
@@ -819,20 +817,68 @@ def test_completion_missing_counter_reconciliation_failure_rolls_back_everything
         expected_error = psycopg.errors.UndefinedTable
 
     with pytest.raises(expected_error):
-        manager.complete_job(
-            int(acquired["id"]),
-            result={"must": "roll back"},
-            worker_id=str(acquired["worker_id"]),
-            lease_id=str(acquired["lease_id"]),
-            completion_token=str(acquired["uuid"]),
-            enforce=True,
-        )
+        if operation == "complete":
+            manager.complete_job(
+                int(acquired["id"]),
+                result={"must": "roll back"},
+                worker_id=str(acquired["worker_id"]),
+                lease_id=str(acquired["lease_id"]),
+                completion_token=str(acquired["uuid"]),
+                enforce=True,
+            )
+        else:
+            _invoke_terminal_operation(manager, acquired, operation, str(acquired["uuid"]))
 
     assert flags == {"update_missed": True, "failure": True}
     assert _job_snapshot(reader, int(acquired["id"])) == before
     assert _counter_snapshot(reader, acquired) is None
     assert _event_count(reader, int(acquired["id"]), "job.completed") == 0
+    assert _event_count(reader, int(acquired["id"]), "job.failed") == 0
     assert all(not recorded for recorded in calls.values())
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+@pytest.mark.parametrize("operation", ("complete", "terminal_fail"))
+@pytest.mark.parametrize("bucket", ("ready", "scheduled"))
+def test_queued_terminal_lifecycle_reconciles_missing_counter(
+    backend: str,
+    operation: str,
+    bucket: str,
+    request: pytest.FixtureRequest,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both queued terminal callers rebuild from post-transition same-key rows."""
+    domain = "queued-missing-counter"
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS", domain)
+    manager = _manager(backend, request, tmp_path, f"{operation}-{bucket}")
+    target = _create_job(
+        manager,
+        domain=domain,
+        available_at=datetime.now(timezone.utc) + timedelta(hours=1) if bucket == "scheduled" else None,
+    )
+    sibling = _create_job(manager, domain=domain)
+    _delete_counter(manager, target)
+    completion_value = "queued-token"
+    if operation == "complete":
+        assert manager.complete_job(int(target["id"]), completion_token=completion_value, enforce=False)
+    else:
+        assert manager.fail_job(
+            int(target["id"]),
+            error="administrative failure",
+            retryable=False,
+            completion_token=completion_value,
+            enforce=False,
+        )
+    expected_status, event_type = (
+        ("completed", "job.completed") if operation == "complete" else ("failed", "job.failed")
+    )
+    assert manager.get_job(int(target["id"]))["status"] == expected_status
+    assert manager.get_job(int(sibling["id"]))["status"] == "queued"
+    assert _counter_snapshot(manager, target) == (1, 0, 0, 0)
+    assert _event_count(manager, int(target["id"]), event_type) == 1
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)

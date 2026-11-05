@@ -44,6 +44,7 @@ Final verification evidence:
 - CDP mobile verification passed for role-play controls and wrapping: Generation style and Role-play setup reachable, no horizontal overflow, composer textarea visible. The measured textarea width was about 87.6px on a 390px viewport, which is cramped and should be treated as a broader mobile composer ergonomics risk outside this role-play slice.
 - CDP compatibility verification passed for included, blended, excluded, override-risk, and persona-specific states.
 - Bandit skipped because no Python files were touched.
+Its subtasks TASK-407.1 to TASK-407.6 were re-parented as TASK-12295.1 to TASK-12295.6 on 2026-11-03 (TASK-13962), in that order: 3a660d4f1d (2026-07-05) renumbered this task from TASK-407 without them. Docs/Development/Backlog_Task_Id_Renumbering.md maps each id.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
