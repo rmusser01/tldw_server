@@ -32,7 +32,6 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 )
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-from tldw_Server_API.app.core.AuthNZ.transaction_hooks import defer_until_after_commit
 from tldw_Server_API.app.core.Usage.quota_resolver import invalidate_user
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
@@ -381,24 +380,18 @@ class UserProfileUpdateService:
                 if not username:
                     raise ValueError("user_not_found")
                 limiter = get_rate_limiter()
-
-                # The limiter writes on its own connection, which self-deadlocks on
-                # SQLite while this request holds BEGIN IMMEDIATE. Apply it after the
-                # commit; a rolled-back request must not leave the account locked.
-                async def _apply_lockout() -> None:
-                    if bool(value):
-                        await limiter.record_failed_attempt(
-                            identifier=username,
-                            attempt_type="login",
-                            lockout_threshold=1,
-                        )
-                    else:
-                        await limiter.reset_failed_attempts(
-                            identifier=username, attempt_type="login"
-                        )
-
-                if not defer_until_after_commit(_apply_lockout):
-                    await _apply_lockout()
+                # Same connection as the request: the lock commits or rolls back with it.
+                if bool(value):
+                    await limiter.record_failed_attempt(
+                        identifier=username,
+                        attempt_type="login",
+                        lockout_threshold=1,
+                        conn=db_conn,
+                    )
+                else:
+                    await limiter.reset_failed_attempts(
+                        identifier=username, attempt_type="login", conn=db_conn
+                    )
                 await _touch_user_updated_at(db_conn, user_id)
                 anchor.mark_changed()
             return True
