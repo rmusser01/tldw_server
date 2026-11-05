@@ -78,7 +78,9 @@ describe("Media search outage handling", () => {
     const pending: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }> = []
     vi.mocked(bgRequest).mockImplementation(() => new Promise((resolve, reject) => { pending.push({ resolve, reject }) }))
     const { unmount, feedback, client } = mountSearch()
-    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2))
+    // WP-43: mount issues exactly one request (the search; the type-discovery
+    // fan-out is gone), so one pending request proves the search is in flight.
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(1))
     const before = vi.mocked(bgRequest).mock.calls.length
     unmount()
     await act(async () => {
@@ -143,7 +145,7 @@ describe("Media search outage handling", () => {
     const resolvers: Array<(value: unknown) => void> = []
     vi.mocked(bgRequest).mockImplementation(() => new Promise(resolve => { resolvers.push(resolve) }))
     const { result, feedback } = mountSearch()
-    await waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(1))
     const data = { items: [{ id: 7, title: 'Current source' }], pagination: { total_items: 1 } }
     vi.mocked(bgRequest).mockResolvedValue(data)
     await act(async () => {

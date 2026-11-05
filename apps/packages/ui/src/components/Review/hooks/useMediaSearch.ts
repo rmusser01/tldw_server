@@ -340,7 +340,6 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     const signal = AbortSignal.any([querySignal, lifetime.current.signal])
     signal.throwIfAborted()
     const request = <T,>(init: Parameters<typeof bgRequest<T>>[0]) => scopedRequest<T>({ ...init, abortSignal: signal })
-    const results: MediaResultItem[] = []
     const hasTextQuery = query.trim().length > 0
     const hasQuery =
       hasTextQuery ||
@@ -358,318 +357,333 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     let actualMediaCount = 0
     let actualNotesCount = 0
 
-    if (kinds.media && !mediaApiUnavailable) {
-      try {
-        // Snapshot for O(1) membership checks in the row loops below; state
-        // updates inside the loops are already deduped by their updaters.
-        const availableMediaTypesSet = new Set(availableMediaTypes)
-        if (searchMode === 'metadata') {
-          const normalizedFilters = normalizeMetadataSearchFilters(metadataFilters)
-          const validationError = validateMetadataSearchFilters(normalizedFilters)
-          if (validationError) {
-            setMetadataValidationError(validationError)
-            setMediaTotal(0)
-            actualMediaCount = 0
-          } else {
-            setMetadataValidationError(null)
-            const path = buildMetadataSearchPath({
-              filters: normalizedFilters,
-              matchMode: metadataMatchMode,
-              page,
-              perPage: pageSize,
-              textQuery: query,
-              mediaTypes,
-              includeKeywords: keywordTokens,
-              excludeKeywords: excludeKeywordTokens,
-              dateRange,
-              sortBy
-            })
-            const metadataResp = await request<any>({
-              path: path as any,
+    // Media and notes searches are independent requests; dispatch them
+    // together (WP-43) instead of paying notes latency after media settles.
+    const searchMedia = async (): Promise<MediaResultItem[]> => {
+      const sideResults: MediaResultItem[] = []
+      if (kinds.media && !mediaApiUnavailable) {
+        try {
+          // Snapshot for O(1) membership checks in the row loops below; state
+          // updates inside the loops are already deduped by their updaters.
+          const availableMediaTypesSet = new Set(availableMediaTypes)
+          if (searchMode === 'metadata') {
+            const normalizedFilters = normalizeMetadataSearchFilters(metadataFilters)
+            const validationError = validateMetadataSearchFilters(normalizedFilters)
+            if (validationError) {
+              setMetadataValidationError(validationError)
+              setMediaTotal(0)
+              actualMediaCount = 0
+            } else {
+              setMetadataValidationError(null)
+              const path = buildMetadataSearchPath({
+                filters: normalizedFilters,
+                matchMode: metadataMatchMode,
+                page,
+                perPage: pageSize,
+                textQuery: query,
+                mediaTypes,
+                includeKeywords: keywordTokens,
+                excludeKeywords: excludeKeywordTokens,
+                dateRange,
+                sortBy
+              })
+              const metadataResp = await request<any>({
+                path: path as any,
+                method: 'GET' as any
+              })
+              const rows = Array.isArray(metadataResp?.results)
+                ? metadataResp.results
+                : []
+
+              const metadataKeys = [
+                'doi',
+                'pmid',
+                'pmcid',
+                'arxiv_id',
+                's2_paper_id',
+                'journal',
+                'license'
+              ]
+
+              for (const row of rows) {
+                const id = row?.media_id ?? row?.id ?? row?.pk ?? row?.uuid
+                const type =
+                  typeof row?.type === 'string'
+                    ? row.type.toLowerCase().trim()
+                    : 'document'
+                if (type && !availableMediaTypesSet.has(type)) {
+                  setAvailableMediaTypes((prev) =>
+                    prev.includes(type) ? prev : [...prev, type]
+                  )
+                }
+
+                const safeMetadata =
+                  row?.safe_metadata && typeof row.safe_metadata === 'object'
+                    ? row.safe_metadata
+                    : {}
+                const snippet = metadataKeys
+                  .map((key) => {
+                    const value = safeMetadata?.[key]
+                    if (value == null || String(value).trim().length === 0) {
+                      return null
+                    }
+                    return `${key}: ${String(value)}`
+                  })
+                  .filter((value): value is string => Boolean(value))
+                  .join(' • ')
+
+                sideResults.push({
+                  kind: 'media',
+                  id,
+                  title: row?.title || `Media ${id}`,
+                  snippet,
+                  keywords: [],
+                  meta: {
+                    type,
+                    created_at: row?.created_at
+                  },
+                  raw: row
+                })
+              }
+
+              const serverTotal = Number(metadataResp?.pagination?.total || rows.length || 0)
+              setMediaTotal(serverTotal)
+              actualMediaCount = serverTotal
+            }
+          } else if (!hasQuery && !hasMediaFilters) {
+            const listing = await request<any>({
+              path: `/api/v1/media/?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
               method: 'GET' as any
             })
-            const rows = Array.isArray(metadataResp?.results)
-              ? metadataResp.results
-              : []
-
-            const metadataKeys = [
-              'doi',
-              'pmid',
-              'pmcid',
-              'arxiv_id',
-              's2_paper_id',
-              'journal',
-              'license'
-            ]
-
-            for (const row of rows) {
-              const id = row?.media_id ?? row?.id ?? row?.pk ?? row?.uuid
-              const type =
-                typeof row?.type === 'string'
-                  ? row.type.toLowerCase().trim()
-                  : 'document'
+            const items = Array.isArray(listing?.items) ? listing.items : []
+            const pagination = listing?.pagination
+            const mediaServerTotal = Number(pagination?.total_items || items.length || 0)
+            setMediaTotal(mediaServerTotal)
+            actualMediaCount = mediaServerTotal
+            for (const m of items) {
+              const id = m?.id ?? m?.media_id ?? m?.pk ?? m?.uuid
+              const meta = deriveMediaMeta(m)
+              const type = meta.type
               if (type && !availableMediaTypesSet.has(type)) {
                 setAvailableMediaTypes((prev) =>
                   prev.includes(type) ? prev : [...prev, type]
                 )
               }
+              const keywords = extractKeywordsFromMedia(m)
 
-              const safeMetadata =
-                row?.safe_metadata && typeof row.safe_metadata === 'object'
-                  ? row.safe_metadata
-                  : {}
-              const snippet = metadataKeys
-                .map((key) => {
-                  const value = safeMetadata?.[key]
-                  if (value == null || String(value).trim().length === 0) {
-                    return null
-                  }
-                  return `${key}: ${String(value)}`
-                })
-                .filter((value): value is string => Boolean(value))
-                .join(' • ')
-
-              results.push({
+              sideResults.push({
                 kind: 'media',
                 id,
-                title: row?.title || `Media ${id}`,
-                snippet,
-                keywords: [],
-                meta: {
-                  type,
-                  created_at: row?.created_at
-                },
-                raw: row
+                title: m?.title || m?.filename || `Media ${id}`,
+                snippet: m?.snippet || m?.summary || '',
+                keywords,
+                meta: meta,
+                raw: m
               })
             }
-
-            const serverTotal = Number(metadataResp?.pagination?.total || rows.length || 0)
-            setMediaTotal(serverTotal)
-            actualMediaCount = serverTotal
-          }
-        } else if (!hasQuery && !hasMediaFilters) {
-          const listing = await request<any>({
-            path: `/api/v1/media/?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
-            method: 'GET' as any
-          })
-          const items = Array.isArray(listing?.items) ? listing.items : []
-          const pagination = listing?.pagination
-          const mediaServerTotal = Number(pagination?.total_items || items.length || 0)
-          setMediaTotal(mediaServerTotal)
-          actualMediaCount = mediaServerTotal
-          for (const m of items) {
-            const id = m?.id ?? m?.media_id ?? m?.pk ?? m?.uuid
-            const meta = deriveMediaMeta(m)
-            const type = meta.type
-            if (type && !availableMediaTypesSet.has(type)) {
-              setAvailableMediaTypes((prev) =>
-                prev.includes(type) ? prev : [...prev, type]
-              )
-            }
-            const keywords = extractKeywordsFromMedia(m)
-
-            results.push({
-              kind: 'media',
-              id,
-              title: m?.title || m?.filename || `Media ${id}`,
-              snippet: m?.snippet || m?.summary || '',
-              keywords,
-              meta: meta,
-              raw: m
-            })
-          }
-        } else {
-          const body = buildMediaSearchPayload({
-            query,
-            mediaTypes,
-            includeKeywords: keywordTokens,
-            excludeKeywords: excludeKeywordTokens,
-            sortBy,
-            dateRange,
-            exactPhrase,
-            fields: searchFields,
-            boostFields: enableBoostFields ? boostFields : undefined
-          })
-          const mediaResp = await request<any>({
-            path: `/api/v1/media/search?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
-            method: 'POST' as any,
-            headers: { 'Content-Type': 'application/json' },
-            body
-          })
-          const items = Array.isArray(mediaResp?.items)
-            ? mediaResp.items
-            : Array.isArray(mediaResp?.results)
-              ? mediaResp.results
-              : []
-          const pagination = mediaResp?.pagination
-          const mediaServerTotal = Number(pagination?.total_items || items.length || 0)
-          setMediaTotal(mediaServerTotal)
-          actualMediaCount = mediaServerTotal
-          for (const m of items) {
-            const id = m?.id ?? m?.media_id ?? m?.pk ?? m?.uuid
-            const meta = deriveMediaMeta(m)
-            const type = meta.type
-            if (type && !availableMediaTypesSet.has(type)) {
-              setAvailableMediaTypes((prev) =>
-                prev.includes(type) ? prev : [...prev, type]
-              )
-            }
-            const keywords = extractKeywordsFromMedia(m)
-
-            results.push({
-              kind: 'media',
-              id,
-              title: m?.title || m?.filename || `Media ${id}`,
-              snippet: m?.snippet || m?.summary || '',
-              keywords,
-              meta: meta,
-              raw: m
-            })
-          }
-        }
-      } catch (err) {
-        if (signal.aborted) throw err
-        if (isMediaEndpointMissingError(err)) {
-          markMediaApiUnavailable(err)
-          actualMediaCount = 0
-          setMediaTotal(0)
-        } else {
-          if (classifyBackendUnreachableError(err).kind === 'backend_unreachable') {
-            console.warn('Media search request failed.')
           } else {
-            console.error('Media search error:', err)
-          }
-          message.error(t('review:mediaPage.searchError', { defaultValue: 'Failed to search media' }))
-        }
-      }
-    } else if (kinds.media) {
-      setMediaTotal(0)
-      actualMediaCount = 0
-    }
-
-    // Fetch notes if enabled
-    if (kinds.notes && searchMode !== 'metadata') {
-      try {
-        const extractNoteKeywords = (note: any): string[] => {
-          const possibleFields = [
-            note?.metadata?.keywords,
-            note?.keywords,
-            note?.tags
-          ]
-          for (const field of possibleFields) {
-            if (field && Array.isArray(field) && field.length > 0) {
-              return field
-                .map((k: any) => {
-                  if (typeof k === 'string') return k
-                  if (k && typeof k === 'object' && k.keyword) return k.keyword
-                  if (k && typeof k === 'object' && k.text) return k.text
-                  return null
-                })
-                .filter((k): k is string => k !== null && k.trim().length > 0)
-            }
-          }
-          return []
-        }
-
-        if (hasTextQuery) {
-          const keywordFilterActive = keywordTokens.length > 0
-          let notesResp: any
-          let usedKeywordServerFilter = false
-
-          try {
-            const body: any = { query }
-            if (keywordFilterActive) {
-              body.must_have = keywordTokens
-              usedKeywordServerFilter = true
-            }
-            notesResp = await request<any>({
-              path: `/api/v1/notes/search/?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
+            const body = buildMediaSearchPayload({
+              query,
+              mediaTypes,
+              includeKeywords: keywordTokens,
+              excludeKeywords: excludeKeywordTokens,
+              sortBy,
+              dateRange,
+              exactPhrase,
+              fields: searchFields,
+              boostFields: enableBoostFields ? boostFields : undefined
+            })
+            const mediaResp = await request<any>({
+              path: `/api/v1/media/search?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
               method: 'POST' as any,
               headers: { 'Content-Type': 'application/json' },
               body
             })
-          } catch {
-            signal.throwIfAborted()
-            usedKeywordServerFilter = false
-            notesResp = await request<any>({
-              path: `/api/v1/notes/search/?query=${encodeURIComponent(
-                query
-              )}&page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
+            const items = Array.isArray(mediaResp?.items)
+              ? mediaResp.items
+              : Array.isArray(mediaResp?.results)
+                ? mediaResp.results
+                : []
+            const pagination = mediaResp?.pagination
+            const mediaServerTotal = Number(pagination?.total_items || items.length || 0)
+            setMediaTotal(mediaServerTotal)
+            actualMediaCount = mediaServerTotal
+            for (const m of items) {
+              const id = m?.id ?? m?.media_id ?? m?.pk ?? m?.uuid
+              const meta = deriveMediaMeta(m)
+              const type = meta.type
+              if (type && !availableMediaTypesSet.has(type)) {
+                setAvailableMediaTypes((prev) =>
+                  prev.includes(type) ? prev : [...prev, type]
+                )
+              }
+              const keywords = extractKeywordsFromMedia(m)
+
+              sideResults.push({
+                kind: 'media',
+                id,
+                title: m?.title || m?.filename || `Media ${id}`,
+                snippet: m?.snippet || m?.summary || '',
+                keywords,
+                meta: meta,
+                raw: m
+              })
+            }
+          }
+        } catch (err) {
+          if (signal.aborted) throw err
+          if (isMediaEndpointMissingError(err)) {
+            markMediaApiUnavailable(err)
+            actualMediaCount = 0
+            setMediaTotal(0)
+          } else {
+            if (classifyBackendUnreachableError(err).kind === 'backend_unreachable') {
+              console.warn('Media search request failed.')
+            } else {
+              console.error('Media search error:', err)
+            }
+            message.error(t('review:mediaPage.searchError', { defaultValue: 'Failed to search media' }))
+          }
+        }
+      } else if (kinds.media) {
+        setMediaTotal(0)
+        actualMediaCount = 0
+      }
+      return sideResults
+    }
+
+    const searchNotes = async (): Promise<MediaResultItem[]> => {
+      const sideResults: MediaResultItem[] = []
+      // Fetch notes if enabled
+      if (kinds.notes && searchMode !== 'metadata') {
+        try {
+          const extractNoteKeywords = (note: any): string[] => {
+            const possibleFields = [
+              note?.metadata?.keywords,
+              note?.keywords,
+              note?.tags
+            ]
+            for (const field of possibleFields) {
+              if (field && Array.isArray(field) && field.length > 0) {
+                return field
+                  .map((k: any) => {
+                    if (typeof k === 'string') return k
+                    if (k && typeof k === 'object' && k.keyword) return k.keyword
+                    if (k && typeof k === 'object' && k.text) return k.text
+                    return null
+                  })
+                  .filter((k): k is string => k !== null && k.trim().length > 0)
+              }
+            }
+            return []
+          }
+
+          if (hasTextQuery) {
+            const keywordFilterActive = keywordTokens.length > 0
+            let notesResp: any
+            let usedKeywordServerFilter = false
+
+            try {
+              const body: any = { query }
+              if (keywordFilterActive) {
+                body.must_have = keywordTokens
+                usedKeywordServerFilter = true
+              }
+              notesResp = await request<any>({
+                path: `/api/v1/notes/search/?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
+                method: 'POST' as any,
+                headers: { 'Content-Type': 'application/json' },
+                body
+              })
+            } catch {
+              signal.throwIfAborted()
+              usedKeywordServerFilter = false
+              notesResp = await request<any>({
+                path: `/api/v1/notes/search/?query=${encodeURIComponent(
+                  query
+                )}&page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
+                method: 'GET' as any
+              })
+            }
+
+            const items = Array.isArray(notesResp) ? notesResp : (notesResp?.items || [])
+            const pagination = notesResp?.pagination
+
+            let filteredItems = items
+            if (keywordFilterActive && !usedKeywordServerFilter) {
+              filteredItems = items.filter((n: any) => {
+                const noteKws = extractNoteKeywords(n)
+                return keywordTokens.some((kw) =>
+                  noteKws.some((nkw) => nkw.toLowerCase().includes(kw.toLowerCase()))
+                )
+              })
+            }
+
+            if (keywordFilterActive && !usedKeywordServerFilter) {
+              const notesClientTotal = filteredItems.length
+              setNotesTotal(notesClientTotal)
+              actualNotesCount = notesClientTotal
+            } else {
+              const notesServerTotal = Number(pagination?.total_items || items.length || 0)
+              setNotesTotal(notesServerTotal)
+              actualNotesCount = notesServerTotal
+            }
+
+            for (const n of filteredItems) {
+              const id = n?.id ?? n?.note_id ?? n?.pk ?? n?.uuid
+              sideResults.push({
+                kind: 'note',
+                id,
+                title: n?.title || `Note ${id}`,
+                snippet: n?.content?.substring(0, 200) || '',
+                keywords: extractNoteKeywords(n),
+                meta: {
+                  type: 'note',
+                  source: n?.metadata?.conversation_id ? 'conversation' : null
+                },
+                raw: n
+              })
+            }
+          } else {
+            const notesResp = await request<any>({
+              path: `/api/v1/notes/?page=${page}&results_per_page=${pageSize}` as any,
               method: 'GET' as any
             })
-          }
-
-          const items = Array.isArray(notesResp) ? notesResp : (notesResp?.items || [])
-          const pagination = notesResp?.pagination
-
-          let filteredItems = items
-          if (keywordFilterActive && !usedKeywordServerFilter) {
-            filteredItems = items.filter((n: any) => {
-              const noteKws = extractNoteKeywords(n)
-              return keywordTokens.some((kw) =>
-                noteKws.some((nkw) => nkw.toLowerCase().includes(kw.toLowerCase()))
-              )
-            })
-          }
-
-          if (keywordFilterActive && !usedKeywordServerFilter) {
-            const notesClientTotal = filteredItems.length
-            setNotesTotal(notesClientTotal)
-            actualNotesCount = notesClientTotal
-          } else {
+            const items = Array.isArray(notesResp?.items) ? notesResp.items : []
+            const pagination = notesResp?.pagination
             const notesServerTotal = Number(pagination?.total_items || items.length || 0)
             setNotesTotal(notesServerTotal)
             actualNotesCount = notesServerTotal
-          }
 
-          for (const n of filteredItems) {
-            const id = n?.id ?? n?.note_id ?? n?.pk ?? n?.uuid
-            results.push({
-              kind: 'note',
-              id,
-              title: n?.title || `Note ${id}`,
-              snippet: n?.content?.substring(0, 200) || '',
-              keywords: extractNoteKeywords(n),
-              meta: {
-                type: 'note',
-                source: n?.metadata?.conversation_id ? 'conversation' : null
-              },
-              raw: n
-            })
+            for (const n of items) {
+              const id = n?.id ?? n?.note_id ?? n?.pk ?? n?.uuid
+              sideResults.push({
+                kind: 'note',
+                id,
+                title: n?.title || `Note ${id}`,
+                snippet: n?.content?.substring(0, 200) || '',
+                keywords: extractNoteKeywords(n),
+                meta: {
+                  type: 'note',
+                  source: n?.metadata?.conversation_id ? 'conversation' : null
+                },
+                raw: n
+              })
+            }
           }
-        } else {
-          const notesResp = await request<any>({
-            path: `/api/v1/notes/?page=${page}&results_per_page=${pageSize}` as any,
-            method: 'GET' as any
-          })
-          const items = Array.isArray(notesResp?.items) ? notesResp.items : []
-          const pagination = notesResp?.pagination
-          const notesServerTotal = Number(pagination?.total_items || items.length || 0)
-          setNotesTotal(notesServerTotal)
-          actualNotesCount = notesServerTotal
-
-          for (const n of items) {
-            const id = n?.id ?? n?.note_id ?? n?.pk ?? n?.uuid
-            results.push({
-              kind: 'note',
-              id,
-              title: n?.title || `Note ${id}`,
-              snippet: n?.content?.substring(0, 200) || '',
-              keywords: extractNoteKeywords(n),
-              meta: {
-                type: 'note',
-                source: n?.metadata?.conversation_id ? 'conversation' : null
-              },
-              raw: n
-            })
-          }
+        } catch (err) {
+          if (signal.aborted) throw err
+          console.error('Notes search error:', err)
+          message.error(t('review:mediaPage.notesSearchError', { defaultValue: 'Failed to search notes' }))
         }
-      } catch (err) {
-        if (signal.aborted) throw err
-        console.error('Notes search error:', err)
-        message.error(t('review:mediaPage.notesSearchError', { defaultValue: 'Failed to search notes' }))
       }
+      return sideResults
     }
+
+    // One search = one media + one notes request, both in flight together.
+    // Row order keeps media results before notes results.
+    const [mediaItems, notesItems] = await Promise.all([searchMedia(), searchNotes()])
+    const results: MediaResultItem[] = [...mediaItems, ...notesItems]
 
     const finalCombinedTotal = actualMediaCount + actualNotesCount
     signal.throwIfAborted()
@@ -907,63 +921,6 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     refetch
   ])
 
-  // Initial load: populate media types
-  useEffect(() => {
-    const signal = lifetime.current.signal
-    ;(async () => {
-      try {
-        // Legacy type caches lack account provenance; derive types from this live listing.
-        // Keep their persisted bytes untouched rather than assigning them to this account.
-        signal.throwIfAborted()
-        const first = await scopedRequest<any>({
-          path: `/api/v1/media/?page=1&results_per_page=50` as any,
-          method: 'GET' as any
-        })
-        const totalPgs = Math.max(
-          1,
-          Number(first?.pagination?.total_pages || 1)
-        )
-        const pagesToFetch = [1, 2, 3].filter((p) => p <= totalPgs)
-        const listings = await Promise.all(
-          pagesToFetch.map((p) =>
-            p === 1
-              ? Promise.resolve(first)
-              : scopedRequest<any>({
-                  path: `/api/v1/media/?page=${p}&results_per_page=50` as any,
-                  method: 'GET' as any
-                })
-          )
-        )
-        signal.throwIfAborted()
-        const typeSet = new Set<string>()
-        for (const listing of listings) {
-          const items = Array.isArray(listing?.items) ? listing.items : []
-          for (const m of items) {
-            const tp = deriveMediaMeta(m).type
-            if (tp) typeSet.add(tp)
-          }
-        }
-        const newTypes = Array.from(typeSet)
-        if (newTypes.length) {
-          setAvailableMediaTypes((prev) =>
-            Array.from(new Set<string>([...prev, ...newTypes])) as string[]
-          )
-        }
-      } catch (error) {
-        if (signal.aborted) return
-        if (isMediaEndpointMissingError(error)) {
-          mediaApiUnavailableNotifiedRef.current = true
-          setMediaApiUnavailable(true)
-          setMediaTotal(0)
-        }
-      }
-
-      try {
-        signal.throwIfAborted()
-        await refetch()
-      } catch {}
-    })()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load keyword suggestions (internal; the exported loadKeywordSuggestions
   // below debounces this per-keystroke entry point).
