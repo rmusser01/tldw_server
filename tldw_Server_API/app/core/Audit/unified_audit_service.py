@@ -1129,20 +1129,20 @@ class UnifiedAuditService:
 
         Args:
             start_background_tasks: When True (default), starts the periodic flush,
-                cleanup, and fallback replay loops (unless running in test mode).
+                cleanup, and fallback replay loops (unless inline_io is set).
                 Set to False for one-off/ephemeral usage where the caller will
                 explicitly call `flush()` and `stop()`.
         """
         self._owner_loop = asyncio.get_running_loop()
         await self._init_database()
         self._last_chain_hash = await self._load_last_chain_hash()
-        # In test mode, avoid opening a persistent pooled connection to prevent
+        # With inline_io, avoid opening a persistent pooled connection to prevent
         # lingering aiosqlite worker threads that can keep the interpreter alive.
-        # Non-test mode uses a pooled connection for performance.
+        # Without inline_io the service uses a pooled connection for performance.
         if not self._inline_io:
             await self._ensure_db_pool()
-        # Avoid starting background tasks in test environments where asyncio.sleep
-        # may be monkeypatched to return immediately, which would otherwise cause
+        # Avoid starting background tasks with inline_io (the test suite's class default),
+        # where asyncio.sleep may be monkeypatched to return immediately, which would otherwise cause
         # tight loops and starve the event loop.
         if start_background_tasks and not self._inline_io:
             await self.start_background_tasks()
@@ -2378,7 +2378,7 @@ class UnifiedAuditService:
             self.stats["events_logged"] += 1
             should_flush = len(self.event_buffer) >= self.buffer_size or event.risk_score >= HIGH_RISK_SCORE
 
-        # In test mode we avoid background tasks; flush only when needed.
+        # With inline_io there are no background tasks; flush only when needed.
         if self._inline_io:
             if should_flush:
                 await self.flush()
@@ -2513,7 +2513,7 @@ class UnifiedAuditService:
             for attempt in range(max_retries):
                 try:
                     if self._inline_io:
-                        # Ephemeral connection per flush in tests to avoid persistent threads
+                        # Ephemeral connection per flush with inline_io to avoid persistent threads
                         async with aiosqlite.connect(self.db_path) as db:
                             try:
                                 await configure_sqlite_connection_async(db)
