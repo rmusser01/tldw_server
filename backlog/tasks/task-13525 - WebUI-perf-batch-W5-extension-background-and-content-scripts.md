@@ -1,7 +1,7 @@
 ---
 id: TASK-13525
 title: 'WebUI perf batch W5: extension background and content scripts'
-status: In Progress
+status: Done
 created_date: 2026-10-07 04:14
 ---
 
@@ -26,15 +26,15 @@ Stage 3 (WP-60/WP-61/WP-62) complete: emitBackgroundMessage extracted to createB
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+W5 extension background/content-scripts batch complete on codex/webui-perf-w5-ext-scripts (b2b7d5d2b0..c0393fe1f3, 3 stage commits, zero fix rounds — the only batch in the program review-clean at every stage). S1 (486c653ee6, WP-56/57): web-clipper tiered capture — selection clips return selection text immediately (no outerHTML serialize, no parser, no innerText forced layout; property-getter spy pins with positive controls), article tier next, fullPageText final fallback only; parser attr-strip single in-place pass (kept-set {href,src} exact); intended fullExtract delta contained (all four consumers traced; visibleBody/clipType/actualType/fallbackPath pinned unchanged). S2 (b1511ccf9c, WP-58/59): copilot popup streams one text-node append per chunk (MutationObserver proof: 1000 chunks, zero removal records vs 1009+ at base) with same-rendered-length skip so stop/done calls no-op; zero synchronous layout reads during the stream (one rAF-coalesced position pass per frame); arrayBufferToBase64 chunked in 8 KB slices, byte-identical to btoa (property test 0..65536), STT WebSocket wire format pinned unchanged — port hop already binary at HEAD, base64 protocol-required only on the WS JSON hop (design ruling on evidence). S3 (c0393fe1f3, WP-60/61/62): emitBackgroundMessage → createBackgroundStatusBroadcaster opening the sidepanel at most once per funnelId/sessionId (first emit still opens from closed; runtime message never suppressed; capacity 500); funnel metrics moved to a coalescing serialize-on-drain writer (5-event burst → 1 write vs 5 at base; 205-event lost-update reproduced red at base — now lossless, bounded 200; correctness bonus); context-menu re-sync gated on server-URL change; alarm non-forcing + capabilities TTL verified ALREADY-DONE by W2 (no duplicate work); WP-63 verified not-landed-anywhere (W4 Stage 5 scope). Batch-final: Family B canned e2e re-run 3x at HEAD plus one base run proving count metrics bit-identical (longTasks 0 everywhere; the 19→21-notification / 49–51→30-mutation drift vs W1's record attributed to interim dev below the branch base); M3 closed done-by-mechanism (no canned copilot harness exists in-repo — both copilot e2e specs need a live backend; append-only + zero-layout-read pins; wall-clock left to a future human DevTools or canned-harness pass); scoped suites 403/403 green (29 files); FE typecheck exit 0; eslint exit 0 from apps/ with the workspace binary (corrected invocation); git diff --check clean over the range; Bandit N/A (TS-only, per program precedent). Baseline append: Batch W5 section in Docs/Reviews/PERF_BASELINE_WEBUI_2026_10.md. Open gaps recorded there: cross-frame selection still runs the article tier; fullExtract delta extends to default article clips; same-length-skip fallback branch untested (no reachable caller); eslint must be invoked from apps/ with the workspace binary; scheduleModelWarmAlarm still runs on same-URL config writes (idempotent); test:e2e:perf beyond the Family B spec left to CI. ADR: none required — scoped perf changes under the approved plan, no new durable architecture rule (assessed each stage).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
