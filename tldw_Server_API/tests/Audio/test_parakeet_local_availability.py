@@ -69,7 +69,7 @@ def test_b05_missing_local_model_returns_503_before_execution_and_minutes(tmp_pa
 
     app = _setup_stubbed_audio_app(monkeypatch, transcript_text="unused", temp_outputs_dir=tmp_path)
     monkeypatch.setattr(stt_provider_adapter, "get_stt_provider_registry", lambda: actual_registry)
-    monkeypatch.setattr(adapter, "transcribe_batch", reject_execution)
+    monkeypatch.setattr(type(adapter), "transcribe_batch", reject_execution)
     monkeypatch.setattr(config, "get_stt_config", lambda: {"parakeet_onnx_model_id": str(tmp_path / "missing")})
     minutes = AsyncMock(return_value=(True, None))
     monkeypatch.setattr(audio_transcriptions, "_consume_daily_minutes", minutes)

@@ -11,8 +11,8 @@ labels:
 - implementation
 dependencies: []
 references:
-- TASK-12989
-- TASK-12990
+- TASK-15125
+- TASK-15126
 - Docs/superpowers/specs/2026-08-08-claims-jobs-stage2a-analytics-exports-design.md
 - Docs/superpowers/plans/2026-08-08-claims-jobs-stage2a-analytics-exports-implementation-plan.md
 - https://github.com/rmusser01/tldw_server/pull/2789

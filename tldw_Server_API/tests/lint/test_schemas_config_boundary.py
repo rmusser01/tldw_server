@@ -56,12 +56,7 @@ IMPORT_TIME_CONFIG_ALLOWLIST: dict[str, str] = {
         "constant; config reads move to call time under TASK-13950.21"
     ),
 }
-_SCHEMA_MODELS = "imports schema models; TASK-13950.15 moves them to core"
-CHAT_REQUEST_SCHEMAS_CORE_IMPORTERS: dict[str, str] = {
-    "core.Chat.chat_helpers": _SCHEMA_MODELS,
-    "core.Chat.chat_service": _SCHEMA_MODELS,
-    "core.Prompt_Management.prompt_improvement_dispatch": _SCHEMA_MODELS,
-}
+CHAT_REQUEST_SCHEMAS_CORE_IMPORTERS: dict[str, str] = {}
 
 
 def _is_config(name: str) -> bool:
@@ -164,8 +159,10 @@ def _module_name(path: Path, root: Path) -> str:
 def schema_config_calls(root: Path = APP_ROOT) -> dict[str, list[tuple[int, str]]]:
     out: dict[str, list[tuple[int, str]]] = {}
     schemas = root.resolve() / "api" / "v1" / "schemas"
+    # The core-owned chat request model (TASK-13950.15 S10) keeps the no-import-time-config guarantee .14 gave it.
+    chat_request = root.resolve() / "core" / "Chat" / "chat_request_schemas.py"
     for path, tree in parse_tree(root).items():
-        if not path.is_relative_to(schemas):
+        if not (path.is_relative_to(schemas) or path == chat_request):
             continue
         calls = import_time_config_calls(tree, _module_name(path, root.resolve()))
         if calls:

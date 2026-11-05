@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+from tldw_Server_API.app.core.Chat.chat_request_schemas import (
     ChatCompletionRequest,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (

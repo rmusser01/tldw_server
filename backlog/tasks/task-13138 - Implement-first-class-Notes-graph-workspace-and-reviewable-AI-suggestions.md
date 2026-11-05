@@ -3,26 +3,25 @@ id: TASK-13138
 title: Implement first-class Notes graph workspace and reviewable AI suggestions
 status: In Progress
 assignee: []
-created_date: '2026-08-27 03:40'
-updated_date: '2026-08-29 22:35'
+created_date: 2026-08-27 03:40
+updated_date: 2026-08-29 22:35
 labels:
-  - notes
-  - knowledge-graph
-  - webui
-  - browser-extension
-  - llm
-  - jobs
+- notes
+- knowledge-graph
+- webui
+- browser-extension
+- llm
+- jobs
 dependencies: []
 references:
-  - TASK-13134
-  - TASK-13135
-  - TASK-13136
-  - TASK-13137
-  - 'https://github.com/rmusser01/tldw_server/pull/2832'
+- TASK-15135
+- TASK-15136
+- TASK-13136
+- TASK-13137
+- https://github.com/rmusser01/tldw_server/pull/2832
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
-  - Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
+- Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md
+- Docs/superpowers/plans/2026-08-26-notes-second-brain-graph-suggestions.md
 priority: high
 ---
 

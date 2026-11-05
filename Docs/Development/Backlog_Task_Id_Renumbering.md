@@ -587,3 +587,73 @@ Renumbered files whose name another copy keeps (links to that name still resolve
 - #2538 (rmusser01): renumber `backlog/tasks/task-2373 - Task-4-Add-CATS-command-builder-and-summary-JSON.md` (dev: `backlog/tasks/task-2373 - Expose-MCP-policy-explain-admin-API-routes.md`)
 - #2538 (rmusser01): renumber `backlog/tasks/task-2374 - Task-5-Add-Server-Lifecycle-And-Runner-Orchestration.md` (dev: `backlog/tasks/task-2374 - Add-MCP-policy-explain-remote-admin-client-and-CLI.md`)
 - #2538 (rmusser01): renumber `backlog/tasks/task-2375 - Document-CATS-fuzzing-setup-and-operations-guide.md` (dev: `backlog/tasks/task-2375 - Document-MCP-policy-explain-surface-and-exports.md`)
+
+## Follow-up (TASK-13962, 2026-11-03)
+
+### Subtasks re-parented
+
+The 43 subtasks that "Subtasks attributed by topic" gives to no copy named a parent id that 3a660d4f1d (2026-07-05) had moved to another task. `task renumber` moved each under its real parent, in their original order; for a subtask id it now also sets `parent_task_id`. Each moved file's notes name its old id, and each new parent's notes name the range.
+
+| Old id | New id | File |
+|---|---|---|
+| TASK-407.1 | TASK-12295.1 | `backlog/tasks/task-12295.1 - Fix-chat-role-play-starter-crash-prompt-recovery-and-preset-accessibility.md` |
+| TASK-407.2 | TASK-12295.2 | `backlog/tasks/task-12295.2 - Implement-chat-role-play-visible-state-and-terminology-cleanup.md` |
+| TASK-407.3 | TASK-12295.3 | `backlog/tasks/task-12295.3 - Restore-chat-role-play-mobile-preset-parity.md` |
+| TASK-407.4 | TASK-12295.4 | `backlog/tasks/task-12295.4 - Add-main-chat-Role-play-setup-surface.md` |
+| TASK-407.5 | TASK-12295.5 | `backlog/tasks/task-12295.5 - Add-saved-role-play-setup-UX.md` |
+| TASK-407.6 | TASK-12295.6 | `backlog/tasks/task-12295.6 - Add-role-play-compatibility-and-request-inclusion-guardrails.md` |
+| TASK-410.1 | TASK-12303.1 | `backlog/tasks/task-12303.1 - Surface-Buddy-production-packet-review-diagnostics.md` |
+| TASK-418.17 (TASK-418.14 before 2026-10-31) | TASK-12318.1 | `backlog/completed/task-12318.1 - Lock-llama.cpp-runtime-API-compatibility.md` |
+| TASK-418.15 | TASK-12318.2 | `backlog/completed/task-12318.2 - Finalize-llama.cpp-managed-runtime-rollout.md` |
+| TASK-418.16 | TASK-12318.3 | `backlog/completed/task-12318.3 - Address-PR-1854-llama.cpp-rollout-review-comments.md` |
+| TASK-463.1 | TASK-12418.1 | `backlog/tasks/task-12418.1 - Gate-Research-Workspace-grounded-chat-on-queryable-sources.md` |
+| TASK-463.2 | TASK-12418.2 | `backlog/tasks/task-12418.2 - Align-Research-Workspace-capability-contract-with-Workspace-model.md` |
+| TASK-463.3 | TASK-12418.3 | `backlog/tasks/task-12418.3 - Wire-Research-Workspace-service-capability-providers.md` |
+| TASK-463.4 | TASK-12418.4 | `backlog/tasks/task-12418.4 - Expose-Research-Workspace-service-capability-remediation-UI.md` |
+| TASK-463.5 | TASK-12418.5 | `backlog/tasks/task-12418.5 - Add-Research-Workspace-source-status-drilldown.md` |
+| TASK-481.1 | TASK-12446.1 | `backlog/tasks/task-12446.1 - Implement-notes-PR-1-backend-search-and-keyword-API-contracts.md` |
+| TASK-481.2 | TASK-12446.2 | `backlog/tasks/task-12446.2 - Implement-notes-PR-2-list-reliability-and-empty-states.md` |
+| TASK-481.3 | TASK-12446.3 | `backlog/tasks/task-12446.3 - Implement-notes-PR-3-save-state-and-error-recovery.md` |
+| TASK-481.4 | TASK-12446.4 | `backlog/tasks/task-12446.4 - Implement-notes-PR-4-navigation-and-first-time-UX.md` |
+| TASK-481.5 | TASK-12446.5 | `backlog/tasks/task-12446.5 - Implement-notes-PR-5-tags-terminology-and-organization-semantics.md` |
+| TASK-481.6 | TASK-12446.6 | `backlog/tasks/task-12446.6 - Implement-notes-PR-6-capture-provenance-and-inbox-view.md` |
+| TASK-481.7 | TASK-12446.7 | `backlog/tasks/task-12446.7 - Implement-notes-PR-7-destination-pickers-for-capture.md` |
+| TASK-481.8 | TASK-12446.8 | `backlog/tasks/task-12446.8 - Implement-notes-PR-8-connections-and-cross-surface-link-clarity.md` |
+| TASK-481.9 | TASK-12446.9 | `backlog/tasks/task-12446.9 - Implement-notes-PR-9-responsive-and-accessibility-hardening.md` |
+| TASK-481.10 | TASK-12446.10 | `backlog/tasks/task-12446.10 - Implement-notes-PR-10-import-export-and-offline-draft-sync.md` |
+| TASK-481.11 | TASK-12446.11 | `backlog/tasks/task-12446.11 - Implement-notes-PR-11-power-user-workflow-polish.md` |
+| TASK-481.12 | TASK-12446.12 | `backlog/tasks/task-12446.12 - Implement-notes-PR-3-save-state-and-error-recovery.md` |
+| TASK-481.13 | TASK-12446.13 | `backlog/tasks/task-12446.13 - PR-4---Notes-navigation-and-first-time-UX.md` |
+| TASK-481.14 | TASK-12446.14 | `backlog/tasks/task-12446.14 - PR-5---Notes-tags-terminology-and-organization-semantics.md` |
+| TASK-481.15 | TASK-12446.15 | `backlog/tasks/task-12446.15 - Implement-notes-PR-9-responsive-and-accessibility-hardening.md` |
+| TASK-481.16 | TASK-12446.16 | `backlog/tasks/task-12446.16 - Implement-notes-PR-10-import-export-and-offline-draft-sync.md` |
+| TASK-481.17 | TASK-12446.17 | `backlog/tasks/task-12446.17 - Implement-notes-PR-11-power-user-workflow-polish.md` |
+| TASK-481.18 | TASK-12446.18 | `backlog/tasks/task-12446.18 - Fix-notes-AI-title-strategy-selector-test.md` |
+| TASK-481.19 | TASK-12446.19 | `backlog/tasks/task-12446.19 - Rebase-notes-PR-2318-on-dev-and-address-review-comments.md` |
+| TASK-528.1 | TASK-12561.1 | `backlog/tasks/task-12561.1 - Add-knowledge-QA-deterministic-state-fixtures-and-baseline-coverage.md` |
+| TASK-528.2 | TASK-12561.2 | `backlog/tasks/task-12561.2 - Fix-knowledge-WebUI-readiness-timeout-and-route-level-recovery.md` |
+| TASK-528.3 | TASK-12561.3 | `backlog/tasks/task-12561.3 - Improve-knowledge-extension-setup-diagnostics-and-recovery.md` |
+| TASK-528.4 | TASK-12561.4 | `backlog/tasks/task-12561.4 - Clarify-knowledge-first-run-empty-and-no-source-recovery-states.md` |
+| TASK-528.5 | TASK-12561.5 | `backlog/tasks/task-12561.5 - Harden-knowledge-ready-search-source-scope-and-saved-profiles.md` |
+| TASK-528.6 | TASK-12561.6 | `backlog/tasks/task-12561.6 - Validate-knowledge-results-evidence-no-results-and-export-workflows.md` |
+| TASK-528.7 | TASK-12561.7 | `backlog/tasks/task-12561.7 - Harden-knowledge-power-user-settings-simple-mode-and-cross-surface-parity.md` |
+| TASK-528.8 | TASK-12561.8 | `backlog/tasks/task-12561.8 - Complete-knowledge-UAT-scripts-documentation-and-regression-guardrails.md` |
+| TASK-528.9 | TASK-12561.9 | `backlog/tasks/task-12561.9 - Address-Knowledge-QA-PR-review-feedback.md` |
+
+No dependency or `references:` entry names an old subtask id. The old ids stay, as history, in the moved files' own text, in their parents' notes, in `Docs/Plans/2026-06-07-knowledge-qa-follow-on-gap-matrix.md` and the nine `Docs/superpowers/plans/2026-06-07-knowledge-*` plans (TASK-528.1-.9), in one `git add` line of `Docs/superpowers/plans/2026-05-17-llamacpp-managed-runtime-implementation-plan.md` (task-418.15's path, next to task-418's pre-July path), and in `TOPIC_EXCEPTIONS` of the one-off generator `Helper_Scripts/renumber_duplicate_task_ids.py` (the 418.14-.16 paths).
+
+### TASK-15183 and TASK-13534
+
+Both were written by hand without an opening `---`. `task edit --title -s -l --remove-preamble` gave each its title, status and labels in the frontmatter and dropped the old block from the body (TASK-15183's `id: TASK-13511`, which its notes already name). TASK-13534's frontmatter has no `id:` line: backlog-py and `check_backlog_task_ids.py` read its id from the file name.
+
+### References
+
+[Backlog_Task_Id_References.md](Backlog_Task_Id_References.md) checks each bare-id `references:` entry that names a renumbered id: 157 entries in 126 files. The 45 that meant a renumbered copy, in `backlog/tasks` files no open PR changes, now name its new id (`task edit --ref`). Three more are in `backlog/completed`, which `task edit` cannot reach, and stay as they are; two are left to open PRs (below).
+
+### Left to open PRs
+
+An open PR changes each of these files, so TASK-13962 leaves them. The PR should make the change; if it closes without it, TASK-15419 applies it with `task edit`.
+
+- #2855 (rmusser01): in `backlog/tasks/task-13145 - Implement-canonical-admin-webhook-durable-producers-and-final-activation.md`, change the dependency `TASK-13111` to `TASK-15132`.
+- #2421 (rmusser01): in `backlog/tasks/task-2281 - Add-LSP-backed-code-intelligence-MCP-tools.md`, change the dependency and the `references:` entry `TASK-2387` to `TASK-15254`.
+- #3323 (rmusser01): in `backlog/tasks/task-13421 - Assess-Jobs-completion-SQL-ownership-after-atomicity-fix.md`, change the `references:` entry `TASK-13215` to `TASK-15149`.

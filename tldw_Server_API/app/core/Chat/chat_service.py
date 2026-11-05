@@ -1620,7 +1620,7 @@ def build_call_params_from_request(
             "grammar_override",
         },
     )
-    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+    from tldw_Server_API.app.core.Chat.chat_request_schemas import (
         _is_server_managed_chat_request_field,
     )
 
