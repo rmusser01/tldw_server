@@ -2806,10 +2806,12 @@ describe("StandaloneHtmlWorkspace", () => {
     expect(screen.getByText(/Recovery unavailable/i)).toBeVisible()
     fireEvent.change(screen.getByLabelText("HTML source"), { target: { value: SECOND_EDIT } })
     await waitFor(() => expect(screen.getByLabelText("HTML source")).toHaveValue(SECOND_EDIT))
-    const beforeReload = Array.from({ length: sessionStorage.length }, (_, index) =>
-      sessionStorage.getItem(sessionStorage.key(index)!)
-    ).join("\n")
-    expect(beforeReload).toContain(SECOND_EDIT)
+    await waitFor(() => {
+      const beforeReload = Array.from({ length: sessionStorage.length }, (_, index) =>
+        sessionStorage.getItem(sessionStorage.key(index)!)
+      ).join("\n")
+      expect(beforeReload).toContain(SECOND_EDIT)
+    })
 
     blockedRemove.mockRestore()
     mocks.slidesCapabilities = {
