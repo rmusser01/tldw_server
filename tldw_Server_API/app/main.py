@@ -1298,7 +1298,7 @@ async def lifespan(app: FastAPI):
         route_enabled=route_enabled,
         get_mcp_config=get_mcp_config,
         validate_mcp_config=validate_mcp_config,
-        test_mode=bool(globals().get("_TEST_MODE")) or _runtime_test_mode_active(),
+        test_mode=_shared_is_explicit_pytest_runtime(),
         run_pg_rls_auto_ensure=_run_pg_rls_auto_ensure,
         register_owned_job_poller=_register_owned_job_poller,
         replace_owned_job_poller_inventory=_replace_owned_job_poller_inventory,
@@ -2620,182 +2620,73 @@ from tldw_Server_API.app.core.Security.middleware import SecurityHeadersMiddlewa
 from tldw_Server_API.app.core.Security.request_id_middleware import RequestIDMiddleware
 from tldw_Server_API.app.core.Security.setup_access_guard import SetupAccessGuardMiddleware
 from tldw_Server_API.app.core.Security.setup_csp import SetupCSPMiddleware
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _test_env_flag_enabled,
+
+_enable_sec_headers_env = _env_os.getenv("ENABLE_SECURITY_HEADERS")
+_enable_sec_headers = (
+    True
+    if (_prod_flag and _enable_sec_headers_env is None)
+    else ((_enable_sec_headers_env or "true").lower() in {"true", "1", "yes", "y", "on"})
 )
-from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-)
-from tldw_Server_API.app.core.testing import (
-    is_test_mode as _shared_is_test_mode,
-)
+# Apply Setup CSP nonce injection before security headers
+try:
+    app.add_middleware(SetupCSPMiddleware)
+except _STARTUP_GUARD_EXCEPTIONS as _e:
+    logger.debug(f"Skipping SetupCSPMiddleware: {_e}")
+# Enforce Setup remote access policy
+try:
+    app.add_middleware(SetupAccessGuardMiddleware)
+except _STARTUP_GUARD_EXCEPTIONS as _e:
+    logger.debug(f"Skipping SetupAccessGuardMiddleware: {_e}")
 
-_TEST_FLAGS_SET = _shared_is_test_mode() or _test_env_flag_enabled("TESTING")
-_EXPLICIT_PYTEST_RUNTIME = _is_explicit_pytest_runtime()
-_TEST_MODE = _EXPLICIT_PYTEST_RUNTIME and (
-    _TEST_FLAGS_SET or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
-)
+if _enable_sec_headers:
+    app.add_middleware(SecurityHeadersMiddleware, enabled=True)
 
+# HTTP request metrics middleware (records count and latency per route)
+app.add_middleware(HTTPMetricsMiddleware)
 
-def _runtime_test_mode_active() -> bool:
-    return _is_explicit_pytest_runtime() and (
-        _shared_is_test_mode()
-        or _test_env_flag_enabled("TESTING")
-        or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
-    )
+# Structured access logs (request_id, method, host, status, duration)
+try:
+    from tldw_Server_API.app.core.Logging.access_log_middleware import AccessLogMiddleware
 
+    app.add_middleware(AccessLogMiddleware)
+except _IMPORT_EXCEPTIONS as _e:
+    logger.debug(f"Skipping AccessLogMiddleware: {_e}")
 
-if _TEST_FLAGS_SET and not _EXPLICIT_PYTEST_RUNTIME:
-    logger.warning(
-        "Test flags are set without explicit pytest runtime; startup guard will reject this configuration."
-    )
+# Sandbox artifact traversal guard (pre-routing)
+try:
+    app.add_middleware(SandboxArtifactTraversalGuardMiddleware)
+except _IMPORT_EXCEPTIONS as _e:
+    logger.debug(f"Skipping SandboxArtifactTraversalGuardMiddleware: {_e}")
 
-if _TEST_MODE:
-    logger.info("TEST_MODE detected: Skipping non-essential middlewares (security headers, metrics, usage logging)")
-    # Apply Setup CSP nonce injection even in tests to keep behavior consistent
+# Per-request usage logging (guarded by settings flag)
+app.add_middleware(UsageLoggingMiddleware)
+
+# Add trace headers middleware: propagate trace context to HTTP responses
+@app.middleware("http")
+async def _trace_headers_middleware(request: Request, call_next):
+    from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager
+
+    tm = get_tracing_manager()
+    # Ensure request_id is in baggage (RequestIDMiddleware already set it)
     try:
-        app.add_middleware(SetupCSPMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupCSPMiddleware in tests: {_e}")
-    # Guard Setup remote access in tests too (should evaluate loopback as allowed)
+        req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+        if req_id:
+            tm.set_baggage("request_id", str(req_id))
+    except _REQUEST_GUARD_EXCEPTIONS:
+        pass
+    response = await call_next(request)
+    # Add trace headers to response
     try:
-        app.add_middleware(SetupAccessGuardMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupAccessGuardMiddleware in tests: {_e}")
-
-    # Sandbox artifact traversal guard (pre-routing)
-    try:
-        app.add_middleware(SandboxArtifactTraversalGuardMiddleware)
-    except _IMPORT_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SandboxArtifactTraversalGuardMiddleware in tests: {_e}")
-
-    @app.middleware("http")
-    async def _trace_headers_middleware(request: Request, call_next):
-        from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager
-
-        tm = get_tracing_manager()
-        # Ensure request_id is in baggage (RequestIDMiddleware already set it)
-        try:
-            req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
-            if req_id:
-                tm.set_baggage("request_id", str(req_id))
-        except _REQUEST_GUARD_EXCEPTIONS as _baggage_err:
-            logger.debug(f"Trace headers: failed to set baggage request_id: {_baggage_err}")
-        response = await call_next(request)
-        # Add trace headers to response
-        try:
-            span = tm.get_current_span()
-            if span:
-                ctx = span.get_span_context()
-                if ctx and getattr(ctx, "is_valid", False):
-                    trace_id = f"{ctx.trace_id:032x}"
-                    span_id = f"{ctx.span_id:016x}"
-                    response.headers.setdefault("X-Trace-Id", trace_id)
-                    response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                else:
-                    # No active span; synthesize a valid W3C traceparent for tests
-                    try:
-                        from secrets import token_hex as _th
-
-                        trace_id = _th(16)  # 32 hex chars
-                        span_id = _th(8)  # 16 hex chars
-                        response.headers.setdefault("X-Trace-Id", trace_id)
-                        response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                    except _REQUEST_GUARD_EXCEPTIONS as _synth_err:
-                        logger.debug(f"Trace headers: failed to synthesize traceparent: {_synth_err}")
+        span = tm.get_current_span()
+        if span:
+            ctx = span.get_span_context()
+            if ctx and getattr(ctx, "is_valid", False):
+                trace_id = f"{ctx.trace_id:032x}"
+                span_id = f"{ctx.span_id:016x}"
+                response.headers.setdefault("X-Trace-Id", trace_id)
+                response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
             else:
-                # No span; synthesize trace headers
-                try:
-                    from secrets import token_hex as _th
-
-                    trace_id = _th(16)
-                    span_id = _th(8)
-                    response.headers.setdefault("X-Trace-Id", trace_id)
-                    response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                except _REQUEST_GUARD_EXCEPTIONS as _synth_err2:
-                    logger.debug(f"Trace headers: failed to synthesize trace headers (no-span case): {_synth_err2}")
-        except _REQUEST_GUARD_EXCEPTIONS as _trace_hdr_err:
-            logger.debug(f"Trace headers: middleware error while setting headers: {_trace_hdr_err}")
-        return response
-
-else:
-    _enable_sec_headers_env = _env_os.getenv("ENABLE_SECURITY_HEADERS")
-    _enable_sec_headers = (
-        True
-        if (_prod_flag and _enable_sec_headers_env is None)
-        else ((_enable_sec_headers_env or "true").lower() in {"true", "1", "yes", "y", "on"})
-    )
-    # Apply Setup CSP nonce injection before security headers
-    try:
-        app.add_middleware(SetupCSPMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupCSPMiddleware: {_e}")
-    # Enforce Setup remote access policy
-    try:
-        app.add_middleware(SetupAccessGuardMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupAccessGuardMiddleware: {_e}")
-
-    if _enable_sec_headers:
-        app.add_middleware(SecurityHeadersMiddleware, enabled=True)
-
-    # HTTP request metrics middleware (records count and latency per route)
-    app.add_middleware(HTTPMetricsMiddleware)
-
-    # Structured access logs (request_id, method, host, status, duration)
-    try:
-        from tldw_Server_API.app.core.Logging.access_log_middleware import AccessLogMiddleware
-
-        app.add_middleware(AccessLogMiddleware)
-    except _IMPORT_EXCEPTIONS as _e:
-        logger.debug(f"Skipping AccessLogMiddleware: {_e}")
-
-    # Sandbox artifact traversal guard (pre-routing)
-    try:
-        app.add_middleware(SandboxArtifactTraversalGuardMiddleware)
-    except _IMPORT_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SandboxArtifactTraversalGuardMiddleware: {_e}")
-
-    # Per-request usage logging (guarded by settings flag)
-    app.add_middleware(UsageLoggingMiddleware)
-
-    # Add trace headers middleware: propagate trace context to HTTP responses
-    @app.middleware("http")
-    async def _trace_headers_middleware(request: Request, call_next):
-        from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager
-
-        tm = get_tracing_manager()
-        # Ensure request_id is in baggage (RequestIDMiddleware already set it)
-        try:
-            req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
-            if req_id:
-                tm.set_baggage("request_id", str(req_id))
-        except _REQUEST_GUARD_EXCEPTIONS:
-            pass
-        response = await call_next(request)
-        # Add trace headers to response
-        try:
-            span = tm.get_current_span()
-            if span:
-                ctx = span.get_span_context()
-                if ctx and getattr(ctx, "is_valid", False):
-                    trace_id = f"{ctx.trace_id:032x}"
-                    span_id = f"{ctx.span_id:016x}"
-                    response.headers.setdefault("X-Trace-Id", trace_id)
-                    response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                else:
-                    # No active span; synthesize a valid W3C traceparent
-                    try:
-                        from secrets import token_hex as _th
-
-                        trace_id = _th(16)
-                        span_id = _th(8)
-                        response.headers.setdefault("X-Trace-Id", trace_id)
-                        response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                    except _REQUEST_GUARD_EXCEPTIONS:
-                        pass
-            else:
-                # No span; synthesize trace headers
+                # No active span; synthesize a valid W3C traceparent
                 try:
                     from secrets import token_hex as _th
 
@@ -2805,9 +2696,20 @@ else:
                     response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
                 except _REQUEST_GUARD_EXCEPTIONS:
                     pass
-        except _REQUEST_GUARD_EXCEPTIONS:
-            pass
-        return response
+        else:
+            # No span; synthesize trace headers
+            try:
+                from secrets import token_hex as _th
+
+                trace_id = _th(16)
+                span_id = _th(8)
+                response.headers.setdefault("X-Trace-Id", trace_id)
+                response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
+            except _REQUEST_GUARD_EXCEPTIONS:
+                pass
+    except _REQUEST_GUARD_EXCEPTIONS:
+        pass
+    return response
 
 
 # Request ID context should be available before the drain gate, and the drain gate

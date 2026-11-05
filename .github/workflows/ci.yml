@@ -652,6 +652,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -2344,6 +2345,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -3875,6 +3877,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -5316,6 +5319,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
@@ -6748,6 +6752,7 @@ jobs:
               tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
               tldw_Server_API/tests/Security/test_secret_manager.py
               tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_app_middleware_stack.py
               tldw_Server_API/tests/Security/test_setup_access_guard.py
               tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
               tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
