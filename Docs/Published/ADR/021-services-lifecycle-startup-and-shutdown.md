@@ -57,3 +57,13 @@ Legacy shutdown adapters and callback-only workers remain compatibility paths. F
 - Use this ADR as the covering record for the Services lifecycle portion of INV-031.
 - Keep `Docs/ADR/inventory/2026-06-04-services-lifecycle-confirmation-audit.md` as the evidence record and caveat boundary for this backfill.
 - Create separate ADRs if a future change materially changes Jobs-vs-Scheduler ownership, external worker-process ownership, or legacy shutdown adapter removal.
+
+## Amendment (TASK-13950.18)
+
+The app-scoped service container changes where the request-path services live. It does not change the shutdown phases above.
+
+- The lifespan builds `app.state.services` (`tldw_Server_API/app/core/Utils/app_services.py`). It holds five services: the AuthNZ DB pool, the session manager, the JWT service, the MCP server and the ChaCha runtime (`ChaChaRuntimeManager`, which now owns the per-user DB cache, the executor and the health map).
+- Shutdown closes the container's objects in the final resource cleanup tail's existing order. `tldw_Server_API/tests/unit/test_app_services_shutdown_order.py` pins that order (`test_final_cleanup_closes_the_container_services_in_adr_021_order`) and runs in the required unit smoke step.
+- After shutdown starts, the ChaCha runtime refuses new work before it resolves any user directory (refuse first). `InvalidChaChaOwnerError` is the only error the deps adapter maps to a 400; other `ValueError`s from the provider stay server faults.
+- The MCP HTTP routes receive the server through `Depends` (`get_mcp_server_dep`). Other code, including workers, reaches the services through the zero-argument getters (`get_db_pool()`, `get_session_manager()`, `get_jwt_service()`, `get_mcp_server()`), which read the same container, so there is still one instance per service; nothing is threaded through worker constructors. Core and services code opens ChaCha DBs through `core/Character_Chat/chacha_db_provider.py`, which imports nothing from the API layer. Endpoint-body getter calls stay frozen by the ratchet (`tests/lint/test_service_singleton_ratchet.py`) and are handed to TASK-13950.20.
+- Tests swap services with the `fresh_services` fixture instead of per-module `reset_*` helpers. Only the migrated services' test-only helpers were deleted (`reset_jwt_service`, `reset_session_manager`, and the `reset_for_tests` helpers in the migrated DB_Management and API_Deps modules). `reset_db_pool` and `reset_mcp_server` stay because production self-heal paths call them: AuthNZ initialization, the token blacklist and the session manager call `reset_db_pool`, which also calls `reset_mcp_server`.

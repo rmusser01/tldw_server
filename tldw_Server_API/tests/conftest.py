@@ -628,7 +628,13 @@ try:
     except Exception:
         _ = None
     # Enable deterministic test behaviors across subsystems
-    os.environ.setdefault("TEST_MODE", "1")
+    # security-required's "Security suites with TEST_MODE unset" step (TASK-13950.19) sets
+    # TLDW_UNSET_TEST_FLAGS=1 to run the suites without any of the three test-mode flags.
+    if os.getenv("TLDW_UNSET_TEST_FLAGS") == "1":
+        for _flag in ("TEST_MODE", "TESTING", "TLDW_TEST_MODE"):
+            os.environ.pop(_flag, None)
+    else:
+        os.environ.setdefault("TEST_MODE", "1")
     os.environ.setdefault("OTEL_SDK_DISABLED", "true")
     # Ensure Postgres helpers see consistent defaults immediately at import time.
     # Many PG tests call get_pg_env() at module import; set test user/password
@@ -975,7 +981,8 @@ def client_with_single_user(monkeypatch):
     Returns a tuple of (client, usage_logger) for tests that also need to inspect usage events.
     """
     # Ensure tests run in non-production behavior
-    os.environ.setdefault("TESTING", "true")
+    if os.getenv("TLDW_UNSET_TEST_FLAGS") != "1":
+        os.environ.setdefault("TESTING", "true")
 
     usage_logger = _TestUsageLogger()
 
