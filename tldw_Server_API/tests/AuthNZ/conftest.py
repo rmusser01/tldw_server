@@ -1336,7 +1336,6 @@ async def isolated_test_environment(monkeypatch, tmp_path):
     # Defer heavy startup (embeddings, TTS, request queue, etc.) to prevent local hangs
     monkeypatch.setenv("DEFER_HEAVY_STARTUP", "true")
     monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", "1")
 
     # 5. Reset ALL singletons to force fresh initialization with new DB
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
@@ -1709,7 +1708,6 @@ async def setup_test_database(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}")
     monkeypatch.setenv("JWT_SECRET_KEY", os.environ.get("JWT_SECRET_KEY", "test-secret-key-for-testing-only"))
-    monkeypatch.setenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", "1")
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import setup_database as _authnz_setup_db
         await _authnz_setup_db()

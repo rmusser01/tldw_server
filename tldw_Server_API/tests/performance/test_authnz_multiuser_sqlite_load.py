@@ -40,7 +40,6 @@ async def _build_app(tmp_path, monkeypatch):
     monkeypatch.setenv("REQUIRE_REGISTRATION_CODE", "false")
     monkeypatch.setenv("USER_DB_BASE_DIR", str(user_db_base))
     monkeypatch.setenv("TLDW_SQLITE_WAL_MODE", "true")
-    monkeypatch.setenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", "true")
     monkeypatch.setenv("CHAT_FORCE_MOCK", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key-12345")
     monkeypatch.setenv("TEST_MODE", "true")

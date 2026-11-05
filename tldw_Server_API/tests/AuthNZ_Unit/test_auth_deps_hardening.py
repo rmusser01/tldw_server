@@ -1,15 +1,13 @@
 import asyncio
 import io
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timezone
 from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.testclient import TestClient
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
@@ -245,62 +243,6 @@ async def test_test_db_adapter_drains_cleanup_before_propagating_cancellation(
     assert pool.conn.rollback_finished.is_set()
     assert pool.acquire_context.release_finished.is_set()
 
-
-@pytest.mark.asyncio
-async def test_stub_session_manager_uses_timezone_aware_timestamps(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
-
-    sm = await auth_deps.get_session_manager_dep()
-    sess = await sm.create_session(
-        user_id=1,
-        access_token="access",
-        refresh_token="refresh",
-        ip_address="127.0.0.1",
-        user_agent="pytest",
-    )
-    for field in ("created_at", "last_activity", "expires_at"):
-        dt = sess[field]
-        assert getattr(dt, "tzinfo", None) is timezone.utc
-
-    refreshed = await sm.refresh_session("unused-positional", session_id=1, user_id=1)
-    assert str(refreshed["expires_at"]).endswith("+00:00")
-
-
-def test_stub_session_manager_supports_admin_endpoint_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
-    app = FastAPI()
-
-    @app.post("/admin-session-contract")
-    async def exercise_admin_session_contract(
-        session_manager=Depends(auth_deps.get_session_manager_dep),
-    ) -> dict[str, int]:
-        user_id = 987_654
-        await session_manager.create_session(
-            user_id=user_id,
-            access_token="access",
-            refresh_token="refresh",
-        )
-        sessions = await session_manager.get_user_sessions(user_id, strict=True)
-        revoked = await session_manager.revoke_all_user_sessions(
-            user_id=user_id,
-            reason="Support case 123",
-            revoked_by=7,
-        )
-        remaining = await session_manager.get_user_sessions(user_id, strict=True)
-        return {
-            "listed": len(sessions),
-            "revoked": revoked,
-            "remaining": len(remaining),
-        }
-
-    response = TestClient(app).post("/admin-session-contract")
-
-    assert response.status_code == 200
-    assert response.json() == {"listed": 1, "revoked": 1, "remaining": 0}
 
 @pytest.mark.asyncio
 async def test_get_current_user_fast_path_sanitizes_cached_user(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1116,7 +1058,6 @@ def test_fallback_rate_bucket_capacity_never_exceeded_concurrently(
 @pytest.mark.asyncio
 async def test_get_session_manager_dep_requires_explicit_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
 
     sentinel = object()
 
@@ -1135,7 +1076,6 @@ async def test_get_session_manager_dep_does_not_use_stub_without_explicit_pytest
 ) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
 
     sentinel = object()
 

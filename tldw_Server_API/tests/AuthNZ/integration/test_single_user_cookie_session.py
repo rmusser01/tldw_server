@@ -37,7 +37,6 @@ async def single_user_cookie_client(tmp_path, monkeypatch, fresh_services):
     monkeypatch.setenv("CSRF_ENABLED", "1")
     monkeypatch.setenv("DEFER_HEAVY_STARTUP", "true")
     monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", "1")
 
     reset_settings()
     await reset_registration_service()
