@@ -9,7 +9,7 @@ labels:
 - emotes
 priority: Medium
 references:
-- TASK-12163
+- TASK-15083
 documentation:
 - Docs/superpowers/specs/2026-07-06-character-chat-streaming-emote-directives-design.md
 ---

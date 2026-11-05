@@ -43,6 +43,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import Evalua
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
 # Use configuration from test_config
+DEFAULT_API_KEY = test_config.TEST_API_KEY
 TEST_SK_KEY = test_config.TEST_SK_KEY
 
 
@@ -1299,7 +1300,7 @@ class TestAuthentication:
     def test_x_api_key_auth(self, client):
 
         """Test authentication with X-API-KEY header"""
-        headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
+        headers = {"X-API-KEY": DEFAULT_API_KEY}
         response = client.get("/api/v1/evaluations", headers=headers)
         assert response.status_code == 200
 

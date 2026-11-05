@@ -141,7 +141,6 @@ core.Audit -> core.RAG: 2
 core.AuthNZ -> api.v1.API_Deps: 3
 core.AuthNZ -> services: 1
 core.Chat -> api.v1.endpoints.llm_providers: 1
-core.Chat -> api.v1.schemas: 2
 core.Claims_Extraction -> api.v1.utils: 1
 core.CodeGraph -> services: 1
 core.Collections -> services: 1
@@ -190,7 +189,6 @@ core.MCP_unified -> services: 11
 core.PrivilegeMaps -> api.v1.utils: 2
 core.PrivilegeMaps -> main: 1
 core.Prompt_Management -> api.v1.endpoints.prompt_studio: 2
-core.Prompt_Management -> api.v1.schemas: 1
 core.Research_Workspace -> api.v1.API_Deps: 1
 core.Security -> services: 1
 core.Setup -> api.v1.endpoints.audio: 1

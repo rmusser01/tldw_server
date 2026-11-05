@@ -10,7 +10,7 @@ labels:
 - planning
 priority: High
 references:
-- TASK-12988
+- TASK-15122
 - Docs/superpowers/specs/2026-07-26-web-scraping-phase-4-extraction-article-orchestration-design.md
 - Docs/superpowers/plans/2026-07-15-web-scraping-phase-3-governed-preflight-package.md
 - Docs/Design/WebScraping_Refactor_Import_Inventory.md

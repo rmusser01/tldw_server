@@ -1,13 +1,11 @@
 ---
 id: TASK-15183
----
-id: TASK-13511
-title: Remediate WebUI and extension performance review findings
 status: Done
 labels:
 - frontend
 - performance
 - architecture
+title: Remediate WebUI and extension performance review findings
 ---
 
 ## Description

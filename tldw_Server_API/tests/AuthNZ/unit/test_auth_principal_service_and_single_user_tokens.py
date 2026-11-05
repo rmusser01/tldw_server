@@ -299,7 +299,6 @@ async def test_single_user_test_key_rejected_outside_test_context_for_auth_princ
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     reset_settings()
 
-    monkeypatch.setattr(auth_principal_resolver, "_is_test_context", lambda: False)
     monkeypatch.setattr(User_DB_Handling, "_is_test_context", lambda: False)
 
     class _StubApiKeyManager:
@@ -353,16 +352,6 @@ def test_user_db_is_test_context_accepts_single_letter_y(
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     assert User_DB_Handling._is_test_context() is True
-
-
-def test_auth_principal_resolver_is_test_context_accepts_single_letter_y(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("TEST_MODE", raising=False)
-    monkeypatch.setenv("TESTING", "y")
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-
-    assert auth_principal_resolver._is_test_context() is True
 
 
 @pytest.mark.parametrize(

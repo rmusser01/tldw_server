@@ -69,8 +69,7 @@ class TestConfig:
     @classmethod
     def get_auth_headers(cls) -> Dict[str, str]:
         """Get authentication headers for API testing."""
-        # The root conftest re-asserts SINGLE_USER_API_KEY per test, so read the live key.
-        return {"Authorization": f"Bearer {os.environ.get('SINGLE_USER_API_KEY') or cls.TEST_API_KEY}"}
+        return {"Authorization": f"Bearer {cls.TEST_API_KEY}"}
 
     @classmethod
     def get_sk_auth_headers(cls) -> Dict[str, str]:

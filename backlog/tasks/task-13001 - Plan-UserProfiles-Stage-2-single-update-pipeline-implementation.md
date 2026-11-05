@@ -11,7 +11,7 @@ labels:
 - architecture
 priority: High
 references:
-- TASK-13000
+- TASK-15127
 - Docs/superpowers/specs/2026-07-20-userprofiles-single-update-pipeline-stage2-design.md
 - commit e54dfcb542
 documentation:

@@ -4,16 +4,15 @@ title: Address PR 2713 authentication persistence review findings and run UAT
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-12 15:37'
+updated_date: 2026-07-12 15:37
 labels: []
 dependencies: []
 references:
-  - TASK-12106
-  - TASK-12108
-  - 'https://github.com/rmusser01/tldw_server/pull/2713'
+- TASK-15050
+- TASK-15052
+- https://github.com/rmusser01/tldw_server/pull/2713
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-07-11-pr-2713-auth-persistence-review-remediation-design.md
+- Docs/superpowers/specs/2026-07-11-pr-2713-auth-persistence-review-remediation-design.md
 ---
 
 ## Description

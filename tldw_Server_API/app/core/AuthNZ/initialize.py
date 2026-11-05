@@ -18,7 +18,7 @@ import sys
 from collections.abc import Iterable
 from getpass import getpass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
@@ -730,6 +730,36 @@ async def ensure_authnz_schema_ready_once() -> None:
         _SCHEMA_ENSURED_KEYS.add(key)
 
 
+async def _revoke_stale_single_user_test_keys(api_repo: Any, user_id: int, primary_key_hash: str | None) -> None:
+    """Revoke 'single-user test key' admin rows that older TEST_MODE boots stored.
+
+    Idempotent and best-effort: a failure logs a warning and never blocks startup.
+    Logs key ids only.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        revoked: list[Any] = []
+        for row in await api_repo.list_user_keys(user_id=user_id):
+            if row.get("name") != "single-user test key" or row.get("is_virtual"):
+                continue
+            if primary_key_hash and row.get("key_hash") == primary_key_hash:
+                continue
+            if await api_repo.revoke_api_key_for_user(
+                key_id=row["id"],
+                user_id=user_id,
+                revoked_status="revoked",
+                active_status="active",
+                reason="stale single-user test key removed at startup",
+                revoked_at=datetime.now(timezone.utc),
+            ):
+                revoked.append(row["id"])
+        if revoked:
+            logger.warning("Revoked {} stale single-user test key row(s): ids={}", len(revoked), revoked)
+    except Exception as exc:  # noqa: BLE001 - best-effort cleanup must not block startup
+        logger.warning("Stale single-user test key revocation skipped: {}", type(exc).__name__)
+
+
 async def ensure_single_user_rbac_seed_if_needed() -> None:
     """Ensure baseline RBAC seed exists in single-user mode for any backend.
 
@@ -880,6 +910,7 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
 
             api_repo = AuthnzApiKeysRepo(pool)
             api_manager: APIKeyManager | None = None
+            key_hash: str | None = None
 
             primary_api_key = (settings.SINGLE_USER_API_KEY or "").strip()
             if primary_api_key and primary_api_key != "CHANGE_ME_TO_SECURE_API_KEY":
@@ -912,38 +943,7 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
                     scope="admin",
                     is_virtual=False,
                 )
-
-            test_api_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-            if test_mode and test_api_key:
-                api_manager = api_manager or APIKeyManager(db_pool=pool)
-                test_key_hash = api_manager.hash_api_key(test_api_key)
-                test_key_prefix = (
-                    (test_api_key[:10] + "...")
-                    if len(test_api_key) > 10
-                    else test_api_key
-                )
-                test_key_identifier = None
-                try:
-                    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import parse_api_key
-
-                    parsed = parse_api_key(test_api_key)
-                    if parsed:
-                        test_key_identifier, _secret = parsed
-                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.opt(exception=True).debug(
-                        "Failed to parse SINGLE_USER_TEST_API_KEY for seed key identifier extraction: {}",
-                        exc,
-                    )
-                await api_repo.upsert_primary_key(
-                    user_id=single_user_id,
-                    key_hash=test_key_hash,
-                    key_identifier=test_key_identifier,
-                    key_prefix=test_key_prefix,
-                    name="single-user test key",
-                    description="Deterministic API key for test automation",
-                    scope="admin",
-                    is_virtual=False,
-                )
+            await _revoke_stale_single_user_test_keys(api_repo, single_user_id, key_hash)
         except _AUTHNZ_SINGLE_USER_OPTIONAL_BACKFILL_EXCEPTIONS as role_assign_err:
             # Log at warning level with context so repeated failures surface operationally
             logger.warning(
@@ -1279,13 +1279,6 @@ async def bootstrap_single_user_profile() -> bool:
         print("✅ Single-user primary API key ensured in AuthNZ store")
         logger.info("Single-user primary API key ensured in AuthNZ store")
         allowed_hashes: set[str] = {key_hash}
-        test_api_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-        if (
-            is_test_mode()
-            and test_api_key
-            and test_api_key != api_key_value
-        ):
-            allowed_hashes.add(manager.hash_api_key(test_api_key))
         errors = await _collect_single_user_invariant_errors(
             pool,
             expected_user_id=expected_user_id,

@@ -61,6 +61,7 @@ Create a parent Backlog task, create child tasks for each remediation slice, wri
 - Final verification from TASK-528.8: shared Knowledge QA Vitest passed 46 files / 377 tests; WebUI Knowledge QA Playwright route-state checks passed 6 tests; trailing-whitespace guard passed for closeout docs/task files; code/test scope guard found no deck/spaced-repetition/study-set terminology in touched Knowledge QA source or E2E files.
 - Known blocker carried forward: extension runtime E2E/UAT is blocked by the WXT production build stall before browser launch. Extension source specs and documented commands are present, but browser-phase extension behavior was not reverified in the final closeout pass.
 - Bandit is not applicable to the closeout slice because TASK-528.8 touched markdown documentation and Backlog records only.
+Its subtasks TASK-528.1 to TASK-528.9 were re-parented as TASK-12561.1 to TASK-12561.9 on 2026-11-03 (TASK-13962), in that order: 3a660d4f1d (2026-07-05) renumbered this task from TASK-528 without them. Docs/Development/Backlog_Task_Id_Renumbering.md maps each id.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
