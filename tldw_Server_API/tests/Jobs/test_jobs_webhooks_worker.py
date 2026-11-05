@@ -22,7 +22,9 @@ def _set_base_env(monkeypatch, tmp_path: Path):
     # Webhooks worker configuration
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
-    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "http://127.0.0.1/webhook")  # loopback OK in TEST_MODE
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "http://127.0.0.1/webhook")
+    # The worker enforces the egress policy in every mode; allow the stub host explicitly.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1")
     monkeypatch.setenv("JOBS_WEBHOOKS_SECRET_KEYS", "testsecret,oldsecret")
     monkeypatch.setenv("JOBS_WEBHOOKS_INTERVAL_SEC", "0.01")
     monkeypatch.setenv("JOBS_WEBHOOKS_TIMEOUT_SEC", "1.0")
