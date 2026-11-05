@@ -535,7 +535,8 @@ async def test_execute_non_stream_call_normalizes_gemini_usage_for_logging(monke
     )
 
     assert logged_usage["prompt_tokens"] == 80
-    assert logged_usage["completion_tokens"] == 30
+    # candidatesTokenCount 30 + thoughtsTokenCount 5: thinking tokens are billed as output (TASK-13952).
+    assert logged_usage["completion_tokens"] == 35
     assert logged_usage["total_tokens"] == 115
     assert logged_usage["usage_metadata"] == {
         "promptTokenCount": 80,
@@ -547,7 +548,7 @@ async def test_execute_non_stream_call_normalizes_gemini_usage_for_logging(monke
     assert logged_usage["estimate_source"] == "provider_usage"
     assert logged_usage["choice_count"] == 1
     assert metrics.tokens["prompt_tokens"] == 80
-    assert metrics.tokens["completion_tokens"] == 30
+    assert metrics.tokens["completion_tokens"] == 35
 
 
 @pytest.mark.asyncio
