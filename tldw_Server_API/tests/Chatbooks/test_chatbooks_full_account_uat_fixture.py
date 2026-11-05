@@ -187,12 +187,39 @@ async def test_fixture_round_trip_verifies_full_inventory_and_exact_embeddings(
         {"name": character["name"]} for character in expected["characters"]
     ]
     assert verified["account_inventory_counts"] == expected["account_inventory"]["source_counts"]
+    destination_db = fixture.create_media_database(
+        str(expected["destination_user_id"]),
+        db_path=str(fixture.DatabasePaths.get_media_db_path(expected["destination_user_id"])),
+    )
+    destination_media = fixture.get_media_by_title(destination_db, expected["media"]["title"])
+    expected_rows = [
+        {
+            **row,
+            "metadata": {
+                **row["metadata"],
+                "media_id": int(destination_media["id"]),
+                "media_uuid": str(destination_media["uuid"]),
+            },
+        }
+        for row in expected["embeddings"]["rows"]
+    ]
     assert verified["embeddings"] == {
         "collection_name": expected["embeddings"]["collection_name"],
         "collection_ids": expected["embeddings"]["collection_ids"],
         "row_count": expected["embeddings"]["row_count"],
-        "rows": expected["embeddings"]["rows"],
+        "rows": expected_rows,
     }
+
+    service = fixture._new_chatbook_service(int(expected["destination_user_id"]))
+    collection = service._get_chroma_manager().get_collection(expected["embeddings"]["collection_name"])
+    collection.update(
+        ids=[expected_rows[0]["id"]],
+        metadatas=[
+            {**expected_rows[0]["metadata"], "media_uuid": expected["embeddings"]["rows"][0]["metadata"]["media_uuid"]}
+        ],
+    )
+    with pytest.raises(fixture.FixtureVerificationError, match="destination embedding vectors and metadata"):
+        await fixture.verify(tmp_path)
 
 
 def test_fixture_uses_public_media_vector_operation() -> None:

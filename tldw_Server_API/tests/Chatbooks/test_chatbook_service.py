@@ -215,9 +215,9 @@ class TestChatbookService:
         assert result["job_id"] == job_id
         assert result["status"] == "pending"
 
-        # Check job was saved - looking for INSERT OR REPLACE
+        # Check the job was saved with the shared conflict-update contract.
         call_args = mock_db.execute_query.call_args[0]
-        assert "INSERT OR REPLACE INTO export_jobs" in call_args[0]
+        assert "INSERT INTO export_jobs" in call_args[0] and "ON CONFLICT(job_id) DO UPDATE SET" in call_args[0]
 
     @pytest.mark.asyncio
     async def test_create_chatbook_sync_wrapper_reraises_cancelled_error(self, service):
@@ -987,7 +987,11 @@ class TestChatbookService:
 
         queries = [call[0] for call in db.calls]
         lock_index = next(index for index, query in enumerate(queries) if "pg_advisory_xact_lock" in query)
-        insert_index = next(index for index, query in enumerate(queries) if "INSERT OR REPLACE INTO export_jobs" in query)
+        insert_index = next(
+            index
+            for index, query in enumerate(queries)
+            if "INSERT INTO export_jobs" in query and "ON CONFLICT(job_id) DO UPDATE SET" in query
+        )
         assert lock_index < insert_index
 
     def test_import_skips_media_when_restore_flag_is_false(self, service, tmp_path):

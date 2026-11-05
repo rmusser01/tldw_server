@@ -602,9 +602,14 @@ async def verify(root: str | Path) -> dict[str, Any]:
         "destination embedding collection row count",
     )
     collection_rows = _normalize_embedding_rows(collection_result)
+    # Imported chunk links must identify the independently loaded destination Media.
+    expected_embedding_rows = [
+        {**row, "metadata": {**row["metadata"], "media_id": media_id, "media_uuid": str(media_row["uuid"])}}
+        for row in expected["embeddings"]["rows"]
+    ]
     _require_equal(
         collection_rows,
-        expected["embeddings"]["rows"],
+        expected_embedding_rows,
         "destination embedding vectors and metadata",
     )
 
