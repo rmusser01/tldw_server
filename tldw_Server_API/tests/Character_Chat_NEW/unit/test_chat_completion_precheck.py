@@ -263,6 +263,67 @@ async def test_auto_router_logs_only_error_types(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["user", "server_default"])
+async def test_auto_router_usage_row_records_whose_key_the_router_call_used(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    """The router's row carries its own handle's source, not the reply's (TASK-13956)."""
+    rows: list[dict[str, Any]] = []
+    handle = SimpleNamespace(
+        provider="openai", api_key="router-key", app_config={}, credentials_resolved=True, credential_source=source
+    )
+
+    class Runtime:
+        async def resolve(self, _provider: str, *, model: str | None = None):
+            del model
+            return handle
+
+        async def mark_used(self, _handle: Any) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    async def provider_call(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "choices": [{"message": {"content": '{"provider":"openai","model":"routed"}'}}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9},
+        }
+
+    async def usage_log(**kwargs: Any) -> None:
+        rows.append(kwargs)
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr(character_chat_sessions, "log_model_router_usage", usage_log)
+
+    choice, _diagnostics = await character_chat_sessions._select_auto_character_llm_router_choice(
+        router_request=RouterRequest(model="auto", surface="character_chat", latest_user_turn="route me", scope="chat-1"),
+        policy=RoutingPolicy(
+            request_model="auto", server_default_provider="openai", boundary_mode="server_default_provider"
+        ),
+        candidates=[{"provider": "openai", "model": "routed"}, {"provider": "openai", "model": "alternate"}],
+        provider_listing={
+            "default_provider": "openai",
+            "providers": [
+                {
+                    "name": "openai",
+                    "default_model": "router-model",
+                    "is_configured": True,
+                    "models_info": [{"name": "router-model"}],
+                }
+            ],
+        },
+        current_user=SimpleNamespace(id=1),
+        credential_runtime=Runtime(),
+    )
+
+    assert choice == {"provider": "openai", "model": "routed"}
+    assert [(row["provider"], row.get("credential_source")) for row in rows] == [("openai", source)]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_boundary", ["usage", "selection"])
 async def test_auto_router_propagates_cancellation_and_closes_runtime_once(
     monkeypatch: pytest.MonkeyPatch,

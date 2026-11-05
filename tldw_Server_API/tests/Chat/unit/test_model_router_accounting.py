@@ -90,6 +90,7 @@ async def test_log_model_router_usage_matches_log_llm_usage_signature():
         user_agent=None,
         token_name=None,
         conversation_id=None,
+        credential_source=None,
     ):
         calls.append(
             {
@@ -112,6 +113,7 @@ async def test_log_model_router_usage_matches_log_llm_usage_signature():
                 "user_agent": user_agent,
                 "token_name": token_name,
                 "conversation_id": conversation_id,
+                "credential_source": credential_source,
             }
         )
 
@@ -127,3 +129,26 @@ async def test_log_model_router_usage_matches_log_llm_usage_signature():
     )
 
     assert len(calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["user", "server_default", None])
+async def test_log_model_router_usage_records_whose_key_the_router_call_used(source):
+    """The router's row carries the router call's own source, so a call on the user's key does not count (TASK-13956)."""
+    calls: list[dict[str, object]] = []
+
+    async def fake_usage_logger(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    await log_model_router_usage(
+        context=RoutingUsageContext(surface="chat", endpoint="POST:/api/v1/chat/completions", user_id=1),
+        provider="openai",
+        model="gpt-4.1-mini",
+        prompt_tokens=10,
+        completion_tokens=2,
+        usage_logger=fake_usage_logger,
+        credential_source=source,
+    )
+
+    assert [(call["operation"], call["credential_source"]) for call in calls] == [("chat_router", source)]

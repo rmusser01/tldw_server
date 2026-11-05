@@ -339,6 +339,8 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     }
     assert captured["router_call"]["model"] == "anthropic/claude-4.5-sonnet"
     assert captured["router_usage"][0]["provider"] == "openrouter"
+    # The fixture's runtime resolves the user's own key, so the router's row says so (TASK-13956).
+    assert captured["router_usage"][0].get("credential_source") == "user"
     assert router_call_flags == [True]
 
 

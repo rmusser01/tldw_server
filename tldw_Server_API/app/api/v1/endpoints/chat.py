@@ -1799,6 +1799,7 @@ async def _select_auto_chat_llm_router_choice(
                     total_tokens=usage["total_tokens"],
                     latency_ms=latency_ms,
                     estimated=usage["total_tokens"] == 0,
+                    credential_source=getattr(router_credential_handle, "credential_source", None),
                 )
             )
         except asyncio.CancelledError:

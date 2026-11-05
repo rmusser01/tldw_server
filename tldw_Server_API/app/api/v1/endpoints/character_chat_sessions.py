@@ -1138,12 +1138,15 @@ async def _select_auto_character_llm_router_choice(
             trusted_base_url_override=False,
             override_snapshot_resolver=capture_provider_override_call_snapshot,
         )
+    router_credential_source: Optional[str] = None  # whose key the router call used, for its usage row
 
     async def _execute_router_call(router_model, router_messages):
+        nonlocal router_credential_source
         provider_credentials = await credential_runtime.resolve(
             router_model.provider,
             model=router_model.model,
         )
+        router_credential_source = getattr(provider_credentials, "credential_source", None)
 
         async def _mark_late_router_choice(result: Any) -> None:
             if _extract_semantic_character_router_choice(result) is not None:
@@ -1188,6 +1191,7 @@ async def _select_auto_character_llm_router_choice(
                 total_tokens=usage["total_tokens"],
                 latency_ms=latency_ms,
                 estimated=usage["total_tokens"] == 0,
+                credential_source=router_credential_source,
             )
         except asyncio.CancelledError:
             raise
