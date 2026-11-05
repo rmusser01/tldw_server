@@ -143,7 +143,8 @@ jobs:
           needs.await_license.outputs.license_passed != 'true'
         )
       )
-    timeout-minutes: 30
+    # A passing run took 28 minutes on 2026-11-03, and #3412 hit 30 twice at the non-UTC step.
+    timeout-minutes: 45
     steps:
       - name: Require the license audit to have passed
         if: >-
