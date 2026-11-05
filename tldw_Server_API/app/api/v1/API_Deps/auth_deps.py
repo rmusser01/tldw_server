@@ -421,7 +421,7 @@ async def get_db_transaction() -> AsyncGenerator[Any, None]:
     """
     db_pool = await get_db_pool()
 
-    # Default: yield a request-scoped transaction so writes commit reliably.
+    # Yield a request-scoped transaction so writes commit reliably.
     # For SQLite lock contention, retry only transaction-entry failures.
     policy = get_authnz_transaction_policy()
     max_retries = policy.sqlite_lock_max_retries
