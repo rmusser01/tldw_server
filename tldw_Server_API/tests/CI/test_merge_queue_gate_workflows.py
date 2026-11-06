@@ -565,7 +565,8 @@ def test_non_utc_workload_has_its_own_required_job_budget():
     timezone = jobs["non-utc-tests"]
     backend = jobs["backend-required"]
     assert "non-utc-tests" in backend["needs"]  # nosec B101
-    assert timezone["timeout-minutes"] == backend["timeout-minutes"] == 30  # nosec B101
+    assert timezone["timeout-minutes"] == 30  # nosec B101 - The isolated timezone budget stays bounded.
+    assert backend["timeout-minutes"] == 45  # nosec B101 - Preserve the upstream backend gate budget.
     offset = _step(timezone, "Confirm the runner is not on UTC")
     suite = _step(timezone, "Timestamp-sensitive tests under a non-UTC timezone")
     assert offset["env"]["TZ"] == suite["env"]["TZ"] == "America/Los_Angeles"  # nosec B101
