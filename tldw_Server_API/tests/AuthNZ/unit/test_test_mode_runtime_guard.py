@@ -114,7 +114,6 @@ def test_app_startup_fails_fast_when_lazy_evaluations_warmup_fails(
     from tldw_Server_API.app import main as main_mod
     from tldw_Server_API.app.core.Evaluations import connection_pool as eval_pool
 
-    monkeypatch.setattr(main_mod, "_TEST_MODE", False, raising=True)
     monkeypatch.setattr(main_mod, "route_enabled", lambda key, **_kwargs: key == "evaluations")
 
     def _boom():

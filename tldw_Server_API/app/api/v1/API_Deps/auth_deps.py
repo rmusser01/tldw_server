@@ -30,9 +30,7 @@ from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import (
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import (
     DatabasePool,
-    await_cancellation_safe_cleanup,
     get_db_pool,
-    select_transaction_cleanup_failure,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
@@ -53,11 +51,6 @@ from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, ge
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
-from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
-    ProfileUserWriteRejected,
-    _profile_user_backend,
-    _profile_user_connection_identity,
-)
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter, get_rate_limiter
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import (
@@ -346,301 +339,74 @@ async def get_login_db_connection() -> AsyncGenerator[Any, None]:
 async def get_db_transaction() -> AsyncGenerator[Any, None]:
     """Get database connection in transaction mode.
 
-    Always behaves as an async generator for FastAPI compatibility. In explicit test mode,
-    yields a lightweight pool adapter backed by one request-scoped transaction.
-    Otherwise, yields a request-scoped transaction connection.
+    Always behaves as an async generator for FastAPI compatibility. Yields the
+    request-scoped transaction connection from ``db_pool.transaction()`` on every
+    backend and in every runtime.
     """
     db_pool = await get_db_pool()
 
-    # Decide whether to use the lightweight adapter (explicit test mode) or a real transaction
-    use_adapter = False
-    try:
-        if _is_test_mode():
-            use_adapter = True
-    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-        # If any detection fails, fall back to default transaction behavior
-        use_adapter = False
+    # Yield a request-scoped transaction so writes commit reliably.
+    # For SQLite lock contention, retry only transaction-entry failures.
+    policy = get_authnz_transaction_policy()
+    max_retries = policy.sqlite_lock_max_retries
+    backoff_base = policy.sqlite_lock_retry_base_seconds
+    backoff_max = policy.sqlite_lock_retry_max_seconds
+    retry_after = policy.busy_retry_after_seconds
+    entry_attempt = 0
+    txn_cm = None
+    conn = None
 
-    if use_adapter:
-        # Keep a single connection open for the request lifetime so cursors remain valid
-        is_postgres_backend = bool(getattr(db_pool, "pool", None) is not None)
-        conn_cm = db_pool.acquire()
-        conn = await conn_cm.__aenter__()
-        transaction_cm = None
-        transaction_entered = False
-
-        # NOTE: This adapter normalizes asyncpg-style ($1, fetch*) and SQLite-style
-        # query/return semantics for tests. If other modules need similar behavior,
-        # it can be extracted into the DB_Management layer.
-        class _ConnAdapter:
-            def __init__(self, _conn: Any, *, is_postgres: bool) -> None:
-                self._conn = _conn
-                self._is_sqlite = not is_postgres
-                self._dollar_param = re.compile(r"\$\d+")
-                expected_backend = "postgres" if is_postgres else "sqlite"
-                managed_backend = _profile_user_backend(_conn)
-                if (
-                    managed_backend is not None
-                    and managed_backend != expected_backend
-                ):
-                    raise ProfileUserWriteRejected()
-                self._authnz_profile_user_backend = expected_backend
-                self._authnz_profile_user_guard_identity = (
-                    _profile_user_connection_identity(_conn)
-                )
-
-            def _normalize_sqlite_sql(self, query: Any) -> Any:
-                if (
-                    not self._is_sqlite
-                    or type(query) is not str
-                    or "$" not in query
-                ):
-                    return query
-                # Replace $1, $2 ... with '?'
-                return self._dollar_param.sub("?", query)
-
-            async def execute(self, query: Any, *args: object) -> Any:
-                # Postgres (asyncpg) supports variadic args; SQLite expects a sequence
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    return await self._conn.execute(query, *args)
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    return await self._conn.execute(q, params)
-
-            async def fetchval(self, query: str, *args: object) -> Any | None:
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    return await self._conn.fetchval(query, *args)
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    cur = await self._conn.execute(q, params)
-                    row = await cur.fetchone()
-                    return row[0] if row else None
-
-            async def fetch(self, query: str, *args: object) -> list[Any]:
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    rows = await self._conn.fetch(query, *args)
-                    return [dict(r) for r in rows]
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    cur = await self._conn.execute(q, params)
-                    rows = await cur.fetchall()
-                    normalized_rows: list[Any] = []
-                    for row in rows:
-                        try:
-                            keys = row.keys()  # sqlite3.Row / aiosqlite.Row
-                            normalized_rows.append({key: row[key] for key in keys})
-                            continue
-                        except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        normalized_rows.append(row)
-                    return normalized_rows
-
-            async def fetchrow(self, query: str, *args: object) -> Any | None:
-                if not self._is_sqlite:
-                    # asyncpg connection
-                    return await self._conn.fetchrow(query, *args)
-                else:
-                    params = args[0] if (len(args) == 1 and isinstance(args[0], (list, tuple))) else args
-                    q = self._normalize_sqlite_sql(query)
-                    cur = await self._conn.execute(q, params)
-                    row = await cur.fetchone()
-                    try:
-                        if not row:
-                            return None
-                        keys = row.keys()  # sqlite3.Row / aiosqlite.Row
-                        return {key: row[key] for key in keys}
-                    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
-                        return row
-
-            async def commit(self) -> None:
-                # Callers historically commit after individual operations. The explicit
-                # SQLite test adapter owns the transaction and finalizes it on dependency
-                # exit so multi-statement gateways remain atomic.
-                return None
-
-        adapter: _ConnAdapter | None = None
-        after_commit_token = begin_after_commit_scope()
-        primary_failure: BaseException | None = None
-        transaction_committed = False
-
-        def _merge_cleanup_failure(
-            primary: BaseException | None,
-            cleanup: BaseException,
-            *,
-            operation: str,
-        ) -> BaseException:
-            selected, should_log = select_transaction_cleanup_failure(
-                primary,
-                cleanup,
-            )
-            if primary is None and isinstance(cleanup, Exception):
-                should_log = True
-            if should_log:
-                logger.bind(
-                    operation=operation,
-                    exception_type=type(cleanup).__name__,
-                ).warning("Test DB adapter cleanup failed")
-            return selected
-
+    while True:
+        txn_cm = db_pool.transaction(
+            acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
+        )
         try:
-            if is_postgres_backend:
-                transaction_cm = conn.transaction()
-                await transaction_cm.__aenter__()
-                transaction_entered = True
-            adapter = _ConnAdapter(conn, is_postgres=is_postgres_backend)
-            yield adapter
-        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve control flow
-            primary_failure = exc
-            if transaction_entered and transaction_cm is not None:
-                try:
-                    await await_cancellation_safe_cleanup(
-                        transaction_cm.__aexit__(
-                            type(primary_failure),
-                            primary_failure,
-                            primary_failure.__traceback__,
-                        )
-                    )
-                except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-                    primary_failure = _merge_cleanup_failure(
-                        primary_failure,
-                        cleanup_exc,
-                        operation="postgres_rollback",
-                    )
-            elif adapter is not None and not is_postgres_backend:
-                try:
-                    await await_cancellation_safe_cleanup(conn.rollback())
-                except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-                    primary_failure = _merge_cleanup_failure(
-                        primary_failure,
-                        cleanup_exc,
-                        operation="sqlite_rollback",
-                    )
-        else:
-            if is_postgres_backend and transaction_cm is not None:
-                try:
-                    await await_cancellation_safe_cleanup(
-                        transaction_cm.__aexit__(None, None, None)
-                    )
-                except BaseException as exc:  # noqa: BLE001 - preserve commit cancellation
-                    primary_failure = exc
-                else:
-                    transaction_committed = True
-            else:
-                try:
-                    await conn.commit()
-                except BaseException as exc:  # noqa: BLE001 - rollback after any commit failure
-                    primary_failure = exc
-                    try:
-                        await await_cancellation_safe_cleanup(conn.rollback())
-                    except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-                        primary_failure = _merge_cleanup_failure(
-                            primary_failure,
-                            cleanup_exc,
-                            operation="sqlite_rollback",
-                        )
-                else:
-                    transaction_committed = True
-
-        try:
-            await await_cancellation_safe_cleanup(
-                conn_cm.__aexit__(
-                    type(primary_failure) if primary_failure is not None else None,
-                    primary_failure,
-                    primary_failure.__traceback__
-                    if primary_failure is not None
-                    else None,
-                )
-            )
-        except BaseException as cleanup_exc:  # noqa: BLE001 - preserve cleanup precedence
-            primary_failure = _merge_cleanup_failure(
-                primary_failure,
-                cleanup_exc,
-                operation="connection_release",
-            )
-
-        try:
-            await finish_after_commit_scope(
-                after_commit_token,
-                committed=transaction_committed,
-            )
-        except BaseException as cleanup_exc:  # noqa: BLE001 - preserve primary control failure
-            primary_failure = _merge_cleanup_failure(
-                primary_failure,
-                cleanup_exc,
-                operation="after_commit_hooks",
-            )
-
-        if primary_failure is not None:
-            raise primary_failure
-    else:
-        # Default: yield a request-scoped transaction so writes commit reliably.
-        # For SQLite lock contention, retry only transaction-entry failures.
-        policy = get_authnz_transaction_policy()
-        max_retries = policy.sqlite_lock_max_retries
-        backoff_base = policy.sqlite_lock_retry_base_seconds
-        backoff_max = policy.sqlite_lock_retry_max_seconds
-        retry_after = policy.busy_retry_after_seconds
-        entry_attempt = 0
-        txn_cm = None
-        conn = None
-
-        while True:
-            txn_cm = db_pool.transaction(
-                acquire_timeout_seconds=policy.db_pool_acquire_timeout_seconds,
-            )
-            try:
-                conn = await txn_cm.__aenter__()
-                break
-            except DatabaseLockError:
-                if entry_attempt >= max_retries:
-                    logger.warning(
-                        "AuthNZ DB lock contention exhausted entry retries (attempts={})",
-                        entry_attempt + 1,
-                    )
-                    raise _authnz_busy_http_exception(retry_after) from None
-                sleep_seconds = min(backoff_base * (2 ** entry_attempt), backoff_max)
-                logger.debug(
-                    "AuthNZ DB lock contention on transaction entry; retrying (attempt={} sleep={}s)",
+            conn = await txn_cm.__aenter__()
+            break
+        except DatabaseLockError:
+            if entry_attempt >= max_retries:
+                logger.warning(
+                    "AuthNZ DB lock contention exhausted entry retries (attempts={})",
                     entry_attempt + 1,
-                    sleep_seconds,
                 )
-                entry_attempt += 1
-                await asyncio.sleep(sleep_seconds)
-            except ConnectionPoolExhaustedError:
                 raise _authnz_busy_http_exception(retry_after) from None
-
-        if txn_cm is None:
-            raise RuntimeError("AuthNZ transaction context manager was not initialized")
-
-        after_commit_token = begin_after_commit_scope()
-        committed = False
-        try:
-            yield conn
-        except BaseException as exc:
-            try:
-                await txn_cm.__aexit__(type(exc), exc, exc.__traceback__)
-            except DatabaseLockError:
-                if isinstance(exc, asyncio.CancelledError):
-                    raise exc from None
-                raise _authnz_busy_http_exception(retry_after) from None
-            raise
-        else:
-            try:
-                await txn_cm.__aexit__(None, None, None)
-            except DatabaseLockError:
-                raise _authnz_busy_http_exception(retry_after) from None
-            committed = True
-        finally:
-            await finish_after_commit_scope(
-                after_commit_token,
-                committed=committed,
+            sleep_seconds = min(backoff_base * (2 ** entry_attempt), backoff_max)
+            logger.debug(
+                "AuthNZ DB lock contention on transaction entry; retrying (attempt={} sleep={}s)",
+                entry_attempt + 1,
+                sleep_seconds,
             )
+            entry_attempt += 1
+            await asyncio.sleep(sleep_seconds)
+        except ConnectionPoolExhaustedError:
+            raise _authnz_busy_http_exception(retry_after) from None
+
+    if txn_cm is None:
+        raise RuntimeError("AuthNZ transaction context manager was not initialized")
+
+    after_commit_token = begin_after_commit_scope()
+    committed = False
+    try:
+        yield conn
+    except BaseException as exc:
+        try:
+            await txn_cm.__aexit__(type(exc), exc, exc.__traceback__)
+        except DatabaseLockError:
+            if isinstance(exc, asyncio.CancelledError):
+                raise exc from None
+            raise _authnz_busy_http_exception(retry_after) from None
+        raise
+    else:
+        try:
+            await txn_cm.__aexit__(None, None, None)
+        except DatabaseLockError:
+            raise _authnz_busy_http_exception(retry_after) from None
+        committed = True
+    finally:
+        await finish_after_commit_scope(
+            after_commit_token,
+            committed=committed,
+        )
 
 
 async def get_password_service_dep() -> PasswordService:
@@ -2070,10 +1836,6 @@ async def _enforce_auth_deps_ingress_guard(
 
     # Claim-first governor hook (primarily for test invariants)
     await get_auth_governor()
-
-    # In test mode, bypass rate limiting entirely for deterministic tests.
-    if _is_test_mode():
-        return
 
     try:
         fallback_limit = _read_non_negative_int_env(fallback_limit_env, fallback_limit_default)
