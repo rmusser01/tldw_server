@@ -2,6 +2,8 @@
 id: TASK-15451
 title: Redact email verification query strings in access logs
 status: Done
+references:
+- https://github.com/rmusser01/tldw_server/pull/3428
 ---
 
 ## Description
