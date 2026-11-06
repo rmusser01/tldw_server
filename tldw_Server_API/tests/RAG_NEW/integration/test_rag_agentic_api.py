@@ -251,6 +251,116 @@ def test_rag_search_profile_without_explicit_generation_is_not_refused_by_the_ll
     assert len(calls) == 1 and calls[0].get("enable_generation") is False
 
 
+def _over_the_limit_with_own_keys(monkeypatch, own: set[str]) -> tuple[list[str], list[bool]]:
+    """An over-limit user with their own key for ``own``; the pipeline records whether it ran marked admitted."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    asked: list[str] = []
+    marked: list[bool] = []
+
+    async def _own_key(_uid, provider):
+        """Stands in for the lookup (the boundary is under test)."""
+        asked.append(provider)
+        return provider in own
+
+    async def _fake_pipeline(**kwargs):
+        marked.append(current_llm_call_context().prechecked)
+        return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_pipeline)
+    refuse_llm_work(monkeypatch)
+    return asked, marked
+
+
+@pytest.mark.parametrize(
+    ("extra", "own", "looked_up"),
+    [
+        ({}, {"openai"}, ["openai"]),
+        ({"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
+         {"openai", "groq"}, ["openai", "groq"]),
+    ],
+    ids=["answer-only", "reformulated-history"],
+)
+def test_rag_search_admits_an_over_limit_user_whose_llm_calls_run_on_their_own_keys(
+    client_with_agentic_overrides, monkeypatch, extra, own, looked_up
+):
+    """Past a limit, a search whose answer (and reformulation) run on the user's own keys goes on, unmarked (TASK-13956)."""
+    asked, marked = _over_the_limit_with_own_keys(monkeypatch, own)
+    resp = client_with_agentic_overrides.post(
+        "/api/v1/rag/search",
+        json={"query": "q", "enable_generation": True, "generation_provider": "openai", **extra},
+    )
+    assert resp.status_code != 402, resp.text
+    assert marked == [False]
+    assert asked == looked_up
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"enable_claims": True},
+        {"enable_document_grading": True, "grading_provider": "openai"},
+        {"enable_reranking": True, "reranking_strategy": "llm_scoring"},
+        {"search_depth_mode": "quality"},
+        {"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
+    ],
+    ids=["claims", "grading", "llm-rerank", "quality-depth", "history-on-a-server-key"],
+)
+def test_rag_search_still_refuses_an_own_key_answer_with_another_llm_stage(client_with_agentic_overrides, monkeypatch, extra):
+    """An LLM stage the boundary cannot place on the user's own key keeps the 402 before any retrieval (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    _asked, marked = _over_the_limit_with_own_keys(monkeypatch, {"openai"})
+    resp = client_with_agentic_overrides.post(
+        "/api/v1/rag/search",
+        json={"query": "q", "enable_generation": True, "generation_provider": "openai", **extra},
+    )
+    assert_llm_quota_402(resp)
+    assert marked == []
+
+
+@pytest.mark.parametrize(
+    ("suggestions", "admitted"), [(None, True), ("true", False)], ids=["no-default", "suggestions-by-default"]
+)
+def test_rag_batch_names_the_providers_of_the_resolved_request(
+    client_with_agentic_overrides, monkeypatch, suggestions, admitted
+):
+    """A server default that turns on another LLM stage keeps the 402 on a batch, as on search (TASK-13956)."""
+    from fastapi import HTTPException
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    asked, _marked = _over_the_limit_with_own_keys(monkeypatch, {"openai"})
+    reached: list[bool] = []
+
+    def _past_the_check(*_args, **_kwargs):
+        """The batch's next step after the quota check: stop an admitted request before any work."""
+        reached.append(True)
+        raise HTTPException(status_code=418, detail="the quota check let the request through")
+
+    monkeypatch.setattr(
+        rag_ep, "_search_agent_setting", lambda env_key, _key: suggestions if env_key == "SEARCH_SUGGESTIONS" else None
+    )
+    monkeypatch.setattr(rag_ep, "_resolve_kanban_db_path", _past_the_check)
+    resp = client_with_agentic_overrides.post(
+        "/api/v1/rag/batch",
+        json={"queries": ["q"], "enable_generation": True, "generation_provider": "openai"},
+    )
+
+    if admitted:
+        assert resp.status_code == 418, resp.text
+        assert asked == ["openai"]
+    else:
+        assert_llm_quota_402(resp)
+        assert reached == []
+
+
 def test_rag_agentic_search_smoke_api(client_with_agentic_overrides, monkeypatch):
 
 

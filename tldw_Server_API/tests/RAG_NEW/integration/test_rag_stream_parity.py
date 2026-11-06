@@ -997,3 +997,50 @@ def test_rag_search_stream_refuses_an_over_quota_user_with_a_real_402(
 
     assert_llm_quota_402(resp)
     assert calls == []
+
+
+@pytest.mark.parametrize(("profile", "admitted"), [("accuracy", False), ("fast", True)], ids=["accuracy", "fast"])
+def test_rag_search_stream_names_the_providers_of_the_resolved_request(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+    profile: str,
+    admitted: bool,
+) -> None:
+    """A profile that turns on another LLM stage keeps the 402 on the stream, as on search (TASK-13956)."""
+    from fastapi import HTTPException
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    asked: list[str] = []
+    marked: list[bool] = []
+
+    async def own_key(_uid: object, provider: str) -> bool:
+        """The user has their own OpenAI key (the boundary is under test)."""
+        asked.append(provider)
+        return provider == "openai"
+
+    def past_the_check(*_args: Any, **_kwargs: Any) -> Any:
+        """The stream's next step after the quota check: stop an admitted request before any work."""
+        marked.append(current_llm_call_context().prechecked)
+        raise HTTPException(status_code=418, detail="the quota check let the request through")
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", own_key)
+    monkeypatch.setattr(rag_ep, "_apply_media_collection_scope", past_the_check)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_stream_overrides.post(
+        "/api/v1/rag/search/stream",
+        json={"query": "q", "enable_generation": True, "generation_provider": "openai", "rag_profile": profile},
+    )
+
+    if admitted:
+        assert resp.status_code == 418, resp.text
+        assert marked == [False]
+        assert asked == ["openai"]
+    else:
+        assert_llm_quota_402(resp)
+        assert marked == []
+        assert asked == []

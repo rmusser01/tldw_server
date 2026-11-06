@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Mapping
 from contextlib import ExitStack
 from typing import Any, Optional
 
@@ -207,6 +208,59 @@ def _rag_provider_http_exception(exc: BaseException) -> HTTPException:
         status_code=status_code,
         detail={"error_code": code, "message": message},
     )
+
+
+# Request settings whose stage makes an LLM call besides the answer, on a provider the boundary cannot
+# name before the pipeline runs (its own field, a config default or "openai"). TASK-13956.
+_RAG_OTHER_LLM_STAGES = (
+    "enable_query_classification", "enable_research_loop", "enable_query_rewriting_loop",
+    "enable_document_grading", "enable_knowledge_strips", "enable_fast_hallucination_check",
+    "enable_utility_grading", "enable_claims", "enable_post_verification", "enable_multi_turn_synthesis",
+    "enable_query_decomposition", "enable_suggestions", "enable_web_fallback", "enable_image_search",
+    "enable_video_search", "enable_structured_response", "enable_faithfulness_eval", "enable_intent_routing",
+    "enable_dynamic_granularity", "enable_evidence_accumulation", "enable_evidence_chains", "enable_abstention",
+    "adaptive_rerun_on_low_confidence", "adaptive_advanced_rewrites",
+)
+
+
+def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
+    """The provider of each LLM call a RAG request makes, for ``enforce_llm_quota`` (TASK-13956).
+
+    The answer's provider, as the generator resolves it, and the reformulation's when a chat history
+    is reformulated. Any other LLM stage adds None, so an over-limit user is refused as before.
+    """
+    # ponytail: a stage this list misses is still checked at its own call (refused there, never counted).
+    from tldw_Server_API.app.core.config import load_and_log_configs
+    from tldw_Server_API.app.core.RAG.rag_service.generation_defaults import resolve_generation_defaults
+
+    named = settings.get("generation_provider")
+    providers: list[str | None] = [
+        resolve_generation_defaults(load_and_log_configs() or {}, named, settings.get("generation_model"))[0]
+    ]
+    if settings.get("chat_history") and settings.get("enable_query_reformulation", True):
+        providers.append(settings.get("classifier_provider") or named or "openai")
+    if (
+        str(settings.get("strategy") or "standard") != "standard"
+        or settings.get("search_depth_mode") == "quality"
+        or (settings.get("enable_reranking", True) and settings.get("reranking_strategy") in {"llm_scoring", "two_tier"})
+        or any(settings.get(flag) for flag in _RAG_OTHER_LLM_STAGES)
+    ):
+        providers.append(None)
+    return providers
+
+
+def _resolved_rag_settings(request: Any, current_user: Any, allowed_fields: set[str] | None = None) -> dict[str, Any]:
+    """The request as the pipeline runs it (a ``rag_profile``'s and the server's search defaults applied).
+
+    For the quota check of a route that resolves its request only after the check (TASK-13956).
+    """
+    return resolve_rag_request(
+        request,
+        current_user=current_user,
+        single_user_id_resolver=DatabasePaths.get_single_user_id,
+        search_agent_setting_fn=_search_agent_setting,
+        search_agent_allowed_fields=allowed_fields,
+    ).payload
 
 
 def _copy_rag_request_with_updates(
@@ -1477,7 +1531,9 @@ async def unified_search_endpoint(
         # Usage quotas (LLM usage accounting spec §4a): a request that generates an answer is checked.
         # The resolved payload is what the pipeline receives; the agentic branch reads the same value.
         if bool(standard_bundle.resolved_request.payload.get("enable_generation", request.enable_generation)):
-            await enforce_llm_quota(getattr(current_user, "id", None))
+            await enforce_llm_quota(
+                getattr(current_user, "id", None), provider=_rag_llm_providers(standard_bundle.resolved_request.payload)
+            )
 
         # Branch: agentic strategy builds a synthetic chunk at query time
         if strategy_value == 'agentic':
@@ -1684,8 +1740,10 @@ async def unified_batch_endpoint(
         )
         await enforce_rag_query_quota(getattr(current_user, "id", None), requested_units)
         if request.enable_generation:
-            # Usage quotas (LLM usage accounting spec §4a): one flag turns generation on for every query.
-            await enforce_llm_quota(getattr(current_user, "id", None))
+            # Usage quotas (LLM usage accounting spec §4a): one flag turns generation on for every query. The
+            # providers come from the resolved request, which carries the server's search defaults (TASK-13956).
+            resolved_settings = _resolved_rag_settings(request, current_user, _BATCH_ROUND2_DEFAULT_FIELDS)
+            await enforce_llm_quota(getattr(current_user, "id", None), provider=_rag_llm_providers(resolved_settings))
 
         logger.info(
             f"Batch RAG search: {requested_units} queries, "
@@ -2085,7 +2143,7 @@ async def resume_batch_endpoint(
         if bool(resume_config.get("enable_generation")):
             # Usage quotas (LLM usage accounting spec §4a): the saved request generates answers,
             # and the work runs for the checkpoint's owner.
-            await enforce_llm_quota(getattr(execution_user, "id", None))
+            await enforce_llm_quota(getattr(execution_user, "id", None), provider=_rag_llm_providers(resume_config))
 
         db_paths = {
             "media_db_path": execution_media_db.db_path if execution_media_db else None,
@@ -2249,8 +2307,10 @@ async def unified_search_stream_endpoint(
 ):
     if not request.enable_generation:
         raise HTTPException(status_code=400, detail="enable_generation must be true for streaming.")
-    # Usage quotas (LLM usage accounting spec §4a), before the streaming response starts.
-    await enforce_llm_quota(getattr(current_user, "id", None))
+    # Usage quotas (LLM usage accounting spec §4a), before the streaming response starts. The providers come
+    # from the resolved request, which carries a profile's switches and the server's search defaults (TASK-13956).
+    resolved_settings = _resolved_rag_settings(request, current_user)
+    await enforce_llm_quota(getattr(current_user, "id", None), provider=_rag_llm_providers(resolved_settings))
     request = _apply_media_collection_scope(request, collections_db)
 
     # Streaming search counts as a single RAG query.
@@ -2383,8 +2443,9 @@ async def advanced_search_endpoint(
     Advanced search with common features enabled.
     """
     if with_answer:
-        # Usage quotas (LLM usage accounting spec §4a): answer generation is checked before any work.
-        await enforce_llm_quota(getattr(current_user, "id", None))
+        # Usage quotas (LLM usage accounting spec §4a): answer generation is checked before any work. Its only
+        # LLM call is the answer, on the default provider (advanced_search turns on no other LLM stage).
+        await enforce_llm_quota(getattr(current_user, "id", None), provider=_rag_llm_providers({}))
     try:
         credential_runtime = _build_credential_runtime(request, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
