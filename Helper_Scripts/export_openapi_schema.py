@@ -15,8 +15,8 @@ RF1, the #2590 class). This script is the backend half of the drift gate:
   the sha256, so the gate fires.
 
 Determinism: a PINNED canonical environment is applied internally (the app has
-env-driven route toggles — MINIMAL_TEST_APP, route enable/disable, _TEST_MODE
-middleware — that would otherwise make the schema differ between machines), and
+env-driven route toggles — MINIMAL_TEST_APP, route enable/disable —
+that would otherwise make the schema differ between machines), and
 the schema is serialized with ``sort_keys=True``. The version field is
 normalized so a package bump does not read as API drift.
 """

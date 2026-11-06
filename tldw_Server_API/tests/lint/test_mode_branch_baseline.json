@@ -145,7 +145,7 @@
   "core/Workflows/adapters/utility/misc.py": {"lines": 2, "predicates": 0, "reason": null},
   "core/config.py": {"lines": 10, "predicates": 0, "reason": null},
   "core/config_llm_providers.py": {"lines": 2, "predicates": 0, "reason": null},
-  "main.py": {"lines": 14, "predicates": 1, "reason": null},
+  "main.py": {"lines": 3, "predicates": 0, "reason": null},
   "services/jobs_webhooks_service.py": {"lines": 1, "predicates": 0, "reason": null},
   "services/lifecycle_worker_specs.py": {"lines": 1, "predicates": 0, "reason": null},
   "services/lifespan_shutdown_sequence.py": {"lines": 2, "predicates": 0, "reason": null},
