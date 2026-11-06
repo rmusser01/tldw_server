@@ -997,6 +997,14 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "product-watchlists-core",
             "product-watchlists-pipeline",
         } | workflow_shards
+        if job_name in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+            product_shards.remove("product-notes-persona")
+            product_shards.update({
+                "product-notes-legacy",
+                "product-notes-new",
+                "product-persona",
+                "product-personalization",
+            })
         assert product_shards.issubset(shard_names)
         assert "product-workflows" not in shard_names
         assert "product-workflows-adapters" not in shard_names
@@ -2507,3 +2515,40 @@ def test_gap5_partitions_preserve_workload_pgvector_and_admission() -> None:
                     owners[path].append(shard["name"])
         assert files and all(len(names) == 1 for names in owners.values()), (job, owners)  # nosec B101 -- No omission or duplication.
         assert {names[0] for names in owners.values()} == set(groups)  # nosec B101 -- Three independent budgets.
+
+def test_notes_persona_linux_partitions_preserve_every_module_once() -> None:
+    """Give the timed-out product families independent unchanged Linux budgets."""
+    from Helper_Scripts.ci.check_shard_coverage import is_covered
+
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests")
+    groups = {
+        f"product-{name}": {(root / directory).as_posix()}
+        for name, directory in (
+            ("notes-legacy", "Notes"),
+            ("notes-new", "Notes_NEW"),
+            ("persona", "Persona"),
+            ("personalization", "Personalization"),
+        )
+    }
+    files = {
+        path.as_posix()
+        for directory in set().union(*groups.values())
+        for path in Path(directory).rglob("*.py")
+        if path.name.startswith("test_") or path.name.endswith("_test.py")
+    }
+    for job in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        assert len(shards) <= 256  # nosec B101 -- Preserve matrix admission.
+        assert all(shard["name"] != "product-notes-persona" for shard in shards)  # nosec B101 -- Retire the combined budget.
+        owners: dict[str, list[str]] = {path: [] for path in files}
+        for shard in shards:
+            paths = str(shard["paths"]).split()
+            if shard["name"] in groups:
+                assert set(paths) == groups[shard["name"]], (job, shard)  # nosec B101 -- Keep the original workload.
+                assert set(shard) == {"name", "paths"}, (job, shard)  # nosec B101 -- Preserve original row metadata.
+            for path in files:
+                if is_covered(path, paths):
+                    owners[path].append(shard["name"])
+        assert files and all(len(names) == 1 for names in owners.values()), (job, owners)  # nosec B101 -- No omitted or repeated module.
+        assert {names[0] for names in owners.values()} == set(groups)  # nosec B101 -- Four complete independent budgets.

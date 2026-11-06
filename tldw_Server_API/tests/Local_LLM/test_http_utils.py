@@ -225,9 +225,6 @@ async def test_managed_readiness_keeps_exact_configured_origin(
     from tldw_Server_API.app.core.exceptions import EgressPolicyError
     from tldw_Server_API.app.core.Local_LLM import http_utils
 
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("TESTING", raising=False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
