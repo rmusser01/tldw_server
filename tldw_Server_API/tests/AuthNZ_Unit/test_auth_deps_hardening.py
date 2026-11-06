@@ -1272,4 +1272,3 @@ async def test_get_db_transaction_maps_pool_exhaustion_to_exact_busy_response(
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "Authentication database is busy. Please retry shortly."
     assert exc_info.value.headers == {"Retry-After": "4"}
-
