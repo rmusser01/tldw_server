@@ -30,7 +30,7 @@ Note: This README follows the project-wide template to help contributors quickly
 - Architecture & Data Flow:
   - Endpoints call service modules via DI from `API_Deps/auth_deps.py`.
   - Services include: `password_service.py`, `jwt_service.py`, `session_manager.py`, `token_blacklist.py`, `api_key_manager.py`, `virtual_keys.py`, `quotas.py`, `orgs_teams.py`, `rbac.py`, `permissions.py`.
-  - Middleware and guards: `rate_limiter.py`, `llm_budget_middleware.py`, `csrf_protection.py`, `security_headers.py`, `usage_logging_middleware.py`.
+  - Middleware and guards: `rate_limiter.py`, `csrf_protection.py`, `security_headers.py`, `usage_logging_middleware.py` (the LLM budget middleware is `core/Usage/llm_budget_middleware.py`).
   - Backends: SQLite (default) and PostgreSQL (production); optional Redis for cache/limits/blacklist.
 - Modes:
   - Single-user: `X-API-KEY` is validated; optional IP allowlist; JWT stack bypassed.
@@ -91,14 +91,14 @@ Note: This README follows the project-wide template to help contributors quickly
   - Core services/utilities: `settings.py`, `database.py`, `migrations.py`, `pg_migrations_extra.py`, `initialize.py`, `run_migrations.py`.
   - Auth flows: `jwt_service.py`, `session_manager.py`, `token_blacklist.py`, `password_service.py`, `mfa_service.py`, `email_service.py`.
   - RBAC/orgs: `rbac.py`, `permissions.py`, `orgs_teams.py`, `privilege_catalog.py`.
-  - Guardrails: `rate_limiter.py`, `llm_budget_middleware.py`, `csrf_protection.py`, `security_headers.py`, `usage_logging_middleware.py`, `llm_budget_guard.py`.
+  - Guardrails: `rate_limiter.py`, `csrf_protection.py`, `security_headers.py`, `usage_logging_middleware.py`. The LLM budget guard and middleware live in `core/Usage/llm_budget_guard.py` and `core/Usage/llm_budget_middleware.py`; BYOK and provider credentials in `core/Provider_Credentials/`.
   - Keys/budgets: `api_key_manager.py`, `virtual_keys.py`, `quotas.py`.
-  - Ops/monitoring: `monitoring.py`, `alerting.py`, `scheduler.py`.
+  - Ops/monitoring: `monitoring.py`, `alerting.py`. The scheduler lives in `services/authnz_scheduler.py`.
 - Extension Points:
   - Add endpoints under `app/api/v1/endpoints/` and use dependencies from `API_Deps/auth_deps.py` (`get_auth_principal`, `RequireRole`, `RequirePermission`, `TokenScopeGuard`, `check_rate_limit`).
   - Extend roles/permissions using RBAC tables; seed updates go into `migrations.py` seeding section.
   - Add budgets or allowlists by extending `virtual_keys.py`/`api_key_manager.py` and updating schema + tests.
-  - Add periodic tasks in `scheduler.py` (e.g., cleanup of expired tokens/lockouts).
+  - Add periodic tasks in `services/authnz_scheduler.py` (e.g., cleanup of expired tokens/lockouts).
 - Coding Patterns:
   - Prefer DI via `Depends(...)`; avoid parsing headers directly in endpoints.
   - Use `loguru` for logging; never log secrets (API keys, passwords).
