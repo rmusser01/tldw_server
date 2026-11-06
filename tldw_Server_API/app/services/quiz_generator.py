@@ -1539,11 +1539,6 @@ async def _call_quiz_generation_llm(
 _ORIGINAL_CALL_QUIZ_GENERATION_LLM = _call_quiz_generation_llm
 
 
-def _should_use_deterministic_test_mode() -> bool:
-    """Keep deterministic test-mode behavior unless a test explicitly patches the LLM call."""
-    return is_test_mode() and _call_quiz_generation_llm is _ORIGINAL_CALL_QUIZ_GENERATION_LLM
-
-
 def _resolve_primary_media_id(normalized_sources: Sequence[dict[str, str]]) -> int | None:
     for source in normalized_sources:
         if source["source_type"] != "media":
@@ -1897,7 +1892,7 @@ async def generate_quiz_from_sources(
             }
 
         metrics.phase = "validation"
-        if _should_use_deterministic_test_mode():
+        if is_test_mode() and _call_quiz_generation_llm is _ORIGINAL_CALL_QUIZ_GENERATION_LLM:
             questions = _build_test_mode_questions(
                 evidence=evidence,
                 normalized_sources=normalized_sources,

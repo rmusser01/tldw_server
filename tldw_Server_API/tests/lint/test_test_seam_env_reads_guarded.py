@@ -57,7 +57,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
         _PYTEST_MARKER,
         (
             "__init__.py",
-            "api/v1/API_Deps/Audit_DB_Deps.py",
             "api/v1/endpoints/admin/__init__.py",
             "api/v1/endpoints/character_chat_sessions.py",
             "api/v1/endpoints/embeddings_v5_production_enhanced.py",
@@ -72,7 +71,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
             "core/Chat/conversation_enrichment.py",
             "core/Chatbooks/quota_manager.py",
             "core/Chunking/chunker.py",
-            "core/DB_Management/db_path_utils.py",
             "core/DB_Management/media_db/runtime/backend_resolution.py",
             "core/Embeddings/audit_adapter.py",
             "core/Evaluations/audit_adapter.py",
@@ -81,7 +79,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
             "core/Ingestion_Media_Processing/download_utils.py",
             "core/MCP_unified/environment.py",
             "core/Prompt_Management/prompt_studio/evaluation_manager.py",
-            "core/Provider_Credentials/byok_testing.py",
             "core/RAG/rag_custom_metrics.py",
             "core/Resource_Governance/governor_redis.py",
             "core/Sandbox/runners/lima_enforcer.py",

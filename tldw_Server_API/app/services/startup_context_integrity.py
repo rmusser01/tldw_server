@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
 )
 from tldw_Server_API.app.core.Context_Integrity.verifier import verify_inventory
 from tldw_Server_API.app.core.DB_Management import db_path_utils
+from tldw_Server_API.app.core.testing import is_test_context
 from tldw_Server_API.app.services.startup_warning_models import StartupWarningRecord
 from tldw_Server_API.app.services.startup_warning_registry import (
     StartupWarningRegistry,
@@ -204,7 +205,7 @@ def _resolve_user_db_base_dir_for_discovery() -> Path:
     default_base = (project_root / "Databases" / "user_databases").resolve()
     user_db_base = settings_user_db_base or env_user_db_base
 
-    if db_path_utils._is_test_context() and env_user_db_base:
+    if is_test_context() and env_user_db_base:
         settings_candidate = _resolve_candidate_like_database_paths(
             settings_user_db_base,
             project_root=project_root,
@@ -212,7 +213,7 @@ def _resolve_user_db_base_dir_for_discovery() -> Path:
         if settings_candidate is None or settings_candidate == default_base:
             user_db_base = env_user_db_base
 
-    if db_path_utils._is_test_context() and not env_user_db_base:
+    if is_test_context() and not env_user_db_base:
         settings_candidate = _resolve_candidate_like_database_paths(
             settings_user_db_base,
             project_root=project_root,
@@ -231,7 +232,7 @@ def _resolve_user_db_base_dir_for_discovery() -> Path:
             user_db_base = legacy_base
 
     if not user_db_base:
-        if db_path_utils._is_test_context():
+        if is_test_context():
             run_tag = db_path_utils._get_test_fallback_run_tag()
             safe_run_tag = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(run_tag))
             return (Path(tempfile.gettempdir()) / "tldw_user_databases_test" / safe_run_tag).resolve()

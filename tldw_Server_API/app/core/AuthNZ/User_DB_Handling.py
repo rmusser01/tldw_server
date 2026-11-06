@@ -47,9 +47,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.testing import (
-    env_flag_enabled,
-    is_explicit_pytest_runtime,
-    is_test_mode,
+    is_test_context,
 )
 from tldw_Server_API.app.core.Utils.fastapi_routes import served_route_for_scope
 
@@ -318,18 +316,6 @@ except _USER_DB_NONCRITICAL_EXCEPTIONS:
     _single_user_instance = None
 
 
-def _is_test_context() -> bool:
-    """Return True when running in pytest or explicit test-mode contexts."""
-    try:
-        if getattr(get_settings(), "TEST_MODE", False):
-            return True
-    except _USER_DB_NONCRITICAL_EXCEPTIONS:
-        pass
-    if is_explicit_pytest_runtime():
-        return True
-    return is_test_mode() or env_flag_enabled("TESTING")
-
-
 def _looks_like_jwt(token: Optional[str]) -> bool:
     """Whether ``token`` has a JWT's three dot-separated segments; a bearer that does not is an API key.
 
@@ -359,7 +345,7 @@ def resolve_user_id_value(
 ) -> Optional[Union[int, str]]:
     """Normalize user_id values with single-user fallback and test-friendly rules."""
     if allow_test_user_ids is None:
-        allow_test_user_ids = _is_test_context()
+        allow_test_user_ids = is_test_context()
 
     missing = user_id is None or (isinstance(user_id, str) and not user_id.strip())
     if missing:
@@ -1126,10 +1112,10 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
             users_repo = await AuthnzUsersRepo.from_pool()
             user_data = await users_repo.get_user_by_id(user_id)
         except _USER_DB_NONCRITICAL_EXCEPTIONS:
-            if not _is_test_context():
+            if not is_test_context():
                 raise
 
-        if not user_data and _is_test_context():
+        if not user_data and is_test_context():
             try:
                 from tldw_Server_API.app.core.DB_Management.Users_DB import (
                     get_user_by_id as legacy_get_user_by_id,

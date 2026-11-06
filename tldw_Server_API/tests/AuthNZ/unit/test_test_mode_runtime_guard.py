@@ -1,6 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core import testing
+
 from tldw_Server_API.app.core.testing import (
     is_test_mode,
     is_production_like_env,
@@ -135,3 +137,22 @@ def test_main_loguru_reconfig_override_accepts_single_letter_y(
     from tldw_Server_API.app import main as main_mod
 
     assert main_mod._caller_allowed_for_loguru_config() is True
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({}, False),
+        ({"TEST_MODE": "1"}, True),
+        ({"TLDW_TEST_MODE": "y"}, True),
+        ({"TESTING": "true"}, True),
+        ({"PYTEST_CURRENT_TEST": "t.py::t (call)"}, True),
+        ({"TEST_MODE": "0", "TESTING": "0"}, False),
+    ],
+)
+def test_is_test_context_is_the_union_of_the_test_signals(monkeypatch, env, expected):
+    for key in ("TEST_MODE", "TLDW_TEST_MODE", "TESTING", "PYTEST_CURRENT_TEST"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert testing.is_test_context() is expected

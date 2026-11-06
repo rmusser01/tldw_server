@@ -102,7 +102,7 @@ def test_user_db_base_dir_env_overrides_settings_outside_tests(monkeypatch, tmp_
     settings_base = tmp_path / "settings_base"
     monkeypatch.setenv("USER_DB_BASE_DIR", f"  {env_base}\t")
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(settings_base))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     base_dir = DatabasePaths.get_user_db_base_dir()
 
@@ -114,7 +114,7 @@ def test_user_db_base_dir_blank_env_falls_back_to_settings(monkeypatch, tmp_path
     settings_base = tmp_path / "settings_base"
     monkeypatch.setenv("USER_DB_BASE_DIR", "  \t")
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(settings_base))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     resolved = DatabasePaths.resolve_user_db_base_dir()
 
@@ -130,7 +130,6 @@ def test_user_db_base_dir_env_overrides_stale_settings_in_tests(monkeypatch, tmp
     stale_settings_base = tmp_path / "stale_settings_base"
     monkeypatch.setenv("USER_DB_BASE_DIR", str(env_base))
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(stale_settings_base))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
 
     resolved = DatabasePaths.resolve_user_db_base_dir()
 
@@ -144,7 +143,7 @@ def test_user_db_base_dir_env_overrides_stale_settings_in_tests(monkeypatch, tmp
 def test_invalid_user_id_rejected_outside_tests(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     with pytest.raises(ValueError, match="Invalid user_id"):
         DatabasePaths.get_user_base_directory("..")
@@ -153,7 +152,7 @@ def test_invalid_user_id_rejected_outside_tests(monkeypatch, tmp_path):
 def test_non_numeric_user_id_rejected_outside_tests(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     with pytest.raises(ValueError, match="Invalid user_id"):
         DatabasePaths.get_user_base_directory("user_abc")
@@ -162,7 +161,6 @@ def test_non_numeric_user_id_rejected_outside_tests(monkeypatch, tmp_path):
 def test_non_numeric_user_id_allowed_in_tests(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
 
     user_dir = DatabasePaths.get_user_base_directory("user_abc")
     _expect_equal(user_dir.name, "user_abc", "test mode should preserve safe non-numeric user ids")
@@ -200,7 +198,6 @@ def test_user_db_base_dir_test_fallback_is_not_repo_local(monkeypatch):
     monkeypatch.delenv("USER_DB_BASE", raising=False)
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", None)
     monkeypatch.setitem(settings, "USER_DB_BASE", None)
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
 
     repo_local_default = (Path.cwd() / "Databases" / "user_databases").resolve()
     resolved = DatabasePaths.get_user_db_base_dir()
@@ -222,7 +219,6 @@ def test_resolve_user_db_base_dir_matches_test_fallback_without_creating(monkeyp
     monkeypatch.setenv("TLDW_TEST_RUN_ID", f"readonly-{tmp_path.name}")
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", None)
     monkeypatch.setitem(settings, "USER_DB_BASE", None)
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
 
     resolved = DatabasePaths.resolve_user_db_base_dir()
 
@@ -243,7 +239,6 @@ def test_user_db_base_dir_test_fallback_uses_unique_run_tag(monkeypatch):
     monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     monkeypatch.setitem(settings, "USER_DB_BASE_DIR", None)
     monkeypatch.setitem(settings, "USER_DB_BASE", None)
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
 
     resolved = DatabasePaths.get_user_db_base_dir()
 
@@ -274,7 +269,7 @@ def test_resolve_trusted_database_path_accepts_absolute_path_inside_project_root
     db_dir.mkdir(parents=True)
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     resolved = db_path_utils.resolve_trusted_database_path(db_dir / "absolute.db")
 
@@ -295,7 +290,7 @@ def test_resolve_trusted_database_path_rejects_symlink_escape(monkeypatch, tmp_p
     (trusted_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     with pytest.raises(InvalidStoragePathError):
         db_path_utils.resolve_trusted_database_path(trusted_dir / "escape" / "users.db")
@@ -314,7 +309,7 @@ def test_resolve_trusted_database_path_rejects_symlinked_database_file(monkeypat
     (trusted_dir / "users.db").symlink_to(outside_db)
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     with pytest.raises(InvalidStoragePathError):
         db_path_utils.resolve_trusted_database_path(trusted_dir / "users.db")
@@ -329,7 +324,6 @@ def test_resolve_trusted_database_path_accepts_symlink_alias_to_temp_root(monkey
     temp_alias.symlink_to(real_temp_root, target_is_directory=True)
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
     monkeypatch.setattr(db_path_utils.tempfile, "gettempdir", lambda: str(temp_alias))
 
     resolved = db_path_utils.resolve_trusted_database_path(temp_alias / "dbs" / "app.db")
@@ -346,7 +340,7 @@ def test_resolve_trusted_database_path_rejects_unresolved_home_prefix(monkeypatc
     project_root.mkdir()
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     with pytest.raises(InvalidStoragePathError):
@@ -359,7 +353,7 @@ def test_ensure_trusted_database_parent_dir_creates_missing_parent(monkeypatch, 
     target_path = project_root / "Databases" / "nested" / "app.db"
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     resolved = db_path_utils.ensure_trusted_database_parent_dir(
         target_path,
@@ -376,7 +370,7 @@ def test_require_trusted_database_parent_exists_rejects_missing_parent(monkeypat
     target_path = project_root / "Databases" / "missing" / "app.db"
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: False)
+    monkeypatch.setattr(db_path_utils, "is_test_context", lambda: False)
 
     with pytest.raises(ValueError, match="parent directory must already exist"):
         db_path_utils.require_trusted_database_parent_exists(
@@ -395,7 +389,6 @@ def test_require_trusted_database_parent_exists_accepts_symlink_alias_to_temp_ro
     (real_temp_root / "dbs").mkdir()
 
     monkeypatch.setattr(db_path_utils, "get_project_root", lambda: str(project_root))
-    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
     monkeypatch.setattr(db_path_utils.tempfile, "gettempdir", lambda: str(temp_alias))
 
     resolved = db_path_utils.require_trusted_database_parent_exists(

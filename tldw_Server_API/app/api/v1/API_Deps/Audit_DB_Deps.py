@@ -5,7 +5,6 @@ Manages user-specific audit service instances for dependency injection.
 import asyncio
 import concurrent.futures
 import contextlib
-import os
 import threading
 import time
 import weakref
@@ -39,7 +38,7 @@ from tldw_Server_API.app.core.exceptions import (
     ServiceInitializationError,
     ServiceInitializationTimeoutError,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.testing import is_test_context
 
 #######################################################################################################################
 
@@ -191,14 +190,6 @@ async def _stop_audit_service_instance(
         return False, False, f"{type(exc).__name__}: {exc}", exc
 
 
-def _is_test_context() -> bool:
-    try:
-        return bool(os.getenv("PYTEST_CURRENT_TEST")) or is_test_mode()
-    except (OSError, RuntimeError, TypeError, ValueError) as exc:
-        logger.debug("Failed to determine test context; defaulting to False: {}", exc)
-        return False
-
-
 def _mark_service_used(service: UnifiedAuditService) -> None:
     try:
         service._last_used_ts = time.monotonic()  # type: ignore[attr-defined]
@@ -340,7 +331,7 @@ def _schedule_service_stop(user_id: Optional[Union[int, str]], service: UnifiedA
 
     if current_loop:
         # In test contexts, avoid leaving background stop tasks pending on loop shutdown.
-        if _is_test_context():
+        if is_test_context():
             threading.Thread(target=_run, name=f"audit-stop-{user_id}", daemon=True).start()
             return
         task = current_loop.create_task(_stop())
@@ -839,7 +830,7 @@ async def get_or_create_audit_service_for_user_id_optional(
         if raw_id in {"system", "unidentified_user"}:
             logger.warning("Non-numeric system user_id {!r}; routing to default audit service.", user_id)
             return await get_or_create_default_audit_service()
-        if _is_test_context():
+        if is_test_context():
             # In tests we allow non-numeric ids to map to per-user storage paths.
             return await _get_or_create_audit_service_for_key(str(user_id))
         msg = f"Invalid non-numeric user_id {user_id!r} for audit service"

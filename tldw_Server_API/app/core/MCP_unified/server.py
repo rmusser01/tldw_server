@@ -435,20 +435,6 @@ class MCPServer:
             )
             return False
 
-    def _is_test_mode(self) -> bool:
-        """Return whether the host reports test mode for MCP behavior gates."""
-        try:
-            return bool(self.environment_flags_provider.is_test_mode())
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-            return False
-
-    def _is_explicit_pytest_runtime(self) -> bool:
-        """Return whether the host reports an explicit pytest runtime."""
-        try:
-            return bool(self.environment_flags_provider.is_explicit_pytest_runtime())
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-            return False
-
     def _should_use_single_user_api_key_compat(self) -> bool:
         """Return whether mounted WS should accept single-user API-key compatibility."""
         flag = os.getenv("MCP_SINGLE_USER_COMPAT_SHIM", "").strip().lower()
@@ -701,7 +687,7 @@ class MCPServer:
 
             try:
                 # Fail fast on insecure production configurations
-                _test_mode = self._is_test_mode() or self._is_explicit_pytest_runtime()
+                _test_mode = self.environment_flags_provider.is_test_mode() or self.environment_flags_provider.is_explicit_pytest_runtime()
                 if not self.config.debug_mode and not _test_mode:
                     ok = validate_config()
                     if not ok:
@@ -1008,7 +994,7 @@ class MCPServer:
 
             # 3) Optional default: enable media module if flag is set and nothing else specified
             enable_media_flag = self._env_flag_enabled("MCP_ENABLE_MEDIA_MODULE")
-            test_mode = self._is_test_mode()
+            test_mode = self.environment_flags_provider.is_test_mode()
             if enable_media_flag and not modules_to_load:
                 default_media_path = self._default_media_db_path()
                 modules_to_load.append(
@@ -1491,7 +1477,7 @@ class MCPServer:
         resolved_ip = controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
         # Test harness mapping and bypass: allow WS in pytest/TEST_MODE and map 'testclient' to loopback
         try:
-            _is_test_env = bool(self._is_explicit_pytest_runtime() or self._is_test_mode())
+            _is_test_env = bool(self.environment_flags_provider.is_explicit_pytest_runtime() or self.environment_flags_provider.is_test_mode())
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             _is_test_env = False
         if resolved_ip == "testclient" or resolved_ip is None and _is_test_env:

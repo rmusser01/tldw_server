@@ -299,7 +299,7 @@ async def test_single_user_test_key_rejected_outside_test_context_for_auth_princ
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     reset_settings()
 
-    monkeypatch.setattr(User_DB_Handling, "_is_test_context", lambda: False)
+    monkeypatch.setattr(User_DB_Handling, "is_test_context", lambda: False)
 
     class _StubApiKeyManager:
         async def validate_api_key(self, **_kwargs):
@@ -326,7 +326,7 @@ async def test_single_user_test_key_rejected_outside_test_context_for_get_reques
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     reset_settings()
 
-    monkeypatch.setattr(User_DB_Handling, "_is_test_context", lambda: False)
+    monkeypatch.setattr(User_DB_Handling, "is_test_context", lambda: False)
 
     class _StubApiKeyManager:
         async def validate_api_key(self, **_kwargs):
@@ -343,15 +343,6 @@ async def test_single_user_test_key_rejected_outside_test_context_for_get_reques
 
     assert exc.value.status_code == 401
     reset_settings()
-
-
-def test_user_db_is_test_context_accepts_single_letter_y(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "y")
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-
-    assert User_DB_Handling._is_test_context() is True
 
 
 @pytest.mark.parametrize(

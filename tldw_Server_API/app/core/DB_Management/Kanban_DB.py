@@ -37,7 +37,8 @@ from typing import Any  # noqa: E402
 from loguru import logger  # noqa: E402
 
 from tldw_Server_API.app.core.config import settings  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths, _is_test_context  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
+from tldw_Server_API.app.core.testing import is_test_context  # noqa: E402
 from tldw_Server_API.app.core.exceptions import StorageUnavailableError  # noqa: E402
 
 # Builds the vector index from (user_id, embedding_config); the openers pass core.Kanban's factory.
@@ -79,7 +80,7 @@ def _generate_uuid() -> str:
 def _normalize_user_id_for_records(user_id: str) -> str:
     """Normalize user IDs for storage; in tests, prefix numeric IDs with test_user_."""
     raw = str(user_id).strip()
-    if _is_test_context() and raw.isdigit():
+    if is_test_context() and raw.isdigit():
         return f"test_user_{raw}"
     return raw
 
@@ -3921,7 +3922,7 @@ END;
         retry_attempt: int,
     ) -> None:
         """Schedule a best-effort retry for vector index operations."""
-        if _is_test_context():
+        if is_test_context():
             return
         if retry_attempt >= self.VECTOR_INDEX_MAX_RETRY_ATTEMPTS:
             return
