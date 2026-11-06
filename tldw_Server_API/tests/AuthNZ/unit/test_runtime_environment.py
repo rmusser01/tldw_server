@@ -71,12 +71,6 @@ def _rg_startup_guard() -> bool:
     return is_production_like_env()
 
 
-def _user_db_handling() -> bool:
-    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import _is_production_like_env
-
-    return _is_production_like_env()
-
-
 def _program_evaluator() -> bool:
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.program_evaluator import ProgramEvaluator
 
@@ -139,7 +133,6 @@ CALLERS: dict[str, Callable[[], bool]] = {
     "testing.is_production_like_env": _testing,
     "config.is_production_environment": _config,
     "rg_startup_guard.is_production_like_env": _rg_startup_guard,
-    "User_DB_Handling._is_production_like_env": _user_db_handling,
     "ProgramEvaluator.is_production_like_environment": _program_evaluator,
     "Admin_Webhooks.is_production_environment_mapping": _admin_webhooks,
     "connectors_service._connector_secret_encryption_required": _connectors_require_encryption,
@@ -287,8 +280,6 @@ def test_user_db_handling_treats_an_empty_pytest_marker_as_unset(neutral_env: py
     neutral_env.setenv("PYTEST_CURRENT_TEST", "")
 
     assert User_DB_Handling._is_test_context() is False
-    assert User_DB_Handling._is_strict_test_bypass_context() is False
 
     neutral_env.setenv("PYTEST_CURRENT_TEST", "tests::x")
     assert User_DB_Handling._is_test_context() is True
-    assert User_DB_Handling._is_strict_test_bypass_context() is True

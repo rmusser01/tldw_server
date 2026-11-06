@@ -94,6 +94,231 @@ def test_complete_v2_refuses_an_over_quota_user_before_any_llm_call(
     assert calls == []
 
 
+def _new_chat(test_client, auth_headers, settings: dict | None = None) -> str:
+    """A chat with the first character, and the chat settings given."""
+    characters = test_client.get("/api/v1/characters/", headers=auth_headers)
+    assert characters.status_code == 200, characters.text
+    created = test_client.post(
+        "/api/v1/chats/", headers=auth_headers, json={"character_id": characters.json()[0]["id"]}
+    )
+    assert created.status_code == 201, created.text
+    chat_id = created.json()["id"]
+    if settings is not None:
+        saved = test_client.put(f"/api/v1/chats/{chat_id}/settings", headers=auth_headers, json={"settings": settings})
+        assert saved.status_code == 200, saved.text
+    return chat_id
+
+
+@pytest.mark.integration
+def test_complete_v2_admits_an_over_limit_user_whose_reply_runs_on_their_own_key(
+    monkeypatch, test_client, auth_headers, populated_character_db
+):
+    """Past a limit, a reply whose provider runs on the user's own key is let through unmarked (TASK-13956)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    chat_id = _new_chat(test_client, auth_headers)
+    asked: list[str] = []
+    admitted: list[bool] = []
+
+    async def _own_key(_uid, provider):
+        """Stands in for the lookup answering True (the boundary is under test)."""
+        asked.append(provider)
+        return True
+
+    def _completion(**_kwargs):
+        admitted.append(current_llm_call_context().prechecked)
+        return {"choices": [{"message": {"content": "On your own key."}}]}
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", _completion)
+    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_work(monkeypatch)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={"provider": "llama", "model": "garden-model", "append_user_message": "Hi", "save_to_db": False},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["assistant_content"] == "On your own key."
+    assert asked == [response.json()["provider"]]
+    assert admitted == [False]  # unmarked: the call is checked where its key is known
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("stream", [False, True])
+def test_complete_v2_answers_402_when_an_admitted_own_key_reply_is_refused_at_the_call(
+    monkeypatch, test_client, auth_headers, populated_character_db, stream
+):
+    """Admitted on their own key, a reply refused at the call is the user's limit: 402, not 502 (TASK-13956)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    chat_id = _new_chat(test_client, auth_headers)
+
+    async def _own_key(_uid, _provider):
+        """The lookup says the reply's provider runs on the user's own key."""
+        return True
+
+    def _refused_at_the_call(**_kwargs):
+        """What the check at the call raises when the reply's key turns out not to be the user's own."""
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", _refused_at_the_call)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_work(monkeypatch)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={"provider": "llama", "model": "garden-model", "append_user_message": "Hi", "save_to_db": False, "stream": stream},
+    )
+
+    assert_llm_quota_402(response)
+
+
+@pytest.mark.integration
+def test_complete_v2_still_refuses_an_own_key_turn_that_may_extract_memories(
+    monkeypatch, test_client, auth_headers, populated_character_db
+):
+    """Memory extraction runs on the server's key, so a saved turn in a chat that has it on is refused (TASK-13956)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Character_Chat.modules import character_memory_extraction
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    chat_id = _new_chat(
+        test_client, auth_headers, {"characterMemoryExtraction": {"enabled": True, "intervalMessages": 1}}
+    )
+    calls: list[dict] = []
+    extractions: list[dict] = []
+
+    async def _own_key(_uid, _provider):
+        """The reply's provider would run on the user's own key."""
+        return True
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: calls.append(kwargs))
+    # A regression would start extraction, which calls the server's provider for real: stub it.
+    monkeypatch.setattr(
+        character_memory_extraction, "extract_character_memories", lambda **kwargs: extractions.append(kwargs)
+    )
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_work(monkeypatch)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={"provider": "llama", "model": "garden-model", "append_user_message": "Hi", "save_to_db": True},
+    )
+
+    assert_llm_quota_402(response)
+    assert response.json()["detail"]["error"] == "limit_exceeded"
+    assert calls == []
+    assert extractions == []
+
+
+@pytest.mark.integration
+def test_complete_v2_answers_402_when_the_refused_router_call_leaves_no_route(
+    monkeypatch, test_client, auth_headers, populated_character_db
+):
+    """The check now runs after the auto-router; a refused router call under failure_mode=error is still the 402."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    chat_id = _new_chat(test_client, auth_headers)
+    calls: list[dict] = []
+
+    async def _refused_router_call(**_kwargs):
+        """What the check at the call raises for an over-limit user's router call on a server key."""
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(
+        character_chat_sessions,
+        "get_configured_providers",
+        lambda: {
+            "default_provider": "local-llm",
+            "providers": [
+                {
+                    "name": "local-llm",
+                    "is_configured": True,
+                    "default_model": "router-model",
+                    "models_info": [{"name": "router-model"}, {"name": "routed-model"}],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", _refused_router_call)
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: calls.append(kwargs))
+    refuse_llm_work(monkeypatch)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={
+            "model": "auto",
+            "routing": {"failure_mode": "error"},
+            "append_user_message": "Route this",
+            "save_to_db": False,
+        },
+    )
+
+    assert_llm_quota_402(response)
+    assert "error_code" not in response.json()["detail"]  # not the 503 auto_routing_failed
+    assert calls == []
+
+
+@pytest.mark.integration
+def test_complete_v2_asks_about_the_routed_provider(monkeypatch, test_client, auth_headers, populated_character_db):
+    """With model auto, the quota check asks about the provider the auto-router chose (TASK-13956)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    chat_id = _new_chat(test_client, auth_headers)
+    asked: list[str] = []
+
+    async def _router_call(**_kwargs):
+        """The auto-router picks the second model."""
+        return {
+            "choices": [{"message": {"content": '{"provider":"local-llm","model":"routed-model"}'}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+        }
+
+    async def _own_key(_uid, provider):
+        """The routed provider runs on the user's own key."""
+        asked.append(provider)
+        return True
+
+    monkeypatch.setattr(
+        character_chat_sessions,
+        "get_configured_providers",
+        lambda: {
+            "default_provider": "local-llm",
+            "providers": [
+                {
+                    "name": "local-llm",
+                    "is_configured": True,
+                    "default_model": "router-model",
+                    "models_info": [{"name": "router-model"}, {"name": "routed-model"}],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", _router_call)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_work(monkeypatch)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={"model": "auto", "append_user_message": "Route this", "save_to_db": False},
+    )
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["provider"], response.json()["model"]) == ("local-llm", "routed-model")
+    assert asked == ["local-llm"]
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("captured_key", ["router-key-a", None], ids=["a-to-b", "absent-to-b"])
@@ -259,6 +484,67 @@ async def test_auto_router_logs_only_error_types(
     assert diagnostics == {"error": "RuntimeError"}
     assert usage_sentinel not in "\n".join(logged)
     assert provider_sentinel not in "\n".join(logged)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["user", "server_default"])
+async def test_auto_router_usage_row_records_whose_key_the_router_call_used(
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    """The router's row carries its own handle's source, not the reply's (TASK-13956)."""
+    rows: list[dict[str, Any]] = []
+    handle = SimpleNamespace(
+        provider="openai", api_key="router-key", app_config={}, credentials_resolved=True, credential_source=source
+    )
+
+    class Runtime:
+        async def resolve(self, _provider: str, *, model: str | None = None):
+            del model
+            return handle
+
+        async def mark_used(self, _handle: Any) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    async def provider_call(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "choices": [{"message": {"content": '{"provider":"openai","model":"routed"}'}}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9},
+        }
+
+    async def usage_log(**kwargs: Any) -> None:
+        rows.append(kwargs)
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr(character_chat_sessions, "log_model_router_usage", usage_log)
+
+    choice, _diagnostics = await character_chat_sessions._select_auto_character_llm_router_choice(
+        router_request=RouterRequest(model="auto", surface="character_chat", latest_user_turn="route me", scope="chat-1"),
+        policy=RoutingPolicy(
+            request_model="auto", server_default_provider="openai", boundary_mode="server_default_provider"
+        ),
+        candidates=[{"provider": "openai", "model": "routed"}, {"provider": "openai", "model": "alternate"}],
+        provider_listing={
+            "default_provider": "openai",
+            "providers": [
+                {
+                    "name": "openai",
+                    "default_model": "router-model",
+                    "is_configured": True,
+                    "models_info": [{"name": "router-model"}],
+                }
+            ],
+        },
+        current_user=SimpleNamespace(id=1),
+        credential_runtime=Runtime(),
+    )
+
+    assert choice == {"provider": "openai", "model": "routed"}
+    assert [(row["provider"], row.get("credential_source")) for row in rows] == [("openai", source)]
 
 
 @pytest.mark.unit

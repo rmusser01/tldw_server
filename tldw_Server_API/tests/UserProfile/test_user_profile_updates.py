@@ -1777,3 +1777,51 @@ def test_admin_profile_update_identity_locked(auth_headers) -> None:
 
         is_locked, _ = _run_async(limiter.check_lockout(str(username), attempt_type="login"))
         assert is_locked is False
+
+
+def _my_identity(client: TestClient, auth_headers) -> tuple[int, str]:
+    user = client.get("/api/v1/users/me/profile", headers=auth_headers).json()["user"]
+    return int(user["id"]), str(user["username"])
+
+
+def test_admin_profile_update_lock_rolls_back_with_a_failed_request(
+    auth_headers, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lock shares the request's transaction: a later failure discards it."""
+
+    async def _boom(*_args, **_kwargs) -> None:
+        raise RuntimeError("step after the lock write failed")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        user_id, username = _my_identity(client, auth_headers)
+        monkeypatch.setattr(update_service_module, "_touch_user_updated_at", _boom)
+        resp = client.patch(
+            f"/api/v1/admin/users/{user_id}/profile",
+            headers=auth_headers,
+            json={"updates": [{"key": "identity.is_locked", "value": True}]},
+        )
+        assert resp.status_code != 200
+        monkeypatch.undo()
+        is_locked, _ = _run_async(get_rate_limiter().check_lockout(username, attempt_type="login"))
+        assert is_locked is False
+
+
+def test_admin_bulk_profile_update_identity_locked(auth_headers) -> None:
+    """Bulk apply writes the lock on its per-user transaction (no second connection)."""
+    with TestClient(app) as client:
+        user_id, username = _my_identity(client, auth_headers)
+        try:
+            resp = client.post(
+                "/api/v1/admin/users/profile/bulk",
+                headers=auth_headers,
+                json={
+                    "user_ids": [user_id],
+                    "updates": [{"key": "identity.is_locked", "value": True}],
+                },
+            )
+            assert resp.status_code == 200
+            assert "identity.is_locked" in resp.json()["results"][0]["applied"]
+            is_locked, _ = _run_async(get_rate_limiter().check_lockout(username, attempt_type="login"))
+            assert is_locked is True
+        finally:
+            _run_async(get_rate_limiter().reset_failed_attempts(username, attempt_type="login"))

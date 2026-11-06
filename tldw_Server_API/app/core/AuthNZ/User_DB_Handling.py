@@ -50,9 +50,7 @@ from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
     is_test_mode,
-    is_truthy,
 )
-from tldw_Server_API.app.core.testing import is_production_like_env as _is_production_like_env
 from tldw_Server_API.app.core.Utils.fastapi_routes import served_route_for_scope
 
 _USER_DB_NONCRITICAL_EXCEPTIONS = (
@@ -330,26 +328,6 @@ def _is_test_context() -> bool:
     if is_explicit_pytest_runtime():
         return True
     return is_test_mode() or env_flag_enabled("TESTING")
-
-
-def _is_strict_test_bypass_context() -> bool:
-    """
-    Return True only when an explicit test runtime is detected.
-
-    This is intentionally stricter than `_is_test_context()` so that accidental
-    `TESTING=1` environment leakage does not enable auth bypasses in non-test
-    deployments.
-    """
-    if is_explicit_pytest_runtime():
-        return True
-    if is_test_mode():
-        return True
-    try:
-        if getattr(get_settings(), "TEST_MODE", False):
-            return True
-    except _USER_DB_NONCRITICAL_EXCEPTIONS:
-        pass
-    return False
 
 
 def _looks_like_jwt(token: Optional[str]) -> bool:
@@ -1546,45 +1524,6 @@ async def get_request_user(
     - Treats non-JWT Bearer tokens as API keys for compatibility.
     - Delegates headerless requests to the canonical cookie-aware resolver.
     """
-    # Test-mode bypasses are disabled in production for safety
-    try:
-        import os as _os
-        _prod = _is_production_like_env()
-        # Test-mode bypass for evaluations when admin gating is explicitly disabled
-        if (
-            not _prod
-            and env_flag_enabled("TESTING")
-            and not is_truthy(_os.getenv("EVALS_HEAVY_ADMIN_ONLY", "true"))
-            and _is_strict_test_bypass_context()
-        ):
-            logger.info(
-                "TESTING with EVALS_HEAVY_ADMIN_ONLY disabled: "
-                "bypassing auth, returning single-user test instance"
-            )
-            return get_single_user_instance()
-    except _USER_DB_NONCRITICAL_EXCEPTIONS as env_exc:
-        logger.debug(
-            f"get_request_user: test-mode bypass env detection failed; continuing with normal auth: {env_exc}"
-        )
-
-    # Warn if test flags are present in production deployments
-    try:
-        import os as _os
-        _prod = _is_production_like_env()
-        if _prod and (
-            is_test_mode()
-            or env_flag_enabled("TESTING")
-        ) and not getattr(get_request_user, "_warned_testflags_prod", False):
-            logger.warning(
-                "TEST flags detected in a production-like runtime; "
-                "test-only auth bypasses are disabled."
-            )
-            get_request_user._warned_testflags_prod = True
-    except _USER_DB_NONCRITICAL_EXCEPTIONS as warn_exc:
-        logger.debug(
-            f"get_request_user: production test-flag warning emission failed; continuing without warning: {warn_exc}"
-        )
-
     # Fast-path: if an AuthPrincipal has already been resolved, reuse the cached
     # _auth_user instead of re-running authentication logic.
     try:

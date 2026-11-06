@@ -345,62 +345,6 @@ async def test_single_user_test_key_rejected_outside_test_context_for_get_reques
     reset_settings()
 
 
-@pytest.mark.asyncio
-async def test_get_request_user_bypass_requires_strict_test_context(monkeypatch):
-    monkeypatch.setenv("TESTING", "true")
-    monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
-    monkeypatch.delenv("TEST_MODE", raising=False)
-    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
-    reset_settings()
-
-    monkeypatch.setattr(User_DB_Handling, "_is_strict_test_bypass_context", lambda: False)
-
-    request = _build_request({})
-    with pytest.raises(HTTPException) as exc:
-        await get_request_user(request, api_key=None, token=None)
-
-    assert exc.value.status_code == 401
-    reset_settings()
-
-
-@pytest.mark.asyncio
-async def test_get_request_user_bypass_allows_strict_test_context(monkeypatch):
-    monkeypatch.setenv("AUTH_MODE", "single_user")
-    monkeypatch.setenv("TESTING", "true")
-    monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
-    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "test-key-abcdef")
-    reset_settings()
-
-    request = _build_request({})
-    user = await get_request_user(request, api_key=None, token=None)
-
-    assert getattr(user, "username", None) == "single_user"
-    reset_settings()
-
-
-@pytest.mark.asyncio
-async def test_get_request_user_bypass_blocked_in_environment_production(monkeypatch):
-    monkeypatch.setenv("AUTH_MODE", "single_user")
-    monkeypatch.setenv("TESTING", "true")
-    monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
-    monkeypatch.setenv("ENVIRONMENT", "production")
-    monkeypatch.delenv("tldw_production", raising=False)
-    # ENVIRONMENT=production now also enforces the production key format (TASK-13950.6).
-    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import format_api_key
-
-    monkeypatch.setenv("SINGLE_USER_API_KEY", format_api_key("deadbeefcafe", "production-strength-secret"))
-    reset_settings()
-
-    request = _build_request({})
-    with pytest.raises(HTTPException) as exc:
-        await get_request_user(request, api_key=None, token=None)
-
-    assert exc.value.status_code == 401
-    reset_settings()
-
-
 def test_user_db_is_test_context_accepts_single_letter_y(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -408,16 +352,6 @@ def test_user_db_is_test_context_accepts_single_letter_y(
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     assert User_DB_Handling._is_test_context() is True
-
-
-def test_user_db_strict_test_bypass_context_accepts_single_letter_y(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "y")
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-
-    assert User_DB_Handling._is_strict_test_bypass_context() is True
 
 
 @pytest.mark.parametrize(

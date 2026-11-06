@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor, RGRequest
 from tldw_Server_API.app.core.Usage import concurrency_quota
 
@@ -92,11 +93,16 @@ def test_a_policy_resolution_failure_leaves_no_heartbeat_task(client: TestClient
     """A request that fails before its slot is taken starts no job-heartbeat task, so none is left running."""
     import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
 
+    calls: list[bool] = []
+
     async def _broken(**_kwargs: Any) -> None:
         """Fail STT policy resolution."""
+        calls.append(True)
         raise RuntimeError("policy failed")
 
     monkeypatch.setattr(audio_tx, "resolve_effective_stt_policy", _broken)
-    with pytest.raises(RuntimeError, match="policy failed"):
+    # The route's get_db_transaction rolls back and re-raises endpoint errors as TransactionError.
+    with pytest.raises(TransactionError):
         _post(client)
+    assert calls
     assert client.portal.call(_heartbeat_loops) == []

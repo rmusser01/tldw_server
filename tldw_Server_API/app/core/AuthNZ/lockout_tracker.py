@@ -89,8 +89,13 @@ class LockoutTracker:
         attempt_type: str = "login",
         lockout_threshold: int | None = None,
         lockout_duration_minutes: int | None = None,
+        *,
+        conn: Any | None = None,
     ) -> dict[str, Any]:
-        """Record a failed authentication attempt and check for lockout."""
+        """Record a failed authentication attempt and check for lockout.
+
+        ``conn`` joins the caller's transaction instead of opening a new one.
+        """
         if not self._initialized:
             await self.initialize()
 
@@ -105,6 +110,7 @@ class LockoutTracker:
             now=now,
             lockout_threshold=int(lockout_threshold),
             lockout_duration_minutes=int(lockout_duration_minutes),
+            **({"conn": conn} if conn is not None else {}),
         )
 
         attempt_count = int(result.get("attempt_count", 0))
@@ -145,7 +151,9 @@ class LockoutTracker:
             return True, locked_until
         return False, None
 
-    async def reset_failed_attempts(self, identifier: str, attempt_type: str = "login") -> None:
+    async def reset_failed_attempts(
+        self, identifier: str, attempt_type: str = "login", *, conn: Any | None = None
+    ) -> None:
         """Clear failed attempt counters and lockout for an identifier and attempt type."""
         if not self._initialized:
             await self.initialize()
@@ -153,6 +161,7 @@ class LockoutTracker:
         await repo.reset_failed_attempts_and_lockout(
             identifier=identifier,
             attempt_type=attempt_type,
+            **({"conn": conn} if conn is not None else {}),
         )
 
 
