@@ -87,6 +87,8 @@ class RateLimiter:
         attempt_type: str = "login",
         lockout_threshold: int | None = None,
         lockout_duration_minutes: int | None = None,
+        *,
+        conn: Any | None = None,
     ) -> dict[str, Any]:
         """Delegate to LockoutTracker."""
         tracker = self._get_lockout_tracker()
@@ -95,6 +97,7 @@ class RateLimiter:
             attempt_type=attempt_type,
             lockout_threshold=lockout_threshold,
             lockout_duration_minutes=lockout_duration_minutes,
+            conn=conn,
         )
 
     async def check_lockout(self, identifier: str, attempt_type: str = "login") -> tuple[bool, datetime | None]:
@@ -102,10 +105,12 @@ class RateLimiter:
         tracker = self._get_lockout_tracker()
         return await tracker.check_lockout(identifier, attempt_type=attempt_type)
 
-    async def reset_failed_attempts(self, identifier: str, attempt_type: str = "login") -> None:
+    async def reset_failed_attempts(
+        self, identifier: str, attempt_type: str = "login", *, conn: Any | None = None
+    ) -> None:
         """Delegate to LockoutTracker."""
         tracker = self._get_lockout_tracker()
-        await tracker.reset_failed_attempts(identifier, attempt_type=attempt_type)
+        await tracker.reset_failed_attempts(identifier, attempt_type=attempt_type, conn=conn)
 
     async def get_usage_stats(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return {"rate_limit_source": "resource_governor"}

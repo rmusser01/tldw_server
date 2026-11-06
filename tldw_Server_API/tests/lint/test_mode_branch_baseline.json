@@ -3,7 +3,7 @@
   "api/v1/API_Deps/Audit_DB_Deps.py": {"lines": 4, "predicates": 1, "reason": null},
   "api/v1/API_Deps/DB_Deps.py": {"lines": 3, "predicates": 0, "reason": null},
   "api/v1/API_Deps/Prompts_DB_Deps.py": {"lines": 1, "predicates": 0, "reason": null},
-  "api/v1/API_Deps/auth_deps.py": {"lines": 13, "predicates": 0, "reason": null},
+  "api/v1/API_Deps/auth_deps.py": {"lines": 11, "predicates": 0, "reason": null},
   "api/v1/API_Deps/billing_deps.py": {"lines": 1, "predicates": 0, "reason": null},
   "api/v1/API_Deps/kanban_deps.py": {"lines": 1, "predicates": 0, "reason": null},
   "api/v1/API_Deps/prompt_studio_deps.py": {"lines": 3, "predicates": 0, "reason": null},

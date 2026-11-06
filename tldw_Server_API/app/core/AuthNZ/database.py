@@ -21,6 +21,7 @@ import aiosqlite
 # 3rd-party imports
 import asyncpg
 from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 from loguru import logger
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
@@ -85,6 +86,7 @@ _AUTHNZ_TRANSACTION_PASSTHROUGH_EXCEPTIONS = (
     RollbackSignal,
     UserRegistrationException,
     HTTPException,
+    RequestValidationError,
     MandatoryAuditWriteError,
     TransactionPassthroughError,
 )
