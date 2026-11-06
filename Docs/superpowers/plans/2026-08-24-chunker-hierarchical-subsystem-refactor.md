@@ -1863,7 +1863,7 @@ case one passed, 221 warnings, 12.32s
 bounded review; live required CI still gates integration.
 **Tests:** Focused voice/helper cases, full auth matrix with exact baseline
 comparison, full Chunking, quality/function-size/tracking ratchets and Bandit.
-**Status:** In Progress
+**Status:** Complete
 
 Focused voice/helper tests: 21 passed, 161 deselected, 245 warnings, 16.49s
 (`/tmp/task15286_voice_focus_green.txt`). Full auth matrix: 174 passed and
@@ -1904,3 +1904,40 @@ Final tracking-format rerun: four passed, 20 warnings, 1.17s
 (`/tmp/task15286_voice_final_tracking.txt`); canonical CLI check and diff checks
 pass. Local correction and review are complete; publication and exact-head CI
 remain the next Stage 3 steps, not evidence of an already completed merge.
+
+### Verified Integration (2026-11-01)
+
+GitHub reports PR #3095 **MERGED** at `2026-11-01T20:31:03Z`, merge commit
+`6bf581da089a7aa6d90440a8801de07f8fdd238b`. The normal merge-commit operation
+was guarded by expected head `c59890093a0aeb58e45881d4ea6b037b4218aa01`
+into live `dev` base `61d02ed484a3c80f5423676b959cf14e7b572a62`.
+Immediately before integration, all eight live required contexts passed on
+that exact head: backend, security, coverage, frontend, e2e, container build,
+E2E Critical (Tier 1 + Journeys), and the trusted frontend license policy.
+All 27 inline threads were resolved, no review requested changes, the approved
+independent reviews remained applicable, and the human Change summary was
+byte-identical. Merge queue was unset. No admin merge or policy bypass was used.
+
+Fresh pre-merge full Chunking plus function-size/tracking tests: 813 passed,
+one established PyThaiNLP skip, 2035 warnings, 40.39s
+(`/tmp/task15286_premerge_final.txt`). Production Bandit: zero findings/errors,
+2876 LOC (`/tmp/bandit_task15286_premerge.json`). Ruff and mypy across hierarchy
+and the auth test pass (eight source files). The verified merge tree is
+byte-identical to the tested head; the isolated branch was fast-forwarded to
+the merge without touching the main checkout. No new runtime change or ADR.
+
+The optional UX job 124956606254 repeated the previously diagnosed history
+review fixture failure at the same helper/call site; its log is
+`/tmp/task15286_c598_ux_smoke_failed.txt`. No further retry, unrelated frontend
+change or required-check waiver was used. The local auth matrix's inherited
+ACP failures and fixture-only Bandit findings remain explicitly documented
+above; passing live required CI is not a claim that those local results were
+globally green.
+
+TASK-15286 is finalized through backlog-py with status Done and merge evidence.
+Post-merge task/plan bookkeeping is delivered in a separate draft PR, not a
+direct push to `dev`; that documentation PR needs its own human-written Change
+summary before integration. Historical records and the dirty main checkout
+remain untouched. The heartbeat was deleted natively after the verified merge
+because its authorized monitoring objective is complete. Keep the isolated
+worktree and branch for the bookkeeping review.
