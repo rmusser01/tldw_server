@@ -9,6 +9,8 @@ import { useSetting } from "@/hooks/useSetting"
 import { HEADER_SHORTCUTS_EXPANDED_SETTING } from "@/services/settings/ui-settings"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { ChatHeader } from "./ChatHeader"
+import { AccountMenu } from "./AccountMenu"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { TtsClipsDrawer } from "@/components/Sidepanel/Chat/TtsClipsDrawer"
 import { useDarkMode } from "@/hooks/useDarkmode"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
@@ -62,6 +64,10 @@ export const Header: React.FC<Props> = ({
     HEADER_SHORTCUTS_EXPANDED_SETTING
   )
   const hostedMode = isHostedTldwDeployment()
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  const hasPersonalAccount =
+    !authorityLoading && config?.authMode === "multi-user" &&
+    Boolean(config.accessToken?.trim())
   const { mode: themeMode, toggleDarkMode } = useDarkMode()
   const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, serverChatLoadState, messages, effectiveAssistantState } =
     useMessageOption()
@@ -409,6 +415,17 @@ export const Header: React.FC<Props> = ({
         onOpenNotifications={onOpenNotifications}
         notificationState={notificationState}
         onRetryNotifications={onRetryNotifications}
+        renderAccountMenu={hasPersonalAccount
+          ? (onClose) => (
+              <AccountMenu
+                onClose={onClose}
+                onOpenNotifications={onOpenNotifications}
+                notificationCount={notificationCount}
+                notificationState={notificationState}
+                onRetryNotifications={onRetryNotifications}
+              />
+            )
+          : undefined}
       />
       {titleReady && titleOwner.saving && headerActionPolicy.showChatTitle ? (
         <div role="status" className="px-3 py-1 text-sm text-text-muted">
