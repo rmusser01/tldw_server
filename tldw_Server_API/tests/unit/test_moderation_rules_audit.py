@@ -254,7 +254,7 @@ async def test_rules_response_waits_for_its_real_audit_commit(rule_case, monkeyp
 @pytest.mark.parametrize("outcome", ["cancel", "failed_spill"])
 async def test_rules_write_never_acknowledges_a_lost_overflow_event(rule_case, monkeypatch, outcome):
     case = rule_case
-    assert case.audit._test_mode  # nosec B101 -- Use the service's normal synchronous test flushing.
+    assert case.audit._inline_io  # nosec B101 -- Use the service's configured synchronous flushing.
     case.audit.buffer_size = 1
     entered, release = asyncio.Event(), asyncio.Event()
     transaction = case.audit._immediate_write_transaction
