@@ -122,3 +122,16 @@ describe('normalizeMonitoringAlert', () => {
     });
   });
 });
+
+describe('acknowledgment state', () => {
+  it.each([
+    [{ is_read: true, read_at: '2026-02-17T10:00:00Z' }, undefined],
+    [{ acknowledged: true, acknowledged_at: 'invalid' }, undefined],
+    [{ is_read: false, acknowledged_at: '2026-02-17T10:00:00Z' }, '2026-02-17T10:00:00.000Z'],
+  ] as const)('reflects the recorded acknowledgment time', (fields, timestamp) => {
+    expect(normalizeMonitoringAlert({ id: 8, ...fields })).toMatchObject({
+      acknowledged: Boolean(timestamp),
+      acknowledged_at: timestamp,
+    });
+  });
+});

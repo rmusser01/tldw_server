@@ -36,6 +36,8 @@ import {
   type DashboardOperationalKpis,
   type JobSnapshot,
 } from '@/lib/dashboard-kpis';
+import { confirmsAlertAcknowledgment, isAlertSnoozed, normalizeMonitoringAlertsPayload } from '@/lib/monitoring-alerts';
+import type { SystemAlert } from '@/app/monitoring/types';
 import { resolveSecurityHealth } from '@/lib/security-health';
 import {
   buildDashboardSystemHealth,
@@ -60,14 +62,6 @@ import Link from 'next/link';
 import { logger } from '@/lib/logger';
 
 type ServerStatusState = 'online' | 'degraded' | 'offline' | 'unknown';
-
-interface DashboardAlert {
-  id: string | number;
-  message?: string;
-  severity?: 'info' | 'warning' | 'error' | 'critical';
-  acknowledged: boolean;
-  created_at?: string;
-}
 
 type ProviderMap = Record<string, Partial<Omit<LLMProvider, 'name'>>>;
 const DEFAULT_ACTIVITY_RANGE: DashboardActivityRange = '7d';
@@ -119,13 +113,6 @@ const processAuditLogs = (result: PromiseSettledResult<unknown>): AuditLog[] => 
   return Array.isArray(items) ? items : [];
 };
 
-const processAlerts = (result: PromiseSettledResult<unknown>): DashboardAlert[] => {
-  if (result.status !== 'fulfilled') {
-    return [];
-  }
-  return Array.isArray(result.value) ? result.value : [];
-};
-
 const processRegistrationCodes = (result: PromiseSettledResult<unknown>): RegistrationCode[] => {
   if (result.status !== 'fulfilled') {
     return [];
@@ -142,7 +129,7 @@ const computeUserStats = (users: User[]) => ({
 export default function DashboardPage() {
   const router = useRouter();
   const { selectedOrg } = useOrgContext();
-  const { success, error: showError } = useToast();
+  const { success, warning, error: showError } = useToast();
   const [stats, setStats] = useState<DashboardUIStats>({
     users: 0,
     activeUsers: 0,
@@ -162,10 +149,8 @@ export default function DashboardPage() {
     DEFAULT_DASHBOARD_OPERATIONAL_KPIS
   );
   const previousJobsSnapshotRef = useRef<JobSnapshot | null>(null);
-  const dashboardLoadInFlightRef = useRef(false);
-  const dashboardLoadRequestIdRef = useRef(0);
   const [recentActivity, setRecentActivity] = useState<AuditLog[]>([]);
-  const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
+  const [alerts, setAlerts] = useState<SystemAlert[]>([]);
   const [systemHealth, setSystemHealth] = useState<DashboardSystemHealth>(
     DEFAULT_DASHBOARD_SYSTEM_HEALTH
   );
@@ -202,7 +187,7 @@ export default function DashboardPage() {
   const [orgError, setOrgError] = useState('');
   const [creatingOrg, setCreatingOrg] = useState(false);
   const [loading, setLoading] = useState(true);
-  const loadingRef = useRef(false); // Ref-based guard for auto-refresh overlap
+  const loadingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
@@ -216,12 +201,9 @@ export default function DashboardPage() {
   } | null>(null);
 
   const loadDashboardData = useCallback(async () => {
-    if (dashboardLoadInFlightRef.current) {
+    if (loadingRef.current) {
       return;
     }
-
-    const requestId = ++dashboardLoadRequestIdRef.current;
-    dashboardLoadInFlightRef.current = true;
 
     try {
       loadingRef.current = true;
@@ -302,8 +284,10 @@ export default function DashboardPage() {
       const logs = processAuditLogs(auditResult);
       setRecentActivity(logs.slice(0, 10));
 
-      const alertsList = processAlerts(alertsResult);
-      setAlerts(alertsList.filter((alert) => !alert.acknowledged));
+      if (alertsResult.status === 'fulfilled') {
+        const rows = normalizeMonitoringAlertsPayload(alertsResult.value);
+        setAlerts(rows.filter((alert) => !alert.acknowledged && !alert.dismissed_at && !isAlertSnoozed(alert)));
+      }
 
       setActivityData(resolveDashboardActivityPoints(activityResult, activityRange));
       setRegistrationCodes(processRegistrationCodes(registrationCodesResult));
@@ -629,18 +613,21 @@ export default function DashboardPage() {
   };
 
   const handleAcknowledgeAlerts = useCallback(async () => {
-    try {
-      await Promise.allSettled(
-        alerts
-          .filter((a) => a.id !== undefined)
-          .map((a) => api.acknowledgeAlert(String(a.id)))
-      );
-      success('Alerts acknowledged', 'All visible alerts acknowledged.');
-      await loadDashboardData();
-    } catch {
-      showError('Acknowledge failed', 'Could not acknowledge alerts.');
+    const results = await Promise.allSettled(alerts.map(async ({ id }) => {
+      if (!/^[1-9]\d*$/.test(id)) return false;
+      return confirmsAlertAcknowledgment(await api.acknowledgeAlert(id), id);
+    }));
+    const confirmed = results.filter((result) => result.status === 'fulfilled' && result.value).length;
+    const summary = `${confirmed} of ${alerts.length} visible alerts confirmed acknowledged.`;
+    if (confirmed > 0 && confirmed === alerts.length) {
+      success('Alerts acknowledged', summary);
+    } else if (confirmed > 0) {
+      warning('Alerts partially acknowledged', summary);
+    } else {
+      showError('Acknowledge failed', summary);
     }
-  }, [alerts, loadDashboardData, success, showError]);
+    await loadDashboardData();
+  }, [alerts, loadDashboardData, success, warning, showError]);
 
   const activityChartData = useMemo(
     () => mergeOverlayData(
