@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -140,6 +141,40 @@ async def test_magic_link_verify_creates_user_and_org(
     assert user["is_verified"] is True
     assert memberships
     assert any(m["role"] == "owner" for m in memberships)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_magic_links_have_one_postgres_winner(isolated_test_environment, monkeypatch):
+    """Both requests pass JWT verification before competing for one durable claim."""
+    from tldw_Server_API.app.api.v1.endpoints import auth
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+
+    client, _ = isolated_test_environment
+    stub_email = _StubEmailService()
+    monkeypatch.setattr(auth, "_get_email_service", lambda: stub_email)
+    monkeypatch.setattr(auth, "get_input_validator", lambda: SimpleNamespace(validate_email=lambda _: (True, None)))
+    assert client.post("/api/v1/auth/magic-link/request", json={"email": "reader@example.com"}).status_code == 200
+    assert stub_email.last_token
+    verify = JWTService.verify_token_async
+    gate = asyncio.Event()
+    arrivals = 0
+
+    async def verify_then_wait(self, *args, **kwargs):
+        nonlocal arrivals
+        claims = await verify(self, *args, **kwargs)
+        if kwargs.get("token_type") == "magic_link":
+            arrivals += 1
+            if arrivals == 2:
+                gate.set()
+            await asyncio.wait_for(gate.wait(), timeout=10)
+        return claims
+
+    monkeypatch.setattr(JWTService, "verify_token_async", verify_then_wait)
+    responses = await asyncio.gather(*(
+        asyncio.to_thread(client.post, "/api/v1/auth/magic-link/verify", json={"token": stub_email.last_token})
+        for _ in range(2)
+    ))
+    assert sorted(response.status_code for response in responses) == [200, 400]
 
 
 @pytest.mark.asyncio
