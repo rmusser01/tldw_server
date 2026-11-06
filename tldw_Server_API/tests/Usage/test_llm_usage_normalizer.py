@@ -63,7 +63,8 @@ def test_normalize_gemini_usage_extracts_cached_content_and_thought_tokens() -> 
     )
 
     assert normalized.input_tokens == 80
-    assert normalized.output_tokens == 30
+    # Raw usageMetadata keys: candidatesTokenCount leaves out the thoughts, which Google bills as output (TASK-13952).
+    assert normalized.output_tokens == 35
     assert normalized.total_tokens == 115
     assert normalized.cached_input_tokens == 50
     assert normalized.cache_read_input_tokens == 50

@@ -17,6 +17,20 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_fetch_modu
 )
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
+
+@pytest.fixture(autouse=True)
+def _hostnames_resolve_to_a_public_address(monkeypatch):
+    """Egress runs for real; made-up hostnames resolve to a public address, no DNS."""
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["93.184.216.34"])
+
+
+def _requested_url(request) -> str:
+    """The URL the caller asked for: egress pins the connection to an IP and keeps the name in Host."""
+    host = request.headers.get("host", "").split(":")[0]
+    return str(request.url.copy_with(host=host)) if host else str(request.url)
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -436,7 +450,7 @@ async def test_httpx_client_does_not_auto_follow_redirects() -> None:
     requested: list[str] = []
 
     def _handler(request: httpx.Request) -> httpx.Response:
-        requested.append(str(request.url))
+        requested.append(_requested_url(request))
         return httpx.Response(302, headers={"Location": "/next"})
 
     client = HttpxWebFetchClient(transport=httpx.MockTransport(_handler))

@@ -41,9 +41,6 @@ _UP = frozenset({"127.0.0.1", "93.184.216.34"})
 def dns(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
     """The production egress policy over a DNS table; returns the table."""
     answers = {"localhost": ["::1", "127.0.0.1"], "dual.example": [_PUBLIC_V6, "93.184.216.34"]}
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
-    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: list(answers.get(host, [])))
     return answers
