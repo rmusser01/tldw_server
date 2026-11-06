@@ -339,6 +339,8 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
     }
     assert captured["router_call"]["model"] == "anthropic/claude-4.5-sonnet"
     assert captured["router_usage"][0]["provider"] == "openrouter"
+    # The fixture's runtime resolves the user's own key, so the router's row says so (TASK-13956).
+    assert captured["router_usage"][0].get("credential_source") == "user"
     assert router_call_flags == [True]
 
 
@@ -672,3 +674,92 @@ def test_a_refused_router_call_is_not_a_provider_failure_and_the_request_gets_th
     assert_llm_quota_402(response)
     assert provider_manager.failures == []
     assert dispatched == []
+
+
+@pytest.mark.integration
+def test_a_refused_router_call_that_leaves_no_route_still_gets_the_402(
+    persona_chat_client,
+    persona_chat_db,
+    execution_scoped_provider_credentials,
+    monkeypatch,
+):
+    """Under failure_mode=error a refused router call leaves no route: the over-limit user gets the 402, not a 503."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    authenticated_client, headers, _ = persona_chat_client
+    refuse_llm_work(monkeypatch)
+    request_data = ChatCompletionRequest(
+        model="auto",
+        api_provider="openrouter",
+        routing={"failure_mode": "error"},
+        messages=[ChatCompletionUserMessageParam(role="user", content="Summarize this")],
+    )
+
+    async def refused_router_call(**kwargs):
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    with (
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={
+                "providers": [
+                    {
+                        "name": "openrouter",
+                        "default_model": "anthropic/claude-4.5-sonnet",
+                        "models_info": [
+                            {"name": "anthropic/claude-4.5-sonnet", "tool_support": True, "vision_support": True, "quality_rank": 20},
+                            {"name": "openai/gpt-4.1-mini", "tool_support": True, "vision_support": True, "quality_rank": 10},
+                        ],
+                    }
+                ],
+                "default_provider": "openrouter",
+            },
+        ),
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call_async",
+            side_effect=refused_router_call,
+            create=True,
+        ),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", headers=headers, json=request_data.model_dump())
+
+    assert_llm_quota_402(response)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("providers", "expected"),
+    [
+        (
+            [{"name": "openai", "models_info": [{"name": "gpt-test", "tool_support": True, "quality_rank": 1}]}],
+            (503, "auto_routing_failed"),
+        ),
+        ([], (400, "auto_routing_no_candidates")),
+    ],
+    ids=["no-decision", "no-candidates"],
+)
+def test_an_over_limit_user_keeps_the_routing_error_when_no_router_call_was_refused(
+    authenticated_client, mock_chacha_db, setup_dependencies, monkeypatch, providers, expected
+):
+    """Only a router call refused at the call turns a lost route into the 402; other routing errors stay (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    refuse_llm_work(monkeypatch)
+    request_data = ChatCompletionRequest(
+        model="auto",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Route this")],
+    )
+
+    with (
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.route_model", return_value=None),
+        patch(
+            "tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers",
+            return_value={"providers": providers, "default_provider": "openai"},
+        ),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+
+    assert (response.status_code, response.json()["detail"].get("error_code")) == expected

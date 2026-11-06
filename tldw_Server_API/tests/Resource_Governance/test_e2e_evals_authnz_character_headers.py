@@ -65,6 +65,7 @@ def _with_rg_middleware(app):
 async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     try:
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 

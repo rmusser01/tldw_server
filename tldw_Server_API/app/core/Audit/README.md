@@ -7,7 +7,7 @@
 - Buffered writes with size/interval/high‑risk flush triggers, daily aggregates and retention cleanup
 - CSV/JSON/JSONL export with optional streaming for large datasets; count endpoint for pagination
 - Per‑user or shared audit databases; fallback JSONL queue for resilience on flush failures
-- Test‑friendly behavior (background loops disabled in TEST_MODE)
+- Test‑friendly behavior (`inline_io=True` disables background loops)
 
 ## 2. Technical Details of Features
 
@@ -47,8 +47,8 @@ common schema, risk scoring, and optional PII redaction before data is persisted
   high-risk event (>=`AUDIT_HIGH_RISK_SCORE`, default `70`) arrives, or on the
   timed flush loop (`flush_interval` seconds).
 - **Background tasks**: `start_background_tasks()` spins up the periodic flush and
-  cleanup loops. In test mode (`TEST_MODE`/`TLDW_TEST_MODE` env or
-  `PYTEST_CURRENT_TEST`), the loops stay disabled so tests can drive `flush()` manually.
+  cleanup loops. With `inline_io=True` (constructor argument; the default is
+  `UnifiedAuditService.inline_io_default`, which the test suite's root conftest sets), the loops stay disabled so tests can drive `flush()` manually.
 - **Cleanup**: `cleanup_old_logs()` enforces the retention window (`retention_days`,
   default 90 days) and prunes the daily stats table.
 - **PII handling**: When enabled, metadata and selected string fields are scanned
@@ -106,10 +106,9 @@ connection and locks) to avoid blocking the event loop.
 | `AUDIT_PII_PATTERNS` | Dict of overrides or new patterns (`{label: regex or [regex...]}`). |
 | `AUDIT_PII_SCAN_FIELDS` | Comma-separated string/list of additional event fields to inspect. |
 | `AUDIT_MAX_DB_MB` | Optional soft cap (MB); currently logs a warning during cleanup when the audit DB exceeds the limit. |
-| `TEST_MODE` / `TLDW_TEST_MODE` | Disable background loops and reduce I/O for tests. |
 
 Constructor kwargs (`retention_days`, `buffer_size`, `flush_interval`, `enable_pii_detection`,
-`enable_risk_scoring`, `db_path`) override global settings per instance.
+`enable_risk_scoring`, `db_path`, `inline_io`) override global settings per instance.
 
 ## 3. Developer Guide for Contributors
 

@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     create_streaming_response_with_timeout,
 )
 from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
 
 
 def test_create_chat_streaming_response_forwards_request_fields():
@@ -1503,9 +1504,9 @@ class TestSafeStreamGenerator:
         assert wire.count('"code": "provider_unavailable"') == 1
         assert sentinel not in wire
         assert sentinel not in "".join(logs)
-        assert finalized == [
-            {"success": False, "cancelled": False, "error": True}
-        ]
+        (outcome,) = finalized
+        assert isinstance(outcome.pop("stream_usage"), _StreamUsage)  # what the stream received (TASK-13953)
+        assert outcome == {"success": False, "cancelled": False, "error": True}
 
     async def test_sync_bridge_error_waits_for_capacity_release_before_propagating(
         self,
