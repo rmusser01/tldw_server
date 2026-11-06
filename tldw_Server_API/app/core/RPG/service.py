@@ -5,18 +5,24 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
+from tldw_Server_API.app.core.DB_Management.RPG_DB import (
+    CampaignUpdateResult,
+    RPGRepository,
+    SessionUpdateResult,
+    SnapshotRebuildResult,
+)
 from tldw_Server_API.app.core.RPG.authority import decide_authority
 from tldw_Server_API.app.core.RPG.constants import MAX_RPG_CONTEXT_CHARS
 from tldw_Server_API.app.core.RPG.context import SessionContext, SessionContextBuilder
 from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGValidationError
-from tldw_Server_API.app.core.RPG.events import canonical_request_hash, validate_event_envelope
+from tldw_Server_API.app.core.RPG.events import SUPPORTED_EVENT_TYPES, canonical_request_hash, validate_event_envelope
 from tldw_Server_API.app.core.RPG.models import (
     RPGCampaign,
     RPGSession,
     RPGSessionEvent,
     RPGSnapshotState,
 )
+from tldw_Server_API.app.core.RPG.proposals import RPGProposalRecord
 from tldw_Server_API.app.core.RPG.reducer import reduce_events
 from tldw_Server_API.app.core.RPG.rules.adapters import RuleAdapterRegistry, build_default_adapter_registry
 from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
@@ -388,16 +394,241 @@ class RPGService:
             proposed_events=rejected.proposed_events,
         )
 
-    def get_snapshot(self, session_id: int) -> SnapshotResult:
-        record = self.repo.get_latest_snapshot(
-            owner_user_id=self.owner_user_id,
-            session_id=session_id,
-        )
+    def get_snapshot(self, session_id: int, snapshot_version: int | None = None) -> SnapshotResult:
+        if snapshot_version is not None:
+            record = self.repo.get_snapshot_by_version(
+                owner_user_id=self.owner_user_id,
+                session_id=session_id,
+                snapshot_version=snapshot_version,
+            )
+        else:
+            record = self.repo.get_latest_snapshot(
+                owner_user_id=self.owner_user_id,
+                session_id=session_id,
+            )
         return SnapshotResult(
             snapshot_version=record.snapshot_version,
             last_event_sequence=record.last_event_sequence,
             snapshot=RPGSnapshotState(**record.snapshot_json),
             diagnostics=record.diagnostics_json,
+        )
+
+    def list_campaigns(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGCampaign], int]:
+        return self.repo.list_campaigns(
+            owner_user_id=self.owner_user_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_campaign_detail(self, campaign_id: int) -> tuple[RPGCampaign, int]:
+        campaign = self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
+        session_count = self.repo.count_campaign_sessions(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+        )
+        return campaign, session_count
+
+    def list_sessions(
+        self,
+        *,
+        campaign_id: int | None = None,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGSession], int]:
+        if campaign_id is not None:
+            self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
+        return self.repo.list_sessions(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_session_detail(self, session_id: int) -> tuple[RPGSession, int]:
+        session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        pending_proposal_count = self.repo.count_pending_proposals(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+        )
+        return session, pending_proposal_count
+
+    def list_events(
+        self,
+        session_id: int,
+        *,
+        after_sequence: int = 0,
+        limit: int = 50,
+        source_type: str | None = None,
+        event_type: str | None = None,
+    ) -> list[RPGSessionEvent]:
+        # Existence/ownership check: foreign or unknown session ids 404.
+        self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        return self.repo.list_events(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            source_type=source_type,
+            event_type=event_type,
+        )
+
+    def list_proposals(
+        self,
+        session_id: int,
+        *,
+        status: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> tuple[list[RPGProposalRecord], int]:
+        # Existence/ownership check: foreign or unknown session ids 404.
+        self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        return self.repo.list_proposals(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+    def update_campaign(
+        self,
+        campaign_id: int,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> CampaignUpdateResult:
+        self._require_idempotency_key(idempotency_key)
+        request_hash = canonical_request_hash(
+            {
+                "target_type": "campaign",
+                "campaign_id": campaign_id,
+                "title": title,
+                "description": description,
+                "status": status,
+                "expected_version": expected_version,
+                "source_type": "user",
+            }
+        )
+        return self.repo.update_campaign(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+            title=title,
+            description=description,
+            status=status,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type="user",
+        )
+
+    def update_session(
+        self,
+        session_id: int,
+        *,
+        title: str | None = None,
+        status: str | None = None,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> SessionUpdateResult:
+        self._require_idempotency_key(idempotency_key)
+        request_hash = canonical_request_hash(
+            {
+                "target_type": "session",
+                "session_id": session_id,
+                "title": title,
+                "status": status,
+                "expected_version": expected_version,
+                "source_type": "user",
+            }
+        )
+        return self.repo.update_session(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            title=title,
+            status=status,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type="user",
+        )
+
+    def replace_authority_settings(
+        self,
+        session_id: int,
+        *,
+        authority_settings: dict[str, Any],
+        expected_version: int,
+        idempotency_key: str,
+    ) -> SessionUpdateResult:
+        self._require_idempotency_key(idempotency_key)
+        self._validate_authority_settings(authority_settings)
+        request_hash = canonical_request_hash(
+            {
+                "target_type": "session",
+                "session_id": session_id,
+                "authority_settings": authority_settings,
+                "expected_version": expected_version,
+                "source_type": "user",
+            }
+        )
+        return self.repo.update_session_authority_settings(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            authority_settings=authority_settings,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type="user",
+        )
+
+    @staticmethod
+    def _validate_authority_settings(settings: dict[str, Any]) -> None:
+        expected_keys = {
+            "import_auto_commit",
+            "mcp_auto_commit",
+            "model_auto_commit",
+            "model_auto_commit_event_types",
+        }
+        if set(settings) != expected_keys:
+            raise RPGValidationError("authority_settings_fields")
+        for field in ("import_auto_commit", "mcp_auto_commit", "model_auto_commit"):
+            if not isinstance(settings[field], bool):
+                raise RPGValidationError(f"{field}_must_be_boolean")
+        event_types = settings["model_auto_commit_event_types"]
+        if not isinstance(event_types, list) or not all(isinstance(item, str) for item in event_types):
+            raise RPGValidationError("model_auto_commit_event_types_must_be_strings")
+        unknown = set(event_types) - set(SUPPORTED_EVENT_TYPES)
+        if unknown:
+            raise RPGValidationError("unknown_event_types")
+
+    def rebuild_snapshot(self, session_id: int, *, idempotency_key: str) -> SnapshotRebuildResult:
+        self._require_idempotency_key(idempotency_key)
+        request_hash = canonical_request_hash(
+            {
+                "target_type": "session",
+                "session_id": session_id,
+                "operation": "snapshot_rebuild",
+                "source_type": "user",
+            }
+        )
+        return self.repo.rebuild_session_snapshot(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type="user",
         )
 
     async def lookup_rules(

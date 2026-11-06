@@ -64,7 +64,7 @@ Authority is source-aware:
 
 Otherwise, the service creates a pending proposal. Applying a proposal validates the proposal's session, status, and base event sequence, then commits the proposed events atomically. Rejecting a proposal marks it rejected without appending session events.
 
-New sessions default to conservative authority settings with `model_auto_commit` and `mcp_auto_commit` disabled.
+New sessions default to conservative authority settings with `model_auto_commit` and `mcp_auto_commit` disabled. Authority settings are mutable after creation: `PUT /sessions/{session_id}/authority-settings` replaces all four fields (`import_auto_commit`, `mcp_auto_commit`, `model_auto_commit`, and the `model_auto_commit_event_types` whitelist) wholesale, requires the session's `expected_version`, and validates that whitelisted event types are known. Unlisted values keep their review-required behavior; the conservative defaults still apply at session creation.
 
 ## Context Builder
 
@@ -74,25 +74,39 @@ This context is intended for reference/orchestration and DM-assistant workflows.
 
 ## REST Surface
 
-The REST router is registered under `/api/v1/rpg`. Current endpoints include:
+The REST router is registered under `/api/v1/rpg`. Current endpoints:
 
-- `GET /rules/adapters`
-- `GET /rules/adapters/{adapter_key}`
-- `POST /campaigns`
-- `POST /campaigns/{campaign_id}/sessions`
-- `POST /sessions/{session_id}/events`
-- `POST /sessions/{session_id}/rules/lookup`
-- `GET /campaigns/{campaign_id}/rules-packs`
-- `PUT /campaigns/{campaign_id}/rules-packs`
-- `GET /sessions/{session_id}/rules-packs`
-- `PUT /sessions/{session_id}/rules-packs`
-- `POST /sessions/{session_id}/context`
-- `POST /sessions/{session_id}/proposals/{proposal_id}/apply`
-- `POST /sessions/{session_id}/proposals/{proposal_id}/reject`
+| Method | Path | Permission | Purpose |
+| --- | --- | --- | --- |
+| GET | `/rules/adapters` | `rpg.rules.read` | List bundled rules adapters |
+| GET | `/rules/adapters/{adapter_key}` | `rpg.rules.read` | One adapter's mechanics metadata and citations |
+| POST | `/campaigns` | `rpg.campaigns.manage` | Create a campaign |
+| GET | `/campaigns` | `rpg.campaigns.read` | List campaigns with optional `status` filter and pagination |
+| GET | `/campaigns/{campaign_id}` | `rpg.campaigns.read` | Campaign detail with session count |
+| PATCH | `/campaigns/{campaign_id}` | `rpg.campaigns.manage` | Update campaign title/description/status (CAS on `expected_version`) |
+| POST | `/campaigns/{campaign_id}/sessions` | `rpg.sessions.manage` | Create a session in a campaign |
+| GET | `/campaigns/{campaign_id}/sessions` | `rpg.sessions.read` | List a campaign's sessions with pending-proposal counts |
+| GET | `/campaigns/{campaign_id}/rules-packs` | `rpg.campaigns.read` + `media.read` | List campaign rules-pack refs |
+| PUT | `/campaigns/{campaign_id}/rules-packs` | `rpg.campaigns.manage` + `media.read` | Replace campaign rules-pack refs wholesale |
+| GET | `/sessions` | `rpg.sessions.read` | Flat session list, optionally scoped by `campaign_id` |
+| GET | `/sessions/{session_id}` | `rpg.sessions.read` | Session detail with authority settings and pending-proposal count |
+| PATCH | `/sessions/{session_id}` | `rpg.sessions.manage` | Update session title/status (CAS on `expected_version`) |
+| PUT | `/sessions/{session_id}/authority-settings` | `rpg.sessions.manage` | Replace authority settings wholesale (CAS on `expected_version`) |
+| POST | `/sessions/{session_id}/events` | `rpg.sessions.manage` | Append events (auto-commit or proposal per authority rules) |
+| GET | `/sessions/{session_id}/events` | `rpg.sessions.read` | Event log with cursor pagination (`after_sequence`) and `source_type`/`event_type` filters |
+| POST | `/sessions/{session_id}/rules/lookup` | `rpg.rules.read` + `media.read` | Rules lookup over attached refs, optional answer mode |
+| GET | `/sessions/{session_id}/rules-packs` | `rpg.sessions.read` + `media.read` | List session rules-pack refs |
+| PUT | `/sessions/{session_id}/rules-packs` | `rpg.sessions.manage` + `media.read` | Replace session rules-pack refs wholesale |
+| POST | `/sessions/{session_id}/context` | `rpg.sessions.read` + `rpg.rules.read` + `media.read` | Build bounded context for inference |
+| GET | `/sessions/{session_id}/snapshot` | `rpg.sessions.read` | Current snapshot state, or a historical one via `?version=` |
+| POST | `/sessions/{session_id}/snapshot/rebuild` | `rpg.sessions.manage` | Rebuild the snapshot by replaying the full event log |
+| GET | `/sessions/{session_id}/proposals` | `rpg.proposals.review` | List a session's proposals with optional `status` filter |
+| POST | `/sessions/{session_id}/proposals/{proposal_id}/apply` | `rpg.proposals.review` | Commit a pending proposal's events |
+| POST | `/sessions/{session_id}/proposals/{proposal_id}/reject` | `rpg.proposals.review` | Reject a pending proposal without committing |
 
-Campaign/session creation, event recording, and proposal review REST calls require the `Idempotency-Key` header. Rules-pack replacement calls carry `idempotency_key` in the JSON request body because they use an optimistic whole-list replacement schema. Endpoints use RPG-specific permissions, rate limits, and token-scope guards such as `rpg.rules.read`, `rpg.campaigns.manage`, `rpg.sessions.read`, `rpg.sessions.manage`, and `rpg.proposals.review`.
+Campaign/session creation, event recording, proposal review, campaign/session PATCH, authority-settings PUT, and snapshot rebuild REST calls require the `Idempotency-Key` header. Rules-pack replacement calls carry `idempotency_key` in the JSON request body because they use an optimistic whole-list replacement schema. Endpoints use RPG-specific permissions, rate limits, and token-scope guards such as `rpg.rules.read`, `rpg.campaigns.manage`, `rpg.sessions.read`, `rpg.sessions.manage`, and `rpg.proposals.review`.
 
-REST request limits include a maximum of 20 events per event-recording request, 64 KiB per event payload after canonical JSON encoding, 500 characters for rules/context queries, 1,000 to 24,000 characters for context output, and 2,000 characters for proposal review notes.
+REST request limits include a maximum of 20 events per event-recording request, 64 KiB per event payload after canonical JSON encoding, 500 characters for rules/context queries, 1,000 to 24,000 characters for context output, 2,000 characters for proposal review notes, and a `limit` between 1 and 100 per page for list and event-log endpoints.
 
 ## MCP Surface
 
@@ -126,9 +140,11 @@ MCP write calls enforce a 256-character idempotency key limit. MCP rules/context
 This runtime does not currently provide:
 
 - map, grid, token, wall, lighting, or shared tabletop rendering features
-- campaign/session list endpoints
-- event list endpoints
-- a REST or MCP dice-roll endpoint
+- campaign, session, event, or proposal deletion (archive/status changes only)
+- a REST or MCP dice-roll endpoint (Phase 2)
+- MCP list/read/discovery tools matching the Phase-1 REST routes (Phase 3)
+- snapshot compaction or pruning of historical snapshot versions
+- a dedicated WebUI
 - bundled long-form rules prose
 - broad retrieval fallback outside attached rules sources
 - autonomous model state commits by default

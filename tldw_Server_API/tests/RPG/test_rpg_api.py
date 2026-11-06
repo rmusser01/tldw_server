@@ -12,9 +12,12 @@ from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collecti
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import rpg as rpg_endpoint
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.RPG.context import SessionContext
 from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
 from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
+from tldw_Server_API.app.core.RPG.service import RPGService
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app
 from tldw_Server_API.tests.PrivilegeCatalog.test_endpoint_scope_catalog_sync import load_catalog_scope_ids
@@ -778,3 +781,222 @@ def test_context_endpoint_rejects_tiny_budget():
     )
 
     assert response.status_code == 422  # nosec B101
+
+
+def test_list_campaigns_route_returns_created_campaign():
+    client = TestClient(app)
+
+    campaign = client.post(
+        "/api/v1/rpg/campaigns",
+        headers=_headers(**{"Idempotency-Key": "route-list-c"}),
+        json={"title": "Route Campaign", "default_adapter_key": "fate"},
+    )
+    listed = client.get("/api/v1/rpg/campaigns", headers=_headers())
+
+    assert listed.status_code == 200  # nosec B101
+    body = listed.json()
+    assert body["total_count"] >= 1  # nosec B101
+    assert any(item["id"] == campaign.json()["id"] for item in body["items"])  # nosec B101
+
+
+def test_read_routes_scope_matrix():
+    expected = {
+        ("GET", "/api/v1/rpg/campaigns"): {rpg_endpoint.RPG_CAMPAIGNS_READ},
+        ("GET", "/api/v1/rpg/campaigns/{campaign_id}"): {rpg_endpoint.RPG_CAMPAIGNS_READ},
+        ("GET", "/api/v1/rpg/campaigns/{campaign_id}/sessions"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}/snapshot"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}/events"): {rpg_endpoint.RPG_SESSIONS_READ},
+        ("GET", "/api/v1/rpg/sessions/{session_id}/proposals"): {rpg_endpoint.RPG_PROPOSALS_REVIEW},
+    }
+    for (method, path), scopes in expected.items():
+        assert scopes <= _route_permissions(method, path), f"{method} {path} missing {scopes - _route_permissions(method, path)}"  # nosec B101
+
+
+def test_session_snapshot_events_and_foreign_404():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-read")
+
+    snap = client.get(f"/api/v1/rpg/sessions/{session_id}/snapshot", headers=_headers())
+
+    assert snap.status_code == 200 and snap.json()["snapshot_version"] == 0  # nosec B101
+
+    events = client.get(f"/api/v1/rpg/sessions/{session_id}/events", headers=_headers())
+
+    assert events.status_code == 200 and events.json()["items"] == []  # nosec B101
+    assert client.get("/api/v1/rpg/campaigns/999999", headers=_headers()).status_code == 404  # nosec B101
+    assert client.get("/api/v1/rpg/sessions/999999/events", headers=_headers()).status_code == 404  # nosec B101
+    assert client.get("/api/v1/rpg/sessions/999999/proposals", headers=_headers()).status_code == 404  # nosec B101
+
+
+def test_session_events_list_with_rows_and_proposals(tmp_path):
+    # The Phase-1 POST /events route hardcodes source_type="user" (no mcp/model
+    # ingest route yet), so a real service is shared with the routes via
+    # dependency override purely to seed one mcp-sourced event; every assertion
+    # below still exercises the HTTP surface. The DB must be file-backed and
+    # unique: TestClient serves on a worker thread, and a fresh connection to
+    # ":memory:" from another thread is a new empty database.
+    service = RPGService(
+        repo=RPGRepository.initialized(CharactersRAGDB(str(tmp_path / "rpg_events_rows.db"), "rpg-api-events-test")),
+        owner_user_id=42,
+    )
+    app.dependency_overrides[rpg_endpoint._service] = lambda: service
+    try:
+        client = TestClient(app)
+        _campaign_id, session_id = _create_campaign_and_session(client, "route-events-rows")
+
+        for index in range(3):
+            recorded = client.post(
+                f"/api/v1/rpg/sessions/{session_id}/events",
+                headers=_headers(**{"Idempotency-Key": f"route-events-rows-{index}"}),
+                json={
+                    "expected_last_event_sequence": index,
+                    "events": [
+                        {
+                            "event_type": "note.added",
+                            "event_payload": {"note_id": f"n{index}", "text": f"Note {index}"},
+                        }
+                    ],
+                },
+            )
+            assert recorded.status_code == 200  # nosec B101
+            assert recorded.json()["committed_events"][0]["sequence_number"] == index + 1  # nosec B101
+
+        listed = client.get(f"/api/v1/rpg/sessions/{session_id}/events", headers=_headers())
+
+        assert listed.status_code == 200  # nosec B101
+        body = listed.json()
+        assert [item["sequence_number"] for item in body["items"]] == [1, 2, 3]  # nosec B101
+        assert body["next_after_sequence"] == 3  # nosec B101
+        assert all(item["event_type"] == "note.added" for item in body["items"])  # nosec B101
+        assert [item["event_payload"]["note_id"] for item in body["items"]] == ["n0", "n1", "n2"]  # nosec B101
+
+        paged = client.get(
+            f"/api/v1/rpg/sessions/{session_id}/events",
+            params={"limit": 1, "after_sequence": 1},
+            headers=_headers(),
+        )
+
+        assert paged.status_code == 200  # nosec B101
+        paged_body = paged.json()
+        assert [item["sequence_number"] for item in paged_body["items"]] == [2]  # nosec B101
+        assert paged_body["next_after_sequence"] == 2  # nosec B101
+
+        # Seed one mcp-sourced event directly (default authority settings keep
+        # mcp events pending as proposals), then verify the list route shape.
+        mcp_result = service.record_events(
+            session_id=session_id,
+            events=[{"event_type": "note.added", "event_payload": {"note_id": "m1", "text": "Mcp note"}}],
+            source_type="mcp",
+            expected_last_event_sequence=3,
+            idempotency_key="route-events-rows-mcp",
+        )
+        assert mcp_result.proposal is not None  # nosec B101
+
+        proposals = client.get(f"/api/v1/rpg/sessions/{session_id}/proposals", headers=_headers())
+
+        assert proposals.status_code == 200  # nosec B101
+        proposals_body = proposals.json()
+        assert proposals_body["total_count"] >= 1  # nosec B101
+        assert proposals_body["items"][0]["session_id"] == session_id  # nosec B101
+        assert proposals_body["items"][0]["status"] == "pending"  # nosec B101
+    finally:
+        app.dependency_overrides.pop(rpg_endpoint._service, None)
+
+
+def test_patch_campaign_archive_and_conflict():
+    client = TestClient(app)
+    campaign_id, _session_id = _create_campaign_and_session(client, "route-patch")
+    patched = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-1"}),
+        json={"status": "archived", "expected_version": 1},
+    )
+    assert patched.status_code == 200 and patched.json()["status"] == "archived"  # nosec B101
+    assert patched.json()["version"] == 2  # nosec B101
+    replay = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-1"}),
+        json={"status": "archived", "expected_version": 1},
+    )
+    assert replay.status_code == 200 and replay.json()["version"] == 2  # nosec B101  (replay)
+    conflict = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-2"}),
+        json={"title": "Stale", "expected_version": 1},
+    )
+    assert conflict.status_code == 409  # nosec B101
+    bad_status = client.patch(
+        f"/api/v1/rpg/campaigns/{campaign_id}", headers=_headers(**{"Idempotency-Key": "route-pc-3"}),
+        json={"status": "deleted", "expected_version": 2},
+    )
+    # The Task 5 schema rejects unknown statuses at the Pydantic Literal layer,
+    # so FastAPI answers with its standard request-validation code (422), not 400.
+    assert bad_status.status_code == 422  # nosec B101
+
+
+def test_patch_session_title_and_conflict():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-patch-s")
+
+    patched = client.patch(
+        f"/api/v1/rpg/sessions/{session_id}",
+        headers=_headers(**{"Idempotency-Key": "route-ps-1"}),
+        json={"title": "Renamed Opening", "expected_version": 1},
+    )
+    assert patched.status_code == 200  # nosec B101
+    assert patched.json()["title"] == "Renamed Opening"  # nosec B101
+    assert patched.json()["version"] == 2  # nosec B101
+
+    conflict = client.patch(
+        f"/api/v1/rpg/sessions/{session_id}",
+        headers=_headers(**{"Idempotency-Key": "route-ps-2"}),
+        json={"status": "archived", "expected_version": 1},
+    )
+    assert conflict.status_code == 409  # nosec B101
+
+
+def test_authority_settings_put_roundtrip():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-auth")
+    payload = {
+        "import_auto_commit": False, "mcp_auto_commit": True,
+        "model_auto_commit": False, "model_auto_commit_event_types": [],
+        "expected_version": 1,
+    }
+    updated = client.put(
+        f"/api/v1/rpg/sessions/{session_id}/authority-settings",
+        headers=_headers(**{"Idempotency-Key": "route-au-1"}), json=payload,
+    )
+    assert updated.status_code == 200  # nosec B101
+    assert updated.json()["authority_settings"]["mcp_auto_commit"] is True  # nosec B101
+    detail = client.get(f"/api/v1/rpg/sessions/{session_id}", headers=_headers())
+    assert detail.json()["authority_settings"]["mcp_auto_commit"] is True  # nosec B101
+    bad = dict(payload, model_auto_commit_event_types=["nope.nope"], expected_version=2)
+    assert client.put(
+        f"/api/v1/rpg/sessions/{session_id}/authority-settings",
+        headers=_headers(**{"Idempotency-Key": "route-au-2"}), json=bad,
+    ).status_code == 400  # nosec B101
+
+
+def test_snapshot_rebuild_route():
+    client = TestClient(app)
+    _campaign_id, session_id = _create_campaign_and_session(client, "route-rb")
+    rebuilt = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/snapshot/rebuild", headers=_headers(**{"Idempotency-Key": "route-rb-1"}),
+    )
+    assert rebuilt.status_code == 200  # nosec B101
+    assert rebuilt.json()["event_count"] == 0 and rebuilt.json()["replayed"] is False  # nosec B101
+    replay = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/snapshot/rebuild", headers=_headers(**{"Idempotency-Key": "route-rb-1"}),
+    )
+    assert replay.status_code == 200 and replay.json()["replayed"] is True  # nosec B101
+
+
+def test_mutation_routes_scope_matrix():
+    expected = {
+        ("PATCH", "/api/v1/rpg/campaigns/{campaign_id}"): {rpg_endpoint.RPG_CAMPAIGNS_MANAGE},
+        ("PATCH", "/api/v1/rpg/sessions/{session_id}"): {rpg_endpoint.RPG_SESSIONS_MANAGE},
+        ("PUT", "/api/v1/rpg/sessions/{session_id}/authority-settings"): {rpg_endpoint.RPG_SESSIONS_MANAGE},
+        ("POST", "/api/v1/rpg/sessions/{session_id}/snapshot/rebuild"): {rpg_endpoint.RPG_SESSIONS_MANAGE},
+    }
+    for (method, path), scopes in expected.items():
+        assert scopes <= _route_permissions(method, path), f"{method} {path} missing {scopes - _route_permissions(method, path)}"  # nosec B101
