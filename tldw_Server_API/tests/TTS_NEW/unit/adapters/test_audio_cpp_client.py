@@ -260,23 +260,13 @@ def lan_egress(monkeypatch):
     """Production egress policy (default ports too) with DNS stubbed.
 
     Returns ``(seen, dns)``: requests that reached the MockTransport, and the DNS answers
-    (host -> list of addresses) tests may fill in. http_client's test-mode carve-out, which
-    skips the private-address check for an unscoped hostname under pytest, is switched off so
-    unscoped hostnames are vetted as in production. The MockTransport is the socket layer, so
+    (host -> list of addresses) tests may fill in. The MockTransport is the socket layer, so
     an empty ``seen`` proves nothing was sent.
     """
-    from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Security import egress
 
     seen: list[httpx.Request] = []
     dns: dict[str, list[str]] = {}
-
-    real_env_flag_enabled = http_client.env_flag_enabled
-    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
-    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
-    monkeypatch.setattr(
-        http_client, "env_flag_enabled", lambda name: name != "TESTING" and real_env_flag_enabled(name)
-    )
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: list(dns.get(host, [])))
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")

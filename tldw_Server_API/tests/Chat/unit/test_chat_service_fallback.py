@@ -42,6 +42,8 @@ from tldw_Server_API.app.core.Chat.chat_service import (
 from tldw_Server_API.app.core.Chat.request_queue import RateLimitedQueue, RequestQueue
 from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.LLM_Calls import gateway
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
+from tldw_Server_API.app.core.Usage.llm_accounting import drain_accounting
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields,
     resolved_request_fields_async,
@@ -6300,10 +6302,13 @@ async def test_execute_streaming_call_finalize_runs_without_refund_cb(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
+async def test_execute_streaming_call_commits_a_cancelled_stream_instead_of_refunding(monkeypatch):
+    """A cancelled stream was read, so its estimate is recorded and committed; nothing is refunded (TASK-13953)."""
     metrics = _DummyMetrics()
     provider_manager = _DummyProviderManager()
     refund_calls: list[dict[str, bool]] = []
+    committed: list[int] = []
+    usage_log = AsyncMock(return_value=None)
 
     def llm_call_func():
         def _stream():
@@ -6318,7 +6323,9 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
     def fake_create_streaming_response_with_timeout(*_args, finalize_callback=None, **_kwargs):
         async def _gen():
             if callable(finalize_callback):
-                await finalize_callback(success=False, cancelled=True, error=False)
+                received = _StreamUsage()
+                received.chars = len("hi")  # the stream delivered its text before the cancel
+                await finalize_callback(success=False, cancelled=True, error=False, stream_usage=received)
             yield "data: [DONE]\n\n"
 
         return _gen()
@@ -6328,6 +6335,7 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
 
     monkeypatch.setattr(chat_service, "create_streaming_response_with_timeout", fake_create_streaming_response_with_timeout)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+    monkeypatch.setattr(chat_service, "log_llm_usage", usage_log)
 
     request = SimpleNamespace(
         method="POST",
@@ -6335,12 +6343,13 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
         headers={},
         state=SimpleNamespace(user_id=None, api_key_id=None),
     )
+    prompt = [{"role": "user", "content": "hello there"}]
 
     resp = await execute_streaming_call(
         current_loop=asyncio.get_running_loop(),
         cleaned_args={
             "api_endpoint": "openai",
-            "messages_payload": [],
+            "messages_payload": prompt,
             "model": "gpt-test",
             "streaming": True,
         },
@@ -6351,7 +6360,7 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
         request=request,
         metrics=metrics,
         provider_manager=provider_manager,
-        templated_llm_payload=[],
+        templated_llm_payload=prompt,
         should_persist=False,
         final_conversation_id="conv-finalize-2",
         character_card_for_context=None,
@@ -6365,6 +6374,7 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
         llm_call_func=llm_call_func,
         refresh_provider_params=lambda _provider: ({}, None),
         moderation_getter=lambda: _DummyModeration(),
+        rg_commit_cb=committed.append,
         rg_refund_cb=rg_refund_cb,
     )
 
@@ -6376,8 +6386,13 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
     finally:
         with contextlib.suppress(Exception):
             await agen.aclose()
+    await drain_accounting()
 
-    assert refund_calls == [{"cancelled": True, "error": False}]
+    assert refund_calls == []
+    usage_log.assert_awaited_once()
+    row = usage_log.await_args.kwargs
+    assert (row["estimate_source"], row["prompt_tokens"]) == ("stream_estimate", chat_service._estimate_tokens_from_messages(prompt))
+    assert committed == [row["total_tokens"]]
     assert any(call[3] == "stream_cancelled" for call in metrics.llm_calls)
 
 
@@ -6576,10 +6591,16 @@ async def test_concurrent_stream_semantic_gate_is_request_local(
     audits[1].log_event.assert_awaited_once()
     assert managers[1].success_records == ["openai"]
     assert any(call[2] is True for call in metrics[1].llm_calls)
-    usage_log.assert_awaited_once()
-    assert usage_log.await_args.kwargs["conversation_id"] == (
-        f"stream-semantic-{invalid_outcome}-1"
-    )
+    await drain_accounting()
+    rows = {call.kwargs["conversation_id"]: call.kwargs for call in usage_log.await_args_list}
+    if invalid_outcome == "missing-finish-eof":
+        # The invalid stream delivered its text, so it is recorded too, from its estimate (TASK-13953).
+        assert sorted(rows) == [f"stream-semantic-{invalid_outcome}-{index}" for index in range(2)]
+        assert rows[f"stream-semantic-{invalid_outcome}-0"]["estimate_source"] == "stream_estimate"
+    else:
+        # Its only chunk is rejected before anything is counted: nothing received, no row, as before.
+        assert sorted(rows) == [f"stream-semantic-{invalid_outcome}-1"]
+    assert rows[f"stream-semantic-{invalid_outcome}-1"]["usage_metadata"] == {"prompt_tokens": 3, "completion_tokens": 2}
 
 
 @pytest.mark.asyncio
@@ -6878,7 +6899,9 @@ async def test_real_queue_combined_output_done_late_error_never_records_provider
     assert sentinel not in wire
     assert recorded_providers == []
     save_message.assert_not_awaited()
-    usage_log.assert_not_awaited()
+    await drain_accounting()
+    usage_log.assert_awaited_once()  # read, so recorded, although it failed (TASK-13953)
+    assert usage_log.await_args.kwargs["estimate_source"] == "stream_estimate"
     audit_service.log_event.assert_not_awaited()
     assert provider_manager.success_records == []
     assert not any(call[2] is True for call in metrics.llm_calls)
@@ -7138,7 +7161,12 @@ async def test_direct_done_then_adapter_failure_records_valid_output_without_cle
     else:
         on_provider_output.assert_awaited_once_with("openai")
     save_message.assert_not_awaited()
-    usage_log.assert_not_awaited()
+    await drain_accounting()
+    if expected_content is None:
+        usage_log.assert_not_awaited()  # nothing received, so nothing recorded, as before
+    else:
+        usage_log.assert_awaited_once()  # read, so recorded, although it failed (TASK-13953)
+        assert usage_log.await_args.kwargs["estimate_source"] == "stream_estimate"
     audit_service.log_event.assert_not_awaited()
     assert provider_manager.success_records == []
     assert not any(call[2] is True for call in metrics.llm_calls)
@@ -7268,8 +7296,11 @@ async def test_concurrent_direct_failure_and_queued_success_record_provider_use_
     healthy_on_success.assert_awaited_once_with("openai")
     healthy_save.assert_awaited_once()
     healthy_audit.log_event.assert_awaited_once()
-    usage_log.assert_awaited_once()
-    assert usage_log.await_args.kwargs["conversation_id"] == "direct-overlap-healthy"
+    # The faulty stream was read too, so it is recorded from its estimate (TASK-13953).
+    await drain_accounting()
+    rows = {call.kwargs["conversation_id"]: call.kwargs for call in usage_log.await_args_list}
+    assert sorted(rows) == ["direct-overlap-faulty", "direct-overlap-healthy"]
+    assert rows["direct-overlap-faulty"]["estimate_source"] == "stream_estimate"
     assert healthy_manager.success_records == ["openai"]
     assert any(call[2] is True for call in healthy_metrics.llm_calls)
 

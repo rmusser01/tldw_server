@@ -1219,6 +1219,15 @@ class StreamingResponseHandler:
             snapshot["usage"] = dict(self.usage)
         return snapshot
 
+    def _save_callback_kwargs(self, save_callback: Callable[..., Any]) -> dict[str, Any]:
+        """The keywords ``save_callback`` accepts: the generation snapshot and what the stream received."""
+        kwargs: dict[str, Any] = {}
+        if _accepts_keyword(save_callback, "generation"):
+            kwargs["generation"] = self.generation_snapshot()
+        if _accepts_keyword(save_callback, "stream_usage"):
+            kwargs["stream_usage"] = self.stream_usage
+        return kwargs
+
     def _partial_settlement_eligible(self) -> bool:
         """Whether an unfinished reply should be kept.
 
@@ -1475,8 +1484,8 @@ class StreamingResponseHandler:
             stream: The stream to process (sync or async iterator)
             save_callback: Optional callback to save the full response. When it
                 accepts a ``generation`` keyword it also receives
-                ``generation_snapshot()``. When it accepts ``provider_usage`` and
-                the provider sent a usage block, it receives that whole block.
+                ``generation_snapshot()``. When it accepts ``stream_usage`` it
+                receives the provider's usage block and the characters received.
             finalize_callback: Optional callback invoked on error/cancel to finalize state
             on_first_output: Optional callback invoked once after the first valid provider output
             partial_save_callback: Optional ``callback(text, *, generation)`` that
@@ -1757,6 +1766,7 @@ class StreamingResponseHandler:
                 if text_piece:
                     self.semantic_output_seen = True
                     first_output_pending = True
+                    self.stream_usage.chars += len(text_piece)  # counted for the usage row, like a content delta
                 try:
                     if self.text_transform:
                         text_piece = self.text_transform(text_piece)
@@ -2104,13 +2114,7 @@ class StreamingResponseHandler:
                     aggregated_tool_calls = self.get_accumulated_tool_calls()
                     aggregated_function_call = self.get_accumulated_function_call()
                     extra_events: list[dict[str, Any]] = []
-                    generation_kwargs: dict[str, Any] = (
-                        {"generation": self.generation_snapshot()}
-                        if _accepts_keyword(save_callback, "generation")
-                        else {}
-                    )
-                    if self.stream_usage.usage and _accepts_keyword(save_callback, "provider_usage"):
-                        generation_kwargs["provider_usage"] = dict(self.stream_usage.usage)
+                    generation_kwargs = self._save_callback_kwargs(save_callback)
                     try:
                         # Support flexible callback signatures (text only or extended)
                         maybe_result = None
@@ -2261,7 +2265,8 @@ async def create_streaming_response_with_timeout(
         conversation_id: ID of the conversation
         model_name: Name of the model
         save_callback: Optional callback to save the response
-        finalize_callback: Optional callback invoked on error/cancel to finalize state
+        finalize_callback: Optional callback invoked on error/cancel to finalize state; when it
+            accepts ``stream_usage`` it receives what the stream received, for its usage row
         on_first_output: Optional callback invoked once after the first valid provider output
         idle_timeout: Timeout for idle connections
         heartbeat_interval: Interval for heartbeat messages
@@ -2305,11 +2310,10 @@ async def create_streaming_response_with_timeout(
             if finalize_invoked or not callable(finalize_callback):
                 return
             finalize_invoked = True
-            maybe_result = finalize_callback(
-                success=success,
-                cancelled=cancelled,
-                error=error,
-            )
+            kwargs: dict[str, Any] = {"success": success, "cancelled": cancelled, "error": error}
+            if _accepts_keyword(finalize_callback, "stream_usage"):
+                kwargs["stream_usage"] = handler.stream_usage  # what the stream received, for its usage row
+            maybe_result = finalize_callback(**kwargs)
             if inspect.isawaitable(maybe_result):
                 await maybe_result
 

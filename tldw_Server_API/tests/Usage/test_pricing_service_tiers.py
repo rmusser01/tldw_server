@@ -341,9 +341,15 @@ def test_a_provider_without_a_batch_price_is_not_discounted() -> None:
 
 # --- Gemini cached content (AC #1) ---
 
-# ai.google.dev/gemini-api/docs/pricing, Standard tier, paid, text/image/video, fetched 2026-10-26:
-# (input, output, context caching) per million tokens, prompts up to 200k tokens.
+# aistudio.google.com/docs/pricing (ai.google.dev/gemini-api/docs/pricing redirects there), Standard tier, paid,
+# text/image/video, fetched 2026-10-26 and again 2026-11-03: (input, output including thinking tokens, context
+# caching) per million tokens, prompts up to 200k tokens. The rates in force on 2026-11-03: gemini-4-argon's double
+# on 2026-12-01, gemini-3.8-flash's and gemini-3.6-flash's on 2027-01-01 (TASK-15423).
 GEMINI_PRICES: dict[str, tuple[float, float, float]] = {
+    "gemini-4-argon": (2.00, 10.00, 0.10),
+    "gemini-3.8-flash": (0.75, 3.75, 0.075),
+    "gemini-3.6-flash": (0.75, 3.75, 0.075),
+    "gemini-3.5-flash-lite": (0.30, 2.50, 0.03),
     "gemini-3.1-pro-preview": (2.00, 12.00, 0.20),
     "gemini-3.1-flash-lite": (0.25, 1.50, 0.025),
     "gemini-3-flash-preview": (0.50, 3.00, 0.05),
@@ -476,3 +482,101 @@ def test_a_reported_cost_is_split_by_the_catalog_shares() -> None:
     # Catalog: 1,000 x $0.005 + 200 x $0.03 per 1K = $0.005 + $0.006.
     assert (prompt_cost, completion_cost, total) == pytest.approx((0.01, 0.012, 0.022))
     assert estimated is False
+
+
+# --- Gemini thinking tokens, service tiers and the newer models (TASK-13952) ---
+
+# aistudio.google.com/docs/pricing, fetched 2026-11-03. The Flex and Priority tables: (input, output including
+# thinking tokens, context caching) per million tokens, text/image/video, prompts up to 200k tokens. A
+# generateContent response reports the tier it ran on in usageMetadata.serviceTier (unspecified, standard, flex,
+# priority). Batch is not a reportable tier: the Batch API is a separate endpoint (batchGenerateContent) that no
+# server code calls.
+GEMINI_TIER_PRICES: dict[str, dict[str, tuple[float, float, float | None]]] = {
+    "gemini-4-argon": {"flex": (1.00, 5.00, 0.05), "priority": (3.60, 18.00, 0.18)},
+    "gemini-3.8-flash": {"flex": (0.375, 1.875, 0.0375), "priority": (1.35, 6.75, 0.135)},
+    "gemini-3.6-flash": {"flex": (0.375, 1.875, 0.0375), "priority": (1.35, 6.75, 0.135)},
+    "gemini-3.5-flash-lite": {"flex": (0.15, 1.25, 0.02), "priority": (0.54, 4.50, 0.05)},
+    "gemini-3.1-flash-lite": {"flex": (0.125, 0.75, 0.0125), "priority": (0.45, 2.70, 0.045)},
+    "gemini-3.1-pro-preview": {"flex": (1.00, 6.00, 0.20), "priority": (3.60, 21.60, 0.36)},
+    "gemini-3-flash-preview": {"flex": (0.25, 1.50, 0.05), "priority": (0.90, 5.40, 0.09)},
+    "gemini-2.5-pro": {"flex": (0.625, 5.00, 0.125), "priority": (2.25, 18.00, 0.225)},
+    "gemini-2.5-flash": {"flex": (0.15, 1.25, 0.03), "priority": (0.54, 4.50, 0.054)},
+    "gemini-2.5-flash-lite": {"flex": (0.05, 0.20, 0.01), "priority": (0.18, 0.72, 0.018)},
+}
+# The same tables' columns for prompts over 200k tokens (the two Pro models only).
+GEMINI_LONG_TIER_PRICES: dict[str, dict[str, tuple[float, float, float | None]]] = {
+    "gemini-3.1-pro-preview": {"flex": (2.00, 9.00, 0.40), "priority": (7.20, 32.40, 0.72)},
+    "gemini-2.5-pro": {"flex": (1.25, 7.50, 0.25), "priority": (4.50, 27.00, 0.45)},
+}
+
+
+@pytest.mark.parametrize(
+    ("model", "tier", "prices"),
+    sorted((model, tier, prices) for model, tiers in GEMINI_TIER_PRICES.items() for tier, prices in tiers.items()),
+)
+def test_a_gemini_model_carries_its_published_flex_and_priority_rates(
+    model: str, tier: str, prices: tuple[float, float, float | None]
+) -> None:
+    got, estimated = PricingCatalog().get_rate_details("google", model, service_tier=tier)
+
+    assert got == pytest.approx(_rates(prices))
+    assert estimated is False
+
+
+@pytest.mark.parametrize(
+    ("model", "tier", "prices"),
+    sorted((model, tier, prices) for model, tiers in GEMINI_LONG_TIER_PRICES.items() for tier, prices in tiers.items()),
+)
+def test_a_gemini_pro_prompt_over_200k_tokens_on_a_tier_pays_the_tier_long_rates(
+    model: str, tier: str, prices: tuple[float, float, float | None]
+) -> None:
+    got, _estimated = PricingCatalog().get_rate_details("google", model, prompt_tokens=200_001, service_tier=tier)
+
+    assert got == pytest.approx(_rates(prices))
+
+
+@pytest.mark.parametrize("tier", ["flex", "priority"])
+@pytest.mark.parametrize(("model", "ga_model"), sorted(GEMINI_PREVIEW_ALIASES.items()))
+def test_a_gemini_2_5_preview_entry_carries_its_ga_model_tiers(model: str, ga_model: str, tier: str) -> None:
+    got, _estimated = PricingCatalog().get_rate_details("google", model, service_tier=tier)
+
+    assert got == pytest.approx(_rates(GEMINI_TIER_PRICES[ga_model][tier]))
+
+
+@pytest.mark.parametrize(
+    ("tier", "prices"),
+    [
+        (None, GEMINI_PRICES["gemini-2.5-flash"]),
+        ("flex", GEMINI_TIER_PRICES["gemini-2.5-flash"]["flex"]),
+        ("priority", GEMINI_TIER_PRICES["gemini-2.5-flash"]["priority"]),
+    ],
+    ids=["standard", "flex", "priority"],
+)
+async def test_a_gemini_reply_costs_its_thinking_tokens_as_output_at_the_tier_it_reports(
+    costed_rows: list[dict[str, Any]], tier: str | None, prices: tuple[float, float, float | None]
+) -> None:
+    """thoughtsTokenCount is billed as output, apart from candidatesTokenCount, at the rates of the tier
+    usageMetadata.serviceTier names; the cached prompt share keeps the tier's cache rate (AC #1, AC #3)."""
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_adapter import GoogleAdapter
+
+    usage_metadata: dict[str, Any] = {
+        "promptTokenCount": 10_000,
+        "candidatesTokenCount": 100,
+        "thoughtsTokenCount": 20,
+        "totalTokenCount": 10_120,
+        "cachedContentTokenCount": 8_000,
+    }
+    if tier is not None:
+        usage_metadata["serviceTier"] = tier
+    usage = GoogleAdapter._normalize_to_openai_shape(
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}], "usageMetadata": usage_metadata}
+    )["usage"]
+
+    await _log("google", "gemini-2.5-flash", usage, usage["prompt_tokens"], usage["completion_tokens"])
+
+    (row,) = costed_rows
+    prompt, completion, cached = prices
+    assert (row["completion_tokens"], row["reasoning_tokens"], row["total_tokens"]) == (120, 20, 10_120)
+    assert row["completion_cost_usd"] == pytest.approx(120 * completion / 1_000_000)
+    assert row["prompt_cost_usd"] == pytest.approx((2_000 * prompt + 8_000 * cached) / 1_000_000)
+    assert row["estimated"] is False

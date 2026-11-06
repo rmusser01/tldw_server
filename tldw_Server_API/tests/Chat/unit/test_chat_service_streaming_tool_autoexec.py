@@ -6,7 +6,7 @@ import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from starlette.responses import StreamingResponse
@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionRecord,
 )
 from tldw_Server_API.app.core.Usage import usage_tracker
+from tldw_Server_API.app.core.Usage.llm_accounting import drain_accounting
 from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
 
@@ -201,6 +202,7 @@ async def _run_execute_streaming_call(
     enable_provider_fallback: bool = False,
     refresh_provider_params=None,
     rg_commit_cb=None,
+    rg_refund_cb=None,
 ) -> StreamingResponse:
     cleaned_args = {
         "api_endpoint": selected_provider,
@@ -244,6 +246,7 @@ async def _run_execute_streaming_call(
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: ({}, None)),
         moderation_getter=lambda: _NoModeration(),
         rg_commit_cb=rg_commit_cb,
+        rg_refund_cb=rg_refund_cb,
     )
 
 
@@ -1133,8 +1136,46 @@ async def _save_nothing(*_args: Any, **_kwargs: Any) -> str:
             0.0042,
             True,
         ),
+        # Gemini: the chunk GoogleAdapter.stream ends with (TASK-13952), 8,000 of 10,000 prompt tokens cached and
+        # the thinking share inside completion_tokens, at gemini-2.5-flash's standard rates ($0.30, $0.03, $2.50
+        # per million), then at its flex rates ($0.15, $0.03, $1.25) when usageMetadata.serviceTier says so.
+        (
+            "google",
+            "gemini-2.5-flash",
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "thoughtsTokenCount": 400,
+                    "cachedContentTokenCount": 8_000,
+                },
+            },
+            None,
+            (2_000 * 0.30 + 8_000 * 0.03 + 1_000 * 2.50) / 1_000_000,
+            False,
+        ),
+        (
+            "google",
+            "gemini-2.5-flash",
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "thoughtsTokenCount": 400,
+                    "cachedContentTokenCount": 8_000,
+                    "service_tier": "flex",
+                },
+            },
+            "flex",
+            (2_000 * 0.15 + 8_000 * 0.03 + 1_000 * 1.25) / 1_000_000,
+            False,
+        ),
     ],
-    ids=["openai-fast-cached", "openrouter-reported-cost"],
+    ids=["openai-fast-cached", "openrouter-reported-cost", "gemini-cached-thinking", "gemini-flex"],
 )
 async def test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_sends(
     stream_usage_rows, provider, model, usage_chunk, tier, total_cost, forwarded
@@ -1152,6 +1193,7 @@ async def test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_se
     )
     chunks = await _collect_sse_chunks(response)
 
+    await drain_accounting()
     (row,) = stream_usage_rows
     assert row["estimate_source"] == "provider_usage"
     assert row["estimated"] is False
@@ -1188,6 +1230,7 @@ async def test_a_streamed_reply_without_usage_is_recorded_from_the_estimate(stre
     )
     await _collect_sse_chunks(response)
 
+    await drain_accounting()
     (row,) = stream_usage_rows
     assert row["estimate_source"] == "stream_estimate"
     assert row["estimated"] is True
@@ -1222,6 +1265,7 @@ async def test_a_usage_block_without_completion_tokens_counts_the_reply_from_the
     )
     await _collect_sse_chunks(response)
 
+    await drain_accounting()
     (row,) = stream_usage_rows
     assert (row["prompt_tokens"], row["completion_tokens"]) == expected_tokens
     assert row["estimated"] is True
@@ -1260,6 +1304,283 @@ async def test_a_streamed_tool_call_reply_is_recorded_once_from_its_usage_chunk(
     await _collect_sse_chunks(response)
 
     assert executed == ["c1"]
+    await drain_accounting()
     (row,) = stream_usage_rows
     assert (row["prompt_tokens"], row["completion_tokens"]) == (300, 40)
     assert row["estimate_source"] == "provider_usage"
+
+
+# --- A stream that ends early still writes one usage row (TASK-13953) ---
+
+_PROMPT_ESTIMATE = chat_service._estimate_tokens_from_messages([{"role": "user", "content": "hi"}])
+
+
+def _content_then(*frames: dict[str, Any], then: str = "wait") -> Any:
+    """A provider call that streams "hello world!" and ``frames``, then waits for a client that never comes back,
+    or fails. ``then="wait_after_frames"`` signals ``read`` once every frame was read, before waiting."""
+    read = asyncio.Event()
+
+    def _call() -> Any:
+        async def _stream() -> Any:
+            if then != "fail_before_output":
+                yield 'data: {"choices": [{"delta": {"content": "hello world!"}}]}\n\n'
+            for frame in frames:
+                yield f"data: {json.dumps(frame)}\n\n"
+            if then.startswith("fail"):
+                raise RuntimeError("upstream reset")
+            read.set()
+            await asyncio.Event().wait()
+
+        return _stream()
+
+    _call.read = read  # type: ignore[attr-defined]
+    return _call
+
+
+async def _drop_after(response: StreamingResponse, ready: asyncio.Event | None = None) -> None:
+    """Read the stream until "hello world!" (and ``ready``), then cancel the reading task, as a disconnect does."""
+    delivered = asyncio.Event()
+
+    async def _read() -> None:
+        async for chunk in response.body_iterator:
+            if "hello world!" in str(chunk):
+                delivered.set()
+
+    reader = asyncio.ensure_future(_read())
+    await asyncio.wait_for(delivered.wait(), timeout=10)
+    if ready is not None:
+        await asyncio.wait_for(ready.wait(), timeout=10)
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+
+
+async def _settled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows once the stream's own task, which outlives a cancelled reader, has written its row."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 10
+    while not rows and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)  # a second row, were one written, shows up here
+    await drain_accounting()
+    return rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_the_client_drops_still_writes_one_row_and_commits_its_tokens(stream_usage_rows) -> None:
+    """The client read the reply and closed on it; the reply counts toward the user's limits (AC #1, AC #2)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_then(),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    await _drop_after(response)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert row["estimate_source"] == "stream_estimate"
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (_PROMPT_ESTIMATE, len("hello world!") // 4)
+    assert committed == [row["total_tokens"]]
+    assert refunded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_dropped_stream_is_recorded_from_the_usage_chunk_that_arrived(stream_usage_rows) -> None:
+    """The provider's count wins over the estimate when the chunk arrived before the drop (AC #1)."""
+    committed: list[int] = []
+    usage = {"prompt_tokens": 40, "completion_tokens": 9, "total_tokens": 49}
+    llm_call_func = _content_then({"choices": [], "usage": usage})
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func, save_message_fn=_save_nothing, rg_commit_cb=committed.append
+    )
+    await _drop_after(response, ready=llm_call_func.read)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert row["estimate_source"] == "provider_usage"
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (40, 9)
+    assert committed == [49]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_client_drop_during_the_save_still_writes_one_row_and_commits_its_tokens(stream_usage_rows) -> None:
+    """The client closed on finish_reason while the message was being saved, where a close on the last frame
+    lands; the reply counts all the same (AC #1, AC #2)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+    saving = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _blocked_save(*_args: Any, **_kwargs: Any) -> str:
+        saving.set()
+        await release.wait()
+        return "message-1"
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(),
+        save_message_fn=_blocked_save,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    await _drop_after(response, ready=saving)
+    release.set()
+
+    (row,) = await _settled(stream_usage_rows)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (_PROMPT_ESTIMATE, len("hello world!") // 4)
+    assert committed == [row["total_tokens"]]
+    assert refunded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_that_fails_writes_one_row_from_what_it_received(stream_usage_rows) -> None:
+    """A provider error after output records the prompt and what arrived, as the provider-level recorder does;
+    the tokens are committed, not refunded (AC #1, AC #2)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_then(then="fail_after_output"),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (_PROMPT_ESTIMATE, len("hello world!") // 4)
+    assert row["estimate_source"] == "stream_estimate"
+    assert committed == [row["total_tokens"]]
+    assert refunded == []
+    assert any('"success": false' in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_that_fails_before_any_output_is_refunded_and_writes_no_row(stream_usage_rows) -> None:
+    """Nothing came back, and the endpoint retries such a failure (an OAuth refresh, a fallback provider) on the
+    same request and reservation: a row here would charge the prompt twice. Refunded, as before (AC #1)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_then(then="fail_before_output"),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    chunks = await _collect_sse_chunks(response)
+    await drain_accounting()
+
+    assert stream_usage_rows == []
+    assert committed == []
+    assert refunded == [{"cancelled": False, "error": True}]
+    assert any('"success": false' in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_dropped_before_any_output_is_refunded_and_writes_no_row(stream_usage_rows) -> None:
+    """Nothing was received, so nothing is recorded, as the provider-level recorder does for an unread stream;
+    the endpoint's own close of a failed attempt before its retry reaches the pipeline as such a drop."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+    entered = asyncio.Event()
+
+    def llm_call_func() -> Any:
+        async def _stream() -> Any:
+            entered.set()
+            await asyncio.Event().wait()
+            yield ""  # never reached
+
+        return _stream()
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    reader = asyncio.ensure_future(_collect_sse_chunks(response))
+    await asyncio.wait_for(entered.wait(), timeout=10)
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+    deadline = asyncio.get_running_loop().time() + 10
+    while not refunded and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)  # the stream's own task finishes after the cancelled reader
+    await drain_accounting()
+
+    assert stream_usage_rows == []
+    assert committed == []
+    assert refunded == [{"cancelled": True, "error": False}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_the_tokens_are_committed_even_when_the_row_write_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A usage write that fails with a driver error still commits to the Resource Governor and billing: a commit
+    skipped on a failed write would be a quota bypass (AC #2)."""
+
+    class _DriverError(Exception):
+        """Not one of the chat pipeline's non-critical exceptions."""
+
+    committed: list[int] = []
+    monkeypatch.setattr(chat_service, "log_llm_usage", AsyncMock(side_effect=_DriverError("disk full")))
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(), save_message_fn=_save_nothing, rg_commit_cb=committed.append
+    )
+    await _collect_sse_chunks(response)
+    await drain_accounting()
+
+    assert committed == [_PROMPT_ESTIMATE + len("hello world!") // 4]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_dropped_stream_on_the_users_own_key_is_recorded_as_such(
+    monkeypatch: pytest.MonkeyPatch, stream_usage_rows
+) -> None:
+    """The row carries credential_source 'user', which the limits skip, as a completed one does (ADR-083)."""
+    monkeypatch.setattr(chat_service, "call_credential_source", lambda _args: "user")
+
+    response = await _run_execute_streaming_call(llm_call_func=_content_then(), save_message_fn=_save_nothing)
+    await _drop_after(response)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert row["credential_source"] == "user"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_the_stream_estimate_counts_reasoning_and_tool_call_arguments(stream_usage_rows) -> None:
+    """A tool-call-only reply is not free: its arguments and reasoning count, as the provider-level recorder
+    counts them (AC #3)."""
+    arguments = json.dumps({"query": "x" * 30})
+    tool_delta = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                                                         "function": {"name": "notes.search", "arguments": arguments}}]}}]}
+    reasoning = {"choices": [{"delta": {"reasoning_content": "y" * 40}}]}
+
+    def llm_call_func() -> Any:
+        def _stream() -> Any:
+            yield f"data: {json.dumps(reasoning)}\n\n"
+            yield f"data: {json.dumps(tool_delta)}\n\n"
+            yield 'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return _stream()
+
+    response = await _run_execute_streaming_call(llm_call_func=llm_call_func, save_message_fn=_save_nothing)
+    await _collect_sse_chunks(response)
+
+    await drain_accounting()
+    (row,) = stream_usage_rows
+    assert row["completion_tokens"] == (len(arguments) + 40) // 4
+    assert row["estimate_source"] == "stream_estimate"
