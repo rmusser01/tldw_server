@@ -1656,11 +1656,17 @@ jobs:
           - name: product-explainer
             paths: >-
               tldw_Server_API/tests/Explainer
-          - name: product-notes-persona
+          - name: product-notes-legacy
             paths: >-
               tldw_Server_API/tests/Notes
+          - name: product-notes-new
+            paths: >-
               tldw_Server_API/tests/Notes_NEW
+          - name: product-persona
+            paths: >-
               tldw_Server_API/tests/Persona
+          - name: product-personalization
+            paths: >-
               tldw_Server_API/tests/Personalization
           - name: product-prompts-legacy
             paths: >-
@@ -3407,11 +3413,17 @@ jobs:
           - name: product-explainer
             paths: >-
               tldw_Server_API/tests/Explainer
-          - name: product-notes-persona
+          - name: product-notes-legacy
             paths: >-
               tldw_Server_API/tests/Notes
+          - name: product-notes-new
+            paths: >-
               tldw_Server_API/tests/Notes_NEW
+          - name: product-persona
+            paths: >-
               tldw_Server_API/tests/Persona
+          - name: product-personalization
+            paths: >-
               tldw_Server_API/tests/Personalization
           - name: product-prompts-legacy
             paths: >-
