@@ -139,6 +139,7 @@ from tldw_Server_API.app.services.auth_service import (
     apply_password_reset as _svc_apply_password_reset,
 )
 from tldw_Server_API.app.services.auth_service import (
+    consume_magic_link,
     fetch_active_user_by_id,
     fetch_user_by_login_identifier,
     update_user_last_login,
@@ -3062,7 +3063,11 @@ async def verify_magic_link(
     session_manager: SessionManager = Depends(get_session_manager_dep),
     registration_service: RegistrationService = Depends(get_registration_service_dep),
 ) -> TokenResponse:
-    """Verify a magic link token and return access/refresh tokens."""
+    """Redeem a one-time sign-in link for access and refresh tokens.
+
+    An already consumed link returns 400. If storage cannot confirm consumption,
+    the server returns 503. Request a fresh link if sign-in fails after consumption.
+    """
     settings = get_settings()
     if settings.AUTH_MODE != "multi_user":
         raise HTTPException(
@@ -3117,13 +3122,36 @@ async def verify_magic_link(
     if not user and email:
         user = await fetch_user_by_login_identifier(db, email)
 
-    if not user:
-        if not settings.ENABLE_REGISTRATION:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Registration is disabled",
-            )
+    if not user and not settings.ENABLE_REGISTRATION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is disabled",
+        )
+    if user and user.get("is_active") in (False, 0):
+        raise HTTPException(status_code=401, detail="Invalid or inactive user")
 
+    jti, expiry = payload.get("jti"), payload.get("exp")
+    try:
+        if not isinstance(jti, str) or not jti.strip() or len(jti) > 255 or type(expiry) not in (int, float):
+            raise ValueError("Invalid redemption claims")
+        expires_at = datetime.fromtimestamp(expiry, tz=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            raise ValueError("Expired redemption claim")
+    except (ValueError, OverflowError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid magic link token") from None
+
+    try:
+        claimed = await consume_magic_link(
+            db, jti=jti, expires_at=expires_at, actor_id=int(user["id"]) if user else None,
+            ip_address=_auth_request_client_ip(request),
+        )
+    except Exception:  # a failed or unconfirmed claim must never grant credentials
+        logger.error("Could not persist magic-link consumption")
+        raise HTTPException(status_code=503, detail="Magic link sign-in is temporarily unavailable") from None
+    if not claimed:
+        raise HTTPException(status_code=400, detail="Invalid magic link token")
+
+    if not user:
         # Create a new user on first magic-link sign-in
         username_base = _derive_username_from_email(email or "user")
         password = registration_service.password_service.generate_secure_password(
@@ -3213,30 +3241,6 @@ async def verify_magic_link(
     )
 
     await update_user_last_login(db, int(user["id"]), datetime.utcnow())
-
-    # Blacklist the magic link token after use (one-time)
-    try:
-        jti = payload.get("jti")
-        raw_exp = payload.get("exp")
-        exp_dt = None
-        if isinstance(raw_exp, (int, float)):
-            exp_dt = datetime.fromtimestamp(raw_exp, tz=timezone.utc)
-        elif isinstance(raw_exp, datetime):
-            exp_dt = raw_exp
-        if jti and exp_dt:
-            from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
-            bl = get_token_blacklist()
-            await bl.revoke_token(
-                jti=jti,
-                expires_at=exp_dt,
-                user_id=int(user["id"]),
-                token_type="magic_link",
-                reason="magic_link_used",
-                revoked_by=int(user["id"]),
-                ip_address=_auth_request_client_ip(request),
-            )
-    except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Magic link token blacklist failed: {}", exc)
 
     return TokenResponse(
         access_token=access_token,
