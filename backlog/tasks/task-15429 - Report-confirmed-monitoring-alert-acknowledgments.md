@@ -2,6 +2,8 @@
 id: TASK-15429
 title: Report confirmed monitoring alert acknowledgments
 status: In Progress
+references:
+- https://github.com/rmusser01/tldw_server/pull/3429
 ---
 
 ## Description
