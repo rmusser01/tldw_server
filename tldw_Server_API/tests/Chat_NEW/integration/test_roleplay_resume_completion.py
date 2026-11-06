@@ -857,6 +857,38 @@ def test_protected_resume_generation_enforces_llm_quota(resume_api, monkeypatch,
     assert db.get_roleplay_resume_state(cid) == before
 
 
+def test_protected_resume_generation_admits_an_over_limit_user_on_their_own_key(resume_api, monkeypatch) -> None:
+    """Past a limit, a resume whose saved provider runs on the user's own key is let through unmarked (TASK-13956)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    client, db, cid, headers = resume_api
+    body = generation_request(client, db, cid, headers)
+    asked: list[str] = []
+    admitted: list[bool] = []
+
+    async def own_key(_uid: object, provider: str) -> bool:
+        """Stands in for the lookup answering True for the saved provider (the boundary is under test)."""
+        asked.append(provider)
+        return provider == "local-llm"
+
+    def provider_call(**_kwargs):
+        admitted.append(current_llm_call_context().prechecked)
+        return {"choices": [{"message": {"role": "assistant", "content": "Resumed on your key."}}]}
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider_call)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", own_key)
+    refuse_llm_work(monkeypatch)
+    response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["assistant_content"] == "Resumed on your key."
+    assert asked == ["local-llm"]
+    assert admitted == [False]
+
+
 @pytest.mark.parametrize(
     "quota_key",
     ["limits.llm_tokens_per_month", "limits.llm_cost_per_day_usd", "limits.llm_cost_per_month_usd"],

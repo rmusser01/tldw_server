@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -20,6 +22,15 @@ class AuthnzRateLimitsRepo:
     """
 
     db_pool: DatabasePool
+
+    @asynccontextmanager
+    async def _write_conn(self, conn: Any | None) -> AsyncIterator[Any]:
+        """Yield the caller's connection as-is, or open this pool's own transaction."""
+        if conn is not None:
+            yield conn
+            return
+        async with self.db_pool.transaction() as own:
+            yield own
 
     def _is_postgres_backend(self) -> bool:
         """Return True when the underlying DatabasePool is using PostgreSQL."""
@@ -552,9 +563,12 @@ class AuthnzRateLimitsRepo:
         now: datetime,
         lockout_threshold: int,
         lockout_duration_minutes: int,
+        conn: Any | None = None,
     ) -> dict[str, Any]:
         """
         Increment the failed-attempt counter and, if necessary, record a lockout.
+
+        With ``conn`` the writes join the caller's transaction (same database).
 
         Returns a dict containing:
         - ``attempt_count`` (int)
@@ -562,7 +576,7 @@ class AuthnzRateLimitsRepo:
         - ``lockout_expires`` (Optional[datetime])
         """
         try:
-            async with self.db_pool.transaction() as conn:
+            async with self._write_conn(conn) as conn:
                 if self._is_postgres_backend():
                     # PostgreSQL - use ON CONFLICT with window-reset semantics
                     result = await conn.fetchrow(
@@ -735,12 +749,16 @@ class AuthnzRateLimitsRepo:
         *,
         identifier: str,
         attempt_type: str,
+        conn: Any | None = None,
     ) -> None:
         """
         Clear failed-attempt counters and account lockout rows for an identifier.
+
+        With ``conn`` the deletes join the caller's transaction (same database).
         """
+        caller_owns_txn = conn is not None
         try:
-            async with self.db_pool.transaction() as conn:
+            async with self._write_conn(conn) as conn:
                 if self._is_postgres_backend():
                     await conn.execute(
                         """
@@ -765,7 +783,8 @@ class AuthnzRateLimitsRepo:
                         (identifier, attempt_type),
                     )
                     try:
-                        await conn.commit()
+                        if not caller_owns_txn:
+                            await conn.commit()
                     except Exception as exc:
                         logger.debug(
                             f"AuthnzRateLimitsRepo SQLite commit failed during reset_failed_attempts_and_lockout: {exc}"

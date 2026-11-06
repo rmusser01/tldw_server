@@ -563,12 +563,11 @@ async def reset_singletons(request):
         # and restore it below, after `yield`.
         try:
             from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware as _HTTPMM
-            from tldw_Server_API.app.core.Security.middleware import SecurityHeadersMiddleware as _SHM
             from tldw_Server_API.app.core.Security.request_id_middleware import RequestIDMiddleware as _RID
             original_user_middleware = list(getattr(_app, 'user_middleware', []))
             kept = []
             for m in original_user_middleware:
-                if getattr(m, 'cls', None) in (_HTTPMM, _SHM, _RID):
+                if getattr(m, 'cls', None) in (_HTTPMM, _RID):
                     continue
                 kept.append(m)
             if len(kept) != len(original_user_middleware):

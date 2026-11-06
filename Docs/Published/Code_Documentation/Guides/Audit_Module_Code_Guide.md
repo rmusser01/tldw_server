@@ -46,7 +46,7 @@ This guide helps project developers understand the Audit module’s architecture
 - PII detection and redaction applied to metadata and selected string fields.
 - If metadata isn’t JSON-serializable, the service stores a redacted representation as `{ "redacted_text": "..." }`.
 - Heuristic risk scoring; high‑risk events trigger immediate flush.
-- Background tasks: periodic flush and daily cleanup (disabled in test mode).
+- Background tasks: periodic flush and daily cleanup (disabled when `inline_io=True`).
 - Strict write support: callers can force durability with `flush(raise_on_failure=True)` and surface
   `MandatoryAuditWriteError` for fail-closed security or state-changing paths.
 
@@ -178,7 +178,7 @@ Tips:
 
 ## Programmatic API (service methods)
 
-- `await initialize()` → prepares schema, opens pool (unless in test mode), starts background tasks (unless in test mode).
+- `await initialize()` → prepares schema, opens pool (unless `inline_io`), starts background tasks (unless `inline_io`).
 - `await log_event(...)` → append to buffer; applies PII detection and risk scoring; high‑risk triggers ad‑hoc flush.
 - `await log_login(user_id, username, ip, user_agent, success, session_id)` → convenience wrapper.
 - `await flush()` → batch insert buffered events.
@@ -218,7 +218,7 @@ async with audit_operation(service, AuditEventType.DATA_READ, ctx,
 
 ## Background Tasks & Shutdown
 
-- Background tasks: periodic flush (`flush_interval`) and daily cleanup. Disabled in test mode to avoid busy loops.
+- Background tasks: periodic flush (`flush_interval`) and daily cleanup. Disabled when `inline_io=True` (default `UnifiedAuditService.inline_io_default`, set by the test suite) to avoid busy loops.
 - DI layer caches per‑user services (LRU). On app shutdown, call `shutdown_all_audit_services()` (see `Audit_DB_Deps.py`).
 - `shutdown_all_audit_services()` returns an `AuditShutdownSummary` and is best-effort by default; pass
   `raise_on_error=True` for targeted callers or tests that need shutdown failures surfaced.
@@ -240,7 +240,7 @@ async with audit_operation(service, AuditEventType.DATA_READ, ctx,
   - `test_unified_audit_service.py`: PII, risk scoring, buffering/flush, queries, export, cleanup, context manager
   - `test_audit_export_endpoint.py`: endpoint auth, headers/filenames, streaming
   - Overrides: PII and risk settings tests ensure settings‑driven behavior remains stable
-- In tests, background tasks are disabled (test mode), so explicitly call `flush()` when needed.
+- In tests, background tasks are disabled (`inline_io`), so explicitly call `flush()` when needed.
 
 ## Extending & Customizing
 

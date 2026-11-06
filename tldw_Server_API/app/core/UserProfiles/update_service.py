@@ -380,14 +380,18 @@ class UserProfileUpdateService:
                 if not username:
                     raise ValueError("user_not_found")
                 limiter = get_rate_limiter()
+                # Same connection as the request: the lock commits or rolls back with it.
                 if bool(value):
                     await limiter.record_failed_attempt(
                         identifier=username,
                         attempt_type="login",
                         lockout_threshold=1,
+                        conn=db_conn,
                     )
                 else:
-                    await limiter.reset_failed_attempts(identifier=username, attempt_type="login")
+                    await limiter.reset_failed_attempts(
+                        identifier=username, attempt_type="login", conn=db_conn
+                    )
                 await _touch_user_updated_at(db_conn, user_id)
                 anchor.mark_changed()
             return True

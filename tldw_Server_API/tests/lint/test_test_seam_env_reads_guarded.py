@@ -63,7 +63,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
             "api/v1/endpoints/embeddings_v5_production_enhanced.py",
             "api/v1/endpoints/prompt_studio/prompt_studio_evaluations.py",
             "api/v1/endpoints/writing.py",
-            "core/Audit/unified_audit_service.py",
             "core/AuthNZ/database.py",
             "core/AuthNZ/key_resolution.py",
             "core/AuthNZ/migrations.py",
@@ -94,7 +93,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
             "core/Usage/llm_budget_guard.py",
             "core/Usage/llm_budget_middleware.py",
             "core/testing.py",
-            "main.py",
         ),
     ),
     "FORCE_CHAT_QUEUE_IN_TESTS": (_UNDER_TEST_MODE, ("api/v1/endpoints/chat.py",)),
@@ -165,7 +163,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
     "EVALS_ABTEST_MAX_MEDIA_IDS": (_NOT_A_SEAM, ("core/Evaluations/embeddings_abtest_service.py",)),
     "EVALS_ABTEST_MAX_QUERIES": (_NOT_A_SEAM, ("core/Evaluations/embeddings_abtest_service.py",)),
     "EVALS_ABTEST_PERSISTENCE": (_NOT_A_SEAM, ("core/DB_Management/Evaluations_DB.py",)),
-    "_TEST_MODE": ("main.py's module global, not an env read", ("main.py",)),
 }
 
 
