@@ -171,17 +171,8 @@ _VIDEO_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _egress_block_private_override() -> Optional[bool]:
-    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"):
-        return False
-    return None
-
-
 def _raise_if_url_blocked(url: str) -> None:
-    policy_result = evaluate_url_policy(
-        url,
-        block_private_override=_egress_block_private_override(),
-    )
+    policy_result = evaluate_url_policy(url)
     if not getattr(policy_result, "allowed", False):
         reason = policy_result.reason or "URL blocked by security policy"
         raise ValueError(f"URL blocked by security policy: {reason}")
@@ -1380,10 +1371,7 @@ def process_single_video(
 
         # 1. Get Metadata & Determine LOCAL Processing Path
         if is_remote:
-            block_override: Optional[bool] = None
-            if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"):
-                block_override = False
-            policy_result = evaluate_url_policy(video_input, block_private_override=block_override)
+            policy_result = evaluate_url_policy(video_input)
             if not getattr(policy_result, "allowed", False):
                 reason = policy_result.reason or "URL blocked by security policy"
                 err_msg = f"URL blocked by security policy: {reason}"

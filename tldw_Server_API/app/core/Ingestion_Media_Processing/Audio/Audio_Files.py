@@ -431,10 +431,7 @@ def _get_model_estimated_size(model_name: str) -> str:
 
 
 def _validate_outbound_url(url: str) -> Optional[str]:
-    block_override: Optional[bool] = None
-    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"):
-        block_override = False
-    result = evaluate_url_policy(url, block_private_override=block_override)
+    result = evaluate_url_policy(url)
     if not getattr(result, "allowed", False):
         return result.reason or "URL blocked by security policy"
     return None

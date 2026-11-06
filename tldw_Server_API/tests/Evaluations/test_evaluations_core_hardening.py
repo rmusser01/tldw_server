@@ -219,6 +219,50 @@ async def test_registered_webhook_delivery_uses_resolved_safe_target(temp_db_pat
 
 
 @pytest.mark.asyncio
+async def test_registered_webhook_delivery_resolves_the_target_under_pytest(temp_db_path, monkeypatch) -> None:
+    manager = WebhookManager(str(temp_db_path))
+    original_url = "http://attacker.test/webhook"
+    monkeypatch.setenv("TESTING", "1")
+    monkeypatch.setenv("TLDW_TEST_MODE", "y")
+    webhook = {
+        "id": 1,
+        "url": original_url,
+        "secret": "test-secret",
+        "retry_count": 1,
+        "timeout_seconds": 5,
+    }
+    payload = WebhookPayload(
+        event="evaluation.completed",
+        evaluation_id="eval-safe",
+        timestamp="2026-06-23T00:00:00+00:00",
+        data={"score": 1.0},
+    )
+
+    async def _ok_fetch(**kwargs):
+        return SimpleNamespace(status_code=200, text="ok")
+
+    with (
+        patch.object(manager, "_create_delivery_record", return_value=1),
+        patch.object(manager, "_update_delivery_record", MagicMock()),
+        patch.object(manager, "_update_webhook_stats", MagicMock()),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(None, None, None, None, ("93.184.216.34", 80))],
+        ),
+        patch(
+            "tldw_Server_API.app.core.Evaluations.webhook_manager.afetch",
+            new=AsyncMock(side_effect=_ok_fetch),
+        ) as mock_fetch,
+    ):
+        await manager._deliver_webhook(webhook, payload)
+
+    mock_fetch.assert_awaited_once()
+    _, kwargs = mock_fetch.await_args
+    assert kwargs["url"] == "http://93.184.216.34/webhook"  # nosec B101
+    assert kwargs["headers"]["Host"] == "attacker.test"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_registered_https_webhook_delivery_preserves_hostname_for_tls(temp_db_path, monkeypatch) -> None:
     manager = WebhookManager(str(temp_db_path))
     original_url = "https://example.test/webhook"

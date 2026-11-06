@@ -18,12 +18,13 @@ TASK-13962 re-parented the subtasks 3a660d4f1d orphaned and pointed bare-id refe
 <!-- AC:BEGIN -->
 - [ ] #1 task-13145 (canonical admin webhook producers) depends on TASK-15132, not TASK-13111: by #2855, or with task edit --dep once #2855 closes without the change
 - [ ] #2 task-2281 (LSP-backed MCP tools) depends on and references TASK-15254, not TASK-2387: by #2421, or with task edit --dep and --ref once #2421 closes without the change
-- [ ] #3 task-13421 (Jobs completion SQL ownership) references TASK-15149, not TASK-13215: by #3323, or with task edit --ref once #3323 closes without the change
+- [x] #3 task-13421 (Jobs completion SQL ownership) references TASK-15149, not TASK-13215: by #3323, or with task edit --ref once #3323 closes without the change
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+AC 3 done on 2026-11-05 in the TASK-13952 PR: #3323 merged without the change.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

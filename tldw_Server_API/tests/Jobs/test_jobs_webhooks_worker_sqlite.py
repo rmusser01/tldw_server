@@ -16,6 +16,8 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_URL", "http://example.test/hook")
+    # The worker enforces the egress policy in every mode; allow the stub host explicitly.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "example.test")
     monkeypatch.setenv("JOBS_WEBHOOKS_SECRET_KEYS", "devsecret")
     monkeypatch.setenv("JOBS_WEBHOOKS_INTERVAL_SEC", "0.01")
 

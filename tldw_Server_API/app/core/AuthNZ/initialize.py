@@ -42,7 +42,6 @@ from tldw_Server_API.app.core.AuthNZ.migrations import check_migration_status, e
 from tldw_Server_API.app.core.AuthNZ.monitoring import get_authnz_monitor
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-from tldw_Server_API.app.core.AuthNZ.scheduler import start_authnz_scheduler
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
 from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
@@ -1347,13 +1346,11 @@ async def test_authentication():
         return False
 
 async def start_services():
-    """Start background services"""
-    print("\n🚀 Starting background services...")
+    """Run the background services (monitoring) check"""
+    print("\n🚀 Running the background services check...")
 
     try:
-        # Start scheduler
-        await start_authnz_scheduler()
-        print("✅ Scheduler started")
+        print("ℹ️  Scheduled AuthNZ jobs run inside the API server.")
 
         # Initialize monitor
         monitor = await get_authnz_monitor()
@@ -1508,7 +1505,7 @@ async def main(*, non_interactive: bool = False, test_setup: bool = False):
 
     # Step 6: Start services (optional)
     should_start_services = test_setup or _prompt_yes_no(
-        "\n🚀 Start background services?",
+        "\n🚀 Run the background services check?",
         default_yes=False,
         non_interactive=non_interactive,
     )
@@ -1540,7 +1537,7 @@ if __name__ == "__main__":
         action="store_true",
         help=(
             "Prepare a rapid test environment (writes an insecure SINGLE_USER_API_KEY, "
-            "populates the .env file, and auto-starts background services)."
+            "populates the .env file, and runs the monitoring check)."
         ),
     )
     try:

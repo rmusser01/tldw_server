@@ -30,7 +30,7 @@ Tip: Keep values conservative if you’re unsure, then update with exact rates f
 
 - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing (model IDs: https://platform.claude.com/docs/en/about-claude/models/overview)
 - OpenAI (text models): https://developers.openai.com/api/docs/pricing (Batch, Flex and Fast tables for `service_tiers`)
-- Google Gemini: https://ai.google.dev/gemini-api/docs/pricing (`cache_read` is the "Context caching price")
+- Google Gemini: https://aistudio.google.com/docs/pricing, where https://ai.google.dev/gemini-api/docs/pricing redirects (`cache_read` is the "Context caching price"; the Flex and Priority tables fill `service_tiers`, keyed by the `usageMetadata.serviceTier` a response reports; Batch is a separate endpoint and is not catalogued)
 - OpenRouter: entries are a fallback only; a call is costed from the `usage.cost` OpenRouter reports (https://openrouter.ai/docs/use-cases/usage-accounting)
 - Z.ai: https://docs.z.ai/guides/overview/pricing
 - Moonshot (Kimi): https://platform.moonshot.ai/docs/pricing/chat#generation-model-kimi-k2
