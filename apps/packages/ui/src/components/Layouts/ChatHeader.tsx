@@ -76,6 +76,7 @@ type ChatHeaderProps = {
   onOpenNotifications?: () => void
   notificationState?: HeaderNotificationState
   onRetryNotifications?: () => void | Promise<void>
+  renderAccountMenu?: (onClose: () => void) => React.ReactNode
 }
 
 const toText = (value: unknown): string =>
@@ -114,7 +115,8 @@ export function ChatHeader({
   notificationCount,
   onOpenNotifications,
   notificationState = "active",
-  onRetryNotifications
+  onRetryNotifications,
+  renderAccountMenu
 }: ChatHeaderProps) {
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false)
   const headerMenuTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -122,6 +124,8 @@ export function ChatHeader({
     React.useState(false)
   const notificationTriggerRef = React.useRef<HTMLButtonElement>(null)
   const notificationPopoverRef = React.useRef<HTMLDivElement>(null)
+  const closeNotificationPopover = React.useCallback(() => setNotificationPopoverOpen(false), [])
+  const accountMenuLabel = toText(t("option:header.accountMenu", "Account menu"))
   React.useEffect(() => {
     if (!headerMenuOpen) return
     // RC Dropdown's delayed autofocus can refocus its closed menu; cancel ours on close.
@@ -341,7 +345,7 @@ export function ChatHeader({
   React.useEffect(() => {
     if (!notificationPopoverOpen) return
     notificationPopoverRef.current
-      ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      ?.querySelector<HTMLElement>("button:not(:disabled), a[href]")
       ?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
@@ -364,15 +368,15 @@ export function ChatHeader({
   }, [notificationPopoverOpen])
 
   React.useEffect(() => {
-    if (notificationState === "idle") setNotificationPopoverOpen(false)
-  }, [notificationState])
+    if (notificationState === "idle" && !renderAccountMenu) setNotificationPopoverOpen(false)
+  }, [notificationState, renderAccountMenu])
 
   const openNotifications = () => {
     setNotificationPopoverOpen(false)
     onOpenNotifications?.()
   }
 
-  const NotificationIcon =
+  const NotificationIcon = renderAccountMenu ? UserCircle2 :
     notificationState === "active"
       ? Bell
       : notificationState === "connecting"
@@ -381,14 +385,19 @@ export function ChatHeader({
           ? BellOff
           : TriangleAlert
 
-  const notificationControl = onOpenNotifications && notificationCopy && (
-    <div className="relative">
-      <Tooltip title={notificationCopy.title} placement="bottomRight">
+  const notificationControl = (renderAccountMenu || (onOpenNotifications && notificationCopy)) && (
+    <div
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) closeNotificationPopover()
+      }}
+    >
+      <Tooltip title={renderAccountMenu ? accountMenuLabel : notificationCopy?.title} placement="bottomRight">
         <button
           ref={notificationTriggerRef}
           type="button"
           onClick={() => setNotificationPopoverOpen((open) => !open)}
-          aria-label={notificationCopy.name}
+          aria-label={renderAccountMenu ? accountMenuLabel : notificationCopy?.name}
           aria-haspopup="dialog"
           aria-expanded={notificationPopoverOpen}
           aria-controls="chat-header-notification-status"
@@ -396,7 +405,7 @@ export function ChatHeader({
           data-testid="chat-header-notifications-bell"
         >
           <NotificationIcon
-            className={`size-4 ${notificationState === "connecting" ? "animate-spin" : ""}`}
+            className={`size-4 ${!renderAccountMenu && notificationState === "connecting" ? "animate-spin" : ""}`}
             aria-hidden="true"
           />
           {notificationState === "active" && (notificationCount ?? 0) > 0 && (
@@ -414,42 +423,48 @@ export function ChatHeader({
           ref={notificationPopoverRef}
           id="chat-header-notification-status"
           role="dialog"
-          aria-label={notificationCopy.title}
-          className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border bg-surface p-3 text-left shadow-lg"
+          aria-label={renderAccountMenu ? accountMenuLabel : notificationCopy?.title}
+          className="absolute right-0 top-full z-50 mt-2 max-h-[calc(100dvh-5rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-border bg-surface p-3 text-left shadow-lg"
         >
-          <p className="text-sm font-semibold text-text">
-            {notificationCopy.title}
-          </p>
-          <p className="mt-1 text-xs leading-5 text-text-muted">
-            {notificationCopy.description}
-          </p>
-          <div className="mt-3 flex items-center gap-2">
-            {(notificationState === "degraded" ||
-              notificationState === "unavailable") &&
-            onRetryNotifications ? (
-              <button
-                type="button"
-                onClick={() => void onRetryNotifications()}
-                className={`rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primaryStrong ${focusRingClasses}`}
-              >
-                {toText(t("option:header.notificationsTryAgain", "Try again"))}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={openNotifications}
-              className={`rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 ${focusRingClasses}`}
-            >
-              {toText(
-                t("option:header.notificationsOpen", "Open notifications")
-              )}
-            </button>
-          </div>
+          {renderAccountMenu ? renderAccountMenu(closeNotificationPopover) : notificationCopy ? (
+            <>
+              <p className="text-sm font-semibold text-text">
+                {notificationCopy.title}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-text-muted">
+                {notificationCopy.description}
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                {(notificationState === "degraded" ||
+                  notificationState === "unavailable") &&
+                onRetryNotifications ? (
+                  <button
+                    type="button"
+                    onClick={() => void onRetryNotifications()}
+                    className={`rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primaryStrong ${focusRingClasses}`}
+                  >
+                    {toText(t("option:header.notificationsTryAgain", "Try again"))}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={openNotifications}
+                  className={`rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 ${focusRingClasses}`}
+                >
+                  {toText(
+                    t("option:header.notificationsOpen", "Open notifications")
+                  )}
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       ) : null}
-      <span role="status" aria-live="polite" className="sr-only">
-        {notificationCopy.announcement}
-      </span>
+      {notificationCopy && (
+        <span role="status" aria-live="polite" className="sr-only">
+          {notificationCopy.announcement}
+        </span>
+      )}
     </div>
   )
   const runMenuAction = (action: (() => void) | undefined) => {
