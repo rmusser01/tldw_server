@@ -673,7 +673,9 @@ async def federation_callback(
         mapped_claims=mapped_claims,
     )
     db_pool = await get_db_pool()
-    async with db_pool.transaction() as db:
+    # Autocommit, like get_login_db_connection: the session manager writes on
+    # its own connection, which a SQLite BEGIN IMMEDIATE here would block.
+    async with db_pool.acquire_statement_autocommit() as db:
         return await _issue_multi_user_tokens(
             request=request,
             db=db,
@@ -3503,7 +3505,7 @@ async def mfa_login(
     data: MFALoginRequest,
     request: Request,
     response: Response,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),

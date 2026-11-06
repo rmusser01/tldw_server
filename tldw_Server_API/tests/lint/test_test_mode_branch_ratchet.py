@@ -66,6 +66,7 @@ SECURITY_FUNCTIONS: frozenset[str] = frozenset(
         "core/http_client.py:_validate_egress_or_raise",
         "services/workflows_webhook_dlq_service.py:_host_allowed",
         "api/v1/API_Deps/auth_deps.py:_authenticate_api_key_from_request",
+        "api/v1/API_Deps/auth_deps.py:get_session_manager_dep",
         "api/v1/API_Deps/auth_deps.py:get_db_transaction",
         "api/v1/API_Deps/auth_deps.py:_enforce_auth_deps_ingress_guard",
         "api/v1/endpoints/mcp_unified_endpoint.py:_resolve_token_data_compat",

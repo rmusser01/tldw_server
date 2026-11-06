@@ -10,9 +10,7 @@ import threading
 import time
 from collections.abc import AsyncGenerator, Awaitable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Annotated, Any, Callable, Optional
-from weakref import WeakKeyDictionary
 
 #
 # 3rd-party imports
@@ -85,9 +83,6 @@ from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
 )
 from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-)
-from tldw_Server_API.app.core.testing import (
     is_production_like_env as _is_production_like_env,
 )
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
@@ -113,14 +108,6 @@ _AUTH_DEPS_NONCRITICAL_EXCEPTIONS = (
     WeakPasswordError,
     InactiveUserError,
 )
-
-# Test stub shared state (persist across dependency calls under TEST_MODE/pytest)
-_TEST_SESSION_STATE: dict = {"sid": 1000, "sessions": {}}
-_TEST_SESSION_LOCKS: "WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = WeakKeyDictionary()
-_TEST_SESSION_LOCK_GUARD = threading.Lock()
-_TEST_SESSION_STATE_GUARD = threading.Lock()
-_TEST_EPHEMERAL_STATE: dict = {"values": {}}
-_TEST_EPHEMERAL_STATE_GUARD = threading.Lock()
 
 _SENSITIVE_USER_KEY_PATTERN = re.compile(
     r"(password|secret|token|api[_-]?key|ssn|totp|otp|mfa|backup_codes|recovery_codes)",
@@ -239,29 +226,6 @@ async def _authenticate_api_key_from_request(request: Request, api_key: str) -> 
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate API key",
         ) from e
-
-
-def _get_test_session_lock() -> asyncio.Lock:
-    """
-    Lazily initialize and return a test session lock scoped to the current event loop.
-
-    The lock is created on first use within the currently running event loop
-    instead of at module import time to avoid binding it to the wrong loop
-    in test environments.
-    """
-    loop = asyncio.get_running_loop()
-    with _TEST_SESSION_LOCK_GUARD:
-        lock = _TEST_SESSION_LOCKS.get(loop)
-        if lock is None:
-            lock = asyncio.Lock()
-            _TEST_SESSION_LOCKS[loop] = lock
-        return lock
-
-
-def reset_test_ephemeral_state() -> None:
-    """Clear the test-only in-process ephemeral KV store (pytest/TEST_MODE)."""
-    with _TEST_EPHEMERAL_STATE_GUARD:
-        _TEST_EPHEMERAL_STATE["values"].clear()
 
 #######################################################################################################################
 #
@@ -420,188 +384,7 @@ async def get_jwt_service_dep() -> JWTService:
 
 
 async def get_session_manager_dep() -> SessionManager:
-    """Get session manager dependency"""
-    # In explicit pytest runtime + test mode, return a lightweight stub to avoid heavy init.
-    # Never use this stub in production-like environments.
-    try:
-        force_real = _env_flag_enabled("AUTHNZ_FORCE_REAL_SESSION_MANAGER")
-        in_production_like = bool(_is_production_like_env())
-        if (
-            not force_real
-            and not in_production_like
-            and _is_explicit_pytest_runtime()
-            and _is_test_mode()
-        ):
-            class _StubSessionManager:
-                enabled = True
-
-                async def is_token_blacklisted(
-                    self,
-                    token: str,
-                    jti: Optional[str] = None,
-                    *,
-                    token_type: Optional[str] = None,
-                    user_id: Optional[int] = None,
-                ) -> bool:
-                    return False
-
-                async def create_session(
-                    self,
-                    user_id: int,
-                    access_token: str,
-                    refresh_token: str,
-                    ip_address: Optional[str] = None,
-                    user_agent: Optional[str] = None,
-                    device_id: Optional[str] = None,
-                    expires_at_override: Optional[datetime] = None,
-                    refresh_expires_at_override: Optional[datetime] = None,
-                    **_kwargs: Any,
-                ) -> dict[str, Any]:
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            _TEST_SESSION_STATE["sid"] += 1
-                            sid = _TEST_SESSION_STATE["sid"]
-                            now = datetime.now(timezone.utc)
-                            expires_at = expires_at_override or now
-                            refresh_expires_at = refresh_expires_at_override or now
-                            sess = {
-                                "id": sid,
-                                "session_id": sid,
-                                "user_id": user_id,
-                                "ip_address": ip_address or "",
-                                "user_agent": user_agent or "",
-                                "device_id": device_id,
-                                "created_at": now,
-                                "last_activity": now,
-                                "expires_at": expires_at,
-                                "refresh_expires_at": refresh_expires_at,
-                                "is_active": True,
-                                "is_revoked": False,
-                            }
-                            _TEST_SESSION_STATE["sessions"][sid] = sess
-                            return sess
-
-                async def update_session_tokens(
-                    self,
-                    _session_id: int = 0,
-                    _access_token: str = "",
-                    _refresh_token: str = "",
-                    **_kwargs: object,
-                ) -> bool:
-                    # No-op in stub
-                    return True
-
-                async def refresh_session(self, *_args: object, **kwargs: object) -> dict[str, Any]:
-                    return {
-                        "session_id": kwargs.get("session_id") or 1,
-                        "user_id": kwargs.get("user_id") or 1,
-                        "expires_at": datetime.now(timezone.utc).isoformat(),
-                    }
-
-                async def get_user_sessions(
-                    self,
-                    user_id: int,
-                    *,
-                    strict: bool = False,
-                ) -> list[dict[str, Any]]:
-                    del strict
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            sessions = list(_TEST_SESSION_STATE["sessions"].values())
-                        return [
-                            s
-                            for s in sessions
-                            if s.get("user_id") == user_id and s.get("is_active") is True
-                        ]
-
-                async def revoke_session(
-                    self,
-                    session_id: int,
-                    revoked_by: Optional[int] = None,
-                    reason: Optional[str] = None,
-                    expected_user_id: Optional[int] = None,
-                ) -> bool:
-                    del revoked_by, reason
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            sess = _TEST_SESSION_STATE["sessions"].get(session_id)
-                            if sess is None or (
-                                expected_user_id is not None
-                                and sess.get("user_id") != expected_user_id
-                            ):
-                                return False
-                            sess["is_revoked"] = True
-                            sess["is_active"] = False
-                            return True
-
-                async def revoke_all_user_sessions(
-                    self,
-                    user_id: int,
-                    except_session_id: Optional[int] = None,
-                    reason: str = "User requested logout from all devices",
-                    revoked_by: Optional[int] = None,
-                ) -> int:
-                    del reason, revoked_by
-                    async with _get_test_session_lock():
-                        with _TEST_SESSION_STATE_GUARD:
-                            changed = 0
-                            for s in _TEST_SESSION_STATE["sessions"].values():
-                                if (
-                                    s.get("user_id") == user_id
-                                    and s.get("session_id") != except_session_id
-                                ):
-                                    s["is_revoked"] = True
-                                    s["is_active"] = False
-                                    changed += 1
-                            return changed
-
-                async def store_ephemeral_value(self, key: str, value: str, ttl_seconds: int) -> None:
-                    ttl = max(int(ttl_seconds), 1)
-                    now = time.monotonic()
-                    expires_at = now + ttl
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        # Opportunistic pruning to keep long-running test suites bounded.
-                        values = _TEST_EPHEMERAL_STATE["values"]
-                        for k, (_v, exp) in list(values.items()):
-                            if exp <= now:
-                                values.pop(k, None)
-                        values[key] = (value, expires_at)
-
-                async def get_ephemeral_value(self, key: str) -> Optional[str]:
-                    now = time.monotonic()
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        entry = _TEST_EPHEMERAL_STATE["values"].get(key)
-                        if not entry:
-                            return None
-                        value, expires_at = entry
-                        if expires_at <= now:
-                            _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-                            return None
-                        return value
-
-                async def consume_ephemeral_value(self, key: str) -> Optional[str]:
-                    now = time.monotonic()
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        entry = _TEST_EPHEMERAL_STATE["values"].get(key)
-                        if not entry:
-                            return None
-                        value, expires_at = entry
-                        if expires_at <= now:
-                            _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-                            return None
-                        _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-                        return value
-
-                async def delete_ephemeral_value(self, key: str) -> None:
-                    with _TEST_EPHEMERAL_STATE_GUARD:
-                        _TEST_EPHEMERAL_STATE["values"].pop(key, None)
-
-            return _StubSessionManager()  # type: ignore[return-value]
-    except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(
-            "get_session_manager_dep: test stub resolution failed; falling back to real SessionManager: {}",
-            exc,
-        )
+    """Get the app's session manager (the same in every runtime; tests inject a fake)."""
     return await get_session_manager()
 
 
