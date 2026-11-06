@@ -52,7 +52,10 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
+    enforce_llm_quota,
+    enforce_llm_quota_if_the_router_was_refused,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.chat_import_transport import ChatImportRoute
 from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
@@ -165,7 +168,7 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
     build_world_book_prompt_context,
 )
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
@@ -613,6 +616,8 @@ async def _execute_character_provider_call(
         return await _execute_provider_call()
     except asyncio.CancelledError:
         raise
+    except LLMQuotaExceededError:
+        raise  # the user's limit, refused at the call: the route answers the 402
     except ChatAPIError as e:
         logger.error(
             "Character chat provider call failed error_type={}",
@@ -1138,12 +1143,15 @@ async def _select_auto_character_llm_router_choice(
             trusted_base_url_override=False,
             override_snapshot_resolver=capture_provider_override_call_snapshot,
         )
+    router_credential_source: Optional[str] = None  # whose key the router call used, for its usage row
 
     async def _execute_router_call(router_model, router_messages):
+        nonlocal router_credential_source
         provider_credentials = await credential_runtime.resolve(
             router_model.provider,
             model=router_model.model,
         )
+        router_credential_source = getattr(provider_credentials, "credential_source", None)
 
         async def _mark_late_router_choice(result: Any) -> None:
             if _extract_semantic_character_router_choice(result) is not None:
@@ -1188,6 +1196,7 @@ async def _select_auto_character_llm_router_choice(
                 total_tokens=usage["total_tokens"],
                 latency_ms=latency_ms,
                 estimated=usage["total_tokens"] == 0,
+                credential_source=router_credential_source,
             )
         except asyncio.CancelledError:
             raise
@@ -3773,6 +3782,20 @@ def _inject_character_memory_from_db(
 
 # In-memory counters for extraction trigger (avoids extra DB write per message)
 _extraction_message_counters: dict[str, int] = {}
+
+
+async def _enforce_character_reply_quota(user_id: Any, provider: str, settings_row: Any, will_persist: bool) -> None:
+    """The LLM quota check, once the reply's provider is known (LLM usage accounting spec §4a, TASK-13956).
+
+    An over-limit user whose reply runs on their own key is let through unmarked, so each call is
+    checked where its key is known. Not when the turn may start memory extraction (a saved reply in
+    a chat that has it on): extraction runs on the server's key, so the check refuses as before.
+    """
+    settings = (settings_row.get("settings") or {}) if isinstance(settings_row, dict) else {}
+    extraction = settings.get("characterMemoryExtraction") if isinstance(settings, dict) else None
+    extracts = will_persist and isinstance(extraction, dict) and bool(extraction.get("enabled"))
+    # ponytail: refuses every turn of such a chat, not only the turns that reach the extraction interval.
+    await enforce_llm_quota(user_id, provider=None if extracts else provider)
 
 
 def _maybe_trigger_character_memory_extraction(
@@ -6761,12 +6784,13 @@ async def _complete_roleplay_resume(
     except RoleplayResumeConflictError as exc:
         raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
 
-    await enforce_llm_quota(current_user.id)
+    effective = prepared["effective_completion"]
+    provider, model = effective["provider"], effective["model"]
+    # An over-limit user whose saved provider runs on their own key is let through unmarked (TASK-13956).
+    await enforce_llm_quota(current_user.id, provider=provider)
     limiter = get_character_rate_limiter()
     current_count = await run_in_threadpool(db.count_messages_for_conversation, chat_id)
     await limiter.check_message_limit(chat_id, current_count + 1)
-    effective = prepared["effective_completion"]
-    provider, model = effective["provider"], effective["model"]
     provider_arguments = prepared["context"]["provider_arguments"]
     try:
         guardrail_config = load_prompt_cost_guardrail_config()
@@ -6984,9 +7008,6 @@ async def character_chat_completion(
 
         if require_current_persona(db, owner_id=str(current_user.id), conversation=conversation) is not None:
             raise HTTPException(status_code=409, detail={"code": "persona_session_generation_unsupported"})
-
-        # Usage quotas (LLM usage accounting spec §4a): refuse before any LLM call or streaming response.
-        await enforce_llm_quota(current_user.id)
 
         # Prepare rate limiter
         rate_limiter = get_character_rate_limiter()
@@ -7239,6 +7260,7 @@ async def character_chat_completion(
             if routing_decision is None:
                 candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
                 if candidate_count > 0:
+                    await enforce_llm_quota_if_the_router_was_refused(current_user.id, routing_debug)
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail={
@@ -7284,6 +7306,7 @@ async def character_chat_completion(
                     "message": "Failed to resolve provider and model for character chat completion.",
                 },
             ) from exc
+        await _enforce_character_reply_quota(current_user.id, provider, settings_row, will_persist)
 
         if strict_model_selection and explicit_model_requested:
             availability = is_model_known_for_provider(provider, model)
