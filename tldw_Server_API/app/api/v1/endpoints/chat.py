@@ -305,7 +305,11 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota, users_own_key_serves
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
+    enforce_llm_quota,
+    enforce_llm_quota_if_the_router_was_refused,
+    users_own_key_serves,
+)
 from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import ChatCommandInfo, ChatCommandsListResponse
 from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryRequest,
@@ -1799,6 +1803,7 @@ async def _select_auto_chat_llm_router_choice(
                     total_tokens=usage["total_tokens"],
                     latency_ms=latency_ms,
                     estimated=usage["total_tokens"] == 0,
+                    credential_source=getattr(router_credential_handle, "credential_source", None),
                 )
             )
         except asyncio.CancelledError:
@@ -3725,6 +3730,7 @@ async def create_chat_completion(
             if routing_decision is None:
                 candidate_count = int((routing_debug or {}).get("candidate_count") or 0)
                 if candidate_count > 0:
+                    await enforce_llm_quota_if_the_router_was_refused(getattr(current_user, "id", None), routing_debug)
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail={
