@@ -63,7 +63,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
             "api/v1/endpoints/embeddings_v5_production_enhanced.py",
             "api/v1/endpoints/prompt_studio/prompt_studio_evaluations.py",
             "api/v1/endpoints/writing.py",
-            "core/Audit/unified_audit_service.py",
             "core/AuthNZ/database.py",
             "core/AuthNZ/key_resolution.py",
             "core/AuthNZ/migrations.py",

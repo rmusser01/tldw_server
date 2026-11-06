@@ -14,10 +14,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 
 @pytest.mark.asyncio
 async def test_fallback_queue_lock_prevents_overlap(tmp_path, monkeypatch):
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "0")
-
     db_path = tmp_path / "audit.db"
     svc1 = UnifiedAuditService(
         db_path=str(db_path),
@@ -25,6 +21,7 @@ async def test_fallback_queue_lock_prevents_overlap(tmp_path, monkeypatch):
         enable_risk_scoring=False,
         buffer_size=1,
         flush_interval=60.0,
+        inline_io=False,
     )
     svc2 = UnifiedAuditService(
         db_path=str(db_path),
@@ -32,6 +29,7 @@ async def test_fallback_queue_lock_prevents_overlap(tmp_path, monkeypatch):
         enable_risk_scoring=False,
         buffer_size=1,
         flush_interval=60.0,
+        inline_io=False,
     )
 
     await svc1.initialize(start_background_tasks=False)

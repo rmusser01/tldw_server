@@ -69,6 +69,7 @@ SECURITY_FUNCTIONS: frozenset[str] = frozenset(
         "api/v1/endpoints/mcp_unified_endpoint.py:_resolve_token_data_compat",
         "core/AuthNZ/auth_principal_resolver.py:get_auth_principal",
         "core/AuthNZ/initialize.py:bootstrap_single_user_profile",
+        "core/Audit/unified_audit_service.py:UnifiedAuditService.__init__",
         "core/MCP_unified/server.py:MCPServer._single_user_compat_auth_via",
     }
 )
