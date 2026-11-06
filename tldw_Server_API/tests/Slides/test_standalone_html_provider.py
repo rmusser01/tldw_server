@@ -76,6 +76,18 @@ EXPECTED_CLOSED_ADAPTER_MANIFEST = (
 )
 
 
+@pytest.fixture(autouse=True)
+def standalone_egress_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Own policy inputs before individual cases apply their policy overrides."""
+    for name in (
+        "EGRESS_ALLOWLIST", "EGRESS_DENYLIST",
+        "WORKFLOWS_EGRESS_ALLOWLIST", "WORKFLOWS_EGRESS_DENYLIST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+
+
 @pytest.fixture
 def provider_module(monkeypatch: pytest.MonkeyPatch, standalone_provider_egress: None) -> ModuleType:
     try:
@@ -1742,6 +1754,37 @@ async def test_official_host_streams_chunks_with_bearer_header_under_production_
     assert seen[0].headers["authorization"] == f"Bearer {PROVIDER_SECRET}"
     assert seen[0].headers["content-type"] == "application/json"
     assert json.loads(seen[0].content)["messages"][0] == {"role": "system", "content": SYSTEM_PROMPT}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy_input", [
+    "EGRESS_ALLOWLIST", "EGRESS_DENYLIST",
+    "WORKFLOWS_EGRESS_ALLOWLIST", "WORKFLOWS_EGRESS_DENYLIST",
+])
+async def test_case_owned_host_policy_refuses_official_host_before_any_request(
+    provider_module: ModuleType,
+    production_egress: dict[str, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    policy_input: str,
+) -> None:
+    if policy_input == "EGRESS_ALLOWLIST":
+        # The lists are unioned; isolate the global-list refusal case.
+        monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWLIST", raising=False)
+    monkeypatch.setenv(
+        policy_input, "example.com" if "ALLOWLIST" in policy_input else "api.openai.com"
+    )
+    target = _target("openai_official_chat_v1")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _chunked_ok(target)
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert exc_info.value.code == "standalone_html_endpoint_not_allowed"
+    assert seen == []
 
 
 @pytest.mark.asyncio

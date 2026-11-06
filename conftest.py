@@ -19,6 +19,7 @@ os.environ.setdefault("AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT", "1000000")
 os.environ.pop("PROFILE", None)
 
 pytest_plugins = (
+    "pytest_mock",
     "tldw_Server_API.tests.helpers.pgvector",
     "tldw_Server_API.tests._plugins.e2e_fixtures",
     "tldw_Server_API.tests._plugins.e2e_state_fixtures",

@@ -33,6 +33,18 @@ COMMERCIAL = ("openai_official_chat_v1", "anthropic_official_messages_v1")
 Boundary = tuple[list[httpx.Request], list[tuple[str, str, dict[str, Any], int]]]
 
 
+@pytest.fixture(autouse=True)
+def standalone_egress_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Own policy inputs for both inventory boundaries before case overrides."""
+    for name in (
+        "EGRESS_ALLOWLIST", "EGRESS_DENYLIST",
+        "WORKFLOWS_EGRESS_ALLOWLIST", "WORKFLOWS_EGRESS_DENYLIST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+
+
 @pytest.fixture
 def boundary(monkeypatch: pytest.MonkeyPatch, standalone_provider_egress: None) -> Boundary:
     """Fake current inventory and all generation/detail traffic at the boundary."""

@@ -44,6 +44,7 @@ from concurrent.futures import TimeoutError as FrameTimeout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import anyio
 import pytest
@@ -283,6 +284,38 @@ def env(
     # The AuthNZ conftest clears overrides before every test; keep workflows off the shared DB.
     full_app.app.dependency_overrides[wf_mod._get_db] = lambda: full_app.workflows_db
     return full_app
+
+
+@pytest.fixture()
+def multiplex_runner(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Observe the upstream real runner loader without replacing its transport."""
+    from tldw_Server_API.app.api.v1.endpoints import acp_multiplex
+
+    loader = AsyncMock(wraps=acp_multiplex.get_runner_client)
+    monkeypatch.setattr(acp_multiplex, "get_runner_client", loader)
+    return loader
+
+
+@pytest.mark.parametrize(
+    "credential_attr,admitted,runner_calls", [("valid", True, 1), ("revoked", False, 0)]
+)
+def test_multiplex_checks_credentials_before_requesting_runner(
+    env: SimpleNamespace,
+    multiplex_runner: AsyncMock,
+    credential_attr: str,
+    admitted: bool,
+    runner_calls: int,
+) -> None:
+    outcome = _outcome(
+        env.client,
+        "/api/v1/acp/multiplex",
+        headers={"Authorization": f"Bearer {getattr(env, credential_attr)}"},
+    )
+    if admitted:
+        assert outcome == "accepted"
+    else:
+        assert outcome in REFUSED
+    assert multiplex_runner.await_count == runner_calls
 
 
 def _receive(ws: object, timeout: float) -> dict[str, object] | None:
