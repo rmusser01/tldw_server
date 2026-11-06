@@ -216,11 +216,11 @@ _RAG_OTHER_LLM_STAGES = (
     "enable_query_classification", "enable_research_loop", "enable_query_rewriting_loop",
     "enable_document_grading", "enable_knowledge_strips", "enable_fast_hallucination_check",
     "enable_utility_grading", "enable_claims", "enable_post_verification", "enable_multi_turn_synthesis",
-    "enable_query_decomposition", "enable_suggestions", "enable_web_fallback", "enable_image_search",
-    "enable_video_search", "enable_structured_response", "enable_faithfulness_eval", "enable_intent_routing",
-    "enable_dynamic_granularity", "enable_evidence_accumulation", "enable_evidence_chains", "enable_abstention",
-    "adaptive_rerun_on_low_confidence", "adaptive_advanced_rewrites",
+    "enable_suggestions", "enable_web_fallback", "enable_faithfulness_eval", "enable_evidence_accumulation",
+    "enable_evidence_chains", "enable_abstention", "adaptive_rerun_on_low_confidence", "adaptive_advanced_rewrites",
 )
+# Not listed, no LLM call of their own: structured response (the answer's prompt), image and video search (inside the
+# research loop), query decomposition, intent routing and dynamic granularity (rule-based).
 
 
 def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:

@@ -999,7 +999,11 @@ def test_rag_search_stream_refuses_an_over_quota_user_with_a_real_402(
     assert calls == []
 
 
-@pytest.mark.parametrize(("profile", "admitted"), [("accuracy", False), ("fast", True)], ids=["accuracy", "fast"])
+@pytest.mark.parametrize(
+    ("profile", "admitted"),
+    [("accuracy", False), ("fast", True), ("balanced", True)],
+    ids=["accuracy", "fast", "balanced"],
+)
 def test_rag_search_stream_names_the_providers_of_the_resolved_request(
     monkeypatch: pytest.MonkeyPatch,
     client_with_stream_overrides: TestClient,

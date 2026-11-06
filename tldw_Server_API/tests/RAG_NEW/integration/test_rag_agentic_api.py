@@ -283,8 +283,11 @@ def _over_the_limit_with_own_keys(monkeypatch, own: set[str]) -> tuple[list[str]
         ({}, {"openai"}, ["openai"]),
         ({"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
          {"openai", "groq"}, ["openai", "groq"]),
+        ({"enable_structured_response": True, "enable_query_decomposition": True, "enable_intent_routing": True,
+          "enable_dynamic_granularity": True, "enable_image_search": True, "enable_video_search": True},
+         {"openai"}, ["openai"]),
     ],
-    ids=["answer-only", "reformulated-history"],
+    ids=["answer-only", "reformulated-history", "switches-without-an-llm-call"],
 )
 def test_rag_search_admits_an_over_limit_user_whose_llm_calls_run_on_their_own_keys(
     client_with_agentic_overrides, monkeypatch, extra, own, looked_up
@@ -308,8 +311,11 @@ def test_rag_search_admits_an_over_limit_user_whose_llm_calls_run_on_their_own_k
         {"enable_reranking": True, "reranking_strategy": "llm_scoring"},
         {"search_depth_mode": "quality"},
         {"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
+        {"enable_evidence_accumulation": True},
+        {"enable_evidence_chains": True},
     ],
-    ids=["claims", "grading", "llm-rerank", "quality-depth", "history-on-a-server-key"],
+    ids=["claims", "grading", "llm-rerank", "quality-depth", "history-on-a-server-key", "evidence-accumulation",
+         "evidence-chains"],
 )
 def test_rag_search_still_refuses_an_own_key_answer_with_another_llm_stage(client_with_agentic_overrides, monkeypatch, extra):
     """An LLM stage the boundary cannot place on the user's own key keeps the 402 before any retrieval (TASK-13956)."""
@@ -325,10 +331,12 @@ def test_rag_search_still_refuses_an_own_key_answer_with_another_llm_stage(clien
 
 
 @pytest.mark.parametrize(
-    ("suggestions", "admitted"), [(None, True), ("true", False)], ids=["no-default", "suggestions-by-default"]
+    ("default_on", "admitted"),
+    [(None, True), ("SEARCH_SUGGESTIONS", False), ("SEARCH_IMAGE_SEARCH", True)],
+    ids=["no-default", "suggestions-by-default", "image-search-by-default"],
 )
 def test_rag_batch_names_the_providers_of_the_resolved_request(
-    client_with_agentic_overrides, monkeypatch, suggestions, admitted
+    client_with_agentic_overrides, monkeypatch, default_on, admitted
 ):
     """A server default that turns on another LLM stage keeps the 402 on a batch, as on search (TASK-13956)."""
     from fastapi import HTTPException
@@ -345,7 +353,7 @@ def test_rag_batch_names_the_providers_of_the_resolved_request(
         raise HTTPException(status_code=418, detail="the quota check let the request through")
 
     monkeypatch.setattr(
-        rag_ep, "_search_agent_setting", lambda env_key, _key: suggestions if env_key == "SEARCH_SUGGESTIONS" else None
+        rag_ep, "_search_agent_setting", lambda env_key, _key: "true" if env_key == default_on else None
     )
     monkeypatch.setattr(rag_ep, "_resolve_kanban_db_path", _past_the_check)
     resp = client_with_agentic_overrides.post(
