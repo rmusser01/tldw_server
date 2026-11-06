@@ -121,12 +121,24 @@ def test_effective_csrf_environment_override_drives_resolution(monkeypatch):
     reset_settings()
 
 
+def test_csrf_default_is_on_when_unconfigured_even_in_test_mode(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import csrf_protection
+
+    monkeypatch.delenv("CSRF_ENABLED", raising=False)
+    monkeypatch.setitem(csrf_protection.global_settings, "CSRF_ENABLED", None)
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    reset_settings()
+
+    assert csrf_protection.resolve_effective_csrf_enabled() is True
+    reset_settings()
+
+
 def test_pytest_import_alone_does_not_disable_effective_csrf(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ import csrf_protection
 
     monkeypatch.delenv("CSRF_ENABLED", raising=False)
     monkeypatch.setattr(csrf_protection, "global_settings", {})
-    monkeypatch.setattr(csrf_protection, "is_test_mode", lambda: False)
     monkeypatch.setattr(
         csrf_protection,
         "get_settings",

@@ -24,19 +24,18 @@ def test_host_allow_deny_logic(monkeypatch):
     assert dlq_mod._host_allowed("https://x.blocked.tld/h", "default") is False
 
 
-def test_host_allow_deny_logic_uses_test_mode_single_letter_y_fallback(monkeypatch):
+def test_host_allowed_has_no_test_context_fallback(monkeypatch):
     monkeypatch.setenv("WORKFLOWS_WEBHOOK_ALLOWLIST", "*.ok.test")
     monkeypatch.setenv("WORKFLOWS_WEBHOOK_DENYLIST", "")
     monkeypatch.setenv("TEST_MODE", "y")
 
-    monkeypatch.setattr(dlq_mod, "is_explicit_pytest_runtime", lambda: False, raising=True)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Security.egress.evaluate_url_policy",
         lambda *_args, **_kwargs: SimpleNamespace(allowed=False, reason="blocked"),
         raising=True,
     )
 
-    assert dlq_mod._host_allowed("https://foo.ok.test/h", "default") is True
+    assert dlq_mod._host_allowed("https://foo.ok.test/h", "default") is False
 
 
 @pytest.mark.asyncio

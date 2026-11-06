@@ -55,7 +55,16 @@ PREDICATE_EXEMPT: frozenset[str] = frozenset(
 SECURITY_FUNCTIONS: frozenset[str] = frozenset(
     {
         "api/v1/endpoints/evaluations/evaluations_auth.py:get_eval_request_user",
+        "api/v1/endpoints/evaluations/evaluations_auth.py:verify_api_key",
+        "core/AuthNZ/User_DB_Handling.py:get_request_user",
+        "core/AuthNZ/csrf_protection.py:resolve_effective_csrf_enabled",
         "core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py:_raise_if_url_blocked",
+        "core/Ingestion_Media_Processing/Video/Video_DL_Ingestion_Lib.py:process_single_video",
+        "core/Ingestion_Media_Processing/Audio/Audio_Files.py:_validate_outbound_url",
+        "core/Evaluations/webhook_manager.py:WebhookManager._deliver_webhook",
+        "core/Utils/egress.py:evaluate_url_policy",
+        "core/http_client.py:_validate_egress_or_raise",
+        "services/workflows_webhook_dlq_service.py:_host_allowed",
         "api/v1/API_Deps/auth_deps.py:_authenticate_api_key_from_request",
         "api/v1/endpoints/mcp_unified_endpoint.py:_resolve_token_data_compat",
         "core/AuthNZ/auth_principal_resolver.py:get_auth_principal",

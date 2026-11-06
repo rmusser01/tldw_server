@@ -187,8 +187,9 @@ def _submit_record(
     completion_tokens: int,
     started: float,
     estimate_source: str | None,
+    estimated: bool | None = None,
 ) -> None:
-    """Schedule one usage row; never raises."""
+    """Schedule one usage row; never raises. ``estimated`` marks a row whose block counts only one side."""
     try:
         provider_name = str(getattr(provider, "name", "") or "provider")
         model = str(request.get("model") or "") if isinstance(request, dict) else ""
@@ -210,7 +211,7 @@ def _submit_record(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 usage_metadata=usage,
-                estimated=True if usage is None else None,
+                estimated=True if usage is None or estimated else None,
                 estimate_source=estimate_source,
                 credential_source=plan.credential_source,
             )
@@ -227,9 +228,12 @@ def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any
         if isinstance(usage, dict) and usage:
             prompt_tokens, completion_tokens = _usage_tokens(usage)
             if (prompt_tokens, completion_tokens) != (0, 0):
+                # A side the block does not count (a prompt-only block, say) comes from the estimate (TASK-13953).
+                counted = (prompt_tokens, completion_tokens)
+                filled = (prompt_tokens or _prompt_estimate(request), completion_tokens or _approx_tokens(_response_chars(response)))
                 _submit_record(
-                    provider, plan, request, usage=usage, prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens, started=started, estimate_source=None,
+                    provider, plan, request, usage=usage, prompt_tokens=filled[0], completion_tokens=filled[1],
+                    started=started, estimate_source=None, estimated=filled != counted,
                 )
                 return
         _submit_record(
@@ -249,9 +253,12 @@ def _record_stream(provider: Any, plan: _CallPlan | None, request: Any, seen: _S
         if seen.usage is not None:
             prompt_tokens, completion_tokens = _usage_tokens(seen.usage)
             if (prompt_tokens, completion_tokens) != (0, 0):
+                # A side the chunk does not count comes from the estimate, as on /chat/completions (TASK-13953).
+                counted = (prompt_tokens, completion_tokens)
+                filled = (prompt_tokens or _prompt_estimate(request), completion_tokens or _approx_tokens(seen.chars))
                 _submit_record(
-                    provider, plan, request, usage=seen.usage, prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens, started=started, estimate_source=None,
+                    provider, plan, request, usage=seen.usage, prompt_tokens=filled[0], completion_tokens=filled[1],
+                    started=started, estimate_source=None, estimated=filled != counted,
                 )
                 return
         _submit_record(
