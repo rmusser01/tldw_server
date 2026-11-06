@@ -299,8 +299,6 @@ async def test_single_user_test_key_rejected_outside_test_context_for_auth_princ
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     reset_settings()
 
-    monkeypatch.setattr(User_DB_Handling, "is_test_context", lambda: False)
-
     class _StubApiKeyManager:
         async def validate_api_key(self, **_kwargs):
             return None
@@ -325,8 +323,6 @@ async def test_single_user_test_key_rejected_outside_test_context_for_get_reques
     monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "test-key-abcdef")
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     reset_settings()
-
-    monkeypatch.setattr(User_DB_Handling, "is_test_context", lambda: False)
 
     class _StubApiKeyManager:
         async def validate_api_key(self, **_kwargs):

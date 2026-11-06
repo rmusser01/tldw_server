@@ -687,7 +687,8 @@ class MCPServer:
 
             try:
                 # Fail fast on insecure production configurations
-                _test_mode = self.environment_flags_provider.is_test_mode() or self.environment_flags_provider.is_explicit_pytest_runtime()
+                flags = self.environment_flags_provider
+                _test_mode = flags.is_test_mode() or flags.is_explicit_pytest_runtime()
                 if not self.config.debug_mode and not _test_mode:
                     ok = validate_config()
                     if not ok:
@@ -1477,7 +1478,8 @@ class MCPServer:
         resolved_ip = controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
         # Test harness mapping and bypass: allow WS in pytest/TEST_MODE and map 'testclient' to loopback
         try:
-            _is_test_env = bool(self.environment_flags_provider.is_explicit_pytest_runtime() or self.environment_flags_provider.is_test_mode())
+            flags = self.environment_flags_provider
+            _is_test_env = bool(flags.is_explicit_pytest_runtime() or flags.is_test_mode())
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             _is_test_env = False
         if resolved_ip == "testclient" or resolved_ip is None and _is_test_env:

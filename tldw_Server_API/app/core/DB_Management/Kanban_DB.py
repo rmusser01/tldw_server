@@ -38,8 +38,8 @@ from loguru import logger  # noqa: E402
 
 from tldw_Server_API.app.core.config import settings  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
-from tldw_Server_API.app.core.testing import is_test_context  # noqa: E402
 from tldw_Server_API.app.core.exceptions import StorageUnavailableError  # noqa: E402
+from tldw_Server_API.app.core.testing import is_test_context  # noqa: E402
 
 # Builds the vector index from (user_id, embedding_config); the openers pass core.Kanban's factory.
 KanbanVectorSearchFactory = Callable[[str, dict[str, Any]], Any]

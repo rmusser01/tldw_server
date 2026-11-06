@@ -696,6 +696,7 @@ async def generate_osce_stations_from_sources(
 
     from tldw_Server_API.app.services import quiz_generator
 
+    # Same rule as quiz_generator (its owner): a patched LLM call opts out of the deterministic path.
     if (
         is_test_mode()
         and quiz_generator._call_quiz_generation_llm is quiz_generator._ORIGINAL_CALL_QUIZ_GENERATION_LLM

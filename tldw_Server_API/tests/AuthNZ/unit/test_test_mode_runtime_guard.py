@@ -2,10 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core import testing
-
 from tldw_Server_API.app.core.testing import (
-    is_test_mode,
     is_production_like_env,
+    is_test_mode,
     validate_test_runtime_flags,
 )
 
@@ -148,6 +147,7 @@ def test_main_loguru_reconfig_override_accepts_single_letter_y(
         ({"TESTING": "true"}, True),
         ({"PYTEST_CURRENT_TEST": "t.py::t (call)"}, True),
         ({"TEST_MODE": "0", "TESTING": "0"}, False),
+        ({"PYTEST_CURRENT_TEST": ""}, False),
     ],
 )
 def test_is_test_context_is_the_union_of_the_test_signals(monkeypatch, env, expected):

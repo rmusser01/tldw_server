@@ -115,7 +115,8 @@ def is_test_context() -> bool:
 
     The one replacement for the modules' private "is this a test" predicates
     (TASK-13950.19). validate_test_runtime_flags() refuses the three flags outside
-    pytest, so in a started server this is is_explicit_pytest_runtime().
+    pytest, so in a started server this is is_explicit_pytest_runtime(). That guard runs
+    from the server lifespan only: in CLIs and scripts TESTING/TEST_MODE still count.
     """
     return is_test_mode() or env_flag_enabled("TESTING") or is_explicit_pytest_runtime()
 
