@@ -6,7 +6,12 @@ import pytest
 
 import tldw_Server_API.app.api.v1.endpoints.media as media_mod
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
-from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
+from tldw_Server_API.tests.helpers.llm_quota import (
+    assert_llm_quota_402,
+    own_keys_for_every_provider,
+    refuse_llm_work,
+)
 
 
 class _StubQuotaService:
@@ -66,6 +71,7 @@ def test_ebook_analysis_is_refused_before_processing(
 
     monkeypatch.setattr(media_mod.books, "process_epub", _process_epub)
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)  # analysis runs on the server's key (TASK-13956)
     response = client.post(
         "/api/v1/media/process-ebooks",
         data={"perform_analysis": "true", "api_name": "openai"},
@@ -73,6 +79,7 @@ def test_ebook_analysis_is_refused_before_processing(
     )
     assert_llm_quota_402(response)
     assert processed == []
+    assert asked == []
 
 
 @pytest.mark.integration
@@ -99,8 +106,16 @@ def test_ebook_processing_without_analysis_is_not_refused(
 def test_other_media_handlers_refuse_analysis_for_an_over_quota_user(
     client_with_single_user, quota_service_stub, monkeypatch: pytest.MonkeyPatch, path: str, data: dict, files: list
 ) -> None:
-    """Each remaining handler answers the 402 before touching its input."""
+    """Each remaining handler answers the 402 before touching its input, whatever keys the user has stored."""
     client, _usage_logger = client_with_single_user
+    summarized: list[dict] = []
+    # A regression would admit the request and analyse on the server's key for real: stub that call.
+    monkeypatch.setattr(
+        Summarization_General_Lib, "_summarize_via_adapter", lambda **kwargs: summarized.append(kwargs) or ""
+    )
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)
     response = client.post(path, data=data, files=files)
     assert_llm_quota_402(response)
+    assert asked == []
+    assert summarized == []

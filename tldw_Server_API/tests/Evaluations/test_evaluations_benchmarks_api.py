@@ -123,10 +123,18 @@ def test_benchmark_manager_preserves_string_user_scope(monkeypatch):
 
 
 def test_benchmark_run_refuses_an_over_quota_user_before_loading_the_dataset(monkeypatch):
-    """Benchmark runs check the LLM quota at the request boundary, as evaluation runs do (TASK-13638)."""
-    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+    """Benchmark runs check the LLM quota at the request boundary, as evaluation runs do (TASK-13638).
+
+    Their items run on the server's key (or a raw ``api_key``), so a stored key does not lift it (TASK-13956).
+    """
+    from tldw_Server_API.tests.helpers.llm_quota import (
+        assert_llm_quota_402,
+        own_keys_for_every_provider,
+        refuse_llm_work,
+    )
 
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)
     loaded = []
     monkeypatch.setattr(benchmarks_ep, "load_benchmark_dataset", lambda *_a, **_k: loaded.append(True) or [])
 
@@ -140,3 +148,4 @@ def test_benchmark_run_refuses_an_over_quota_user_before_loading_the_dataset(mon
     assert_llm_quota_402(response)
     assert response.json()["detail"]["error"] == "limit_exceeded"
     assert loaded == []
+    assert asked == []
