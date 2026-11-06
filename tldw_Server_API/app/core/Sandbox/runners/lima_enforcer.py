@@ -5,12 +5,6 @@ import platform
 import sys
 from typing import Any
 
-from tldw_Server_API.app.core.testing import is_truthy
-
-
-def _truthy(v: str | None) -> bool:
-    return is_truthy(v)
-
 
 def _detect_variant() -> str:
     try:
@@ -32,52 +26,18 @@ class LimaSecurityEnforcer:
             "variant": _detect_variant(),
         }
 
-    def _default_ready(self) -> bool:
-        host = self.host_facts()
-        if str(host.get("variant", "")).lower() == "wsl":
-            return False
-        return sys.platform.startswith("linux") or sys.platform == "darwin"
-
-    def _test_override_mode(self) -> bool:
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
-        return _truthy(os.getenv("TEST_MODE"))
-
     def preflight_capabilities(self) -> dict[str, bool]:
-        host = self.host_facts()
-        variant = str(host.get("variant", "")).strip().lower()
-        host_os = str(host.get("os", "")).strip().lower()
-        if variant == "wsl" or host_os.startswith("win"):
-            # Always fail closed on unsupported host enforcement surfaces.
-            return {"deny_all": False, "allowlist": False}
-
-        default_ready = self._default_ready()
-        # Allowlist enforcement is not implemented for Lima runner yet.
-        allowlist_default = False
-        deny_default = bool(default_ready)
-
-        if not self._test_override_mode():
-            return {"deny_all": deny_default, "allowlist": allowlist_default}
-
-        deny_all = os.getenv("TLDW_SANDBOX_LIMA_ENFORCER_DENY_ALL_READY")
-        allowlist = os.getenv("TLDW_SANDBOX_LIMA_ENFORCER_ALLOWLIST_READY")
-        return {
-            "deny_all": _truthy(deny_all) if deny_all is not None else deny_default,
-            "allowlist": _truthy(allowlist) if allowlist is not None else allowlist_default,
-        }
+        # Lima's default user-mode network remains enabled with networks: [].
+        return {"deny_all": False, "allowlist": False}
 
     def apply_deny_all(self, _instance_ctx: dict[str, Any]) -> bool:
-        return bool(self.preflight_capabilities().get("deny_all"))
+        return False
 
     def apply_allowlist(self, _instance_ctx: dict[str, Any], _targets: list[str]) -> bool:
-        return bool(self.preflight_capabilities().get("allowlist"))
+        return False
 
     def verify(self, _instance_ctx: dict[str, Any], mode: str) -> bool:
-        mode_norm = str(mode or "").strip().lower()
-        caps = self.preflight_capabilities()
-        if mode_norm == "allowlist":
-            return bool(caps.get("allowlist"))
-        return bool(caps.get("deny_all"))
+        return False
 
     def cleanup(self, _instance_ctx: dict[str, Any]) -> bool:
         return True
@@ -100,8 +60,7 @@ class MacOSLimaEnforcer(LimaSecurityEnforcer):
 
 
 class WindowsLimaEnforcer(LimaSecurityEnforcer):
-    def _default_ready(self) -> bool:
-        return False
+    """Windows Lima security enforcer; strict enforcement is unavailable."""
 
 
 def build_lima_enforcer() -> LimaSecurityEnforcer:

@@ -309,10 +309,21 @@ def test_seatbelt_start_run_times_out_and_cleans_up(monkeypatch, tmp_path: Path)
 
     monkeypatch.setattr(seatbelt_module.tempfile, "mkdtemp", lambda prefix: str(run_root))
     killpg_calls: list[tuple[int, int]] = []
+    group_running = True
+
+    def _killpg(pid: int, sig: int) -> None:
+        nonlocal group_running
+        if sig == 0:
+            if not group_running:
+                raise ProcessLookupError()
+            return
+        killpg_calls.append((pid, sig))
+        group_running = False
+
     monkeypatch.setattr(
         seatbelt_module.os,
         "killpg",
-        lambda pid, sig: killpg_calls.append((pid, sig)),
+        _killpg,
         raising=False,
     )
 

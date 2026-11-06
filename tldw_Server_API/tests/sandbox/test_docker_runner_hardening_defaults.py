@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import tldw_Server_API.app.core.Sandbox.runners.docker_runner as docker_module
-from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType, TrustLevel
 from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 
 
@@ -60,6 +60,60 @@ def _capture_docker_create_command(monkeypatch: pytest.MonkeyPatch, spec: RunSpe
     if not create_cmd:
         pytest.fail(f"docker create command not captured: {recorded_cmds!r}")
     return create_cmd
+
+
+@pytest.mark.parametrize(
+    ("trust", "admin_pids", "admin_workspace", "admin_nofile", "pids", "workspace", "nofile"),
+    [
+        (TrustLevel.untrusted, 1000, 1000, 10000, 64, 64, 256),
+        (TrustLevel.trusted, 32, 16, 128, 32, 16, 128),
+        (TrustLevel.standard, -1, 0, -1, 256, 256, 1024),
+    ],
+)
+def test_docker_create_clamps_resources_to_profile_and_positive_admin_limits(
+    monkeypatch: pytest.MonkeyPatch,
+    trust: TrustLevel,
+    admin_pids: int,
+    admin_workspace: int,
+    admin_nofile: int,
+    pids: int,
+    workspace: int,
+    nofile: int,
+) -> None:
+    monkeypatch.setattr(docker_module.app_settings, "SANDBOX_PIDS_LIMIT", admin_pids)
+    monkeypatch.setattr(docker_module.app_settings, "SANDBOX_WORKSPACE_CAP_MB", admin_workspace)
+    monkeypatch.setattr(docker_module.app_settings, "SANDBOX_ULIMIT_NOFILE", admin_nofile)
+    spec = RunSpec(None, RuntimeType.docker, "image", ["true"], trust_level=trust)
+
+    command = _capture_docker_create_command(monkeypatch, spec)
+
+    assert command[command.index("--pids-limit") + 1] == str(pids)
+    assert f"nofile={nofile}:{nofile}" in command
+    assert any(value.startswith("/workspace:") and f"size={workspace}m" in value for value in command)
+
+
+def test_docker_create_bounds_daemon_log_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(docker_module.app_settings, "SANDBOX_MAX_LOG_BYTES", 12345)
+    command = _capture_docker_create_command(
+        monkeypatch, RunSpec(None, RuntimeType.docker, "image", ["true"])
+    )
+
+    assert command[command.index("--log-driver") + 1] == "local"
+    assert "max-size=12345" in command
+    assert "max-file=1" in command
+
+
+def test_docker_rejects_mutable_workspace_bind_without_quota(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
+    monkeypatch.setenv("SANDBOX_DOCKER_BIND_WORKSPACE", "true")
+
+    with pytest.raises(RuntimeError, match="workspace_bind_quota_unsupported"):
+        DockerRunner().start_run(
+            "unbounded-workspace", RunSpec(None, RuntimeType.docker, "image", ["true"]), str(tmp_path)
+        )
 
 
 @pytest.mark.unit

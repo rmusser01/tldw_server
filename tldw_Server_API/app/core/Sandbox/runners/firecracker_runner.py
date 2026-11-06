@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -67,7 +68,8 @@ def _virtiofsd_bin() -> str:
 
 
 def _preflight_errors() -> list[str]:
-    errors: list[str] = []
+    # A binary (including an operator wrapper) is not evidence of host containment.
+    errors: list[str] = ["firecracker_host_containment_not_implemented"]
     if not sys.platform.startswith("linux"):
         errors.append("linux_required")
     if not os.path.exists("/dev/kvm"):
@@ -217,9 +219,9 @@ def _copy_tree(src: str, dst: str) -> None:
                 shutil.copy2(s, t)
 
 
-def _terminate_process(proc: subprocess.Popen | None, name: str) -> None:
+def _terminate_process(proc: subprocess.Popen | None, name: str) -> bool:
     if proc is None:
-        return
+        return True
     try:
         proc.terminate()
         try:
@@ -228,8 +230,10 @@ def _terminate_process(proc: subprocess.Popen | None, name: str) -> None:
             logger.warning(f"Firecracker cleanup timed out waiting for {name}; killing process")
             proc.kill()
             proc.wait(timeout=5)
+        return True
     except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
         logger.warning(f"Firecracker cleanup failed for {name}: {e}")
+        return False
 
 
 def _tail_log(run_id: str, log_path: str, stop_flag: dict[str, bool]) -> None:
@@ -261,6 +265,24 @@ class FirecrackerRunner:
 
     def __init__(self) -> None:
         pass
+
+    _active_lock = threading.RLock()
+    _active_processes: dict[str, list[subprocess.Popen]] = {}
+    _cancelled: set[str] = set()
+
+    @classmethod
+    def cancel_run(cls, run_id: str) -> bool:
+        """Confirm termination of every host process before acknowledging cancel."""
+        with cls._active_lock:
+            processes = list(cls._active_processes.get(run_id, []))
+        if not processes:
+            return False
+        results = [_terminate_process(proc, "firecracker workload") for proc in processes]
+        if not all(results):
+            return False
+        with cls._active_lock:
+            cls._cancelled.add(run_id)
+        return True
 
     def start_run(self, run_id: str, spec: RunSpec, session_workspace: str | None = None) -> RunStatus:
         if _truthy(os.getenv("TLDW_SANDBOX_FIRECRACKER_FAKE_EXEC")) or not _real_enabled():
@@ -321,6 +343,8 @@ class FirecrackerRunner:
                 "--api-sock",
                 api_sock,
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=run_dir)
+            with self._active_lock:
+                self._active_processes[run_id] = [fc_proc]
 
             # Wait for socket
             deadline = time.time() + 3.0
@@ -357,6 +381,8 @@ class FirecrackerRunner:
                     "--socket-path", vfs_sock,
                     "-o", f"source={workspace}",
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                with self._active_lock:
+                    self._active_processes[run_id].append(virtiofs_proc)
                 _fc_api_request(api_sock, "PUT", "/fs", {
                     "mount_tag": "workspace",
                     "socket": vfs_sock,
@@ -369,7 +395,6 @@ class FirecrackerRunner:
             # Tail logs (best-effort) until status appears
             log_path = os.path.join(workspace, "run.log")
             try:
-                import threading
                 tail_thread = threading.Thread(
                     target=_tail_log,
                     args=(run_id, log_path, stop_flag),
@@ -385,6 +410,9 @@ class FirecrackerRunner:
             exit_code = None
             reason = None
             while time.time() < deadline:
+                with self._active_lock:
+                    if run_id in self._cancelled:
+                        break
                 if os.path.exists(status_path):
                     try:
                         with open(status_path, encoding="utf-8") as rf:
@@ -400,7 +428,12 @@ class FirecrackerRunner:
                     break
                 time.sleep(0.1)
 
-            if exit_code is None:
+            with self._active_lock:
+                cancelled = run_id in self._cancelled
+            if cancelled:
+                phase = RunPhase.killed
+                reason = "canceled_by_user"
+            elif exit_code is None:
                 # Timeout: kill VM
                 reason = "execution_timeout"
                 with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
@@ -469,6 +502,9 @@ class FirecrackerRunner:
                     tail_thread.join(timeout=1)
             _terminate_process(virtiofs_proc, "virtiofsd")
             _terminate_process(fc_proc, "firecracker")
+            with self._active_lock:
+                self._active_processes.pop(run_id, None)
+                self._cancelled.discard(run_id)
             with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 shutil.rmtree(run_dir, ignore_errors=True)
 

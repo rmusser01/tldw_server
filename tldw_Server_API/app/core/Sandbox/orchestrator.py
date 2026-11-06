@@ -800,6 +800,15 @@ class SandboxOrchestrator:
             logger.debug(f"store.try_claim_run failed: {e}")
             return None
 
+    def cancel_queued_run(self, run_id: str) -> bool:
+        """Fence queued execution in the durable store before acknowledging cancel."""
+        if not self._store.cancel_queued_run(run_id):
+            return False
+        status = self._store.get_run(run_id)
+        if status is not None:
+            self.update_run(run_id, status)
+        return True
+
     def renew_run_claim(self, run_id: str, *, worker_id: str, lease_seconds: int = 30) -> bool:
         try:
             return bool(self._store.renew_run_claim(str(run_id), worker_id=str(worker_id), lease_seconds=int(lease_seconds)))

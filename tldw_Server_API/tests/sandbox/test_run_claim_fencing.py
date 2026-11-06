@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
+from tldw_Server_API.app.core.config import clear_config_cache
+from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
 from tldw_Server_API.app.core.Sandbox.orchestrator import SandboxOrchestrator
 
@@ -222,7 +223,7 @@ def test_start_admission_respects_active_run_limit(
     assert admitted_b_after.phase == RunPhase.starting
 
 
-def test_start_admission_ignores_expired_active_claim(
+def test_start_admission_requires_reconciliation_after_active_claim_expiry(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -257,11 +258,10 @@ def test_start_admission_ignores_expired_active_claim(
         lease_seconds=30,
     )
 
-    assert admitted_b is not None
-    assert admitted_b.phase == RunPhase.starting
+    assert admitted_b is None
 
 
-def test_start_admission_ignores_unclaimed_active_row(
+def test_start_admission_requires_reconciliation_for_unclaimed_active_row(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -297,8 +297,7 @@ def test_start_admission_ignores_unclaimed_active_row(
         lease_seconds=30,
     )
 
-    assert admitted_b is not None
-    assert admitted_b.phase == RunPhase.starting
+    assert admitted_b is None
 
 
 @pytest.mark.parametrize(

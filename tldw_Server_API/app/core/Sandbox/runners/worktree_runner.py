@@ -15,6 +15,7 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -154,6 +155,7 @@ class WorktreeRunner:
     _active_lock = threading.RLock()
     _active_proc: dict[str, subprocess.Popen[bytes]] = {}
     _active_run_dir: dict[str, str] = {}
+    _active_worktree: dict[str, tuple[str, str]] = {}
     _cancelled_runs: set[str] = set()
 
     def __init__(
@@ -336,6 +338,7 @@ class WorktreeRunner:
     def _clear_active_run(cls, run_id: str) -> str | None:
         with cls._active_lock:
             cls._active_proc.pop(run_id, None)
+            cls._active_worktree.pop(run_id, None)
             return cls._active_run_dir.pop(run_id, None)
 
     @classmethod
@@ -351,29 +354,54 @@ class WorktreeRunner:
             return was
 
     @classmethod
-    def _terminate_process_group(cls, proc: subprocess.Popen[bytes]) -> None:
-        with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
-            os.killpg(proc.pid, signal.SIGTERM)
+    def _process_group_exists(cls, proc: subprocess.Popen[bytes]) -> bool:
+        """Treat inaccessible groups as live until absence is confirmed."""
         try:
-            proc.wait(timeout=cls._cancel_grace_seconds())
-            return
+            os.killpg(proc.pid, 0)
+        except ProcessLookupError:
+            return False
         except _WORKTREE_NONCRITICAL_EXCEPTIONS:
-            pass
-        with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
-            os.killpg(proc.pid, signal.SIGKILL)
-        with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
-            proc.wait(timeout=1)
+            return True
+        return True
+
+    @classmethod
+    def _terminate_process_group(cls, proc: subprocess.Popen[bytes]) -> bool:
+        """Confirm every process in the group is gone, including descendants."""
+        for sig, grace in ((signal.SIGTERM, cls._cancel_grace_seconds()), (signal.SIGKILL, 1)):
+            try:
+                os.killpg(proc.pid, sig)
+            except ProcessLookupError:
+                with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+                    proc.wait(timeout=0)
+                return True
+            except _WORKTREE_NONCRITICAL_EXCEPTIONS:
+                return False
+            deadline = time.monotonic() + grace
+            while True:
+                with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+                    proc.wait(timeout=0)
+                if not cls._process_group_exists(proc):
+                    return True
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.05)
+        return False
 
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
         with cls._active_lock:
             proc = cls._active_proc.get(run_id)
+            worktree = cls._active_worktree.get(run_id)
 
         if proc is None:
             return False
 
+        if cls._terminate_process_group(proc) is not True:
+            return False
         cls._mark_cancelled(run_id)
-        cls._terminate_process_group(proc)
+        if worktree:
+            with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+                cls.destroy_worktree(*worktree)
         run_dir = cls._clear_active_run(run_id)
         if run_dir:
             with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
@@ -574,6 +602,11 @@ class WorktreeRunner:
                     start_new_session=True,
                 )
                 self._register_active_run(run_id, proc, run_dir)
+                if worktree_path and repo_path_for_cleanup:
+                    with self._active_lock:
+                        self._active_worktree[run_id] = (worktree_path, repo_path_for_cleanup)
+                if spec.on_backend_started is not None:
+                    spec.on_backend_started(str(proc.pid))
 
                 try:
                     wait_result = proc.wait(
@@ -633,15 +666,25 @@ class WorktreeRunner:
                 message = "canceled_by_user"
         finally:
             finished = datetime.now(timezone.utc)
-            if worktree_path and repo_path_for_cleanup:
-                with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
-                    self.destroy_worktree(worktree_path, repo_path_for_cleanup)
-            run_dir_to_remove = self._clear_active_run(run_id)
-            if run_dir_to_remove:
-                run_dir = run_dir_to_remove
-            if run_dir:
-                with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
-                    shutil.rmtree(run_dir, ignore_errors=True)
+            stopped = proc is None or not self._process_group_exists(proc)
+            if not stopped:
+                stopped = self._terminate_process_group(proc)
+            if stopped:
+                if worktree_path and repo_path_for_cleanup:
+                    with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+                        self.destroy_worktree(worktree_path, repo_path_for_cleanup)
+                run_dir_to_remove = self._clear_active_run(run_id)
+                if run_dir_to_remove:
+                    run_dir = run_dir_to_remove
+                if run_dir:
+                    with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+                        shutil.rmtree(run_dir, ignore_errors=True)
+            else:
+                phase = RunPhase.running
+                exit_code = None
+                artifacts_map = {}
+                artifact_counters = {}
+                message = "backend_termination_unconfirmed"
 
         with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
             if phase == RunPhase.timed_out:
@@ -649,7 +692,7 @@ class WorktreeRunner:
                     run_id, "end",
                     {"exit_code": None, "reason": "execution_timeout"},
                 )
-            elif phase != RunPhase.killed:
+            elif phase not in {RunPhase.killed, RunPhase.running}:
                 hub.publish_event(run_id, "end", {"exit_code": exit_code})
 
         try:
@@ -676,7 +719,7 @@ class WorktreeRunner:
             phase=phase,
             runtime=self.runtime_type,
             started_at=started,
-            finished_at=finished,
+            finished_at=finished if phase != RunPhase.running else None,
             exit_code=exit_code,
             message=message,
             runtime_version=self._version(),

@@ -8,11 +8,15 @@ metadata.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any
+import threading
+from collections.abc import Callable, Iterable
+from typing import Any, BinaryIO
+
+from tldw_Server_API.app.core.config import settings as app_settings
 
 from ..limits import ArtifactLimitResult, artifact_limit_counter_defaults, collect_limited_artifacts
-from ..policy import SandboxPolicyConfig
+from ..models import RunSpec, TrustLevel
+from ..policy import TRUST_PROFILES, SandboxPolicyConfig
 
 _RESOURCE_LIMIT_EXCEPTIONS = (
     AttributeError,
@@ -22,6 +26,56 @@ _RESOURCE_LIMIT_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+
+def docker_resource_limits(spec: RunSpec) -> tuple[int, int, int]:
+    """Clamp PID, workspace and file-descriptor caps to the run's trust profile."""
+    cfg = sandbox_policy_config()
+    profile = TRUST_PROFILES[spec.trust_level or TrustLevel.standard]
+    return (
+        min(_positive_int(cfg.pids_limit, 256), profile["pids_limit"]),
+        min(_positive_int(cfg.workspace_cap_mb, 256), profile["workspace_cap_mb"]),
+        min(
+            _positive_int(getattr(app_settings, "SANDBOX_ULIMIT_NOFILE", None), 1024),
+            profile["ulimit_nofile"],
+        ),
+    )
+
+
+def drain_process_output(
+    process: Any,
+    publish_stdout: Callable[[bytes], None],
+    publish_stderr: Callable[[bytes], None],
+) -> int:
+    """Drain both child pipes concurrently without buffering arbitrary long lines."""
+    totals = [0, 0]
+    errors: list[Exception] = []
+    publish_lock = threading.Lock()
+
+    def pump(pipe: BinaryIO | None, publish: Callable[[bytes], None], index: int) -> None:
+        if pipe is None:
+            return
+        try:
+            with pipe:
+                read = getattr(pipe, "read1", pipe.read)
+                while chunk := read(64 * 1024):
+                    totals[index] += len(chunk)
+                    with publish_lock:
+                        publish(chunk)
+        except _RESOURCE_LIMIT_EXCEPTIONS as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=pump, args=(process.stdout, publish_stdout, 0), daemon=True),
+        threading.Thread(target=pump, args=(process.stderr, publish_stderr, 1), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    if errors:
+        raise errors[0]
+    return sum(totals)
 
 
 def sandbox_policy_config() -> SandboxPolicyConfig:
