@@ -5,6 +5,7 @@ Defines custom markers and test configuration for end-to-end testing
 that simulates real user interactions with the application.
 """
 
+import tldw_Server_API.tests._thread_env  # noqa: F401  (before anything that could load numpy/joblib)
 import pytest
 import os
 import asyncio
