@@ -2,7 +2,7 @@
 
 Backlog design task: `TASK-15414`
 
-Status: Approved by requester on 2026-11-02, together with ADR-086. Approval
+Status: Approved by requester on 2026-11-02, together with ADR-096 (then ADR-086). Approval
 authorizes implementation planning; execution still requires plan review and
 an execution-method choice.
 
@@ -392,7 +392,7 @@ boundary is a durable module-boundary rule, even though it is local to Chunker
 and follows the existing pipeline/service pattern. Repository policy does not
 require a decision to be repository-wide before an ADR is needed.
 
-[ADR-086: Chunker Execution Live-Context Boundary](../../ADR/086-chunker-execution-live-context-boundary.md)
+[ADR-096: Chunker Execution Live-Context Boundary](../../ADR/096-chunker-execution-live-context-boundary.md)
 records this decision with status **Accepted** following requester approval
 on 2026-11-02. Its scope is the
 new execution subsystem; it does not retroactively change the accepted behavior
@@ -422,7 +422,7 @@ additional public modes, an executor hierarchy or speculative abstractions.
   confirmed that all three revisions address their risks and returned
   "nothing important left". No material planning questions remain from that
   check. The review does not substitute for requester design/ADR approval.
-- Requester approval of this revised document and ADR-086: received on
+- Requester approval of this revised document and ADR-096 (then ADR-086): received on
   2026-11-02 after the review found no further actionable issues.
 - Implementation planning: authorized and tracked in TASK-15415.
 - Product/test edits and execution: not started; plan review and an execution

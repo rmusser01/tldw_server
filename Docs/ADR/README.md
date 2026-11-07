@@ -115,7 +115,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-086](086-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
 | [ADR-087](087-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
 | [ADR-088](088-mcp-certified-completion-lifecycle.md) | Proposed | Certify one bounded native-async completion path and retain ownership through cancellation, abandonment, and shutdown. |
-| [ADR-086](086-chunker-execution-live-context-boundary.md) | Accepted | Delegate Chunker's three execution paths to an internal service with neutral helpers and a live context, without importing the facade or sibling pipelines. |
 | [ADR-094](094-jobs-resource-admission-and-domain-publication.md) | Accepted | Keep exclusive resource admission and monotonic authority in shared Jobs, with atomic output fences and replay receipts in domain storage. |
 | [ADR-095](095-coordinated-chroma-sdk-storage-lifetimes.md) | Proposed | Coordinate validation and complete canonical Chroma SDK lifetimes in shared storage sessions; fail closed on unsupported or incomplete existing storage. |
 | [ADR-096](096-tiered-development-and-release-ci.md) | Proposed | Run focused CI on dev PRs and require full same-commit qualification on main PRs and server publication. |
@@ -130,5 +129,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-098](098-advisory-ui-design-drift-reporting.md) | Proposed | Report UI token, color, radius, and layout drift across all four product UI roots without blocking builds or merges. |
 | [ADR-099](099-per-user-session-cap.md) | Accepted | Cap live sessions per user; evict the least recently active, same install first; never refuse sign-in. |
 | [ADR-100](100-document-workspace-chat-association.md) | Proposed | Store Document Workspace chat links with the owned native conversation and verify access through Media and Chat. |
+| [ADR-096](096-chunker-execution-live-context-boundary.md) | Accepted | Delegate Chunker's three execution paths to an internal service with neutral helpers and a live context, without importing the facade or sibling pipelines. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
