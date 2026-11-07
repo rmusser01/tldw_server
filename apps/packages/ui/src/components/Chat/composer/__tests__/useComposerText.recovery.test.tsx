@@ -3,7 +3,8 @@ import path from "node:path"
 import ts from "typescript"
 import {
   isChatSubmitSuccess,
-  normalizeChatSubmitResult
+  normalizeChatSubmitResult,
+  shouldRestoreDraftAfterSubmit
 } from "@/hooks/chat/chat-action-utils"
 import React from "react"
 import { act, cleanup, renderHook } from "@testing-library/react"
@@ -76,6 +77,7 @@ const deployedAfterSend = (
     "restorePromptAssistAttempt",
     "isChatSubmitSuccess",
     "normalizeChatSubmitResult",
+    "shouldRestoreDraftAfterSubmit",
     "clearSubmittedDocuments",
     "selectedDocuments",
     "contextFiles",
@@ -84,6 +86,7 @@ const deployedAfterSend = (
     "submittedKnowledgeMentionRevision",
     "setContextFiles",
     "setKnowledgeMentionActive",
+    "draftOwnership",
     `${afterSendCode}; return afterSend;`
   )(
     attempt,
@@ -92,6 +95,7 @@ const deployedAfterSend = (
     composer.restorePromptAssistAttempt,
     isChatSubmitSuccess,
     normalizeChatSubmitResult,
+    shouldRestoreDraftAfterSubmit,
     vi.fn(),
     [],
     [],
@@ -99,7 +103,8 @@ const deployedAfterSend = (
     {current:0},
     0,
     vi.fn(),
-    vi.fn()
+    vi.fn(),
+    composer.captureDraftOwnership()
   ) as (
     result:
       | import("@/hooks/chat/chat-action-utils").ChatSubmitResult
@@ -147,6 +152,7 @@ const deployedWebAfterSend = (
     "restorePromptAssistAttempt",
     "isChatSubmitSuccess",
     "normalizeChatSubmitResult",
+    "shouldRestoreDraftAfterSubmit",
     "messageForModel",
     "clearImportedSidepanelContext",
     "draftOwnership",
@@ -159,6 +165,7 @@ const deployedWebAfterSend = (
     composer.restorePromptAssistAttempt,
     isChatSubmitSuccess,
     normalizeChatSubmitResult,
+    shouldRestoreDraftAfterSubmit,
     undefined,
     vi.fn(),
     composer.captureDraftOwnership(),
@@ -982,6 +989,72 @@ describe("retained fresh composer recovery", () => {
         expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
         view.unmount()
       }
+    }
+  )
+
+  it.each([
+    ["compact", "local"], ["WebUI", "local"],
+    ["compact", "native"], ["WebUI", "native"]
+  ] as const)(
+    "the actual %s kept-question callback leaves no submitted draft after a saved %s chat remount",
+    async (surface, kind) => {
+      const address: ChatDraftAddress = kind === "local"
+        ? { kind: "local", id: "kept-question", profileId: "profile" }
+        : { kind: "native", id: "kept-question", ownerKey: chatDraftOwnerKey(scope()), scope: { type: "global" } }
+      act(() => useStoreMessageOption.getState().setChatDraftAddress(address))
+      const surfaceKey = surface === "compact" ? "tldw:sidepanelChatDraft:active" : root
+      const view = mount(surfaceKey, surface === "compact")
+      await settle()
+      act(() => view.result.current.setMessageValue("ALREADY ADMITTED QUESTION"))
+      await settle()
+      let attempt!: number
+      act(() => { attempt = view.result.current.beginPromptAssistReset() })
+      await settle()
+      const completed = (surface === "compact" ? deployedAfterSend : deployedWebAfterSend)(attempt, view.result.current)
+      act(() => completed({ status: "skipped", reason: "Request cancelled", questionKept: true }))
+      await settle()
+      expect(view.result.current.form.values.message).toBe("")
+      view.unmount()
+      const cold = mount(surfaceKey, surface === "compact")
+      await settle()
+      expect(cold.result.current.form.values.message).toBe("")
+    }
+  )
+
+  it.each([
+    ["compact", "new input"], ["WebUI", "new input"],
+    ["compact", "account"], ["WebUI", "account"]
+  ] as const)(
+    "the actual %s kept-question callback preserves input after a later %s boundary",
+    async (surface, boundary) => {
+      act(() => useStoreMessageOption.getState().setChatDraftAddress({ kind: "local", id: "late-kept-question", profileId: "profile" }))
+      const surfaceKey = surface === "compact" ? "tldw:sidepanelChatDraft:active" : root
+      const view = mount(surfaceKey, surface === "compact")
+      await settle()
+      act(() => view.result.current.setMessageValue("OLD QUESTION"))
+      await settle()
+      let attempt!: number
+      act(() => { attempt = view.result.current.beginPromptAssistReset() })
+      await settle()
+      const completed = (surface === "compact" ? deployedAfterSend : deployedWebAfterSend)(attempt, view.result.current)
+      if (boundary === "account") {
+        act(() => {
+          authority.user = "bob"
+          window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+          useStoreMessageOption.getState().startNewChatDraft()
+        })
+        await settle()
+        expect(view.result.current.isDraftOwnerCurrent()).toBe(true)
+      }
+      act(() => view.result.current.setMessageValue("NEW UNSENT INPUT"))
+      await settle()
+      act(() => completed({ status: "skipped", reason: "Request cancelled", questionKept: true }))
+      await settle()
+      expect(view.result.current.form.values.message).toBe("NEW UNSENT INPUT")
+      view.unmount()
+      const cold = mount(surfaceKey, surface === "compact")
+      await settle()
+      expect(cold.result.current.form.values.message).toBe("NEW UNSENT INPUT")
     }
   )
 

@@ -356,6 +356,16 @@ async def _validate_provider_credentials(
         )
 
 
+def _eval_provider_name(api_name: Any) -> str:
+    """The judge provider an evaluation names, as its credential resolution reads it (OpenAI by default)."""
+    return canonical_provider_name(str(api_name or "").strip() or "openai")
+
+
+def _batch_eval_providers(items: Any) -> list[str]:
+    """Each batch item's judge provider, as ``batch_evaluate`` resolves it (a non-dict item is OpenAI's)."""
+    return [_eval_provider_name(item.get("api_name") if isinstance(item, dict) else None) for item in items or []]
+
+
 async def _resolve_and_validate_eval_provider(
     request: Union[GEvalRequest, RAGEvaluationRequest, ResponseQualityRequest],
     eval_type: str,
@@ -365,7 +375,7 @@ async def _resolve_and_validate_eval_provider(
     credential_runtime: Optional[ProviderCredentialRuntime] = None,
 ) -> tuple[str, str, ProviderCallCredentials, ProviderCredentialRuntime]:
     """Resolve one policy-enforced provider/model credential handle."""
-    provider_name = canonical_provider_name((request.api_name or "openai").strip() or "openai")
+    provider_name = _eval_provider_name(request.api_name)
     raw_api_key = getattr(request, "api_key", None)
     if raw_api_key:
         logger.debug("Ignoring per-request api_key override for provider={}", provider_name)
@@ -980,8 +990,9 @@ async def evaluate_geval(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
-        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
-        await enforce_llm_quota(current_user.id)
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything. An
+        # over-limit user whose judge provider runs on their own key is let through unmarked (TASK-13956).
+        await enforce_llm_quota(current_user.id, provider=_eval_provider_name(request.api_name))
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1197,8 +1208,9 @@ async def evaluate_rag(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
-        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
-        await enforce_llm_quota(current_user.id)
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything. An
+        # over-limit user whose judge provider runs on their own key is let through unmarked (TASK-13956).
+        await enforce_llm_quota(current_user.id, provider=_eval_provider_name(request.api_name))
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1395,8 +1407,9 @@ async def evaluate_response_quality(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
-        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
-        await enforce_llm_quota(current_user.id)
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything. An
+        # over-limit user whose judge provider runs on their own key is let through unmarked (TASK-13956).
+        await enforce_llm_quota(current_user.id, provider=_eval_provider_name(request.api_name))
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1685,8 +1698,8 @@ async def batch_evaluate(
         start_time = time.time()
         service = get_unified_evaluation_service_for_user(current_user.id)
         if request.evaluation_type in {"geval", "rag", "response_quality"}:
-            # Usage quotas (LLM usage accounting spec §4a): these types make LLM calls inside the request.
-            await enforce_llm_quota(current_user.id)
+            # Usage quotas (§4a): admitted past a limit only when every item's provider is the user's own key.
+            await enforce_llm_quota(current_user.id, provider=_batch_eval_providers(request.items))
         if request.evaluation_type in {"geval", "rag", "response_quality"}:
             credential_runtime = _build_eval_credential_runtime(
                 current_user=current_user,

@@ -108,8 +108,15 @@ def test_create_run_returns_503_on_mandatory_audit_failure(evals_crud_client, mo
 
 @pytest.mark.integration
 def test_create_run_refuses_an_over_quota_user_before_the_run_starts(evals_crud_client, monkeypatch):
-    """A run's samples are LLM calls made in a task the request starts, so the run is checked at creation (§4a)."""
-    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+    """A run's samples are LLM calls made in a task the request starts, so the run is checked at creation (§4a).
+
+    They run on the server's key, so a key the user stored does not lift the refusal (TASK-13956).
+    """
+    from tldw_Server_API.tests.helpers.llm_quota import (
+        assert_llm_quota_402,
+        own_keys_for_every_provider,
+        refuse_llm_work,
+    )
 
     client, headers = evals_crud_client
     started: list[str] = []
@@ -124,8 +131,10 @@ def test_create_run_refuses_an_over_quota_user_before_the_run_starts(evals_crud_
 
     monkeypatch.setattr(crud, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)
 
     r = client.post("/api/v1/evaluations/eval_abc/runs", json={"target_model": "gpt-4o-mini", "config": {}}, headers=headers)
 
     assert_llm_quota_402(r)
     assert started == []
+    assert asked == []

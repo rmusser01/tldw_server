@@ -3497,6 +3497,9 @@
   "historySelection_recoveryUnsavedReplyTitle": {
     "message": "Reply not saved"
   },
+  "historySelection_stoppedBeforeReplyTitle": {
+    "message": "Stopped before a reply"
+  },
   "historySelection_recoveryUnconfirmedTitle": {
     "message": "Reply not confirmed"
   },

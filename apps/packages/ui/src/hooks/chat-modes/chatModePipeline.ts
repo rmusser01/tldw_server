@@ -1300,9 +1300,15 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         const scopeInvalidated = Boolean(
           params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted
         )
+        // A Stop before any text keeps the question for dev's saved-question
+        // retry, instead of a kept turn with no reply to show (CM-02).
+        const stoppedBeforeReply =
+          historyTurn.persistence !== "server" && Boolean(historyTurn.admission) &&
+          !replyCompleted && !fullText.trim() && signal.aborted &&
+          params.wasStoppedByUser?.() === true
         const outcome: HistoryTurnOutcome | undefined =
           historyTurn.persistence === "server" && historyTurn.resultId ? historyTurn.outcome ?? "interrupted" :
-          (!historyTurn.admission && !historyTurn.existingSelection) || scopeInvalidated
+          (!historyTurn.admission && !historyTurn.existingSelection) || scopeInvalidated || stoppedBeforeReply
             ? undefined
             : replyCompleted
               ? historyTurn.resultId ? "complete" : undefined
@@ -1325,11 +1331,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         try {
           await historyTurn.recover(
             {
-              content: fullText,
+              content: stoppedBeforeReply ? "" : fullText,
               assistantId: resolvedAssistantMessageId,
               createdAt,
               outcome,
-              interruptionReason: keptReason
+              interruptionReason: keptReason,
+              ...(stoppedBeforeReply ? { stoppedBeforeReply: true } : {})
             },
             e
           )
@@ -1385,6 +1392,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               (historyTurn.admission || historyTurn.existingSelection || row.id !== resolvedUserMessageId)
           )
         )
+        // The question stays on screen, so the composer doesn't get it back.
+        if (stoppedBeforeReply && historyTurn.admission)
+          return chatSubmitSkipped("Request cancelled", { questionKept: true })
       } else {
         await historyTurn.cancelPreparation?.()
         setMessagesWithTransition(messages)

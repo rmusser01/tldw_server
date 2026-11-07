@@ -1061,6 +1061,82 @@ def test_batch_evaluation_llm_quota_refuses_llm_types_and_admits_propositions(mo
     assert admitted.status_code != 402, admitted.text
 
 
+def _past_the_limit_on_own_keys(monkeypatch, own: set[str]) -> tuple[list[str], list[bool]]:
+    """An over-limit user with their own key for the providers in ``own``; the rate limiter, next after
+    the quota check, answers 418 and records whether the request was marked admitted."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    asked: list[str] = []
+    marked: list[bool] = []
+
+    async def _own_key(_uid, provider):
+        """Stands in for the lookup (the boundary is under test)."""
+        asked.append(provider)
+        return provider in own
+
+    def _limiter_reached(_uid):
+        marked.append(current_llm_call_context().prechecked)
+        raise HTTPException(status_code=418, detail="the quota check let the request through")
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", _limiter_reached)
+    refuse_llm_work(monkeypatch)
+    return asked, marked
+
+
+@pytest.mark.parametrize("route", ["geval", "rag", "response-quality"])
+def test_sync_evaluation_admits_an_over_limit_user_whose_judge_runs_on_their_own_key(monkeypatch, route):
+    """Past a limit, an evaluation whose judge provider is the user's own key goes on, unmarked (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    app = _build_eval_only_app(monkeypatch)
+    asked, marked = _past_the_limit_on_own_keys(monkeypatch, {"openai"})
+
+    with TestClient(app) as client:
+        admitted = client.post(f"/api/v1/evaluations/{route}", json=_LLM_EVAL_BODIES[route])
+        refused = client.post(f"/api/v1/evaluations/{route}", json={**_LLM_EVAL_BODIES[route], "api_name": "anthropic"})
+
+    assert admitted.status_code == 418, admitted.text
+    assert marked == [False]
+    assert_llm_quota_402(refused)
+    assert asked == ["openai", "anthropic"]
+
+
+@pytest.mark.parametrize(
+    ("second_provider", "admitted", "looked_up"),
+    [
+        ("groq", True, ["openai", "groq"]),
+        ("anthropic", False, ["openai", "anthropic"]),
+        (None, True, ["openai"]),  # an item without api_name is judged by OpenAI, so it is looked up once
+    ],
+    ids=["groq", "anthropic", "default"],
+)
+def test_batch_evaluation_admits_an_over_limit_user_only_when_every_items_judge_is_their_own_key(
+    monkeypatch, second_provider, admitted, looked_up
+):
+    """A batch names each item's provider; one item off the user's own keys refuses the batch (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    app = _build_eval_only_app(monkeypatch)
+    asked, marked = _past_the_limit_on_own_keys(monkeypatch, {"openai", "groq"})
+    second = {**_LLM_EVAL_BODIES["geval"], "api_name": second_provider}
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/batch",
+            json={"evaluation_type": "geval", "parallel_workers": 1, "items": [_LLM_EVAL_BODIES["geval"], second]},
+        )
+
+    if admitted:
+        assert response.status_code == 418, response.text
+        assert marked == [False]
+    else:
+        assert_llm_quota_402(response)
+    assert asked == looked_up
+
+
 def test_batch_client_teardown_poison_isolated_before_next_credential_resolution(
     monkeypatch,
 ):

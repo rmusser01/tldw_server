@@ -25,7 +25,11 @@ from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scrap
 from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced
 from tldw_Server_API.app.services import web_scraping_service as service
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
-from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+from tldw_Server_API.tests.helpers.llm_quota import (
+    assert_llm_quota_402,
+    own_keys_for_every_provider,
+    refuse_llm_work,
+)
 
 pytestmark = pytest.mark.integration
 PROMPT_ID = "media.web.summarization"
@@ -583,12 +587,15 @@ WEB_SUMMARY_REQUESTS = [
 def test_summaries_for_an_over_quota_user_are_refused_before_any_page_is_fetched(
     context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, Any], summarize_flag: str
 ) -> None:
-    """The 402 comes first, so no page is fetched and then discarded (TASK-13864)."""
+    """The 402 comes first, so no page is fetched and then discarded (TASK-13864); summaries run on the
+    server's key, so a key the user stored does not lift it (TASK-13956)."""
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)
     response = context.client.post(path, json={**body, summarize_flag: True})
     assert_llm_quota_402(response)
     assert context.fetches == []
     assert context.calls == []
+    assert asked == []
 
 
 @pytest.mark.parametrize(("path", "body", "summarize_flag"), WEB_SUMMARY_REQUESTS)

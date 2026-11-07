@@ -325,6 +325,82 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
   })
 
+  // CM-02: a Stop before any text arrives keeps the question once, says so,
+  // and Retry asks it again without saving it a second time.
+  it.each([
+    { label: "a fresh chat", saved: false, initialText: "" },
+    { label: "a saved server chat", saved: true, initialText: "" },
+    { label: "a fresh chat after whitespace-only output", saved: false, initialText: " \n\t" },
+    { label: "a saved server chat after whitespace-only output", saved: true, initialText: " \n\t" }
+  ])("CM-02: Stop before any reply text in $label keeps the question once and Retry asks it again", async ({ saved, initialText }) => {
+    const server = createFakeTldwServer()
+    if (saved)
+      server.seedChat({
+        id: "saved-chat",
+        title: "Saved topic",
+        turns: [
+          { role: "user", content: "Saved question" },
+          { role: "assistant", content: "Saved answer" }
+        ]
+      })
+    // Held before visible reply text; released at the end so nothing outlives the test.
+    const held = deferred()
+    server.planCompletion({
+      chunks: [...(initialText ? [initialText] : []), "never sent"],
+      pauseAfterChunks: initialText ? 1 : 0,
+      resume: held.promise
+    })
+    server.planCompletion({ reply: "Answer after retry" })
+    const view = await renderPlayground({
+      server,
+      ...(saved ? { extras: <SidebarServerChatButton chatId="saved-chat" title="Saved topic" /> } : {})
+    })
+    if (saved) await openSavedServerChat(view, { title: "Saved topic", lastMessage: "Saved answer" })
+    const earlier = saved
+      ? [
+          { role: "user", text: "Saved question" },
+          { role: "assistant", text: "Saved answer" }
+        ]
+      : []
+
+    try {
+    await startSend(view, "Stop me early")
+    await waitFor(() => expect(server.completionRequests()).toHaveLength(1), HARNESS_WAIT)
+    if (initialText) await waitForStreamedText(initialText)
+    await view.user.click(screen.getByRole("button", { name: "Stop Streaming" }))
+    await waitForChatIdle()
+
+    // The question is kept once: in the transcript, not also back in the composer.
+    await waitFor(
+      () => expect(transcript()).toEqual([...earlier, { role: "user", text: "Stop me early" }]),
+      HARNESS_WAIT
+    )
+    expect(view.composer).toHaveValue("")
+    const title = await screen.findByText("Stopped before a reply", {}, HARNESS_WAIT)
+    const card = title.closest("[role='status']") as HTMLElement
+    expect(within(card).queryByRole("alert")).toBeNull()
+
+    await view.user.click(within(card).getByRole("button", { name: "Review retry" }))
+    await view.user.click(await within(card).findByRole("button", { name: "Retry saved question" }, HARNESS_WAIT))
+    await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+    await waitForChatIdle()
+    expect(
+      completionMessages(server.completionRequests()[1]).filter((message) => message.content === "Stop me early")
+    ).toHaveLength(1)
+    await waitFor(
+      () =>
+        expect(transcript()).toEqual([
+          ...earlier,
+          { role: "user", text: "Stop me early" },
+          { role: "assistant", text: "Answer after retry" }
+        ]),
+      HARNESS_WAIT
+    )
+    } finally {
+      held.resolve()
+    }
+  })
+
   it.each([
     { temporary: false, control: "form" },
     { temporary: true, control: "form" },

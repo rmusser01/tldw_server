@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { TFunction } from "i18next"
@@ -43,6 +43,67 @@ const props = (overrides: Partial<React.ComponentProps<typeof ChatHeader>> = {})
 })
 
 describe("ChatHeader notification lifecycle", () => {
+  it.each([true, false])("opens account navigation and restores keyboard focus (chat layout %s)", async (showChatTitle) => {
+    const user = userEvent.setup()
+    render(<ChatHeader {...props({
+      showChatTitle,
+      renderAccountMenu: (onClose) => <a href="/settings/tldw" onClick={onClose}>Account settings</a>
+    })} />)
+    const trigger = screen.getByRole("button", { name: "Account menu" })
+    trigger.focus()
+    await user.keyboard("{Enter}")
+
+    const dialog = screen.getByRole("dialog", { name: "Account menu" })
+    expect(within(dialog).getByRole("link", { name: "Account settings" })).toHaveFocus()
+    await user.keyboard("{Escape}")
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it("keeps account navigation available while notifications are idle", async () => {
+    const user = userEvent.setup()
+    render(<ChatHeader {...props({
+      notificationState: "idle",
+      renderAccountMenu: () => <a href="/settings/tldw">Account settings</a>
+    })} />)
+    await user.click(screen.getByRole("button", { name: "Account menu" }))
+    expect(screen.getByRole("link", { name: "Account settings" })).toBeVisible()
+  })
+
+  it("dismisses account navigation when keyboard focus leaves the popup", async () => {
+    const user = userEvent.setup()
+    render(<ChatHeader {...props({
+      renderAccountMenu: () => <a href="/settings/tldw">Account settings</a>
+    })} />)
+    await user.click(screen.getByRole("button", { name: "Account menu" }))
+    await user.tab()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("dismisses account navigation when reverse tab leaves through the trigger", async () => {
+    const user = userEvent.setup()
+    render(<ChatHeader {...props({
+      renderAccountMenu: () => <a href="/settings/tldw">Account settings</a>
+    })} />)
+    const trigger = screen.getByRole("button", { name: "Account menu" })
+    await user.click(trigger)
+    await user.tab({ shift: true })
+    expect(trigger).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("closes account navigation when clicking its trigger again", async () => {
+    const user = userEvent.setup()
+    render(<ChatHeader {...props({
+      renderAccountMenu: () => <a href="/settings/tldw">Account settings</a>
+    })} />)
+    const trigger = screen.getByRole("button", { name: "Account menu" })
+    await user.click(trigger)
+    await user.click(trigger)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
   it("names the active count and hides the visual badge from assistive technology", () => {
     render(<ChatHeader {...props()} />)
 

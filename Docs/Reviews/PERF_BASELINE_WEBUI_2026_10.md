@@ -610,3 +610,188 @@ At HEAD there are zero unresolved Critical/Important review findings.
   `tsc --noEmit` → 0 errors.
 - The W0 streaming benches (Families A/B) belong to W1's remediation scope
   and are skipped here per the batch brief.
+
+## Batch W5 (TASK-13525) — 2026-11-05
+
+Extension background/content-scripts batch: web-clipper tiered capture
+(WP-56/57), copilot popup streaming appends + chunked base64 (WP-58/59),
+sidepanel open-once guard + context-menu URL gate + funnel-metrics
+coalescing (WP-60/61/62). Branch `codex/webui-perf-w5-ext-scripts`, range
+`b2b7d5d2b0..c0393fe1f3` (3 commits; base = dev merge `b2b7d5d2b0` incl.
+W1+W2 — W3/W4 were pending merge on disjoint files at branch time). Every
+number below is from an actual run at HEAD `c0393fe1f3` on 2026-11-05
+(same machine/environment as the frozen tables; the W0/W1/W2 sections above
+are untouched). W5 touched 16 TypeScript files, all under
+`apps/packages/ui/src/{entries,services,parser,utils}` — no sidepanel,
+store, or persistence file is in the diff.
+
+### Family B re-run at HEAD (canned 100-chunk sidepanel stream)
+
+W5 owns no sidepanel/streaming code, so the expectation was an unchanged
+shape — proven, not assumed: the count metrics at the **branch base**
+`b2b7d5d2b0` are identical to HEAD (same run harness, one run at base).
+
+`bunx playwright test tests/e2e/performance-streaming.spec.ts` — 3 runs at
+HEAD, 1 at base (`msPerChunk` is per APPLIED chunk, per the label-ambiguity
+note in Family B above):
+
+| Run | chunksServed | chunksApplied | storeSubscriberNotifications | messageUpdateNotifications | domMutations | longTasks | ttftMs | streamPhaseMs | msPerChunk | minChunkGapMs | maxChunkGapMs | domNodeCount |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| HEAD 1 | 100 | 15 | 21 | 16 | 30 | 0 | 149.3 | 1118.6 | 74.57 | 22.6 | 89.2 | 241 |
+| HEAD 2 | 100 | 15 | 21 | 16 | 30 | 0 | 188.0 | 1117.8 | 74.52 | 33.2 | 90.0 | 241 |
+| HEAD 3 | 100 | 15 | 21 | 16 | 30 | 0 | 137.6 | 1147.3 | 76.49 | 42.5 | 88.8 | 241 |
+| base | 100 | 15 | 21 | 16 | 30 | 0 | 106.1 | 1171.0 | 78.07 | 68.8 | 88.7 | 214 |
+
+- **W5's delta on this family: none.** Count metrics are bit-identical at
+  base and HEAD (100/15/21/16/30); `longTasks` is 0 in all four runs (it
+  was 0 in every W0 baseline and W1 run as well).
+- The shape did drift vs the W1-era records (19 → 21 store notifications;
+  domMutations 49–51 → 30; domNodeCount 196 → 214/241), but the base run
+  attributes all of it to interim dev work merged into dev between W1's
+  branch point and this branch's base — not to W5. `domNodeCount` is the
+  one visibly jittery metric historically (196/196/215 across the frozen
+  W0 runs themselves; 214 at base, 241 ×3 at HEAD here).
+- Family A (unit streaming bench, W1's) was not re-run: its file and every
+  code path it measures are untouched by the W5 diff (see the file list
+  above); Families C1/C2 belong to W2's scope, equally untouched.
+
+### What W5 proved, and how (mechanism framing, W3 convention)
+
+**W5 landed no new benchmark, and none was needed: its wins are
+complexity-class changes on paths the existing benches do not cover,
+pinned by mechanism tests, not wall-clock deltas.** Family B above exists
+to prove W5 broke nothing measured. The actual evidence, per stage:
+
+- **S1 — tiered capture (WP-56/57):** property-getter spies on the stub
+  document prove the selection path never touches `outerHTML`,
+  `innerText`, or `textContent` and never invokes the parser
+  (`defaultExtractContent` mock unused), with positive controls proving
+  the fallback tiers do touch them; a characterization trio pins
+  visible-body/tier ordering per scenario (selection present / absent /
+  article empty). Per-clip host-main-thread work drops from
+  full-page serialize + cheerio parse + forced `innerText` layout to one
+  `getSelection().toString()` + trim — the plan's "< 10 ms capture"
+  criterion is satisfied by construction (nothing measurable remains on
+  the path), pinned per the W3 no-wall-clock convention.
+- **S2 — copilot appends (WP-58):** a MutationObserver over the real
+  render target through a 1000-chunk stream proves **appends, not
+  replaces** — exactly one added text node per non-empty chunk and ZERO
+  records with `removedNodes.length > 0` (a `textContent` assignment always
+  removes the old child; at base the same stream produced 1009+ removal
+  records). Per-chunk DOM work drops from an O(total) whole-element
+  rewrite (O(total²) across a stream) to O(chunk). A `getBoundingClientRect`
+  spy pins **zero synchronous layout reads during the stream** and exactly
+  one after the rAF flush (1000 schedules coalesce to 1 `updatePosition`);
+  the stop-path test pins the terminal full-text call no-oping via the
+  same-rendered-length skip (one removal record at base, zero now).
+- **S2 — chunked base64 (WP-59):** property parity vs `btoa` for random
+  byte arrays across sizes 0/1/7/8191/8192/8193/65536 plus round-trip —
+  the helper is byte-identical while going from per-byte string concat to
+  8 KB `String.fromCharCode.apply` slices (O(n), no per-byte accumulation).
+  The wire-format pin: an 8493-byte audio frame (spanning the 8 KB seam)
+  posted over the real STT port produces the exact JSON
+  `{"type":"audio","data":"<btoa(reference)>"}` on the WebSocket — the
+  protocol is provably unchanged.
+- **S3 — background hygiene (WP-60/61/62):** the broadcaster suite pins
+  open-once-per-funnel across multiple broadcasts with every runtime
+  message still delivered (first emit still opens from closed;
+  uncorrelated broadcasts keep legacy behavior; 500-id capacity bound),
+  per-session correlation for quick ingests, and the 500 ms retry. The
+  funnel-metrics suite pins a 5-event synchronous burst → exactly **1**
+  storage write (5 at base) and the lost-update fix as a correctness
+  bonus: a 205-event burst persisted **1** event at base (reproduced red
+  by the reviewer); the coalescing writer persists the bounded 200 newest
+  losslessly. The URL-gate suite pins same-URL config writes no-oping the
+  context-menu sync (no capabilities call, no menu rebuild) while URL
+  changes still re-sync.
+
+### M3 disposition (W0 manual row: copilot popup host-page long tasks) — DONE BY MECHANISM
+
+M3's consuming batch is W5, and this section is the owner's disposition.
+The wall-clock number was **not** measured; the row is closed by
+mechanism evidence, stated honestly:
+
+- The W0 placeholder asked for a human DevTools recording of host-page
+  long tasks (> 50 ms) during a ≥ 100-chunk copilot stream. A
+  playwright-measured substitute would need a canned copilot-stream
+  harness (mock SSE + `tldw:popup:open` + in-page PerformanceObserver);
+  **no such harness exists in-repo** — both copilot e2e specs
+  (`copilot-popup.spec.ts`, `copilot-popup-enhanced.spec.ts`) skip without
+  a live backend, and building a new harness could not be committed under
+  this batch-final's doc+backlog-only commit rule, so any number it
+  produced would be irreproducible.
+- The mechanism evidence is the S2 pin set above: per-chunk work is an
+  O(chunk) text-node append (MutationObserver append proof, zero
+  removals), zero synchronous layout reads per chunk (spy: 0 during the
+  stream, 1 per rAF flush), terminal calls no-op. The removed behavior —
+  full accumulated-string reassignment per chunk — is exactly the
+  long-task mechanism M3 was written to catch; it is gone by construction
+  and by falsifier test, not by measured delta.
+- A wall-clock before/after for the popup on a large stream remains
+  available to a future human DevTools pass or a canned copilot harness;
+  nothing in M3 blocks W5's closure.
+
+### Per-stage attribution (what this branch landed vs pre-landed work)
+
+| Stage | Commit | Landed by W5 | Pre-landed at branch point / out of scope |
+|---|---|---|---|
+| S1 — web-clipper tiered capture (WP-56/57) | `486c653ee6` | **Gap closed** — tiering was a genuine gap despite TASK-13511's lazy parser (lazy ≠ avoided: every clip still eagerly serialized `outerHTML`, ran the parser, and forced `innerText`): `requestedType` threaded into `extractClipPageTextFromDocument`; selection clips with a live selection return immediately; article tier next; `fullPageText` only as the final fallback for tiered types (non-tiered/legacy keeps eager behavior); `parser/default.ts` per-attribute `removeAttr` loop → one in-place attribs pass preserving the exact kept-set `{href, src}`. Intended `fullExtract` delta (plan-mandated, contained): a selection clip's `fullExtract` is now its selection text, an article clip's is its article text (was whole-page); all four consumers traced in review (fallback chains, selection-first preference, or non-caller); `visibleBody`/`clipType`/`actualType`/`fallbackPath` unchanged (characterization trio). | TASK-13511's lazy parser chunk (`parser-main.js`) — made the parse deferrable, not avoidable; the resolution side's tier ORDER already existed |
+| S2 — copilot appends + chunked base64 (WP-58/59) | `b1511ccf9c` | **Both gaps closed** — popup: `appendResponseText` (one text node per chunk) + `setResponseText` same-rendered-length skip so stop/done no-op instead of O(total) rewrites; rAF position coalescing unchanged. base64: `arrayBufferToBase64` in 8 KB slices, byte-identical, drop-in for all four call sites (background STT + three WebUI voice hooks). Design ruling (on evidence): the port hop was already binary at HEAD (`useTldwStt` posts raw chunk data), so the plan's ArrayBuffer-over-port alternative would have changed nothing there; base64 exists only on the STT WebSocket JSON hop, where it is protocol-required — chunked-base64 chosen, wire format pinned unchanged (8493-byte seam frame). | Port hop already binary (pre-existing `normalizeFileData` path) |
+| S3 — background warm/keep-alive hygiene (WP-60/61/62) | `c0393fe1f3` | Sidepanel guard **gap** → `emitBackgroundMessage` extracted to `createBackgroundStatusBroadcaster` + `createSidepanelOpenOnceGuard` (open at most once per funnelId/sessionId; first emit still opens from closed; runtime message never suppressed; async retry rejections now logged). Context-menu URL gate **partial → gap closed**: `tldwConfig` watcher re-syncs the clipper menu (and forced warm) only when the server URL changes. Funnel metrics (m1, folded in) **gap** → in-memory pending array + coalescing serialize-on-drain writer (hydrate-once merge, bounded 200, one write per drain window) with the lost-update fix. | Alarm non-forcing (WP-61a) and the 5-min capabilities TTL **already done by W2 Stage 3** — verified, no duplicate work; WP-63 (effective-config per-request reads) not landed anywhere — W4 Stage 5 scope, verified only |
+
+Review record: all three stages Approved with **0 Critical/Important
+findings and zero fix rounds** — the only batch in the program with a
+perfect review record through batch-final.
+
+### Documented gaps / follow-ups
+
+- **Cross-frame selection still runs the article tier** (S1): a
+  context-menu clip whose selection lives in another frame
+  (`window.getSelection()` empty in the content-script frame) still pays
+  the article tier before the context-menu `selectionText` wins
+  resolution — wasted work, correct result; plan-faithful (only
+  `requestedType` was threaded). Follow-up if it ever shows up in
+  measurements.
+- **`fullExtract` delta extends to default article clips** (S1 review
+  minor): an article clip whose article tier succeeds now reports
+  `fullExtract = articleText` (was full-page text) — same containment
+  argument as the selection case; recorded for whole-branch visibility.
+- **Same-length-skip fallback untested** (S2): `setResponseText`'s
+  same-rendered-length skip relies on the documented caller invariant; a
+  length mismatch still falls back to a full replace (API correct for
+  arbitrary future callers), but no test exercises the mismatch branch —
+  no reachable caller today.
+- **eslint invocation note (corrected here)**: linting these files must
+  run **from `apps/`** with the workspace-installed binary —
+  `tldw-frontend/node_modules/.bin/eslint --config tldw-frontend/eslint.config.mjs
+  --suppressions-location tldw-frontend/eslint-suppressions.packages-ui.json`
+  (the `lint:ui` script shape). A bare `bunx eslint` from the wrong cwd
+  resolves a registry ESLint (10.14.0) that crashes on this config
+  (`scopeManager.addGlobals is not a function`); the Stage 3 report's
+  invocation line is superseded by this one.
+- **`scheduleModelWarmAlarm` runs on every config write** (S3 footnote):
+  only the context-menu sync and the forced `warmModels(true)` are
+  URL-gated; the alarm (re)scheduler still fires on same-URL writes —
+  idempotent bookkeeping, no network. Deferred minor.
+- **`test:e2e:perf` left to CI**: the batch-final re-ran the W0-canonical
+  Family B spec only; the other two specs in the `performance-*.ts` trio
+  (`performance-cache`, `performance-smoke-lite`) run in CI, not locally
+  here.
+
+### Verification runs at final HEAD (2026-11-05, `c0393fe1f3`)
+
+- Family B canned e2e: 3 runs at HEAD + 1 at branch base — table above;
+  all green, `longTasks` 0 everywhere.
+- Scoped suites (the batch's touched neighborhoods):
+  `bun run vitest run src/entries/__tests__/ src/entries/shared/__tests__/
+  src/services/web-clipper/__tests__/ src/parser/__tests__/
+  src/utils/__tests__/compress.test.ts
+  src/services/__tests__/background-helpers.broadcast.test.ts` in
+  `apps/packages/ui` — **29 files, 403/403 green**.
+- FE typecheck (CI-canonical): `cd apps/tldw-frontend && bun run typecheck`
+  → **exit 0**.
+- eslint (corrected invocation, from `apps/`, workspace binary, over the 16
+  touched TS files): **exit 0**.
+- Whitespace: `git diff --check b2b7d5d2b0..HEAD` → clean.
+- Bandit: N/A — TypeScript-only batch, no Python touched (per program
+  precedent).
