@@ -1555,7 +1555,6 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
               tldw_Server_API/tests/Evaluations/test_db_adapter.py
               tldw_Server_API/tests/Evaluations/test_error_scenarios.py
-              tldw_Server_API/tests/Evaluations/test_eval_*.py
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
@@ -3251,7 +3250,6 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
               tldw_Server_API/tests/Evaluations/test_db_adapter.py
               tldw_Server_API/tests/Evaluations/test_error_scenarios.py
-              tldw_Server_API/tests/Evaluations/test_eval_*.py
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
@@ -4783,7 +4781,6 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
               tldw_Server_API/tests/Evaluations/test_db_adapter.py
               tldw_Server_API/tests/Evaluations/test_error_scenarios.py
-              tldw_Server_API/tests/Evaluations/test_eval_*.py
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
@@ -6225,7 +6222,6 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
               tldw_Server_API/tests/Evaluations/test_db_adapter.py
               tldw_Server_API/tests/Evaluations/test_error_scenarios.py
-              tldw_Server_API/tests/Evaluations/test_eval_*.py
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
@@ -7658,7 +7654,6 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_connection_pool.py
               tldw_Server_API/tests/Evaluations/test_db_adapter.py
               tldw_Server_API/tests/Evaluations/test_error_scenarios.py
-              tldw_Server_API/tests/Evaluations/test_eval_*.py
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
