@@ -3,6 +3,7 @@ import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { db } from "./schema"
 import { generateID } from "./helpers"
+import { indexMessagesSearchTokens } from "./search-tokens"
 import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
 import type { ChatScope } from "@/types/chat-scope"
@@ -150,13 +151,25 @@ const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[])
       typeof clientId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) continue
     claims.set(clientId, [...(claims.get(clientId) || []), remote])
   }
+  // One pass up front instead of a scan per local row: canonical ids and raw
+  // ids are both ownership anchors a server id must not collide with, and a
+  // local id may only claim when it is unambiguous.
+  const knownIds = new Set<string>()
+  const localIdCounts = new Map<string, number>()
+  for (const message of current) {
+    const canonical = canonicalId(message)
+    if (canonical) knownIds.add(canonical)
+    if (message.id) {
+      knownIds.add(message.id)
+      localIdCounts.set(message.id, (localIdCounts.get(message.id) || 0) + 1)
+    }
+  }
   return current.map(local => {
     const matches = local.id ? claims.get(local.id) : undefined
     if (matches?.length !== 1 || local.isBot || (local.role && local.role !== "user") || canonicalId(local)) return local
     const remote = matches[0]
     const serverId = canonicalId(remote)!
-    if (current.some(message => canonicalId(message) === serverId || message.id === serverId) ||
-      current.filter(message => message.id === local.id).length !== 1 || local.message !== remote.message ||
+    if (knownIds.has(serverId) || localIdCounts.get(local.id) !== 1 || local.message !== remote.message ||
       JSON.stringify((local.images || []).filter(Boolean)) !== JSON.stringify((remote.images || []).filter(Boolean))) return local
     return { ...local, serverMessageId: serverId }
   })
@@ -165,19 +178,40 @@ const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[])
 /** Recover only through an acknowledged reply and its explicit canonical remote parent. */
 const recoverAnchoredUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
   current = recoverCorrelatedUsers(current, incoming)
+  // Index the post-correlation state once; multiplicity is load-bearing, so
+  // every index keeps all matches in order.
+  const incomingByCanonical = new Map<string, ChatMessage[]>()
+  for (const message of incoming) {
+    const id = canonicalId(message)
+    if (id) incomingByCanonical.set(id, [...(incomingByCanonical.get(id) || []), message])
+  }
+  const knownIds = new Set<string>()
+  const currentById = new Map<string, ChatMessage[]>()
+  const botByCanonical = new Map<string, ChatMessage[]>()
+  for (const message of current) {
+    const canonical = canonicalId(message)
+    if (canonical) {
+      knownIds.add(canonical)
+      if (message.isBot) botByCanonical.set(canonical, [...(botByCanonical.get(canonical) || []), message])
+    }
+    if (message.id) {
+      knownIds.add(message.id)
+      currentById.set(message.id, [...(currentById.get(message.id) || []), message])
+    }
+  }
   const claims = new Map<string, string[]>()
   for (const reply of incoming) {
     const replyId = canonicalId(reply)
     if (!reply.isBot || (reply.role && reply.role !== "assistant") || !replyId || !reply.parentMessageId) continue
-    const parents = incoming.filter(message => canonicalId(message) === reply.parentMessageId)
+    const parents = incomingByCanonical.get(reply.parentMessageId) || []
     if (parents.length !== 1) continue
     const user = parents[0]
     const userId = canonicalId(user)!
     if (user.isBot || (user.role && user.role !== "user")) continue
-    if (current.some(message => canonicalId(message) === userId || message.id === userId)) continue
-    const anchors = current.filter(message => message.isBot && canonicalId(message) === replyId)
+    if (knownIds.has(userId)) continue
+    const anchors = botByCanonical.get(replyId) || []
     if (anchors.length !== 1 || !anchors[0].parentMessageId) continue
-    const candidates = current.filter(message => message.id === anchors[0].parentMessageId)
+    const candidates = currentById.get(anchors[0].parentMessageId) || []
     const local = candidates[0]
     if (candidates.length !== 1 || local.isBot || canonicalId(local) || local.message !== user.message ||
       // Text-only local saves historically retained the empty composer image.
@@ -216,6 +250,7 @@ export const reconcileServerChatMessages = (
     const id = key(message)
     return id ? [[id, message] as const] : []
   }))
+  const hasServerGreeting = incoming.some(message => message.messageType === "character:greeting" || message.messageType === "greeting")
   const merged = incoming.map(remote => {
     const id = key(remote)
     const local = id ? localById.get(id) : undefined
@@ -239,7 +274,7 @@ export const reconcileServerChatMessages = (
     if (local.isBot && isRepresentedVariant(local) && (local.variants || []).every(isRepresentedVariant)) continue
     // A synthetic greeting is superseded only by an acknowledged server greeting.
     if (!canonicalId(local) && (local.messageType === "character:greeting" || local.messageType === "greeting") &&
-      incoming.some(message => message.messageType === "character:greeting" || message.messageType === "greeting")) continue
+      hasServerGreeting) continue
     merged.push(local)
   }
   return merged
@@ -262,13 +297,27 @@ export const reconcileServerChatMirror = async ({
     images: row.images, sources: row.sources || [], parentMessageId: row.parent_message_id
   })), messages)
   const acknowledgedRows = rows.map((row, index) => ({ ...row, serverMessageId: recovered[index].serverMessageId }))
-  const localIds = new Map<string, string>()
-  for (const remote of messages) {
+  // First persisted row per server id — for unacknowledged rows the raw id is
+  // the only alias a server id can match. One index instead of a find() scan
+  // per incoming message; first write wins, like the first find() match.
+  const persistedByKey = new Map<string, Message>()
+  for (const row of acknowledgedRows) {
+    const key = row.serverMessageId || row.id
+    if (!persistedByKey.has(key)) persistedByKey.set(key, row)
+  }
+  // A captured source row must be confirmed by exactly one live message.
+  const confirmedByServerId = new Map<string, ChatMessage[]>()
+  for (const message of localMessages) {
+    const serverId = canonicalId(message)
+    if (!serverId || !message.id) continue
+    confirmedByServerId.set(serverId, [...(confirmedByServerId.get(serverId) || []), message])
+  }
+  // Plan every write synchronously; reads and writes are batched below.
+  const planned = messages.flatMap(remote => {
     const serverMessageId = canonicalId(remote)
-    if (!serverMessageId) continue
-    const persisted = acknowledgedRows.find(row => row.serverMessageId === serverMessageId ||
-      (!row.serverMessageId && row.id === serverMessageId))
-    const confirmed = localMessages.filter(message => canonicalId(message) === serverMessageId && message.id)
+    if (!serverMessageId) return []
+    const persisted = persistedByKey.get(serverMessageId)
+    const confirmed = confirmedByServerId.get(serverMessageId) || []
     const captured = !persisted && confirmed.length === 1 ? confirmed[0] : undefined
     const local = persisted || (captured ? {
       id: captured.id!, history_id: historyId, role: captured.role || (captured.isBot ? "assistant" : "user"),
@@ -277,8 +326,6 @@ export const reconcileServerChatMirror = async ({
       parent_message_id: captured.parentMessageId, serverMessageId, serverMessageVersion: captured.serverMessageVersion
     } as Message : undefined)
     const id = local?.id || `${historyId}:server:${encodeURIComponent(serverMessageId)}`
-    const existing = await db.messages.get(id)
-    if (existing && existing.history_id !== historyId) throw createServicePromptScopeChangedError()
     const localVersion = local?.serverMessageVersion ?? 0
     const remoteVersion = remote.serverMessageVersion ?? 0
     const preserveContent = local && (local.serverMessageVersion == null || localVersion >= remoteVersion) && local.content !== remote.message
@@ -293,11 +340,29 @@ export const reconcileServerChatMirror = async ({
       createdAt: canonicalCreatedAt(remote.createdAt) ?? local?.createdAt ?? Date.now(),
       serverMessageVersion: Math.max(localVersion, remoteVersion) || undefined
     }
-    if (existing) await db.messages.put(next)
-    else await db.messages.add(next)
-    localIds.set(serverMessageId, id)
+    return [{ serverMessageId, id, next }]
+  })
+  // One batched existence read; a qualified id owned by another history must
+  // abort the transaction before any write lands.
+  const existingRows = await db.messages.bulkGet(planned.map(message => message.id))
+  for (const existing of existingRows)
+    if (existing && existing.history_id !== historyId) throw createServicePromptScopeChangedError()
+  const nextRows = planned.map(message => message.next)
+  if (nextRows.length > 0) {
+    await db.messages.bulkPut(nextRows)
+    // Mirror content can change (remote edits); keep the search index fresh.
+    // Stale tokens for previous content are harmless extras that exact
+    // verification rejects.
+    await indexMessagesSearchTokens(nextRows)
   }
-  return { localIds, rows: await db.messages.where("history_id").equals(historyId).toArray() }
+  const localIds = new Map<string, string>(planned.map(message => [message.serverMessageId, message.id] as const))
+  // Return exactly what a fresh index scan would: every row of this history
+  // ordered by primary key (equal index keys order by primary key), with the
+  // planned writes overlaid on the initial read.
+  const rowsById = new Map(rows.map(row => [row.id, row] as const))
+  for (const next of nextRows) rowsById.set(next.id, next)
+  const mirrorRows = [...rowsById.values()].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+  return { localIds, rows: mirrorRows }
 }, undefined, validate_lease)
 
 /** Apply a successful canonical delete to only its already-acknowledged local mirror. */
