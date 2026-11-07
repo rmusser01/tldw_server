@@ -719,9 +719,8 @@ def test_start_authorize_zotero_rejects_request_derived_localhost_base_in_produc
             raise AssertionError("authorize_url must not be reached when redirect base is unconfigured")
 
     monkeypatch.delenv("CONNECTOR_REDIRECT_BASE_URL", raising=False)
-    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
-    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
 
     client = TestClient(base_client.app, base_url="http://localhost")
@@ -750,9 +749,8 @@ def test_start_authorize_zotero_rejects_insecure_non_https_redirect_base(
         def authorize_url(self, *a, **kw):
             raise AssertionError("authorize_url must not be reached for insecure redirect bases")
 
-    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
-    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setenv("CONNECTOR_REDIRECT_BASE_URL", "http://example.com")
     monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
 
@@ -782,9 +780,8 @@ def test_start_authorize_zotero_treats_whitespace_redirect_base_as_unconfigured(
             raise AssertionError("authorize_url must not be reached when redirect base is blank")
 
     monkeypatch.setenv("CONNECTOR_REDIRECT_BASE_URL", "   ")
-    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
-    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FakeConn())
 
     client = TestClient(base_client.app, base_url="http://localhost")
@@ -798,9 +795,8 @@ def test_resolve_webhook_callback_base_treats_whitespace_redirect_base_as_missin
     import tldw_Server_API.app.api.v1.endpoints.connectors as ep
 
     monkeypatch.setenv("CONNECTOR_REDIRECT_BASE_URL", "   ")
-    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setattr(ep, "is_test_mode", lambda: False)
     monkeypatch.delenv("TESTING", raising=False)
-    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
     with pytest.raises(HTTPException) as exc:
         ep._resolve_webhook_callback_base(None, type("Conn", (), {"redirect_base": ""})())
