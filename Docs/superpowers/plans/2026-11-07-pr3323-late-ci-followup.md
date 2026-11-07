@@ -1,8 +1,8 @@
 # PR #3323 Late CI Follow-up
 
 **Task:** TASK-15480 (original local evidence run ID: TASK-15466)
-**Follow-up PR:** https://github.com/rmusser01/tldw_server/pull/3438 (draft)
-**Base:** `dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c` (`dev`)
+**Follow-up PR:** https://github.com/rmusser01/tldw_server/pull/3438
+**Base:** `cb70f0c5d134ac585c70fc30b5a99bf0ced98562` (`dev`); initial publication base was `dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c`.
 **Goal:** Validate all four late CI failures and publish only confirmed, unowned repairs.
 **ADR check:** No new ADR is required for restoring existing lock configuration and generated-artifact contracts. ADR-059 governs task editing; ADR-085 governs the separately owned AuthNZ fixture repair.
 
@@ -11,7 +11,7 @@
 - Preserve production behavior unless a regression proves it incorrect.
 - Do not weaken assertions, increase thresholds, add dependencies, or bypass CI.
 - Independently validate the overlapping AuthNZ and MCP fixes in PR #3406; link their ownership instead of duplicating pending changes.
-- The human Change summary waiver for #3323 does not extend to this PR. Publish as draft pending its own summary and hosted qualification.
+- The requester has explicitly waived the human Change summary for this PR and authorized normal auto-merge: "Change summary waived for PR #3438." Required checks and review protections remain enforced; no administrative merge or manual required-gate dispatch is authorized.
 - Use the shared project venv and existing database fixtures. Keep external logs and experiments outside the checkout.
 
 ## Stage 1: Attribute and Reproduce
@@ -38,12 +38,13 @@
 **Goal:** Open the follow-up PR with an auditable qualification record.
 **Success Criteria:** Affected tests and security/lint/format/task guards verified, independent review complete, normal hooks pass, clean published branch.
 **Tests:** Exact affected CI groups where feasible, repository-wide execution attempt, scoped Ruff/Black/compile/Bandit, whitespace/task guards.
-**Status:** In Progress (publication complete; hosted qualification and human summary pending)
+**Status:** In Progress (publication complete; explicit waiver recorded; exact-head hosted qualification pending)
 
 - [x] Run affected selections and record every failure, skip and environment limitation without relabeling them green.
 - [x] Review source/test scope and baseline-compare any inherited security findings.
 - [x] Commit code and canonical task records together; open draft PR against dev with all four dispositions and #3406 dependency.
-- [ ] Before landing, satisfy the new PR's own human-summary and exact-current-head hosted gates. Merge is not part of this request.
+- [x] Record the requester's explicit waiver and authorization for normal auto-merge on this PR.
+- [ ] Before landing, satisfy the exact-current-head protected checks and review gates through normal GitHub auto-merge.
 
 ## Initial Evidence
 
@@ -101,4 +102,18 @@ Independent logging review found no actionable findings and reproduced baseline/
 
 The complete current integrations selection finished with **3,490 passes, 28 skips, zero failures/errors**, and 22,418 warnings in 871.64 seconds. Its 3,518 collected cases include the formerly failing inventory guard. Skips are 17 optional curl-cffi cases, nine opt-in external API cases and two cases whose management router is not enabled in this environment; none is an unavailable PostgreSQL case. The selection and CI plugin/marker settings are recorded in `/tmp/pr3323-followup-20261107/integrations-green.log` and its XML peer.
 
-Source and related task/plan records were committed normally as `1d0a61a9b3fb9c24876ab2684214df9aa18c5357`, published on `codex/jobs-postmerge-ci-followup`, and opened as draft PR #3438 against the still-current verified dev base. The committed-task ratchet and unique-ID tests pass 15 cases against that exact base. The later publication-record commit changes only this plan and the task; repaired source/generated-artifact blobs remain unchanged. No merge or auto-merge was requested for the new PR; the old #3323 summary waiver is not inherited.
+Source and related task/plan records were committed normally as `1d0a61a9b3fb9c24876ab2684214df9aa18c5357`, published on `codex/jobs-postmerge-ci-followup`, and initially opened as draft PR #3438 against the then-current verified dev base. The committed-task ratchet and unique-ID tests pass 15 cases against that exact base. The later publication-record commit changes only this plan and the task; repaired source/generated-artifact blobs remain unchanged. At that initial publication no merge or auto-merge was requested, and the old #3323 waiver was not inherited. The subsequent explicit authorization below supersedes that initial landing state.
+
+### Review And Auto-merge Follow-up
+
+The requester stated, verbatim: "Change summary waived for PR #3438." The same request authorizes addressing all validated review comments and failing checks, rebasing if needed, and enabling normal auto-merge. This waiver is specific to #3438; it does not remove any GitHub protected-check requirement.
+
+The initial live audit read the full paginated discussion, submitted reviews, inline comments and thread state. There were no submitted reviews or inline threads, and no further thread page. CodeRabbit's draft-skip message is not a completed review. No failing check was reported; the eight required gates had passed on published `c3ccd5a3298b82d9b4f68deced61192e7795f5e4` while broad CI was still running/queued. Those successes do not qualify a new head.
+
+Live dev advanced to `cb70f0c5d134ac585c70fc30b5a99bf0ced98562` through WebUI header PR #3400. Its 12 changed paths do not overlap this PR. With auto-merge verified off, both PR commits rebased cleanly. `git range-diff` proves both patches unchanged (rebased `b2691654a0` and `4718c29076`), and all repaired test/generated-artifact blobs are identical to the previous published head. No production behavior or tests were altered to accommodate the rebase. Fresh affected verification will cover the rebase and waiver metadata before an explicit SHA-specific leased push.
+
+The merge-queue variable is unset. After the final publication and review/check refresh, mark the PR ready and enable normal merge-commit auto-merge. Do not bypass checks, dispatch required gates manually, cancel unrelated CI, or keep rebasing an armed PR. Task completion remains conditional on actual landing, not merely arming auto-merge.
+
+Fresh local verification after this rebase passes **277 tests, zero failures/errors/skips** (848 warnings): 22 Logging, ten inventory, 212 Docs and 33 test-quality/task ratchet cases. Ruff, scoped Black, compilation, whitespace, canonical task normalization and unique IDs pass. Bandit against the exact new dev base retains the same three inherited B105 synthetic-secret findings with no new findings or analysis errors (B101 excluded in both test scans). Backend/helper/config inputs are identical between the two dev bases; the earlier broad matrices remain historical source-identical evidence, not new-head hosted passes.
+
+The old published head's hosted core-server-smoke check completed successfully during this audit, confirming the previously disclosed local Hypothesis limitation is not a hosted failure on that head. No failing check or actionable review comment was reported before final publication. PR #3406 remains open at its independently validated source head. The rebased head still needs its own hosted protected gates before normal auto-merge can land it.
