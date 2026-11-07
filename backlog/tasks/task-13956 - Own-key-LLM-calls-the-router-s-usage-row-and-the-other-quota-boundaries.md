@@ -1,7 +1,7 @@
 ---
 id: TASK-13956
 title: 'Own-key LLM calls: the router''s usage row and the other quota boundaries'
-status: In Progress
+status: Done
 labels:
 - quotas
 - backend
@@ -16,9 +16,9 @@ Follow-up of TASK-13955, which made a call on the user's own provider key (on a 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Each LLM quota boundary whose LLM calls run on the user's stored key names every call's provider to enforce_llm_quota before any LLM work, so an over-limit user whose calls all run on their own key is let through unmarked; a request with a call the boundary cannot place on the user's key still counts; a boundary whose calls run on the server's key keeps refusing; a test per endpoint family, character chat first
-- [ ] #2 A media ingest job's start check keeps refusing an over-limit user who stored a key for the analysis provider, because job analysis runs on the server's key, and keeps the job admission marker; making job analysis use the stored key is TASK-15426; with a test
-- [ ] #3 The auto-router's usage row on /chat/completions, character chat and chat_route_resolver records the router call's credential_source, with a test
+- [x] #1 Each LLM quota boundary whose LLM calls run on the user's stored key names every call's provider to enforce_llm_quota before any LLM work, so an over-limit user whose calls all run on their own key is let through unmarked; a request with a call the boundary cannot place on the user's key still counts; a boundary whose calls run on the server's key keeps refusing; a test per endpoint family, character chat first
+- [x] #2 A media ingest job's start check keeps refusing an over-limit user who stored a key for the analysis provider, because job analysis runs on the server's key, and keeps the job admission marker; making job analysis use the stored key is TASK-15426; with a test
+- [x] #3 The auto-router's usage row on /chat/completions, character chat and chat_route_resolver records the router call's credential_source, with a test
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -31,19 +31,21 @@ PR B (#3426): enforce_llm_quota takes several providers (admitted past a limit o
 PR B final review (fable, clean session): 0 Critical, 1 Important, 4 Minor; no path where an admitted-unmarked user's call on another key is neither refused nor counted. Important fixed (3a402df4e6): _RAG_OTHER_LLM_STAGES listed six switches that make no LLM call (structured response, image and video search, query decomposition, intent routing, dynamic granularity), so the balanced profile and the SEARCH_STRUCTURED_RESPONSE / SEARCH_IMAGE_SEARCH / SEARCH_VIDEO_SEARCH defaults refused an own-key user; dropped, with evidence accumulation and evidence chains kept (they call an LLM). RED 3 failed, 13 passed -> 16 passed (netblock 0); scoped re-review: addressed.
 ACs #1 and #2 amended (owner answer 2026-11-05: Amend + follow-up). Old #1: Each LLM quota boundary that knows its provider before any LLM work passes it to enforce_llm_quota, with a test per endpoint family, character chat first. Old #2: A media ingest job's start check admits analysis for an over-limit user whose analysis provider resolves to their own key, without marking the job admitted, with a test. Why: media analysis (and the ingest job), the study assistants, watchlist summaries, evaluation runs and benchmarks never resolve a stored user key, so their calls are the operator's and count; naming their provider would move the 402 into the middle of the work. Follow-up TASK-15426. AC #3 unchanged. PR B's deferred minors and a pre-existing outbound test: TASK-15427.
 Plan, PR C of 3: Docs/superpowers/plans/2026-11-05-own-key-server-key-boundaries-close-out.md.
+PR C (#3427): pins (own_keys_for_every_provider) that media analysis and the ingest job's start, the study assistants, watchlist summaries, evaluation runs and benchmarks refuse an over-limit user whatever keys they stored, without asking (their calls run on the server's key); mutations: /media/add naming its provider fails its pin, the flashcards route naming payload.provider fails its pin (whose request now names openai), and neither sends a request off the machine (the media pin stubs _summarize_via_adapter). ADR-083 amended (2026-11-06), Usage_Quotas.md and the BYOK guide updated, mirror refreshed. Focused 21 passed; wider 901 passed, 1 skipped -> 902 passed, 1 skipped; tests/Docs + lint + CI + backlog-py 1661 passed; shard, triage, route-auth, OpenAPI as before. Bandit: no source touched in PR C (PRs A and B: no issues).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Over-limit users whose LLM calls all run on their own key are let through, unmarked, at every boundary that can name its calls' providers: character chat (the reply's provider after the auto-router; a roleplay resume's saved provider; not a saved reply in a chat with memory extraction on), the judge-model evaluations (each batch item's provider), chat document generation, and RAG search, stream, batch, resume and advanced search (the answer's provider and the reformulation's, read from the resolved request; any other LLM stage counts, including one a rag_profile or a server default turns on). enforce_llm_quota takes several providers and refuses when any is missing or not the user's own. An admitted character chat reply refused at the call answers the 402, not 502. The auto-router's usage row records the router call's credential_source on /chat/completions, character chat and chat_route_resolver, whose raw-key router call also marks its context. A refused router call that leaves no route answers the 402, not 503; any other routing error keeps its status. Media analysis and the ingest job, the study assistants, watchlist summaries, evaluation runs and benchmarks run on the server's key, so they keep refusing (ACs #1 and #2 amended, owner 2026-11-05); follow-ups TASK-15426 and TASK-15427 (PR B's deferred minors). Evaluation token reservations unchanged. PRs #3423, #3426, #3427.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
