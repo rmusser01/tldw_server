@@ -1363,6 +1363,72 @@ def test_document_generate_refuses_an_over_quota_user_before_generation(authenti
     assert RecordingStubService.generate_calls == 0
 
 
+def test_document_generate_admits_an_over_limit_user_whose_provider_runs_on_their_own_key(
+    authenticated_client, monkeypatch
+):
+    """Past a limit, a document whose provider runs on the user's own key is generated, unmarked (TASK-13956)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    asked: list[str] = []
+    marked: list[bool] = []
+
+    async def own_key(_uid, provider):
+        """Stands in for the lookup answering True for the request's provider (the boundary is under test)."""
+        asked.append(provider)
+        return provider == "openai"
+
+    class OwnKeyRuntime:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def resolve(self, provider, *, model=None):
+            return SimpleNamespace(provider=provider, api_key="sk-own", app_config={}, credentials_resolved=True)
+
+        async def mark_used(self, _handle):
+            return None
+
+        async def close(self):
+            return None
+
+    class OwnKeyStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def generate_document(self, *args, **kwargs):
+            marked.append(current_llm_call_context().prechecked)
+            return "Generated on your own key."
+
+        def get_generated_documents(self, conversation_id=None, document_type=None, **_kwargs):
+            return [
+                {
+                    "id": 1,
+                    "conversation_id": conversation_id,
+                    "title": "Doc",
+                    "content": "Generated on your own key.",
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "generation_time_ms": 1,
+                    "created_at": datetime.datetime.now(datetime.timezone.utc),
+                }
+            ]
+
+    from tldw_Server_API.app.api.v1.endpoints import chat_documents as chat_docs
+
+    monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", OwnKeyRuntime)
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: OwnKeyStubService
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", own_key)
+    refuse_llm_work(monkeypatch)
+
+    response = authenticated_client.post("/api/v1/chat/documents/generate", json=_make_payload())
+
+    assert response.status_code == 200, response.text
+    assert asked == ["openai"]
+    assert marked == [False]
+    response.close()
+
+
 def test_document_generate_maps_input_error_from_service(authenticated_client):
 
 

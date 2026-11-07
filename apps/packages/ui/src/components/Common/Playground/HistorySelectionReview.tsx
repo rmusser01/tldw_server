@@ -447,8 +447,16 @@ export function HistorySelectionReview({
     owner: string | null
     open: boolean
   }>({ owner: null, open: false })
+  // A question stopped before its reply is offered for retry only while the
+  // conversation still ends at it; a later message moves on from it (CM-02).
+  const movedOnFromStoppedQuestion = (entry: HistorySelectionController["recoveries"][number]) => {
+    if (!entry.turn.stopped_before_reply) return false
+    const cursor = selection.view?.cursor
+    const question = entry.turn.admission?.input_message_id ?? entry.turn.input_id
+    return !(cursor?.kind === "after_message" && cursor.message_id === question)
+  }
   const recoveries = (selection.recoveries ?? [])
-    .filter((entry) => !hideRecovery?.(entry))
+    .filter((entry) => !hideRecovery?.(entry) && !movedOnFromStoppedQuestion(entry))
     .sort(
       (a, b) =>
         b.turn.created_at - a.turn.created_at ||
@@ -769,7 +777,9 @@ export function HistorySelectionReview({
         <>
           {/* The problem, then its cause, then what is kept (CC-02). */}
           <p className="font-medium">
-            {entry.turn.state === "generated_unsaved"
+            {entry.turn.stopped_before_reply
+              ? text("stoppedBeforeReplyTitle", "Stopped before a reply")
+              : entry.turn.state === "generated_unsaved"
               ? text("recoveryUnsavedReplyTitle", "Reply not saved")
               : entry.turn.persistence === "server" && entry.turn.admission
                 ? text("recoveryUnconfirmedTitle", "Reply not confirmed")
