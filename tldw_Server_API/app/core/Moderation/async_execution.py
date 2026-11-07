@@ -53,6 +53,18 @@ def close_moderation_offloads() -> None:
         _closed = True
 
 
+def prepare_moderation_execution() -> bool:
+    """Reopen settled admission at trusted startup without resetting ownership."""
+    from tldw_Server_API.app.core.Moderation.execution_runner import get_execution_runner
+
+    global _closed
+    with _lock:
+        if _active or not get_execution_runner()._prepare_lifecycle():
+            return False
+        _closed = False
+        return True
+
+
 async def _run_moderation_offload(call: Callable[[], T], *, scope: ExecutionScope) -> T:
     """Copy context into one admitted thread; cancellation signals its scope."""
     global _active

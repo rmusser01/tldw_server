@@ -29,6 +29,38 @@ async def test_callable_timeout_error_is_not_misreported_as_transport_deadline()
     assert not shared.cancelled.is_set()
 
 
+async def test_trusted_restart_waits_for_native_offload_without_resetting_slots(monkeypatch):
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
+
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+    monkeypatch.setattr(async_execution, "_closed", False)
+    entered, release = threading.Event(), threading.Event()
+
+    def call():
+        entered.set()
+        return release.wait(2)
+
+    task = asyncio.create_task(async_execution._run_moderation_offload(call, scope=scope()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        async_execution.close_moderation_offloads()
+        owner.close()
+        assert async_execution.prepare_moderation_execution() is False
+        assert async_execution._active == 1
+        assert owner._closed
+        with pytest.raises(ModerationExecutionError, match="worker_unavailable"):
+            await async_execution._run_moderation_offload(lambda: "unexpected", scope=scope())
+    finally:
+        release.set()
+        await task
+    assert async_execution.prepare_moderation_execution() is True
+    assert execution_runner.get_execution_runner() is owner
+    assert await async_execution._run_moderation_offload(lambda: "restarted", scope=scope()) == "restarted"
+
+
 async def test_async_heartbeat_runs_while_worker_stalls():
     from tldw_Server_API.app.core.Moderation.async_execution import _run_moderation_offload
 

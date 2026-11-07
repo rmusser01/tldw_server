@@ -89,6 +89,33 @@ def runner(factory, bounds=None, **kwargs):
     return ModerationExecutionRunner(bounds or ExecutionBounds(), process_factory=factory, **kwargs)
 
 
+def test_trusted_restart_retains_quarantined_child_until_actual_settlement():
+    from tldw_Server_API.app.core.Moderation import execution_runner
+
+    child = Child(data=b"invalid frame", unreapable=True)
+    child.returncode = None
+    owner = runner(lambda *args, **kwargs: child)
+    try:
+        with pytest.raises(ModerationExecutionError):
+            owner.execute(request(), scope())
+        owner.close(timeout_s=0)
+        entries = set(owner._entries)
+        owned = execution_runner._owned_total
+        quarantined = execution_runner._quarantined_total
+        assert entries and owned > 0 and quarantined > 0
+        assert owner._prepare_lifecycle() is False
+        assert owner._closed
+        assert owner._entries == entries
+        assert execution_runner._owned_total == owned
+        assert execution_runner._quarantined_total == quarantined
+    finally:
+        child.returncode = -9
+        owner.close()
+    assert not owner._entries
+    assert owner._prepare_lifecycle() is True
+    assert not owner._closed
+
+
 def test_fifth_active_worker_is_refused_without_queue():
     entered = threading.Barrier(5)
     release = threading.Event()
