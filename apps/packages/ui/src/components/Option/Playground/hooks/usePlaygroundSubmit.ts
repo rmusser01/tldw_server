@@ -828,6 +828,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             if (messageForModel && pageContextRevisionRef.current.revision === pageContextRevision) {
               clearImportedSidepanelContext?.()
             }
+          } else if (draftOwnership.isOwnerCurrent() && outcome.status === "skipped" && outcome.questionKept) {
+            markPromptAssistAttemptSaved(promptAssistAttemptId, true)
           } else if (shouldRestoreDraftAfterSubmit(outcome)) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }

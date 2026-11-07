@@ -2435,11 +2435,9 @@ export const SidepanelForm = ({
           textAreaFocus()
         },
         afterSend: (result) => {
+          if (promptAssistAttemptId === null) return
           const outcome = normalizeChatSubmitResult(result)
-          if (
-            promptAssistAttemptId !== null &&
-            isChatSubmitSuccess(outcome)
-          ) {
+          if (isChatSubmitSuccess(outcome)) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             // Legacy void outcomes can include a swallowed failure.
             if (result !== undefined) clearDraft(promptAssistAttemptId)
@@ -2448,8 +2446,10 @@ export const SidepanelForm = ({
               setContextFiles(current => current === contextFiles ? [] : current)
               if (knowledgeMentionRevision.current === submittedKnowledgeMentionRevision) setKnowledgeMentionActive(false)
             }
-          } else if (promptAssistAttemptId !== null &&
-            shouldRestoreDraftAfterSubmit(outcome)) {
+          } else if (outcome.status === "skipped" && outcome.questionKept && draftOwnership.isOwnerCurrent()) {
+            markPromptAssistAttemptSaved(promptAssistAttemptId, true)
+            clearDraft(promptAssistAttemptId)
+          } else if (shouldRestoreDraftAfterSubmit(outcome)) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
         },
