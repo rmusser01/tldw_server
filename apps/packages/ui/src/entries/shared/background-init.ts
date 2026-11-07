@@ -322,9 +322,15 @@ export const initBackground = async (
       const prevUrl = getServerUrl(value?.oldValue)
       const hasServer = nextUrl.length > 0
       void scheduleModelWarmAlarm(hasServer)
-      void syncWebClipperContextMenu(saveToClipperMenuId)
-      if (hasServer && nextUrl !== prevUrl) {
-        void warmModels(true)
+      // WP-62: the clipper context menu only depends on the connected
+      // server, so re-sync it (and re-warm models) only when the URL actually
+      // changed — unrelated config writes (e.g. credential refreshes) used to
+      // rebuild the menu and re-resolve capabilities on every write.
+      if (nextUrl !== prevUrl) {
+        void syncWebClipperContextMenu(saveToClipperMenuId)
+        if (hasServer) {
+          void warmModels(true)
+        }
       }
     }
   })

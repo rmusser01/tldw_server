@@ -422,6 +422,91 @@ describe("background clipper rollout guard", () => {
     )
   })
 
+  it("no-ops the clipper context-menu sync when a config write keeps the server URL", async () => {
+    await initBackground({
+      storage: storage as never,
+      contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+      saveToClipperMenuId: "save-to-clipper-pa",
+      saveToCompanionMenuId: "save-to-companion-pa",
+      saveToNotesMenuId: "save-to-notes-pa",
+      narrateSelectionMenuId: "narrate-selection-pa",
+      transcribeMenuId: {
+        transcribe: "transcribe-media-pa",
+        transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+      },
+      warmModels,
+      capabilities: {
+        sendToTldw: false,
+        processLocal: false,
+        transcribe: false,
+        openApiCheck: false
+      },
+      onActionIconClickChange: vi.fn(),
+      onContextMenuClickChange: vi.fn()
+    })
+    await flushPromises()
+
+    expect(mocks.contextMenusCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "save-to-clipper-pa" })
+    )
+
+    mocks.contextMenusCreate.mockClear()
+    mocks.contextMenusRemove.mockClear()
+    mocks.getServerCapabilities.mockClear()
+
+    // WP-62: an unrelated config write (e.g. an API-key refresh) must not
+    // rebuild the clipper context menu or re-resolve server capabilities.
+    watchHandlers.tldwConfig?.({
+      oldValue: { serverUrl: "http://127.0.0.1:8000", apiKey: "old-key" },
+      newValue: { serverUrl: "http://127.0.0.1:8000", apiKey: "new-key" }
+    })
+    await flushPromises()
+
+    expect(mocks.getServerCapabilities).not.toHaveBeenCalled()
+    expect(mocks.contextMenusRemove).not.toHaveBeenCalledWith(
+      "save-to-clipper-pa"
+    )
+    expect(mocks.contextMenusCreate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: "save-to-clipper-pa" })
+    )
+  })
+
+  it("re-syncs the clipper context menu when the server URL changes", async () => {
+    await initBackground({
+      storage: storage as never,
+      contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+      saveToClipperMenuId: "save-to-clipper-pa",
+      saveToCompanionMenuId: "save-to-companion-pa",
+      saveToNotesMenuId: "save-to-notes-pa",
+      narrateSelectionMenuId: "narrate-selection-pa",
+      transcribeMenuId: {
+        transcribe: "transcribe-media-pa",
+        transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+      },
+      warmModels,
+      capabilities: {
+        sendToTldw: false,
+        processLocal: false,
+        transcribe: false,
+        openApiCheck: false
+      },
+      onActionIconClickChange: vi.fn(),
+      onContextMenuClickChange: vi.fn()
+    })
+    await flushPromises()
+
+    mocks.getServerCapabilities.mockClear()
+
+    watchHandlers.tldwConfig?.({
+      oldValue: { serverUrl: "http://127.0.0.1:8000" },
+      newValue: { serverUrl: "http://127.0.0.1:9000" }
+    })
+    await flushPromises()
+
+    expect(mocks.getServerCapabilities).toHaveBeenCalledTimes(1)
+    expect(mocks.contextMenusRemove).toHaveBeenCalledWith("save-to-clipper-pa")
+  })
+
   it("removes the clipper menu after config changes to a server without clipper support", async () => {
     await initBackground({
       storage: storage as never,

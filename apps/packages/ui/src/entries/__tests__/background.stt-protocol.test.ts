@@ -289,6 +289,33 @@ describe("background STT audio protocol", () => {
     })
   })
 
+  it("encodes multi-slice audio frames with chunked base64 unchanged on the wire", async () => {
+    const port = connectRuntimePort("tldw:stt")
+
+    port.postMessage({ action: "connect" })
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+
+    const ws = MockWebSocket.instances[0]
+    ws.open()
+
+    // 8193 + 300 bytes spans the 8 KB conversion seam in utils/compress.ts.
+    const bytes = new Uint8Array(8493)
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = (i * 31 + 7) & 0xff
+    }
+    let binary = ""
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+
+    port.postMessage({ action: "audio", data: bytes.buffer })
+
+    expect(JSON.parse(ws.sent[2])).toEqual({
+      type: "audio",
+      data: globalThis.btoa(binary)
+    })
+  })
+
   it("uses matching extension session auth in the STT first frame and ignores cookie markers", async () => {
     storageState.tldwConfig = {
       serverUrl: "https://api.example.test",
