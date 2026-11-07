@@ -188,8 +188,31 @@ Logs: `/tmp/pr3437-restart-red.log`, `/tmp/pr3437-restart-ownership-red.log`,
 `/tmp/pr3437-lifecycle-final-green.log`,
 `/tmp/pr3437-authnz-chat-native-green.log`, `/tmp/bandit_pr3437_restart.json`.
 
-Full native AuthNZ floor and isolated global coverage reruns are in progress;
-their final results are not yet claimed. Coverage uses distinct /tmp data paths.
+Full native AuthNZ floor: 421 passed, 46,210 warnings, exit 0, 611.98 seconds;
+45.22 percent against the unchanged 35 percent floor. Native OAuth lock files
+use an isolated /tmp directory, not an in-memory bypass. This run began during
+merge preparation before the rebase; backend content is unchanged by the rebase.
+Log: `/tmp/pr3437-authnz-coverage-native.log`.
+
+An intervening global rerun overlapped rebase and had one cleanup-unconfirmed
+refusal in test_probe_output_is_bounded_and_nonzero_exit_preserved (1,075 passed).
+The isolated benign reproduction passed. Independent static review found no
+supported code/deadline change: the controller explicitly refuses success until
+both process-group cleanup and pipe readers are confirmed, retains ownership
+and retries. Subsequent absence of a controller demonstrates eventual retirement,
+not that the initial refusal was false. Its exact cause is not established.
+Retain `/tmp/pr3437-global-restart.log` and
+`/tmp/pr3437-harness-overflow-repro.log`; this failed run is not a pass.
+
+Final isolated global coverage reran on the stable published source head
+52efef9d1b6f43b6df82f52f6a22518815fe2b63: 1,076 passed, 3,677 warnings,
+exit 0, 181.33 seconds; 18.09 percent against the unchanged 12 percent floor.
+Log `/tmp/pr3437-global-final-head.log`, XML `/tmp/pr3437-global-final-head.xml`.
+Coverage used distinct /tmp data paths throughout these final reruns. Final
+quality/size/global ratchets: 43 passed, 146 warnings, exit 0. Lifecycle test
+Bandit: zero findings/errors with only B101 excluded. All eight changed
+lifecycle/test paths compile under both Python3.12 and3.14 with SyntaxWarning
+as error. No runtime, test or packaging edit follows these final checks.
 
 ## Merge Gates
 
@@ -200,3 +223,15 @@ genuinely pass on the final head. No manual gate dispatch, fabricated status,
 disabled test or hook bypass is authorized. A requester-owned Change summary
 was requested asynchronously and remains separate from AI-authored summaries.
 Windows runtime remains unverified. No whole-project pass is claimed.
+
+Published reviewed source52efef9d1b6f43b6df82f52f6a22518815fe2b63 on latest
+fetched devcb70f0c5d134ac585c70fc30b5a99bf0ced98562 with an exact lease against
+remote510b00da4c91e526b95cb873cc1372d33c04482f. Rebase had no conflicts;
+all33 range-diff entries are equal patches, and backend/tests/pyproject content
+matches backup codex/moderation-pre-merge-prep-rebase-20261107. Worktree is clean
+before this evidence-only update. Current PR is MERGEABLE, auto-merge null;
+required checks have not finished. The trusted license audit is queued, with
+downstream workflows awaiting its verdict. No current-head failed check is
+reported. Active rules require seven strict statuses plus the trusted dev
+license status; an empty gh pr checks --required response while jobs queue does
+not remove those rules. No gate dispatch, status forgery or paid bot invocation.
