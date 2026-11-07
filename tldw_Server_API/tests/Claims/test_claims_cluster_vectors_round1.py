@@ -3,7 +3,7 @@
 import io
 import os
 import pickle
-import select
+import selectors
 import signal
 import sqlite3
 import tempfile
@@ -68,7 +68,9 @@ def _fork_result(action):
         os._exit(0)
     os.close(write_fd)
     try:
-        assert select.select([read_fd], [], [], 5)[0], "forked child waited on inherited state"
+        with selectors.DefaultSelector() as selector:
+            selector.register(read_fd, selectors.EVENT_READ)
+            assert selector.select(timeout=5), "forked child waited on inherited state"
         return os.read(read_fd, 100).decode()
     finally:
         os.close(read_fd)
@@ -76,6 +78,31 @@ def _fork_result(action):
         if not waited:
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires real POSIX fork")
+def test_forked_session_rejects_inherited_handle_with_high_pipe_fd(config, seeded, monkeypatch):
+    fcntl = pytest.importorskip("fcntl")
+    original_pipe = os.pipe
+    read_fds = []
+
+    def high_pipe():
+        read_fd, write_fd = original_pipe()
+        try:
+            high_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, 1024)
+        except BaseException:
+            os.close(write_fd)
+            raise
+        finally:
+            os.close(read_fd)
+        read_fds.append(high_fd)
+        return high_fd, write_fd
+
+    monkeypatch.setattr(os, "pipe", high_pipe)
+    with StorageSession(seeded) as session:
+        assert _fork_result(session.__enter__) == "vector_forked_handle"
+        assert session._depth == 1
+    assert len(read_fds) == 1 and read_fds[0] >= 1024
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires real POSIX fork")
