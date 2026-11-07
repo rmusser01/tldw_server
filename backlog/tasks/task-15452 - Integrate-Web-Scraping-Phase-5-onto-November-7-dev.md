@@ -1,7 +1,7 @@
 ---
 id: TASK-15452
 title: Integrate Web Scraping Phase 5 onto November 7 dev
-status: In Progress
+status: Done
 labels:
 - web-scraping
 - integration
@@ -15,28 +15,35 @@ Integrate the completed Phase5 branch onto fetched dev dfac3ca7f34a296a2dc3a3fbc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Clean local rebase preserves upstream security changes and all Phase5 behavior, with reversible backup.
-- [ ] #2 Affected scraping HTTP browser service consumer and metadata checks are recorded with exact failures/skips and no new security findings.
-- [ ] #3 Final local state and any remaining publication decision are reported truthfully.
+- [x] #1 Clean local rebase preserves upstream security changes and all Phase5 behavior, with reversible backup.
+- [x] #2 Affected scraping HTTP browser service consumer and metadata checks are recorded with exact failures/skips and no new security findings.
+- [x] #3 Final local state and any remaining publication decision are reported truthfully.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR assessment: no new decision; existing accepted web-scraping ownership ADR093 governs. Identifier collides with open PR media ADR093; renumber only our unpublished record without modifying its accepted rationale. Existing isolated worktree reused. Backlog namespace scanned fresh dev plus all43openPR changed-file pages; max15451. Task15452 reserved for integration; replacementIDs above15452. Existing source51064ceeb9 and final review acceptance retained; no task implementation re-dispatch. Local-only integration is the next preparation step; asynchronous publication question pending.
+Namespace-only preparation committed then all73commits rebased without conflict onto dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c; current sourceHEAD1f204828b557091277831e9aaadae1bb1a0aa53c. Backup codex/web-scraping-phase-5-pre-nov7-integration-51064cee retained. Range-diff shows all72priorcommits patch-identical, only extra namespace commit. Across accepted scraping/endpoint/service source, sole delta versus oldhead is upstream30line egress-bypass removal in sharedHTTP; preserve callback bounds unchanged. Upstream summary-quota test additions retained. Duplicate-ID CI and full changed-Python Ruff/compile pass. Rebased full scraping/HTTP/native gate running; no publication approval received, no push/PR/merge.
+Broad rebased gate FAILED3/3484pass26optional11004warnings548.62s before remainingHTTP: native lifecycle heldthread[cancel]8s entry wait; transfer[/stream-child]15s wait; crosscookie ArticleFailurecleanup. Exact unchanged3case rerun2pass1fail22warnings31.35s; only crosscleanup reproducible. Observation-only diagnostic no timing/security changes captured Browser.close1.182836s, existing logical cleanup grace1.000257s then actual remaining owner drains successfully with zero pending in0.027s. Log /tmp/web-phase5-nov7-native-diagnostic.log. This proves the cookie-behavior fixture unintentionally tests a1second cleanup deadline under current host; no production timeout/guard/owner change is justified. Make ONLY that test constructor use existing explicit cleanup_grace_s5, leaving all cookie/header assertions, real browser connection and strict cleanup-bound tests unchanged. Earlier two timing failures remain disclosed; full native and remaining certification required before green claim. Temporary diagnostic is ignored and not shipped. No hook/newdependency/subsystem/push/merge.
+Final mandatory native gate now51passed0skip166warnings96.23s; /tmp/web-phase5-nov7-native-final.log+xml. Earlier amended native run50passed1failed: held-child stream checked pool0 immediately after logicalParentStop and peerclose, but actual retained lease1; existing contract explicitly separates logical stop and physical release. Minimal test-only repair observes existing pool._release viaEvent and waits5s for actual event withEOFstillheld, preserving pool0/requestcount/bytebudget assertions. Cookie explicitgrace5 repair proven separately; production cleanup default1s and strict held/rejected/early-release tests unchanged. Only native testfile changed, no new API/hooks/dependency. Refresh generated inventory ONLYline279->282 for unchanged legacy import due test formatting shift. Initial aggregate remains FAILED3; parsedXML proves entire unchanged Web_Scraping partition3473passed26optional with nofailure before native. Remaining WebScraping/sharedHTTP partition excludes exactly51native separately verified; running /tmp/web-phase5-nov7-web-http-remainder.log. No broad-green or timing-rootcause claim for two initially nonreproducing lifecycle timeouts; retain history. Next services/consumers/quality/fullrepo collection and normal hooks before finalization.
+Stable quality gate64passed0skip205knownwarnings76.68s, including corrected generated inventory, architecture, function limits and task format (/tmp/web-phase5-nov7-quality.log+xml). Remaining WebScraping/HTTP partition633passed2environment-skips plus1inventoryfailure2077warnings108.30s; controller updated artifact while test had already loaded oldexpected snapshot. Test-generated actual JSON is byte-identical to current trackedJSON; stable quality rerun resolves exactly that metadata failure, not a production defect. Parsed and deduplicated JUnit by(classname,name):3473Web_Scraping pass+26optional from completed unchanged partition in initial aggregate,51finalmandatorynative,633remainingpass+2environment-skips,1stableinventorypass =4186distinct cases/4158passed28skipped. This is partition coverage, NOT a newly green single aggregate run; all failed/intermediate logs retained. Services117passed0skip1587deselected401warnings9.28s including official2PG. Actual consumers running. Fresh scoped independent reviewVolta01a1b739-f79a-7440-b76e-60ee839263e3 reads only test/inventory delta and named cleanup semantics; report nov7-integration-review.md, no broad re-audit. Production stillunchanged bycontroller. No publication answer received.
+Actual consumer gate770passed12optional skips6913knownwarnings213.33s, exit0 /tmp/web-phase5-nov7-consumers.log+xml. Scoped independent reviewerVolta ACCEPT, no substantive findings, report .superpowers/sdd/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs/nov7-integration-review.md; agentclosed. Review confirms cookie grace override onlyisolatescookie assertions from measured slowclose, stream event follows ORIGINALpool._release and keepsEOFheld, no forcedrelease or alteredprodteardown. Existing default grace can still produce bounded cleanup failure on a slowhost; no universal latency/default-grace-success claim. Native51,services117,quality64 and distinct4158sourcepasses/28skips fully accounted as partitioned evidence, not a falsely relabelled green single aggregate. Bandit production8unchangedLOW/noMEDHIGH/noerrors; touched native testscan78LOW B101asserts vsbaseline77, onlyaddedhit is intentional stronger EOF-held assertion (test-framework falsepositive, not suppressed); noother test findings. Full repository test command running /tmp/web-phase5-nov7-repository-pytest.log; report actual collection result before final record/commit. No publication reply, no push/PR/merge.
+Final bare repository command python-mpytest-oaddopts-empty-ra--maxfail1-q exits1duringcollection: unchanged duplicate test_meetings_db_deps_error_mapping modules API_Deps vsMeetings,2optional skips9warnings26.09s (/tmp/web-phase5-nov7-repository-pytest.log). gitdiff dfac3ca7 confirms bothmodules/rootconftest/pyproject byte-identical todev. No unrelated repair/skip or fullrepo-green claim. All verification/review processes collected and reviewer closed. Scoped integration acceptance complete: approved plan stages complete; native51/services117/consumers770/quality64 pass with disclosed skips and distinct4158sourcepasses28skips across partitions. Initialfailedaggregate, staleinventorysnapshotfailure and twoinitialnonreproducingnative timeouts remain disclosed, not erased. Canonical task/ID/link/diff/normal-hook final commit gates follow on explicit5file scope; no production edits, source behavior preserved. Branch is local only; async publication question has no answer, no push/PR/merge, no PR readiness assertion; future freshdev/PRreview/human-written Change summary gate remains. Governing ADR094 decision/rationale unchanged; task namespace old15421..30 now15453..62, unrelated dev records preserved; backup retained.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rebased the completed Phase5 branch onto fetched dev dfac3ca7 without conflicts, preserving all72accepted patches and upstream egress/summary-quota changes. Renumbered only colliding unpublished task/ADR records with official backlog-py, retaining historical notes and accepted decisions. Corrected two native test assumptions using existing controls: cookie parity now has explicit cleanup allowance after measured slow close; held-stream drain waits for actual existing pool release withEOFstillheld. Production limits/guards/APIs unchanged; no hook/newconnection/dependency/subsystem/functionality removal. Scoped independent review accepted. Verified4158scraping/HTTP passes28skips across disjoint JUnit partitions,51native0skip,117services0skipinclPG,770consumers12optional,64quality0skip; fullchangedPython Ruff/compile and metadata checks pass. Production Bandit8knownLOW0MEDHIGH0errors, testassert-only notices reviewed without suppression. Bare fullrepo still collection-blocked by unchanged Meetings duplicate basename; initial failures and limits retained in plan/notes. Local branch/worktree retained; no publication/merge and no human Change-summary ownership claim.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

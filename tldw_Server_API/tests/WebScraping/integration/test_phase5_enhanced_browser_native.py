@@ -131,7 +131,10 @@ async def test_native_raw_cookie_override_is_origin_scoped_without_losing_browse
             ]
         )
         browser = GuardedArticleBrowser(
-            egress_guard=Guard(), context=RuntimeRequestContext(), transport_decision=_legacy_allowed
+            egress_guard=Guard(),
+            context=RuntimeRequestContext(),
+            transport_decision=_legacy_allowed,
+            cleanup_grace_s=5,
         )
         await browser.acquire(plan.url, plan.browser)
         original_requests = list(seen)
@@ -761,6 +764,14 @@ async def test_native_child_stream_budget_stops_before_held_eof_and_physically_d
                 return SimpleNamespace(allowed=True)
 
         pool = _BrowserAcquisitionPool(1)
+        drained = asyncio.Event()
+        release_lease = pool._release
+
+        def observed_release(lease):
+            release_lease(lease)
+            drained.set()
+
+        monkeypatch.setattr(pool, "_release", observed_release)
         plan = ArticlePlan.from_routing_plan(
             SimpleNamespace(url=bases[0] + "/stream-child", domain="127.0.0.1"),
             {"web_scraper_retry_count": 1, "web_scraper_retry_timeout": 5},
@@ -782,6 +793,8 @@ async def test_native_child_stream_budget_stops_before_held_eof_and_physically_d
             assert not stream.release.is_set(), "EOF remains held until physical-drain assertions"
             assert any(session != "main" and size > 1024 for session, size in chunks)
             assert 0 < parent.snapshot().transfer_bytes <= 1024
+            await asyncio.wait_for(drained.wait(), 5)
+            assert not stream.release.is_set(), "EOF remains held through actual pool release"
             assert pool.active_count == 0
             assert [path for _, path, _ in seen] == ["/stream-child", "/stream-body"]
         finally:

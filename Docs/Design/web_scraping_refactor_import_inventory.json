@@ -1217,7 +1217,7 @@
       {
         "import_kind": "from",
         "imported_name": "enhanced_web_scraping",
-        "line": 279,
+        "line": 282,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/integration/test_phase5_enhanced_browser_native.py",
         "target_name": "enhanced_web_scraping"
