@@ -1,6 +1,6 @@
 # Moderation Dev Integration
 
-Associated task: TASK-15466 (formerly TASK-15417).
+Associated task: TASK-15477 (formerly TASK-15417/15466).
 
 ## Scope and Rebase
 
@@ -23,9 +23,11 @@ against dev on 2026-11-07. No merge or auto-merge was requested.
 Dev independently assigned TASK-15417 and ADR-086 to other work. Paginated
 open-PR file inventory plus dev inspection found maximum task ID 15465 and
 ADR 095. Only this branch's implementation task and Moderation ADR were moved
-to TASK-15466 and ADR-096. Old commit/task notes, log paths and evidence retain
+initially to TASK-15466 and ADR-096. Publication-time audit found PR3436, opened
+during verification, independently using task IDs through 15476 and ADR-096.
+Final identities are TASK-15477 and ADR-097. Old commit/task notes, log paths and evidence retain
 historical aliases. Accepted ADR rationale was not changed. ADR assessment:
-existing ADR-096 and ADR-021 govern; integration requires no new decision.
+existing ADR-097 and ADR-021 govern; integration requires no new decision.
 
 ## Independent Integration Review
 
@@ -38,6 +40,12 @@ Audio/realtime credential auto-merges, and independent-field batching.
 Subsequent identity corrections and import sorting are semantically neutral.
 This is a static integration review, not a new whole-implementation review or
 unconditional merge/platform approval.
+
+The same independent reviewer also inspected the later blocked-pipe harness
+correction and controlled-delay regression, with no actionable findings. The
+review confirms actual child/cleanup assertions and independent containment
+remain, the separate tightened-deadline regression is unchanged, and dev's
+independently assigned ADR/task records are untouched.
 
 ## Verification
 
@@ -56,7 +64,9 @@ checkout's `.venv`. Existing warnings remain visible.
   Log: `/tmp/moderation-integration-credential-regression.log`.
 - OpenAPI fingerprint and committed path-union check: both match, exit 0.
   Log: `/tmp/moderation-integration-openapi-check.log`.
-- All 68 cumulatively changed Python paths compile with SyntaxWarning as error.
+- All 68 cumulatively changed Python paths compile under host Python 3.14 and
+  Homebrew Python 3.12 with SyntaxWarning as error. Compilation is not Linux or
+  Windows runtime evidence.
 - Production Bandit: 0 findings, 0 scan errors, exit 0. Existing unused-nosec
   advisories remain visible. `/tmp/bandit_moderation_integration_prod.json`.
 - Test Bandit, only B101 excluded: 32 previously reviewed findings, 0 scan errors,
@@ -68,16 +78,31 @@ checkout's `.venv`. Existing warnings remain visible.
 - Shard coverage: 871 shards, 5,392 files, 4 ignored, 44 baseline,
   0 newly uncovered; exit 0. No CI workflow changes needed.
 - HTTP-client-patching and nonempty-legacy-complete guards: exit 0.
-- Same-path Ruff comparison against dev: 89 baseline, initially 71 current,
-  one new endpoint import-order diagnostic. After moving only the new imports,
-  endpoint comparison shows zero new; the other 67 paths are unchanged from
-  that comparison. Both edited probe test files are Ruff-clean. Remaining
+- Final same-path Ruff comparison against dev: 89 baseline, 70 current,
+  zero new. An initial comparison identified one new endpoint import-order
+  diagnostic, corrected by moving only the new imports. Both edited probe
+  test files are Ruff-clean. Remaining
   inherited findings are not silently suppressed or described as a clean scan.
 
-Backend focused suite and final committed-head task-format results are pending.
+- Final complete affected backend manifest at source
+  `55eb4b4e4eb9ae62ec07686b2d58f20478049c9c`: **2,152 passed, two preexisting
+  skips, 8,244 warnings**, 373.16 seconds, exit 0. Includes all Moderation unit
+  files plus current Chat/streaming, Audio/realtime, Guardian, Workflow,
+  lifecycle and permission suites from the prior release manifest, including
+  the new controlled-delay regression. Log:
+  `/tmp/moderation-integration-backend-final.log`.
+  The unchanged skips are the complex heartbeat integration fixture and the
+  optional real Silero VAD fixture. These counts overlap other focused runs;
+  they are not summed as unique coverage. Subsequent identity/docs-only changes
+  do not alter this tested runtime, tests, UI or packaging source.
+
 An initial task-format run referenced the old committed task filename after
 its working-tree rename; actual renamed task contents pass canonical checking.
-The committed-head ratchet must be rerun after committing the rename.
+After committing the rename in `55eb4b4e4eb9ae62ec07686b2d58f20478049c9c`, the
+committed-head ratchet passed all four tests (24 warnings, exit 0, 2.49 seconds);
+`/tmp/moderation-integration-task-format-final.log`.
+Final publication identity correction requires one more committed-head metadata
+ratchet run; the actual renamed task is normalized via backlog-py before commit.
 
 ## Blocked-Pipe Probe Correction
 
@@ -97,6 +122,10 @@ real blocked-pipe check. It still requires a real launch, deadline failure,
 reaped child, closed descriptors, empty registry and a successful next request.
 Independent tree containment and the separate tightened-deadline regression are
 unchanged. Production code, caps and deadlines are untouched by this correction.
+GREEN runner/containment suites: 44 passed, 144 warnings, exit 0, 18.82 seconds;
+`/tmp/moderation-integration-blocked-write-green.log`. Scoped test-fix Bandit
+retains only its existing B404/B603 subprocess heuristics (B101 excluded), and
+both files compile and pass Ruff. No test security suppression was added.
 
 ## Publication Gates
 

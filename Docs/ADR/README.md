@@ -125,6 +125,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-091](091-bounded-durable-persona-session-transcripts.md) | Accepted | Retain bounded owned Persona turns across process restart without changing Chat or semantic-memory persistence. |
 | [ADR-092](092-postgresql-skills-registry-owner-boundary.md) | Proposed | Scope the shared PostgreSQL Skill registry by checkout owner; preserve unowned legacy rows and ambiguous purge archives. |
 | [ADR-093](093-postgresql-media-source-owner-identity.md) | Proposed | Scope shared PostgreSQL Media source identity by owner while preserving reserved clone URL recovery guarantees. |
-| [ADR-096](096-moderation-killable-stdlib-regex-execution.md) | Accepted | Execute Moderation runtime matching/redaction with stdlib `re` in a parent-supervised killable child and fail closed with sanitized admin incidents. |
+| [ADR-097](097-moderation-killable-stdlib-regex-execution.md) | Accepted | Execute Moderation runtime matching/redaction with stdlib `re` in a parent-supervised killable child and fail closed with sanitized admin incidents. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

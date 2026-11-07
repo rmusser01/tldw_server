@@ -1,6 +1,6 @@
 # Moderation Isolation Final Review Closure
 
-Date: 2026-11-03. Associated task: TASK-15466 (previously TASK-15417).
+Date: 2026-11-03. Associated task: TASK-15477 (previously TASK-15417/15466).
 Source revision: `6b9d2c9b30d134c354cccc191397decdf8f510a3`.
 Branch: `codex/moderation-ci-triage-regex-design`.
 This records implementation completion, not unconditional merge or platform approval.
@@ -81,7 +81,7 @@ as fresh all-current-head suites. See the detailed validation record:
   lint isolation, new LLM-surface coverage and legacy Workflow accessor repair
   remain outside this slice.
 
-ADR assessment: existing accepted ADR-096 and ADR-021 govern; their rationale
+ADR assessment: existing accepted ADR-097 and ADR-021 govern; their rationale
 was not rewritten. The approved design and Audio amendment remain under
 `Docs/superpowers/specs/`. Completed controller-owned implementation plans are
 removed per AGENTS; their committed history and local evidence archive preserve

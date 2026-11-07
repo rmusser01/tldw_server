@@ -1,4 +1,4 @@
-# ADR-096: Parent-Supervised Standard-Library Regex for Moderation
+# ADR-097: Parent-Supervised Standard-Library Regex for Moderation
 
 **Status:** Accepted
 **Date:** 2026-11-02
@@ -9,7 +9,9 @@
 
 **Identity correction (2026-11-07):** Previously ADR-086 on this unmerged branch;
 renumbered after rebasing because dev independently assigned that number to
-provider credential scope. Accepted decision and rationale are unchanged.
+provider credential scope. Interim ADR-096 was also claimed by PR3436 while
+verification ran, so publication uses ADR-097. Accepted decision and rationale
+are unchanged.
 
 ## Decision
 

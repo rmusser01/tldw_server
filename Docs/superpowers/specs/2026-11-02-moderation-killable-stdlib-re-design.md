@@ -299,7 +299,7 @@ cannot spawn a child, enabled moderation fails closed with an admin incident.
 ## ADR Check
 
 ADR required: yes. Accepted record:
-`Docs/ADR/096-moderation-killable-stdlib-regex-execution.md`.
+`Docs/ADR/097-moderation-killable-stdlib-regex-execution.md`.
 The security failure contract and parent/child ownership are durable decisions;
 the existing ADR index does not specify this Moderation boundary. Related ADRs:
 021 (lifecycle ownership), 028 (avoid general pickle), and 006 (security gate).
@@ -317,9 +317,9 @@ on 2026-11-02; result: "nothing important left". No blocking questions raised.
 Requester approval of this written design: received on 2026-11-02 ("yes").
 Implementation plan: `Docs/superpowers/plans/2026-11-02-moderation-killable-stdlib-re-implementation-plan.md`.
 Review amendments close runtime coverage/reporting gaps and replace duplicate
-incident projections; accepted ADR-096 rationale remains unchanged. Revised plan
-confirmation was received on 2026-11-02; implementation is tracked by TASK-15466
-(previously TASK-15417 before the 2026-11-07 dev integration).
+incident projections; accepted ADR-097 rationale remains unchanged. Revised plan
+confirmation was received on 2026-11-02; implementation is tracked by TASK-15477
+(previously TASK-15417, then TASK-15466 during the 2026-11-07 dev integration).
 Independent follow-up review on 2026-11-02 confirmed all four corrections at the
 planning level with no new amendment-caused P1/P2 issues. Runtime verification
 remains future implementation work.
