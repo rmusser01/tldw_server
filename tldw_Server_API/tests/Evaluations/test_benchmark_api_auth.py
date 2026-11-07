@@ -125,10 +125,16 @@ def test_run_routes_accept_evals_manage_permission() -> None:
 
 
 def test_run_route_refuses_an_over_quota_user_before_any_work(monkeypatch) -> None:
-    """The standalone run route checks the LLM quota before it looks up the benchmark (TASK-13638)."""
-    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+    """The standalone run route checks the LLM quota before it looks up the benchmark (TASK-13638), whatever keys
+    the user stored: its items run on the server's key or a raw ``api_key`` (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import (
+        assert_llm_quota_402,
+        own_keys_for_every_provider,
+        refuse_llm_work,
+    )
 
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)
     app = _make_app()
     _override_user(app, [EVALS_MANAGE])
 
@@ -137,3 +143,4 @@ def test_run_route_refuses_an_over_quota_user_before_any_work(monkeypatch) -> No
 
     assert_llm_quota_402(response)
     assert response.json()["detail"]["error"] == "limit_exceeded"
+    assert asked == []

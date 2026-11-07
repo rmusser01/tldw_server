@@ -1748,8 +1748,12 @@ def test_quiz_attempt_question_assistant_respond_refuses_an_over_quota_user(
     quizzes_db: CharactersRAGDB,
     monkeypatch,
 ):
-    """An over-quota user gets the 402 and the study assistant never calls the LLM."""
-    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+    """An over-quota user gets the 402 and the study assistant never calls the LLM, whatever keys they stored."""
+    from tldw_Server_API.tests.helpers.llm_quota import (
+        assert_llm_quota_402,
+        own_keys_for_every_provider,
+        refuse_llm_work,
+    )
 
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
     question_id = question_ids[0]
@@ -1764,15 +1768,17 @@ def test_quiz_attempt_question_assistant_respond_refuses_an_over_quota_user(
         recording_generate_reply,
     )
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)  # the assistant runs on the server's key (TASK-13956)
 
     response = client_with_quizzes_db.post(
         f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant/respond",
-        json={"action": "explain"},
+        json={"action": "explain", "provider": "openai"},
         headers=AUTH_HEADERS,
     )
 
     assert_llm_quota_402(response)
     assert calls == []
+    assert asked == []
 
 
 def test_quiz_attempt_question_assistant_respond_returns_409_for_stale_thread_version(
