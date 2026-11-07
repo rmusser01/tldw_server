@@ -92,10 +92,7 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
     ProviderCallCredentials,
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-    is_test_mode as _is_test_mode,
-)
+from tldw_Server_API.app.core.testing import is_test_context
 
 # Non-critical exceptions for defensive guards and best-effort flows
 _EVALS_NONCRITICAL_EXCEPTIONS = (
@@ -169,10 +166,6 @@ def _get_webhook_manager_for_user(user_id: int) -> WebhookManager:
 def get_db_for_user(user_id: int):
     svc = get_unified_evaluation_service_for_user(user_id)
     return getattr(svc, 'db', None)
-
-
-def _is_eval_test_mode() -> bool:
-    return bool(_is_test_mode() or _is_explicit_pytest_runtime())
 
 
 def _normalize_eval_user_id(current_user: User) -> Optional[int]:
@@ -1031,7 +1024,7 @@ async def evaluate_geval(
         import time as _time
         wm = _get_webhook_manager_for_user(current_user.id)
         start_event_id = f"geval_{int(_time.time())}_{webhook_user_id[:8]}"
-        if _is_eval_test_mode():
+        if is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_STARTED,
@@ -1123,7 +1116,7 @@ async def evaluate_geval(
                 )
 
         # Send webhook: evaluation completed (await in TEST_MODE)
-        if _is_eval_test_mode():
+        if is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_COMPLETED,
@@ -1251,7 +1244,7 @@ async def evaluate_rag(
         wm = _get_webhook_manager_for_user(current_user.id)
         import time as _time
         start_event_id = f"rag_{int(_time.time())}_{webhook_user_id[:8]}"
-        if _is_eval_test_mode():
+        if is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_STARTED,
@@ -1331,7 +1324,7 @@ async def evaluate_rag(
                 )
 
         # Send webhook: evaluation completed (await in TEST_MODE)
-        if _is_eval_test_mode():
+        if is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_COMPLETED,
@@ -1449,7 +1442,7 @@ async def evaluate_response_quality(
         wm = _get_webhook_manager_for_user(current_user.id)
         import time as _time
         start_event_id = f"response_quality_{int(_time.time())}_{webhook_user_id[:8]}"
-        if _is_eval_test_mode():
+        if is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_STARTED,
@@ -1529,7 +1522,7 @@ async def evaluate_response_quality(
                 format_compliance = None
 
         # Send webhook: evaluation completed (await in TEST_MODE)
-        if _is_eval_test_mode():
+        if is_test_context():
             await wm.send_webhook(
                 user_id=webhook_user_id,
                 event=WebhookEvent.EVALUATION_COMPLETED,

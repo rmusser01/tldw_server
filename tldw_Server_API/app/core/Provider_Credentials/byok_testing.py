@@ -60,7 +60,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     list_registered_providers,
     provider_requires_api_key,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.testing import is_test_context
 from tldw_Server_API.app.core.TTS.gateway_catalog import (
     MAX_DISCOVERY_BYTES,
     _parse_discovered_models,
@@ -134,10 +134,6 @@ class _GatewayCredentialRejected(Exception):
 
 class _GatewayProbeUnavailable(Exception):
     pass
-
-
-def _is_test_mode() -> bool:
-    return is_test_mode() or os.getenv("PYTEST_CURRENT_TEST") is not None
 
 
 def _provider_validation_runtime(
@@ -594,7 +590,7 @@ async def test_provider_credentials(
             f"Configure DEFAULT_MODEL_{provider_norm.replace('.', '_').replace('-', '_').upper()} or pass model."
         )
 
-    if _is_test_mode():
+    if is_test_context():
         if is_obviously_invalid_key(api_key):
             raise ChatAuthenticationError(
                 message=f"Provider '{provider_norm}' rejected the supplied credentials.",

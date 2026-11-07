@@ -1551,7 +1551,7 @@ async def test_evaluation_endpoint_retries_explicit_false_provider_mark(
         "provider_requires_api_key",
         lambda _provider: False,
     )
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-1")
     monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
@@ -1760,7 +1760,7 @@ async def test_prompt_studio_sync_cancellation_stops_before_next_provider_call(m
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
     monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
 
     task = asyncio.create_task(
         eval_endpoint.create_evaluation(
@@ -1850,7 +1850,7 @@ async def test_prompt_studio_background_cancellation_stops_before_next_provider_
 
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
 
     task = asyncio.create_task(
         eval_endpoint.run_evaluation_async(
@@ -2007,7 +2007,7 @@ async def test_prompt_studio_bedrock_auth_contract(
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
     monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
@@ -2152,7 +2152,7 @@ async def test_prompt_studio_keeps_request_snapshot_at_adapter_boundary(
         raising=False,
     )
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: False)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-1")
     monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
@@ -2333,7 +2333,7 @@ async def test_prompt_studio_concurrent_adapter_snapshots_remain_isolated(
         lambda *_args: (1, [], [], False),
     )
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(evaluation_manager, "is_test_mode", lambda: False)
     monkeypatch.setattr(
         evaluation_manager,
@@ -2484,7 +2484,7 @@ async def test_prompt_studio_timeout_drains_adapter_before_runtime_close_without
         lambda *_args: (1, [], [], False),
     )
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: False)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-timeout")
     monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")

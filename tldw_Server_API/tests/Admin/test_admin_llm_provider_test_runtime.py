@@ -193,7 +193,7 @@ def _install_adapter_boundary(
 ) -> None:
     registry = _Registry(adapters)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: registry)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
 
 
 async def _wait_for_thread_state(

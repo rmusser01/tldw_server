@@ -52,7 +52,7 @@ async def test_rich_detail_without_original_preserves_content(media_db, monkeypa
     assert detail["content"]["text"] == "Public synthetic source one."
     assert detail["has_original_file"] is False
     assert detail["original_file_url"] is None
-    monkeypatch.setattr(item_endpoint, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(item_endpoint, "is_test_mode", lambda: False)
     response = Response()
     payload = await item_endpoint.get_media_item(
         request=Request({"type": "http", "method": "GET", "path": f"/api/v1/media/{media_id}", "headers": []}),

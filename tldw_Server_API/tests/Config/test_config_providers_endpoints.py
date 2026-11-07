@@ -257,7 +257,7 @@ def _install_config_validation_adapter_boundary(
         snapshot_loader,
         raising=False,
     )
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(
         byok_testing,
         "get_registry",

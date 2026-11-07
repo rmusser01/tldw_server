@@ -55,7 +55,6 @@ def _install_cancellation_endpoint_dependencies(monkeypatch, runtime, service) -
     monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowingLimiter())
     monkeypatch.setattr(eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: service)
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: _NoopWebhookManager())
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
 
 
 async def _await_cancelled(task: asyncio.Task) -> None:

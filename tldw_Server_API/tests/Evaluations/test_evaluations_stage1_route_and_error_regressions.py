@@ -242,7 +242,6 @@ def test_geval_capacity_exhaustion_returns_detached_503_and_closes_runtime(
     monkeypatch.setattr(service_module, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     monkeypatch.setattr(ms_g_eval, "run_geval", _forbidden_geval)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: _WebhookManager())
     monkeypatch.setattr(
@@ -439,7 +438,6 @@ def test_sync_evaluation_capacity_exhaustion_is_detached_503(
     monkeypatch.setattr(rag_evaluator, "analyze", forbidden_analyze)
     monkeypatch.setattr(response_quality_evaluator, "analyze", forbidden_analyze)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: WebhookManager())
     monkeypatch.setattr(
@@ -598,7 +596,6 @@ def test_response_quality_capacity_failure_drains_admitted_siblings_before_runti
     monkeypatch.setattr(response_quality_evaluator, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(response_quality_evaluator, "analyze", blocking_analyze)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: WebhookManager())
     monkeypatch.setattr(
@@ -941,7 +938,6 @@ def test_batch_geval_uses_stable_and_webhook_user_identity(monkeypatch):
                 "results": {"metrics": {"coherence": 0.9}},
             }
 
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(
         eval_unified,
         "_build_eval_credential_runtime",
@@ -1189,7 +1185,6 @@ def test_batch_client_teardown_poison_isolated_before_next_credential_resolution
             }
 
     monkeypatch.setattr(llm_provider_overrides, "get_db_pool", _blocking_get_db_pool)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(
         eval_unified,
         "_build_eval_credential_runtime",

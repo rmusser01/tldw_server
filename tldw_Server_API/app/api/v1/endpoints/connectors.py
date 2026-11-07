@@ -73,6 +73,7 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
 
@@ -85,13 +86,6 @@ def _extract_request_base(request: Request | None) -> str:
     except (AttributeError, TypeError, ValueError):
         logger.debug("Failed to resolve base_url from request")
         return ""
-
-
-def _is_connector_test_mode() -> bool:
-    return (
-        os.getenv("TEST_MODE", "").strip().lower() == "true"
-        or os.getenv("TESTING", "").strip().lower() == "true"
-    )
 
 
 def _is_local_callback_base(base_url: str) -> bool:
@@ -142,7 +136,7 @@ def _resolve_redirect_base(request: Request | None, conn) -> str:
         return configured_base
 
     request_base = _extract_request_base(request)
-    if not _is_connector_test_mode():
+    if not (is_test_mode() or env_flag_enabled("TESTING")):
         if request_base:
             logger.warning(
                 "Rejecting request-derived base_url for connector OAuth redirect base in non-test mode: {}",
@@ -185,7 +179,7 @@ def _resolve_webhook_callback_base(request: Request | None, conn) -> str:
     if connector_base:
         return connector_base
     request_base = _extract_request_base(request)
-    if request_base and (_is_connector_test_mode() or _is_local_callback_base(request_base)):
+    if request_base and (is_test_mode() or env_flag_enabled("TESTING") or _is_local_callback_base(request_base)):
         return _validate_redirect_base(request_base)
     raise HTTPException(
         status_code=500,

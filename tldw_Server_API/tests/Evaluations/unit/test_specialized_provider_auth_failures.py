@@ -411,7 +411,6 @@ async def test_specialized_endpoint_maps_auth_to_502_without_marking_used(
         "_get_webhook_manager_for_user",
         lambda _user_id: _NoopWebhookManager(),
     )
-    monkeypatch.setattr(eval_endpoint, "_is_eval_test_mode", lambda: True)
 
     endpoint = getattr(eval_endpoint, endpoint_name)
     with pytest.raises(eval_endpoint.HTTPException) as exc_info:

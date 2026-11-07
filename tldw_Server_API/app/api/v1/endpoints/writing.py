@@ -87,7 +87,7 @@ from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tokenizer as _resolve_tokenizer_shared,
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.testing import is_test_context
 
 router = APIRouter()
 
@@ -715,10 +715,6 @@ DEFAULT_WRITING_THEME_CATALOG: list[WritingDefaultTheme] = [
         order=0,
     )
 ]
-
-
-def _is_test_mode() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST") or is_test_mode())
 
 
 def _normalize_wordcloud_options(options: WritingWordcloudOptions | None) -> WritingWordcloudOptions:
@@ -1911,7 +1907,7 @@ async def create_wordcloud(
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing wordcloud")
 
-    if _is_test_mode():
+    if is_test_context():
         _run_wordcloud_job(db, cache_key, text, options)
         try:
             refreshed = db.get_writing_wordcloud(cache_key)

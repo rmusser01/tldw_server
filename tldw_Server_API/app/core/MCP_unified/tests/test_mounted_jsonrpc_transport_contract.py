@@ -403,8 +403,11 @@ def _install_mounted_ws_single_user_compat(
     monkeypatch.setattr(server.config, "allowed_client_ips", [])
     monkeypatch.setattr(server.config, "blocked_client_ips", [])
     monkeypatch.setattr(server.config, "debug_mode", debug_mode)
-    monkeypatch.setattr(server, "_is_test_mode", lambda: test_mode)
-    monkeypatch.setattr(server, "_is_explicit_pytest_runtime", lambda: test_mode)
+    monkeypatch.setattr(
+        server,
+        "environment_flags_provider",
+        SimpleNamespace(is_test_mode=lambda: test_mode, is_explicit_pytest_runtime=lambda: test_mode),
+    )
     monkeypatch.setattr(server, "_env_flag_enabled", lambda _name: False)
     monkeypatch.setattr(mcp_server_module, "is_single_user_profile_mode", lambda: True, raising=False)
     monkeypatch.setattr(mcp_server_module, "get_settings", lambda: _SingleUserSettings(api_key), raising=False)
