@@ -82,7 +82,6 @@ def test_embedding_cache_key_secret_uses_test_fallback_when_hmac_key_missing(mon
         raise ValueError("missing hmac secret")
 
     monkeypatch.setattr(mod, "derive_hmac_key", _raise_value_error)
-    monkeypatch.setattr(mod, "_is_test_context", lambda: True)
 
     assert mod._embedding_cache_key_secret() == b"tldw_embeddings_cache_hmac_fallback"
 
@@ -98,7 +97,7 @@ def test_embedding_cache_key_secret_raises_outside_tests(monkeypatch):
         raise ValueError("missing hmac secret")
 
     monkeypatch.setattr(mod, "derive_hmac_key", _raise_value_error)
-    monkeypatch.setattr(mod, "_is_test_context", lambda: False)
+    monkeypatch.setattr(mod, "is_test_context", lambda: False)
 
     with pytest.raises(ValueError, match="missing hmac secret"):
         mod._embedding_cache_key_secret()
@@ -110,7 +109,7 @@ def test_embedding_cache_key_changes_when_secret_changes(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
 
     mod._embedding_cache_key_secret.cache_clear()
-    monkeypatch.setattr(mod, "_is_test_context", lambda: False)
+    monkeypatch.setattr(mod, "is_test_context", lambda: False)
 
     monkeypatch.setattr(mod, "derive_hmac_key", lambda: b"cache-secret-one")
     first = mod.get_cache_key("cache me", "local_api", "test-model", backend_identity="http://backend/v1")

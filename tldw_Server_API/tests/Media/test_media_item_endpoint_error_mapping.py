@@ -510,7 +510,6 @@ async def test_get_media_item_auth_header_diagnostic_failure_log_is_sanitized(mo
         def model_dump(self):
             return self._details
 
-    monkeypatch.setattr(media_item_endpoint, "_is_test_mode", lambda: True, raising=True)
     monkeypatch.setattr(
         media_item_endpoint,
         "get_full_media_details_rich",

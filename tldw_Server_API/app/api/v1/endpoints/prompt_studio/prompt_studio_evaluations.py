@@ -65,7 +65,7 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
     ProviderCredentialRuntime,
     mark_provider_credential_used,
 )
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.testing import is_test_context, is_test_mode
 
 router = APIRouter(prefix="/api/v1/prompt-studio", tags=["prompt-studio"])
 
@@ -95,10 +95,6 @@ _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     json.JSONDecodeError,
 )
-
-
-def _is_prompt_studio_test_mode() -> bool:
-    return is_test_mode() or os.getenv("PYTEST_CURRENT_TEST") is not None
 
 
 def _prompt_studio_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
@@ -344,7 +340,7 @@ async def create_evaluation(
                 provider_key,
                 provider_credentials,
             )
-            and not _is_prompt_studio_test_mode()
+            and not is_test_context()
         ):
             record_byok_missing_credentials(provider_key, operation="prompt_studio")
             raise HTTPException(
@@ -970,7 +966,7 @@ async def run_evaluation_async(
                     provider_key,
                     provider_credentials,
                 )
-                and not _is_prompt_studio_test_mode()
+                and not is_test_context()
             ):
                 raise RuntimeError(f"Provider '{provider_name}' requires an API key.")
 
