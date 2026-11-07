@@ -267,7 +267,7 @@ finishes between caller cancellation and context-manager exit.
 TTS engine/registry tests pass; no new lint or Bandit findings.
 **Tests:** AudioCpp module, NeuTTS module, gateway catalog module, TTS engine
 cancellation, local offload and registry regressions; full media-audio shard.
-**Status:** In Progress
+**Status:** Complete
 
 The six complete affected/shared test modules pass 446 cases in 11.59 seconds.
 Ruff passes. Bandit reports zero findings/errors on the three production files;
@@ -282,7 +282,7 @@ claimed.
 evidence updated, current-head hosted checks read back. Draft and auto-merge
 gates remain unchanged while the human Change summary is absent.
 **Tests:** Independent source review, full-branch ratchets and remote readback.
-**Status:** Not Started
+**Status:** In Progress
 
 Independent delta review approves the introduced source in `3b92d47e6c` and
 passes 86 focused cases. It also validates one pre-existing P2: the owned
@@ -345,7 +345,7 @@ Ruff, changed-line Black, Bandit and normal hooks.
 **Success Criteria:** No validated findings remain; draft, CI and human-summary
 gates stay explicit. Do not claim the complete 88,180-case suite passed.
 **Tests:** Independent delta review, full-branch guards, remote PR readback.
-**Status:** Not Started
+**Status:** In Progress
 
 The unchanged two shared-audit cases now pass after whole-repository collection
 (two passed, 12 collection skips, 88,180 deselected, 33.98 seconds). The complete
@@ -358,3 +358,37 @@ provisions client version 18 for this shard. Preserve these tests; this local
 environment limitation is not a source fix or a green shard. The original
 fail-fast run remains a historical failure, not a full-suite pass. Normal hooks
 pass; independent immutable fixture review remains required.
+
+## November 7 Publication Checkpoint
+
+The audio rerun started on the first repair candidate (`3b92d47e6c` source)
+finishes with **4,319 passed, 37 skipped, one xfailed and one xpassed** in
+1,542.73 seconds. It does not qualify later source deltas by itself. After the
+cleanup follow-up, all six affected/shared modules pass **448 tests**, and the
+reviewer independently passes **277 AudioCpp cases** and repeated-cancellation
+diagnostics. Source `90d0d449fb` is explicitly approved; the raw-cleanup P2 is
+closed with no actionable findings. The pre-existing unbounded drain policy is
+unchanged, not newly certified as bounded.
+
+Admin fixture source `c73a98411b` is also explicitly approved with no actionable
+findings. The reviewer independently passes **57 tests**, injects distinct stale
+aliases, exercises both real safety cases and verifies alias/value restoration.
+Both shared-audit cases pass after full-repository collection. The earlier
+fail-fast failure is repaired, but a complete 88,180-case execution is not
+claimed. The two missing-local-`pg_dump` recovery failures remain an explicit
+qualification limitation; current-head hosted results are still required.
+
+Final full-branch quality/RLS/task/async-blocking guards pass **58 tests**.
+Ruff lint, changed-line Black, compile checks, diff checks and normal hooks pass.
+Bandit reports zero findings/errors on all three touched production files and
+the Admin fixture. Audio test diagnostics contain only assertions and the
+unchanged dummy-secret B105 at AudioCpp test line 1185. Whole-file Ruff-format
+drift on three audio files also reproduces on the base; no unrelated rewrite
+is introduced. ADR required: no, for the reasons above.
+
+Publish the source-approved candidate plus evidence-only task/plan updates to
+the existing draft PR. Verified remote dev remains `dfac3ca7f3` and the prior
+published branch head remains `2bd4eab7cf`. Do not inherit old-head hosted checks
+as new-head success, enable auto-merge, waive the human Change summary, or start
+Skills execution features. Parent and qualification tasks remain in progress
+while these landing gates are open.
