@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Track repairs through `TASK-2294.3.2.5` through `TASK-2294.3.2.9` using backlog-py.
+- Track repairs through `TASK-2294.3.2.5` through `TASK-2294.3.2.10` using backlog-py.
 - Preserve security checks, negative assertions, collection, plugin-isolation policy and CI baselines; no blanket skips or timeout increases.
 - Use the project virtual environment and canonical AuthNZ database fixtures. Never log credentials or raw sensitive subprocess diagnostics.
 - Keep the unrelated untracked audit ZIP untouched. Workers do not commit or run stashing hooks while other workers edit.
@@ -312,3 +312,49 @@ mode. Its entire isolated module passes 57 cases, and the Admin source/test
 files match dev. Root cause is not attributed; do not claim the repository-wide
 run passed or silently classify this as repaired. It is separate from the
 validated audio failures and current-head hosted CI qualification.
+
+## November 7 Admin Fixture Reconciliation (TASK-2294.3.2.10)
+
+Whole-repository collection followed by only the failing shared-audit test
+reproduces RED without executing preceding tests (one failure, 88,180 deselected).
+A read-only identity probe confirms both the HTTP audit dependency and backup
+service share an older settings object, distinct from `config.settings` patched
+by the test. This attributes the apparent mode mismatch to fixture ownership,
+not a production backup capability defect. Bind both consumer aliases to the
+current settings object inside `storage_scope` with reversible monkeypatches.
+Keep the real owner-mode and no-mutation assertions unchanged. ADR required: no;
+fixture-only correction changes no runtime or durable architecture rule.
+
+### Admin Stage 1: Reproduce
+**Goal:** Attribute the mismatch without changing production behavior.
+**Success Criteria:** Whole-collection selection is RED with differing identities;
+isolated-module control is green.
+**Tests:** Full collection selected shared-audit case; isolated 57-case module.
+**Status:** Complete
+
+### Admin Stage 2: Repair And Verify
+**Goal:** Apply the intended audit configuration to the actual fixture consumers.
+**Success Criteria:** Both selected cases pass after whole-repository collection;
+the complete backup module and related regressions remain green.
+**Tests:** Whole-collection selection, backup storage scope and Admin backup group,
+Ruff, changed-line Black, Bandit and normal hooks.
+**Status:** In Progress
+
+### Admin Stage 3: Review And Publish
+**Goal:** Independently review the immutable fixture delta and publish evidence.
+**Success Criteria:** No validated findings remain; draft, CI and human-summary
+gates stay explicit. Do not claim the complete 88,180-case suite passed.
+**Tests:** Independent delta review, full-branch guards, remote PR readback.
+**Status:** Not Started
+
+The unchanged two shared-audit cases now pass after whole-repository collection
+(two passed, 12 collection skips, 88,180 deselected, 33.98 seconds). The complete
+module passes all 57 cases (1.89 seconds). Ruff, changed-line Black and Bandit
+pass with zero findings/errors. The exact Admin backup-core group finishes with
+119 passed and two failures: both live recovery tests cannot find `pg_dump` on
+the local PATH. The canonical fixture provisions PostgreSQL 18.1, but no local
+client binary is installed in the checked Homebrew tool locations. CI explicitly
+provisions client version 18 for this shard. Preserve these tests; this local
+environment limitation is not a source fix or a green shard. The original
+fail-fast run remains a historical failure, not a full-suite pass. Normal hooks
+pass; independent immutable fixture review remains required.
