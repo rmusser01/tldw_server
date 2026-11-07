@@ -3324,8 +3324,12 @@ def test_flashcard_assistant_respond_refuses_an_over_quota_user(
     client_with_flashcards_db: TestClient,
     monkeypatch,
 ):
-    """An over-quota user gets the 402 and the study assistant never calls the LLM."""
-    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+    """An over-quota user gets the 402 and the study assistant never calls the LLM, whatever keys they stored."""
+    from tldw_Server_API.tests.helpers.llm_quota import (
+        assert_llm_quota_402,
+        own_keys_for_every_provider,
+        refuse_llm_work,
+    )
 
     created = client_with_flashcards_db.post(
         "/api/v1/flashcards",
@@ -3345,15 +3349,17 @@ def test_flashcard_assistant_respond_refuses_an_over_quota_user(
         recording_generate_reply,
     )
     refuse_llm_work(monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)  # the assistant runs on the server's key (TASK-13956)
 
     response = client_with_flashcards_db.post(
         f"/api/v1/flashcards/{card_uuid}/assistant/respond",
-        json={"action": "explain"},
+        json={"action": "explain", "provider": "openai"},
         headers=AUTH_HEADERS,
     )
 
     assert_llm_quota_402(response)
     assert calls == []
+    assert asked == []
 
 
 def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(

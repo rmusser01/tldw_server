@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summ
 from tldw_Server_API.app.core.Usage import llm_accounting, quota_resolver
 from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
 from tldw_Server_API.app.core.Usage.llm_quota_gate import user_to_check
-from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+from tldw_Server_API.tests.helpers.llm_quota import own_keys_for_every_provider, refuse_llm_calls
 
 pytestmark = pytest.mark.integration
 
@@ -159,6 +159,25 @@ async def test_a_refused_document_batch_keeps_every_document(job_dbs: Path, refu
     for row, name in zip(rows, names):
         _assert_kept_with_refusal(manager.get_job(int(row["id"])), job_dbs, f"Project {name} opens")
     assert refused == []
+
+
+@pytest.mark.asyncio
+async def test_a_stored_key_for_the_analysis_provider_does_not_admit_the_job(
+    job_dbs: Path, refused: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Job analysis runs on the server's key, never the owner's, so an own key leaves the start check as it was.
+
+    Refused, the job is stored without analysis and makes no LLM call (TASK-13956).
+    """
+    asked = own_keys_for_every_provider(monkeypatch)
+    manager = JobManager()
+    row = _create_job(manager, job_dbs, _write_document(job_dbs, "Cedar"), "document")
+
+    await _run_jobs(manager, 1)
+
+    _assert_kept_with_refusal(manager.get_job(int(row["id"])), job_dbs, "Project Cedar opens")
+    assert refused == []
+    assert asked == []
 
 
 @pytest.mark.asyncio

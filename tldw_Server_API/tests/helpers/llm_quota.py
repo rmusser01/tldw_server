@@ -39,6 +39,27 @@ def refuse_llm_calls(monkeypatch: pytest.MonkeyPatch) -> None:
         return
 
 
+def own_keys_for_every_provider(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The user has their own key for every provider; returns each provider a boundary asks about.
+
+    For a boundary whose LLM calls run on the server's key: it must refuse an over-limit user
+    anyway, without asking (TASK-13956).
+    """
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+
+    # ponytail: patches the module attribute, so code that imported users_own_key_serves by name at module
+    # level still gets the real lookup (False in tests): such a regression passes. Patch that module too then.
+    asked: list[str] = []
+
+    async def _own_key(_uid: object, provider: str) -> bool:
+        """Every provider runs on the user's own key."""
+        asked.append(provider)
+        return True
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    return asked
+
+
 def assert_llm_quota_402(response: Any) -> None:
     """The response is the public LLM quota refusal: 402, limit_exceeded, Retry-After."""
     assert response.status_code == 402, response.text
