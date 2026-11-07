@@ -27,6 +27,8 @@ def _reload_log_buffer() -> ModuleType:
 
     import tldw_Server_API.app.core.Logging.system_log_buffer as log_buffer
 
+    # A prior writer must finish before reload replaces its shared settings state.
+    log_buffer._LOG_FILE_QUEUE.join()
     return importlib.reload(log_buffer)
 
 
@@ -101,7 +103,7 @@ def test_log_sink_redacts_secrets_before_buffer_and_file_append(
         "provider failed api_key=sk-secretvalue123 password:open-sesame "
         "Authorization: Bearer secret-token-123"
     )
-    secret_extra = {
+    secret_extra: dict[str, object] = {
         "api_key": "sk-extra-secretvalue123",
         "db_password": "extra-open-sesame",
         "access_token": "extra-token-secret",
@@ -304,6 +306,53 @@ def test_reload_reuses_log_file_queue_and_worker(
 
     assert reloaded._LOG_FILE_QUEUE is queue
     assert reloaded._LOG_FILE_WORKER is worker
+
+
+@pytest.mark.unit
+def test_reload_finishes_queued_settings_before_reset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import tldw_Server_API.app.core.config as config_mod
+
+    log_buffer = _reload_log_buffer()
+    started = threading.Event()
+    release = threading.Event()
+
+    def _delayed_config() -> configparser.ConfigParser:
+        started.set()
+        release.wait()
+        return configparser.ConfigParser()
+
+    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "false")
+    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(tmp_path / "previous.jsonl"))
+    monkeypatch.setenv("SYSTEM_LOG_FILE_MAX_ENTRIES", "100")
+    monkeypatch.delenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", raising=False)
+    monkeypatch.setattr(config_mod, "load_comprehensive_config", _delayed_config)
+    monkeypatch.setattr(log_buffer, "_LOG_FILE_SETTINGS_INITIALIZED", False)
+    queue = log_buffer._LOG_FILE_QUEUE
+    log_buffer._ensure_log_file_worker()
+    queue.put({"message": "previous queued entry"})
+    join_queue = queue.join
+
+    def _release_and_drain() -> None:
+        release.set()
+        join_queue()
+
+    try:
+        assert started.wait(timeout=1)
+        monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(tmp_path / "current.jsonl"))
+        monkeypatch.setenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", "10")
+        # Finish the old settings read at the reload helper's drain boundary.
+        monkeypatch.setattr(queue, "join", _release_and_drain)
+        log_buffer = _reload_log_buffer()
+        monkeypatch.setattr(log_buffer, "_HAS_FCNTL", False)
+        with log_buffer._log_file_lock():
+            _release_and_drain()
+            with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+                with log_buffer._log_file_lock(timeout=0):
+                    pytest.fail("Queued settings changed the held lock's path")
+    finally:
+        _release_and_drain()
 
 
 @pytest.mark.unit
