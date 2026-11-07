@@ -542,7 +542,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               <div
                 key="shell-header"
                 className={classNames(
-                  'relative z-20 w-full min-w-0',
+                  'relative z-30 w-full min-w-0',
                   isViewportConstrainedRoute ? 'shrink-0' : undefined
                 )}
               >

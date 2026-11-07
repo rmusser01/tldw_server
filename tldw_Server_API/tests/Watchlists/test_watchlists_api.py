@@ -1917,16 +1917,19 @@ def _over_quota_run(c, monkeypatch) -> tuple[int, list[list[dict]]]:
 
 
 def test_output_summaries_refuse_an_over_quota_user_before_any_summary(client_with_user, monkeypatch):
-    """An over-quota user asking for summaries gets the 402 before any summary call (TASK-13864)."""
-    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+    """An over-quota user asking for summaries gets the 402 before any summary call (TASK-13864), whatever keys
+    they stored: summaries run on the server's key (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, own_keys_for_every_provider
 
     c = client_with_user
     run_id, summarized = _over_quota_run(c, monkeypatch)
+    asked = own_keys_for_every_provider(monkeypatch)
 
     r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "summarize": True, "llm_provider": "openai"})
 
     assert_llm_quota_402(r)
     assert summarized == []
+    assert asked == []
     r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
     assert r.status_code == 200, r.text
     assert r.json()["total"] == 0

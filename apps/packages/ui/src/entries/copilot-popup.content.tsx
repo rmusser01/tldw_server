@@ -19,6 +19,7 @@ type PopupInstance = {
   close: () => void
   setState: (state: PopupState, message?: string) => void
   setResponseText: (text: string) => void
+  appendResponseText: (chunk: string) => void
   setPreviewText: (text: string) => void
   getPreviewText: () => string
   setReplaceEnabled: (enabled: boolean) => void
@@ -412,8 +413,28 @@ const createPopup = (
     schedulePositionUpdate()
   }
 
+  // Length of the text currently rendered in responseEl. Maintained by
+  // setResponseText/appendResponseText so a full rewrite can be skipped
+  // when the streaming path has already appended exactly that text
+  // (every caller accumulates the same chunks in the same order).
+  let responseRenderedLength = 0
+
   const setResponseText = (text: string) => {
+    if (text.length === responseRenderedLength) {
+      // Already rendered byte-for-byte by the append path; assigning
+      // textContent would rewrite the whole (potentially long) text.
+      schedulePositionUpdate()
+      return
+    }
     responseEl.textContent = text
+    responseRenderedLength = text.length
+    schedulePositionUpdate()
+  }
+
+  const appendResponseText = (chunk: string) => {
+    if (!chunk) return
+    responseEl.appendChild(document.createTextNode(chunk))
+    responseRenderedLength += chunk.length
     schedulePositionUpdate()
   }
 
@@ -473,6 +494,7 @@ const createPopup = (
     close,
     setState,
     setResponseText,
+    appendResponseText,
     setPreviewText,
     getPreviewText,
     setReplaceEnabled,
@@ -626,7 +648,7 @@ const handlePopupOpen = async (payload?: PopupPayload) => {
     for await (const chunk of chatService.streamMessage(messages, { model, stream: true })) {
       if (streamCancelled) break
       responseText += chunk
-      popup.setResponseText(responseText)
+      popup.appendResponseText(chunk)
     }
   } catch (error) {
     if (!streamCancelled) {

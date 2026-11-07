@@ -120,9 +120,25 @@ export const isRestrictedClipperPage = (pageUrl: string): boolean => {
 }
 
 export const extractClipPageTextFromDocument = async (
-  doc: Document = document
+  doc: Document = document,
+  requestedType?: ClipCaptureType
 ): Promise<Pick<ClipCaptureInput, "selectionText" | "articleText" | "fullPageText">> => {
   const selectionText = trimText(window.getSelection()?.toString())
+
+  // Tiered capture (WP-56/WP-57): when a selection clip is requested and a
+  // selection exists, it already wins the capture resolution tier order, so
+  // return it immediately — selection clips never pay for the full-page
+  // serialize, the heavy parser pass, or the forced innerText layout below.
+  if (requestedType === "selection" && selectionText) {
+    return { selectionText: selectionText || undefined }
+  }
+
+  // The tiered clip types (selection/article) compute the full-page text
+  // only as the final fallback, when the article tier came up empty. The
+  // other clip types keep the general flow's existing eager capture.
+  const tieredCapture =
+    requestedType === "selection" || requestedType === "article"
+
   const html = doc.documentElement?.outerHTML || ""
   let articleText = ""
   try {
@@ -132,7 +148,11 @@ export const extractClipPageTextFromDocument = async (
     // Parser unavailable: the capture flow degrades to full-page text or a
     // bookmark fallback, so never block the clip on this.
   }
-  const fullPageText = trimText(doc.body?.innerText || doc.body?.textContent)
+
+  const fullPageText =
+    !tieredCapture || !articleText
+      ? trimText(doc.body?.innerText || doc.body?.textContent)
+      : ""
   return {
     selectionText: selectionText || undefined,
     articleText: articleText || undefined,
