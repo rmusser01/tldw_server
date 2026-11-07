@@ -626,13 +626,12 @@ async def _close_audio_cpp_response_before_cancellation(
     caller_cancellation: asyncio.CancelledError | None = None
     while not close_task.done():
         try:
-            await asyncio.shield(close_task)
+            # Drain owned cleanup without installing a raw late-error logger.
+            await asyncio.wait({close_task})
         except asyncio.CancelledError as cancellation:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 caller_cancellation = caller_cancellation or cancellation
-        except Exception:  # noqa: BLE001 - closer exception is inspected below
-            break
     try:
         close_task.result()
     except asyncio.CancelledError:
@@ -687,13 +686,12 @@ async def _open_audio_cpp_wav_async(
     caller_cancellation: asyncio.CancelledError | None = None
     while not open_task.done():
         try:
-            await asyncio.shield(open_task)
+            # The thread must finish before cancellation propagates, even on error.
+            await asyncio.wait({open_task})
         except asyncio.CancelledError as cancellation:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 caller_cancellation = caller_cancellation or cancellation
-        except Exception:  # noqa: BLE001 - task result is inspected below
-            break
     try:
         handle = open_task.result()
     except BaseException:
