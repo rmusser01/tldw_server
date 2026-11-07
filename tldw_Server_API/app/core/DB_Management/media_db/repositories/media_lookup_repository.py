@@ -9,6 +9,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
+    media_owner_identity,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
@@ -331,6 +332,9 @@ class MediaLookupRepository:
             query += " AND deleted = 0"
         if not include_trash:
             query += " AND is_trash = 0"
+        if getattr(getattr(self.session, "backend_type", None), "name", None) == "POSTGRESQL":
+            query += " AND COALESCE(CAST(owner_user_id AS TEXT),client_id) = ?"
+            params.append(media_owner_identity(self.session.client_id))
         query += " LIMIT 1"
 
         db = self.session
@@ -366,6 +370,9 @@ class MediaLookupRepository:
             query += " AND deleted = 0"
         if not include_trash:
             query += " AND is_trash = 0"
+        if getattr(getattr(self.session, "backend_type", None), "name", None) == "POSTGRESQL":
+            query += " AND COALESCE(CAST(owner_user_id AS TEXT),client_id) = ?"
+            params.append(media_owner_identity(self.session.client_id))
         query += " LIMIT 1"
 
         db = self.session

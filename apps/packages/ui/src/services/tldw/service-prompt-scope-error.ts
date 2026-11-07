@@ -104,6 +104,31 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (requestMethod === "GET" && /^\/api\/v1\/storage\/files\/[1-9][0-9]*\/download$/.test(pathname)) return true
+  if (requestMethod === "GET" && (
+    pathname === "/api/v1/agent-orchestration/projects" ||
+    /^\/api\/v1\/agent-orchestration\/projects\/[1-9][0-9]*\/tasks$/.test(pathname) ||
+    /^\/api\/v1\/agent-orchestration\/tasks\/[1-9][0-9]*$/.test(pathname) ||
+    pathname === "/api/v1/acp/sessions"
+  )) return true
+  if (requestMethod === "POST" && [
+    "/api/v1/research-workspace/artifacts/generate", "/api/v1/quizzes/generate",
+    "/api/v1/slides/generate/from-media", "/api/v1/audio/speech",
+  ].includes(pathname)) return true
+  if (/^\/api\/v1\/workspaces\/[^/]+\/outputs$/.test(pathname)) return requestMethod === "POST"
+  if (/^\/api\/v1\/workspaces\/[^/]+\/outputs\/[A-Za-z0-9_-]+$/.test(pathname)) return requestMethod === "GET"
+  if (/^\/api\/v1\/workspaces\/[^/]+$/.test(pathname) && requestMethod === "PUT") return true
+  if (pathname === "/api/v1/data-tables/generate") return requestMethod === "POST"
+  if (/^\/api\/v1\/data-tables\/jobs\/[1-9][0-9]*$/.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
+  const tablePath = /^\/api\/v1\/data-tables\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/regenerate)?$/i.exec(pathname)
+  if (tablePath) return requestMethod === (tablePath[1] ? "POST" : "GET")
+  if (/^\/api\/v1\/media\/[1-9][0-9]*\/progress$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
+  const annotationsPath = /^\/api\/v1\/media\/[1-9][0-9]*\/annotations(?:\/(sync|[A-Za-z0-9_-]+))?$/.exec(pathname)
+  if (annotationsPath) {
+    if (!annotationsPath[1]) return ["GET", "POST"].includes(requestMethod)
+    if (annotationsPath[1] === "sync") return requestMethod === "POST"
+    return ["PUT", "DELETE"].includes(requestMethod)
+  }
   if (pathname === "/openapi.json") return requestMethod === "GET"
   if (pathname === "/api/v1/config/docs-info") return requestMethod === "GET"
   if (pathname === "/api/v1/audio-studio/projects") return ["GET", "POST"].includes(requestMethod)
@@ -167,6 +192,9 @@ export const isServicePromptRequestPath = (
     return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
     return ["PATCH", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts$/.test(pathname)) return ["GET", "POST"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts\/[^/]+$/.test(pathname)) return requestMethod === "PUT"
+  if (/^\/api\/v1\/research\/runs\/[^/]+\/bundle$/.test(pathname)) return requestMethod === "GET"
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/audio/transcriptions") return requestMethod === "POST"
@@ -205,6 +233,8 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/chat\/messages\/[^/]+\/rag-context$/.test(pathname) ||
     pathname === "/api/v1/rag/search/stream" || pathname === "/api/v1/chatbooks/export"
   )) return true
+  if (requestMethod === "POST" && pathname === "/api/v1/media/documents/render") return true
+  if (requestMethod === "GET" && /^\/api\/v1\/media\/[1-9][0-9]*\/annotated-file$/.test(pathname)) return true
   if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media"||
       pathname === "/api/v1/media/" ||
       pathname === "/api/v1/media/ingest/jobs")) return true
@@ -235,7 +265,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "PATCH" && /^\/api\/v1\/flashcards\/decks\/[1-9][0-9]*$/.test(pathname)) return true
   if (requestMethod === "GET") {
     return (
-      pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
+      ["/api/v1/flashcards/decks", "/api/v1/flashcards/review/next", "/api/v1/flashcards/templates"].includes(pathname) || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
       pathname === "/api/v1/scheduled-tasks" ||
       pathname === "/api/v1/scheduled-tasks/results" ||
       pathname === "/api/v1/notifications" ||

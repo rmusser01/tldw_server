@@ -236,6 +236,21 @@ vi.mock("@/store/model", () => ({
   ) => selector({ apiProvider: undefined })
 }))
 
+// Component-only owner seam; connected Scene suites exercise authenticated account ownership.
+vi.mock("../ChatPane/useResearchActorScene", async () => {
+  const React = await vi.importActual<typeof import("react")>("react")
+  return {
+    useResearchActorScene: (workspaceId: string, referenceId: string) => ({
+      capturePrivateScene: React.useCallback(() => null, []),
+      captureChatReferenceOwner: React.useCallback(() => ({
+        scopeKey: "component-owner",
+        isCurrent: () => workspaceStoreState.workspaceId === workspaceId &&
+          workspaceStoreState.workspaceChatReferenceId === referenceId
+      }), [workspaceId, referenceId])
+    })
+  }
+})
+
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: (...args: unknown[]) => {
     mockUseMessageOption(...args)
@@ -920,7 +935,8 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     expect(mockUseMessageOption).toHaveBeenCalledWith({
       scope: { type: "workspace", workspaceId: "workspace-a" },
-      hydrateServerChat: true
+      hydrateServerChat: true,
+      capturePrivateScene: expect.any(Function)
     })
   })
 
@@ -947,6 +963,12 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       historyId: "history-imported",
       serverChatId: null
     })
+
+    // The real chat hook publishes hydration to its next render.
+    mockSetMessages.mockImplementationOnce((messages) => { messageOptionState.messages = messages })
+    mockSetHistory.mockImplementationOnce((history) => { messageOptionState.history = history })
+    mockSetHistoryId.mockImplementationOnce((historyId) => { messageOptionState.historyId = historyId })
+    mockSetServerChatId.mockImplementationOnce((serverChatId) => { messageOptionState.serverChatId = serverChatId })
 
     renderChatPane()
 
@@ -977,7 +999,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [],
       historyId: null,
       serverChatId: null
-    })
+    }, expect.anything())
   })
 
   it("keeps transcript as a scrollable flex region anchored above the composer", () => {
@@ -1034,7 +1056,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [],
       historyId: null,
       serverChatId: null
-    })
+    }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: true}))
   })
 
   it("restores previous chat session when clear-chat undo runs", () => {
@@ -1101,7 +1123,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [{ role: "user", content: "hello" }],
       historyId: "history-a",
       serverChatId: "server-chat-a"
-    })
+    }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: false}))
   })
 
   it("retains the local conversation Undo restore flow", async () => {
@@ -1148,7 +1170,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         history: [{ role: "assistant", content: "Second" }],
         historyId: "history-a",
         serverChatId: null
-      })
+      }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: false}))
     })
 
     const scheduledConfig = mockScheduleWorkspaceUndoAction.mock.calls[0]?.[0] as
@@ -1455,7 +1477,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [{ role: "user", content: "Workspace A message" }],
       historyId: "history-a",
       serverChatId: "server-chat-a"
-    })
+    }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: false}))
     expect(mockSetMessages).toHaveBeenCalledWith([
       {
         isBot: true,
@@ -1528,7 +1550,14 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         release(accepted)
       })
       expect(mockScheduleWorkspaceUndoAction).not.toHaveBeenCalled()
-      expect(mockSaveWorkspaceChatSession).not.toHaveBeenCalled()
+      for (const [key, saved, owner] of mockSaveWorkspaceChatSession.mock.calls) {
+        expect(key).toBe("workspace-a")
+        expect(saved).toEqual({
+          messages: messageOptionState.messages, history: messageOptionState.history,
+          historyId: "owned-mirror", serverChatId: "saved-chat"
+        })
+        expect(owner).toMatchObject({scopeKey: "component-owner", clear: false})
+      }
     }
   )
 

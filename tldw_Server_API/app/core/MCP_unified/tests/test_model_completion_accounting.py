@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -222,14 +223,19 @@ async def test_release_is_explicitly_pre_dispatch_and_releases_governor(accounti
 )
 @pytest.mark.parametrize("operation", ["release_before_dispatch", "mark_dispatched", "retain_ambiguous", "reconcile"])
 async def test_invalid_handle_insertion_owner_has_no_repository_or_governor_effects(
-    accounting, mocker, invalid_owner, operation
+    accounting, monkeypatch, invalid_owner, operation
 ):
     handle = await accounting.service.reserve(request(), identity())
     invalid_handle = replace(handle, _insertion_owner=invalid_owner)
-    effects = [
-        mocker.spy(accounting.repo, name)
-        for name in ("release_before_dispatch", "mark_dispatched", "retain_ambiguous", "reconcile")
-    ] + [mocker.spy(accounting.governor, name) for name in ("release", "commit")]
+    effects = []
+    for target, names in (
+        (accounting.repo, ("release_before_dispatch", "mark_dispatched", "retain_ambiguous", "reconcile")),
+        (accounting.governor, ("release", "commit")),
+    ):
+        for name in names:
+            effect = AsyncMock(wraps=getattr(target, name))
+            monkeypatch.setattr(target, name, effect)
+            effects.append(effect)
     accounting.events.clear()
     with pytest.raises(ModelCompletionFailure, match="invalid_accounting_handle") as error:
         await getattr(accounting.service, operation)(invalid_handle)

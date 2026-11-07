@@ -255,6 +255,16 @@ SCOPE_ALLOWLIST: dict[str, str] = {
     "tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py": (
         "scope from the operator-configured local-LLM (llama.cpp, Ollama, ...) base URL."
     ),
+    "tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py": (
+        "scope built only from server search_engines.searx_search_api_url; a request searx_url receives "
+        "that scope only after an exact configured-origin match. Other URLs retain normal egress "
+        "checks; provider responses and search terms cannot create a private-network scope (ADR-090)."
+    ),
+    "tldw_Server_API/app/core/Local_LLM/http_utils.py": (
+        "readiness scope from the managed llama.cpp/Llamafile/Ollama runtime host and port, or its "
+        "admin-controlled runtime profile; ordinary inference requests cannot supply this origin. "
+        "The exact origin is captured before polling and redirects receive no broader scope (ADR-030)."
+    ),
     "tldw_Server_API/app/core/Local_LLM/llamacpp_snapshot_operations.py": (
         "scope from the configured llama.cpp server origin."
     ),

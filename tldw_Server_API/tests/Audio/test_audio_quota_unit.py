@@ -348,6 +348,10 @@ async def test_backfill_postgres_query_failure_log_is_sanitized(monkeypatch):
     class _FailingPostgresPool:
         pool = object()
 
+        async def fetchval(self, query):
+            assert query == "SELECT to_regclass('public.audio_usage_daily') IS NOT NULL"  # nosec B101 -- Exact legacy-table probe.
+            return True
+
         async def fetch(self, *args, **kwargs):  # noqa: ARG002
             raise RuntimeError("postgres backfill query failed at /private/audio-pg.db")
 

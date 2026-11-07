@@ -1,3 +1,5 @@
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -281,6 +283,10 @@ describe("accepted LocalChatList selections", () => {
     })
     const view = render(<MemoryRouter><QueryClientProvider client={queryClient}><HistorySelectionProvider><SelectionProbe /><LocalChatList searchQuery="" selectedChatId={null} onSelectChat={onSelectChat} /></HistorySelectionProvider></QueryClientProvider></MemoryRouter>)
     try {
+      // Initial owner publication replaces the list reader; open only its qualified result.
+      const expectedOwner = chatDraftOwnerKey(await resolveServicePromptScope())
+      await waitFor(() => expect(queryClient.getQueriesData({ queryKey: ["fetchChatHistory", "on-device"] })
+        .some(([key, data]) => key[4] === expectedOwner && data !== undefined)).toBe(true))
       fireEvent.click(await screen.findByRole("button", { name: "Owned local chat" }))
       await waitFor(() => expect(io.readMessages).toHaveBeenCalledWith("owned"))
       if (outcome === "unmounted") view.unmount()

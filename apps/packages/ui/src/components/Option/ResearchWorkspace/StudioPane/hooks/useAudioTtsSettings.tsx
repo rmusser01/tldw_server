@@ -1,8 +1,12 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React, { useState, useEffect, useRef } from "react"
 import type { MessageInstance } from "antd/es/message/interface"
 import type { TFunction } from "i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { fetchTldwVoiceCatalog, type TldwVoice } from "@/services/tldw/audio-voices"
+import {
+  fetchTldwVoiceCatalog,
+  type TldwVoice
+} from "@/services/tldw/audio-voices"
 import {
   fetchTtsProviders,
   type TldwTtsProvidersInfo
@@ -11,7 +15,14 @@ import {
   fetchTldwTtsModels,
   type TldwTtsModel
 } from "@/services/tldw/audio-models"
-import { toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
+import {
+  normalizeTtsProviderKey,
+  toServerTtsProviderKey
+} from "@/services/tldw/tts-provider-keys"
+import {
+  listCustomVoices,
+  type TldwCustomVoice
+} from "@/services/tldw/voice-cloning"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import type { AudioTtsProvider } from "@/types/workspace"
 import type { AudioGenerationSettings } from "@/types/workspace"
@@ -118,16 +129,40 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
   const { audioSettings, setAudioSettings, messageApi, t } = deps
 
   const [showTtsSettings, setShowTtsSettings] = useState(false)
+  const [customVoices, setCustomVoices] = useState<TldwCustomVoice[]>([])
+  const [customVoiceCatalogSettled, setCustomVoiceCatalogSettled] = useState<
+    string | null
+  >(null)
+  const [accountRevision, setAccountRevision] = useState(0)
+  const accountRevisionRef = useRef(0)
   const [tldwVoices, setTldwVoices] = useState<TldwVoice[]>([])
   const [providersInfo, setProvidersInfo] =
     useState<TldwTtsProvidersInfo | null>(null)
   const [tldwModels, setTldwModels] = useState<TldwTtsModel[]>([])
   const [loadingVoices, setLoadingVoices] = useState(false)
-  const [voiceCatalogSettled, setVoiceCatalogSettled] = useState(false)
+  const [voiceCatalogSettled, setVoiceCatalogSettled] = useState<string | null>(
+    null
+  )
   const [previewingVoice, setPreviewingVoice] = useState(false)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
 
-  const inferredTldwProviderKey = inferTldwProviderFromModel(audioSettings.model)
+  useEffect(
+    () =>
+      watchChatAccountChanges(() => {
+        accountRevisionRef.current += 1
+        setAccountRevision(accountRevisionRef.current)
+        setCustomVoices([])
+        setTldwVoices([])
+        setTldwModels([])
+        setProvidersInfo(null)
+        setVoiceCatalogSettled(null)
+      }),
+    []
+  )
+
+  const inferredTldwProviderKey = inferTldwProviderFromModel(
+    audioSettings.model
+  )
   const explicitBackendSupported =
     providersInfo?.supports_explicit_backend === true
   const selectedBackend = explicitBackendSupported
@@ -144,6 +179,7 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
 
   useEffect(() => {
     let cancelled = false
+    const revision = accountRevisionRef.current
 
     if (audioSettings.provider !== "tldw") {
       setProvidersInfo(null)
@@ -152,19 +188,22 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
 
     fetchTtsProviders()
       .then((info) => {
-        if (!cancelled) setProvidersInfo(info)
+        if (!cancelled && revision === accountRevisionRef.current)
+          setProvidersInfo(info)
       })
       .catch(() => {
-        if (!cancelled) setProvidersInfo(null)
+        if (!cancelled && revision === accountRevisionRef.current)
+          setProvidersInfo(null)
       })
 
     return () => {
       cancelled = true
     }
-  }, [audioSettings.provider])
+  }, [audioSettings.provider, accountRevision])
 
   useEffect(() => {
     let cancelled = false
+    const revision = accountRevisionRef.current
 
     if (audioSettings.provider !== "tldw") {
       setTldwModels([])
@@ -173,34 +212,46 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
 
     fetchTldwTtsModels(selectedBackend || undefined)
       .then((models) => {
-        if (!cancelled) setTldwModels(models)
+        if (!cancelled && revision === accountRevisionRef.current)
+          setTldwModels(models)
       })
       .catch(() => {
-        if (!cancelled) setTldwModels([])
+        if (!cancelled && revision === accountRevisionRef.current)
+          setTldwModels([])
       })
 
     return () => {
       cancelled = true
     }
-  }, [audioSettings.provider, selectedBackend])
+  }, [audioSettings.provider, selectedBackend, accountRevision])
+
+  // Settlement must belong to this catalog, not the previous render's completed request.
+  const voiceCatalogKey = JSON.stringify([
+    accountRevision,
+    audioSettings.provider,
+    catalogProvider,
+    audioSettings.model,
+    selectedBackend
+  ])
 
   // Fetch voices when provider changes to tldw
   useEffect(() => {
     let cancelled = false
+    const revision = accountRevisionRef.current
 
     if (audioSettings.provider !== "tldw") {
       setTldwVoices([])
       setLoadingVoices(false)
-      setVoiceCatalogSettled(true)
+      setVoiceCatalogSettled(voiceCatalogKey)
       return
     }
     if (!catalogProvider) {
       setTldwVoices([])
       setLoadingVoices(false)
-      setVoiceCatalogSettled(true)
+      setVoiceCatalogSettled(voiceCatalogKey)
       return
     }
-    setVoiceCatalogSettled(false)
+    setVoiceCatalogSettled(null)
     setLoadingVoices(true)
     fetchTldwVoiceCatalog(
       catalogProvider,
@@ -209,26 +260,76 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
         : undefined
     )
       .then((voices) => {
-        if (!cancelled) {
+        if (!cancelled && revision === accountRevisionRef.current) {
           setTldwVoices(voices)
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!cancelled && revision === accountRevisionRef.current) {
           setTldwVoices([])
         }
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!cancelled && revision === accountRevisionRef.current) {
           setLoadingVoices(false)
-          setVoiceCatalogSettled(true)
+          setVoiceCatalogSettled(voiceCatalogKey)
         }
       })
 
     return () => {
       cancelled = true
     }
-  }, [audioSettings.model, audioSettings.provider, catalogProvider, selectedBackend])
+  }, [
+    audioSettings.model,
+    audioSettings.provider,
+    catalogProvider,
+    selectedBackend,
+    accountRevision,
+    voiceCatalogKey
+  ])
+
+  const unresolvedBackend = Boolean(audioSettings.backend && !providersInfo)
+  const customVoicesAllowed =
+    audioSettings.provider === "tldw" &&
+    !selectedBackend &&
+    Boolean(providersInfo || !audioSettings.backend)
+  const customVoiceCatalogKey = JSON.stringify([
+    accountRevision,
+    customVoicesAllowed,
+    unresolvedBackend
+  ])
+
+  useEffect(() => {
+    let cancelled = false
+    const revision = accountRevisionRef.current
+    setCustomVoices([])
+    setCustomVoiceCatalogSettled(
+      !customVoicesAllowed && !unresolvedBackend ? customVoiceCatalogKey : null
+    )
+    if (customVoicesAllowed) {
+      listCustomVoices()
+        .then((voices) => {
+          if (!cancelled && revision === accountRevisionRef.current)
+            setCustomVoices(voices)
+        })
+        .catch(() => {
+          if (!cancelled && revision === accountRevisionRef.current)
+            setCustomVoices([])
+        })
+        .finally(() => {
+          if (!cancelled && revision === accountRevisionRef.current)
+            setCustomVoiceCatalogSettled(customVoiceCatalogKey)
+        })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [
+    customVoicesAllowed,
+    unresolvedBackend,
+    accountRevision,
+    customVoiceCatalogKey
+  ])
 
   // Cleanup preview audio on unmount
   useEffect(() => {
@@ -244,39 +345,64 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
   // Get voice options based on provider
   const getVoiceOptions = React.useCallback(() => {
     if (audioSettings.provider === "tldw") {
-      if (tldwVoices.length > 0) {
-        return tldwVoices.map((v) => ({
-          value: v.voice_id || v.id || v.name || "",
-          label: v.name || v.voice_id || v.id || "Unknown"
-        }))
-      }
-      if (selectedBackendCapabilities) {
-        const modelVoices = audioSettings.model
-          ? selectedBackendCapabilities.model_capabilities?.[audioSettings.model]
-              ?.voices
-          : undefined
-        const discoveredVoices =
-          modelVoices?.length
+      let options = tldwVoices.map((v) => ({
+        value: v.voice_id || v.id || v.name || "",
+        label: v.name || v.voice_id || v.id || "Unknown"
+      }))
+      if (!options.length) {
+        if (selectedBackendCapabilities) {
+          const modelVoices = audioSettings.model
+            ? selectedBackendCapabilities.model_capabilities?.[
+                audioSettings.model
+              ]?.voices
+            : undefined
+          options = modelVoices?.length
             ? modelVoices.map((voice) => ({ value: voice, label: voice }))
             : (selectedBackendCapabilities.voices || []).map((voice) => ({
                 value: voice.voice_id || voice.id || voice.name || "",
                 label: voice.name || voice.voice_id || voice.id || "Unknown"
               }))
-        return discoveredVoices.filter((voice) => voice.value)
+          options = options.filter((voice) => voice.value)
+        } else if (inferredTldwProviderKey === "kitten_tts") {
+          options = KITTEN_FALLBACK_VOICES
+        } else if (
+          !inferredTldwProviderKey ||
+          inferredTldwProviderKey === "kokoro"
+        ) {
+          options = KOKORO_FALLBACK_VOICES
+        }
       }
-      if (inferredTldwProviderKey === "kitten_tts") {
-        return KITTEN_FALLBACK_VOICES
-      }
-      return KOKORO_FALLBACK_VOICES
+      const provider = normalizeTtsProviderKey(catalogProvider)
+      const ownedOptions = selectedBackend
+        ? []
+        : customVoices
+            .filter(
+              (voice) =>
+                !voice.provider ||
+                normalizeTtsProviderKey(voice.provider) === provider
+            )
+            .filter((voice) => Boolean(voice.voice_id))
+            .map((voice) => ({
+              value: `custom:${voice.voice_id}`,
+              label: `Custom: ${voice.name || voice.voice_id}`
+            }))
+      return [
+        ...ownedOptions,
+        ...options.filter(
+          (option) =>
+            !ownedOptions.some((owned) => owned.value === option.value)
+        )
+      ]
     }
-    if (audioSettings.provider === "openai") {
-      return OPENAI_TTS_VOICES
-    }
+    if (audioSettings.provider === "openai") return OPENAI_TTS_VOICES
     return []
   }, [
     audioSettings.model,
     audioSettings.provider,
+    catalogProvider,
+    customVoices,
     inferredTldwProviderKey,
+    selectedBackend,
     selectedBackendCapabilities,
     tldwVoices
   ])
@@ -289,11 +415,18 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     if (!voiceOptions.length) {
       return
     }
-    if (!voiceCatalogSettled && !tldwVoices.length) {
+    if (
+      unresolvedBackend ||
+      voiceCatalogSettled !== voiceCatalogKey ||
+      (!selectedBackend && customVoiceCatalogSettled !== customVoiceCatalogKey)
+    ) {
       return
     }
     const currentVoice = String(audioSettings.voice || "").trim()
-    if (currentVoice && voiceOptions.some((option) => option.value === currentVoice)) {
+    if (
+      currentVoice &&
+      voiceOptions.some((option) => option.value === currentVoice)
+    ) {
       return
     }
     setAudioSettings({ voice: voiceOptions[0].value })
@@ -303,6 +436,11 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     getVoiceOptions,
     tldwVoices.length,
     voiceCatalogSettled,
+    voiceCatalogKey,
+    customVoiceCatalogSettled,
+    customVoiceCatalogKey,
+    selectedBackend,
+    unresolvedBackend,
     setAudioSettings
   ])
 
@@ -328,11 +466,7 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
       return OPENAI_TTS_MODELS
     }
     return []
-  }, [
-    audioSettings.provider,
-    selectedBackendCapabilities,
-    tldwModels
-  ])
+  }, [audioSettings.provider, selectedBackendCapabilities, tldwModels])
 
   const backendOptions = React.useMemo(
     () => [
@@ -399,14 +533,17 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
 
     setPreviewingVoice(true)
     try {
-      const result = await tldwClient.synthesizeSpeechDetailed(VOICE_PREVIEW_TEXT, {
-        model: audioSettings.model,
-        voice: audioSettings.voice,
-        responseFormat: "mp3",
-        speed: audioSettings.speed,
-        backend: audioSettings.backend || undefined,
-        allowFallback: audioSettings.allowFallback ?? true
-      })
+      const result = await tldwClient.synthesizeSpeechDetailed(
+        VOICE_PREVIEW_TEXT,
+        {
+          model: audioSettings.model,
+          voice: audioSettings.voice,
+          responseFormat: "mp3",
+          speed: audioSettings.speed,
+          backend: audioSettings.backend || undefined,
+          allowFallback: audioSettings.allowFallback ?? true
+        }
+      )
       const audioBlob = new Blob([result.buffer], { type: "audio/mpeg" })
       const audioUrl = URL.createObjectURL(audioBlob)
 
@@ -441,7 +578,11 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     showTtsSettings,
     setShowTtsSettings,
     tldwVoices,
-    loadingVoices,
+    loadingVoices:
+      loadingVoices ||
+      (audioSettings.provider === "tldw" &&
+        !selectedBackend &&
+        customVoiceCatalogSettled !== customVoiceCatalogKey),
     previewingVoice,
     previewAudioRef,
     // computed
@@ -452,6 +593,6 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     getVoiceOptions,
     getModelOptions,
     handleBackendChange,
-    handlePreviewVoice,
+    handlePreviewVoice
   }
 }

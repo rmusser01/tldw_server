@@ -25,6 +25,39 @@ const mirrorBindingKey = ({ chatId, ownerKey, scope }: MirrorBinding) => JSON.st
 const acknowledgedMirrorIds = new Map<string, string>()
 export const hasAcknowledgedServerChatMirror = ({ historyId, ...binding }: MirrorBinding & { historyId: string | null }) => historyId !== null && acknowledgedMirrorIds.get(mirrorBindingKey(binding)) === historyId
 
+/** Read authority without adopting a legacy mirror or changing any local work. */
+export const readWorkspaceServerChatMirror = async ({
+  historyId, chatId, ownerKey, workspaceId,
+}: { historyId: string; chatId: string; ownerKey: string; workspaceId: string }) =>
+  db.transaction("r", [db.chatHistories, db.messages, db.compareStates, db.historySelections, db.sessionFiles], async () => {
+    const header = await db.chatHistories.get(historyId)
+    if (!header || header.server_chat_id !== chatId || header.server_scope_key !== ownerKey ||
+        header.server_scope_type !== "workspace" || header.server_workspace_id !== workspaceId)
+      throw new Error("Workspace Chat mirror ownership unavailable")
+    assertNoPendingLocalSettingsWrite(header)
+    if (header.is_rag || header.doc_id || header.character_id || header.last_used_prompt ||
+        header.root_id || header.parent_conversation_id || header.forked_from_message_id || header.local_owner_key)
+      throw new Error("Workspace Chat mirror has unsupported local context")
+    const rows = await db.messages.where("history_id").equals(historyId).toArray()
+    const compare = await db.compareStates.get(historyId)
+    const selections = await db.historySelections.where("conversation_id").equals(historyId).toArray()
+    const files = await db.sessionFiles.get(historyId)
+    if ((compare && Object.entries(compare).some(([key, value]) =>
+          !["history_id", "updatedAt"].includes(key) && value != null && value !== false &&
+          (typeof value !== "object" || Object.keys(value).length > 0))) ||
+        selections.some(row => Object.keys(row.pending_turns || {}).length || row.pending_confirmation ||
+          row.pending_view_session_id || row.pending_dispatch_started) ||
+        (files && (files.files.length || files.retrievalEnabled)))
+      throw new Error("Workspace Chat mirror has pending local work")
+    const fields = new Set(["id", "history_id", "name", "role", "content", "images", "sources", "createdAt",
+      "reasoning_time_taken", "messageType", "clusterId", "modelId", "generationInfo", "metadataExtra",
+      "modelName", "modelImage", "documents", "discoSkillComment", "serverMessageId", "serverMessageVersion", "parent_message_id"])
+    if (rows.some(row => Object.entries(row).some(([key, value]) => value !== undefined && !fields.has(key)) ||
+        !["user", "assistant", "system"].includes(row.role)))
+      throw new Error("Workspace Chat mirror has unverified message context")
+    return { header, rows, compare, selections, files }
+  })
+
 export const linkServerChatMirror = async ({
   chatId, title, ownerKey, currentHistoryId, legacyHistoryId, scope, signal, validate_lease
 }: {

@@ -969,9 +969,11 @@ describe("Playground cockpit shell", () => {
     });
 
     const runtimeRail = screen.getByTestId("playground-cockpit-right-rail");
-    expect(runtimeRail).toHaveTextContent("Error");
-    expect(runtimeRail).toHaveTextContent("No chat models configured");
-    expect(runtimeRail).not.toHaveTextContent("Ready");
+    await waitFor(() => {
+      expect(runtimeRail).toHaveTextContent("Error");
+      expect(runtimeRail).toHaveTextContent("No chat models configured");
+      expect(runtimeRail).not.toHaveTextContent("Ready");
+    });
 
     expect(
       screen.queryByRole("status", { name: "Chat status" }),

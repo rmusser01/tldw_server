@@ -1,4 +1,25 @@
 {
+  "requestedWorkspace_localWork": {
+    "message": "Your local draft or saved Chat has been kept. Return to the account where it was created to save or export it, then retry."
+  },
+  "requestedWorkspace_account": {
+    "message": "Check account"
+  },
+  "requestedWorkspace_unavailable": {
+    "message": "Workspace could not be opened"
+  },
+  "requestedWorkspace_recovery": {
+    "message": "Your current workspace and unsaved work have been kept. Check your account and connection, then retry."
+  },
+  "requestedWorkspace_retry": {
+    "message": "Retry"
+  },
+  "requestedWorkspace_back": {
+    "message": "Back to Workspaces"
+  },
+  "requestedWorkspace_opening": {
+    "message": "Opening workspace…"
+  },
   "sharedWorkspace_unavailable": {
     "message": "This shared workspace isn't available."
   },

@@ -311,10 +311,12 @@ class McpHubExternalAccessResolver:
             secret_available = bool(server.get("secret_configured")) or bool(
                 managed_secret_ref_ready_cache.get(int(state.get("managed_ref_id") or 0), False)
             )
+            auth = dict(dict(server.get("config") or {}).get("auth") or {})
+            requires_secret = str(auth.get("mode") or "none").strip().lower() not in {"", "none"}
             runtime_executable = bool(
                 allows_external
                 and not disabled
-                and secret_available
+                and (secret_available or not requires_secret)
                 and server_source == "managed"
                 and not superseded_by
                 and enabled
@@ -330,7 +332,7 @@ class McpHubExternalAccessResolver:
                 blocked_reason = "server_disabled"
             elif not allows_external:
                 blocked_reason = "external_capability_not_granted"
-            elif not secret_available:
+            elif requires_secret and not secret_available:
                 blocked_reason = "missing_secret"
 
             rows.append(

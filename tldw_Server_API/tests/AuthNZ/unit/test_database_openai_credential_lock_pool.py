@@ -130,6 +130,8 @@ async def test_fresh_postgres_initialize_executes_trusted_schema_as_guarded_stat
         async def fetchval(self, query: str) -> str | bool:
             if query == "SELECT version()":
                 return "PostgreSQL test"
+            if query == database.POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL:
+                return True
             if "information_schema.tables" in query:
                 return False
             raise AssertionError(f"Unexpected query: {query}")

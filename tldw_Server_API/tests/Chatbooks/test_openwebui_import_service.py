@@ -525,7 +525,7 @@ def test_import_openwebui_json_reports_oversized_chat_metadata_per_item(
         ConflictResolution.SKIP,
     )
 
-    assert success is True, message
+    assert success is False, message
     assert result["imported_chats"] == 0
     assert result["failed_chats"] == 1
     assert any("conversation metadata was not stored" in warning for warning in result["warnings"])
@@ -639,7 +639,7 @@ def test_import_openwebui_db_reports_oversized_chat_metadata_per_item(
         conflict_resolution=ConflictResolution.SKIP,
     )
 
-    assert success is True, message
+    assert success is False, message
     assert result["imported_chats"] == 0
     assert result["failed_chats"] == 1
     assert any("conversation metadata was not stored" in warning for warning in result["warnings"])
@@ -776,7 +776,7 @@ def test_import_openwebui_json_rolls_back_when_message_insert_fails(openwebui_se
 
     success, message, result = openwebui_service.import_openwebui_json(path, ConflictResolution.SKIP)
 
-    assert success is True, message
+    assert success is False, message
     assert result["imported_chats"] == 0
     assert result["imported_messages"] == 0
     assert result["failed_chats"] == 1
@@ -806,7 +806,7 @@ def test_import_openwebui_json_rolls_back_when_metadata_insert_fails(openwebui_s
 
     success, message, result = openwebui_service.import_openwebui_json(path, ConflictResolution.SKIP)
 
-    assert success is True, message
+    assert success is False, message
     assert result["imported_chats"] == 0
     assert result["failed_chats"] == 1
     assert openwebui_service.db.get_conversation_by_source_ref(
@@ -830,7 +830,7 @@ def test_import_openwebui_json_rolls_back_conversation_when_chat_fails_after_cre
 
     success, message, result = openwebui_service.import_openwebui_json(path, ConflictResolution.SKIP)
 
-    assert success is True, message
+    assert success is False, message
     assert result["imported_chats"] == 0
     assert result["failed_chats"] == 1
     assert openwebui_service.db.get_conversation_by_source_ref(

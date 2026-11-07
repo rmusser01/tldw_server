@@ -8,7 +8,6 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -24,12 +23,8 @@ def test_postgres_rls_helper_rebinds_on_media_database() -> None:
 
     postgres_rls_module = _load_postgres_rls_module()
 
-    assert MediaDatabase.__dict__["_postgres_policy_exists"].__globals__["__name__"] == (
-        postgres_rls_module.__name__
-    )
-    assert MediaDatabase.__dict__["_ensure_postgres_rls"].__globals__["__name__"] == (
-        postgres_rls_module.__name__
-    )
+    assert MediaDatabase.__dict__["_postgres_policy_exists"].__globals__["__name__"] == (postgres_rls_module.__name__)
+    assert MediaDatabase.__dict__["_ensure_postgres_rls"].__globals__["__name__"] == (postgres_rls_module.__name__)
 
 
 def test_postgres_policy_exists_returns_true_when_rows_are_present() -> None:
@@ -55,7 +50,7 @@ def test_postgres_policy_exists_returns_false_on_backend_error() -> None:
     assert postgres_rls_module._postgres_policy_exists(db, object(), "media", "policy_a") is False
 
 
-def test_ensure_postgres_rls_recreates_media_policy_and_only_creates_missing_sync_log_policies() -> None:
+def test_ensure_postgres_rls_refreshes_existing_and_creates_missing_sync_log_policies() -> None:
     postgres_rls_module = _load_postgres_rls_module()
 
     conn = object()
@@ -107,6 +102,8 @@ def test_ensure_postgres_rls_recreates_media_policy_and_only_creates_missing_syn
     assert any('ALTER TABLE "sync_log" ENABLE ROW LEVEL SECURITY' in call for call in calls)
     assert any('ALTER TABLE "sync_log" FORCE ROW LEVEL SECURITY' in call for call in calls)
     assert not any('CREATE POLICY "sync_scope_admin" ON "sync_log"' in call for call in calls)
+    assert any('ALTER POLICY "sync_scope_admin" ON "sync_log" USING (' in call for call in calls)  # nosec B101 # owner refresh regression assertion.
+    assert not any("DROP POLICY" in call and 'ON "sync_log"' in call for call in calls)  # nosec B101 # preserve existing roles and command.
     assert any('CREATE POLICY "sync_scope_personal" ON "sync_log"' in call for call in calls)
     assert any('CREATE POLICY "sync_scope_org" ON "sync_log"' in call for call in calls)
     assert any('CREATE POLICY "sync_scope_team" ON "sync_log"' in call for call in calls)

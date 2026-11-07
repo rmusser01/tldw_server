@@ -171,6 +171,68 @@ describe("research workspace server reconciliation", () => {
     )
   })
 
+  it.each([
+    ["all selected", true, true, ["source-b", "source-a", "source-a"]],
+    ["none selected", false, false, []],
+    ["mixed selection", true, false, ["source-a"]]
+  ] as const)(
+    "preserves existing source versions during unchanged %s bootstrap",
+    async (_name, a, b, selection) => {
+      const existing = [
+        { id: "source-a", media_id: 501, selected: a, version: 7 },
+        { id: "source-b", media_id: 502, selected: b, version: 11 }
+      ]
+      const client = makeClient(existing)
+      const result = await reconcileResearchWorkspaceServerState({
+        client,
+        workspaceId: "workspace-1",
+        sources: [
+          makeSource({ id: "source-a", mediaId: 501 }),
+          makeSource({ id: "source-b", mediaId: 502 })
+        ],
+        selectedSourceIds: [...selection]
+      })
+      expect(client.updateWorkspaceSourceSelection).not.toHaveBeenCalled()
+      expect(client.addWorkspaceSource).not.toHaveBeenCalled()
+      expect(result.errors).toEqual([])
+    }
+  )
+
+  it.each([
+    { existing: [] },
+    { existing: [{ id: "source-a", media_id: 501, selected: false }] }
+  ])(
+    "retains the selection write for missing desired IDs in %j",
+    async ({ existing }) => {
+      const client = makeClient(existing)
+      await reconcileResearchWorkspaceServerState({
+        client,
+        workspaceId: "workspace-1",
+        sources: [],
+        selectedSourceIds: ["missing"]
+      })
+      expect(
+        client.updateWorkspaceSourceSelection
+      ).toHaveBeenCalledExactlyOnceWith("workspace-1", ["missing"])
+    }
+  )
+
+  it("still clears selected server-only rows when local selection otherwise matches", async () => {
+    const client = makeClient([
+      { id: "source-a", media_id: 501, selected: true },
+      { id: "server-only", media_id: 502, selected: true }
+    ])
+    await reconcileResearchWorkspaceServerState({
+      client,
+      workspaceId: "workspace-1",
+      sources: [makeSource({ id: "source-a", mediaId: 501 })],
+      selectedSourceIds: ["source-a"]
+    })
+    expect(
+      client.updateWorkspaceSourceSelection
+    ).toHaveBeenCalledExactlyOnceWith("workspace-1", ["source-a"])
+  })
+
   it("reconciles existing backend rows to the canonical local selected source ids", async () => {
     const client = makeClient([
       {

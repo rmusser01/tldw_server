@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
@@ -1133,4 +1133,205 @@ describe("ExternalServersTab", () => {
     await user.click(within(row).getByRole("button", { name: /tool catalog/i }))
     expect(onOpenToolCatalog).toHaveBeenCalledTimes(1)
   }, 15000)
+  describe("credential context", () => {
+    const configureServers = async (legacy = false) => {
+      const [first] = await mocks.listExternalServers()
+      const slots = legacy ? [] : [
+        first.credential_slots[0],
+        { ...first.credential_slots[0], slot_name: "token_write", display_name: "Write token" }
+      ]
+      const rows = [
+        { ...first, credential_slots: slots },
+        {
+          ...first,
+          id: "docs-second",
+          name: "Docs Second",
+          credential_slots: slots.map((slot) => ({ ...slot, server_id: "docs-second" }))
+        }
+      ]
+      mocks.listExternalServers.mockClear()
+      mocks.listExternalServers.mockResolvedValue(rows)
+      mocks.getMcpHubReadiness.mockResolvedValue(readinessResponse([
+        readinessServer({}),
+        readinessServer({ server_id: "docs-second", server_name: "Docs Second" })
+      ]))
+      return rows
+    }
+
+    const findCredentialInput = async (legacy = false) => {
+      const input = await screen.findByLabelText(legacy ? /^secret$/i : /^slot secret$/i)
+      if (!legacy) await waitFor(() =>
+        expect(screen.getByLabelText(/^credential slot$/i)).toHaveValue("token_readonly")
+      )
+      return input
+    }
+
+    it.each(["server", "slot"])("retires a slot draft when its %s changes", async (target) => {
+      await configureServers()
+      render(<ExternalServersTab />)
+      const input = await findCredentialInput()
+      fireEvent.change(input, { target: { value: "first-target-draft" } })
+      fireEvent.change(screen.getByLabelText(target === "server" ? /^server$/i : /^credential slot$/i), {
+        target: { value: target === "server" ? "docs-second" : "token_write" }
+      })
+      expect(input).toHaveValue("")
+      expect(screen.getByRole("button", { name: /^save slot secret$/i })).toBeDisabled()
+      expect(mocks.setExternalServerSlotSecret).not.toHaveBeenCalled()
+    })
+
+    it("retires a legacy draft when its server changes", async () => {
+      await configureServers(true)
+      render(<ExternalServersTab />)
+      const input = await findCredentialInput(true)
+      fireEvent.change(input, { target: { value: "first-target-draft" } })
+      fireEvent.change(screen.getByLabelText(/^server$/i), { target: { value: "docs-second" } })
+      expect(input).toHaveValue("")
+      expect(screen.getByRole("button", { name: /^save secret$/i })).toBeDisabled()
+      expect(mocks.setExternalServerSecret).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ["legacy", "resolve"], ["legacy", "reject"],
+      ["slot", "resolve"], ["slot", "reject"],
+      ["clear", "resolve"], ["clear", "reject"]
+    ])("retires an old %s %s after drilldown leaves and returns to the same server", async (kind, outcome) => {
+      await configureServers(kind === "legacy")
+      let resolve!: (value: unknown) => void
+      let reject!: (reason: Error) => void
+      const pending = new Promise((yes, no) => { resolve = yes; reject = no })
+      const operation = kind === "legacy" ? mocks.setExternalServerSecret
+        : kind === "slot" ? mocks.setExternalServerSlotSecret : mocks.clearExternalServerSlotSecret
+      operation.mockReturnValueOnce(pending)
+      const view = render(<ExternalServersTab />)
+      const inputName = kind === "legacy" ? /^secret$/i : /^slot secret$/i
+      const input = await findCredentialInput(kind === "legacy")
+      if (kind !== "clear") fireEvent.change(input, { target: { value: "first-target-draft" } })
+      fireEvent.click(screen.getByRole("button", { name: kind === "legacy" ? /^save secret$/i
+        : kind === "slot" ? /^save slot secret$/i : /^clear slot secret$/i }))
+      try {
+        expect(operation).toHaveBeenCalledTimes(1)
+        expect(operation).toHaveBeenCalledWith(...(kind === "legacy"
+          ? ["docs-managed", "first-target-draft"]
+          : kind === "slot" ? ["docs-managed", "token_readonly", "first-target-draft"]
+            : ["docs-managed", "token_readonly"]))
+        for (const [object_id, request_id] of [["docs-second", 41], ["docs-managed", 42]] as const) {
+          view.rerender(<ExternalServersTab drillTarget={{
+            tab: "credentials", object_kind: "external_server", object_id, request_id, action: "focus"
+          }} />)
+          expect(screen.getByLabelText(/^server$/i)).toHaveValue(object_id)
+        }
+      } finally {
+        await act(async () => {
+          if (outcome === "resolve") resolve({ ok: true })
+          else reject(new Error("old-target-rejected"))
+          await pending.catch(() => undefined)
+        })
+      }
+      expect(screen.getByLabelText(inputName)).toHaveValue("")
+      expect(screen.queryByText(/^(Secret configured|Slot secret configured|Slot secret cleared)$/)).toBeNull()
+      expect(screen.queryByText(/old-target-rejected|Failed to (save|clear).*secret/i)).toBeNull()
+      expect(mocks.listExternalServers).toHaveBeenCalledTimes(1)
+    })
+
+    it("locks the credential draft during its save and keeps the current selection after inventory reload", async () => {
+      const rows = await configureServers()
+      let finish!: (value: unknown) => void
+      const pending = new Promise((resolve) => { finish = resolve })
+      mocks.listExternalServers.mockResolvedValueOnce(rows).mockReturnValueOnce(pending)
+      render(<ExternalServersTab />)
+      const input = await findCredentialInput()
+      fireEvent.change(input, { target: { value: "first-target-draft" } })
+      fireEvent.click(screen.getByRole("button", { name: /^save slot secret$/i }))
+      try {
+        expect(input).toBeDisabled()
+        expect(screen.getByRole("button", { name: /^clear slot secret$/i })).toBeDisabled()
+        await screen.findByText(/^Slot secret configured$/)
+        fireEvent.change(screen.getByLabelText(/^server$/i), { target: { value: "docs-second" } })
+      } finally {
+        await act(async () => { finish(rows); await pending })
+      }
+      expect(screen.getByLabelText(/^server$/i)).toHaveValue("docs-second")
+      expect(screen.getByLabelText(/^slot secret$/i)).toHaveValue("")
+      expect(screen.getByLabelText(/^slot secret$/i)).toBeEnabled()
+      expect(screen.queryByText(/^Slot secret configured$/)).toBeNull()
+    })
+
+    it("keeps the latest selected server when an inventory refresh removes the previous one", async () => {
+      const rows = await configureServers()
+      const refreshed = [{ ...rows[0], id: "docs-third", name: "Docs Third" }, rows[1]]
+      let finish!: (value: unknown) => void
+      const pending = new Promise((resolve) => { finish = resolve })
+      mocks.listExternalServers.mockResolvedValueOnce(rows).mockReturnValueOnce(pending)
+      render(<ExternalServersTab />)
+      const input = await findCredentialInput()
+      fireEvent.change(input, { target: { value: "first-target-draft" } })
+      fireEvent.click(screen.getByRole("button", { name: /^save slot secret$/i }))
+      try {
+        await screen.findByText(/^Slot secret configured$/)
+        fireEvent.change(screen.getByLabelText(/^server$/i), { target: { value: "docs-second" } })
+      } finally {
+        await act(async () => { finish(refreshed); await pending })
+      }
+      expect(screen.getByLabelText(/^server$/i)).toHaveValue("docs-second")
+    })
+
+    it("preserves the import result when the imported server becomes selected", async () => {
+      const rows = await mocks.listExternalServers()
+      mocks.listExternalServers.mockResolvedValueOnce(rows).mockResolvedValue([
+        rows[0], { ...rows[1], server_source: "managed", runtime_executable: true }
+      ])
+      render(<ExternalServersTab />)
+      const row = await findServerRow("Search Legacy")
+      fireEvent.click(within(row).getByRole("button", { name: /import to mcp hub/i }))
+      await waitFor(() => expect(screen.getByLabelText(/^server$/i)).toHaveValue("search-legacy"))
+      expect(await screen.findByText(/^Legacy server imported$/)).toBeTruthy()
+    })
+
+    it("preserves the slot creation result when the new slot becomes selected", async () => {
+      const rows = await mocks.listExternalServers()
+      mocks.listExternalServers.mockResolvedValueOnce(rows).mockResolvedValue([
+        { ...rows[0], credential_slots: [...rows[0].credential_slots, {
+          ...rows[0].credential_slots[0], slot_name: "token_write", display_name: "Write token"
+        }] }, ...rows.slice(1)
+      ])
+      render(<ExternalServersTab />)
+      await findCredentialInput()
+      fireEvent.click(screen.getByRole("button", { name: /^add slot$/i }))
+      fireEvent.change(screen.getByLabelText(/^slot name$/i), { target: { value: "token_write" } })
+      fireEvent.change(screen.getByLabelText(/^slot display name$/i), { target: { value: "Write token" } })
+      fireEvent.click(screen.getByRole("button", { name: /^save slot$/i }))
+      await waitFor(() => expect(screen.getByLabelText(/^credential slot$/i)).toHaveValue("token_write"))
+      expect(await screen.findByText(/^Credential slot created$/)).toBeTruthy()
+    })
+
+    it("preserves the new server discovery warning when its server becomes selected", async () => {
+      const rows = await mocks.listExternalServers()
+      const created = { ...rows[0], id: "docs-new", name: "Docs New", credential_slots: [] }
+      mocks.listExternalServers.mockResolvedValueOnce(rows).mockResolvedValue([...rows, created])
+      mocks.createExternalServer.mockResolvedValueOnce(created)
+      mocks.refreshExternalServerDiscovery.mockRejectedValueOnce(new Error("discovery-unavailable"))
+      render(<ExternalServersTab />)
+      await findCredentialInput()
+      fireEvent.click(screen.getByRole("button", { name: /new managed server/i }))
+      fireEvent.click(screen.getByRole("button", { name: /local stdio/i }))
+      fireEvent.change(screen.getByLabelText(/^server id$/i), { target: { value: "docs-new" } })
+      fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Docs New" } })
+      fireEvent.change(screen.getByLabelText(/^command$/i), { target: { value: "node" } })
+      fireEvent.click(screen.getByRole("button", { name: /save and discover tools/i }))
+      await waitFor(() => expect(screen.getByLabelText(/^server$/i)).toHaveValue("docs-new"))
+      expect(await screen.findByText("Docs New saved, but tool discovery failed: discovery-unavailable")).toBeTruthy()
+    })
+
+    it("shows the current slot save configuration error without losing the draft", async () => {
+      await configureServers()
+      const guidance = "Configure a valid BYOK_ENCRYPTION_KEY before saving MCP credentials"
+      mocks.setExternalServerSlotSecret.mockRejectedValueOnce(new Error(guidance))
+      render(<ExternalServersTab />)
+      const input = await findCredentialInput()
+      fireEvent.change(input, { target: { value: "first-target-draft" } })
+      fireEvent.click(screen.getByRole("button", { name: /^save slot secret$/i }))
+      expect(await screen.findByText(`Failed to save slot secret: ${guidance}`)).toBeTruthy()
+      expect(input).toHaveValue("first-target-draft")
+    })
+  })
 })

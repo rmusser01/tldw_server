@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_s
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
     apply_postgres_core_media_schema,
     ensure_postgres_keyword_identity,
+    ensure_postgres_media_owner_identity,
     ensure_postgres_sync_log_contract,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
@@ -105,12 +106,18 @@ def ensure_postgres_post_core_structures(
     """Ensure non-core PostgreSQL schema structures after base bootstrap or migration."""
 
     ensure_postgres_sync_log_contract(db, conn)
+    ensure_postgres_media_owner_identity(db, conn)
     db._ensure_postgres_collections_tables(conn)
     db._ensure_postgres_tts_history(conn)
     db._ensure_postgres_audio_presets(conn)
     db._ensure_postgres_data_tables(conn)
     _ensure_postgres_safe_transcript_extractor(db, conn)
     ensure_postgres_document_workspace_schema(conn)
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation import (
+        validate_postgres_annotation_replay_index,
+    )
+
+    validate_postgres_annotation_replay_index(db, conn)
     db._ensure_postgres_source_hash_column(conn)
     db._ensure_postgres_claims_extensions(conn)
     db._ensure_postgres_email_schema(conn)
@@ -119,6 +126,23 @@ def ensure_postgres_post_core_structures(
     ensure_postgres_policies(db, conn)
     # Last: it locks keywords, and requests lock media (RLS) before keywords.
     ensure_postgres_keyword_identity(db, conn)
+
+
+def ensure_postgres_email_acceleration_if_missing(db: SupportsPostgresPostCoreStructures, conn: Any) -> None:
+    """Retry optional acceleration only when its existing artifacts are absent."""
+    ready = db.backend.execute(
+        "SELECT to_regclass('public.idx_email_text_trigram') IS NOT NULL "
+        "AND (SELECT count(*) FROM pg_statistic_ext s JOIN pg_namespace n ON n.oid=s.stxnamespace "
+        "WHERE n.nspname=current_schema() AND s.stxname=ANY(%s))=2",
+        (["email_media_visibility_stats", "email_text_condition_stats"],),
+        connection=conn,
+    ).scalar
+    if ready is not True:
+        from tldw_Server_API.app.core.DB_Management.media_db.schema.email_schema_structures import (
+            _ensure_postgres_email_search_acceleration,
+        )
+
+        _ensure_postgres_email_search_acceleration(db, conn)
 
 
 def bootstrap_postgres_schema(db: SupportsPostgresPostCoreStructures) -> None:
@@ -144,6 +168,41 @@ def bootstrap_postgres_schema(db: SupportsPostgresPostCoreStructures) -> None:
             raise SchemaError(
                 f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
             )
+
+        authority = backend.execute(
+            "SELECT pg_has_role(current_user,c.relowner,'USAGE') AS can_migrate "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=current_schema() AND c.relname='media' AND c.relkind IN ('r','p')",
+            connection=conn,
+        ).first
+        if authority is not None and not authority["can_migrate"]:
+            if current_version != target_version:
+                raise SchemaError("PostgreSQL content requires schema-owner migration before runtime startup")
+            from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation import (
+                validate_postgres_runtime_schema,
+            )
+            validate_postgres_runtime_schema(db, conn)
+            return
+
+        if (
+            authority is not None
+            and authority["can_migrate"] is True
+            and current_version == target_version
+        ):
+            from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation import (
+                validate_postgres_owner_reopen,
+                validate_postgres_schema_catalog,
+            )
+
+            # Reopening a ready schema must not take DDL locks against live readers.
+            try:
+                validate_postgres_schema_catalog(db, conn)
+                validate_postgres_owner_reopen(db, conn)
+            except SchemaError:
+                logger.debug("PostgreSQL catalog validation requires schema-owner repair")
+            else:
+                ensure_postgres_email_acceleration_if_missing(db, conn)
+                return
 
         must_tables = [
             "media",

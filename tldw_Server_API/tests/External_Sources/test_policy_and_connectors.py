@@ -2487,3 +2487,21 @@ async def test_worker_gmail_large_fixture_backfill_handles_edge_cases(monkeypatc
     assert upsert_by_source["m004"]["metadata"]["email"]["attachments"]
     assert len(upsert_by_source["m004"]["metadata"]["email"]["attachments"]) == 1
     assert upsert_by_source["m001"]["metadata"]["email"]["labels"] == ["INBOX", "IMPORTANT"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_sqlite_connector_policy_keeps_lazy_provisioning_and_restrictions(tmp_path):
+    """Read-only PostgreSQL changes retain SQLite's existing setup and policy values."""
+    from tldw_Server_API.app.core.External_Sources import connectors_service as service
+
+    async with aiosqlite.connect(tmp_path / "policy.sqlite3") as db:
+        db.row_factory = aiosqlite.Row
+        db._is_sqlite = True
+        policy = await service.upsert_policy(
+            db, 41, {"enabled_providers": ["notion"], "denied_remote_paths": ["/private/*"]}
+        )
+        assert policy["enabled_providers"] == ["notion"] and policy["denied_remote_paths"] == [
+            "/private/*"
+        ]  # nosec B101 -- actual SQLite policy compatibility.
+        assert await service.get_policy(db, 42) == {}  # nosec B101 -- existing unconfigured policy behavior.

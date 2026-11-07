@@ -1,3 +1,6 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Button } from 'antd';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import postcss from 'postcss';
@@ -188,5 +191,84 @@ describe('shared primary button foreground', () => {
     expect(document.documentElement.style.getPropertyValue(foregroundVar)).toBe(white);
     clearThemeTokens();
     expect(document.documentElement.style.getPropertyValue(foregroundVar)).toBe('');
+  });
+});
+
+describe('Ant Design primary bridge boundaries', () => {
+  const selectorParser = createRequire(require.resolve('tailwindcss/package.json'))(
+    'postcss-selector-parser'
+  );
+
+  it.each([
+    { name: 'regular primary', props: { type: 'primary' as const }, expected: true },
+    {
+      name: 'disabled primary',
+      props: { type: 'primary' as const, disabled: true },
+      expected: false,
+    },
+    { name: 'danger primary', props: { type: 'primary' as const, danger: true }, expected: false },
+    { name: 'ghost primary', props: { type: 'primary' as const, ghost: true }, expected: false },
+    {
+      name: 'outlined primary',
+      props: { type: 'primary' as const, color: 'primary' as const, variant: 'outlined' as const },
+      expected: false,
+    },
+    {
+      name: 'link primary',
+      props: { color: 'primary' as const, variant: 'link' as const },
+      expected: false,
+    },
+  ])('applies readable normal/hover/pressed pairs only to $name', ({ props, expected }) => {
+    const host = document.createElement('div');
+    host.innerHTML = renderToStaticMarkup(createElement(Button, props, 'Action'));
+    const button = host.querySelector('button')!;
+    const css = postcss.parse(
+      readFileSync(require.resolve('../../assets/tailwind-shared.css'), 'utf8')
+    );
+    for (const state of ['normal', 'hover', 'active']) {
+      button.classList.remove('test-hover', 'test-active');
+      if (state !== 'normal') button.classList.add('test-' + state);
+      const styles: Record<string, string> = {};
+      css.walkRules((rule) => {
+        const ownsFill = rule.nodes.some(
+          (node) =>
+            node.type === 'decl' &&
+            node.prop === 'background-color' &&
+            /^rgb\(var\(--color-primary(?:-strong)?\)\)$/.test(node.value)
+        );
+        if (!ownsFill) return;
+        const selector = selectorParser(
+          (root: {
+            walkPseudos: (
+              fn: (pseudo: { value: string; replaceWith: (node: unknown) => void }) => void
+            ) => void;
+          }) => {
+            root.walkPseudos((pseudo) => {
+              if (pseudo.value === ':hover' || pseudo.value === ':active') {
+                pseudo.replaceWith(
+                  selectorParser.className({ value: 'test-' + pseudo.value.slice(1) })
+                );
+              }
+            });
+          }
+        ).processSync(rule.selector);
+        if (!button.matches(selector)) return;
+        rule.walkDecls((decl) => {
+          if (decl.prop === 'color' || decl.prop === 'background-color') {
+            expect(decl.important).toBe(true);
+            styles[decl.prop] = decl.value;
+          }
+        });
+      });
+      const tone = state === 'normal' ? 'primary' : 'primary-strong';
+      expect(styles).toEqual(
+        expected
+          ? {
+              'background-color': 'rgb(var(--color-' + tone + '))',
+              color: 'rgb(var(--color-' + tone + '-foreground))',
+            }
+          : {}
+      );
+    }
   });
 });

@@ -1,4 +1,5 @@
 import React, { useState } from "react"
+import type { MessageInstance } from "antd/es/message/interface"
 import { useTranslation } from "react-i18next"
 import { Button, Input, Table as AntTable, message } from "antd"
 import { Plus, Save, Search } from "lucide-react"
@@ -23,11 +24,27 @@ import {
   WORKSPACE_UNDO_WINDOW_MS,
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction,
+  finalizeWorkspaceUndoAction,
 } from "../undo-manager"
 import { buildProposalDeepResearchVerificationSections } from "./proposal-deep-research-verification"
 import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
 
 const MAX_DISPLAYED_UNRESOLVED_QUESTIONS = 3
+
+const useEditorRemovalUndo = (messageApi: MessageInstance) => {
+  const pending = React.useRef(new Map<string, string>())
+  const messages = React.useRef(messageApi)
+  messages.current = messageApi
+  const finalize = React.useCallback(() => {
+    for (const [id, key] of pending.current) {
+      finalizeWorkspaceUndoAction(id)
+      messages.current.destroy(key)
+    }
+    pending.current.clear()
+  }, [])
+  React.useEffect(() => () => finalize(), [finalize])
+  return { remember: (id: string, key: string) => pending.current.set(id, key), finalize }
+}
 
 export const MindMapArtifactViewer: React.FC<{
   content: string
@@ -416,11 +433,15 @@ export const ProposalDeepResearchVerificationViewer: React.FC<{
 
 export const FlashcardArtifactEditor: React.FC<{
   cards: FlashcardDraft[]
-  onSave: (cards: FlashcardDraft[]) => void
+  onSave: (cards: FlashcardDraft[]) => void | Promise<void>
 }> = ({ cards, onSave }) => {
   const { t } = useTranslation(["playground", "common"])
   const [messageApi, messageContextHolder] = message.useMessage()
   const [draftCards, setDraftCards] = useState<FlashcardDraft[]>(cards)
+  const [saving, setSaving] = useState(false)
+  const savingRef = React.useRef(false)
+  const removalUndo = useEditorRemovalUndo(messageApi)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const updateCard = (
     index: number,
@@ -455,6 +476,7 @@ export const FlashcardArtifactEditor: React.FC<{
       })
 
       const undoMessageKey = `workspace-flashcard-remove-undo-${undoHandle.id}`
+      removalUndo.remember(undoHandle.id, undoMessageKey)
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
@@ -499,12 +521,13 @@ export const FlashcardArtifactEditor: React.FC<{
       }
       }
     },
-    [draftCards, messageApi, t]
+    [draftCards, messageApi, removalUndo, t]
   )
 
   return (
-    <div className="flex max-h-[70vh] flex-col gap-3">
+    <fieldset disabled={saving} className="flex min-w-0 max-h-[70vh] flex-col gap-3 border-0 p-0">
       {messageContextHolder}
+      {saveError && <p role="alert" className="text-danger">{saveError}</p>}
       <div className="flex items-center justify-between">
         <p className="text-xs text-text-muted">
           Edit generated flashcards before reusing them.
@@ -552,28 +575,47 @@ export const FlashcardArtifactEditor: React.FC<{
         <Button
           type="primary"
           icon={<Save className="h-3.5 w-3.5" />}
-          onClick={() =>
-            onSave(
+          loading={saving}
+          aria-label="Save changes"
+          onClick={async () => {
+            if (savingRef.current) return
+            savingRef.current = true
+            setSaving(true)
+            setSaveError(null)
+            try {
+              removalUndo.finalize()
+              await onSave(
               draftCards.filter(
                 (card) => card.front.trim().length > 0 && card.back.trim().length > 0
               )
             )
-          }
+            } catch (error) {
+              setSaveError(error instanceof Error ? error.message :
+                t("playground:studio.outputEditSaveFailed", "Could not save. Your edits are kept."))
+            } finally {
+              savingRef.current = false
+              setSaving(false)
+            }
+          }}
         >
           Save changes
         </Button>
       </div>
-    </div>
+    </fieldset>
   )
 }
 
 export const QuizArtifactEditor: React.FC<{
   questions: QuizQuestionDraft[]
-  onSave: (questions: QuizQuestionDraft[]) => void
+  onSave: (questions: QuizQuestionDraft[]) => void | Promise<void>
 }> = ({ questions, onSave }) => {
   const { t } = useTranslation(["playground", "common"])
   const [messageApi, messageContextHolder] = message.useMessage()
   const [draftQuestions, setDraftQuestions] = useState<QuizQuestionDraft[]>(questions)
+  const [saving, setSaving] = useState(false)
+  const savingRef = React.useRef(false)
+  const removalUndo = useEditorRemovalUndo(messageApi)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const updateQuestion = (
     index: number,
@@ -608,6 +650,7 @@ export const QuizArtifactEditor: React.FC<{
       })
 
       const undoMessageKey = `workspace-quiz-remove-undo-${undoHandle.id}`
+      removalUndo.remember(undoHandle.id, undoMessageKey)
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
@@ -652,12 +695,13 @@ export const QuizArtifactEditor: React.FC<{
         }
       }
     },
-    [draftQuestions, messageApi, t]
+    [draftQuestions, messageApi, removalUndo, t]
   )
 
   return (
-    <div className="flex max-h-[70vh] flex-col gap-3">
+    <fieldset disabled={saving} className="flex min-w-0 max-h-[70vh] flex-col gap-3 border-0 p-0">
       {messageContextHolder}
+      {saveError && <p role="alert" className="text-danger">{saveError}</p>}
       <div className="flex items-center justify-between">
         <p className="text-xs text-text-muted">
           Edit generated quiz questions and answers.
@@ -738,19 +782,34 @@ export const QuizArtifactEditor: React.FC<{
         <Button
           type="primary"
           icon={<Save className="h-3.5 w-3.5" />}
-          onClick={() =>
-            onSave(
+          loading={saving}
+          aria-label="Save changes"
+          onClick={async () => {
+            if (savingRef.current) return
+            savingRef.current = true
+            setSaving(true)
+            setSaveError(null)
+            try {
+              removalUndo.finalize()
+              await onSave(
               draftQuestions.filter(
                 (question) =>
                   question.question.trim().length > 0 &&
                   question.answer.trim().length > 0
               )
             )
-          }
+            } catch (error) {
+              setSaveError(error instanceof Error ? error.message :
+                t("playground:studio.outputEditSaveFailed", "Could not save. Your edits are kept."))
+            } finally {
+              savingRef.current = false
+              setSaving(false)
+            }
+          }}
         >
           Save changes
         </Button>
       </div>
-    </div>
+    </fieldset>
   )
 }

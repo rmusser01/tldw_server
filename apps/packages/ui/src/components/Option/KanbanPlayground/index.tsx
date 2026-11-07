@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react"
+import { lazy, Suspense, useState, useCallback, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Dropdown,
@@ -18,7 +18,8 @@ import {
   Download,
   RefreshCw,
   Archive,
-  MoreVertical
+  MoreVertical,
+  Sparkles
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -31,6 +32,8 @@ import { ImportPanel } from "./ImportPanel"
 import { ArchivedItemsDrawer } from "./ArchivedItemsDrawer"
 import { BoardGallery } from "./BoardGallery"
 import { useKanbanShortcuts } from "./useKanbanShortcuts"
+
+const GenerateBoardDialog = lazy(() => import("./GenerateBoardDialog"))
 
 const BADGE_INDICATOR_STYLE = {
   backgroundColor: "rgb(var(--color-primary))",
@@ -58,6 +61,7 @@ const KanbanWorkspace = () => {
 
   // Create board modal state
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [generateModalOpen, setGenerateModalOpen] = useState(false)
   const [newBoardName, setNewBoardName] = useState("")
   const [newBoardDescription, setNewBoardDescription] = useState("")
 
@@ -264,12 +268,12 @@ const KanbanWorkspace = () => {
   ]
 
   const renderHeader = () => (
-    <div className="flex items-center justify-between mb-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div className="flex items-center gap-3">
         <Kanban className="w-6 h-6 text-primary" />
         <h1 className="text-xl font-semibold">Kanban Playground</h1>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 text-sm text-text-muted">
           <span>Boards</span>
           <Badge
@@ -294,10 +298,12 @@ const KanbanWorkspace = () => {
         >
           New Board
         </Button>
+        <Button icon={<Sparkles className="w-4 h-4" />} onClick={() => setGenerateModalOpen(true)}>Generate board</Button>
         <Dropdown menu={{ items: actionsMenuItems }} trigger={["click"]}>
-          <Button icon={<MoreVertical className="w-4 h-4" />} />
+          <Button aria-label="Board actions" icon={<MoreVertical className="w-4 h-4" />} />
         </Dropdown>
         <Button
+          aria-label="Refresh boards"
           icon={<RefreshCw className="w-4 h-4" />}
           onClick={() => {
             refetchBoards()
@@ -354,6 +360,14 @@ const KanbanWorkspace = () => {
       {renderHeader()}
 
       <div className="min-h-[500px]">{renderContent()}</div>
+
+      {generateModalOpen && <Suspense fallback={<p role="status">Loading board generation…</p>}>
+        <GenerateBoardDialog onClose={() => setGenerateModalOpen(false)} onSaved={boardId => {
+          if (!isActive()) return
+          handleBoardImported(boardId)
+          setGenerateModalOpen(false)
+        }} />
+      </Suspense>}
 
       {/* Archive drawer */}
       <ArchivedItemsDrawer

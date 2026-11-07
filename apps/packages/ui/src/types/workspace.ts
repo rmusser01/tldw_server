@@ -395,6 +395,9 @@ export interface WorkspaceStudyArtifactData {
 }
 
 export interface GeneratedArtifact {
+  workspaceArtifactId?: string
+  workspaceArtifactVersion?: number
+  removedFromStudio?: boolean
   id: string
   type: ArtifactType
   title: string

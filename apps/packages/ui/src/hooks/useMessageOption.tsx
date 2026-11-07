@@ -47,6 +47,7 @@ import type { ChatScope } from "@/types/chat-scope";
 type PersonaMemoryMode = "read_only" | "read_write";
 
 type UseMessageOptionOptions = {
+  capturePrivateScene?: Parameters<typeof useChatActions>[0]["capturePrivateScene"];
   /** Only the chat surface owns hydration; toolbars and settings are passive. */
   hydrateServerChat?: boolean;
   forceCompareEnabled?: boolean;
@@ -726,6 +727,7 @@ export const useMessageOption = (
     inheritedAssistant,
     inheritedPersonaMemoryMode,
     scope: opts.scope,
+    capturePrivateScene: opts.capturePrivateScene,
     visualIdentityManualExpressionOverride:
       opts.visualIdentityManualExpressionOverride,
     setVisualIdentityManualExpressionOverride:

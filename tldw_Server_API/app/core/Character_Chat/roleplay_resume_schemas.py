@@ -77,7 +77,7 @@ class RoleplayResumeCompletionResultV1(HistoryWireModel):
 class CharacterChatCompletionV2Response(BaseModel):
     tldw_roleplay_resume_v1: RoleplayResumeCompletionResultV1 | None = None
     chat_id: str
-    character_id: int
+    character_id: int | None
     provider: str
     model: str | None = None
     saved: bool = False

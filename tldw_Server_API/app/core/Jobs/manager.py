@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid as _uuid
+from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -2319,6 +2320,24 @@ class JobManager:
             cls._RLS_OWNER_USER_ID.set(owner_user_id if (owner_user_id or "").strip() else None)
         except _JOB_NONCRITICAL_EXCEPTIONS:
             pass
+
+    @classmethod
+    @contextlib.contextmanager
+    def scoped_rls_context(
+        cls, *, is_admin: bool, domain_allowlist: str | None, owner_user_id: str | None
+    ) -> Iterator[None]:
+        """Restore the caller's tenant context even when a request is cancelled."""
+        domain = domain_allowlist if (domain_allowlist or "").strip() else None
+        owner = owner_user_id if (owner_user_id or "").strip() else None
+        admin_token = cls._RLS_IS_ADMIN.set(bool(is_admin))
+        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain)
+        owner_token = cls._RLS_OWNER_USER_ID.set(owner)
+        try:
+            yield
+        finally:
+            cls._RLS_OWNER_USER_ID.reset(owner_token)
+            cls._RLS_DOMAIN_ALLOWLIST.reset(domain_token)
+            cls._RLS_IS_ADMIN.reset(admin_token)
 
     @classmethod
     def clear_rls_context(cls) -> None:
@@ -4949,6 +4968,9 @@ class JobManager:
         payload: dict[str, Any],
         expected_uuid: str | None = None,
         expected_domain: str | None = None,
+        expected_worker_id: str | None = None,
+        expected_lease_id: str | None = None,
+        expected_payload: dict[str, Any] | None = None,
     ) -> bool:
         """Atomically replace one guarded live Jobs payload."""
         if not isinstance(payload, dict):
@@ -4965,17 +4987,29 @@ class JobManager:
                 if expected_domain is not None:
                     clauses.append("domain = %s")
                     guards.append(str(expected_domain))
+                if expected_worker_id is not None:
+                    clauses.append("worker_id = %s")
+                    guards.append(expected_worker_id)
+                if expected_lease_id is not None:
+                    clauses.append("lease_id = %s")
+                    guards.append(expected_lease_id)
+                if expected_worker_id is not None or expected_lease_id is not None:
+                    clauses.append("status = 'processing'")
                 where_sql = " AND ".join(clauses)
                 with conn:
                     with self._pg_cursor(conn) as cur:
                         cur.execute(
-                            "SELECT domain, queue, job_type FROM jobs "
+                            "SELECT domain, queue, job_type, payload FROM jobs "
                             f"WHERE {where_sql} FOR UPDATE",  # nosec B608
                             tuple(guards),
                         )
                         row = cur.fetchone()
                         if not row:
                             return False
+                        if expected_payload is not None:
+                            current_payload = self._maybe_decrypt_json(self._parse_json_value(row["payload"]))
+                            if json.dumps(current_payload, sort_keys=True, allow_nan=False) != json.dumps(expected_payload, sort_keys=True, allow_nan=False):
+                                return False
                         serialized = self._serialize_replacement_payload(
                             payload,
                             domain=str(row["domain"]),
@@ -4997,16 +5031,28 @@ class JobManager:
             if expected_domain is not None:
                 clauses.append("domain = ?")
                 guards.append(str(expected_domain))
+            if expected_worker_id is not None:
+                clauses.append("worker_id = ?")
+                guards.append(expected_worker_id)
+            if expected_lease_id is not None:
+                clauses.append("lease_id = ?")
+                guards.append(expected_lease_id)
+            if expected_worker_id is not None or expected_lease_id is not None:
+                clauses.append("status = 'processing'")
             where_sql = " AND ".join(clauses)
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT domain, queue, job_type FROM jobs "
+                    "SELECT domain, queue, job_type, payload FROM jobs "
                     f"WHERE {where_sql}",  # nosec B608
                     tuple(guards),
                 ).fetchone()
                 if not row:
                     return False
+                if expected_payload is not None:
+                    current_payload = self._maybe_decrypt_json(self._parse_json_value(row[3]))
+                    if json.dumps(current_payload, sort_keys=True, allow_nan=False) != json.dumps(expected_payload, sort_keys=True, allow_nan=False):
+                        return False
                 serialized = self._serialize_replacement_payload(
                     payload,
                     domain=str(row[0]),

@@ -68,6 +68,7 @@ def create_data_table(
     row_count: int = 0,
     generation_model: str | None = None,
     table_uuid: str | None = None,
+    generation_job: dict[str, str] | None = None,
     owner_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Create a data table metadata record and return the row."""
@@ -87,9 +88,9 @@ def create_data_table(
             """
             INSERT INTO data_tables (
                 uuid, name, description, workspace_tag, prompt, column_hints_json, status,
-                row_count, generation_model, last_error,
+                row_count, generation_model, last_error, generation_job_json,
                 created_at, updated_at, last_modified, version, client_id, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 table_uuid,
@@ -102,12 +103,13 @@ def create_data_table(
                 int(row_count),
                 generation_model,
                 None,
+                json.dumps(generation_job, sort_keys=True) if generation_job is not None else None,
                 now,
                 now,
                 now,
                 1,
                 owner_client_id,
-                0,
+                False,
             ),
         )
         row = self._fetchone_with_connection(
@@ -242,6 +244,9 @@ def update_data_table(
     generation_model: str | None = None,
     last_error: Any = _DATA_TABLES_UNSET,
     column_hints: str | dict[str, Any] | list[Any] | None = None,
+    generation_job: Any = _DATA_TABLES_UNSET,
+    expected_generation_job: Any = _DATA_TABLES_UNSET,
+    expected_version: int | None = None,
 ) -> dict[str, Any] | None:
     """Update data table metadata and return the updated row."""
     owner_filter = self._resolve_data_tables_owner(owner_user_id)
@@ -273,6 +278,10 @@ def update_data_table(
         update_parts.append("column_hints_json = ?")
         params.append(_serialize_column_hints(column_hints))
 
+    if generation_job is not _DATA_TABLES_UNSET:
+        update_parts.append("generation_job_json = ?")
+        params.append(json.dumps(generation_job, sort_keys=True) if generation_job is not None else None)
+
     if not update_parts:
         return self.get_data_table(int(table_id), include_deleted=True, owner_user_id=owner_user_id)
 
@@ -288,8 +297,26 @@ def update_data_table(
     if owner_filter is not None:
         sql += " AND client_id = ?"
         params.append(owner_filter)
-    self.execute_query(sql, tuple(params), commit=True)
-    return self.get_data_table(int(table_id), include_deleted=True, owner_user_id=owner_user_id)
+    # Keep the returned version under the UPDATE's row lock.
+    with self.transaction() as conn:
+        if expected_generation_job is not _DATA_TABLES_UNSET or expected_version is not None:
+            locked_sql = "SELECT * FROM data_tables WHERE id = ? AND client_id = ? AND deleted = 0"
+            if self.backend_type == BackendType.POSTGRESQL:
+                locked_sql += " FOR UPDATE"
+            current = self._fetchone_with_connection(conn, locked_sql, (int(table_id), owner_filter or str(self.client_id)))
+            if not current:
+                return None
+            if expected_generation_job is not _DATA_TABLES_UNSET and current.get("generation_job_json") != expected_generation_job:
+                return None
+            if expected_version is not None and current["version"] != expected_version:
+                return None
+        self._execute_with_connection(conn, sql, tuple(params))
+        read_sql = "SELECT * FROM data_tables WHERE id = ?"
+        read_params: list[Any] = [int(table_id)]
+        if owner_filter is not None:
+            read_sql += " AND client_id = ?"
+            read_params.append(owner_filter)
+        return self._fetchone_with_connection(conn, read_sql, tuple(read_params))
 
 
 def soft_delete_data_table(self: Any, table_id: int, owner_user_id: int | None = None) -> bool:

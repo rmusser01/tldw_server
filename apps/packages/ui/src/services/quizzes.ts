@@ -1,3 +1,4 @@
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { bgRequest } from "@/services/background-proxy"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { createResourceClient } from "@/services/resource-client"
@@ -704,7 +705,7 @@ export async function respondQuizAttemptQuestionAssistant(
 
 export async function generateQuiz(
   request: QuizGenerateRequest,
-  options?: { signal?: AbortSignal; timeoutMs?: number }
+  options?: { signal?: AbortSignal; timeoutMs?: number; requestScope?: ServicePromptRequestScope }
 ): Promise<QuizGenerateResponse> {
   const timeoutMs =
     typeof options?.timeoutMs === "number" && options.timeoutMs > 0
@@ -714,7 +715,8 @@ export async function generateQuiz(
   return await bgRequest<QuizGenerateResponse, AllowedPath, "POST">({
     path: "/api/v1/quizzes/generate",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...requestScopeFields(options?.requestScope),
+    headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
     body: request,
     abortSignal: options?.signal,
     timeoutMs

@@ -628,7 +628,7 @@ it("reuses the shell controller and gives chat route reentry a fresh lifetime", 
     const selection = useHistorySelectionContext()
     const navigate = useNavigate()
     seen.push(selection?.getReference ?? null)
-    return <><button onClick={() => navigate("/settings")}>Leave</button><button onClick={() => navigate("/chat")}>Return</button></>
+    return <><button onClick={() => navigate("/model-playground")}>Model</button><button onClick={() => navigate("/settings")}>Leave</button><button onClick={() => navigate("/chat")}>Return</button></>
   }
   function Content() {
     const current = useHistorySelectionContext()
@@ -637,6 +637,10 @@ it("reuses the shell controller and gives chat route reentry a fresh lifetime", 
   const view = render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><Content /></OptionLayout></MemoryRouter>)
   const first = seen.at(-1)
   expect(first).toBeTypeOf("function")
+  fireEvent.click(view.getByText("Model"))
+  expect(seen.at(-1)).toBe(first)
+  fireEvent.click(view.getByText("Return"))
+  expect(seen.at(-1)).toBe(first)
   fireEvent.click(view.getByText("Leave"))
   expect(seen.at(-1)).toBeTypeOf("function")
   expect(seen.at(-1)).not.toBe(first)

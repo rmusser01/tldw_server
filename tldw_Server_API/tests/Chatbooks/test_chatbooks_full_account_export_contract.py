@@ -2,6 +2,7 @@ import base64
 import json
 import zipfile
 from collections.abc import AsyncIterator
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -733,3 +734,114 @@ async def test_jobs_worker_marks_export_job_failed_for_zero_item_allowlist():
     assert saved_jobs[0].status is ExportStatus.FAILED
     assert saved_jobs[0].completed_at is not None
     assert "allowlist" in saved_jobs[0].error_message
+
+
+@pytest.mark.asyncio
+async def test_full_account_scope_tag_count_matches_export(tmp_path, monkeypatch, full_account_user):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "content"))
+    with ExitStack() as cleanup:
+        db = CharactersRAGDB(db_path=str(DatabasePaths.get_chacha_db_path(1)), client_id="1")
+        cleanup.callback(db.close_connection)
+        assert db.add_keyword("s02-roundtrip-tag") is not None  # nosec B101 -- Pytest behavior assertion.
+        service = ChatbookService(user_id="1", db=db, user_id_int=1)
+        scope = {row["category"]: row for row in service.get_full_account_export_scope()["categories"]}
+        success, message, archive_path = await service.create_chatbook(
+            name="S02 tag scope",
+            description="Exact scope count",
+            format_version=ChatbookVersion.V1_1,
+            content_selections=None,
+            async_mode=False,
+        )
+        assert success, message  # nosec B101 -- Pytest behavior assertion.
+        with zipfile.ZipFile(archive_path) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["account_inventory_summary"]["counts"]["tags_categories_relationships"] == 1  # nosec B101 -- Pytest behavior assertion.
+        assert scope["tags_categories_relationships"]["count"] == 1  # nosec B101 -- Pytest behavior assertion.
+        assert scope["tags_categories_relationships"]["restore_status"] == "non_restorable"  # nosec B101 -- Pytest behavior assertion.
+        assert scope["tags_categories_relationships"]["warning"]  # nosec B101 -- Pytest behavior assertion.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row_counts", [(3,), (0,), (2, 0)])
+async def test_full_account_scope_embedding_collection_count_matches_export(
+    tmp_path,
+    monkeypatch,
+    full_account_user,
+    row_counts,
+):
+    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "content"))
+    with ExitStack() as cleanup:
+        db = CharactersRAGDB(db_path=str(DatabasePaths.get_chacha_db_path(1)), client_id="1")
+        cleanup.callback(db.close_connection)
+        chroma = ChromaDBManager(
+            user_id="1",
+            user_embedding_config={
+                "USER_DB_BASE_DIR": str(DatabasePaths.get_user_db_base_dir()),
+                "chroma_client_settings": {"backend": "persistent", "anonymized_telemetry": False},
+            },
+        )
+        cleanup.callback(chroma.close)
+        for index, count in enumerate(row_counts):
+            collection = chroma.get_or_create_collection(collection_name=f"s02-scope-{index}")
+            if count:
+                collection.add(
+                    ids=[f"row-{i}" for i in range(count)],
+                    documents=[f"Rowan fact {i}" for i in range(count)],
+                    embeddings=[[float(i), 1.0] for i in range(count)],
+                )
+        assert (chroma.user_chroma_path / "chroma.sqlite3").is_file()  # nosec B101 -- Pytest behavior assertion.
+        service = ChatbookService(user_id="1", db=db, user_id_int=1)
+        service._chroma_manager = chroma
+        scope = {row["category"]: row for row in service.get_full_account_export_scope()["categories"]}
+        success, message, archive_path = await service.create_chatbook(
+            name="S02 embedding scope",
+            description="Collection units",
+            format_version=ChatbookVersion.V1_1,
+            content_selections=None,
+            include_embeddings=True,
+            async_mode=False,
+        )
+        assert success, message  # nosec B101 -- Pytest behavior assertion.
+        with zipfile.ZipFile(archive_path) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["account_inventory_summary"]["counts"]["embeddings"] == len(row_counts)  # nosec B101 -- Pytest behavior assertion.
+        assert scope["embeddings"]["count"] == len(row_counts)  # nosec B101 -- Pytest behavior assertion.
+
+
+@pytest.mark.asyncio
+async def test_full_account_scope_counts_media_vectors_without_chroma(tmp_path, monkeypatch, full_account_user):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "content"))
+    with ExitStack() as cleanup:
+        db = CharactersRAGDB(db_path=str(DatabasePaths.get_chacha_db_path(1)), client_id="1")
+        cleanup.callback(db.close_connection)
+        media_db = create_media_database("1", db_path=str(DatabasePaths.get_media_db_path(1)))
+        cleanup.callback(media_db.close_connection)
+        for index in range(2):
+            media_id, _, _ = media_db.add_media_with_keywords(
+                url=f"https://example.test/s02-vector-{index}",
+                title=f"S02 vector source {index}",
+                media_type="document",
+                content="Rowan Observatory uses Selene.",
+                keywords=[],
+                owner_user_id=1,
+            )
+            if index == 0:
+                media_db.set_media_vector_embedding(int(media_id), bytes.fromhex("0000803f00000000"))
+        service = ChatbookService(user_id="1", db=db, user_id_int=1)
+        service._media_db = media_db
+        scope = {row["category"]: row for row in service.get_full_account_export_scope()["categories"]}
+        success, message, archive_path = await service.create_chatbook(
+            name="S02 media vectors",
+            description="Media vector units",
+            format_version=ChatbookVersion.V1_1,
+            content_selections=None,
+            include_embeddings=True,
+            async_mode=False,
+        )
+        assert success, message  # nosec B101 -- Pytest behavior assertion.
+        with zipfile.ZipFile(archive_path) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["account_inventory_summary"]["counts"]["embeddings"] == 1  # nosec B101 -- Pytest behavior assertion.
+        assert scope["embeddings"]["count"] == 1  # nosec B101 -- Pytest behavior assertion.

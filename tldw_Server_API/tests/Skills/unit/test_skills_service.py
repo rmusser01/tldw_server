@@ -125,6 +125,20 @@ class TestSkillsService:
         yield service
         chacha_db.close_connection()
 
+    @pytest.mark.asyncio
+    async def test_cold_sync_preserves_ambiguous_missing_row_purge_archive(self, service):
+        created = await service.create_skill("ambiguous-purge", "Preserve this exact source.")
+        await service.delete_skill("ambiguous-purge", expected_version=created["version"])
+        row = service._get_db().get_skill_registry("ambiguous-purge", include_deleted=True)
+        archive = Path(row["directory_path"])
+        staging = service.trash_dir / (".purging-" + row["uuid"])
+        archive.rename(staging)
+        before = {str(p.relative_to(staging)): p.read_bytes() for p in staging.rglob("*") if p.is_file()}
+        service._get_db().purge_skill_registry("ambiguous-purge", expected_version=row["version"])
+        await _restart_and_sync(service)
+        assert staging.is_dir()  # nosec B101 # Missing registry authority cannot prove an archive is obsolete.
+        assert {str(p.relative_to(staging)): p.read_bytes() for p in staging.rglob("*") if p.is_file()} == before  # nosec B101 # Preserve every original archive byte.
+
     def test_cleanup_failure_log_omits_paths_and_exception_details(
         self,
         service,
@@ -2183,12 +2197,12 @@ Body
         assert not cleanup_dir.exists() or not any(cleanup_dir.iterdir())
 
     @pytest.mark.asyncio
-    async def test_startup_reconciles_purge_when_cleanup_queue_staging_failed(
+    async def test_startup_preserves_unproven_purge_when_cleanup_queue_staging_failed(
         self,
         service,
         monkeypatch,
     ):
-        """A committed purge orphan is retried even when queue staging failed."""
+        """A cold process cannot infer purge commitment from a now-invisible row."""
         created = await service.create_skill("purge-stage-failure", "Old body")
         await service.delete_skill("purge-stage-failure", expected_version=created["version"])
         deleted_row = service._get_db().get_skill_registry(
@@ -2209,15 +2223,20 @@ Body
 
         staging_dir = service.trash_dir / f".purging-{deleted_row['uuid']}"
         assert staging_dir.is_dir()
-        assert service._get_db().get_skill_registry(
-            "purge-stage-failure",
-            include_deleted=True,
-        ) is None
+        assert (
+            service._get_db().get_skill_registry(
+                "purge-stage-failure",
+                include_deleted=True,
+            )
+            is None
+        )
 
+        held = {str(p.relative_to(staging_dir)): p.read_bytes() for p in staging_dir.rglob("*") if p.is_file()}
         monkeypatch.setattr(service, "_stage_for_cleanup", original_stage)
         await _restart_and_sync(service)
 
-        assert not staging_dir.exists()
+        assert staging_dir.is_dir()  # nosec B101 # Missing authority cannot authorize cleanup after restart.
+        assert {str(p.relative_to(staging_dir)): p.read_bytes() for p in staging_dir.rglob("*") if p.is_file()} == held  # nosec B101 # Keep every preserved byte.
 
     @pytest.mark.asyncio
     async def test_startup_reconciles_replacement_archive_when_queue_staging_failed(

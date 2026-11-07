@@ -443,15 +443,19 @@ async def _backfill_audio_usage_daily_to_ledger(ledger: ResourceDailyLedger) -> 
         return
     try:
         pool = await get_db_pool()
-        # Ensure legacy tables exist if callers created them previously; this
-        # is a no-op when they do not.
-        await _ensure_tables(pool)
+        if pool.pool:
+            # Reporting must not provision an optional legacy store under the serving role.
+            if not await pool.fetchval("SELECT to_regclass('public.audio_usage_daily') IS NOT NULL"):
+                _audio_minutes_legacy_backfill_done = True
+                return
+        else:
+            await _ensure_tables(pool)
         day = datetime.now(timezone.utc).date()
         rows = []
         if pool.pool:
             try:
                 rows = await pool.fetch(
-                    "SELECT user_id, minutes_used FROM audio_usage_daily WHERE day=$1",
+                    "SELECT user_id, minutes_used FROM public.audio_usage_daily WHERE day=$1",
                     day,
                 )
                 iterable = [(int(r["user_id"]), float(r["minutes_used"])) for r in rows or []]

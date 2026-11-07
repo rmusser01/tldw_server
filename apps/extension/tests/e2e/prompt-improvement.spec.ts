@@ -350,9 +350,30 @@ const ensureChatInput = async (page: Page) => {
       })
     )
     .filter({ visible: true })
-  await expect(input).toHaveCount(1, { timeout: 20_000 })
-  await expect(input).toBeVisible({ timeout: 20_000 })
-  await expect(input).toBeEditable()
+  try {
+    await expect(input).toHaveCount(1, { timeout: 20_000 })
+    await expect(input).toBeVisible({ timeout: 20_000 })
+    await expect(input).toBeEditable()
+  } catch (error) {
+    console.error("[prompt-improvement:composer-readiness]", {
+      ...await page.evaluate(() => {
+        const store = Reflect.get(window, "__tldw_useConnectionStore")
+        const state = store?.getState?.()?.state
+        return {
+          storeReady: typeof store?.getState === "function",
+          connected: state?.isConnected === true,
+          checking: state?.isChecking === true,
+          rootChildCount: document.querySelector("#root")?.children.length ?? 0,
+          restoreBusy: !!document.querySelector('[aria-busy="true"][aria-label="Restoring previous chat"]'),
+          composerDockCount: document.querySelectorAll('[data-testid="sidepanel-composer-dock"]').length,
+          alertCount: document.querySelectorAll('[role="alert"]').length,
+        }
+      }).catch(() => ({ snapshotUnavailable: true })),
+      visibleInputCount: await input.count().catch(() => null),
+      startButtonVisible: await startButton.first().isVisible().catch(() => false),
+    })
+    throw error
+  }
   return input
 }
 

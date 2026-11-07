@@ -2936,6 +2936,9 @@
   "tldw_logout_failed": {
     "message": "Logout failed"
   },
+  "tldw_logout_unconfirmed": {
+    "message": "The server did not confirm sign-out. This session may still be active."
+  },
   "evaluations_title": {
     "message": "Evaluations playground"
   },

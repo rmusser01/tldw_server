@@ -1,4 +1,5 @@
 import { bgRequest } from "@/services/background-proxy"
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 
 export type ResearchWorkspaceArtifactType = "audio_overview" | "data_table" | "mindmap"
@@ -24,12 +25,13 @@ export type ResearchWorkspaceArtifactGenerateResponse = {
 
 export async function generateResearchWorkspaceArtifact(
   request: ResearchWorkspaceArtifactGenerateRequest,
-  options?: { signal?: AbortSignal; timeoutMs?: number }
+  options?: { signal?: AbortSignal; timeoutMs?: number; requestScope?: ServicePromptRequestScope }
 ): Promise<ResearchWorkspaceArtifactGenerateResponse> {
   return await bgRequest<ResearchWorkspaceArtifactGenerateResponse, AllowedPath, "POST">({
     path: "/api/v1/research-workspace/artifacts/generate",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...requestScopeFields(options?.requestScope),
+    headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
     body: request,
     abortSignal: options?.signal,
     timeoutMs: options?.timeoutMs ?? 180000

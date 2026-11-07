@@ -43,6 +43,9 @@ def _make_principal(
 
 
 class _FakeService:
+    async def refresh_external_server_discovery(self, server_id, executor):
+        return await executor(server_id)
+
     async def list_acp_profiles(self, **_kwargs: Any) -> list[dict[str, Any]]:
         return []
 
@@ -650,6 +653,13 @@ def _registry_entry(
 class _ConfigurableExternalServerService(_FakeService):
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.rows = rows
+
+    async def refresh_external_server_discovery(self, server_id, executor):
+        result = await executor(server_id)
+        for row in self.rows:
+            if server_id is None or row["id"] == server_id:
+                row["last_error_category"] = "discovery_failed" if row["id"] in result.get("errors", {}) else None
+        return result
 
     async def list_external_servers(self, **kwargs: Any) -> list[dict[str, Any]]:
         owner_scope_type = kwargs.get("owner_scope_type")

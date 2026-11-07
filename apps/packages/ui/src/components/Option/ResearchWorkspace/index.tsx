@@ -1,3 +1,8 @@
+import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
+import { hasResearchWorkspaceMigrationTombstone } from "@/store/workspace";
+import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 import { useResearchWebCapture } from "@/utils/use-research-web-capture"
 import { WebArticleCaptureModal } from "./SourcesPane/WebArticleCaptureModal"
@@ -16,7 +21,11 @@ import {
   Command,
   Loader2
 } from "lucide-react"
-import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
+import {
+  createWorkspaceStorage,
+  flushWorkspacePersistence,
+  useWorkspaceStore
+} from "@/store/workspace"
 import {
   WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS,
   WORKSPACE_STORAGE_CHANNEL_NAME,
@@ -30,8 +39,9 @@ import {
 import {
   runResearchWorkspaceMigration,
   type ResearchWorkspaceIndexedDbStoreRef,
-  type ResearchWorkspaceMigrationRunResult
-} from "@/store/workspace-migration"
+  type ResearchWorkspaceMigrationRunResult,
+  type ResearchWorkspaceMigrationRunInput,
+} from "@/store/workspace-migration";
 import {
   RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
   RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE,
@@ -128,7 +138,7 @@ import {
 } from "@/services/web-clipper/agent-task-handoff"
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
-import { restoreMigratedResearchWorkspace } from "./workspace-server-restore"
+import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -1244,10 +1254,6 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   const lastCrossTabSyncWarningRef = React.useRef(0)
   const workspaceMigrationSignatureRef = React.useRef<string | null>(null)
-  const workspaceMigrationInFlightRef = React.useRef<{
-    signature: string
-    promise: Promise<ResearchWorkspaceMigrationRunResult>
-  } | null>(null)
   const initialWorkspaceMigrationLocalStorageKeysRef = React.useRef<
     string[] | null
   >(null)
@@ -1260,7 +1266,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
   const retryWorkspaceMigration = React.useCallback(() => {
     workspaceMigrationSignatureRef.current = null
-    workspaceMigrationInFlightRef.current = null
     setWorkspaceMigrationResult(null)
     setWorkspaceMigrationLoading(false)
     setWorkspaceMigrationRetryNonce((value) => value + 1)
@@ -1664,7 +1669,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       return [
         "Legacy workspace data found",
         "Server receipt saved",
-        "Local data retained until server deletion eligibility is available"
+        "Local data retained until server content and readback are verified"
       ]
     }
 
@@ -1679,10 +1684,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     if (workspaceMigrationResult.status === "failed") {
-      return [
-        "Legacy workspace data found",
-        "Migration failed before local deletion"
-      ]
+      return ["Legacy workspace data found", workspaceMigrationResult.message];
     }
 
     if (workspaceMigrationResult.status === "deleted") {
@@ -1743,20 +1745,23 @@ const ResearchWorkspaceBody: React.FC = () => {
     })
   }, [activeWorkspaceOperations, statusGuardrailsEnabled, workspaceId])
 
+  const workspaceMigrationReady =
+    workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId ===
+      workspaceId &&
+    workspaceProjectedSourceStatusByMediaIdRef.current.fallbackReady;
+
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
     }
-    if (!isStoreHydrated || !workspaceId) return
+    if (!isStoreHydrated || !workspaceId || !workspaceMigrationReady) return
     if (typeof window === "undefined") return
 
     if (wasWorkspaceFreshlyInitializedInRuntime(workspaceId)) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1775,7 +1780,6 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     if (!hasLegacyContent) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1791,57 +1795,77 @@ const ResearchWorkspaceBody: React.FC = () => {
       indexedDbSignature,
       workspaceMigrationRetryNonce.toString()
     ].join("::")
-    const inFlightMigration = workspaceMigrationInFlightRef.current
-    const canReuseInFlightMigration =
-      inFlightMigration?.signature === signature
-    if (
-      workspaceMigrationSignatureRef.current === signature &&
-      !canReuseInFlightMigration
-    ) {
-      return
-    }
+    if (workspaceMigrationSignatureRef.current === signature) return;
     workspaceMigrationSignatureRef.current = signature
 
-    let cancelled = false
+    let mounted = true;
+    let retired = false;
+    const isCurrent = () =>
+      mounted &&
+      !retired &&
+      useWorkspaceStore.getState().workspaceId === workspaceId;
+    const releaseAccount = watchChatAccountChanges((invalidated) => {
+      if (!invalidated || !mounted) return;
+      retired = true;
+      if (workspaceMigrationSignatureRef.current === signature)
+        workspaceMigrationSignatureRef.current = null;
+      setWorkspaceMigrationLoading(false);
+      setWorkspaceMigrationResult(null);
+    });
     setWorkspaceMigrationLoading(true)
 
-    const migrationPromise =
-      canReuseInFlightMigration && inFlightMigration
-        ? inFlightMigration.promise
-        : runResearchWorkspaceMigration({
-            targetWorkspaceId: workspaceId,
-            targetWorkspaceName: workspaceName || "Research Workspace",
-            discoveredLocalStorageKeys,
-            discoveredIndexedDbStores,
-            readLocalStorageValue: async (key) => window.localStorage.getItem(key),
-            api: {
-              createWorkspaceMigration: tldwClient.createWorkspaceMigration,
-              putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
-              finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
-              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
-              ackWorkspaceMigrationClientDelete:
-                tldwClient.ackWorkspaceMigrationClientDelete
-            },
-            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
-            writeLocalStorageValue: (key, value) =>
-              window.localStorage.setItem(key, value),
-            now: () => new Date().toISOString()
-          })
-
-    if (!canReuseInFlightMigration) {
-      workspaceMigrationInFlightRef.current = {
-        signature,
-        promise: migrationPromise
+    const migrationInput: ResearchWorkspaceMigrationRunInput = {
+      targetWorkspaceId: workspaceId,
+      targetWorkspaceName: workspaceName || "Research Workspace",
+      isCurrent,
+      discoveredLocalStorageKeys,
+      discoveredIndexedDbStores,
+      readLocalStorageValue: async (key) => window.localStorage.getItem(key),
+      api: {
+        createWorkspaceMigration: tldwClient.createWorkspaceMigration,
+        putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
+        finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
+        getWorkspaceMigration: tldwClient.getWorkspaceMigration,
+        ackWorkspaceMigrationClientDelete:
+          tldwClient.ackWorkspaceMigrationClientDelete,
+      },
+    };
+    const migrationPromise = (async () => {
+      // Capture after initial source hydration and its queued durable writes settle.
+      await flushWorkspacePersistence();
+      if (!isCurrent()) return null;
+      const currentKeys = [
+        ...new Set([
+          ...discoveredLocalStorageKeys,
+          ...collectResearchWorkspaceLegacyLocalStorageKeys(),
+        ]),
+      ].sort();
+      const currentStores =
+        collectResearchWorkspaceLegacyIndexedDbStores(currentKeys);
+      for (const store of discoveredIndexedDbStores) {
+        if (
+          !currentStores.some(
+            (current) =>
+              current.databaseName === store.databaseName &&
+              current.storeName === store.storeName,
+          )
+        )
+          currentStores.push(store);
       }
-    }
+      return runResearchWorkspaceMigration({
+        ...migrationInput,
+        discoveredLocalStorageKeys: currentKeys,
+        discoveredIndexedDbStores: currentStores,
+      });
+    })();
 
     void migrationPromise
       .then((result) => {
-        if (cancelled) return
+        if (!isCurrent() || !result) return;
         setWorkspaceMigrationResult(result)
       })
       .catch((error) => {
-        if (cancelled) return
+        if (!isCurrent()) return;
         setWorkspaceMigrationResult({
           status: "failed",
           migrationId: null,
@@ -1849,27 +1873,31 @@ const ResearchWorkspaceBody: React.FC = () => {
           serverMigration: null,
           localDeletionEligibility: null,
           deletedSurfaceIds: [],
-          message: "Research Workspace migration failed before local deletion.",
-          error
-        })
+          message:
+            "Research Workspace migration stopped. Review local data before retrying cleanup.",
+          error,
+        });
       })
       .finally(() => {
-        if (workspaceMigrationInFlightRef.current?.signature === signature) {
-          workspaceMigrationInFlightRef.current = null
-        }
-        if (!cancelled) {
-          setWorkspaceMigrationLoading(false)
+        releaseAccount();
+        if (mounted && !retired) {
+          setWorkspaceMigrationLoading(false);
         }
       })
 
     return () => {
-      cancelled = true
+      mounted = false;
+      retired = true;
+      releaseAccount();
+      if (workspaceMigrationSignatureRef.current === signature)
+        workspaceMigrationSignatureRef.current = null;
     }
   }, [
     isStoreHydrated,
     statusGuardrailsEnabled,
     workspaceId,
     workspaceMigrationRetryNonce,
+    workspaceMigrationReady,
     workspaceName
   ])
 
@@ -2483,10 +2511,42 @@ const ResearchWorkspaceBody: React.FC = () => {
     const returnContext = activeDeepResearchReturnContext
     const returnContextKey = activeDeepResearchReturnKey
     const originWorkspaceId = returnContext.sourceWorkspaceId
-    const canContinueImport = () =>
-      isMountedRef.current &&
+    const controller = new AbortController()
+    const deadline = performance.now() + 15000
+    let timedOut = false
+    let accountRetired = false
+    let scope: ServicePromptSnapshot | undefined
+    const ownsImport = () => !accountRetired && isMountedRef.current &&
       deepResearchBundleImportRequestSeqRef.current === importRequestId &&
       useWorkspaceStore.getState().workspaceId === originWorkspaceId
+    const timeoutMessage = "Import could not finish within 15 seconds. Retry importing the bundle."
+    const timeout = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+      scope?.release()
+      if (ownsImport()) setDeepResearchBundleImportState({
+        contextKey: returnContextKey, status: "failed", message: timeoutMessage,
+      })
+    }, 15000)
+    const releaseAccount = watchChatAccountChanges((changed) => {
+      if (!changed) return
+      const wasCurrent = ownsImport()
+      accountRetired = true
+      controller.abort()
+      if (wasCurrent) setDeepResearchBundleImportState({
+        contextKey: returnContextKey, status: "failed",
+        message: "The account or server changed. Reopen this bundle in the current account.",
+      })
+    })
+    const canContinueImport = () => {
+      if (!ownsImport()) return false
+      if (timedOut || performance.now() >= deadline) {
+        timedOut = true
+        controller.abort()
+        throw new DOMException(timeoutMessage, "TimeoutError")
+      }
+      return !controller.signal.aborted
+    }
 
     setDeepResearchBundleImportState({
       contextKey: returnContextKey,
@@ -2494,21 +2554,34 @@ const ResearchWorkspaceBody: React.FC = () => {
     })
 
     try {
-      const bundle = await tldwClient.getResearchBundle(
-        returnContext.researchRunId
-      )
+      if ((hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId)))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!canContinueImport()) return
+      const bundle = scope
+        ? await tldwClient.getResearchBundle(returnContext.researchRunId, {
+          requestScope: scope.requestScope, signal: controller.signal,
+          timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+        })
+        : await tldwClient.getResearchBundle(returnContext.researchRunId)
       if (!canContinueImport()) return
 
+      if (!scope && (hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId)))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!canContinueImport()) return
       const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
       const sourceArtifact = returnContext.sourceArtifactId
         ? (currentArtifacts.find(
             (artifact: GeneratedArtifact) =>
-              artifact.id === returnContext.sourceArtifactId
+              artifact.id === returnContext.sourceArtifactId &&
+              (!scope || hasWorkspaceArtifactOrigin(artifact, scope.scopeKey, originWorkspaceId))
           ) ?? null)
         : null
       const artifactPayload = buildDeepResearchBundleArtifactPayload({
         bundle,
-        returnContext,
+        returnContext: scope && !sourceArtifact
+          ? { sourceWorkspaceId: originWorkspaceId, researchRunId: returnContext.researchRunId,
+              sourceArtifactId: null, sourceArtifactTemplate: null, sourceArtifactTitle: null }
+          : returnContext,
         sourceArtifact
       })
       const importedDeepResearchData = artifactPayload.data?.deepResearch as
@@ -2521,7 +2594,24 @@ const ResearchWorkspaceBody: React.FC = () => {
         : 0
 
       if (!canContinueImport()) return
-      addArtifact(artifactPayload)
+      const retainedDraft = scope ? currentArtifacts.find((artifact) =>
+        hasWorkspaceArtifactOrigin(artifact, scope!.scopeKey, originWorkspaceId) &&
+        artifact.producerMetadata?.producerType === "deep_research_bundle_import" &&
+        artifact.producerMetadata.runId === returnContext.researchRunId) : undefined
+      const draft = retainedDraft ?? addArtifact(artifactPayload)
+      const isCurrentDraft = () => canContinueImport() &&
+        useWorkspaceStore.getState().generatedArtifacts.find((artifact) => artifact.id === draft.id) === draft
+      if (!scope && (draft.workspaceArtifactId || (hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId))))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (scope) {
+        if (!retainedDraft) bindWorkspaceArtifactOrigin(draft, scope.scopeKey, originWorkspaceId)
+        const saved = await persistWorkspaceArtifact(draft, {
+          workspaceId: originWorkspaceId, scope, isCurrent: isCurrentDraft, deadline,
+        })
+        if (!isCurrentDraft()) return
+        useWorkspaceStore.getState().updateArtifactStatus(draft.id, draft.status, saved)
+      }
+      await flushWorkspacePersistence()
       if (!canContinueImport()) return
       setDeepResearchBundleImportState({
         contextKey: returnContextKey,
@@ -2540,9 +2630,10 @@ const ResearchWorkspaceBody: React.FC = () => {
       })
       focusWorkspacePane("studio")
     } catch (error) {
-      if (!canContinueImport()) return
-      const message =
-        error instanceof DeepResearchBundleImportError || error instanceof Error
+      if (!ownsImport()) return
+      const message = timedOut
+        ? timeoutMessage
+        : error instanceof DeepResearchBundleImportError || error instanceof Error
           ? error.message
           : t(
               "playground:studio.deepResearchBundleImportFailed",
@@ -2553,6 +2644,11 @@ const ResearchWorkspaceBody: React.FC = () => {
         status: "failed",
         message
       })
+    } finally {
+      clearTimeout(timeout)
+      scope?.release()
+      releaseAccount()
+      controller.abort()
     }
   }, [
     activeDeepResearchReturnContext,
@@ -2765,8 +2861,9 @@ const ResearchWorkspaceBody: React.FC = () => {
         try {
           const restored = await restoreMigratedResearchWorkspace({
             signal: restoration.signal,
-            apply: snapshot => {
-              if (!cancelled && !currentWorkspaceIdRef.current) restoreServerWorkspace(snapshot)
+            isCurrent: () => !cancelled && !useWorkspaceStore.getState().workspaceId,
+            apply: (snapshot, chatSession) => {
+              if (!cancelled && !useWorkspaceStore.getState().workspaceId) restoreServerWorkspace(snapshot, chatSession)
             }
           })
           if (restored || cancelled || currentWorkspaceIdRef.current) return
@@ -4273,9 +4370,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                 )}
               </dt>
               <dd>
-                {workspaceMigrationResult.serverMigration?.client_delete_eligible
-                  ? t("common:yes", "Yes")
-                  : t("common:no", "No")}
+                {t("common:no", "No")}
               </dd>
             </dl>
 

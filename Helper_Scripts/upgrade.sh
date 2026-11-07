@@ -8,6 +8,10 @@
 # Options:
 #   --dry-run            Run pre-flight checks only; make no changes
 #   --target-version TAG Pull a specific git tag/branch instead of latest
+#   --confirm-offline    Confirm API and all workers are stopped and cannot reconnect
+#
+# Backups cover repository Databases/ only. Preserve external profile data,
+# source files and configuration separately before upgrading.
 #   --help               Show this help and exit
 # ===========================================================================
 set -euo pipefail
@@ -30,6 +34,7 @@ log_step()  { echo -e "\n${BOLD}==> $*${NC}"; }
 # Defaults
 # ---------------------------------------------------------------------------
 DRY_RUN=false
+CONFIRM_OFFLINE=false
 TARGET_VERSION=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -45,6 +50,10 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=true
             shift
             ;;
+        --confirm-offline)
+            CONFIRM_OFFLINE=true
+            shift
+            ;;
         --target-version)
             TARGET_VERSION="${2:-}"
             if [[ -z "$TARGET_VERSION" ]]; then
@@ -54,11 +63,13 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: $0 [--dry-run] [--target-version TAG] [--help]"
+            echo "Usage: $0 [--dry-run] [--confirm-offline] [--target-version TAG] [--help]"
             echo ""
             echo "Options:"
             echo "  --dry-run            Run pre-flight checks only; make no changes"
             echo "  --target-version TAG Pull a specific git tag/branch instead of latest"
+            echo "  --confirm-offline    Confirm API and all workers are stopped and cannot reconnect"
+            echo "  Backup scope: repository Databases/ only; preserve external data/files/config separately."
             echo "  --help               Show this help and exit"
             exit 0
             ;;
@@ -69,6 +80,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if ! $DRY_RUN && ! $CONFIRM_OFFLINE; then
+    log_error "Stop the API and all workers, prevent reconnects, then pass --confirm-offline."
+    exit 1
+fi
 
 cd "${REPO_ROOT}"
 
@@ -85,23 +101,26 @@ if ! command -v "$PYTHON" &>/dev/null; then
 fi
 
 # Run the upgrade helpers module; it exits 0 if can_proceed, 1 otherwise.
-if "$PYTHON" -m Helper_Scripts.upgrade_helpers --json > /tmp/tldw_upgrade_checks.json 2>&1; then
+PREFLIGHT_FILE="$(mktemp "${TMPDIR:-/tmp}/tldw_upgrade_checks.XXXXXX")"
+trap 'rm -f -- "$PREFLIGHT_FILE"' EXIT
+
+if "$PYTHON" -m Helper_Scripts.upgrade_helpers --json > "$PREFLIGHT_FILE" 2>&1; then
     log_info "All pre-upgrade checks passed."
 else
     log_error "Pre-upgrade checks failed:"
-    cat /tmp/tldw_upgrade_checks.json
+    cat "$PREFLIGHT_FILE"
     exit 1
 fi
 
 # Pretty-print the summary
 "$PYTHON" -c "
-import json, pathlib
-data = json.loads(pathlib.Path('/tmp/tldw_upgrade_checks.json').read_text())
+import json, pathlib, sys
+data = json.loads(pathlib.Path(sys.argv[1]).read_text())
 print(f\"  Summary: {data['summary']}\")
 for c in data['checks']:
     icon = {'ok':'✓','warn':'!','fail':'✗'}.get(c['status'],'?')
     print(f\"    [{icon}] {c['name']}: {c.get('message','')}\")
-"
+" "$PREFLIGHT_FILE"
 
 if $DRY_RUN; then
     log_info "Dry-run mode — stopping here. No changes were made."
@@ -132,11 +151,13 @@ cat > "${BACKUP_DIR}/rollback_info.txt" <<ROLLBACK
 COMMIT=${CURRENT_COMMIT}
 BRANCH=${CURRENT_BRANCH}
 
-# To rollback, run:
-#   cd ${REPO_ROOT}
-#   git checkout ${CURRENT_COMMIT}
-#   cp -a ${BACKUP_DIR}/Databases/ ${REPO_ROOT}/Databases/
-#   pip install -e .
+# Recovery:
+#   Keep API and workers stopped and prevent reconnects.
+#   Restore a verified backup into a separate empty target with the matching
+#   prior-release environment; verify data/files/config before switching.
+#   This directory contains repository Databases/ only, not external profile data.
+#   Never run the old binary against migrated data or merge-copy over live stores.
+#   See Docs/Database_Migrations.md for supported recovery limits.
 ROLLBACK
 
 # Backup databases if they exist
@@ -195,24 +216,27 @@ log_step "Step 7/7: Post-upgrade validation"
 if "$PYTHON" -m Helper_Scripts.upgrade_helpers 2>&1; then
     log_info "Post-upgrade checks passed."
 else
-    log_warn "Post-upgrade checks reported issues — review output above."
+    log_error "Post-upgrade preflight failed. Keep API and workers stopped; inspect the failure before startup."
+    log_warn "Recovery information: ${BACKUP_DIR}/rollback_info.txt"
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo ""
-echo -e "${GREEN}${BOLD}Upgrade complete!${NC}"
+echo -e "${GREEN}${BOLD}Code and dependencies updated.${NC}"
+echo "Database migrations are pending; start the server and verify every configured store before accepting the upgrade."
 echo ""
 echo "  Previous commit: ${CURRENT_COMMIT}"
 echo "  Current commit:  ${NEW_COMMIT}"
 echo "  Backup location: ${BACKUP_DIR}/"
 echo ""
-echo -e "${BOLD}Rollback instructions:${NC}"
-echo "  1. cd ${REPO_ROOT}"
-echo "  2. git checkout ${CURRENT_COMMIT}"
-echo "  3. cp -a ${BACKUP_DIR}/Databases/ ${REPO_ROOT}/Databases/"
-echo "  4. pip install -e ."
-echo "  5. Restart the server"
+echo -e "${BOLD}Recovery:${NC}"
+echo "  Keep API and workers stopped; restore a verified backup into a separate empty target."
+echo "  Use the matching prior-release environment and verify data/files/config before switching."
+echo "  This backup covers repository Databases/ only; preserve external data/files/config separately."
+echo "  Never run an old binary against migrated data or merge-copy over live stores."
+echo "  See Docs/Database_Migrations.md for supported recovery limits."
 echo ""
 echo "See ${BACKUP_DIR}/rollback_info.txt for details."

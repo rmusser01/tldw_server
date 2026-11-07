@@ -380,3 +380,40 @@ def test_replace_remediation_missing_generated_id_restores_cards_and_prior_activ
     assert after_conversions == before_conversions
     after_cards = [dict(row) for row in quizzes_db.execute_query("SELECT * FROM flashcards ORDER BY id").fetchall()]
     assert after_cards == before_cards
+
+
+@pytest.mark.parametrize("operation", ["create", "repeat", "replace", "list"])
+def test_postgres_remediation_response_preserves_timestamp_contract(pg_restricted_backend, operation):
+    from tldw_Server_API.app.api.v1.schemas.quizzes import (
+        QuizRemediationConversionListResponse,
+        QuizRemediationConvertResponse,
+    )
+
+    db = CharactersRAGDB(":memory:", client_id="s01-response-owner", backend=pg_restricted_backend)
+    try:
+        attempt_id, quiz_id, missed_id, _ = _create_attempt_with_one_miss_and_one_correct(db)
+        created = db.convert_quiz_remediation_questions(
+            attempt_id=attempt_id, question_ids=[missed_id], create_deck_name="S01 response contract"
+        )
+        if operation == "list":
+            payload = QuizRemediationConversionListResponse.model_validate(
+                db.list_attempt_remediation_conversions(attempt_id)
+            )
+            conversion = payload.items[0]
+        else:
+            result = (
+                created
+                if operation == "create"
+                else db.convert_quiz_remediation_questions(
+                    attempt_id=attempt_id,
+                    question_ids=[missed_id],
+                    target_deck_id=created["target_deck"]["id"],
+                    replace_active=operation == "replace",
+                )
+            )
+            payload = QuizRemediationConvertResponse.model_validate(result)
+            conversion = payload.results[0].conversion
+        assert conversion is not None and conversion.quiz_id == quiz_id and conversion.question_id == missed_id  # nosec B101 -- Pytest contract assertion.
+        assert conversion.client_id == "s01-response-owner" and conversion.created_at and conversion.last_modified  # nosec B101 -- Pytest ownership/timestamp assertion.
+    finally:
+        db.close_connection()

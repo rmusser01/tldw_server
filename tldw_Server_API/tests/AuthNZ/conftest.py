@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, Any, AsyncGenerator, Optional
 from unittest.mock import Mock, AsyncMock, MagicMock
+from urllib.parse import quote, unquote
 
 import asyncpg
 from loguru import logger
@@ -50,9 +51,9 @@ def _parse_pg_dsn(dsn: str):
             return None
         host = parsed.hostname or "localhost"
         port = int(parsed.port or 5432)
-        user = parsed.username or "tldw_user"
-        password = parsed.password or "TestPassword123!"
-        db = (parsed.path or "/tldw_test").lstrip("/") or "tldw_test"
+        user = unquote(parsed.username or "tldw_user")
+        password = unquote(parsed.password or "TestPassword123!")
+        db = unquote((parsed.path or "/tldw_test").lstrip("/") or "tldw_test")
         return {
             "host": host,
             "port": port,
@@ -70,6 +71,14 @@ TEST_DB_HOST = (_parsed or {}).get("host") or os.getenv("TEST_DB_HOST", "localho
 TEST_DB_PORT = int(((_parsed or {}).get("port")) or int(os.getenv("TEST_DB_PORT", "5432")))
 TEST_DB_USER = (_parsed or {}).get("user") or os.getenv("TEST_DB_USER", "tldw_user")
 TEST_DB_PASSWORD = (_parsed or {}).get("password") or os.getenv("TEST_DB_PASSWORD", "TestPassword123!")
+
+
+def _pg_test_dsn(database: str) -> str:
+    """Quote connection components without changing AuthNZ fixture precedence."""
+    return (
+        f"postgresql://{quote(TEST_DB_USER, safe='')}:{quote(TEST_DB_PASSWORD, safe='')}"
+        f"@{TEST_DB_HOST}:{TEST_DB_PORT}/{quote(database, safe='')}"
+    )
 
 # Import TestClient for isolated environment
 from fastapi.testclient import TestClient
@@ -1323,7 +1332,7 @@ async def isolated_test_environment(monkeypatch, tmp_path):
         await test_conn.close()
 
     # 4. Set environment variables for this test
-    db_url = f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{db_name}"
+    db_url = _pg_test_dsn(db_name)
     monkeypatch.setenv("TEST_DATABASE_URL", db_url)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", db_url)
@@ -1445,7 +1454,7 @@ async def setup_test_database(monkeypatch):
     """Create and setup the test database for the test session."""
     # Ensure FastAPI + core settings pick Postgres for this test DB
     require_pg = os.getenv("TLDW_TEST_POSTGRES_REQUIRED", "").lower() in ("1", "true", "yes")
-    test_dsn = f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}"
+    test_dsn = _pg_test_dsn(TEST_DB_NAME)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", test_dsn)
     try:
@@ -1705,7 +1714,7 @@ async def setup_test_database(monkeypatch):
     # Also run the AuthNZ module's Postgres bootstrap to ensure full schema parity
     # (sessions, registration_codes, RBAC, API keys, usage tables, etc.)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
-    monkeypatch.setenv("DATABASE_URL", f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}")
+    monkeypatch.setenv("DATABASE_URL", _pg_test_dsn(TEST_DB_NAME))
     monkeypatch.setenv("JWT_SECRET_KEY", os.environ.get("JWT_SECRET_KEY", "test-secret-key-for-testing-only"))
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import setup_database as _authnz_setup_db
@@ -1819,7 +1828,7 @@ async def clean_database(setup_test_database):
 @pytest_asyncio.fixture
 async def test_db_pool(setup_test_database, clean_database):
     """Create a test database pool connected to the test PostgreSQL database."""
-    test_database_url = f"postgresql://{TEST_DB_USER}:{TEST_DB_PASSWORD}@{TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME}"
+    test_database_url = _pg_test_dsn(TEST_DB_NAME)
 
     test_settings = Settings(
         AUTH_MODE="multi_user",

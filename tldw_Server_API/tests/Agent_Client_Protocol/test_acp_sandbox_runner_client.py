@@ -452,6 +452,10 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
         def __init__(self) -> None:
             super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
+            self.unregistered: list[str] = []
+
+        async def _unregister_permission_session(self, session_id: str) -> None:
+            self.unregistered.append(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -475,6 +479,8 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
     assert "session-close" not in runner._session_owners
     assert "session-close" not in fake_client._permission_sessions
 
+    assert fake_client.unregistered == ["session-close"]  # nosec B101 -- exactly one permission-session release.
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
@@ -489,6 +495,10 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
         def __init__(self) -> None:
             super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
+            self.unregistered: list[str] = []
+
+        async def _unregister_permission_session(self, session_id: str) -> None:
+            self.unregistered.append(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -511,6 +521,8 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
     ]
     assert "session-close-legacy" not in fake_client._permission_sessions
 
+    assert fake_client.unregistered == ["session-close-legacy"]  # nosec B101 -- exactly one permission-session release.
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
@@ -525,6 +537,10 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
         def __init__(self) -> None:
             super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
+            self.unregistered: list[str] = []
+
+        async def _unregister_permission_session(self, session_id: str) -> None:
+            self.unregistered.append(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -546,6 +562,8 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
         ("_tldw/session/close", {"sessionId": "session-close-code"}),
     ]
     assert "session-close-code" not in fake_client._permission_sessions
+
+    assert fake_client.unregistered == ["session-close-code"]  # nosec B101 -- exactly one permission-session release.
 
 
 @pytest.mark.unit
@@ -674,6 +692,7 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
             if method == "initialize":
                 return _CallResult({"agentCapabilities": {}})
             if method == "session/new":
+                capture["session_wire"] = payload
                 return _CallResult({"sessionId": "acp-session-env"})
             if method == "_tldw/session/close":
                 return _CallResult({})
@@ -698,6 +717,7 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
         cwd="/workspace",
         user_id=7,
         session_env={"WORKSPACE_TOKEN": session_workspace_auth_value},
+        mcp_servers=[{"name": "public", "type": "stdio", "command": "/usr/bin/python3"}],
     )
 
     assert session_id == "acp-session-env"
@@ -707,6 +727,10 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
         "CONFIG_ONLY": "yes",
         "WORKSPACE_TOKEN": session_workspace_auth_value,
     }
+
+    assert capture["session_wire"]["mcpServers"] == [  # nosec B101 -- sandbox uses the same complete ACP configuration.
+        {"name": "public", "type": "stdio", "command": "/usr/bin/python3", "args": [], "env": []},
+    ]
 
 
 @pytest.mark.unit

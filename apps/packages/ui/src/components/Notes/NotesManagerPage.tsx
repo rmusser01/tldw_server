@@ -260,6 +260,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const [shortcutHelpOpen, setShortcutHelpOpen] = React.useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const desktopSidebarCollapsedRef = React.useRef(false)
+  const wasMobileViewportRef = React.useRef(isMobileViewport)
   const [conversationLabelById, setConversationLabelById] = React.useState<Record<string, string>>({})
   const conversationLabelByIdRef = React.useRef<Record<string, string>>({})
   conversationLabelByIdRef.current = conversationLabelById
@@ -2619,7 +2620,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
 
   React.useEffect(() => {
-    if (!isMobileViewport) desktopSidebarCollapsedRef.current = sidebarCollapsed
+    if (!isMobileViewport && !wasMobileViewportRef.current) {
+      desktopSidebarCollapsedRef.current = sidebarCollapsed
+    }
+    wasMobileViewportRef.current = isMobileViewport
   }, [isMobileViewport, sidebarCollapsed])
 
   React.useEffect(() => {
@@ -2780,6 +2784,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-1 bg-bg p-2 sm:p-4" data-testid="notes-page-frame">
+      <h1 className="sr-only">{t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}</h1>
       {LeaveGuard ? <LeaveGuard when={ed.leaveGuard.when} onLeave={ed.leaveGuard.onLeave} /> : null}
       <a href={`#${NOTES_LIST_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_LIST_REGION_ID)} className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow">
         {t('option:notesSearch.skipToNotesList', { defaultValue: 'Skip to notes list' })}

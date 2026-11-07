@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event"
 import { ConfigProvider } from "antd"
 import { openModelSelector } from "../playground-cockpit-actions"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from "vitest"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { PlaygroundEmpty } from "../PlaygroundEmpty"
@@ -7129,6 +7129,28 @@ describe("PlaygroundForm role-play starter", () => {
   ] as const)(
     "detaches through the real Form before one selection write for %s",
     async (path) => {
+      const startedAt = performance.now()
+      let phase = "opening-preview"
+      let identityReleased = false
+      let applicationSettled = false
+      let cleanupStarted = false
+      onTestFailed(() => {
+        try {
+          console.info("[role-play-startup-progress]", JSON.stringify({
+            path,
+            phase,
+            elapsedMs: Math.round(performance.now() - startedAt),
+            identityReleased,
+            applicationSettled,
+            cleanupStarted,
+            selectionWrites: selectedAssistantMock.setSelectedAssistant.mock.calls.length,
+            sceneReads: nativeSetupFixture.scene.mock.calls.length,
+            sceneWrites: saveActorSettingsMock.mock.calls.length
+          }))
+        } catch {
+          // Keep the original failure if diagnostic output is unavailable.
+        }
+      })
       const kind = path === "legacy character startup" ? "character" : null
       const identity = kind ? { kind, id: "new-identity", name: "New identity" } : null
       if (kind === null)
@@ -7162,6 +7184,7 @@ describe("PlaygroundForm role-play starter", () => {
       const held = sceneSelectionGate<void>()
       selectedAssistantMock.setSelectedAssistant.mockReturnValueOnce(held.promise)
       const { view, apply } = await openOwnedStartupPreview()
+      phase = "waiting-for-selection"
       let application: Promise<unknown> | undefined
       try {
         act(() => {
@@ -7172,6 +7195,7 @@ describe("PlaygroundForm role-play starter", () => {
             selectedAssistantMock.setSelectedAssistant
           ).toHaveBeenCalledOnce()
         )
+        phase = "asserting-detachment"
         expect(
           playgroundFormMessageOptionState.value.setServerChatId
         ).toHaveBeenCalledWith(null)
@@ -7183,18 +7207,25 @@ describe("PlaygroundForm role-play starter", () => {
           expect(saveActorSettingsMock).not.toHaveBeenCalled()
         }
         let accepted: unknown
+        phase = "waiting-for-application"
         await act(async () => {
           held.resolve(undefined)
+          identityReleased = true
           accepted = await application
+          applicationSettled = true
         })
+        phase = "asserting-acceptance"
         expect(accepted).toBe(true)
         expect(
           screen.queryByRole("button", { name: "Apply saved template" })
         ).not.toBeInTheDocument()
       } finally {
+        cleanupStarted = true
         view.unmount()
         held.resolve(undefined)
+        identityReleased = true
         await Promise.allSettled([application])
+        applicationSettled = true
       }
     }
   )

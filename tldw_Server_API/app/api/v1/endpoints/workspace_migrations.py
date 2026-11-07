@@ -6,8 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
 router = APIRouter()
 
@@ -154,7 +155,7 @@ async def create_workspace_migration(
     _ = current_user
     try:
         row, created = db.upsert_workspace_migration_session(body.model_dump(mode="json"))
-    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+    except (ConflictError, InputError, CharactersRAGDBError, NotFoundError) as exc:
         raise map_db_error_to_http(
             exc,
             default_detail="Failed to create workspace migration",

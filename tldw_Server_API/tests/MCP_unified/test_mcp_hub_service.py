@@ -744,3 +744,126 @@ async def test_service_rejects_binding_managed_secret_ref_from_different_scope(t
             managed_secret_ref_id=int(managed_ref["id"]),
             actor_id=actor_id,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key,target",
+    [(key, target) for key in ("", "CHANGE_ME_TO_SECURE_BYOK_KEY") for target in ("legacy", "slot", "default_alias")]
+    + [(_b64_key(b"k"), "default_alias_second")],
+)
+async def test_external_secret_encryption_configuration_is_actionable_and_writes_nothing(
+    tmp_path, monkeypatch, key, target
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.services.mcp_hub_service import McpHubService
+
+    db_path = tmp_path / "users.db"
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", key)
+    reset_settings()
+    await reset_db_pool()
+    pool = await get_db_pool()
+    ensure_authnz_tables(db_path)
+    repo = McpHubRepo(pool)
+    await repo.ensure_tables()
+    service = McpHubService(repo=repo)
+    await service.create_external_server(
+        server_id="crypto-config-test",
+        name="Crypto configuration test",
+        transport="stdio",
+        config={"cmd": "npx"},
+        owner_scope_type="global",
+        owner_scope_id=None,
+        enabled=False,
+        actor_id=1,
+    )
+    if target != "legacy":
+        await service.create_external_server_credential_slot(  # nosec B106 -- api_key is the credential-kind fixture label.
+            server_id="crypto-config-test",
+            slot_name="api_key",
+            display_name="Default",
+            secret_kind="api_key",
+            privilege_class="read",
+            is_required=True,
+            actor_id=1,
+        )
+    legacy_before = None
+    slot_before = None
+    if target == "default_alias_second":
+        saved = await service.set_external_server_secret(  # nosec B106 -- fixed synthetic previous credential in an isolated test database.
+            server_id="crypto-config-test", secret_value="c11-previous-value", actor_id=1
+        )
+        legacy_before = await repo.get_external_secret("crypto-config-test")
+        slot_before = await repo.get_external_server_slot_secret(server_id="crypto-config-test", slot_name="api_key")
+        assert saved["secret_configured"] and legacy_before and slot_before  # nosec B101 -- the valid default alias must persist both encrypted stores.
+        from tldw_Server_API.app.services import mcp_hub_service
+
+        encrypt = mcp_hub_service.encrypt_byok_payload
+        calls = 0
+
+        def reject_second_encryption(payload):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ValueError("c11-unit-only-canary")
+            return encrypt(payload)
+
+        monkeypatch.setattr(mcp_hub_service, "encrypt_byok_payload", reject_second_encryption)
+    with pytest.raises(BadRequestError, match="Configure a valid BYOK_ENCRYPTION_KEY") as caught:
+        if target == "slot":
+            await service.set_external_server_slot_secret(  # nosec B106 -- fixed synthetic rejection canary, never a real credential.
+                server_id="crypto-config-test",
+                slot_name="api_key",
+                secret_value="c11-unit-only-canary",
+                actor_id=1,
+            )
+        else:
+            await service.set_external_server_secret(  # nosec B106 -- fixed synthetic rejection canary, never a real credential.
+                server_id="crypto-config-test",
+                secret_value="c11-unit-only-canary",
+                actor_id=1,
+            )
+    assert caught.value.__context__ is None and caught.value.__cause__ is None  # nosec B101 -- safe public error must not retain private crypto context.
+    assert await repo.get_external_secret("crypto-config-test") == legacy_before  # nosec B101 -- failed encryption must preserve the previous legacy credential.
+    if target != "legacy":
+        assert (
+            await repo.get_external_server_slot_secret(server_id="crypto-config-test", slot_name="api_key")
+            == slot_before
+        )  # nosec B101 -- failed encryption must preserve the previous slot credential.
+    if target == "default_alias_second":
+        assert calls == 2  # nosec B101 -- the first real encryption must succeed before the second rejects.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deleted", [True, False])
+async def test_delete_workspace_member_reports_result_and_audits_its_owner(monkeypatch, deleted):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.services import mcp_hub_service
+
+    owner = {"id": 17, "owner_scope_type": "org", "owner_scope_id": 42}
+    repo = SimpleNamespace(
+        get_workspace_set_object=AsyncMock(return_value=owner),
+        delete_workspace_set_member=AsyncMock(return_value=deleted),
+    )
+    audit = AsyncMock()
+    monkeypatch.setattr(mcp_hub_service, "emit_mcp_hub_audit", audit)
+    service = mcp_hub_service.McpHubService(repo=repo)
+    result = await service.delete_workspace_set_member(17, "rowan", actor_id=7)
+    assert result is deleted  # nosec B101 -- successful/no-op deletion must keep its actual repository result.
+    repo.delete_workspace_set_member.assert_awaited_once_with(17, "rowan")
+    if deleted:
+        audit.assert_awaited_once_with(
+            action="mcp_hub.workspace_set_object.member.delete",
+            actor_id=7,
+            resource_type="mcp_workspace_set_object",
+            resource_id="17",
+            metadata={"owner_scope_type": "org", "owner_scope_id": 42, "workspace_id": "rowan"},
+        )
+    else:
+        audit.assert_not_awaited()

@@ -176,6 +176,7 @@ describe("PipelineWizard", () => {
     fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
 
     await waitFor(() => expect(activate).toBeEnabled())
+    await readyActionButton("Activate schedule")
     fireEvent.click(activate)
     await waitFor(() => expect(props.onActivate).toHaveBeenCalledTimes(1))
   })

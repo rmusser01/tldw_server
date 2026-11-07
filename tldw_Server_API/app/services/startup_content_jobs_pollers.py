@@ -211,6 +211,16 @@ def provide_content_jobs_worker_specs(
             ),
         ),
         stop_event_worker_spec(
+            name="ingestion_sources_task",
+            worker_service=_run_ingestion_sources_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: not context.sidecar_mode
+            and route_enabled_predicate(
+                "INGESTION_SOURCES_WORKER_ENABLED", "ingestion-sources"
+            )(context),
+        ),
+        stop_event_worker_spec(
             name="media_ingest_jobs_task",
             worker_service=_run_media_ingest_jobs_worker_service,
             category="jobs",
@@ -1160,6 +1170,14 @@ def _run_research_workspace_output_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_research_workspace_output_jobs_worker(stop_event)
+
+
+def _run_ingestion_sources_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.ingestion_sources_worker import (
+        run_ingestion_sources_worker,
+    )
+
+    return run_ingestion_sources_worker(stop_event)
 
 
 def _run_media_ingest_jobs_worker_service(stop_event: Any) -> Any:

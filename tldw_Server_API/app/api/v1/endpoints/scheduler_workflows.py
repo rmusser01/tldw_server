@@ -330,8 +330,12 @@ async def update_schedule(
     update: dict[str, Any] = {}
     if body.name is not None:
         update["name"] = body.name
+    if body.cron is not None or body.timezone is not None:
+        _validate_cron_or_422(
+            body.cron if body.cron is not None else s.cron,
+            body.timezone if body.timezone is not None else s.timezone,
+        )
     if body.cron is not None:
-        _validate_cron_or_422(body.cron, body.timezone or s.timezone)
         update["cron"] = body.cron
     if body.timezone is not None:
         update["timezone"] = body.timezone

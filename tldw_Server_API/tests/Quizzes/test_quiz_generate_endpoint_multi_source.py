@@ -8,6 +8,7 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuizGenerateRequest,
     QuizGenerationProfileDefinition,
 )
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
 from tldw_Server_API.app.services.quiz_generator import QuizProvenanceValidationError
 
 pytestmark = pytest.mark.unit
@@ -209,3 +210,27 @@ async def test_generate_quiz_rejects_unknown_workspace_before_generation(monkeyp
         await quizzes_endpoint.generate_quiz(request=request, db=db, media_db=Mock())
 
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type, expected_status",
+    [
+        (quizzes_endpoint.ChatAuthenticationError, 400),
+        (quizzes_endpoint.ChatBadRequestError, 400),
+        (quizzes_endpoint.ChatRateLimitError, 429),
+        (ChatProviderError, 502),
+    ],
+)
+async def test_generate_quiz_maps_provider_failures_without_leaking_details(monkeypatch, error_type, expected_status):
+    async def fail_provider(**_kwargs):
+        raise error_type(provider="ollama", message="PROVIDER_SYNTHETIC_SECRET")
+
+    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fail_provider)
+    request = QuizGenerateRequest.model_validate(
+        {"sources": [{"source_type": "note", "source_id": "note-1"}], "num_questions": 1}
+    )
+    with pytest.raises(HTTPException) as caught:
+        await quizzes_endpoint.generate_quiz(request=request, db=Mock(), media_db=Mock())
+    assert caught.value.status_code == expected_status  # nosec B101 -- Pytest HTTP contract assertion.
+    assert "PROVIDER_SYNTHETIC_SECRET" not in str(caught.value.detail)  # nosec B101 -- Pytest public-error privacy assertion.

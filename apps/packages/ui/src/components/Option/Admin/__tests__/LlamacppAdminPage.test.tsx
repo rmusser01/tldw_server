@@ -1021,6 +1021,7 @@ describe("LlamacppAdminPage", () => {
       jobs: [completedDownloadJob]
     })
 
+    await waitFor(() => expect(screen.getByRole("button", { name: /Refresh downloads/ })).not.toHaveClass("ant-btn-loading"))
     fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
 
     await waitFor(() => {
@@ -1044,12 +1045,14 @@ describe("LlamacppAdminPage", () => {
       new Error("download list failed")
     )
 
+    await waitFor(() => expect(screen.getByRole("button", { name: /Refresh downloads/ })).not.toHaveClass("ant-btn-loading"))
     fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
 
     expect(await screen.findByText("download list failed")).toBeTruthy()
 
     apiMock.listLlamacppAssetDownloads.mockResolvedValueOnce({ jobs: [] })
 
+    await waitFor(() => expect(screen.getByRole("button", { name: /Refresh downloads/ })).not.toHaveClass("ant-btn-loading"))
     fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
 
     await waitFor(() => {
