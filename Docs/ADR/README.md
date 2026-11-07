@@ -115,7 +115,7 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-086](086-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
 | [ADR-087](087-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
 | [ADR-088](088-mcp-certified-completion-lifecycle.md) | Proposed | Certify one bounded native-async completion path and retain ownership through cancellation, abandonment, and shutdown. |
-| [ADR-093](093-web-scraping-crawl-and-process-local-job-ownership.md) | Accepted | Separate crawl and bounded process-local job state behind injected canonical execution, preserving public outcomes and compatibility while deferring durable Jobs migration. |
+| [ADR-094](094-web-scraping-crawl-and-process-local-job-ownership.md) | Accepted | Separate crawl and bounded process-local job state behind injected canonical execution, preserving public outcomes and compatibility while deferring durable Jobs migration. |
 
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

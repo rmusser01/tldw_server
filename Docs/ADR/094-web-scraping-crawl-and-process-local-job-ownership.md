@@ -1,4 +1,4 @@
-# ADR-093: Web Scraping Crawl And Process-Local Job Ownership
+# ADR-094: Web Scraping Crawl And Process-Local Job Ownership
 
 **Status:** Accepted
 **Date:** 2026-10-04
@@ -103,3 +103,12 @@ The corresponding web-scraping design and planning records are now TASK-15431
 and TASK-15432; their older numbers had also been allocated to unrelated work.
 Historical notes retain their original identifiers; current tracking links use
 the corrected namespace. The accepted decision remains unchanged.
+
+## Identifier Correction (2026-11-07)
+
+An unrelated PostgreSQL media ownership ADR in an open PR now uses ADR-093.
+After checking fetched dev and all changed-file pages of 43 open PRs, this
+unpublished web-scraping record moves to ADR-094. Its accepted decision and
+rationale are unchanged; this is not a supersession. The design/planning tasks
+remain TASK-15431/TASK-15432. Execution tracking is now TASK-15453 and Tasks 3-11
+are TASK-15454 through TASK-15462; historical identifiers above remain historical.

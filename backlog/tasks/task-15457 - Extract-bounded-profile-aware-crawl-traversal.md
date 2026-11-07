@@ -1,5 +1,5 @@
 ---
-id: TASK-15425
+id: TASK-15457
 title: Extract bounded profile-aware crawl traversal
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 6 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15421. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 6 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -35,6 +35,8 @@ Round1 author fixes complete: I1 policy/robots transport now registers a scoped 
 Controller independent gate complete: full Task6 review found I1 unowned policy/robots physical transport, I2 over-limit Unicode query normalization temporary, I3 denied independent item drops failure/later inputs. 55033a803b fixes all; fresh scoped re-review01a19938-e6b7-77f0-973b-58d623ea067e ADDRESSED all3, no new Critical/Important/Minor breakage. Final post-fix636 covering tests pass, zero skips/failures, 1284 warnings categorized to unchanged conftest/framework/schema/config sources; Ruff/format/compile/Bandit clean. Historical fullscope3427pass26skip2arXivfail and inventory1fail10pass remain visible Task11 gates, not post-fix fullgreen. Exact originalBASE92bc73fe37 through55033a803b includes controller execution rulings and author87c794be0f/0702dc3ee2/fix. Task1 swallowed-harness and Task2 drained-handle lifetime minors resolved with actual execution/weakref drain tests. File locking/storage/migration Task7, producer/concurrency Task8, wrapper/service cutover Tasks9/10 remain unimplemented; sequential direct-acquisition latency implication explicitly carried to Task8/final review. Reports/reviews in plan-scoped SDD workspace.
 Namespace migration before fresh-dev integration: original identifier TASK-15413; current identifier TASK-15425. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+2026-11-07 integration namespace correction: TASK-15425 -> TASK-15457; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
+Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

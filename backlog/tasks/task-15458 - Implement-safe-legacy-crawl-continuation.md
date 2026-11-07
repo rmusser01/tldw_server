@@ -1,5 +1,5 @@
 ---
-id: TASK-15426
+id: TASK-15458
 title: Implement safe legacy crawl continuation
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 7 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15421. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 7 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -33,6 +33,8 @@ Round 1 fixes verified from a73cad8ad7: I1 explicit version-1 wire field sets be
 Controller gate complete: independent review I1 missing-v1-budget-field defaults/null legacy pages and I2 renewed per-stage cleanup timeout fixed in70e58f4a86; controller packaging omission (crawl missing __init__, namespaces=false) also fixed with actual configured setuptools discovery/import regression. Fresh scoped re-review01a19977-1767-7ed3-8c4a-902128c5ea2f all3ADDRESSED, no new Critical/Important breakage. Final346 covering tests pass, warnings remain visible incl deferredM1 multithreaded-fork deprecation. Newrun_crawl265lines, no ceilingincrease, quality/Banditzero. Six earlier-branch size regressions are NOT baseline debt and remain Task9/10/11 obligations; 2arXiv assertions/inventory/fullrepohttpx2 gates remain disclosed. Native Windows trustedlocal execution unverified here; service-root mode failsclosed without secure capability, explicit localnative mode retained. Future trustedroot/mode selection Task9/10 must come from composition. Reports/review/rereview in plan-scoped SDD workspace.
 Namespace migration before fresh-dev integration: original identifier TASK-15414; current identifier TASK-15426. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+2026-11-07 integration namespace correction: TASK-15426 -> TASK-15458; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
+Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

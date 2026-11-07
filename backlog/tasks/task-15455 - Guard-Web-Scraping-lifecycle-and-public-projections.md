@@ -1,5 +1,5 @@
 ---
-id: TASK-15423
+id: TASK-15455
 title: Guard Web Scraping lifecycle and public projections
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 4 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15421. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 4 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -32,6 +32,8 @@ Review fix round 1 complete; keep In Progress for controller gate. Important 1 f
 Controller gate: fresh reviewer found I1 nested metadata URL leak and I2 unretryable failed shutdown; both fixed in afe62367b6 and independently re-reviewed ADDRESSED, no new Critical/Important breakage. Task4 report/review/rereview files are in the plan-scoped SDD workspace. 471 pre-review covering tests; 197 post-fix covering tests, warning sources match categorized baseline; scoped Bandit zero findings/errors. Per-operation drain Task5, queue cutover Task9 and outcome/checkpoint ordering Task6-10 remain deliberate next-task work, not Task4 gaps. Deferred Minor3 startup/shutdown cancellation transition is recorded for final whole-branch review. Existing full-suite httpx2 collection blocker, legacy UP015 and planned inventory drift remain disclosed.
 Namespace migration before fresh-dev integration: original identifier TASK-15411; current identifier TASK-15423. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+2026-11-07 integration namespace correction: TASK-15423 -> TASK-15455; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
+Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
