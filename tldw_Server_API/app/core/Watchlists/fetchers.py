@@ -75,10 +75,6 @@ _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _in_test_mode() -> bool:
-    return _is_test_mode()
-
-
 async def _close_response(resp: Any) -> None:
     if resp is None:
         return
@@ -296,7 +292,7 @@ async def fetch_rss_items(urls: list[str], *, limit: int = 10, tenant_id: str = 
         return []
 
     # Offline mode for unit tests
-    if _in_test_mode():
+    if _is_test_mode():
         return [{"title": "Test Item", "url": "https://example.com/x", "summary": "Test", "published": None}][:limit]
 
     try:
@@ -373,7 +369,7 @@ async def fetch_site_top_links(base_url: str, *, top_n: int = 10, method: str = 
     if top_n <= 0:
         return []
 
-    if _in_test_mode():
+    if _is_test_mode():
         # Provide stable deterministic links
         return [base_url] * min(top_n, 3)
 
@@ -508,7 +504,7 @@ async def fetch_site_items_with_rules(
     if max_pages is None or max_pages < 1:
         max_pages = 1
 
-    if _in_test_mode():
+    if _is_test_mode():
         max_items = limit if limit is not None else 3
         max_items = min(max_items, 5)
         samples: list[dict[str, Any]] = []

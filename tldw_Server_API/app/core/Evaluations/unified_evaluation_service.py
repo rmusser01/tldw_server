@@ -94,10 +94,6 @@ from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provi
 from tldw_Server_API.app.core.testing import is_test_mode
 
 
-def _await_webhook_inline_in_test_mode() -> bool:
-    return is_test_mode()
-
-
 class EvaluationType(str, Enum):
     """Supported evaluation types"""
     MODEL_GRADED = "model_graded"
@@ -786,7 +782,7 @@ class UnifiedEvaluationService:
                             effective_user_id = f"user_{_app_settings.get('SINGLE_USER_FIXED_ID', '1')}"
                         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                             effective_user_id = "user_1"
-                    if self.webhook_manager and _await_webhook_inline_in_test_mode():
+                    if self.webhook_manager and is_test_mode():
                         await self.webhook_manager.send_webhook(
                             user_id=effective_user_id,
                             event=WebhookEvent.EVALUATION_COMPLETED,
@@ -924,7 +920,7 @@ class UnifiedEvaluationService:
                             effective_user_id = f"user_{_app_settings.get('SINGLE_USER_FIXED_ID', '1')}"
                         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                             effective_user_id = "user_1"
-                    if self.webhook_manager and _await_webhook_inline_in_test_mode():
+                    if self.webhook_manager and is_test_mode():
                         await self.webhook_manager.send_webhook(
                             user_id=effective_user_id,
                             event=WebhookEvent.EVALUATION_COMPLETED,
@@ -1036,7 +1032,7 @@ class UnifiedEvaluationService:
                             effective_user_id = f"user_{_app_settings.get('SINGLE_USER_FIXED_ID', '1')}"
                         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                             effective_user_id = "user_1"
-                    if self.webhook_manager and _await_webhook_inline_in_test_mode():
+                    if self.webhook_manager and is_test_mode():
                         await self.webhook_manager.send_webhook(
                             user_id=effective_user_id,
                             event=WebhookEvent.EVALUATION_COMPLETED,

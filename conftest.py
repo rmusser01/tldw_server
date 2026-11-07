@@ -17,6 +17,19 @@ os.environ.setdefault("AUTH_MODE", "single_user")
 os.environ.setdefault("AUTH_DEPS_FALLBACK_RATE_LIMIT", "1000000")
 os.environ.setdefault("AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT", "1000000")
 os.environ.pop("PROFILE", None)
+# Single-threaded numeric libraries keep joblib/loky from leaking semaphores under pytest
+# (moved here from the package __init__ files, TASK-13950.19).
+for _name, _value in (
+    ("JOBLIB_MULTIPROCESSING", "0"),
+    ("JOBLIB_BACKEND", "threading"),
+    ("LOKY_MAX_CPU_COUNT", "1"),
+    ("OMP_NUM_THREADS", "1"),
+    ("OPENBLAS_NUM_THREADS", "1"),
+    ("MKL_NUM_THREADS", "1"),
+    ("NUMEXPR_NUM_THREADS", "1"),
+    ("TOKENIZERS_PARALLELISM", "false"),
+):
+    os.environ.setdefault(_name, _value)
 
 pytest_plugins = (
     "tldw_Server_API.tests.helpers.pgvector",
