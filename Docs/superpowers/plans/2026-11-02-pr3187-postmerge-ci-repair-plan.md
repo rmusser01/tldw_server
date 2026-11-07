@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Track repairs through `TASK-2294.3.2.5` through `TASK-2294.3.2.8` using backlog-py.
+- Track repairs through `TASK-2294.3.2.5` through `TASK-2294.3.2.9` using backlog-py.
 - Preserve security checks, negative assertions, collection, plugin-isolation policy and CI baselines; no blanket skips or timeout increases.
 - Use the project virtual environment and canonical AuthNZ database fixtures. Never log credentials or raw sensitive subprocess diagnostics.
 - Keep the unrelated untracked audit ZIP untouched. Workers do not commit or run stashing hooks while other workers edit.
@@ -283,3 +283,32 @@ evidence updated, current-head hosted checks read back. Draft and auto-merge
 gates remain unchanged while the human Change summary is absent.
 **Tests:** Independent source review, full-branch ratchets and remote readback.
 **Status:** Not Started
+
+Independent delta review approves the introduced source in `3b92d47e6c` and
+passes 86 focused cases. It also validates one pre-existing P2: the owned
+AudioCpp response closer uses shield and leaks a raw late failure after caller
+cancellation. A new two-case regression proves the same defect in response
+cleanup and the adjacent owned WAV-open thread (both RED, 1.15 seconds).
+Extend only those demonstrated waits to wait/result, retaining the existing
+drain loops, first caller cancellation and final exception classification.
+The full audio run already in flight qualifies the first repair candidate,
+not this later delta; run the complete AudioCpp module after this delta and
+report that distinction accurately.
+
+Post-review repair evidence: all six affected/shared modules pass 448 cases in
+12.70 seconds, including response-close and WAV-open late failures under two
+caller cancellations. Ruff and changed-line Black pass; Bandit reports zero
+production findings/errors. The four first-candidate regressions were rerun
+after tightening test cleanup and pass again. A stdlib-only probe of the real
+TTS lock helper also passes both late-failure cancellation cases on Python
+3.12.12; this is not represented as a full Python 3.12 pytest run. Full-branch
+quality/RLS/task/async-blocking guards pass 58 cases before the cleanup delta.
+
+The repository-wide fail-fast command collected 88,180 tests and stopped after
+840 passes and 12 skips at
+`Admin/test_backup_storage_scope.py::test_shared_audit_refuses_stale_per_user_file[backup]`:
+the audit dependency reports per-user storage where the test patched shared
+mode. Its entire isolated module passes 57 cases, and the Admin source/test
+files match dev. Root cause is not attributed; do not claim the repository-wide
+run passed or silently classify this as repaired. It is separate from the
+validated audio failures and current-head hosted CI qualification.
