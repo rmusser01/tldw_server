@@ -52,8 +52,10 @@ export function useVlmBackends(): UseVlmBackendsResult {
     retry: false,
   });
 
-  const endpoint = capabilitiesQuery.data
-    ? resolveBackendsEndpoint(capabilitiesQuery.data)
+  // A 200-with-null body keeps the pre-query behavior: derive from {} so the
+  // default backends endpoint still loads instead of a silent empty state.
+  const endpoint = capabilitiesQuery.data !== undefined
+    ? resolveBackendsEndpoint(capabilitiesQuery.data ?? {})
     : null;
 
   const backendsQuery = useQuery({

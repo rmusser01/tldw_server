@@ -212,7 +212,7 @@ const readPersistentConfigScope = async (
     const values = await getMany
       .call(persistent, ["tldwConfig", REFRESH_ROTATION_KEY])
       .catch(() => null)
-    if (values && typeof values === "object") {
+    if (values && typeof values === "object" && !Array.isArray(values)) {
       return {
         stored: (values["tldwConfig"] as TldwConfig | undefined | null) ?? null,
         rotation: values[REFRESH_ROTATION_KEY] ?? null
@@ -377,6 +377,9 @@ export const waitForNewerCurrentAccessToken = async (
           if (remaining <= 0) return await checkOnce()
           let timedOut = false
           const timeout = new Promise<void>((resolve) => {
+            // Clear the superseded timer; otherwise only the last iteration's
+            // handle is cleared in finally and earlier timers run to deadline.
+            if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
             timeoutHandle = setTimeout(() => { timedOut = true; resolve() }, remaining)
           })
           await Promise.race([changed, timeout])
