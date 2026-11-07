@@ -2884,7 +2884,7 @@ interface SourcesState {
   sourceFocusTarget: { sourceId: string; token: number } | null
   sourcesLoading: boolean
   sourcesError: string | null
-  sourceContentCache: Record<number, WorkspaceSourceContentCacheEntry>
+  sourceContentCache: Map<number, WorkspaceSourceContentCacheEntry>
 }
 
 interface StudioState {
@@ -3285,7 +3285,7 @@ export const initialSourcesState: SourcesState = {
   sourceFocusTarget: null,
   sourcesLoading: false,
   sourcesError: null,
-  sourceContentCache: {}
+  sourceContentCache: new Map()
 }
 
 export const initialStudioState: StudioState = {
