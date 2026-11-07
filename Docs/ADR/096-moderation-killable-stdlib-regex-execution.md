@@ -1,4 +1,4 @@
-# ADR-086: Parent-Supervised Standard-Library Regex for Moderation
+# ADR-096: Parent-Supervised Standard-Library Regex for Moderation
 
 **Status:** Accepted
 **Date:** 2026-11-02
@@ -6,6 +6,10 @@
 **Decision owner:** Requester; written design approved on 2026-11-02
 **Related task:** TASK-15414
 **Related spec/plan:** Docs/superpowers/specs/2026-11-02-moderation-killable-stdlib-re-design.md
+
+**Identity correction (2026-11-07):** Previously ADR-086 on this unmerged branch;
+renumbered after rebasing because dev independently assigned that number to
+provider credential scope. Accepted decision and rationale are unchanged.
 
 ## Decision
 
