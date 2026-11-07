@@ -1,7 +1,7 @@
 ---
 id: TASK-13935
 title: Stabilize backup-restore confirmation coverage
-status: In Progress
+status: Done
 labels:
 - frontend
 - testing
@@ -18,7 +18,7 @@ Investigate and fix the repeated advisory shared-ui coverage failure in DataOpsP
 <!-- AC:BEGIN -->
 - [x] #1 Reproduce the recorded hidden confirmation failure with evidence identifying its cause.
 - [x] #2 Repair the cause while preserving exact artifact/dataset/user context, explicit confirmation and cancellation never posting.
-- [ ] #3 Verify focused and relevant coverage tests, lint/types as applicable, and obtain fresh independent review.
+- [x] #3 Verify focused and relevant coverage tests, lint/types as applicable, and obtain fresh independent review.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -30,19 +30,21 @@ Candidate repair scopes getByRole to the real popup found by its existing overwr
 Controlled reproduction now matches the hosted symptom: with a realistic ten-backup first page (one chacha target plus nine distinct media rows), the ORIGINAL helper fails the SAME cancellation case at toBeVisible within unchanged3000ms. Diagnostic: first whole-page query3423ms; popup remained ant-zoom-big-appear-prepare with computed opacity0 when timeout expired. Source /private/tmp/backup-restore-linux-20261025; log /private/tmp/backup-restore-linux-inventory-red.log. This proves a query-starvation failure mechanism under a controlled larger inventory, not the exact original hosted timing. Retain the ten-row fixture in the existing case to prevent regression; no assertion removed. Correction to prior Bandit note: explicit TSX path produced a Python AST syntax-error entry, so Bandit did NOT validate this TypeScript scope (not zero parsed findings/clearance). No Python changed.
 Identical-condition controlled red/green succeeded: ten-row first-page fixture, real AntD popup, sameNode20.20.2/Bun1.3.2/V8/twoCPU and unchanged3000ms timeout/assertions. ORIGINAL helper fails at hidden Restore; candidate passes. First query falls3423ms ->191ms; candidate continues polling the real button through prepare and reaches visible stable popup. Logs /private/tmp/backup-restore-linux-inventory-{red,green}.log; only helper query scope differs between these instrumented copies. Final production/test diff contains no diagnostic logging or dependency/config changes. Retained ten-row fixture is regression context for existing cancellation case; all22 safety assertions remain. Hosted exact-head qualification still pending publication.
 Final regression fixture additionally asserts the ninth neighboring artifact is visibly present in the target backup tbody; this closes review concern that a changed request order could silently bypass ten-row coverage. Final native verification:23passes in2files (all22backup cases plus selected real DSR erasure-confirm/cancel case;11unrelatedDSR cases not selected), /private/tmp/backup-restore-final-native-guarded.log. Final test ESLint0errors/0warnings, noneignored, /private/tmp/backup-restore-eslint-final.json. Independent backup_restore_coverage_review approves final diff, no remaining findings. Unique own plan IMPLEMENTATION_PLAN_backup_restore_coverage_20261025.md stages1/2Complete,3InProgress; final exact-source Linux166-file V8 shard and hosted qualification pending. Production files, transport/domain implementation, dependencies, config, workflows/protection and earlier evidence unchanged.
+2026-11-06 bookkeeping closure requested by the user: GitHub freshly verifies PR#3317 MERGED at2026-10-25T21:43:53Z, merge commit15b0c18ca1bcefcdf3ae6f0a4b1618c6150fd46a; commit is contained in current dev2f402bd7e34015ca6823793fd05cee68a16092b2. This updates stale task status/final summary only. Earlier pending-CI and paused-sidebar wording is historical and superseded by the actual merge. Preserve historical evidence and limitations. PR https://github.com/rmusser01/tldw_server/pull/3317. No product or workflow change.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR#3317 merged into dev at2026-10-25T21:43:53Z, commit15b0c18ca1bcefcdf3ae6f0a4b1618c6150fd46a, verified contained in current dev on2026-11-06. Backup-restore confirmation coverage repair merged. Popup-scoped lookup and the ten-backup cancellation fixture preserve the original visibility deadline, artifact/dataset/owner context, explicit confirmation and no-POST cancellation assertions. Controlled red/green and final Linux plus hosted shard11/16 passed1506tests/166files, including22backup cases;23native cases passed. Bandit is not a TypeScript analyzer; full repository and live database restore were not run.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

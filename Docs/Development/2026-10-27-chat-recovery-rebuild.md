@@ -30,7 +30,7 @@ Checked in code and with a probe on the Playground integration harness.
 |---|---|---|
 | CC-04 | Partly fixed: both controls hide while the captured history is empty (TASK-13550). | Everything in the owner decision above, plus plain-language review copy and chronological order. |
 | CC-02 | Open. After a provider 502 with no output, fresh and saved chats show "Turn needs review / User input accepted; response not saved / Inspect original input and result / Review retry / Copy recovered text / Dismiss recovery". No cause, no alert. Only the model chip says Unreachable (Wave 3). | Plain-language failure card with the cause, `role=alert`, Retry and Switch model. |
-| CM-02 | Mostly fixed. A partial reply on Stop is kept and marked Stopped with Retry (CS-04). The in-bubble Stop has a name. Stop before dispatch no longer shows `request_config_scope_changed`. | Stop before the first token: the question stays and the draft is also put back in the composer, with no "Stopped" note. Busy Send still reads "Queue" (the side panel says "Send after this reply", XS-10). |
+| CM-02 | Mostly fixed. A partial reply on Stop is kept and marked Stopped with Retry (CS-04). The in-bubble Stop has a name. Stop before dispatch no longer shows `request_config_scope_changed`. | Stop before the first token: the question stays and the draft is also put back in the composer, with no "Stopped" note (fixed in the follow-up PR). Busy Send still reads "Queue" (the side panel says "Send after this reply", XS-10). |
 | CC-N2 | Partly fixed: the model chip turns Unreachable after a provider failure (Wave 3 CC-01). | Error copy is the generic "Something went wrong while talking to your tldw server". The same error shows twice, in the reply bubble and in the composer banner. |
 | CM-06 | Open. Screen readers hear "Still generating response (checkpoint N)" every 5 s; no elapsed time. A startup timeout has friendly copy but doesn't name the model. | Plain announcements at about 10 s and 30 s naming the model, a visible elapsed timer, and a timeout message that names the model. |
 
@@ -62,16 +62,18 @@ case that opens the picker from the card; `useModelPickerOpenRequests`;
 negative checks pointed at the new titles.
 **Status:** Complete
 
-**Not done: Stop before the first token (CM-02).** The question stays in the
-transcript and the draft also returns to the composer, so sending again
-saves the question twice. Keeping an empty "Stopped" reply with Retry was
-tried and backed out: dev rebuilds the transcript from the selected history
-plus kept turns, and a kept turn without reply text is not shown
-(`isRetainedPartialReply` needs `result_text`). Without a Retry there, the
-restored draft is the only quick way to ask again, so it stays. A proper fix
-belongs with dev's retry design: let a stopped turn with no text use the
-saved-question retry, then stop restoring the draft (a `questionKept` flag on
-the skipped result is enough for the second part).
+**Stop before the first token (CM-02), done in the follow-up PR.** The
+question stays in the transcript and the draft is no longer also put back in
+the composer (the skipped result carries `questionKept`). The turn is recorded
+without an outcome and marked `stopped_before_reply`, so it isn't kept as an
+empty reply: the review card says "Stopped before a reply", and dev's
+"Review retry" → "Retry saved question" asks the saved question again
+without saving it twice. The Playground harness's fake server now returns the
+admission proof (`validated_admission`) that the real server does, so this
+retry runs end to end in the integration tests. Stop still ends at once:
+following the stopped question doesn't wait for a slow history read. The card
+shows only while the conversation still ends at that question; sending a new
+message moves on from it, as dev's own test expects.
 
 ### Stage 3: long waits (CM-06) and one error surface (CC-N2)
 **Goal:** waits show elapsed time and announce plainly; an error shows once.
