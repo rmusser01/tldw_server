@@ -10,9 +10,9 @@
 
 **Spec:** [Approved Phase 5 design](../specs/2026-10-04-web-scraping-phase-5-crawl-process-local-jobs-design.md).
 
-**Decision:** [Accepted ADR-094](../../ADR/094-web-scraping-crawl-and-process-local-job-ownership.md). No new ADR: this plan implements that ownership decision without changing it.
+**Decision:** [Accepted ADR-096](../../ADR/096-web-scraping-crawl-and-process-local-job-ownership.md). No new ADR: this plan implements that ownership decision without changing it.
 
-**Task:** TASK-15432 (planning complete); TASK-15453 (execution complete). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01; implementation and review complete locally, not published or merged. November 7 integration is tracked separately by TASK-15452 and its integration plan.
+**Task:** TASK-15432 (planning complete); TASK-15467 (execution complete). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01; implementation and review complete. November 7 integration/publication is tracked separately by TASK-15466 and its integration plan. No merge is authorized.
 
 ## Global Constraints
 
@@ -390,7 +390,7 @@ history, and no removal of intentionally requested public article/raw content.
 - [x] **Step 2: Run `python -m pytest tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py -q`.** RED 15 failed; added nested-redaction and failed-cleanup review regressions also reproduced before fixes.
 - [x] **Step 3: Implement authorization before side effects and explicit public projections; reuse established auth dependencies and sanitizers.** Serialized/idempotent initialization, owned drain guards and explicit failed-cleanup retry; ordinary automatic startup preserved.
 - [x] **Step 4: Run new tests and existing admin/retention regressions.** 471 pre-review covering tests and 197 post-fix covering tests pass; Bandit zero findings; warning sources categorized. Fresh review I1-I2 fixed and independently re-reviewed; deferred startup/shutdown transition minor remains for final review.
-- [x] **Step 5: Commit explicit paths and child task:** `cc4db584dc`, `afe62367b6`; TASK-15455 Done after independent gate (formerly TASK-15423).
+- [x] **Step 5: Commit explicit paths and child task:** `cc4db584dc`, `afe62367b6`; TASK-15469 Done after independent gate (formerly TASK-15423/TASK-15455).
 
 ## Stage 3: Governed Crawl And Continuation
 
@@ -479,7 +479,7 @@ assert no over-budget chunk appended; do not claim zero kernel buffering oversho
 - [x] **Step 2: Run the three named acquisition/preflight/shared-HTTP suites.** Initial RED 19 failures; added deterministic review regressions also reproduced before fixes.
 - [x] **Step 3: Implement narrow internal hooks/discovery sidecar and actual per-operation drain.** Fresh review I1-I3 cancellation/commit/WebSocket/cleanup defects fixed and independently re-reviewed.
 - [x] **Step 4: Run new and existing regressions.** Historical full scope 3288 passed, 26 skipped, 5 failed; three earlier-Phase5 integration failures corrected, two baseline arXiv assertions retained for Task 11. Final 773 covering tests pass; Chromium 3 pass/no skips; touched Bandit zero findings. Inventory/full-repository baseline gates remain visible, no full-scope green claim.
-- [x] **Step 5: Commit explicit paths and child task:** `e3b4515f54`, `db27425016`, `f2abedc4e1`; TASK-15456 Done after fresh review and fix gate (formerly TASK-15424).
+- [x] **Step 5: Commit explicit paths and child task:** `e3b4515f54`, `db27425016`, `f2abedc4e1`; TASK-15470 Done after fresh review and fix gate (formerly TASK-15424/TASK-15456).
 
 ### Task 6: Extract Bounded Discovery And Profile Traversal
 
@@ -632,7 +632,7 @@ Use Hypothesis for normalization/order/disposition/accounting invariants.
 - [x] **Step 2: Run the three named frontier/discovery/engine suites.** Initial RED three missing-module errors; final brief suite 58 pass, all-profile focused 147 pass before independent review.
 - [x] **Step 3: Move traversal/parsing rules behind injected acquisition.** No lower owner/wrapper import or duplicate discovery fetch. New bounded normalization, private hooks/policy/seeds and actual policy-work drain follow execution rulings.
 - [x] **Step 4: Rerun direct/queued profile and interruption coverage.** Fresh review I1-I3 fixed and independently re-reviewed; final 636 covering tests pass, scoped Bandit zero findings. Historical broad 3427 pass/26 skip/two baseline arXiv failures and inventory gate remain Task 11 obligations. Sequential direct latency/concurrency implication carried to Task 8/final review, no throughput-parity claim.
-- [x] **Step 5: Commit explicit paths and child task:** `87c794be0f`, `0702dc3ee2`, `55033a803b`; TASK-15457 Done after fresh review/fix gate (formerly TASK-15425).
+- [x] **Step 5: Commit explicit paths and child task:** `87c794be0f`, `0702dc3ee2`, `55033a803b`; TASK-15471 Done after fresh review/fix gate (formerly TASK-15425/TASK-15457).
 
 ### Task 7: Implement Safe Legacy Continuation
 
@@ -726,7 +726,7 @@ retention. New writer fixes future in-flight loss; it cannot recover missing old
 - [x] **Step 2: Run the two named checkpoint suites.** RED two missing-module collection failures; strict schema/aggregate cleanup/packaging defects also reproduced before correction.
 - [x] **Step 3: Implement versioned/legacy loading, atomic storage and owned finalization.** Single aggregate two-second cleanup deadline, current-policy replay and actual writer drain retain unfinished state without masking primary stops.
 - [x] **Step 4: Rerun checkpoint/engine/lock/package coverage.** Final 346 covering tests pass; scoped quality/Bandit clean. New run_crawl reduced to 265 lines, no ceiling increase; six other branch size regressions remain certification work. Native Windows not verified; service-root capability limitation and M1 fork warning remain explicit.
-- [x] **Step 5: Commit explicit paths and child task:** `efbd0e70fc`, `70e58f4a86`; TASK-15458 Done after fresh task/fix review, including regular-package shipping correction (formerly TASK-15426).
+- [x] **Step 5: Commit explicit paths and child task:** `efbd0e70fc`, `70e58f4a86`; TASK-15472 Done after fresh task/fix review, including regular-package shipping correction (formerly TASK-15426/TASK-15458).
 
 ### Task 8: Compose Bounded Batches And Queue-Owned Pages
 
@@ -1329,7 +1329,7 @@ warnings, 18.01s (`/tmp/web-phase5-controller-final-focused.log`). Full changed
 Python scope Ruff and compile checks passed. Endpoint-complete final Bandit
 reported eight unchanged LOW findings, no MEDIUM/HIGH findings or scan errors;
 no new suppression. Detailed commands, warning provenance and earlier failed-run
-history remain in TASK-15462 and TASK-15453; final logs use
+history remain in TASK-15476 and TASK-15467; final logs use
 `/tmp/web-phase5-fix-*-receipt.log` and
 `/tmp/bandit_web_phase5_controller_final.json`.
 

@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 2 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 2 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15467. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -33,6 +33,7 @@ Controller fresh review and fix round1 complete. Commits 213f02c26b, 6d193eaecb,
 Namespace migration before fresh-dev integration: original identifier TASK-15409; current identifier TASK-15409. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
 Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
+Current publication namespace: integration TASK-15466; execution parent TASK-15467; Tasks3-11 TASK-15468 through TASK-15476; Tasks1/2 TASK-15408/TASK-15409; design/planning TASK-15431/TASK-15432; accepted ownership ADR096. Historical IDs and review results above are retained verbatim. User approved pushing and opening a PR, not merging; human-written Change summary remains required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

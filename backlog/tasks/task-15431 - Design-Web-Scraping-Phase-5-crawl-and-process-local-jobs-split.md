@@ -43,12 +43,13 @@ Current artifacts: Docs/superpowers/specs/2026-10-04-web-scraping-phase-5-crawl-
 Namespace-only correction after fresh-dev rebase: original design identifier TASK-15282 is occupied by an unrelated completed Chunker design. Current web-scraping design identifier TASK-15431. Status, criteria, accepted design and history preserved; official path-specific backlog-py renumber used, no unrelated record altered.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
 Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
+Current publication namespace: integration TASK-15466; execution parent TASK-15467; Tasks3-11 TASK-15468 through TASK-15476; Tasks1/2 TASK-15408/TASK-15409; design/planning TASK-15431/TASK-15432; accepted ownership ADR096. Historical IDs and review results above are retained verbatim. User approved pushing and opening a PR, not merging; human-written Change summary remains required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Written Phase 5 specification and ADR-094 approved by the human requester on 2026-11-01 after all targeted review amendments. Recorded spec Approved and ADR Accepted; no product implementation. Separate TASK-15432 owns the detailed plan, safety defaults and plan-review gate. Scoped documentation and task checks pass; runtime behavior is not claimed tested.
+Written Phase 5 specification and ADR-096 approved by the human requester on 2026-11-01 after all targeted review amendments. Recorded spec Approved and ADR Accepted; no product implementation. Separate TASK-15432 owns the detailed plan, safety defaults and plan-review gate. Scoped documentation and task checks pass; runtime behavior is not claimed tested.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

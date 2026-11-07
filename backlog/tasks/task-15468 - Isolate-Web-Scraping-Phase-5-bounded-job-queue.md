@@ -1,5 +1,5 @@
 ---
-id: TASK-15454
+id: TASK-15468
 title: Isolate Web Scraping Phase 5 bounded job queue
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 3 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 3 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15467. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -35,6 +35,8 @@ Namespace migration before fresh-dev integration: original identifier TASK-15410
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
 2026-11-07 integration namespace correction: TASK-15422 -> TASK-15454; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
 Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
+Publication namespace correction after fresh45openPR paginated scan: TASK-15454 -> TASK-15468; former ID belongs to unrelated Jobs/Claims work. Original dated history/status/criteria preserved. Publication approval applies; tracking TASK-15466.
+Current publication namespace: integration TASK-15466; execution parent TASK-15467; Tasks3-11 TASK-15468 through TASK-15476; Tasks1/2 TASK-15408/TASK-15409; design/planning TASK-15431/TASK-15432; accepted ownership ADR096. Historical IDs and review results above are retained verbatim. User approved pushing and opening a PR, not merging; human-written Change summary remains required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
