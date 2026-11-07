@@ -110,6 +110,17 @@ def is_explicit_pytest_runtime() -> bool:
         return False
 
 
+def is_test_context() -> bool:
+    """TEST_MODE, TLDW_TEST_MODE or TESTING is on, or pytest is running a test.
+
+    The one replacement for the modules' private "is this a test" predicates
+    (TASK-13950.19). validate_test_runtime_flags() refuses the three flags outside
+    pytest, so in a started server this is is_explicit_pytest_runtime(). That guard runs
+    from the server lifespan only: in CLIs and scripts TESTING/TEST_MODE still count.
+    """
+    return is_test_mode() or env_flag_enabled("TESTING") or is_explicit_pytest_runtime()
+
+
 def audio_imports_enabled_for_runtime() -> bool:
     """Allow heavy audio router imports outside pytest or with explicit opt-in."""
     return not is_explicit_pytest_runtime() or env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO")

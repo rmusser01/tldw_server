@@ -270,16 +270,3 @@ def test_settings_refuses_the_test_api_key_fallback_in_production_under_pytest(
 
     with pytest.raises(ValueError, match="SINGLE_USER_API_KEY"):
         _settings(AUTH_MODE="single_user", SINGLE_USER_API_KEY=None)
-
-
-def test_user_db_handling_treats_an_empty_pytest_marker_as_unset(neutral_env: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
-
-    neutral_env.delenv("TEST_MODE", raising=False)
-    neutral_env.setattr(User_DB_Handling, "get_settings", lambda: SimpleNamespace(TEST_MODE=False))
-    neutral_env.setenv("PYTEST_CURRENT_TEST", "")
-
-    assert User_DB_Handling._is_test_context() is False
-
-    neutral_env.setenv("PYTEST_CURRENT_TEST", "tests::x")
-    assert User_DB_Handling._is_test_context() is True

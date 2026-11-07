@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.constants import (
     MEDIA_DB_FILENAME,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, StorageUnavailableError
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.testing import is_test_context
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
@@ -27,10 +27,6 @@ UserId = Union[int, str]
 _SAFE_TEST_USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _SAFE_OUTPUT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _TEST_FALLBACK_RUN_TAG = uuid.uuid4().hex[:8]
-
-
-def _is_test_context() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST")) or is_test_mode()
 
 
 def _get_test_fallback_run_tag() -> str:
@@ -50,7 +46,7 @@ def _normalize_user_id(user_id: UserId) -> str:
         if int(raw) < 1:
             raise ValueError(f"user_id must be a positive integer for filesystem path: {user_id!r}")
         return raw
-    if _is_test_context():
+    if is_test_context():
         if (
             _SAFE_TEST_USER_ID_RE.fullmatch(raw)
             and raw[0].isalnum()
@@ -175,7 +171,7 @@ def _iter_trusted_database_roots(
                 continue
             trusted_roots.extend(normalized_roots)
 
-    if _is_test_context():
+    if is_test_context():
         trusted_roots.extend(_normalize_trusted_root(tempfile.gettempdir(), project_root=project_root))
         trusted_roots.extend(_normalize_trusted_root(Path.cwd(), project_root=project_root))
 
@@ -455,7 +451,7 @@ class DatabasePaths:
         project_root = Path(get_project_root())
         default_base = (project_root / "Databases" / "user_databases").resolve()
         user_db_base = env_user_db_base or settings_user_db_base
-        if _is_test_context() and not env_user_db_base:
+        if is_test_context() and not env_user_db_base:
             try:
                 candidate = Path(settings_user_db_base) if settings_user_db_base else None
                 if candidate is not None:
@@ -477,7 +473,7 @@ class DatabasePaths:
                 )
                 user_db_base = legacy_base
         if not user_db_base:
-            if _is_test_context():
+            if is_test_context():
                 import tempfile
 
                 run_tag = _get_test_fallback_run_tag()

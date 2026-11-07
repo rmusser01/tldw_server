@@ -412,7 +412,7 @@ async def _allow_scope(*_args: Any, **_kwargs: Any) -> None:
 
 def _install_boundary(monkeypatch: pytest.MonkeyPatch, adapter: Any, pool: _ObservedPool) -> None:
     registry = SimpleNamespace(get_adapter=lambda _provider: adapter)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: registry)
     monkeypatch.setattr(byok_testing, "build_app_config_for_provider", lambda *_args: {})
     monkeypatch.setattr(
@@ -466,7 +466,7 @@ def _install_legacy_boundary(
     pool: _ObservedPool,
 ) -> None:
     registry = SimpleNamespace(get_adapter=lambda _provider: None)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: registry)
     monkeypatch.setattr(byok_testing, "list_registered_providers", lambda: ["openai"])
     monkeypatch.setattr(byok_testing, "chat_api_call", call)
@@ -629,7 +629,7 @@ def _install_shared_admin_chat_boundary(
     """Install real Admin and Chat adapter boundaries over one process pool."""
     admin_registry = SimpleNamespace(get_adapter=lambda _provider: admin_adapter)
     chat_registry = SimpleNamespace(get_adapter=lambda _provider: chat_adapter)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: admin_registry)
     monkeypatch.setattr(byok_testing, "build_app_config_for_provider", lambda *_args: {})
     monkeypatch.setattr(
@@ -1108,7 +1108,7 @@ async def test_default_validation_deadline_reaches_ollama_http_timeout_without_m
     adapter = local_adapters.OllamaAdapter()
     registry = SimpleNamespace(get_adapter=lambda _provider: adapter)
     pool = _ObservedPool(1)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: registry)
     monkeypatch.setattr(byok_testing, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
@@ -1616,7 +1616,7 @@ async def test_provider_specific_health_admission_tracks_real_worker_lifetime(
         "PROVIDER_CREDENTIAL_VALIDATION_PER_PROVIDER_CONCURRENCY",
         "1",
     )
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(
         byok_testing,
         "get_registry",

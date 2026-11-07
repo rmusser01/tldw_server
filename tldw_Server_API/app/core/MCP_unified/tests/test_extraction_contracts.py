@@ -2896,8 +2896,7 @@ def test_mcp_server_uses_injected_environment_flags_provider() -> None:
     server = MCPServer(dependencies=deps)
 
     assert server._env_flag_enabled("MCP_ENABLE_DEMO_AUTH") is True  # noqa: SLF001
-    assert server._is_test_mode() is True  # noqa: SLF001
-    assert server._is_explicit_pytest_runtime() is True  # noqa: SLF001
+    assert server.environment_flags_provider is deps.environment_flags_provider
     assert server._is_truthy("yes") is True  # noqa: SLF001
 
 
