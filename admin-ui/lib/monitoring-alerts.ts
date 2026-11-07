@@ -345,8 +345,7 @@ export const normalizeMonitoringAlert = (value: unknown): SystemAlert | null => 
   const timestamp = !Number.isNaN(Date.parse(timestampRaw))
     ? new Date(timestampRaw).toISOString()
     : new Date().toISOString();
-  const acknowledged = Boolean(obj.acknowledged ?? obj.is_read ?? obj.read_at);
-  const acknowledgedAtRaw = coerceString(obj.acknowledged_at) || coerceString(obj.read_at);
+  const acknowledgedAtRaw = coerceString(obj.acknowledged_at);
   const acknowledgedAt = acknowledgedAtRaw && !Number.isNaN(Date.parse(acknowledgedAtRaw))
     ? new Date(acknowledgedAtRaw).toISOString()
     : undefined;
@@ -374,7 +373,7 @@ export const normalizeMonitoringAlert = (value: unknown): SystemAlert | null => 
     message,
     source,
     timestamp,
-    acknowledged,
+    acknowledged: Boolean(acknowledgedAt),
     acknowledged_at: acknowledgedAt,
     dismissed_at: dismissedAt,
     acknowledged_by: acknowledgedBy,
@@ -383,6 +382,13 @@ export const normalizeMonitoringAlert = (value: unknown): SystemAlert | null => 
     escalated_severity: coerceSeverity(obj.escalated_severity, severity),
     metadata,
   };
+};
+
+export const confirmsAlertAcknowledgment = (payload: unknown, id: string): boolean => {
+  const receipt = toObject(payload);
+  if (receipt?.status !== 'ok' || String(receipt.id) !== id) return false;
+  const item = normalizeMonitoringAlert(receipt.item);
+  return item?.id === id && item.acknowledged;
 };
 
 export const normalizeMonitoringAlertsPayload = (payload: unknown): SystemAlert[] => {

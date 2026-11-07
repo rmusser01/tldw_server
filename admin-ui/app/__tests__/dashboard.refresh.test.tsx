@@ -1,11 +1,11 @@
 /* @vitest-environment jsdom */
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DashboardPage from '../page';
 import { api } from '@/lib/api-client';
 
-const noop = () => {};
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
 
 const createDeferred = <T,>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -52,10 +52,7 @@ vi.mock('@/components/ui/confirm-dialog', () => ({
 }));
 
 vi.mock('@/components/ui/toast', () => ({
-  useToast: () => ({
-    success: vi.fn(),
-    error: vi.fn(),
-  }),
+  useToast: () => toast,
 }));
 
 vi.mock('@/components/ui/accessible-icon-button', () => ({
@@ -71,7 +68,8 @@ vi.mock('@/components/dashboard/DashboardHeader', () => ({
 }));
 
 vi.mock('@/components/dashboard/AlertsBanner', () => ({
-  AlertsBanner: () => <section aria-label="Dashboard alerts">Alerts</section>,
+  AlertsBanner: ({ alerts, onAcknowledgeAll }: { alerts: Array<{ id: string }>; onAcknowledgeAll: () => void }) =>
+    alerts.length ? <button onClick={onAcknowledgeAll}>Acknowledge {alerts.length}</button> : null,
 }));
 
 vi.mock('@/components/dashboard/StatsGrid', () => ({
@@ -115,6 +113,8 @@ vi.mock('@/lib/api-client', () => ({
     getLLMProviders: vi.fn(),
     getAuditLogs: vi.fn(),
     getAlerts: vi.fn(),
+    acknowledgeAlert: vi.fn(),
+    getRealtimeStats: vi.fn(),
     getDashboardActivity: vi.fn(),
     getUsageDaily: vi.fn(),
     getLlmUsageSummary: vi.fn(),
@@ -203,6 +203,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   vi.clearAllTimers();
   vi.resetAllMocks();
@@ -238,5 +239,48 @@ describe('DashboardPage refresh behavior', () => {
     });
 
     expect(apiMock.getDashboardStats).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Dashboard bulk acknowledgment', () => {
+  const stamp = '2026-02-17T10:00:00.000Z';
+  const receipt = (id: number, acknowledged_at: string | null) => ({
+    status: 'ok', id, item: { id, acknowledged_at },
+  });
+
+  it.each([
+    ['both confirmed', receipt(2, stamp), 'success'],
+    ['unconfirmed response', receipt(2, null), 'warning'],
+    ['different alert', receipt(9, stamp), 'warning'],
+    ['request failed', new Error('Denied'), 'warning'],
+  ] as const)('reports %s after checking the server response', async (_, second, level) => {
+    apiMock.getAlerts.mockResolvedValue({ items: [
+      { id: 1, is_read: true }, { id: 2 },
+      { id: 3, acknowledged_at: stamp }, { id: 4, dismissed_at: stamp },
+      { id: 5, snoozed_until: '2999-01-01T00:00:00Z' },
+    ] });
+    const acknowledge = vi.mocked(api.acknowledgeAlert);
+    acknowledge.mockResolvedValueOnce(receipt(1, stamp));
+    if (second instanceof Error) acknowledge.mockRejectedValueOnce(second);
+    else acknowledge.mockResolvedValueOnce(second);
+
+    render(<DashboardPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge 2' }));
+    await waitFor(() => expect(toast[level]).toHaveBeenCalledOnce());
+    expect(acknowledge.mock.calls).toEqual([['1'], ['2']]);
+    expect(apiMock.getAlerts).toHaveBeenCalledTimes(2);
+    if (level === 'warning') {
+      expect(toast.warning.mock.calls[0][1]).toContain('1 of 2');
+      expect(toast.success).not.toHaveBeenCalled();
+    }
+  });
+
+  it('reports total failure when all writes reject', async () => {
+    apiMock.getAlerts.mockResolvedValue([{ id: 10 }]);
+    vi.mocked(api.acknowledgeAlert).mockRejectedValue(new Error('Denied'));
+    render(<DashboardPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge 1' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledOnce());
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });
