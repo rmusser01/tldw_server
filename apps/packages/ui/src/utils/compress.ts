@@ -28,6 +28,11 @@ export async function decompressData(compressedData: ArrayBuffer): Promise<strin
     return decoder.decode(decompressedArrayBuffer);
 }
 
+// 8 KB slices keep String.fromCharCode.apply far below the engine's
+// argument limit while making the conversion O(n) with no per-byte
+// string concatenation (W5 Stage 2, WP-59).
+const BASE64_CONVERSION_CHUNK_SIZE = 8192
+
 /**
  * Converts an ArrayBuffer to a base64 string for storage or transmission
  * @param buffer - The ArrayBuffer to convert
@@ -35,11 +40,12 @@ export async function decompressData(compressedData: ArrayBuffer): Promise<strin
  */
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
+    const parts: string[] = [];
+    for (let offset = 0; offset < bytes.byteLength; offset += BASE64_CONVERSION_CHUNK_SIZE) {
+        const slice = bytes.subarray(offset, Math.min(offset + BASE64_CONVERSION_CHUNK_SIZE, bytes.byteLength));
+        parts.push(String.fromCharCode.apply(null, slice as unknown as number[]));
     }
-    return globalThis.btoa(binary);
+    return globalThis.btoa(parts.join(""));
 }
 
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
