@@ -1,6 +1,6 @@
-# Moderation Dev Integration (TASK-15466, previously TASK-15417)
+# Moderation Dev Integration (TASK-15477, previously TASK-15417/15466)
 
-ADR assessment: ADR-096 and ADR-021 govern the existing implementation. No new
+ADR assessment: ADR-097 and ADR-021 govern the existing implementation. No new
 architecture decision is required for rebasing and publishing the approved work.
 
 ## Stage 1: Rebase
@@ -16,11 +16,11 @@ checks pass, or unrelated baseline limitations are explicitly documented.
 **Tests**: Native process containment prerequisites before hostile probes; recorded
 focused regression manifest; UI tests/typecheck; touched Python compilation/Bandit;
 Backlog metadata and task ID checks; independent conflict/integration review.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Publish
 **Goal**: Push the verified branch and create a PR against dev.
 **Success Criteria**: PR URL recorded with fresh verification and remaining platform
 limitations. No merge or auto-merge; human-owned Change summary remains a merge gate.
 **Tests**: Confirm PR base/head and clean worktree; inspect initial CI dispatch.
-**Status**: Not Started
+**Status**: In Progress
