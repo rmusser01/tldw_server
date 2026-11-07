@@ -50,6 +50,7 @@ import {
   getWorkProductTemplate,
   type WorkProductTemplate
 } from "@/workspace-templates/work-product-templates"
+import { resolveSourceContentText } from "../../source-content-text"
 import {
   formatQuizQuestionsContent,
   type FlashcardDraft,
@@ -846,24 +847,6 @@ const extractChatCompletionText = (payload: unknown): string => {
   ).trim()
 }
 
-const extractMediaDetailText = (payload: unknown): string => {
-  if (!isRecord(payload)) {
-    return ""
-  }
-  if (typeof payload.content === "string" && payload.content.trim()) {
-    return payload.content.trim()
-  }
-  const content = isRecord(payload.content) ? payload.content : null
-  if (typeof content?.text === "string" && content.text.trim()) {
-    return content.text.trim()
-  }
-  const processing = isRecord(payload.processing) ? payload.processing : null
-  if (typeof processing?.analysis === "string" && processing.analysis.trim()) {
-    return processing.analysis.trim()
-  }
-  return ""
-}
-
 const readChatCompletionResponseText = async (response: Response): Promise<string> => {
   const bodyText = (await response.text()).trim()
   if (!bodyText) {
@@ -981,24 +964,20 @@ const loadStudioSourceContextBundle = async (
   )
   const mediaDetails = await Promise.all(
     options.mediaIds.map(async (mediaId) => {
-      const detail = await tldwClient.getMediaDetails(mediaId, {
-        include_content: true,
-        include_versions: false,
-        include_version_content: false,
+      // WP-45: reuse already-ingested source text from the workspace store
+      // (shared with ChatPane's "ask with sources"); only misses fetch.
+      const resolvedContent = await resolveSourceContentText(mediaId, {
         requestScope: options.requestScope,
         signal: options.abortSignal
       })
       const source = sourceByMediaId.get(mediaId)
-      const sourceMeta = isRecord(detail) && isRecord(detail.source) ? detail.source : null
       return {
         sourceId: source?.id || `media-${mediaId}`,
         mediaId,
         sourceStatus: source?.status,
         title:
-          source?.title ||
-          (typeof sourceMeta?.title === "string" ? sourceMeta.title : "") ||
-          `Source ${mediaId}`,
-        text: extractMediaDetailText(detail)
+          source?.title || resolvedContent.title || `Source ${mediaId}`,
+        text: resolvedContent.text
       }
     })
   )

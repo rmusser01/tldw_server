@@ -20,6 +20,9 @@ import {
   deriveEffectiveSelectedSourceIds
 } from '@/store/workspace-organization'
 
+/** WP-45: cap for the in-memory source-text cache (never persisted). */
+const SOURCE_CONTENT_CACHE_MAX_ENTRIES = 32
+
 // Extract SourcesActions from workspace.ts (action interface only)
 type SourcesActions = Pick<
   WorkspaceState,
@@ -54,6 +57,8 @@ type SourcesActions = Pick<
   | 'getSelectedMediaIds'
   | 'getEffectiveSelectedSources'
   | 'getEffectiveSelectedMediaIds'
+  | 'getSourceContentText'
+  | 'setSourceContentText'
 >
 
 export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => ({
@@ -562,5 +567,34 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
   getEffectiveSelectedMediaIds: () =>
     get()
       .getEffectiveSelectedSources()
-      .map((source) => source.mediaId)
+      .map((source) => source.mediaId),
+
+  getSourceContentText: (mediaId, version = null) => {
+    const entry = get().sourceContentCache[mediaId]
+    if (
+      !entry ||
+      entry.version !== version ||
+      typeof entry.text !== "string" ||
+      entry.text.length === 0
+    ) {
+      return null
+    }
+    return entry.text
+  },
+
+  setSourceContentText: (mediaId, version, text, title = null) => {
+    const normalizedText = text.trim()
+    if (!Number.isFinite(mediaId) || normalizedText.length === 0) return
+    set((state) => {
+      // Re-insert to refresh insertion order so eviction drops the oldest ask.
+      const nextCache = { ...state.sourceContentCache }
+      delete nextCache[mediaId]
+      nextCache[mediaId] = { version, text: normalizedText, title }
+      const cacheKeys = Object.keys(nextCache)
+      if (cacheKeys.length > SOURCE_CONTENT_CACHE_MAX_ENTRIES) {
+        delete nextCache[Number(cacheKeys[0])]
+      }
+      return { sourceContentCache: nextCache }
+    })
+  }
 })
