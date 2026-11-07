@@ -19,6 +19,10 @@ checks, touched compilation/lint/Bandit and independent fix review.
 preserve all budgets, ownership, privacy and fail-closed caller contracts.
 **Status**: Complete
 
+Native AuthNZ reproduction found that sequential app lifespans retain closed
+Moderation admission. Add restart and retained-ownership regressions before
+correcting trusted startup; never reset PID counters or discard live owners.
+
 ## Stage 3: Publish and Prepare for Merge
 **Goal**: Push corrections, respond to comments and report real merge gates.
 **Success Criteria**: PR updated, every finding disposition recorded, required

@@ -38,8 +38,11 @@ if hasattr(os, "register_at_fork"):
 
 
 def prepare_moderation_incident_store() -> None:
-    """Have the DB owner transactionally prepare the schema before traffic."""
+    """Prepare storage and reopen trusted startup admission, retaining leases."""
+    global _closed
     ModerationReviewStore()
+    with _lock:
+        _closed = False
 
 
 def _emit_reporter_error() -> None:

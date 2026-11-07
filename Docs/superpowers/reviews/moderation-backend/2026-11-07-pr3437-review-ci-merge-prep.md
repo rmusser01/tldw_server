@@ -135,15 +135,61 @@ Sandbox fixture suite: 20 passed, 72 warnings, exit 0. Exact tenant ratchets:
 1,079 passed/one preexisting skip/2,948 warnings, then 193 passed/1,304 warnings;
 both exit 0. These overlap other runs and are not summed as unique coverage.
 
-The separate local AuthNZ floor invocation initially used the default shared
-home lock path and recorded two BYOK rotation lock failures; the suite is still
-running. An unchanged two-test reproduction failed similarly. Setting only the
+The separate local AuthNZ floor invocation used the default shared home lock
+path and finished with five failures and 416 passes (45.00 percent coverage,
+above 35 percent). This is a failed suite, not a successful floor check. Two
+failures were BYOK rotation lock acquisition; three were chat503s after repeated
+app lifespans. An unchanged two-test BYOK reproduction failed similarly. Setting only the
 supported OPENAI_OAUTH_REFRESH_LOCK_DIR override to an isolated /tmp directory
 makes both tests pass (440 warnings, exit 0, 2.10 seconds). This is local sandbox
 and shared-state qualification, not a reason to weaken assertions or change
 AuthNZ production code. Its final floor/result and the real CI floor remain
 separate gates. The supported override does not select the weaker in-memory
 lock backend: both tests still exercise native file locking and rotation.
+
+## Sequential Lifespan Recovery
+
+A native reproduction with isolated native OAuth lock files confirmed a real
+Moderation lifecycle defect: the first AuthNZ chat request passed, then later
+app lifespans returned moderation_unavailable503. Shutdown closed offload and
+singleton-runner admission permanently in the same PID. The restart regression
+failed on the second lifespan before the correction. Additional RED tests
+covered a real blocked native offload and a retained quarantined child.
+
+Trusted startup now reopens only the same settled singleton owner under its
+lock, and only when actual orchestration ownership is zero. It does not replace
+an owner, reset counters, drop entries, spawn a child or reopen on request paths.
+Admission stays closed while native work or quarantined resources remain owned.
+The async global ceiling changes exactly 4 to 5 for trusted startup, with a
+reviewed rationale; the strict test-quality baseline remains unchanged.
+
+Independent fix review caught a second lifecycle gap: incident reporting also
+stayed closed after restart. A second-lifespan oversized-input regression failed
+because no review item was persisted. Successful trusted store preparation now
+reopens reporter admission under its existing lock without clearing a live
+reporting-thread lease. A live-thread regression failed before the correction,
+then verified retained single-slot ownership, rejection of another report and
+real persistence after release. The exact reporter global ceiling changes 5 to
+6 with that reason. No capacity or timing limit changes.
+
+The reviewer also removed a new test race: quarantine is now established by an
+immediate malformed frame and unreapable fake child under the default scope,
+not an artificial 20 ms spawn assumption. Scoped re-review accepted all changes
+with no further actionable findings; concurrent independent lifespans remain
+unvalidated. Initial regression construction used a wrong WorkerResponse field;
+that was corrected before the meaningful RED reproduction, not counted as proof.
+
+Final lifecycle/async/runner/reporter suite: 84 passed, 267 warnings, exit 0,
+25.50 seconds. All three native AuthNZ chat cases pass (523 warnings, exit 0,
+18.14 seconds). Production Bandit on all four lifecycle modules has zero
+findings/errors; all eight touched lifecycle/test Python files are Ruff-clean.
+Logs: `/tmp/pr3437-restart-red.log`, `/tmp/pr3437-restart-ownership-red.log`,
+`/tmp/pr3437-reporter-restart-red.log`, `/tmp/pr3437-reporter-lease-red.log`,
+`/tmp/pr3437-lifecycle-final-green.log`,
+`/tmp/pr3437-authnz-chat-native-green.log`, `/tmp/bandit_pr3437_restart.json`.
+
+Full native AuthNZ floor and isolated global coverage reruns are in progress;
+their final results are not yet claimed. Coverage uses distinct /tmp data paths.
 
 ## Merge Gates
 

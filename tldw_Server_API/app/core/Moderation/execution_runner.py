@@ -359,6 +359,15 @@ class ModerationExecutionRunner:
             self._wake.wait(0.05)
             self._wake.clear()
 
+    def _prepare_lifecycle(self) -> bool:
+        """Reopen the same settled owner only at trusted application startup."""
+        self._check_pid()
+        with self._lock:
+            if self._entries:
+                return False
+            self._closed = False
+            return True
+
     def close(self, *, timeout_s: float = 0.5) -> None:
         """Reject admission immediately, kill registered children and boundedly reap."""
         self._check_pid()

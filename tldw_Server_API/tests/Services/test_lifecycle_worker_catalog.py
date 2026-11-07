@@ -107,6 +107,47 @@ async def test_moderation_prepare_failure_keeps_catalog_and_shutdown_owner(monke
     assert owner._closed and async_execution._closed and execution_incidents._closed
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_moderation_trusted_startup_reopens_same_settled_owner(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.DB_Management.Moderation_Review_DB import ModerationReviewStore
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_incidents, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds, FailureMetadata
+    from tldw_Server_API.app.services.startup_moderation_workers import provide_moderation_worker_specs
+    from tldw_Server_API.tests.unit.test_moderation_execution_runner import request, scope
+
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "restart.db"))
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+    monkeypatch.setattr(async_execution, "_closed", False)
+    monkeypatch.setattr(execution_incidents, "_closed", False)
+    context = _context()
+    for lifecycle in range(2):
+        specs = provide_moderation_worker_specs(context)
+        try:
+            result = await async_execution._run_moderation_offload(
+                lambda: owner.execute(request(), scope()), scope=scope()
+            )
+            assert result.result.text == "hello"
+            assert execution_runner.get_execution_runner() is owner
+            if lifecycle:
+                with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+                    await async_execution.run_moderation_async(
+                        lambda: pytest.fail("oversized input was admitted"),
+                        metadata=FailureMetadata("evaluate", None, 1_000_001),
+                    )
+                [item] = ModerationReviewStore(tmp_path / "restart.db").list_items()["items"]
+                assert item["excerpt"] == execution_incidents.ENGINE_FAILURE_EXCERPT
+                assert item["context"]["reason"] == "size_exceeded"
+                assert item["context"]["input_chars"] == 1_000_001
+                assert item["matches"] == [] and item["effective_policy"] == {}
+        finally:
+            await specs[0].shutdown_callback_factory(context)()
+        with pytest.raises(ModerationExecutionError, match="worker_unavailable"):
+            await async_execution._run_moderation_offload(lambda: "unexpected", scope=scope())
+
+
 def _worker_spec(name: str, **overrides: Any) -> WorkerSpec:
     values: dict[str, Any] = {
         "name": name,

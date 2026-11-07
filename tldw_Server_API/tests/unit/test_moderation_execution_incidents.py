@@ -41,6 +41,43 @@ def test_failure_excerpt_is_constant():
     assert incidents.ENGINE_FAILURE_EXCERPT == "[Moderation execution failed; content withheld]"
 
 
+@pytest.mark.asyncio
+async def test_trusted_restart_keeps_live_reporter_lease(store, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    original = incidents._persist_failure
+    monkeypatch.setattr(incidents, "_closed", False)
+
+    def stalled(*args, **kwargs):
+        entered.set()
+        release.wait(3)
+        original(*args, **kwargs)
+
+    monkeypatch.setattr(incidents, "_persist_failure", stalled)
+    metadata = FailureMetadata("evaluate", None, 1)
+    with execution_scope() as first:
+        owner = incidents.report_execution_failure_background(
+            ModerationExecutionError("capacity_exhausted"), metadata=metadata, scope=first
+        )
+    assert owner is not None
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        await incidents.close_moderation_incident_reporting()
+        incidents.prepare_moderation_incident_store()
+        assert not incidents._closed
+        assert incidents._report_thread is owner and owner.is_alive()
+        with execution_scope() as second:
+            rejected = incidents.report_execution_failure_background(
+                ModerationExecutionError("worker_crashed"), metadata=metadata, scope=second
+            )
+        assert rejected is None
+    finally:
+        release.set()
+        owner.join(1)
+        assert not owner.is_alive()
+    [item] = store.list_items()["items"]
+    assert item["context"]["reason"] == "capacity_exhausted"
+
+
 def test_capture_disabled_still_records_incident(store):
     report()
     [item] = store.list_items()["items"]

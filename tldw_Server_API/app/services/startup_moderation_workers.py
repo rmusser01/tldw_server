@@ -12,11 +12,13 @@ from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 def provide_moderation_worker_specs(context: WorkerLifecycleContext) -> Sequence[WorkerSpec]:
     """Register a shutdown owner without spawning a worker at startup/import."""
+    from tldw_Server_API.app.core.Moderation.async_execution import prepare_moderation_execution
     from tldw_Server_API.app.core.Moderation.execution_incidents import (
         _reporter_failure,
         prepare_moderation_incident_store,
     )
 
+    prepare_moderation_execution()
     try:
         prepare_moderation_incident_store()
     except Exception:  # noqa: BLE001 - degraded observability must retain shutdown ownership.
