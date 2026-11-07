@@ -430,6 +430,40 @@ and unarmed; actual exact-head CI, review feedback and the human Change
 summary are not satisfied by these local results. Never dispatch required
 gates manually or convert/merge the draft as part of this exception.
 
+## Docs Publication Follow-Up (2026-11-07)
+
+The all-pages CI/review audit of published `b3bfae3ca5` found all eight live
+required contexts successful, including an actually executed Workspaces API
+step. No submitted reviews or inline threads exist; CodeRabbit skipped the
+draft and cubic explicitly skipped the rewritten history, not approved it.
+Two non-required jobs failed: onboarding docs and the `gap-verified-9` shard.
+Their root causes were a missing checked-in published ADR/index and two
+relative ADR metadata links to spec/plan files outside the curated site.
+
+Existing snapshot tests reproduce 3 failures in 4.70s; refreshing the
+unchanged generator before correcting links reproduces the strict-build
+failure with exactly those 2 warnings (14.50s). Only ADR-096 metadata line 8
+now links to the immutable public repository sources at `b3bfae3ca5`, following
+existing ADR precedent. Its accepted decision, rationale, status, date and
+owner remain unchanged. The unchanged refresh script generated only
+`Docs/Published/ADR/096-chunker-execution-live-context-boundary.md` and its
+index row; a second refresh is byte-identical. No tests, warning policies,
+publication manifest, workflow or application code changed.
+
+GREEN: all 212 Docs tests pass (653 warnings, 58.75s); direct strict MkDocs
+build succeeds with zero warning-level diagnostics (13.94s), retaining
+existing informational anchor notices. Public/private docs, onboarding
+command boundaries and endpoint drift checks pass. Fresh Chunking: 988
+passed, 1 established PyThaiNLP skip, 3412 warnings in 108.55s. Task-format:
+4 passed, 24 warnings in 1.83s. Production Bandit: 0 findings/errors, 1737 LOC.
+Logs: `/tmp/pr3405_docs_{snapshot_red,strict_red,green,strict_green}.txt`,
+`/tmp/pr3405_docs_fix_chunking.txt`, `/tmp/pr3405_docs_tracking.txt` and
+`/tmp/bandit_pr3405_docs_fix_production.json`. No global suite/type success
+is claimed. ADR required: no new decision, metadata/publication repair only.
+Independent bounded review and normal draft-branch publication follow; all
+remote gates must run on the subsequent head rather than inherit old passes.
+Keep the PR draft and preserve its human-owned summary.
+
 ## Final Verification Commands
 
 After runtime activation, run these from the isolated root; log complete output

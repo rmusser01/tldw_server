@@ -5,7 +5,7 @@
 **Backfilled from:** not backfilled
 **Decision owner:** Requester + Codex collaboration; explicitly approved 2026-11-02
 **Related task:** TASK-15414 (renumbered from TASK-15413), TASK-15415
-**Related spec/plan:** [Shared execution design](../superpowers/specs/2026-11-02-chunker-shared-execution-refactor-design.md), [implementation plan](../superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md)
+**Related spec/plan:** [Shared execution design (repository source)](https://github.com/rmusser01/tldw_server/blob/b3bfae3ca5c4511e15f0d9ce62b8fc946fa49fab/Docs/superpowers/specs/2026-11-02-chunker-shared-execution-refactor-design.md), [implementation plan (repository source)](https://github.com/rmusser01/tldw_server/blob/b3bfae3ca5c4511e15f0d9ce62b8fc946fa49fab/Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md)
 
 ## Decision
 
