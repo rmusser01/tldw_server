@@ -20,8 +20,12 @@ import {
   deriveEffectiveSelectedSourceIds
 } from '@/store/workspace-organization'
 
-/** WP-45: cap for the in-memory source-text cache (never persisted). */
-const SOURCE_CONTENT_CACHE_MAX_ENTRIES = 32
+/**
+ * WP-45: cap for the in-memory source-text cache (never persisted).
+ * Single source of truth — the ResearchWorkspace source-content resolver
+ * and its tests import this constant instead of mirroring the value.
+ */
+export const SOURCE_CONTENT_CACHE_MAX_ENTRIES = 32
 
 // Extract SourcesActions from workspace.ts (action interface only)
 type SourcesActions = Pick<
@@ -570,7 +574,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       .map((source) => source.mediaId),
 
   getSourceContentText: (mediaId, version = null) => {
-    const entry = get().sourceContentCache[mediaId]
+    const entry = get().sourceContentCache.get(mediaId)
     if (
       !entry ||
       entry.version !== version ||
@@ -586,13 +590,19 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
     const normalizedText = text.trim()
     if (!Number.isFinite(mediaId) || normalizedText.length === 0) return
     set((state) => {
-      // Re-insert to refresh insertion order so eviction drops the oldest ask.
-      const nextCache = { ...state.sourceContentCache }
-      delete nextCache[mediaId]
-      nextCache[mediaId] = { version, text: normalizedText, title }
-      const cacheKeys = Object.keys(nextCache)
-      if (cacheKeys.length > SOURCE_CONTENT_CACHE_MAX_ENTRIES) {
-        delete nextCache[Number(cacheKeys[0])]
+      // The cache is a Map so integer mediaId keys keep insertion order
+      // (a plain object iterates integer-like keys numerically, which made
+      // eviction drop the smallest id instead of the least-recently-used
+      // one). Delete + re-insert refreshes recency for this mediaId, and
+      // the first key is the least-recently-used entry to evict.
+      const nextCache = new Map(state.sourceContentCache)
+      nextCache.delete(mediaId)
+      nextCache.set(mediaId, { version, text: normalizedText, title })
+      if (nextCache.size > SOURCE_CONTENT_CACHE_MAX_ENTRIES) {
+        const oldestKey = nextCache.keys().next().value
+        if (oldestKey !== undefined) {
+          nextCache.delete(oldestKey)
+        }
       }
       return { sourceContentCache: nextCache }
     })

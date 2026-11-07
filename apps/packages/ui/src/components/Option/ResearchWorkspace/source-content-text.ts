@@ -12,11 +12,15 @@ import { useWorkspaceStore } from "@/store/workspace"
  * in-memory only and never adds persistence coupling.
  *
  * Eventual server-side replacement: batch `POST /media/details/batch {ids}`
- * (tracked as a note on TASK-13515).
+ * (tracked as a note on TASK-15186).
  */
 
-/** Mirrors the resolver's cache cap (see sources-slice). */
-export const MAX_SOURCE_CONTENT_CACHE_ENTRIES = 32
+/**
+ * Cache cap used by the eviction logic in the workspace store; re-exported
+ * here so resolver-side consumers share the single definition (no mirrored
+ * value that can drift).
+ */
+export { SOURCE_CONTENT_CACHE_MAX_ENTRIES } from "@/store/workspace-slices/sources-slice"
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object"
@@ -83,10 +87,7 @@ type SourceContentCacheStore = {
       text: string,
       title?: string | null
     ) => void
-    sourceContentCache?: Record<
-      number,
-      { title?: string | null }
-    >
+    sourceContentCache?: Map<number, { title?: string | null }>
   }
 }
 
@@ -100,7 +101,7 @@ const readCachedSourceContent = (
   if (typeof cached !== "string" || cached.length === 0) return null
   return {
     text: cached,
-    title: state?.sourceContentCache?.[mediaId]?.title ?? null,
+    title: state?.sourceContentCache?.get(mediaId)?.title ?? null,
     fromCache: true
   }
 }

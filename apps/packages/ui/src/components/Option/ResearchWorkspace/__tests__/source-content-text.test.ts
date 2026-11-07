@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
-  MAX_SOURCE_CONTENT_CACHE_ENTRIES,
   extractSourceContentText,
   resolveSourceContentText
 } from "../source-content-text"
+import { SOURCE_CONTENT_CACHE_MAX_ENTRIES } from "@/store/workspace-slices/sources-slice"
 import { useWorkspaceStore } from "@/store/workspace"
 
 const getMediaDetailsMock = vi.hoisted(() => vi.fn())
@@ -21,7 +21,7 @@ const detailWithText = (text: string) => ({
 })
 
 const resetCache = () => {
-  useWorkspaceStore.setState({ sourceContentCache: {} })
+  useWorkspaceStore.setState({ sourceContentCache: new Map() })
 }
 
 describe("resolveSourceContentText (WP-45 store reuse)", () => {
@@ -107,17 +107,40 @@ describe("resolveSourceContentText (WP-45 store reuse)", () => {
 
   it("bounds the in-memory cache to the entry cap", () => {
     const store = useWorkspaceStore.getState()
-    for (let mediaId = 1; mediaId <= MAX_SOURCE_CONTENT_CACHE_ENTRIES + 1; mediaId += 1) {
+    for (let mediaId = 1; mediaId <= SOURCE_CONTENT_CACHE_MAX_ENTRIES + 1; mediaId += 1) {
       store.setSourceContentText(mediaId, null, `text ${mediaId}`)
     }
 
     const cache = useWorkspaceStore.getState().sourceContentCache
-    expect(Object.keys(cache)).toHaveLength(MAX_SOURCE_CONTENT_CACHE_ENTRIES)
+    expect(cache.size).toBe(SOURCE_CONTENT_CACHE_MAX_ENTRIES)
     expect(useWorkspaceStore.getState().getSourceContentText(1, null)).toBeNull()
     expect(useWorkspaceStore.getState().getSourceContentText(
-      MAX_SOURCE_CONTENT_CACHE_ENTRIES + 1,
+      SOURCE_CONTENT_CACHE_MAX_ENTRIES + 1,
       null
-    )).toBe(`text ${MAX_SOURCE_CONTENT_CACHE_ENTRIES + 1}`)
+    )).toBe(`text ${SOURCE_CONTENT_CACHE_MAX_ENTRIES + 1}`)
+  })
+
+  it("evicts the least-recently-used entry, not the smallest mediaId", () => {
+    // A plain object iterates integer-like keys in ascending numeric order,
+    // which used to evict the smallest id regardless of insertion recency.
+    // The Map-based cache must evict by least-recent use instead: insert
+    // mediaId 40 first, then 2..33 — at 33 entries the oldest ask (40) is
+    // evicted, NOT the smallest id (2).
+    const store = useWorkspaceStore.getState()
+    store.setSourceContentText(40, null, "text 40")
+    for (let mediaId = 2; mediaId <= SOURCE_CONTENT_CACHE_MAX_ENTRIES + 1; mediaId += 1) {
+      store.setSourceContentText(mediaId, null, `text ${mediaId}`)
+    }
+
+    expect(useWorkspaceStore.getState().sourceContentCache.size).toBe(
+      SOURCE_CONTENT_CACHE_MAX_ENTRIES
+    )
+    expect(useWorkspaceStore.getState().getSourceContentText(40, null)).toBeNull()
+    expect(useWorkspaceStore.getState().getSourceContentText(2, null)).toBe("text 2")
+    expect(useWorkspaceStore.getState().getSourceContentText(
+      SOURCE_CONTENT_CACHE_MAX_ENTRIES + 1,
+      null
+    )).toBe(`text ${SOURCE_CONTENT_CACHE_MAX_ENTRIES + 1}`)
   })
 })
 
