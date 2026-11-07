@@ -463,7 +463,7 @@ services.
 ## References
 
 - `Docs/Design/WebScraping_Refactor_Import_Inventory.md`
-- [Accepted Phase 5 ownership ADR](../ADR/093-web-scraping-crawl-and-process-local-job-ownership.md)
+- [Accepted Phase 5 ownership ADR](../ADR/094-web-scraping-crawl-and-process-local-job-ownership.md)
 - [Phase 5 design](../superpowers/specs/2026-10-04-web-scraping-phase-5-crawl-process-local-jobs-design.md)
 - [Phase 5 execution plan](../superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md)
 - `Docs/superpowers/specs/2026-07-26-web-scraping-phase-4-extraction-article-orchestration-design.md`

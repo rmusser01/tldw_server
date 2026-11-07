@@ -1,5 +1,5 @@
 ---
-id: TASK-15422
+id: TASK-15454
 title: Isolate Web Scraping Phase 5 bounded job queue
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 3 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15421. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 3 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -33,6 +33,8 @@ Fix round 1 I1-I3 verified and fixed in separate focused RED/GREEN cycles agains
 Controller fresh review plus scoped re-review closed I1-I3 at b8224e38ba, no new breakage. M1 warning provenance confirmed: 13 added cases explain26 additional pre-existing conftest cleanup warnings; no new source/suppression. Future production wiring/physical browser lifecycle belongs to Tasks5/9/11, not claimed certified by this isolated queue task. Task3 complete; interfaces remain per original plan, no accounting transfer or restart feature added.
 Namespace migration before fresh-dev integration: original identifier TASK-15410; current identifier TASK-15422. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+2026-11-07 integration namespace correction: TASK-15422 -> TASK-15454; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
+Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -1,5 +1,5 @@
 ---
-id: TASK-15429
+id: TASK-15461
 title: Preserve crawl outcomes through services and ingestion
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 10 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15421. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 10 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -35,6 +35,8 @@ Task10 independently accepted: fullreview9feeaee6c7..2987eec27f coherent spec/qu
 Namespace migration before fresh-dev integration: original identifier TASK-15417; current identifier TASK-15429. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
 Final controller tracking synchronization after all Task10 reviews and whole-branch fix review accepted. Existing final summary and historical evidence preserved. Integrated source e05c3b7dbad4bf2da5bfe7d8f6b9fdc48602e80c passed final receipt gates: scraping/sharedHTTP4158 (28 optional/environment skips), native51 (no skips), services117 including both official PostgreSQL cases (no skips), consumers770 (12 optional skips), quality64. Recursive cancellation is verified through the real engine, adapter and service with the original cancellation object and finalized partial report. Independent scoped review closed all four whole-branch findings with no new findings. Fresh controller regression71 passed, no skips,227 known warnings18.01s (/tmp/web-phase5-controller-final-focused.log). Endpoint-complete Bandit8 unchanged LOW,0MEDIUM/HIGH,0scanerrors. Whole-repo collection remains blocked by unrelated duplicate Meetings test module basenames; optional curl/live providers/native Windows unverified. Final acceptance details and limitations in parent TASK-15421 and approved plan. No push/PR/merge authorized or performed.
+2026-11-07 integration namespace correction: TASK-15429 -> TASK-15461; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
+Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

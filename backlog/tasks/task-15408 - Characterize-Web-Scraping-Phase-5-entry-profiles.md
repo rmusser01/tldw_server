@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 1 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15421. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 1 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -31,12 +31,13 @@ Implementation commit 2606d6569c is complete; controller fresh spec/quality revi
 Fresh task review approved spec compliance and quality at commit 2606d6569c; no Critical/Important finding. Minor fixture unexpected-call assertion swallowing and baseline warning noise recorded for Task 6/final review. Cannot-verify items resolved as unchanged pipeline or later task ownership, with controller 2366-test Phase3/4/HTTP baseline recorded. Explicit Ruff on two new Python files passed. Full repository and existing inventory baseline gates remain disclosed, not suppressed. Task 1 is complete.
 Namespace migration before fresh-dev integration: original identifier TASK-15408; current identifier TASK-15408. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Characterized all seven Phase 5 entry profiles through real existing adapters using deterministic test-only boundaries. Added live-import manifest completeness, signature/export/constructor snapshots, traversal/scoring/filter/robots/sitemap/envelope/metadata/callback/option-presence coverage. Focused 52 passed; scoped regressions 87 passed; inventory 10 passed with 1 pre-existing stale-line artifact failure. Pre-commit and Bandit passed (test-only B101 exclusion). No production changes. Full evidence, actual consumer paths, counter-wording concern, baseline httpx2 collection failure, and ADR-093 assessment are in the ignored Task 1 SDD report.
+Characterized all seven Phase 5 entry profiles through real existing adapters using deterministic test-only boundaries. Added live-import manifest completeness, signature/export/constructor snapshots, traversal/scoring/filter/robots/sitemap/envelope/metadata/callback/option-presence coverage. Focused 52 passed; scoped regressions 87 passed; inventory 10 passed with 1 pre-existing stale-line artifact failure. Pre-commit and Bandit passed (test-only B101 exclusion). No production changes. Full evidence, actual consumer paths, counter-wording concern, baseline httpx2 collection failure, and ADR-094 assessment are in the ignored Task 1 SDD report.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

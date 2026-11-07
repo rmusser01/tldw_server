@@ -1,5 +1,5 @@
 ---
-id: TASK-15424
+id: TASK-15456
 title: Integrate crawl controls with canonical acquisition
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 5 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15421. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 5 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -35,6 +35,8 @@ Task5 review fix round1 against db27425016: Important1 now wraps parent Reservat
 Controller gate complete: fresh Task5 reviewer found page-local commit race, swallowed WS parent stop and cancellation/deadline cleanup precedence; all three fixed in f2abedc4e1 and independently re-reviewed ADDRESSED, no new Critical/Important breakage. 773 final covering tests pass, no skips; warnings exposed/categorized to known sources, no new observed category; lint/format/compile/Bandit clean. Earlier branch Task2 AST and Task4 management-principal regressions corrected in separate db27425016 (147 covering pass); not waived as pristine baseline. Earlier full Web_Scraping+HTTP run 3288pass26skip5fail is retained as historical evidence, not a post-fix green claim. Two existing arXiv assertions and inventory drift remain visible for Task11; current Watchlists failure contract is None and those consumer/test files match execution baseline. Parser/derived-memory bounds Task6, queued wrapper retry integration Tasks8/9, checkpoint/outcome/history Tasks7/10/11 remain explicit later work. Reports and both independent reviews in plan-scoped SDD directory.
 Namespace migration before fresh-dev integration: original identifier TASK-15412; current identifier TASK-15424. Parent and task/ADR references updated with the official backlog-py API after the 45-PR namespace scan; governing web-scraping ADR-085 renamed ADR-093 only to avoid unrelated accepted ADR-085. Work history, status and criteria retained.
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
+2026-11-07 integration namespace correction: TASK-15424 -> TASK-15456; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
+Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
