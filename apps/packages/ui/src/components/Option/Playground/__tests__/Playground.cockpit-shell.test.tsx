@@ -958,7 +958,10 @@ describe("Playground cockpit shell", () => {
 
   it("does not report standard chat runtime ready when no chat models are usable", async () => {
     messageOptionState.value.selectedModel = "tldw:gpt-4o";
-    tldwServerState.fetchChatModels.mockResolvedValue([]);
+    let finishModels!: (models: Awaited<ReturnType<typeof tldwServerState.fetchChatModels>>) => void;
+    tldwServerState.fetchChatModels.mockReturnValueOnce(
+      new Promise((resolve) => { finishModels = resolve; })
+    );
 
     render(<Playground />);
 
@@ -969,9 +972,14 @@ describe("Playground cockpit shell", () => {
     });
 
     const runtimeRail = screen.getByTestId("playground-cockpit-right-rail");
-    expect(runtimeRail).toHaveTextContent("Error");
-    expect(runtimeRail).toHaveTextContent("No chat models configured");
     expect(runtimeRail).not.toHaveTextContent("Ready");
+    expect(runtimeRail).not.toHaveTextContent("No chat models configured");
+    finishModels([]);
+    await waitFor(() => {
+      expect(runtimeRail).toHaveTextContent("Error");
+      expect(runtimeRail).toHaveTextContent("No chat models configured");
+      expect(runtimeRail).not.toHaveTextContent("Ready");
+    });
 
     expect(
       screen.queryByRole("status", { name: "Chat status" }),

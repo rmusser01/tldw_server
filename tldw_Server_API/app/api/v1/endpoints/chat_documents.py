@@ -358,8 +358,8 @@ async def generate_document(
         user_id_int, team_ids, org_ids, trusted_base_url_override = (
             derive_trusted_credential_scope(http_request, principal)
         )
-        # Usage quotas (LLM usage accounting spec §4a), before the job branch and any generation.
-        await enforce_llm_quota(user_id_int)
+        # Usage quotas (§4a), before the job branch and any generation; an own-key provider is let through unmarked.
+        await enforce_llm_quota(user_id_int, provider=provider_key)
         credential_runtime = ProviderCredentialRuntime(
             user_id=user_id_int,
             team_ids=team_ids,

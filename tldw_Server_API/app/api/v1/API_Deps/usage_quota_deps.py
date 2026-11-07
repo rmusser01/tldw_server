@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import asdict
 from typing import Any
 
@@ -88,23 +89,41 @@ async def users_own_key_serves(user_id: Any, provider: str) -> bool:
 
 
 async def enforce_llm_quota(
-    user_id: Any, estimated_tokens: int = 1, *, provider: str | None = None, own_key: bool | None = None
+    user_id: Any,
+    estimated_tokens: int = 1,
+    *,
+    provider: str | Collection[str | None] | None = None,
+    own_key: bool | None = None,
 ) -> None:
     """402 limit_exceeded when the user is over an LLM quota; otherwise mark the request admitted (spec §4a).
 
     An over-limit user whose ``provider`` runs on their own key is let through
     unmarked: each call is then checked where its key is known, and a call on
-    the user's own key is not checked (TASK-13955). ``own_key`` is the caller's
-    ``users_own_key_serves`` answer for this user and provider, when it already
-    has one; None looks it up.
+    the user's own key is not checked (TASK-13955). ``provider`` names the
+    provider of every LLM call the request makes: one name, or several (an
+    evaluation batch's items, TASK-13956). A request that names none, or names
+    one the user has no own key for, is refused. ``own_key`` is the caller's
+    ``users_own_key_serves`` answer for a single provider, when it already has
+    one; None looks it up, and so does a collection, whatever ``own_key`` says.
     """
     refusal = await llm_quota_refusal(user_id, estimated_tokens)
     if refusal is None:
         mark_llm_quota_prechecked()
         return
-    if provider and (own_key if own_key is not None else await users_own_key_serves(user_id, provider)):
+    names = [provider] if isinstance(provider, str) else list(provider or ())
+    if not isinstance(provider, str):
+        own_key = None  # a caller's answer is for one provider; several are each looked up
+    if names and all(names) and (own_key if own_key is not None else await _own_key_serves_each(user_id, names)):
         return
     raise LLMQuotaExceededError(**asdict(refusal))
+
+
+async def _own_key_serves_each(user_id: Any, providers: list[str]) -> bool:
+    """``users_own_key_serves`` for each provider once, stopping at the first that is not the user's own key."""
+    for name in dict.fromkeys(providers):
+        if not await users_own_key_serves(user_id, name):
+            return False
+    return True
 
 
 async def require_llm_quota(current_user: User = Depends(get_request_user)) -> None:

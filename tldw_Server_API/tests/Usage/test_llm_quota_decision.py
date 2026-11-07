@@ -221,6 +221,58 @@ async def test_an_over_limit_user_whose_provider_runs_on_their_own_key_is_let_th
 
 
 @pytest.mark.parametrize(
+    ("providers", "admitted", "asked"),
+    [
+        (["openai", "groq", "openai"], True, ["openai", "groq"]),
+        (["openai", "anthropic", "groq"], False, ["openai", "anthropic"]),
+        (["openai", None], False, []),
+        ([], False, []),
+    ],
+    ids=["each-own-key", "one-not", "one-unnamed", "none-named"],
+)
+async def test_several_providers_are_let_through_only_when_each_runs_on_the_users_own_key(
+    monkeypatch: pytest.MonkeyPatch, providers: list[str | None], admitted: bool, asked: list[str]
+) -> None:
+    """A request naming several providers is admitted past a limit only if every one is the user's own (TASK-13956)."""
+    looked_up: list[str] = []
+
+    async def _own_key(_user_id: object, provider: str) -> bool:
+        """The user has their own key for openai and groq."""
+        looked_up.append(provider)
+        return provider in {"openai", "groq"}
+
+    async def _enforce() -> bool:
+        await usage_quota_deps.enforce_llm_quota(7, provider=providers)
+        return current_llm_call_context().prechecked
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    _set_limits(monkeypatch, tokens=0)
+    if admitted:
+        assert await asyncio.create_task(_enforce()) is False
+    else:
+        with pytest.raises(LLMQuotaExceededError):
+            await _enforce()
+    assert looked_up == asked
+
+
+async def test_own_key_answers_for_a_single_provider_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller's ``own_key`` answer is not taken for several providers: each is looked up (TASK-13956)."""
+    looked_up: list[str] = []
+
+    async def _own_key(_user_id: object, provider: str) -> bool:
+        """The user has no own key for anthropic."""
+        looked_up.append(provider)
+        return False
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    _set_limits(monkeypatch, tokens=0)
+    with pytest.raises(LLMQuotaExceededError) as refused:
+        await usage_quota_deps.enforce_llm_quota(7, provider=["anthropic"], own_key=True)
+    assert refused.value.status_code == 402
+    assert looked_up == ["anthropic"]
+
+
+@pytest.mark.parametrize(
     ("requested", "byok_on", "allowlisted", "row", "base_url", "expected"),
     [
         ("OpenAI", True, True, {"id": 1}, None, True),
