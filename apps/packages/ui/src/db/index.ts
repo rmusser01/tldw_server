@@ -14,7 +14,7 @@
  * 1. Startup legacy-data migration — `db/dexie/migration.ts` (run via
  *    `hooks/useMigration.tsx`) imports `PageAssitDatabase` directly and
  *    uses `getUserID`, `getChatHistories`, `getChatHistory`,
- *    `deleteAllChatHistory`, `getAllPrompts`, `getAllWebshares`, and
+ *    `getAllPrompts`, `getAllWebshares`, and
  *    `getSessionFilesInfo`.
  * 2. Firefox-private-mode fallback (Dexie throws DatabaseClosedError
  *    there):
@@ -210,6 +210,16 @@ export class PageAssitDatabase {
     this.db = chrome.storage.local
   }
 
+  private readLegacyValue<T>(key: string): Promise<T | undefined> {
+    return new Promise((resolve, reject) => {
+      this.db.get(key, (items) => {
+        const error = chrome.runtime?.lastError
+        if (error || !items) reject(new Error(error?.message || "Storage unavailable"))
+        else resolve(items[key] as T | undefined)
+      })
+    })
+  }
+
   async getSessionFiles(sessionId: string): Promise<UploadedFile[]> {
     return new Promise((resolve) => {
       this.db.get(`session_files_${sessionId}`, (result) => {
@@ -222,11 +232,7 @@ export class PageAssitDatabase {
   }
 
   async getSessionFilesInfo(sessionId: string): Promise<SessionFiles | null> {
-    return new Promise((resolve) => {
-      this.db.get(`session_files_${sessionId}`, (result) => {
-        resolve(result[`session_files_${sessionId}`] || null)
-      })
-    })
+    return await this.readLegacyValue<SessionFiles>(`session_files_${sessionId}`) ?? null
   }
 
   async addFileToSession(sessionId: string, file: UploadedFile) {
@@ -288,29 +294,16 @@ export class PageAssitDatabase {
 
   async getChatHistory(id: string): Promise<MessageHistory> {
     const modelNicknames = await getAllModelNicknames()
-    return new Promise((resolve, reject) => {
-      this.db.get(id, (result) => {
-        resolve(
-          (result[id] || []).map((message: any) => {
-            return {
-              ...message,
-              modelName:
-                modelNicknames[message.name]?.model_name || message.name,
-              modelImage:
-                modelNicknames[message.name]?.model_avatar || undefined
-            }
-          })
-        )
-      })
-    })
+    const messages = await this.readLegacyValue<MessageHistory>(id)
+    return (messages ?? []).map((message) => ({
+      ...message,
+      modelName: modelNicknames[message.name]?.model_name || message.name,
+      modelImage: modelNicknames[message.name]?.model_avatar || undefined
+    }))
   }
 
   async getChatHistories(): Promise<ChatHistory> {
-    return new Promise((resolve, reject) => {
-      this.db.get("chatHistories", (result) => {
-        resolve(result.chatHistories || [])
-      })
-    })
+    return await this.readLegacyValue<ChatHistory>("chatHistories") ?? []
   }
 
   async getChatHistoryTitleById(id: string): Promise<string> {
@@ -400,11 +393,7 @@ export class PageAssitDatabase {
   }
 
   async getAllPrompts(): Promise<Prompts> {
-    return new Promise((resolve, reject) => {
-      this.db.get("prompts", (result) => {
-        resolve(result.prompts || [])
-      })
-    })
+    return await this.readLegacyValue<Prompts>("prompts") ?? []
   }
 
   async bulkAddPrompts(prompts: Prompt[]) {
@@ -516,11 +505,7 @@ export class PageAssitDatabase {
   }
 
   async getAllWebshares(): Promise<Webshare[]> {
-    return new Promise((resolve, reject) => {
-      this.db.get("webshares", (result) => {
-        resolve(result.webshares || [])
-      })
-    })
+    return await this.readLegacyValue<Webshare[]>("webshares") ?? []
   }
 
   async addWebshare(webshare: Webshare) {
@@ -535,12 +520,8 @@ export class PageAssitDatabase {
     this.db.set({ webshares: newWebshares })
   }
 
-  async getUserID() {
-    return new Promise((resolve, reject) => {
-      this.db.get("user_id", (result) => {
-        resolve(result.user_id || "")
-      })
-    })
+  async getUserID(): Promise<string> {
+    return await this.readLegacyValue<string>("user_id") ?? ""
   }
 
   async setUserID(id: string) {
