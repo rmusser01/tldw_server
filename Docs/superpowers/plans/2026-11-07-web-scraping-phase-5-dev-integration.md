@@ -30,8 +30,8 @@ partitions; the initial failed aggregate was not relabelled as passing.
 publication occurs only if separately approved. No automatic merge; future merge
 still requires the requester's own Change summary.
 **Tests:** Canonical records, duplicate IDs, links, diff check and clean status.
-**Status:** Complete locally. Integration evidence and the two reviewed test-only
-corrections are included in the normal-hook commit. No publication or merge.
+**Status:** Complete. Integration evidence and the two reviewed test-only
+corrections are committed. The approved publication is PR #3436; no merge.
 
 ## Verification And Limits
 
@@ -77,3 +77,14 @@ found collisions with two newer PRs: only our unpublished task/ADR identifiers
 were corrected to TASK-15466 through TASK-15476 and ADR-096. Runtime code and all
 recorded verification are unchanged. Any future merge still requires the
 requester's own Change summary.
+
+## Publication Receipt
+
+The requester approved pushing the verified branch and creating a PR, not merging.
+[PR #3436](https://github.com/rmusser01/tldw_server/pull/3436) is open against `dev`,
+not a draft and not merged. Its initial published head is
+`90272306f657a85ed6054498478040cdb8fcfb55`; runtime/test bytes still match the
+verified integration commit `3617af15bd8d635447d634316aa9c4fd584648fb`.
+Initial remote checks are queued, not certified green. This receipt is followed
+only by a tracking commit; the requester-written Change summary remains pending
+and blocks any future merge. Branch and worktree are retained for PR iteration.
