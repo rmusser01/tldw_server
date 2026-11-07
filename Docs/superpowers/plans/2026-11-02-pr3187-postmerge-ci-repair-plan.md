@@ -227,3 +227,59 @@ publication lease is the verified remote head
 `f06032b3e9b9c03ce60e9b2a4b58e66ed1f75948`. Do not claim current-head hosted
 success from the prior run. The follow-up still needs a human-written Change
 summary before merge; no Skills runner feature is enabled by this continuation.
+
+## November 7 Audio Cancellation Repair (TASK-2294.3.2.9)
+
+The exact in-app shard finished with 4,339 passed and three existing parser
+skips. The full media-audio run finished with 4,315 passed, 37 skipped, one
+xfail, one xpass and three failures: AudioCpp cancelled discovery follower,
+NeuTTS cancelled engine call, and cancelled sole gateway-catalog waiter.
+All three reproduce together unchanged in 1.08 seconds. Python 3.14's
+`asyncio.shield` explicitly logs late inner failures after cancellation even
+when the operation owner already retrieves the exception. This is a real
+raw-error containment defect, not a reason to weaken the existing assertions.
+
+**Approach:** use the existing MCP completion transport's public
+`asyncio.wait({future})`/`future.result()` pattern at these three owned-operation
+waits. Preserve the completed-future fast path, follower cancellation isolation,
+catalog ownership and engine lock handoff. Do not change global loop logging,
+private asyncio callbacks, timeout policy or unrelated shield call sites.
+A new shared abstraction is unnecessary for these small replacements.
+ADR required: no; this restores existing cancellation/redaction contracts and
+introduces no new ownership policy, public API or dependency.
+
+### Repair Stage 1: Reproduce
+**Goal:** Pin the late-failure and simultaneous completion/cancellation behavior.
+**Success Criteria:** Existing three tests fail unchanged; a deterministic TTS
+completion/cancellation race fails before repair.
+**Tests:** The three named regressions above and the new shared-engine race.
+**Status:** Complete
+
+RED evidence: the existing three cases fail together (1.08 seconds); the new
+engine completion/cancellation race independently fails with an unretrieved raw
+future exception (1.08 seconds). All four pass after the minimal repair (0.95
+seconds). The completed-call cleanup now retrieves errors even when the call
+finishes between caller cancellation and context-manager exit.
+
+### Repair Stage 2: Repair And Qualify
+**Goal:** Preserve cancellation isolation without raw late-error logging.
+**Success Criteria:** Unchanged regressions, affected module suites and shared
+TTS engine/registry tests pass; no new lint or Bandit findings.
+**Tests:** AudioCpp module, NeuTTS module, gateway catalog module, TTS engine
+cancellation, local offload and registry regressions; full media-audio shard.
+**Status:** In Progress
+
+The six complete affected/shared test modules pass 446 cases in 11.59 seconds.
+Ruff passes. Bandit reports zero findings/errors on the three production files;
+the touched test module reports only 27 B101 assertion diagnostics. Changed-line
+Black and normal hooks remain required. The full media-audio rerun and a
+repository-wide fail-fast pytest run are in progress; no full-suite pass is
+claimed.
+
+### Repair Stage 3: Review And Publish
+**Goal:** Independently review the immutable candidate and publish honest status.
+**Success Criteria:** All validated findings closed, normal hooks pass, task/PR
+evidence updated, current-head hosted checks read back. Draft and auto-merge
+gates remain unchanged while the human Change summary is absent.
+**Tests:** Independent source review, full-branch ratchets and remote readback.
+**Status:** Not Started
