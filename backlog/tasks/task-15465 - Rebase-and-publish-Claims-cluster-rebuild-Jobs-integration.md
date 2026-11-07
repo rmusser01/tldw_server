@@ -1,7 +1,7 @@
 ---
 id: TASK-15465
 title: Rebase and publish Claims cluster rebuild Jobs integration
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -18,7 +18,7 @@ Rebase the completed Claims Stage2C branch onto current dev, preserve shared Job
 <!-- AC:BEGIN -->
 - [x] #1 Current dev integration and namespace repairs preserve both resource and enrolled-workflow behavior.
 - [x] #2 Fresh scoped backend, static, security and hook results plus repository-wide attempt limitations are recorded.
-- [ ] #3 Verified branch is pushed and PR against dev is created without fabricating a human Change summary or bypassing gates.
+- [x] #3 Verified branch is pushed and PR against dev is created without fabricating a human Change summary or bypassing gates.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,19 +34,21 @@ Scoped integration repair verification complete, parent gates still pending: fin
 Publication evidence checkpoint: dev is still dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c by fresh ls-remote, and the target feature branch remains absent remotely. Fresh qualification consists of the initial full Claims/Jobs run (5608 passed, 46 failed, 3 legacy skips), followed by exact correction proof (all 46 original failed nodes plus forced high-FD regression: 47 passed, zero skips) and the coherent affected rerun (1238 passed, zero skips across 17 files, official SQLite/PostgreSQL fixtures). This is not a post-fix full combined-suite pass. Storage/MediaPG/Watchlists/Config/router/Chroma/migrations: 710 passed, 1 legacy skip, 15 xfailed, 2 xpassed; Backlog/tool/format: 179 passed. Root attempt collected 89496 and stopped after 840 passed, 1 Audit shared-vs-per-user mode failure, 12 collection skips; exact isolated Audit case passed, but order/config interaction remains undiagnosed and is not proven baseline. Full configured Ruff 113 inherited vs 115 dev, zero new; Bandit58 production files one identical inherited manager B608, zero errors/new findings, facade-only correction rescan zero findings/errors. No source changes after scoped green verification. Rebase-composition review clean; final correction review pending. Draft body preserves missing human Change summary as a merge gate. No merge, auto-merge, deployment, CI cancellation, or main-checkout edits.
 Final corrected-head static qualification at 293806967e: compile all 100 PR-touched Python files passed; full configured Ruff 113 current versus 115 dev, zero new signatures; Bandit on all 57 final PR-touched production files reports one unchanged B608 archive query (source identical to dev except reported line numbers), zero scan errors/new findings. The earlier 58-file scan included the subsequently restored canonical facade, which no longer differs from dev. Final evidence /tmp/claims-stage2c-final-20261107-{paths.json,ruff.log,ruff-baseline.json,bandit.json,bandit-baseline.json}. Only tracking metadata changed after behavioral qualification.
 Final independent correction review approved 293806967ebff7d6fdab4c156bba7e6383651741 with zero actionable findings. Reviewer independently reconciled all 46 original failures, deterministic high-FD RED, final47pass and affected1238pass XML/log evidence, exact result-work assertions, canonical inert exports and real caller imports; no completion/lifecycle guard relaxed. Report /tmp/claims-stage2c-rebase-fix-independent-review-20261107.md. Full final PR-scoped hooks passed125paths (10 applicable passed; YAML/TOML/wizard-only Ruff/Black no-file skips) in /tmp/claims-stage2c-final-20261107-hooks.log. Stage2 complete with root Audit/legacy/warning/static qualifications explicitly preserved; Stage3 in progress. Prepared Draft body awaiting human-owned Change summary; no merge authorization. Only task/plan metadata is changing after verification.
+Published authorized Draft PR https://github.com/rmusser01/tldw_server/pull/3434 against dev at dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c. Initial published head efc60ff856005731fc623b9aa0fa03feced00884 verified exactly against local HEAD; OPEN/isDraft=true/autoMergeRequest=null. Normal first push, no force or discarded remote changes. Final closeout changes only this task plus removal of its own completed publication plan, followed by canonical metadata hooks, normal commit and normal push; no production changes after qualification. Human Change summary, current-head CI/review and root Audit qualification remain explicit merge-readiness gates, not incomplete publication deliverables. Existing implementation artifacts, governing/proposed ADR statuses, unrelated plans and main checkout preserved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the requested rebase, fresh qualification and Draft PR publication: https://github.com/rmusser01/tldw_server/pull/3434. Integrated dev dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c while preserving enrolled workflows and resource/UUID fences; repaired only private task/ADR collisions. All 46 initial scoped failures were corrected and independently validated in 47 focused and 1238 affected passes with zero skips. Additional storage/config/migration qualification710passed (legacy1skip15xfail2xpass), Backlog179passed, compile100passed, all applicable full PR hooks passed. Full configured Ruff and Bandit have no new findings relative to dev; inherited warnings remain. Single root attempt stopped at840passed/1Audit mode failure/12collection skips, isolated case passed; order interaction remains undiagnosed, not a full-green claim. Draft remains open pending human-written Change summary, published-head CI/review and explicit root-suite qualification. No merge, auto-merge, deployment, CI cancellation, hook bypass, direct dev push or unrelated checkout edits. Remove only the completed Docs/Plans/IMPLEMENTATION_PLAN_claims_stage2c_publication_20261107.md; preserve approved spec/runbook/ADR artifacts.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
