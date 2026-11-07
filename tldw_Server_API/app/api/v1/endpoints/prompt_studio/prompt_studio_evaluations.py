@@ -17,7 +17,6 @@ Security
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime
 from typing import Any, Optional

@@ -497,6 +497,7 @@ async def test_get_media_item_sanitizes_unexpected_error_log(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_media_item_auth_header_diagnostic_failure_log_is_sanitized(monkeypatch):
+    monkeypatch.setattr(media_item_endpoint, "is_test_mode", lambda: True)
     logger_stub = _patch_endpoint_logger(monkeypatch)
 
     class ExplodingHeaders:

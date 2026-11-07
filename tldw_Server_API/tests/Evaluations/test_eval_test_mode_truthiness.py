@@ -1,8 +1,6 @@
 import pytest
 
-from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_unified as eval_unified
 from tldw_Server_API.app.core.Evaluations import unified_evaluation_service as unified_eval_svc
-
 
 pytestmark = pytest.mark.unit
 
