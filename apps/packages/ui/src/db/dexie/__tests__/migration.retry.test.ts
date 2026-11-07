@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { db } from "../schema"
-import { runAllMigrations } from "../migration"
+import { DatabaseMigration, runAllMigrations } from "../migration"
 
 vi.mock("../schema", async () => {
   const { createMemoryDexie } = await import("@/components/Option/Playground/__tests__/harness/memory-dexie")
@@ -23,7 +23,7 @@ beforeEach(async () => {
     webshares: [{ id: "w", title: "Original", createdAt: 1 }],
     session_files_old: { sessionId: "old", files: [{ id: "f" }], retrievalEnabled: true },
   }
-  vi.stubGlobal("chrome", { storage: { local: {
+  vi.stubGlobal("chrome", { storage: { sync: { get: async () => ({}) }, local: {
     get(key: string | null, callback: (value: Record<string, unknown>) => void) {
       callback(key === null ? source : { [key]: source[key] })
     },
@@ -36,7 +36,9 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it("rolls back a failed history, retains its source and retries without overwriting edits", async () => {
   source.old = [message, { ...message, id: "m2" }]
   const read = vi.spyOn(db.messages, "bulkPut").mockRejectedValueOnce(new Error("Quota exceeded"))
-  await expect(runAllMigrations()).rejects.toThrow()
+  expect((await new DatabaseMigration().migrateAllData()).errors).toEqual([
+    "Failed to migrate chat history old: Error: Quota exceeded"
+  ])
   expect(source.chatHistories).toEqual([history])
   expect(source.old).toHaveLength(2)
   expect(await db.chatHistories.get(history.id)).toBeUndefined()
@@ -62,7 +64,9 @@ it("rolls back a failed history, retains its source and retries without overwrit
 
 it("does not attach legacy messages to another destination owner", async () => {
   await db.chatHistories.put({ ...history, title: "Claimed", local_owner_key: "owner::x" })
-  await expect(runAllMigrations()).rejects.toThrow()
+  expect((await new DatabaseMigration().migrateAllData()).errors).toEqual([
+    "Failed to migrate chat history old: Error: Cannot add legacy messages to a claimed history"
+  ])
   expect((await db.chatHistories.get("old"))?.title).toBe("Claimed")
   expect(await db.messages.count()).toBe(0)
   expect(source.old).toEqual([message])
@@ -70,20 +74,22 @@ it("does not attach legacy messages to another destination owner", async () => {
 
 it("rejects a message linked to a different history", async () => {
   source.old = [{ ...message, history_id: "other" }]
-  await expect(runAllMigrations()).rejects.toThrow()
+  expect((await new DatabaseMigration().migrateAllData()).errors).toEqual([
+    "Failed to migrate chat history old: Error: Message belongs to a different history"
+  ])
   expect(await db.messages.count()).toBe(0)
 })
 
 it("propagates a session-file write failure and can retry it", async () => {
   vi.spyOn(db.sessionFiles, "put").mockRejectedValueOnce(new Error("Quota exceeded"))
-  await expect(runAllMigrations()).rejects.toThrow()
+  await expect(runAllMigrations()).rejects.toThrow("Session file migration did not finish")
   await runAllMigrations()
   expect((await db.sessionFiles.get("old"))?.files).toHaveLength(1)
 })
 
 it("treats a browser storage read failure as a retryable error", async () => {
   // Chrome reports storage failures through lastError inside the callback.
-  vi.stubGlobal("chrome", { runtime: {}, storage: { local: {
+  vi.stubGlobal("chrome", { runtime: {}, storage: { ...chrome.storage, local: {
     get(key: string | null, callback: (data: Record<string, unknown>) => void) {
       if (key === history.id) {
         Object.assign(chrome.runtime, { lastError: { message: "Storage inaccessible" } })
@@ -94,14 +100,17 @@ it("treats a browser storage read failure as a retryable error", async () => {
       }
     }
   } } })
-  await expect(runAllMigrations()).rejects.toThrow()
+  expect((await new DatabaseMigration().migrateAllData()).errors).toEqual([
+    "Failed to migrate chat history old: Error: Storage inaccessible"
+  ])
+  await expect(runAllMigrations()).rejects.toThrow("Local database migration did not finish")
   expect(await db.chatHistories.get("old")).toBeUndefined()
 })
 
 it("does not attach session files to an existing claimed chat", async () => {
   source.chatHistories = []
   await db.chatHistories.put({ ...history, local_owner_key: "claimed" })
-  await expect(runAllMigrations()).rejects.toThrow()
+  await expect(runAllMigrations()).rejects.toThrow("Session file migration did not finish")
   expect(await db.sessionFiles.get("old")).toBeUndefined()
   expect(source.session_files_old).toBeDefined()
 })
