@@ -2,6 +2,8 @@
 id: TASK-15450
 title: Make magic-link redemption a durable single-winner operation
 status: Done
+references:
+- https://github.com/rmusser01/tldw_server/pull/3430
 ---
 
 ## Description
