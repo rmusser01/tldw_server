@@ -183,3 +183,47 @@ identical before publication. Normal hosted qualification and the new PR's
 human-written Change summary are pending. Auto-merge is disabled; the original
 PR #3187 waiver does not transfer. Historical red checks on the merged commit
 are not relabeled as successful.
+
+## November 7 Continuation
+
+PR #3406's completed hosted run has all required gates green. Its only failing
+shard is media-audio (plus the aggregate): the provider-failure retry test checks
+remaining delay after worker shutdown and observed 3.959 seconds against a
+four-second floor. Current dev already repairs this in `98f9ead454`, asserting
+the persisted five-second schedule against the UTC-second failure window rather
+than subsequent shutdown duration. Do not duplicate that upstream repair.
+
+The four follow-up commits are rebased onto dev
+`dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c`. One Parakeet test conflict preserves
+upstream's `monkeypatch.setitem(adapter.__dict__, ...)` for exact restoration of
+absent instance overrides; its deterministic cached-method case remains.
+The other three repair test blobs match the previously approved published head.
+Backup `codex/mcp3406-pre-nov07-rebase` retains that head. ADR required: no;
+this rebase and fixture verification change no durable architecture rule.
+
+Independent semantic/rebase review approves source
+`89de3acec971b5c73604fe6003bba37d2ac0d795` with no verified source findings.
+Fresh focused audio passes 108 tests with one existing opt-in skip using a
+run-specific AuthNZ database; canonical SQLite/PostgreSQL regressions pass 89
+without skips. The exact infrastructure/metrics/monitoring shard passes 489
+without skips. Quality/security/tracking guards pass 55; unfiltered collection
+finds 88,179 tests. Ruff and normal hooks pass; Bandit retains the same 94
+test-assertion-only low findings, no additions or scan errors. No production
+Python, dependency, CI baseline or assertion changes are introduced.
+
+An initial concurrent focused run had a startup SQLite lock before transcription
+assertions (107 passed, one skip, one failure); the isolated database rerun
+passes. An initial combined MCP/infrastructure run, unlike CI's grouping, had
+three failures (model-runtime timeout, provider retry-window status and telemetry
+restart alignment), 4,825 passed and three existing parser skips. All three
+failing cases pass in isolated attribution without deadline/assertion changes;
+the exact separate infrastructure shard also passes. Do not represent that
+combined run as green. Exact MCP in-app and full media-audio runs are still in
+progress at publication; their final results must be reported separately.
+
+Source may be published to obtain normal current-head CI while qualification
+continues, only with the PR still draft and auto-merge disabled. The explicit
+publication lease is the verified remote head
+`f06032b3e9b9c03ce60e9b2a4b58e66ed1f75948`. Do not claim current-head hosted
+success from the prior run. The follow-up still needs a human-written Change
+summary before merge; no Skills runner feature is enabled by this continuation.
