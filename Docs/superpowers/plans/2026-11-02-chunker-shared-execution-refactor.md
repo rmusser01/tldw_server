@@ -421,8 +421,11 @@ Ruff, Black (9 files), compileall, task-ID and shard guards pass (872 shards,
 `/tmp/bandit_pr3405_rebase_20261107_production.json`. Unique ADR IDs, indexed
 file existence, operative links and exact accepted-body identity are checked.
 No full-repository or globally clean mypy claim is made; the prior audit
-still reproduced 14 known legacy-facade errors. Bounded independent reconciliation
-review and explicit force-with-lease publication follow. PR #3405 remains draft
+still reproduced 14 known legacy-facade errors. Bounded independent review
+approved `179bf6939d..800c36a066` with no Critical, Important or Minor findings;
+all declined items are dispositioned in TASK-15416. This checkpoint accompanies
+explicit force-with-lease publication, whose readback is recorded on the PR.
+PR #3405 remains draft
 and unarmed; actual exact-head CI, review feedback and the human Change
 summary are not satisfied by these local results. Never dispatch required
 gates manually or convert/merge the draft as part of this exception.
