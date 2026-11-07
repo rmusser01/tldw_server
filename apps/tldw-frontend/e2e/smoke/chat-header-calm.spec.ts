@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import type { useArtifactsStore } from '../../../packages/ui/src/store/artifacts';
 
-const prepareOfflinePreview = async (page: Page) => {
+const prepareOfflinePreview = async (page: Page, account = false) => {
   await page.route('http://127.0.0.1:8000/**', (route) =>
     route.fulfill({
       status: 503,
@@ -24,7 +24,12 @@ const prepareOfflinePreview = async (page: Page) => {
       body: JSON.stringify({ providers: [] }),
     })
   );
-  await page.addInitScript(() => {
+  if (account) await page.route('**/api/v1/auth/me', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ id: 'header-account', username: 'Review account', email: 'review@example.invalid' }),
+  }));
+  await page.addInitScript((personalAccount) => {
     localStorage.setItem('assistant_setup_dismissed', 'true');
     localStorage.setItem('__tldw_first_run_complete', 'true');
     localStorage.setItem('__tldw_test_bypass', 'true');
@@ -37,7 +42,17 @@ const prepareOfflinePreview = async (page: Page) => {
         apiKey: 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY',
       })
     );
-  });
+    if (personalAccount) {
+      const token = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' })) + '.' +
+        btoa(JSON.stringify({ sub: 'header-account', exp: 1999999999 })) + '.audit';
+      localStorage.setItem('tldwConfig', JSON.stringify({
+        serverUrl: 'http://127.0.0.1:8000', authMode: 'multi-user',
+        accessToken: token, refreshToken: 'header-account-test-refresh',
+      }));
+      localStorage.setItem('authMode', 'multi-user');
+      localStorage.setItem('accessToken', token);
+    }
+  }, account);
 };
 
 for (const viewport of [
@@ -201,6 +216,54 @@ for (const viewport of [
       }
       expect(errors).toEqual([]);
     });
+
+    for (const route of ['/chat', '/settings']) {
+      test(`account menu contrast and focus ${route} ${viewport.name} ${theme}`, async ({ page }, testInfo) => {
+        await prepareOfflinePreview(page, true);
+        await page.addInitScript((theme) => {
+          localStorage.setItem('theme', theme);
+          localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+        }, theme);
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await page.setViewportSize(viewport);
+        await page.goto(route, { waitUntil: 'domcontentloaded' });
+        if (route === '/chat') {
+          await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 60_000 });
+          const exitFocus = page.getByRole('button', { name: 'Exit focus', exact: true });
+          if (await exitFocus.isVisible()) await exitFocus.click();
+        }
+        const trigger = page.getByRole('button', { name: 'Account menu', exact: true });
+        await trigger.click();
+        const dialog = page.getByRole('dialog', { name: 'Account menu', exact: true });
+        const accountSettings = dialog.getByRole('link', { name: 'Account settings', exact: true });
+        await expect(dialog.getByText('review@example.invalid', { exact: true })).toBeVisible();
+        await expect(accountSettings).toHaveAttribute('href', '/settings/tldw');
+        await expect(accountSettings).toBeFocused();
+        const axe = await new AxeBuilder({ page }).include('#chat-header-notification-status').analyze();
+        expect(axe.violations).toEqual([]);
+        await page.screenshot({
+          animations: 'disabled',
+          path: testInfo.outputPath(`${route.slice(1)}-${viewport.name}-${theme}-account.png`),
+        });
+        const bounds = (await dialog.boundingBox())!;
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+        expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+        for (const action of await dialog.locator('a, button').all()) {
+          expect((await action.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+          await action.click({ trial: true, timeout: 5000 });
+        }
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(trigger).toBeFocused();
+        await trigger.click();
+        await expect(accountSettings).toBeFocused();
+        await page.keyboard.press('Shift+Tab');
+        await expect(trigger).toBeFocused();
+        await page.keyboard.press('Shift+Tab');
+        await expect(dialog).toBeHidden();
+      });
+    }
   }
 }
 
