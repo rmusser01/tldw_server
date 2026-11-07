@@ -356,7 +356,7 @@ async def consume_magic_link(
     else:
         try:
             if result.rowcount in (0, 1):
-                return result.rowcount == 1
+                return bool(result.rowcount == 1)
         finally:
             await result.close()
     raise RuntimeError("Unconfirmed magic-link insert result")

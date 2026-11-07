@@ -1171,7 +1171,7 @@ async def _reserve_auth_rg_requests(
             op_id=op_id,
         )
         if handle_id:
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 await governor.commit(handle_id, actuals={"requests": 1}, op_id=op_id)
         if decision.allowed:
             return True, None
@@ -1386,8 +1386,8 @@ async def _build_scope_claims(user_id: int) -> dict[str, Any]:
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         return {}
 
-    team_ids = sorted({m.get("team_id") for m in memberships if m.get("team_id") is not None})
-    org_ids = sorted({m.get("org_id") for m in memberships if m.get("org_id") is not None})
+    team_ids = sorted({m["team_id"] for m in memberships if m.get("team_id") is not None})
+    org_ids = sorted({m["org_id"] for m in memberships if m.get("org_id") is not None})
 
     claims: dict[str, Any] = {}
     if team_ids:
@@ -1688,7 +1688,7 @@ async def login(
 
             log_counter("auth_login_user_not_found")
             # finalize diag headers in test mode for visibility
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 _finalize_login_diag(request, response)
             extra_headers = {"WWW-Authenticate": "Bearer"}
             if _is_test_mode():
@@ -1750,7 +1750,7 @@ async def login(
                     needs_rehash = needs_rehash2
                     password_service = fresh_ps
                     # annotate header to indicate re-verify succeeded
-                    with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                         response.headers["X-TLDW-Login-Reverify"] = "ok"
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 # fall back to original result
@@ -1800,7 +1800,7 @@ async def login(
             logger.info(f"Remaining login attempts: {remaining}")
 
             log_counter("auth_login_invalid_password")
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 _finalize_login_diag(request, response)
             extra_headers = {"WWW-Authenticate": "Bearer"}
             if _is_test_mode():
@@ -1925,7 +1925,7 @@ async def login(
                     ) from exc
                 response.status_code = status.HTTP_202_ACCEPTED
                 log_counter("auth_login_mfa_required")
-                with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                     _finalize_login_diag(request, response)
                 return MFAChallengeResponse(
                     session_token=session_token,
@@ -1998,7 +1998,7 @@ async def login(
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
-        with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
             _finalize_login_diag(request, response)
         return result
 
@@ -2397,8 +2397,8 @@ async def refresh_token(
                 raise InvalidTokenError("Refresh token has been revoked")
 
             # JWT standard uses 'sub' for subject (user ID)
-            user_id = token_payload.get("sub") or token_payload.get("user_id")
-            if not user_id:
+            raw_user_id = token_payload.get("sub") or token_payload.get("user_id")
+            if not raw_user_id:
                 if _is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "decode"
@@ -2409,7 +2409,7 @@ async def refresh_token(
 
             # Convert to int if it's a string
             try:
-                user_id = int(user_id)
+                user_id = int(raw_user_id)
             except (ValueError, TypeError):
                 if _is_test_mode():
                     try:
@@ -2443,7 +2443,7 @@ async def refresh_token(
 
         # Attach user_id for middleware that binds CSRF tokens on refresh responses.
         try:
-            http_request.state.user_id = int(user.get("id")) if isinstance(user, dict) else None
+            http_request.state.user_id = int(user["id"]) if isinstance(user, dict) else None
         except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Failed to set request.state.user_id during refresh: {}", exc)
 
@@ -2464,13 +2464,11 @@ async def refresh_token(
             add_claims = dict(scope_claims)
             if session_id:
                 add_claims["session_id"] = session_id
-            if not add_claims:
-                add_claims = None
             new_access_token = jwt_service.create_access_token(
                 user_id=user['id'],
                 username=user['username'],
                 role=user['role'],
-                additional_claims=add_claims
+                additional_claims=add_claims or None
             )
             # Rotate refresh token if enabled
             new_refresh_token = payload.refresh_token
@@ -2520,7 +2518,7 @@ async def refresh_token(
             except asyncio.CancelledError:
                 raise
             except _AUTH_NONCRITICAL_EXCEPTIONS as _bl_e:
-                with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                     logger.debug(f"Refresh: blacklist prior token best-effort failed: {_bl_e}")
 
         if settings.PII_REDACT_LOGS:
@@ -2532,7 +2530,7 @@ async def refresh_token(
         log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
         # TEST_MODE: include simple duration metric header (non-breaking)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Refresh-Duration-ms"] = str(int((time.perf_counter() - start_time) * 1000))
         return TokenResponse(
             access_token=new_access_token,
@@ -2799,7 +2797,7 @@ async def verify_email(
             ) from None
 
         try:
-            user_id = int(payload.get("sub"))
+            user_id = int(payload["sub"])
             email = str(payload.get("email") or "").strip()
             if not email:
                 raise ValueError("Missing email claim")
@@ -2917,12 +2915,12 @@ async def request_magic_link(
 
     email = _normalize_magic_email(data.email)
     if not email:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     try:
         validator = get_input_validator()
         is_valid, _error_msg = validator.validate_email(email)
         if not is_valid:
-            return MessageResponse(message="If the account exists, a sign-in link has been sent")
+            return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         # Never fail the request on validation errors; keep response generic
         pass
@@ -2936,7 +2934,7 @@ async def request_magic_link(
         tags={"auth_endpoint": "magic_link_request", "scope": "ip"},
     )
     if not ip_allowed:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     email_allowed, _retry_after = await _reserve_auth_rg_requests(
         request,
         policy_id="authnz.magic_link.email",
@@ -2944,14 +2942,14 @@ async def request_magic_link(
         tags={"auth_endpoint": "magic_link_request", "scope": "email"},
     )
     if not email_allowed:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
     user = await fetch_user_by_login_identifier(db, email)
     user_id = int(user["id"]) if user and user.get("id") is not None else None
 
     # If registration is disabled and user doesn't exist, do not send an email.
     if not user and not settings.ENABLE_REGISTRATION:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
     try:
         token = jwt_service.create_magic_link_token(
@@ -2974,7 +2972,7 @@ async def request_magic_link(
             detail="Failed to send magic link email",
         ) from exc
 
-    return MessageResponse(message="If the account exists, a sign-in link has been sent")
+    return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
 
 @router.post(
@@ -3047,7 +3045,7 @@ async def request_admin_reauth(
             detail="Failed to send admin reauthentication email",
         ) from exc
 
-    return MessageResponse(message="Admin reauthentication link sent")
+    return MessageResponse(message="Admin reauthentication link sent", details=None)
 
 
 @router.post(
@@ -3132,7 +3130,10 @@ async def verify_magic_link(
 
     jti, expiry = payload.get("jti"), payload.get("exp")
     try:
-        if not isinstance(jti, str) or not jti.strip() or len(jti) > 255 or type(expiry) not in (int, float):
+        if (
+            not isinstance(jti, str) or not jti.strip() or len(jti) > 255
+            or (type(expiry) is not int and type(expiry) is not float)
+        ):
             raise ValueError("Invalid redemption claims")
         expires_at = datetime.fromtimestamp(expiry, tz=timezone.utc)
         if expires_at <= datetime.now(timezone.utc):
@@ -3671,7 +3672,7 @@ async def mfa_login(
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 logger.debug(f"rate_limiter.reset_failed_attempts failed: {rl_exc}")
 
-        with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
             await session_manager.delete_ephemeral_value(cache_key)
 
         log_counter("auth_login_success")
@@ -3710,7 +3711,7 @@ async def register(
     response: Response,
     _diag=Depends(_register_runtime_diag),  # noqa: B008
     registration_service: RegistrationService = Depends(get_registration_service_dep)
-) -> RegistrationResponse:
+) -> RegistrationResponse | Response:
     """
     Register a new user
 
@@ -3852,7 +3853,7 @@ async def register(
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         # Attach diagnostics (if enabled)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "duplicate-user"
         _finalize_register_diag(http_request, response)
         detail = "Username or email already exists."
@@ -3871,7 +3872,7 @@ async def register(
         log_counter("auth_register_weak_password")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "weak-password"
         _finalize_register_diag(http_request, response)
         raise HTTPException(
@@ -3883,7 +3884,7 @@ async def register(
         log_counter("auth_register_invalid_code")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "invalid-registration-code"
         _finalize_register_diag(http_request, response)
         raise HTTPException(
@@ -3906,7 +3907,7 @@ async def register(
         log_counter("auth_register_error")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "registration-error"
         _finalize_register_diag(http_request, response)
         raise HTTPException(
@@ -3923,7 +3924,7 @@ async def register(
         log_counter("auth_register_unexpected_error")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "internal-error"
         duration = time.perf_counter() - start_time
         _finalize_register_diag(http_request, response)
@@ -3956,9 +3957,9 @@ async def register(
 
 @router.get("/me", response_model=DeprecatedUserResponse, deprecated=True)
 async def get_current_user_info(
+    response: Response,
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    response: Response = None,
-) -> DeprecatedUserResponse:
+) -> DeprecatedUserResponse | Response:
     """
     Deprecated: use /api/v1/users/me/profile.
 
