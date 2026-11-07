@@ -25,6 +25,7 @@ Follow-up of TASK-13956 PR B (#3426). (1) Test hygiene: RAG_NEW/integration/test
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+AC #1's socket probe: the repo has one, tldw_Server_API/tests/helpers/offline_network.block_live_network() (it blocks and records getaddrinfo, gethostbyname, connect and connect_ex); TASK-13956's runs used a local equivalent outside the repo.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
