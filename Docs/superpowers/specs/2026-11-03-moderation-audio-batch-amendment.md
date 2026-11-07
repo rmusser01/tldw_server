@@ -1,7 +1,7 @@
 # Moderation Audio Batch Amendment
 
 Status: approved by the requester on2026-11-03 through the explicit batching
-approval question. Associated work: TASK-15417. This records the approved short
+approval question. Associated work: TASK-15466 (previously TASK-15417). This records the approved short
 design, not a relaxation of execution limits.
 
 ## Evidence And Intent
@@ -54,7 +54,7 @@ API endpoint is added. Existing compiler/admin-lint scope remains unchanged.
 
 ## ADR Assessment
 
-ADR required: existing accepted ADR-086 governs stdlib re in killable batch
+ADR required: existing accepted ADR-096 governs stdlib re in killable batch
 children, and ADR-021 governs lifecycle ownership. This extends a batch's bounded
 data shape without changing engine, ownership, persistence authority or durable
 architecture rules. No new ADR or accepted-rationale rewrite is required.

@@ -145,7 +145,9 @@ def run(mode: str) -> None:
             assert time.monotonic() - start < 3.5
             assert_clean()
         elif mode in {"nonzero", "posture", "blocked-write"}:
-            with execution_scope(timeout_s=0.1 if mode == "blocked-write" else 2) as scope:
+            # The large blocked-write frame must reach the pipe, not exhaust
+            # an artificial 100 ms scope during serialization on a busy host.
+            with execution_scope() as scope:
                 submitted = (
                     snapshot_substitution_request("x" * 1000000, [], None, bounds) if mode == "blocked-write" else safe
                 )

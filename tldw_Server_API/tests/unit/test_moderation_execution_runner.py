@@ -420,6 +420,27 @@ def test_independent_real_child_ownership_probes(mode):
         assert b"BATCH_PROVEN 102 launches 1" in result.stdout
 
 
+def test_blocked_write_probe_reaches_child_after_slow_serialization():
+    import sys
+    from pathlib import Path
+
+    from tldw_Server_API.tests.helpers.moderation_process_harness import run_isolated_probe
+
+    probe = Path(__file__).resolve().parents[1] / "helpers" / "moderation_supervisor_probe.py"
+    code = (
+        "import runpy,time;from pathlib import Path;"
+        f"probe=Path({str(probe)!r});ns=runpy.run_path(str(probe));"
+        "ns['bootstrap'](probe.resolve().parents[3]);"
+        "from tldw_Server_API.app.core.Moderation import execution_runner as runner;"
+        "original=runner.encode_request;"
+        "\ndef delayed(request):\n time.sleep(0.15)\n return original(request)\n"
+        "runner.encode_request=delayed;ns['run']('blocked-write')"
+    )
+    result = run_isolated_probe([sys.executable, "-I", "-S", "-c", code])
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(b"OK blocked-write")
+
+
 def test_fork_during_spawn_waits_for_descriptor_publication():
     import os
     import sys

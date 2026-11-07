@@ -29,6 +29,7 @@ Draft spec and proposed ADR-086 written. Chosen architecture: standard-library r
 Fresh builder check completed (Copernicus, 01a19d4a-4a37-7133-a058-aa4121fc8e66): nothing important left; no blocking questions. Metadata CI suite: 4 passed, 20 warnings. No runtime, tests, dependencies, or workflow files changed. Written design and proposed ADR await requester approval; AC3 intentionally remains unchecked until approval. No PR opened or auto-merge enabled.
 Requester approved the complete written design on 2026-11-02 (yes). Spec approval metadata and ADR-086/index updated to Accepted; no accepted ADR rationale changed. Planning handed to TASK-15415; implementation has not started. Documentation-only validation remains canonical task/ID checks, metadata CI 4 passed with 20 warnings, and whitespace checks; Bandit not applicable. No pending design blockers; plan approval still required before implementation.
 Historical CI triage reference TASK-15413 was renumbered to TASK-15416 after open PR 3404 independently allocated15413; original allocation notes above remain historical. Approved implementation now tracked by TASK-15417.
+2026-11-07 integration identity correction: implementation task is now TASK-15466 (previously TASK-15417), and accepted Moderation decision is Docs/ADR/096-moderation-killable-stdlib-regex-execution.md (previously ADR-086). Only this branch records were renumbered to avoid independently assigned dev/open-PR IDs; historical allocation notes/commit IDs retained.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
