@@ -21,12 +21,13 @@ Consume a verified one-time sign-in token before account or session effects, usi
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. Enforces the existing one-time sign-in contract using the existing blacklist table. Plan: reproduce duplicate and failed claims, implement a committed conditional insert before grants, verify the handler and both SQL dialects.
+Review follow-up: accept only explicit insert outcomes. Unknown PostgreSQL command tags and SQLite row counts return 503. Two regressions returned 400 before this change. Final verification after review: 58 SQLite/adjacent tests and 7 PostgreSQL 18 integration tests passed. Ruff, compile, whitespace and changed-code Bandit checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-A conditional blacklist insert on the existing autocommit sign-in connection makes redemption single-winner before account and session effects. Concurrent HTTP submissions and unavailable persistence both reproduced incorrect success on SQLite before the fix. The SQLite and adjacent AuthNZ suites passed 56 tests; all seven PostgreSQL 18 magic-link integration tests passed. Ruff, compile and whitespace checks passed. Bandit reported 10 runtime findings versus 11 on the base, with none introduced. The endpoint documentation describes 400, 503 and requesting a fresh link after a later failure.
+The existing unique token identifier is claimed on the sign-in connection before any account or session changes. Confirmed duplicates return 400; uncertain or failed writes return 503. Concurrent requests and persistence failure reproduced incorrect success on the base. Final verification: 58 SQLite and adjacent AuthNZ tests, seven PostgreSQL 18 integration tests, Ruff, compile, whitespace, and no newly introduced runtime Bandit findings (base 11, branch 10).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

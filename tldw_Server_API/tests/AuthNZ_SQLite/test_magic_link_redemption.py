@@ -107,3 +107,19 @@ async def test_downstream_failure_leaves_link_spent(sign_in, monkeypatch):
         assert (await sign_in.submit()).status_code == 500
     assert (await sign_in.submit()).status_code == 400
     assert await sign_in.pool.fetchval("SELECT count(*) FROM sessions WHERE user_id = ?", sign_in.user_id) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("driver", ["postgres", "sqlite"])
+async def test_unconfirmed_insert_result_is_unavailable(sign_in, monkeypatch, driver):
+    from unittest.mock import AsyncMock
+
+    consume = auth.consume_magic_link
+    result = "UNKNOWN" if driver == "postgres" else SimpleNamespace(rowcount=-1, close=AsyncMock())
+
+    async def consume_with_unknown_result(db, **kwargs):
+        return await consume(SimpleNamespace(execute=AsyncMock(return_value=result)), **kwargs)
+
+    monkeypatch.setattr(auth, "consume_magic_link", consume_with_unknown_result)
+    assert (await sign_in.submit()).status_code == 503
+    assert await sign_in.pool.fetchval("SELECT count(*) FROM sessions WHERE user_id = ?", sign_in.user_id) == 0
