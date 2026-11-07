@@ -33,6 +33,7 @@ async def test_claimed_admin_in_options_cannot_control_lifecycle(monkeypatch, co
             json={"role": "admin", "owner_user_id": 1, "options": {"permissions": ["*"]}},
         )
     assert response.status_code == 403
+    assert response.json() == {"detail": "Platform administrator required"}
 
 
 @pytest.mark.parametrize(

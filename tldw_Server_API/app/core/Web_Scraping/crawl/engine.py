@@ -346,6 +346,7 @@ async def run_crawl(
     source = iter((plan.request.base_url,) if seeds is None else seeds)
     input_done = False
     restored_sequences = frozenset()
+    sitemap_total = sitemap_processed = 0
 
     async def evaluate(entry, phase):
         context.check()
@@ -354,12 +355,15 @@ async def run_crawl(
         return decision
 
     def commit_denial(entry, decision):
+        nonlocal sitemap_processed
         # Orchestration supplies the profile's established safe failure payload;
         # pure policy fakes can omit details, but cannot manufacture success data.
         failure = {**dict(decision.metadata), "url": entry.url, "extraction_successful": False}
         failure.setdefault("error", decision.reason)
         context.check()
         frontier.commit(entry, PageData(failure, DiscoveryResult(entry.url, entry.url, ())))
+        if plan.profile.endswith("sitemap") and entry.parent_url is not None:
+            sitemap_processed += 1
         notify("in_progress", entry)
 
     def notify(status, entry=None):
@@ -372,6 +376,11 @@ async def run_crawl(
                         "current_url": entry.url if entry else None,
                         "queue_size": frontier.queued_count,
                         "visited": frontier.completed_count,
+                        **(
+                            {"total_urls": sitemap_total, "processed_urls": sitemap_processed}
+                            if plan.profile.endswith("sitemap")
+                            else {}
+                        ),
                     }
                 )
             )
@@ -387,7 +396,9 @@ async def run_crawl(
             if state is not None:
                 if state.scope != checkpoint.scope or state.plan != plan or state.schema_version != 1:
                     raise ValueError("checkpoint binding mismatch")
-                context.restore_budget(state.budget, accounting_complete=state.accounting_complete)
+                context.restore_budget(
+                    state.budget, accounting_complete=state.accounting_complete, stop_reason=state.stop_reason
+                )
                 frontier = Frontier.from_snapshot(plan, state.frontier)
                 frontier.restore_unfinished()
                 restored_sequences = frozenset(
@@ -538,6 +549,11 @@ async def run_crawl(
                 frontier.commit(entry, page)
                 for child in children:
                     frontier.admit(child)
+                if plan.profile.endswith("sitemap"):
+                    if collection_root:
+                        sitemap_total += len(children)
+                    elif entry.parent_url is not None:
+                        sitemap_processed += 1
                 count = next_count
                 notify("in_progress", entry)
                 if article.get("error") == "browser_transport_unavailable":

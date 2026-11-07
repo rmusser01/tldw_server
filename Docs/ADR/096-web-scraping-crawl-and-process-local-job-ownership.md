@@ -6,7 +6,9 @@
 **Backfilled from:** not backfilled
 **Decision owner:** Human requester in the Web Refactoring chat; written design approved 2026-11-01
 **Related task:** TASK-15431
-**Related spec/plan:** [Phase 5 design](../superpowers/specs/2026-10-04-web-scraping-phase-5-crawl-process-local-jobs-design.md); [implementation plan](../superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md) awaiting review
+**Related spec/plan:** `Docs/superpowers/specs/2026-10-04-web-scraping-phase-5-crawl-process-local-jobs-design.md`;
+`Docs/superpowers/plans/2026-11-01-web-scraping-phase-5-crawl-process-local-jobs.md`
+(repository-only implementation records, not published site pages)
 
 ## Decision
 

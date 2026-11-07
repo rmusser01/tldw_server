@@ -173,9 +173,11 @@ async def test_preflight_http_redirects_charge_at_each_started_hop():
         egress_guard=SimpleNamespace(decide=allowed),
         transport=SimpleNamespace(send=send),
     )
-    with pytest.raises(ParentStop, match="budget_exhausted"):
+    with pytest.raises(ParentStop, match="budget_exhausted") as caught:
         await probe.get(ProbeHttpRequest(url="https://example.test/start", allow_redirects=True))
     assert calls == ["https://example.test/start"]
+    assert caught.value.reason == "budget_exhausted"
+    assert parent.snapshot().network_requests == 1
 
 
 async def test_preflight_browser_stop_aborts_route_without_losing_reason():
@@ -200,9 +202,11 @@ async def test_preflight_browser_stop_aborts_route_without_losing_reason():
         egress_guard=SimpleNamespace(decide=allowed),
     )
     route = SimpleNamespace(request=SimpleNamespace(resource_type="document", url="https://example.test"), abort=abort)
-    with pytest.raises(ParentStop, match="budget_exhausted"):
+    with pytest.raises(ParentStop, match="budget_exhausted") as caught:
         await probe._http_handler(BrowserProbeOptions())(route)
     assert aborted == [True]
+    assert caught.value.reason == "budget_exhausted"
+    assert parent.snapshot().network_requests == 1
 
 
 async def test_cancel_during_tool_spawn_owns_late_process_cleanup():

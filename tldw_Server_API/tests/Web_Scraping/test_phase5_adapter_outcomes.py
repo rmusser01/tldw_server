@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Web_Scraping.crawl.models import CrawlLimits
 from tldw_Server_API.app.core.Web_Scraping.orchestration import article
 from tldw_Server_API.app.core.Web_Scraping.orchestration.crawl_context import CrawlContext
 from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
+from tldw_Server_API.tests.Web_Scraping.phase5_fakes import bind_enhanced_capabilities
 from tldw_Server_API.tests.Web_Scraping.test_phase4_article_orchestration import URL, _harness
 
 pytestmark = pytest.mark.unit
@@ -447,6 +448,7 @@ async def test_duplicate_attempts_transform_before_retry_without_discovery_debit
     monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: fixture.dependencies)
     scraper = EnhancedWebScraper(config={})
     scraper.deduplicator = ContentDeduplicator(tmp_path / "hashes.json")
+    bind_enhanced_capabilities(scraper, fixture.dependencies)
     scraper.deduplicator.add_content(URL + "/original", "converted:body")
     attempts = []
     transform = scraper._apply_dedup
@@ -709,6 +711,7 @@ async def test_public_recursive_preserves_explicit_method_with_real_js_advice(
     monkeypatch.setattr(article, "_fetch_response", held_fetch)
     monkeypatch.setattr(fixture.browser, "acquire", held_browser)
     scraper = EnhancedWebScraper(config=config)
+    bind_enhanced_capabilities(scraper, fixture.dependencies)
 
     async def close_legacy_capability():
         pass
@@ -794,6 +797,7 @@ async def test_public_crawl_cookie_forms_preserve_stored_explicit_route_preceden
     monkeypatch.setattr(article, "_fetch_response", response)
     scraper = EnhancedWebScraper(config={})
     scraper.cookie_manager = CookieManager(tmp_path / "cookies.json")
+    bind_enhanced_capabilities(scraper, fixture.dependencies)
     if stored_form != "absent":
         scraper.cookie_manager.add_cookies("example.com", form(stored, stored_form))
     scraper.cookie_manager.add_cookies("other.example", [{"unrelated": "not-for-this-job"}])

@@ -136,9 +136,11 @@ def test_explicit_seed_cannot_resolve_against_an_oversized_request_base(monkeypa
 
     monkeypatch.setattr(module, "normalize_reference", normalize)
     frontier = Frontier(resolved)
-    with pytest.raises(ParentStop, match="budget_exhausted"):
+    with pytest.raises(ParentStop, match="budget_exhausted") as caught:
         frontier.admit(entry("https://e.test/x"))
     assert calls == []
+    assert caught.value.reason == "budget_exhausted"
+    assert frontier.snapshot().queued == frontier.snapshot().inflight == ()
 
 
 @given(st.lists(st.integers(min_value=0, max_value=30), min_size=2, max_size=15, unique=True))

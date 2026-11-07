@@ -1750,14 +1750,12 @@ class EnhancedWebScraper:
             )
         return not self._browser
 
-    def _start_controlled_job(self, payload, controls) -> WorkHandle[PageData]:
-        """Bind this instance's capabilities to one canonical, controlled attempt."""
+    def _controlled_dependencies(self, *, config, cookies, method="auto", user_agent=None, custom_headers=None):
+        """Compose instance capabilities for both batch and crawl canonical pages."""
         from .orchestration import article
 
-        config = payload.options.get("configuration", self.config)
         config = article._snapshot_config(config)
-        cookies = article._snapshot_cookies(payload.options["selected_cookies"])
-        method = payload.operation
+        cookies = article._snapshot_cookies(cookies)
         resolver = self._resolve_scrape_plan
         state = {"method": method, "route_backend": "auto", "default_handler": True}
         dependencies = article._build_default_dependencies(cookies)
@@ -1774,8 +1772,8 @@ class EnhancedWebScraper:
             headers = self._build_plan_headers(
                 plan.ua_profile,
                 dict(plan.headers),
-                payload.options.get("user_agent"),
-                payload.options.get("custom_headers"),
+                user_agent,
+                custom_headers,
             )
             plan = replace(
                 plan,
@@ -1850,6 +1848,22 @@ class EnhancedWebScraper:
             http_only=True,
             http_failure=_failed_scrape_result,
             browser_http_fallback=browser_http_fallback,
+        )
+        return dependencies
+
+    def _start_controlled_job(self, payload, controls) -> WorkHandle[PageData]:
+        """Bind this instance's capabilities to one canonical, controlled attempt."""
+        from .orchestration import article
+
+        config = payload.options.get("configuration", self.config)
+        cookies = article._snapshot_cookies(payload.options["selected_cookies"])
+        method = payload.operation
+        dependencies = self._controlled_dependencies(
+            config=config,
+            cookies=cookies,
+            method=method,
+            user_agent=payload.options.get("user_agent"),
+            custom_headers=payload.options.get("custom_headers"),
         )
 
         async def run():
@@ -2063,9 +2077,6 @@ class EnhancedWebScraper:
 
         def progress(snapshot):
             updates = dict(snapshot)
-            if sitemap:
-                updates["processed_urls"] = snapshot["pages_scraped"]
-                updates["total_urls"] = snapshot["pages_scraped"] + snapshot["queue_size"]
             self._set_progress(task_id, **updates)
 
         await self.job_queue.start()
@@ -2086,6 +2097,7 @@ class EnhancedWebScraper:
                 queue=self.job_queue,
                 transform=self._apply_dedup,
                 browser_http_fallback=self._browser_http_fallback,
+                page_dependencies=self._controlled_dependencies,
             )
         except asyncio.CancelledError as error:
             report = getattr(error, "report", None)
@@ -2214,8 +2226,12 @@ class EnhancedWebScraper:
         return entry
 
     async def save_progress(self, task_name: str, filepath: Path):
-        """Save progress to file for resumability"""
-        progress_data = self._progress.get(task_name, {})
+        """Save a credential-safe observation, not an execution checkpoint."""
+        import sys
+
+        from .jobs.admission import bounded_snapshot
+
+        progress_data, _ = bounded_snapshot(self._progress.get(task_name, {}), sys.maxsize, redact=True)
         async with aiofiles.open(filepath, "w") as f:
             await f.write(json.dumps(progress_data, indent=2))
 

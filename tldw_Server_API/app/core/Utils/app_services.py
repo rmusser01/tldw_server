@@ -12,6 +12,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tldw_Server_API.app.core.Web_Scraping.jobs.admission import SyncCrawlAdmission
+
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
     from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
@@ -29,6 +31,7 @@ class AppServices:
     jwt_service: JWTService | None = None
     mcp_server: MCPServer | None = None
     chacha_runtime: ChaChaRuntimeManager | None = None
+    sync_crawl_admission: SyncCrawlAdmission = field(default_factory=SyncCrawlAdmission, repr=False)
     # Serializes first-time session-manager init; a fresh container gets a fresh lock.
     session_manager_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 

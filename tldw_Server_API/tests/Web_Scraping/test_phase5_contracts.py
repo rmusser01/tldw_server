@@ -272,12 +272,13 @@ def test_strategy_rejection_never_calls_private_object_string_conversion(source)
             calls.append("coerced")
             return "private-key"
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as caught:
         if source == "config":
             resolve(config={"web_crawl_strategy": PrivateStrategy()})
         else:
             resolve(options={"crawl_strategy": PrivateStrategy()}, supplied=frozenset({"crawl_strategy"}))
     assert calls == []
+    assert str(caught.value) == "crawl option must be a scalar or a domain-weight mapping"
 
 
 def test_explicit_none_uses_config_and_invalid_threshold_keeps_config():
@@ -363,11 +364,12 @@ def test_domain_weight_rejection_does_not_execute_float_conversion():
             calls.append("executed")
             return 0.5
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as caught:
         resolve(
             config={"web_crawl_enable_domain_map": True, "web_crawl_domain_map": {"example.com": ExecutableWeight()}}
         )
     assert calls == []
+    assert str(caught.value) == "domain_map option must map domain strings to numeric weights"
 
 
 def test_direct_plan_constructor_cannot_bypass_safe_options_and_provenance():

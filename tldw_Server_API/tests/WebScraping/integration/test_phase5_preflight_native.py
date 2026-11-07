@@ -23,6 +23,46 @@ from tldw_Server_API.tests.WebScraping.integration.test_phase5_enhanced_browser_
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
+@pytest.fixture
+def native_cdp_observation(monkeypatch):
+    """Observe real CDP retirement, optionally holding native continuations."""
+    from playwright.async_api import Browser
+
+    state = SimpleNamespace(
+        entered=asyncio.Event(),
+        release=asyncio.Event(),
+        exited=asyncio.Event(),
+        hold_continuations=False,
+        detached_connected=[],
+        detached_after_release_and_exit=[],
+    )
+    new_session = Browser.new_browser_cdp_session
+
+    async def session(browser):
+        root = await new_session(browser)
+        send, detach = root.send, root.detach
+        browser.on("disconnected", lambda _: state.exited.set())
+
+        async def observed_send(method, params=None):
+            if state.hold_continuations and method == "Fetch.continueRequest":
+                state.entered.set()
+                await state.release.wait()
+            return await send(method, params)
+
+        async def observed_detach():
+            state.detached_connected.append(browser.is_connected())
+            state.detached_after_release_and_exit.append(state.release.is_set() and state.exited.is_set())
+            await detach()
+
+        monkeypatch.setattr(root, "send", observed_send)
+        monkeypatch.setattr(root, "detach", observed_detach)
+        return root
+
+    monkeypatch.setattr(Browser, "new_browser_cdp_session", session)
+    yield state
+    state.release.set()
+
+
 @pytest.mark.parametrize("mode", ["denied", "allowed", "budget"])
 async def test_native_preflight_redirect_admission_checks_and_charges_each_dispatch_once(mode):
     checks = []
@@ -114,26 +154,15 @@ async def test_native_preflight_redirect_stop_through_real_facade_prevents_canon
 
 
 @pytest.mark.parametrize("close_mode", ["held", "rejected"])
-async def test_native_preflight_guard_survives_held_or_rejected_close(monkeypatch, close_mode):
+async def test_native_preflight_guard_survives_held_or_rejected_close(monkeypatch, close_mode, native_cdp_observation):
     from playwright.async_api import Browser
 
     from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import browser as adapter
     from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PhysicalWork, physical_work
 
     entered, release = asyncio.Event(), asyncio.Event()
-    browsers, detached = [], []
-    close, new_session = Browser.close, Browser.new_browser_cdp_session
-
-    async def session(self):
-        root = await new_session(self)
-        detach = root.detach
-
-        async def observed_detach():
-            detached.append(self.is_connected())
-            await detach()
-
-        monkeypatch.setattr(root, "detach", observed_detach)
-        return root
+    browsers, detached = [], native_cdp_observation.detached_connected
+    close = Browser.close
 
     async def held_close(self, *args, **kwargs):
         browsers.append(self)
@@ -154,7 +183,6 @@ async def test_native_preflight_guard_survives_held_or_rejected_close(monkeypatc
         native.stop = held_stop
         return native
 
-    monkeypatch.setattr(Browser, "new_browser_cdp_session", session)
     monkeypatch.setattr(Browser, "close", held_close)
     monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", 0.05)
     parent = CrawlContext(CrawlLimits(), clock=time.monotonic)
@@ -215,36 +243,14 @@ async def test_native_preflight_guard_survives_held_or_rejected_close(monkeypatc
         assert detached == [False] and not browsers[0].is_connected()
 
 
-async def test_native_preflight_command_holds_physical_owner_past_browser_exit(monkeypatch):
-    from playwright.async_api import Browser
-
+async def test_native_preflight_command_holds_physical_owner_past_browser_exit(monkeypatch, native_cdp_observation):
     from tldw_Server_API.app.core.Web_Scraping.preflight.adapters import browser as adapter
     from tldw_Server_API.app.core.Web_Scraping.runtime.controls import PhysicalWork, observe_physical, physical_work
 
-    entered, release, exited = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    detached, navigation = [], []
-    original = Browser.new_browser_cdp_session
-
-    async def session(self):
-        root = await original(self)
-        send, detach = root.send, root.detach
-        self.on("disconnected", lambda _: exited.set())
-
-        async def held_send(method, params=None):
-            if method == "Fetch.continueRequest":
-                entered.set()
-                await release.wait()
-            return await send(method, params)
-
-        async def observed_detach():
-            detached.append(release.is_set() and exited.is_set())
-            await detach()
-
-        monkeypatch.setattr(root, "send", held_send)
-        monkeypatch.setattr(root, "detach", observed_detach)
-        return root
-
-    monkeypatch.setattr(Browser, "new_browser_cdp_session", session)
+    observation = native_cdp_observation
+    observation.hold_continuations = True
+    entered, release, exited = observation.entered, observation.release, observation.exited
+    detached, navigation = observation.detached_after_release_and_exit, []
     monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", 0.05)
     controls = PreflightRuntimeControls(RuntimeRequestContext())
     guard = SimpleNamespace(decide=lambda *args, **kwargs: asyncio.sleep(0, result=SimpleNamespace(allowed=True)))

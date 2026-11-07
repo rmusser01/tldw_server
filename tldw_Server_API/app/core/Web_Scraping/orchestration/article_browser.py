@@ -10,7 +10,6 @@ import math
 import threading
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, replace
-from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -29,6 +28,8 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.browser import (
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import ProbeEgressGuard
 from tldw_Server_API.app.core.Web_Scraping.runtime.requests import RuntimeRequestContext
 
+from ..runtime.browser_accounting import RequestTransfers, non_negative_integer
+from ..runtime.browser_document import serialize_document
 from ..runtime.controls import ParentControls, ParentStop, physical_work
 from .article_browser_dispatch import TransferSessions
 from .article_models import ArticleFailure, ArticleLimits, DirectBrowserProfile
@@ -44,49 +45,8 @@ _MAX_CALLBACK_CAPACITY = 1024
 _CALLBACK_IDLE_TURNS = 3
 _BROWSER_RETRY_DELAY_S = 2.0
 _RETRYABLE_BROWSER_STAGES = frozenset({"launch", "context", "page", "navigation", "stealth", "wait", "content"})
-_ISOLATED_WORLD_NAME = "tldw-article-serialization-v1"
 _MAX_SAFE_JAVASCRIPT_INTEGER = 2**53 - 1
 _BASE64_ALPHABET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
-_HTML_SERIALIZATION_EXPRESSION = """(maxBytes) => {
-  const doctype = document.doctype
-    ? new XMLSerializer().serializeToString(document.doctype) + "\\n"
-    : "";
-  const html = doctype + document.documentElement.outerHTML;
-  let size = 0;
-  for (const character of html) {
-    const codePoint = character.codePointAt(0);
-    size += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-    if (size > maxBytes) {
-      return { ok: false, size };
-    }
-  }
-  return { ok: true, html };
-}"""
-_DOCUMENT_SERIALIZATION_EXPRESSION = """(maxBytes) => {
-  const serialized = (HTML_SERIALIZER)(maxBytes);
-  if (!serialized.ok) return serialized;
-  let content = "";
-  for (const selector of ["main", "article", '[role="main"]', "#content", ".content"]) {
-    for (const element of document.querySelectorAll(selector)) {
-      const text = element.innerText;
-      if (text.length > content.length) content = text;
-    }
-  }
-  if (!content) content = document.body.innerText;
-  const author = document.querySelector('meta[name="author"]');
-  const date = document.querySelector('meta[property="article:published_time"]');
-  const dom = {title: document.title, author: author ? author.content : "Unknown",
-               date: date ? date.content : "", content};
-  let size = 0;
-  for (const text of Object.values(dom)) {
-    for (const character of text) {
-      const codePoint = character.codePointAt(0);
-      size += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-      if (size > maxBytes) return {ok: false, size};
-    }
-  }
-  return {...serialized, dom};
-}""".replace("HTML_SERIALIZER", _HTML_SERIALIZATION_EXPRESSION)
 
 
 def _strict_capacity(value: object, *, maximum: int, label: str) -> int:
@@ -463,9 +423,7 @@ class _BrowserTransferLedger:
         self._total = 0
         self._terminal = False
         self._parent = parent
-        self._request_lock = threading.Lock()
-        self._request_bytes: dict[tuple[str, str], int] = {}
-        self._finished_requests: set[tuple[str, str]] = set()
+        self._requests = RequestTransfers(lease._callback_capacity, self._add)
 
     def _charge_parent(self, amount: int) -> bool:
         if self._parent is None:
@@ -498,49 +456,23 @@ class _BrowserTransferLedger:
 
     @staticmethod
     def _request_key(session: str, payload: object) -> tuple[str, str]:
-        if not isinstance(payload, Mapping):
-            raise TypeError("invalid CDP event envelope")
-        identifier = payload.get("requestId")
-        if not isinstance(identifier, str) or not identifier or len(identifier) > 1024:
-            raise ValueError("invalid request identifier")
-        return session, identifier
+        return RequestTransfers.key(session, payload)
 
     def on_request_data(self, session: str, payload: object) -> None:
         try:
-            key = self._request_key(session, payload)
-            amount = self._non_negative_integer(payload.get("encodedDataLength"))
-            if amount == 0:
-                amount = self._non_negative_integer(payload.get("dataLength"))
-            with self._request_lock:
-                if key in self._finished_requests:
-                    return
-                if key not in self._request_bytes and len(self._request_bytes) >= self._lease._callback_capacity:
-                    raise ValueError("request observation capacity")
-                self._request_bytes[key] = self._request_bytes.get(key, 0) + amount
-            self._add(amount)
+            self._requests.data(session, payload)
         except (TypeError, ValueError, OverflowError):
             self._fail(ArticleFailure("browser_error", "capability"))
 
     def on_request_finished(self, session: str, payload: object) -> None:
         try:
-            key = self._request_key(session, payload)
-            total = self._non_negative_integer(payload.get("encodedDataLength"))
-            with self._request_lock:
-                if key in self._finished_requests:
-                    return
-                charged = self._request_bytes.pop(key, 0)
-                if len(self._finished_requests) >= self._lease._callback_capacity:
-                    self._finished_requests.pop()
-                self._finished_requests.add(key)
-            self._add(max(0, total - charged))
+            self._requests.finished(session, payload)
         except (TypeError, ValueError, OverflowError):
             self._fail(ArticleFailure("browser_error", "capability"))
 
     def on_request_failed(self, session: str, payload: object) -> None:
         try:
-            key = self._request_key(session, payload)
-            with self._request_lock:
-                self._request_bytes.pop(key, None)
+            self._requests.failed(session, payload)
         except (TypeError, ValueError):
             self._fail(ArticleFailure("browser_error", "capability"))
 
@@ -566,17 +498,7 @@ class _BrowserTransferLedger:
         except (binascii.Error, TypeError, ValueError, UnicodeError):
             self._fail(ArticleFailure("browser_error", "capability"))
 
-    @staticmethod
-    def _non_negative_integer(value: object) -> int:
-        if type(value) is int:
-            if value < 0:
-                raise ValueError("invalid transfer length")
-            return value
-        if type(value) is not float:
-            raise TypeError("invalid transfer length")
-        if not math.isfinite(value) or value < 0 or not value.is_integer() or value > _MAX_SAFE_JAVASCRIPT_INTEGER:
-            raise ValueError("invalid transfer length")
-        return int(value)
+    _non_negative_integer = staticmethod(non_negative_integer)
 
     def _add_text(self, data: str) -> None:
         if not self._charge_parent(0):
@@ -1151,92 +1073,7 @@ class GuardedArticleBrowser:
     async def _serialize_document(
         session: Any, max_bytes: int, *, capture_dom: bool = False
     ) -> tuple[str, Mapping[str, str] | None]:
-        if type(max_bytes) is not int or max_bytes < 0:
-            raise ArticleFailure("browser_error", "capability")
-        send = getattr(session, "send", None)
-        if not callable(send):
-            raise ArticleFailure("browser_error", "capability")
-
-        async def command(
-            method: str,
-            params: dict[str, object] | None = None,
-        ) -> Mapping[str, Any]:
-            try:
-                operation = send(method) if params is None else send(method, params)
-                if not inspect.isawaitable(operation):
-                    raise TypeError("CDP send is not awaitable")
-                response = await operation
-            except asyncio.CancelledError:
-                raise
-            except ParentStop:
-                raise
-            except ArticleFailure:
-                raise
-            except Exception:  # noqa: BLE001 - CDP failures are sanitized
-                raise ArticleFailure("browser_error", "capability") from None
-            if not isinstance(response, Mapping) or "exceptionDetails" in response:
-                raise ArticleFailure("browser_error", "capability")
-            return response
-
-        frame_tree_response = await command("Page.getFrameTree")
-        frame_tree = frame_tree_response.get("frameTree")
-        if not isinstance(frame_tree, Mapping):
-            raise ArticleFailure("browser_error", "capability")
-        frame = frame_tree.get("frame")
-        if not isinstance(frame, Mapping):
-            raise ArticleFailure("browser_error", "capability")
-        frame_id = frame.get("id")
-        if not isinstance(frame_id, str) or not frame_id:
-            raise ArticleFailure("browser_error", "capability")
-
-        isolated_world_response = await command(
-            "Page.createIsolatedWorld",
-            {
-                "frameId": frame_id,
-                "worldName": _ISOLATED_WORLD_NAME,
-                "grantUniveralAccess": False,
-            },
-        )
-        context_id = isolated_world_response.get("executionContextId")
-        if type(context_id) is not int or context_id < 0:
-            raise ArticleFailure("browser_error", "capability")
-
-        evaluation_response = await command(
-            "Runtime.evaluate",
-            {
-                "expression": f"({(_DOCUMENT_SERIALIZATION_EXPRESSION if capture_dom else _HTML_SERIALIZATION_EXPRESSION)})({max_bytes})",
-                "contextId": context_id,
-                "returnByValue": True,
-            },
-        )
-        remote_result = evaluation_response.get("result")
-        if not isinstance(remote_result, Mapping):
-            raise ArticleFailure("browser_error", "capability")
-        result = remote_result.get("value")
-        if not isinstance(result, Mapping) or type(result.get("ok")) is not bool:
-            raise ArticleFailure("browser_error", "capability")
-        if result["ok"] is True:
-            html = result.get("html")
-            if not isinstance(html, str) or len(html.encode("utf-8")) > max_bytes:
-                raise ArticleFailure("browser_error", "capability")
-            if not capture_dom:
-                return html, None
-            dom = result.get("dom")
-            if (
-                not isinstance(dom, Mapping)
-                or set(dom) != {"title", "author", "date", "content"}
-                or any(not isinstance(value, str) for value in dom.values())
-                or sum(len(value.encode("utf-8")) for value in dom.values()) > max_bytes
-            ):
-                raise ArticleFailure("browser_error", "capability")
-            return html, MappingProxyType(dict(dom))
-        if "html" in result:
-            raise ArticleFailure("browser_error", "capability")
-        try:
-            _BrowserTransferLedger._non_negative_integer(result.get("size"))
-        except (TypeError, ValueError, OverflowError):
-            raise ArticleFailure("browser_error", "capability") from None
-        raise ArticleFailure("response_too_large", "rendered_html")
+        return await serialize_document(session, max_bytes, capture_dom=capture_dom, failure=ArticleFailure)
 
     async def _decision_allowed(self, url: str) -> bool:
         if self._parent is not None:
@@ -1761,13 +1598,17 @@ class GuardedArticleBrowser:
                 await self._stealth_hook(page)
 
             stage = "navigation"
-            await page.goto(
+            response = await page.goto(
                 url,
                 wait_until="domcontentloaded",
                 timeout=profile.timeout_ms,
             )
             if outcome.failure is not None:
                 raise outcome.failure
+            if profile.extra_headers is not None and (response is None or not 200 <= response.status < 300):
+                failure = ArticleFailure("fetch_error", "navigation")
+                failure.retry_suppressed = True
+                raise failure
             if profile.stealth_enabled:
                 wait_for_timeout = getattr(page, "wait_for_timeout", None)
                 if not callable(wait_for_timeout):

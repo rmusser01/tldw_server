@@ -26,9 +26,6 @@ from ..runtime.controls import COUNTERS, BudgetSnapshot
 from .frontier import Frontier
 from .models import CheckpointLimits, CheckpointScope, CheckpointState, CrawlPlan, FrontierEntry, FrontierSnapshot
 
-_owners: dict[tuple[int, int, str], CheckpointStore] = {}
-_registry_lock = threading.Lock()
-_stores: weakref.WeakSet = weakref.WeakSet()
 _DESCRIPTOR_PATHS = os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW")
 # Wire version 1 is explicit; future dataclass defaults must not replenish usage.
 _STATE_FIELDS = frozenset(
@@ -59,19 +56,30 @@ class CheckpointError(ValueError):
         super().__init__(code)
 
 
-def _after_fork() -> None:
-    # Never flock(LOCK_UN) an inherited open-file description: that unlocks the
-    # parent's writer too. Child copies may only close their own descriptors.
-    global _registry_lock
-    for store in tuple(_stores):
-        store._mutex = threading.RLock()
-        for name in ("_lock_fd", "_directory_fd"):
-            fd = getattr(store, name, None)
-            if fd is not None:
-                os.close(fd)
-                setattr(store, name, None)
-    _owners.clear()
-    _registry_lock = threading.Lock()
+class _CheckpointRegistry:
+    """Own the local writer index and its fork-sensitive synchronization."""
+
+    def __init__(self) -> None:
+        self.owners: dict[tuple[int, int, str], CheckpointStore] = {}
+        self.lock = threading.Lock()
+        self.stores: weakref.WeakSet = weakref.WeakSet()
+
+    def after_fork(self) -> None:
+        # Never unlock an inherited open-file description: that unlocks the
+        # parent's writer too. Child copies may only close their descriptors.
+        for store in tuple(self.stores):
+            store._mutex = threading.RLock()
+            for name in ("_lock_fd", "_directory_fd"):
+                fd = getattr(store, name, None)
+                if fd is not None:
+                    os.close(fd)
+                    setattr(store, name, None)
+        self.owners.clear()
+        self.lock = threading.Lock()
+
+
+_registry = _CheckpointRegistry()
+_after_fork = _registry.after_fork
 
 
 if hasattr(os, "register_at_fork"):
@@ -252,11 +260,11 @@ class CheckpointStore:
                 parent_stat = parent.stat()
             store._parent = path.parent
             store._key = (parent_stat.st_dev, parent_stat.st_ino, store._name)
-            with _registry_lock:
-                if store._key in _owners:
+            with _registry.lock:
+                if store._key in _registry.owners:
                     raise CheckpointError("checkpoint_in_use")
-                _owners[store._key] = store
-                _stores.add(store)
+                _registry.owners[store._key] = store
+                _registry.stores.add(store)
             store._check_target(store._name)
             store._lock_fd = store._open_file(store._name + ".lock", os.O_CREAT | os.O_RDWR)
             try:
@@ -595,8 +603,8 @@ class CheckpointStore:
                         os.close(fd)
                     except OSError:
                         failed = True
-                with _registry_lock:
-                    if _owners.get(self._key) is self:
-                        del _owners[self._key]
+                with _registry.lock:
+                    if _registry.owners.get(self._key) is self:
+                        del _registry.owners[self._key]
             if failed:
                 raise CheckpointError() from None

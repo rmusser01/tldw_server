@@ -41,7 +41,7 @@ def to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]
                     if isinstance(item.get(key), str) and item[key] in {"N/A", ""}:
                         item.pop(key, None)
         return values
-    if outcome.stop_reason == "policy_denied" and not outcome.has_partial_results:
+    if profile.startswith("legacy_") and outcome.stop_reason == "policy_denied" and not outcome.has_partial_results:
         # Existing collectors return an empty list on pre-admission denial.
         return []
     if (

@@ -23,7 +23,7 @@ import json
 import os
 import tempfile
 import threading
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Coroutine, Mapping
 from concurrent.futures import Future
 from contextlib import suppress
 from datetime import datetime
@@ -53,6 +53,7 @@ from tldw_Server_API.app.core.http_client import fetch as http_fetch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     browser_transport_failure_result,
@@ -109,6 +110,7 @@ from tldw_Server_API.app.core.Web_Scraping.selectors import (
 from .contracts.conversion import to_legacy_crawl
 from .contracts.execution import CrawlReport
 from .contracts.requests import CrawlRequest
+from .jobs.admission import SyncCrawlAdmission as _SyncCrawlAdmission
 from .orchestration.crawl import execute_crawl
 
 _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS = (
@@ -1166,53 +1168,12 @@ def get_url_depth(url: str) -> int:
     return len(urlparse(url).path.strip("/").split("/"))
 
 
-class _SyncCrawlAdmission:
-    """Process-owned leases for loops and default executors still retiring."""
-
-    def __init__(self, capacity: int = 4) -> None:
-        self.capacity = capacity
-        self.pid = os.getpid()
-        self._lock = threading.Lock()
-        self._active = 0
-
-    @property
-    def active_count(self) -> int:
-        if self.pid != os.getpid():
-            return 0
-        with self._lock:
-            return self._active
-
-    def acquire(self) -> Callable[[], None]:
-        from .jobs.admission import QueueRejected
-
-        with self._lock:
-            if self._active >= self.capacity:
-                raise QueueRejected("queue_overloaded")
-            self._active += 1
-        released = False
-
-        def release() -> None:
-            nonlocal released
-            # An inherited lease cannot touch an inherited lock or child credits.
-            if self.pid != os.getpid():
-                return
-            with self._lock:
-                if not released:
-                    released = True
-                    self._active -= 1
-
-        return release
-
-
-_SYNC_CRAWL_ADMISSION = _SyncCrawlAdmission()
-
-
 def _get_sync_crawl_admission() -> _SyncCrawlAdmission:
     """Replace inherited state before acquiring any potentially fork-held lock."""
-    global _SYNC_CRAWL_ADMISSION
-    if _SYNC_CRAWL_ADMISSION.pid != os.getpid():
-        _SYNC_CRAWL_ADMISSION = _SyncCrawlAdmission(_SYNC_CRAWL_ADMISSION.capacity)
-    return _SYNC_CRAWL_ADMISSION
+    services = app_services()
+    if services.sync_crawl_admission.pid != os.getpid():
+        services.sync_crawl_admission = _SyncCrawlAdmission(services.sync_crawl_admission.capacity)
+    return services.sync_crawl_admission
 
 
 def _configure_sync_crawl_capacity(capacity: int) -> None:

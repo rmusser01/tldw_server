@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -20,6 +23,42 @@ class QueueRejected(Exception):
     def __init__(self, code: Literal["queue_overloaded", "queue_stopping", "job_payload_too_large"]) -> None:
         self.code = code
         super().__init__(code)
+
+
+class SyncCrawlAdmission:
+    """Process-owned leases for synchronous crawl loops still retiring."""
+
+    def __init__(self, capacity: int = 4) -> None:
+        self.capacity = capacity
+        self.pid = os.getpid()
+        self._lock = threading.Lock()
+        self._active = 0
+
+    @property
+    def active_count(self) -> int:
+        if self.pid != os.getpid():
+            return 0
+        with self._lock:
+            return self._active
+
+    def acquire(self) -> Callable[[], None]:
+        with self._lock:
+            if self._active >= self.capacity:
+                raise QueueRejected("queue_overloaded")
+            self._active += 1
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            # An inherited lease cannot touch an inherited lock or child credits.
+            if self.pid != os.getpid():
+                return
+            with self._lock:
+                if not released:
+                    released = True
+                    self._active -= 1
+
+        return release
 
 
 class SnapshotTooLarge(ValueError):

@@ -129,6 +129,7 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-098](098-advisory-ui-design-drift-reporting.md) | Proposed | Report UI token, color, radius, and layout drift across all four product UI roots without blocking builds or merges. |
 | [ADR-099](099-per-user-session-cap.md) | Accepted | Cap live sessions per user; evict the least recently active, same install first; never refuse sign-in. |
 | [ADR-100](100-document-workspace-chat-association.md) | Proposed | Store Document Workspace chat links with the owned native conversation and verify access through Media and Chat. |
+| [ADR-096](096-web-scraping-crawl-and-process-local-job-ownership.md) | Accepted | Separate crawl and bounded process-local job state behind injected canonical execution, preserving public outcomes and compatibility while deferring durable Jobs migration. |
 | [ADR-104](104-account-security-lock.md) | Accepted | Let a user lock their own account: all credentials refused (423) until an emailed link unlocks it; the previous address can take the account back for 7 days. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

@@ -18,7 +18,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_gauge, log_histogram
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Utils.coercion import parse_bool
 
 from ..browser_transport import (
     browser_transport_failure_result,
@@ -71,11 +71,6 @@ _EXCLUDES = [
     ".pdf",
     ".zip",
 ]
-
-
-def _truthy(value: Any) -> bool:
-    """Use the same string normalization as the characterized enhanced adapter."""
-    return is_truthy(value) if isinstance(value, str) else bool(value)
 
 
 def _segments(url: str) -> int:
@@ -167,7 +162,8 @@ class ProfileTraversalPolicy:
             if weights:
                 scorers.append(DomainAuthorityScorer(weights))
         self.scorer, self.order = CompositeScorer(scorers), PathDepthScorer()
-        self.respect = _truthy(options.get("respect_robots", config.get("web_scraper_respect_robots", True)))
+        respect = options.get("respect_robots", config.get("web_scraper_respect_robots", True))
+        self.respect = parse_bool(respect, default=False) if isinstance(respect, str) else bool(respect)
         self.robots = RobotsFilter(headers.get("User-Agent", "*"), fetch_robots=self._fetch_document)
         self._prepared = True
 
@@ -372,6 +368,24 @@ def _prepare_page_plan(
     return replace(prepared, backend="playwright") if method == "playwright" else prepared
 
 
+def _observe_progress(
+    plan: CrawlPlan, policy: ProfileTraversalPolicy, snapshot: Mapping[str, Any], committed: int
+) -> None:
+    """Keep existing profile telemetry separate from page capability composition."""
+    if plan.profile not in {"enhanced_recursive", "enhanced_url_level"}:
+        return
+    _observe(log_gauge, "webscraping.crawl.queue_size", float(snapshot["queue_size"]))
+    if snapshot["pages_scraped"] > committed and policy.active_entry is not None:
+        entry = policy.active_entry
+        logger.debug(
+            "Accept URL [{} depth={}]: {}",
+            plan.options["crawl_strategy"],
+            entry.depth,
+            redact_url_for_log(entry.url),
+        )
+        _observe(log_counter, "webscraping.crawl.pages_crawled")
+
+
 async def execute_crawl(
     request: CrawlRequest,
     *,
@@ -387,6 +401,7 @@ async def execute_crawl(
     queue: ProcessLocalJobQueue | None = None,
     transform: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
     browser_http_fallback: Callable[[], bool] | None = None,
+    page_dependencies: Callable[..., article.ArticleDependencies] | None = None,
 ) -> CrawlReport:
     """Snapshot private inputs and compose the sole canonical engine."""
     config = article._snapshot_config(config)
@@ -504,17 +519,7 @@ async def execute_crawl(
 
     def progress(snapshot: Mapping[str, Any]) -> None:
         nonlocal committed
-        if profile in {"enhanced_recursive", "enhanced_url_level"}:
-            _observe(log_gauge, "webscraping.crawl.queue_size", float(snapshot["queue_size"]))
-            if snapshot["pages_scraped"] > committed and policy.active_entry is not None:
-                entry = policy.active_entry
-                logger.debug(
-                    "Accept URL [{} depth={}]: {}",
-                    plan.options["crawl_strategy"],
-                    entry.depth,
-                    redact_url_for_log(entry.url),
-                )
-                _observe(log_counter, "webscraping.crawl.pages_crawled")
+        _observe_progress(plan, policy, snapshot, committed)
         committed = snapshot["pages_scraped"]
         if hooks.on_progress:
             hooks.on_progress(snapshot)
@@ -608,8 +613,21 @@ async def execute_crawl(
             discovery_on_success=profile in {"enhanced_recursive", "enhanced_url_level"},
             discovery_gate=discovery_gate,
             transform=transform,
-            method_intent="trafilatura" if profile == "enhanced_recursive" else "auto",
-            browser_http_fallback=browser_http_fallback,
+            method_intent=plan.options.get("method") or ("trafilatura" if profile == "enhanced_recursive" else "auto"),
+            dependencies=page_dependencies(
+                config=page_config,
+                cookies=page_cookies,
+                method=plan.options.get("method") or ("trafilatura" if profile == "enhanced_recursive" else "auto"),
+                user_agent=requested_agent if execution is None else execution.get("user_agent"),
+                custom_headers={
+                    key: value
+                    for key, value in page_headers.items()
+                    if key.lower() != "user-agent" or requested_agent is not None
+                },
+            )
+            if page_dependencies is not None
+            else None,
+            browser_http_fallback=browser_http_fallback if page_dependencies is None else None,
         )
 
     async def acquire(entry: FrontierEntry) -> WorkHandle[PageData]:
@@ -662,7 +680,7 @@ async def execute_crawl(
         # Exception tracebacks can outlive this owner. Physical handles and the
         # engine's drain retainer, not completed coroutine frames, own live state.
         private.clear()
-        transform = browser_http_fallback = None
+        transform = browser_http_fallback = page_dependencies = None
         stored = None
         requested_agent = None
         config = headers = header_copy = credentials = options = cookies = hooks = policy = acquire = fetch_document = (

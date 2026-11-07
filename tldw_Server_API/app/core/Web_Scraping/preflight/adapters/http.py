@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.probes import (
     ProbeTimeout,
     ProbeUnavailable,
 )
-from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentControls, ParentStop
 from tldw_Server_API.app.core.Web_Scraping.runtime.policy import (
     ProbeEgressDecision,
     ProbeEgressGuard,
@@ -205,11 +205,13 @@ async def _snapshot_response(
     )
 
 
-def _redirect_location(response: ProbeHttpResponse) -> str | None:
+def _redirect_location(response: ProbeHttpResponse, parent: ParentControls | None = None) -> str | None:
     if response.status not in _REDIRECT_STATUS_CODES:
         return None
     for name, value in response.headers.items():
         if name.lower() == "location":
+            if parent is not None:
+                parent.check_url(value)
             if not value or not value.strip():
                 raise ProbeError("invalid_redirect", "Redirect target is invalid.")
             if _contains_invalid_raw_url_codepoint(value):
@@ -394,7 +396,9 @@ def _canonical_redirect_key(url: str) -> str:
     return urlunsplit((scheme, authority, path or "/", query, ""))
 
 
-def _resolve_redirect(current_url: str, location: str) -> str:
+def _resolve_redirect(current_url: str, location: str, parent: ParentControls | None = None) -> str:
+    if parent is not None:
+        parent.check_url(location)
     if "\\" in location or _contains_invalid_raw_url_codepoint(location):
         raise ProbeError("invalid_redirect", "Redirect target is invalid.")
     try:
@@ -415,7 +419,7 @@ def _resolve_redirect(current_url: str, location: str) -> str:
     ):
         raise ProbeError("invalid_redirect", "Redirect target is invalid.")
     try:
-        resolved = urljoin(current_url, location)
+        resolved = parent.resolve_url(current_url, location) if parent is not None else urljoin(current_url, location)
         parsed = urlsplit(resolved)
         resolved = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
     except (TypeError, UnicodeError, ValueError):
@@ -690,6 +694,8 @@ class GuardedHttpProbe:
         try:
             raw = await self._transport_for(request).send(request)
             try:
+                if self._controls.parent is not None:
+                    self._controls.parent.check_url(str(getattr(raw, "url", None) or request.url))
                 return await _snapshot_response(raw, fallback_url=request.url)
             finally:
                 await _close_response(raw)
@@ -714,6 +720,8 @@ class GuardedHttpProbe:
         visited: set[str] = set()
 
         for hop in range(http_client.DEFAULT_MAX_REDIRECTS + 1):
+            if self._controls.parent is not None:
+                self._controls.parent.check_url(current_url)
             current_key = _canonical_redirect_key(current_url)
             if current_key in visited:
                 raise ProbeError("redirect_loop", "Redirect loop detected.")
@@ -742,7 +750,7 @@ class GuardedHttpProbe:
             )
             if not request.allow_redirects:
                 return response
-            location = _redirect_location(response)
+            location = _redirect_location(response, self._controls.parent)
             if location is None:
                 return response
             if hop == http_client.DEFAULT_MAX_REDIRECTS:
@@ -750,7 +758,11 @@ class GuardedHttpProbe:
                     "too_many_redirects",
                     "Redirect limit exceeded.",
                 )
-            next_url = _resolve_redirect(current_url, location)
+            if self._controls.parent is not None:
+                next_url = _resolve_redirect(current_url, location, self._controls.parent)
+                self._controls.parent.check_url(next_url)
+            else:
+                next_url = _resolve_redirect(current_url, location)
             current_headers, current_cookies = _credentials_for_hop(
                 current_headers,
                 current_cookies,

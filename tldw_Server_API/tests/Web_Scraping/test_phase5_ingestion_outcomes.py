@@ -142,6 +142,7 @@ async def test_sitemap_pending_cancellation_cannot_launch_a_summary(monkeypatch)
     with pytest.raises(asyncio.CancelledError):
         await task
     assert calls == []
+    assert task.cancelled()
 
 
 async def test_endpoint_reads_aggregate_before_normalizing_articles(monkeypatch):

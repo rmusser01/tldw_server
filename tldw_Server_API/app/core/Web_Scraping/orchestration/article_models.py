@@ -11,7 +11,8 @@ from urllib.parse import urlsplit
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers
 
-DEFAULT_MAX_ARTICLE_BYTES = 16_777_216
+from ..runtime.browser_document import DEFAULT_MAX_ARTICLE_BYTES as DEFAULT_MAX_ARTICLE_BYTES
+
 DEFAULT_MAX_BROWSER_TRANSFER_BYTES = 67_108_864
 MAX_CONFIGURED_RESPONSE_BYTES = 1_073_741_824
 DEFAULT_BROWSER_RETRIES = 3

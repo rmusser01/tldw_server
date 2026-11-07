@@ -211,7 +211,9 @@ class CrawlContext:
             self._handles = {key: item for key, item in self._handles.items() if not item.drained.done()}
             return tuple(self._handles.values())
 
-    def restore_budget(self, snapshot: BudgetSnapshot, *, accounting_complete: bool) -> None:
+    def restore_budget(
+        self, snapshot: BudgetSnapshot, *, accounting_complete: bool, stop_reason: str | None = None
+    ) -> None:
         """Restore known usage once, excluding paused checkpoint wall time."""
         counts = {name: getattr(snapshot, name) for name in COUNTERS}
         if any(
@@ -233,6 +235,9 @@ class CrawlContext:
             self._counts = counts
             self._deadline = self._clock() + remaining
             self._accounting_complete = accounting_complete and snapshot.accounting_complete
+            if stop_reason in {"budget_exhausted", "deadline_exhausted"}:
+                self._stop_reason = stop_reason
+                self._notify_stop_locked()
 
     def snapshot(self) -> BudgetSnapshot:
         """Return an immutable known-accounting snapshot without suppressing cleanup."""
