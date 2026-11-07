@@ -46,11 +46,9 @@ class RecoveryScenario:
         return enqueue(self.owner_manager, **kwargs)
 
     def acquire(self):
-        job = self.manager.acquire_next_job(
+        return self.manager.acquire_next_job(
             domain="claims", queue="default", worker_id="cluster-tests", lease_seconds=60
         )
-        assert job is not None
-        return job
 
     def inventory(self):
         return {
@@ -212,6 +210,11 @@ async def test_late_physical_handler_is_fenced_after_new_generation(
     initial = output(s.db)
     old = s.admit(config={"CLAIMS_JOBS_MAX_RETRIES_CLUSTER_REBUILD": 0}).job
     acquired = s.acquire()
+    assert (acquired["uuid"], acquired["status"], acquired["worker_id"]) == (
+        old["uuid"], "processing", "cluster-tests"
+    )
+    assert acquired["lease_id"] == s.manager.get_job(old["id"])["lease_id"]
+    assert acquired["lease_id"]
     entered, release = threading.Event(), threading.Event()
     publish = MediaDatabase.publish_claim_cluster_rebuild
 
@@ -412,23 +415,19 @@ def test_spawned_admission_race_is_queue_independent(recovery_scenario, differen
         results.close()
 
 
-async def test_missing_owner_db_can_be_explicitly_reactivated_after_reappearance(tmp_path, monkeypatch):
-    JobManager.set_acquire_gate(False)
-    monkeypatch.delenv("JOBS_DB_URL", raising=False)
-    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "observer.db"))
-    owner_dir = tmp_path / "42"
+@pytest.mark.parametrize("recovery_storage", ["sqlite"], indirect=True)
+async def test_missing_owner_db_can_be_explicitly_reactivated_after_reappearance(recovery_storage, tmp_path, monkeypatch):
+    manager = recovery_storage.manager
+    owner_dir = tmp_path / "43"
     monkeypatch.setattr(handlers.DatabasePaths, "resolve_user_base_directory", lambda owner: owner_dir)
-    monkeypatch.setattr(handlers.media_db_runtime_defaults, "postgres_content_mode", False)
-    manager = JobManager(tmp_path / "jobs.db")
-    monkeypatch.setattr(handlers, "jobs_manager_from_env", lambda: manager)
-    job = enqueue(manager).job
+    job = enqueue(manager, owner="43").job
     await run_worker(manager)
     assert manager.get_job(job["id"])["error_code"] == "claims_cluster_owner_database_missing"
     assert not owner_dir.exists()
     # Provisioning is an explicit external owner action, never worker maintenance.
-    db = MediaDatabase(db_path=owner_dir / "Media_DB_v2.db", client_id="42")
+    db = MediaDatabase(db_path=owner_dir / "Media_DB_v2.db", client_id="43")
     try:
-        seed(db)
+        seed(db, owner=43)
         assert db.execute_query("SELECT * FROM claims_cluster_publication_receipts").fetchall() == []
         assert manager.retry_now_jobs(job_id=job["id"]) == 1
         await run_worker(manager)

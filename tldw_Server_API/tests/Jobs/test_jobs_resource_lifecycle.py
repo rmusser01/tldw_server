@@ -39,9 +39,7 @@ class ResourceScenario:
         return self.manager.admit_resource_job(make_command(), request=make_request(key=key)).job
 
     def acquire(self):
-        job = self.manager.acquire_next_job(domain="claims", queue="default", worker_id="worker", lease_seconds=300)
-        assert job is not None
-        return job
+        return self.manager.acquire_next_job(domain="claims", queue="default", worker_id="worker", lease_seconds=300)
 
     def attempt(self, job):
         return ResourceAttempt(
@@ -73,8 +71,13 @@ def resource_scenario(manager):
 
 def test_attempt_matches_exact_live_authority(resource_scenario):
     s = resource_scenario
-    s.admit()
+    admitted = s.admit()
     job = s.acquire()
+    assert (job["uuid"], job["status"], job["worker_id"], job["resource_generation"]) == (
+        admitted["uuid"], "processing", "worker", 1
+    )
+    assert s.manager.get_job(job["id"])["lease_id"] == job["lease_id"]
+    assert job["lease_id"]
     attempt = s.attempt(job)
     assert s.manager.validate_resource_attempt(attempt)
     for changes in (

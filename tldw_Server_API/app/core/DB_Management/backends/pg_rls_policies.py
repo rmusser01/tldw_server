@@ -641,6 +641,23 @@ def build_chacha_rls_sql() -> list[str]:
             $study_rls$;
         """)
 
+    # Media publication metadata remains owner-only, even for app admins.
+    # Guarded because the shared installer can precede Media schema v27.
+    for table in ("claims_cluster_publication_heads", "claims_cluster_publication_receipts"):
+        add(f"""
+            DO $claims_cluster_publication_rls$
+            BEGIN
+              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
+              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
+              DROP POLICY IF EXISTS {table}_owner ON {table};
+              CREATE POLICY {table}_owner ON {table} FOR ALL
+                USING (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''))
+                WITH CHECK (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''));
+            END
+            $claims_cluster_publication_rls$;
+        """)
+
     # Notes
     add("ALTER TABLE IF EXISTS notes ENABLE ROW LEVEL SECURITY;")
     add("ALTER TABLE IF EXISTS notes FORCE ROW LEVEL SECURITY;")

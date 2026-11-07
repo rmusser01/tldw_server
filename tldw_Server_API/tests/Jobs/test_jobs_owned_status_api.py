@@ -288,8 +288,7 @@ def test_owned_status_establishes_and_restores_jobs_rls_context(jobs_pg_dsn, tmp
     from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg, ensure_jobs_tables_pg
     from tldw_Server_API.tests.Jobs.test_jobs_rls_postgres import _dsn_or_skip
 
-    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "observer.db"))
-    admin = JobManager(backend="postgres", db_url=jobs_pg_dsn)
+    admin = JobManager(tmp_path / "observer.db", backend="postgres", db_url=jobs_pg_dsn)
     own = admit(admin)
     archive(admin, own)
     active = admit(admin, "2")

@@ -10709,6 +10709,37 @@ class JobManager:
         return deleted
 
     # Maintenance
+    @contextlib.contextmanager
+    def _prune_transaction(self, conn: Any, *, dry_run: bool, slides_archive_fence: bool) -> Iterator[None]:
+        """Keep the backend prune fence until unsafe-archive poison commits."""
+        with conn:
+            if self.backend == "postgres" and slides_archive_fence:
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(%s)",
+                        (self._pg_advisory_key(*_SLIDES_GENERATION_CORRELATION_LOCK_PARTS),),
+                    )
+            if not dry_run:
+                if self.backend != "postgres":
+                    conn.execute("BEGIN IMMEDIATE")
+                conn.execute("SAVEPOINT jobs_prune")
+            try:
+                yield
+            except SlidesGenerationJobsUnavailableError:
+                if not dry_run:
+                    # Revert prune/guard writes, retaining the earlier backend fence.
+                    conn.execute("ROLLBACK TO SAVEPOINT jobs_prune")
+                    conn.execute("RELEASE SAVEPOINT jobs_prune")
+                    self._record_slides_generation_diagnostic(
+                        conn,
+                        code="ambiguous_generation_legacy_row",
+                        count=1,
+                    )
+                raise
+            else:
+                if not dry_run:
+                    conn.execute("RELEASE SAVEPOINT jobs_prune")
+
     def prune_jobs(
         self,
         *,
@@ -10750,18 +10781,14 @@ class JobManager:
             for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS)
         )
         conn = self._connect()
-        slides_diagnostic_persisted = False
         _test_mode = _is_test_mode()
         deleted = 0
         try:
             if self.backend == "postgres":
-                with conn:  # noqa: SIM117
+                with self._prune_transaction(  # noqa: SIM117
+                    conn, dry_run=dry_run, slides_archive_fence=slides_archive_fence
+                ):
                     with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
-                        if slides_archive_fence:
-                            cur.execute(
-                                "SELECT pg_advisory_xact_lock(%s)",
-                                (self._pg_advisory_key(*_SLIDES_GENERATION_CORRELATION_LOCK_PARTS),),
-                            )
                         where_parts: list[str] = []
                         params: list[Any] = []
                         placeholders = ",".join(["%s"] * len(statuses))
@@ -10855,9 +10882,10 @@ class JobManager:
                                 test_mode=_test_mode,
                             )
             else:
-                with conn, contextlib.ExitStack() as lifecycle:
-                    if not dry_run:
-                        conn.execute("BEGIN IMMEDIATE")
+                with (
+                    self._prune_transaction(conn, dry_run=dry_run, slides_archive_fence=slides_archive_fence),
+                    contextlib.ExitStack() as lifecycle,
+                ):
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(
@@ -11279,16 +11307,6 @@ class JobManager:
                 )
             return int(deleted)
 
-        except SlidesGenerationJobsUnavailableError:
-            if not slides_diagnostic_persisted:
-                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                    with contextlib.closing(self._connect()) as diagnostic_conn:
-                        self._record_slides_generation_diagnostic(
-                            diagnostic_conn,
-                            code="ambiguous_generation_legacy_row",
-                            count=1,
-                        )
-            raise
         finally:
             conn.close()
 

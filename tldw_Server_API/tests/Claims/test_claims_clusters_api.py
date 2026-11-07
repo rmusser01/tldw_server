@@ -151,12 +151,11 @@ def test_claims_clusters_endpoints():
 
 
 def test_default_cluster_rebuild_preserves_real_legacy_result(monkeypatch):
-    from types import SimpleNamespace
-
     from fastapi import FastAPI
 
     from tldw_Server_API.app.api.v1.API_Deps import DB_Deps
     from tldw_Server_API.app.api.v1.endpoints import claims
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
     from tldw_Server_API.app.core.Claims_Extraction import claims_service
 
     monkeypatch.delenv("CLAIMS_JOBS_ENABLED", raising=False)
@@ -167,9 +166,8 @@ def test_default_cluster_rebuild_preserves_real_legacy_result(monkeypatch):
     monkeypatch.setattr(DB_Deps, "_resolve_media_db_for_user", lambda user: db)
     app = FastAPI()
     app.include_router(claims.router, prefix="/api/v1")
-    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
-    app.dependency_overrides[get_auth_principal] = lambda: AuthPrincipal(
-        kind="user", user_id=1, roles=[], permissions=["claims.admin"]
+    app.dependency_overrides[get_request_user] = lambda: User(
+        id=1, username="cluster-admin", roles=["user"], permissions=["claims.admin"]
     )
     try:
         with TestClient(app) as client:

@@ -1883,8 +1883,13 @@ def test_db_management_partitions_cover_each_file_once() -> None:
     files = {path.as_posix() for path in root.glob("test_[a-z]*.py")}
     patterns = {
         "db-management-a-c": (
-            "test_[a-b]*.py", "test_character_*.py", "test_chat_*.py",
-            "test_claims_*.py", "test_con*.py", "test_core_*.py",
+            "test_[a-b]*.py",
+            "test_character_*.py",
+            "test_chat_*.py",
+            "test_claims_*.py",
+            "test_claim_cluster_rebuild_*.py",
+            "test_con*.py",
+            "test_core_*.py",
         ),
         "db-management-d-l": ("test_[d-l]*.py",),
         "db-management-m": ("test_m*.py",),

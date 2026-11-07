@@ -932,6 +932,7 @@ jobs:
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_claim_cluster_rebuild_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-management-d-l
@@ -1501,6 +1502,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
               tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/property/test_claim_cluster_publication_order.py
+              tldw_Server_API/tests/Claims/property/test_claims_cluster_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
@@ -2625,6 +2628,7 @@ jobs:
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_claim_cluster_rebuild_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-management-d-l
@@ -3197,6 +3201,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
               tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/property/test_claim_cluster_publication_order.py
+              tldw_Server_API/tests/Claims/property/test_claims_cluster_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
@@ -4157,6 +4163,7 @@ jobs:
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_claim_cluster_rebuild_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-management-d-l
@@ -4729,6 +4736,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
               tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/property/test_claim_cluster_publication_order.py
+              tldw_Server_API/tests/Claims/property/test_claims_cluster_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
@@ -5599,6 +5608,7 @@ jobs:
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_claim_cluster_rebuild_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-management-d-l
@@ -6171,6 +6181,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
               tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/property/test_claim_cluster_publication_order.py
+              tldw_Server_API/tests/Claims/property/test_claims_cluster_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py
@@ -7032,6 +7044,7 @@ jobs:
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_claim_cluster_rebuild_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-management-d-l
@@ -7604,6 +7617,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_alerts_*.py
               tldw_Server_API/tests/Claims/test_claims_alignment.py
               tldw_Server_API/tests/Claims/property/test_claims_analytics_export_state_properties.py
+              tldw_Server_API/tests/Claims/property/test_claim_cluster_publication_order.py
+              tldw_Server_API/tests/Claims/property/test_claims_cluster_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports.py
               tldw_Server_API/tests/Claims/test_claims_analytics_exports_cleanup.py
               tldw_Server_API/tests/Claims/test_claims_api_strict_parse_mode.py

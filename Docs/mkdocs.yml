@@ -166,6 +166,7 @@ nav:
           - ChaChaNotes DB: Code_Documentation/Databases/ChaChaNotes_DB.md
           - Jobs Module: Code_Documentation/Jobs_Module.md
           - Jobs Manager: Code_Documentation/Jobs_Manager.md
+          - Claims Cluster Rebuild Jobs: Operations/Claims_Cluster_Rebuild_Jobs.md
       - Ingestion and Audio Internals:
           - Ingestion Media Processing: Code_Documentation/Ingestion_Media_Processing.md
           - Audio Pipeline: Code_Documentation/Ingestion_Pipeline_Audio.md

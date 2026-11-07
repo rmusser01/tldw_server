@@ -504,9 +504,23 @@ class ResourceAdmissionCases:
             return original(*args, **kwargs)
 
         monkeypatch.setattr(manager, "_prepare_job_admission", prepare)
-        manager.admit_resource_job(make_command(), request=make_request())
-        manager.admit_resource_job(make_command(), request=make_request())
-        manager.admit_resource_job(make_command(), request=make_request(key=None))
+        created = manager.admit_resource_job(make_command(), request=make_request())
+        assert created.kind == "created"
+        stored = manager.get_job(created.job["id"])
+        assert stored["payload"] == {
+            "version": 1,
+            "owner_user_id": "1",
+            "method": "exact",
+            "min_size": 2,
+            "similarity_threshold": None,
+            "algorithm_version": 1,
+        }
+        before = snapshot(manager)
+        replay = manager.admit_resource_job(make_command(), request=make_request())
+        reuse = manager.admit_resource_job(make_command(), request=make_request(key=None))
+        assert (replay.kind, reuse.kind) == ("request_replayed", "active_reused")
+        assert replay.job["uuid"] == reuse.job["uuid"] == stored["uuid"]
+        assert snapshot(manager) == before
         assert calls == [1]
 
     @pytest.mark.parametrize("job_type", [TYPE, TYPE + ".v1", TYPE + ".v2"])

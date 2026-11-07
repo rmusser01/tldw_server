@@ -681,7 +681,6 @@ async def test_cancelled_physical_thread_cannot_overwrite_successor(
     notifications = []
     publish = MediaDatabase.publish_claim_cluster_rebuild
     calculate = handlers.calculate_claim_cluster_rebuild
-    rebuild = handlers._rebuild_claim_clusters
 
     def publish_barrier(self, **kwargs):
         if kwargs["identity"].job_uuid == old["uuid"] and pause_after_authority:
@@ -696,9 +695,9 @@ async def test_cancelled_physical_thread_cannot_overwrite_successor(
             assert release.wait(10)
         return result
 
-    def record_old(job):
+    async def record_old(job):
         try:
-            result = rebuild(job)
+            result = await handlers.process_claims_job(job)
             if job["uuid"] == old["uuid"]:
                 old_results.append(result)
             return result
@@ -710,13 +709,15 @@ async def test_cancelled_physical_thread_cannot_overwrite_successor(
     def absent(**kwargs):
         yield None
 
-    monkeypatch.setattr(MediaDatabase, "publish_claim_cluster_rebuild", publish_barrier)
-    monkeypatch.setattr(handlers, "calculate_claim_cluster_rebuild", calculate_barrier)
-    monkeypatch.setattr(handlers, "_rebuild_claim_clusters", record_old)
+    if pause_after_authority:
+        target, method, barrier = MediaDatabase, "publish_claim_cluster_rebuild", publish_barrier
+    else:
+        target, method, barrier = handlers, "calculate_claim_cluster_rebuild", calculate_barrier
+    monkeypatch.setattr(target, method, barrier)
     monkeypatch.setattr(handlers, "open_claim_cluster_vector_reader", absent)
     monkeypatch.setattr(handlers, "evaluate_published_cluster_watchlists", lambda *a, **k: notifications.append(k))
     sdk = WorkerSDK(manager, WorkerConfig(domain="claims", queue="default", worker_id="old-physical", lease_seconds=60))
-    old_task = asyncio.create_task(sdk.run(handler=handlers.process_claims_job, job_types=("claims_rebuild_clusters",)))
+    old_task = asyncio.create_task(sdk.run(handler=record_old, job_types=("claims_rebuild_clusters",)))
     try:
         assert await asyncio.to_thread(entered.wait, 5)
         assert manager.cancel_job(old["id"])
@@ -730,6 +731,8 @@ async def test_cancelled_physical_thread_cannot_overwrite_successor(
         assert await asyncio.to_thread(finished.wait, 5)
         await asyncio.wait_for(old_task, 10)
         assert output(db) == before
+        receipts = db.execute_query("SELECT job_uuid FROM claims_cluster_publication_receipts").fetchall()
+        assert [row["job_uuid"] for row in receipts] == [successor["uuid"]]
         assert notifications == [{"owner_user_id": "42"}]
         assert manager.get_job(old["id"])["status"] == "cancelled"
         if pause_after_authority:
