@@ -1,7 +1,7 @@
 ---
 id: TASK-15466
 title: Resolve PR3434 review feedback and Audit isolation failure
-status: In Progress
+status: Done
 labels:
 - claims
 - jobs
@@ -21,8 +21,8 @@ Address all validated comments and independent requested code review findings on
 <!-- AC:BEGIN -->
 - [x] #1 All actionable PR comments and independent review findings have validated dispositions and addressed inline threads are resolved.
 - [x] #2 Audit order-sensitive failure has a deterministic red/green regression and minimal verified correction without weakening storage safety.
-- [ ] #3 Fresh scoped, root-attempt, lint, Bandit and applicable hook evidence plus limitations are recorded on the published exact head.
-- [ ] #4 User summary waiver recorded accurately, Draft made ready and merge-commit auto-merge enabled only after fixes and independent review, with required CI retained.
+- [x] #3 Fresh scoped, root-attempt, lint, Bandit and applicable hook evidence plus limitations are recorded on the published exact head.
+- [x] #4 User summary waiver recorded accurately, Draft made ready and merge-commit auto-merge enabled only after fixes and independent review, with required CI retained.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -41,19 +41,22 @@ Independent correction follow-up approved exact6filedelta, no remaining/new find
 Complete Claims+Jobs run exited1 after1534.54s:5667passed3legacySkips1failure2setupErrors35623warnings. All P1/P2/Audit review regressions passed. Failure ingestion cancellation test configured collection-time config.settings while ingestion_mod._settings used a different proxy, so asserted0.01butobserved8.0; same test-input isolation family. Added deterministic current/rebound variant RED1failed1passed0skips to prove, then bind three input overrides to actual ingestion_mod._settings; no production ingestion deadline or shutdown behavior changes. Two PG setup ConnectionTimeout errors were before test bodies in official ensure_job_counters_pg connection creation, both rerun untouched with original timeout test passed together3passed22warnings2.17s. Own fixture server diagnostics show normal per-test DB teardown/checkpoints and no observed OOM/too-many-connections evidence; root cause of transient connection delays not fully established, do not claim code defect or fullwidegreen. Complete Claims+entire implicated PGslides module requalification now running; retain first full-run outcomes by name. Auto-merge remains off; new one-file test-only delta needs scoped independent review before publication/arming.
 Final outcome closure run exited0: completeClaims+entireimplicatedPGslidesmodule1636passed1legacyspaCySkip7318warnings198.99s. Bothnewingestioncurrent/reboundvariants and bothoriginalPGsetup-errornodes explicitly present/pass (plusallmodulevariants), noPGavailabilityskip. No production source differs from e11bd9bfc7; only this one test input binding correction follows the wide run. Preserve originalwide5667pass1failure2errors3skips as historicalresult, not a post-fix combined-suite green claim. Currentconfiguredfullstatic103Pythoncompilepass/Ruff113vs116devzero new; productionBandit57files1identicalinheritedB6080errors. AdditionalingestiontestBandit6current/6baselineB101expectedpytestassertions0new/errors0, no assertions removed/ignored. Corrects earlier shorthand: Admin backup-test Bandit was0; otherpytestassertions are not production security findings. ScopednewtestRuff0/formatterclean/syntaxpass. Independent one-file followup pending, fullTask remainsInProgress and autooff.
 Independent final test-only review clean, report /tmp/claims-pr3434-ingestion-followup-review.md; correctlookupsite, strict0.01/cancel/nonblockingshutdownassertions unchanged,8normal/exception/current/rebound restorationprobespassed. All6setasides explicitly dispositioned: priorwhole/P1P2coveredalready; PGconnectioncausalitynotproven/no prodretry; completedclosure1636pass1legacy skiprecordedseparately; forciblystoppingrealproviderthreadsoutsideunchangedmockedcontract; runtimehotreloadnotnewguarantee; mergeauth/CIparentownedwithuserwaiveronlysummary. FinalfullPRhooks129pathsallapplicablepass; no source changes after exactonefilediff review. Nextnormalcommitpublishesonlytestbinding+tracking, no production change frome11bd9bfc7. No actionableGitHubinline/reviewthreads asoflastcompletepagination; Qodobillingnoticeinformational, independentreplacementpostedissuecomment6712371446. Auto remains off until exactnewpublishedhead/feedback/gatesreadback.
+Gated merge-commit auto-merge was actually enabled and read back at2026-11-07T20:31:38Z on63401c95c0dead3bc4001bf923df15140c934fb2. GitHubreportedBEHIND: devadvancedto cb70f0c5d134ac585c70fc30b5a99bf0ced98562 viaPR3400 frontend/docs/task-onlychanges. Disarmedbeforeanybranchupdate, pinnedfetchedremotehead63401c95c0dead3bc4001bf923df15140c934fb2 for explicitlease, retainedrecoveryref codex/claims-pr3434-before-dev-update-20261107. Rebased46commitswithoutconflicts toebd29dd51843e2f20867cb819e40ec2572b7c18c; all46patch-equivalent. Entire tldw_Server_API treehash identical before/after c9c94e7a35d0ccf0924d452e1533b1e5515cecc9; rootAGENTS/.agents/pyproject/conftestunchanged, no newbackendinstruction or code contract. Latestdevonly12frontend/docs/other-taskfiles changed; noneofours. Reopenedpublicationqualification: freshClaims+PGslidescohort and Audit91 cohort plus fullstaticrunning beforepublish/re-arm. No CIcancel/adminmerge/settingschanges/directdevpush/othercheckout edits; autooff untilnewpublishedexactheadvalidated. Currenteffective rulesetsenforce8contexts including E2E Critical (Tier1+Journeys), strictup-to-date, mergeonly; classicprotection404isnotabsenceofrules.
+Latest-dev requalification complete on cb70f0c5d134ac585c70fc30b5a99bf0ced98562: fresh completeClaims+PGslides1636passed1legacyspaCySkip7314warnings196.50s; freshcombinedAudit/backup/Config91passed0skips282warnings11.37s. Alloriginalexceptionalnodes and current/reboundfixtures pass; noPGavailabilityskip. Freshcompile103pass, configuredRuff113vs116devzero new, Bandit57production1identicalinheritedB608zero errors. All46commits patch-equivalent; API treec9c94e7a35d0ccf0924d452e1533b1e5515cecc9unchanged. Auto-merge verified MERGE at20:31:38Z on63401c95c0, then explicitly disabled before current-dev rebase; no source/CI gates bypassed. This finalcloseout onlyupdatesTask/removesowncompletedplan; normalhooks and explicitlease publication againstfetchedremote63401c95c0dead3bc4001bf923df15140c934fb2 willprecede exact-head re-arm/readback, whose final evidence is posted on PR3434. Old-headCIhasno failedchecks, queuedrequiredchecksremainmandatory; latestcompletefeedbackpagination0inline/0reviews/0threads, Qodobillingnotice and CodeRabbitdev-base-skip notice are informational, notcodefindings. No globalbot/CI/repositorypolicyconfiguration modified.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Resolved PR3434 validated independent P1/P2 findings: session-exclusive native Chroma ownership through teardown/error paths and global unique embedding-ID batching with last-source mapping/correct skipped counts. Fixed root Audit and adjacent service/path test inputs, plus ingestion timeout harness input binding; no production Audit/deadline semantics weakened. Independent whole-PR review plus exact correction/test-only followups clean; all set-asides explicitly dispositioned. Test-first RED/GREEN preserved. Originalwide run5667pass/1stale-inputfailure/2PGsetupconnectiontimeouts/3legacy skips is not relabeled green; everyexceptionalnode passed isolation and complete affected-module closure. Fresh latest-dev closure1636pass1legacy skip and Audit91pass; native147pass with documentedlegacy1skip15xfail2xpass, E2E/calculation33pass. Compile103pass; configuredRuff113vs116dev/no new; Bandit57productiononeinheritedB608/no errors; no new test-scope findings. Rootrepositoryattempt remains limited by missingpg_dump after954passes, notafull-rootgreenclaim. User explicitly waived human Change summary; no fabricated rationale. Gated MERGE auto-merge enabled/readback once then safelydisarmed for frontend-only devadvance;46commits rebasedwithoutconflict onto cb70f0c5d134ac585c70fc30b5a99bf0ced98562 with byte-identical API tree. Removeonlycompleted Docs/Plans/IMPLEMENTATION_PLAN_pr3434_review_audit_20261107.md, publishwith exactlease and re-armthe final verifiedhead under8effective requiredchecks/strictcurrentbase/mergeonly; actualfinalreadbackrecordedin PRcomments. No CIcancellation/adminmerge/directdevpush/unrelatedmaincheckout changes. PR https://github.com/rmusser01/tldw_server/pull/3434.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
