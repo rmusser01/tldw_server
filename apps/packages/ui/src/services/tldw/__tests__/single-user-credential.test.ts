@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
+vi.mock("@/utils/media-navigation-scope", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/utils/media-navigation-scope")
+  >()
+  return {
+    ...actual,
+    deriveScopedUserId: vi.fn(actual.deriveScopedUserId)
+  }
+})
+
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
   MANUAL_SESSION_KEY,
@@ -878,5 +889,235 @@ describe("terminal refresh invalidation mutation lifetime guard", () => {
     expect(effective).not.toHaveProperty("accessToken")
     expect(effective).not.toHaveProperty("refreshToken")
     expect(await persistent.get("tldwConfig")).toEqual(multiUserConfig)
+  })
+})
+
+/**
+ * Mirrors the optional batched-read capability of the production storage
+ * (chrome.storage.local.get([k1, k2]) via @plasmohq/storage getMany) so the
+ * credential layer can collapse its sequential reads into one round-trip.
+ */
+class BatchedMemoryStorage extends MemoryStorage {
+  getManyCalls: string[][] = []
+  getCalls: string[] = []
+
+  override async get<T>(key: string): Promise<T | undefined> {
+    this.getCalls.push(key)
+    return super.get<T>(key)
+  }
+
+  async getMany<T>(keys: string[]): Promise<Record<string, T | undefined | null>> {
+    this.getManyCalls.push([...keys])
+    const values: Record<string, T | undefined | null> = {}
+    for (const key of keys) values[key] = this.values.get(key) as T | undefined
+    return values
+  }
+}
+
+/** Mirrors the plasmo Storage watch/unwatch surface backed by storage.onChanged. */
+class WatchableMemoryStorage extends BatchedMemoryStorage {
+  private watchers = new Map<string, Set<() => void>>()
+
+  override async set<T>(key: string, value: T): Promise<void> {
+    await super.set(key, value)
+    for (const callback of this.watchers.get(key) ?? []) callback()
+  }
+
+  watch(callbackMap: Record<string, () => void>): boolean {
+    for (const [key, callback] of Object.entries(callbackMap)) {
+      let callbacks = this.watchers.get(key)
+      if (!callbacks) {
+        callbacks = new Set()
+        this.watchers.set(key, callbacks)
+      }
+      callbacks.add(callback)
+    }
+    return true
+  }
+
+  unwatch(callbackMap: Record<string, () => void>): void {
+    for (const [key, callback] of Object.entries(callbackMap)) {
+      this.watchers.get(key)?.delete(callback)
+    }
+  }
+
+  watcherCount(key: string): number {
+    return this.watchers.get(key)?.size ?? 0
+  }
+}
+
+describe("effective-config read batching", () => {
+  const target = {
+    serverUrl: multiUserConfig.serverUrl,
+    authMode: multiUserConfig.authMode,
+    authSource: multiUserConfig.authSource,
+    orgId: multiUserConfig.orgId
+  }
+
+  it("resolves the effective config from one batched persistent read", async () => {
+    const persistent = new BatchedMemoryStorage()
+    const session = new MemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+    await persistent.set(REFRESH_ROTATION_KEY, {
+      version: 1,
+      serverUrl: multiUserConfig.serverUrl,
+      authMode: multiUserConfig.authMode,
+      authSource: multiUserConfig.authSource,
+      orgId: multiUserConfig.orgId,
+      sourceAccessToken: "access-0",
+      sourceRefreshToken: "refresh-0",
+      accessToken: "access-1",
+      refreshToken: "refresh-1"
+    })
+
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toMatchObject({ accessToken: "access-1", refreshToken: "refresh-1" })
+    expect(persistent.getManyCalls).toEqual([["tldwConfig", REFRESH_ROTATION_KEY]])
+    // Only the rotation-dependent invalidation marker may follow the batch.
+    expect(persistent.getCalls).toEqual([
+      refreshSessionInvalidationKey({
+        ...multiUserConfig,
+        accessToken: "access-1",
+        refreshToken: "refresh-1"
+      })
+    ])
+  })
+
+  it("follows the batch with at most one session-area read for session credentials", async () => {
+    const persistent = new BatchedMemoryStorage()
+    class RecordingSessionStorage extends MemoryStorage {
+      getCalls: string[] = []
+
+      override async get<T>(key: string): Promise<T | undefined> {
+        this.getCalls.push(key)
+        return super.get<T>(key)
+      }
+    }
+    const session = new RecordingSessionStorage()
+    const config: TldwConfig = {
+      authMode: "single-user",
+      serverUrl: "https://api.example.test/path",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    }
+    await persistent.set("tldwConfig", config)
+    await session.set(MANUAL_SESSION_KEY, {
+      apiKey: "session-secret",
+      credentialSource: "manual",
+      apiKeyPersistence: "session",
+      apiKeyServerOrigin: "https://api.example.test"
+    })
+
+    await expect(
+      resolveEffectiveTldwConfig({ persistent, session })
+    ).resolves.toEqual({ ...config, apiKey: "session-secret" })
+    expect(persistent.getManyCalls).toEqual([["tldwConfig", REFRESH_ROTATION_KEY]])
+    // Single-user manual session credentials have no invalidation marker, so
+    // nothing in the persistent area follows the batched read.
+    expect(persistent.getCalls).toEqual([])
+    expect(session.getCalls).toEqual([MANUAL_SESSION_KEY])
+  })
+})
+
+describe("event-driven rotation wait", () => {
+  const target = {
+    serverUrl: multiUserConfig.serverUrl,
+    authMode: multiUserConfig.authMode,
+    authSource: multiUserConfig.authSource,
+    orgId: multiUserConfig.orgId
+  }
+  const settle = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
+  it("resolves from the storage-change subscription without polling", async () => {
+    const persistent = new WatchableMemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+    // A poll loop with this interval cannot resolve inside the test timeout,
+    // so only the onChanged subscription can satisfy this expectation.
+    const waiting = waitForNewerCurrentAccessToken(
+      persistent,
+      target,
+      "access-0",
+      { timeoutMs: 8_000, pollIntervalMs: 60_000 }
+    )
+    await settle()
+    await storeRefreshRotationIfCurrent(
+      persistent,
+      target,
+      "refresh-0",
+      { accessToken: "access-1", refreshToken: "refresh-1" }
+    )
+
+    await expect(waiting).resolves.toBe(true)
+    expect(persistent.watcherCount("tldwConfig")).toBe(0)
+    expect(persistent.watcherCount(REFRESH_ROTATION_KEY)).toBe(0)
+    expect(persistent.getManyCalls.length).toBeGreaterThanOrEqual(1)
+    expect(persistent.getManyCalls[0]).toEqual(["tldwConfig", REFRESH_ROTATION_KEY])
+  })
+
+  it("keeps waiting through change events that do not yield a newer token", async () => {
+    const persistent = new WatchableMemoryStorage()
+    await persistent.set("tldwConfig", multiUserConfig)
+
+    const waiting = waitForNewerCurrentAccessToken(
+      persistent,
+      target,
+      "access-0",
+      { timeoutMs: 120 }
+    )
+    await settle()
+    await persistent.set(REFRESH_ROTATION_KEY, {
+      version: 1,
+      serverUrl: "https://other.example.test",
+      authMode: multiUserConfig.authMode,
+      authSource: multiUserConfig.authSource,
+      orgId: multiUserConfig.orgId,
+      sourceAccessToken: "access-0",
+      sourceRefreshToken: "refresh-0",
+      accessToken: "other-access",
+      refreshToken: "other-refresh"
+    })
+
+    await expect(waiting).resolves.toBe(false)
+    expect(persistent.watcherCount("tldwConfig")).toBe(0)
+    expect(persistent.watcherCount(REFRESH_ROTATION_KEY)).toBe(0)
+  })
+
+  it("decodes the captured JWT once per wait across repeated re-checks", async () => {
+    vi.mocked(deriveScopedUserId).mockClear()
+    const persistent = new WatchableMemoryStorage()
+    const capturedAccess = jwtForUser(42)
+    await persistent.set("tldwConfig", {
+      ...multiUserConfig,
+      accessToken: jwtForUser(99),
+      refreshToken: "refresh-99"
+    })
+
+    const waiting = waitForNewerCurrentAccessToken(
+      persistent,
+      target,
+      capturedAccess,
+      { timeoutMs: 150 }
+    )
+    await settle()
+    for (let i = 0; i < 3; i += 1) {
+      await persistent.set(REFRESH_ROTATION_KEY, {
+        version: 1,
+        serverUrl: `https://other-${i}.example.test`,
+        authMode: multiUserConfig.authMode,
+        authSource: multiUserConfig.authSource,
+        orgId: multiUserConfig.orgId,
+        sourceAccessToken: "access-0",
+        sourceRefreshToken: "refresh-0",
+        accessToken: `other-access-${i}`,
+        refreshToken: `other-refresh-${i}`
+      })
+    }
+
+    await expect(waiting).resolves.toBe(false)
+    const capturedDecodes = vi.mocked(deriveScopedUserId).mock.calls
+      .filter(([input]) => input?.accessToken === capturedAccess).length
+    expect(capturedDecodes).toBe(1)
   })
 })

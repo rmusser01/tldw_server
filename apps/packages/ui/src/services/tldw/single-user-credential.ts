@@ -28,6 +28,19 @@ export interface CredentialStorage {
   remove(key: string): Promise<void>
 }
 
+/**
+ * Optional bulk/notify capabilities the production storage (chrome.storage via
+ * @plasmohq/storage) provides. Consumers that only implement
+ * {@link CredentialStorage} keep working through the sequential fallbacks.
+ */
+type BatchedCredentialStorage = CredentialStorage & {
+  /** One storage round-trip for several keys (chrome.storage.local.get([...])). */
+  getMany?: <T>(keys: string[]) => Promise<Record<string, T | undefined | null>>
+  /** storage.onChanged subscription surface; returns false when unsupported. */
+  watch?: (callbackMap: Record<string, () => void>) => boolean
+  unwatch?: (callbackMap: Record<string, () => void>) => void
+}
+
 export const MANUAL_SESSION_KEY = "tldwManualSessionApiKey"
 export const REFRESH_ROTATION_KEY = "tldwRefreshRotation"
 export const REFRESH_SESSION_INVALIDATION_PREFIX = "tldwInvalidRefreshSession:"
@@ -183,6 +196,40 @@ export const hasInvalidatedRefreshSession = async (
   return Boolean(key && await persistent.get(key) === true)
 }
 
+/**
+ * Read the shared connection config and its rotation overlay. When the store
+ * supports batched reads both keys are fetched in ONE storage round-trip;
+ * otherwise the sequential per-key reads are kept. `swallowReadErrors` keeps
+ * the resolveEffective error semantics (an unreadable key reads as null),
+ * while callers that propagate read failures leave it off.
+ */
+const readPersistentConfigScope = async (
+  persistent: CredentialStorage,
+  swallowReadErrors = false
+): Promise<{ stored: TldwConfig | null; rotation: unknown }> => {
+  const getMany = (persistent as BatchedCredentialStorage).getMany
+  if (typeof getMany === "function") {
+    const values = await getMany
+      .call(persistent, ["tldwConfig", REFRESH_ROTATION_KEY])
+      .catch(() => null)
+    if (values && typeof values === "object") {
+      return {
+        stored: (values["tldwConfig"] as TldwConfig | undefined | null) ?? null,
+        rotation: values[REFRESH_ROTATION_KEY] ?? null
+      }
+    }
+    // A failed batched read falls back to the per-key reads below so one
+    // unreadable key cannot null out the other.
+  }
+  const stored = swallowReadErrors
+    ? await persistent.get<TldwConfig>("tldwConfig").catch(() => null)
+    : await persistent.get<TldwConfig>("tldwConfig")
+  const rotation = swallowReadErrors
+    ? await persistent.get<unknown>(REFRESH_ROTATION_KEY).catch(() => null)
+    : await persistent.get<unknown>(REFRESH_ROTATION_KEY)
+  return { stored: stored ?? null, rotation }
+}
+
 /** An immutable marker cannot overwrite another tab's login or successful rotation. */
 export const invalidateRefreshSessionIfCurrent = async (
   persistent: CredentialStorage,
@@ -220,7 +267,7 @@ export const hasNewerCurrentRefreshRotation = async (
 ): Promise<boolean> => {
   const captured = nonEmptySecret(capturedAccessToken)
   if (!captured) return false
-  const stored = await persistent.get<TldwConfig>("tldwConfig")
+  const { stored, rotation } = await readPersistentConfigScope(persistent)
   if (
     !stored ||
     typeof stored !== "object" ||
@@ -228,11 +275,46 @@ export const hasNewerCurrentRefreshRotation = async (
   ) {
     return false
   }
-  const record = applicableRefreshRotation(
-    stored,
-    await persistent.get<unknown>(REFRESH_ROTATION_KEY)
-  )
+  const record = applicableRefreshRotation(stored, rotation)
   return Boolean(record && record.accessToken !== captured)
+}
+
+/** Decoded principal of a token that carries no recognizable user claim. */
+const UNKNOWN_MULTI_USER_PRINCIPAL = deriveScopedUserId({
+  userId: null,
+  authMode: "multi-user",
+  accessToken: null
+})
+
+const multiUserPrincipalForToken = (accessToken: string): string =>
+  deriveScopedUserId({
+    userId: null,
+    authMode: "multi-user",
+    accessToken
+  })
+
+const hasNewerCurrentAccessTokenForPrincipal = async (
+  persistent: CredentialStorage,
+  checked: ServicePromptTargetLock,
+  captured: string,
+  capturedPrincipal: string
+): Promise<boolean> => {
+  const { stored, rotation } = await readPersistentConfigScope(persistent)
+  if (
+    !stored ||
+    typeof stored !== "object" ||
+    !servicePromptTargetsMatch(stored, checked)
+  ) {
+    return false
+  }
+  const record = applicableRefreshRotation(stored, rotation)
+  // An applicable rotation owns the effective credential. Its unchanged source
+  // JWT is older, even when it identifies the same account as the captured JWT.
+  if (record) return record.accessToken !== captured
+  const current = nonEmptySecret(stored.accessToken)
+  if (!current || current === captured) return false
+  return capturedPrincipal !== UNKNOWN_MULTI_USER_PRINCIPAL &&
+    multiUserPrincipalForToken(current) === capturedPrincipal
 }
 
 export const hasNewerCurrentAccessToken = async (
@@ -242,39 +324,12 @@ export const hasNewerCurrentAccessToken = async (
 ): Promise<boolean> => {
   const captured = nonEmptySecret(capturedAccessToken)
   if (!captured) return false
-  const stored = await persistent.get<TldwConfig>("tldwConfig")
-  if (
-    !stored ||
-    typeof stored !== "object" ||
-    !servicePromptTargetsMatch(stored, checked)
-  ) {
-    return false
-  }
-  const record = applicableRefreshRotation(
-    stored,
-    await persistent.get<unknown>(REFRESH_ROTATION_KEY)
+  return hasNewerCurrentAccessTokenForPrincipal(
+    persistent,
+    checked,
+    captured,
+    multiUserPrincipalForToken(captured)
   )
-  // An applicable rotation owns the effective credential. Its unchanged source
-  // JWT is older, even when it identifies the same account as the captured JWT.
-  if (record) return record.accessToken !== captured
-  const current = nonEmptySecret(stored.accessToken)
-  if (!current || current === captured) return false
-  const unknownPrincipal = deriveScopedUserId({
-    userId: null,
-    authMode: "multi-user",
-    accessToken: null
-  })
-  const capturedPrincipal = deriveScopedUserId({
-    userId: null,
-    authMode: "multi-user",
-    accessToken: captured
-  })
-  return capturedPrincipal !== unknownPrincipal &&
-    deriveScopedUserId({
-      userId: null,
-      authMode: "multi-user",
-      accessToken: current
-    }) === capturedPrincipal
 }
 
 export const waitForNewerCurrentAccessToken = async (
@@ -287,14 +342,66 @@ export const waitForNewerCurrentAccessToken = async (
   }> = {}
 ): Promise<boolean> => {
   const timeoutMs = Math.max(0, options.timeoutMs ?? 1_000)
+  const captured = nonEmptySecret(capturedAccessToken)
+  if (!captured) return false
+  // The captured JWT is decoded once per wait and reused by every re-check.
+  const capturedPrincipal = multiUserPrincipalForToken(captured)
+  const checkOnce = () => hasNewerCurrentAccessTokenForPrincipal(
+    persistent,
+    checked,
+    captured,
+    capturedPrincipal
+  )
+
+  const watchCapable = persistent as BatchedCredentialStorage
+  if (typeof watchCapable.watch === "function") {
+    let signalChange: () => void = () => {}
+    let changed = new Promise<void>((resolve) => { signalChange = resolve })
+    const listenerMap: Record<string, () => void> = {
+      tldwConfig: () => signalChange(),
+      [REFRESH_ROTATION_KEY]: () => signalChange()
+    }
+    let watched = false
+    try {
+      watched = watchCapable.watch(listenerMap) !== false
+    } catch {
+      watched = false
+    }
+    if (watched) {
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+      try {
+        if (await checkOnce()) return true
+        const deadline = Date.now() + timeoutMs
+        while (true) {
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) return await checkOnce()
+          let timedOut = false
+          const timeout = new Promise<void>((resolve) => {
+            timeoutHandle = setTimeout(() => { timedOut = true; resolve() }, remaining)
+          })
+          await Promise.race([changed, timeout])
+          if (timedOut) return await checkOnce()
+          // Arm the next signal before re-checking so a change landing during
+          // the check still wakes the next iteration.
+          changed = new Promise<void>((resolve) => { signalChange = resolve })
+          if (await checkOnce()) return true
+        }
+      } finally {
+        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
+        try {
+          watchCapable.unwatch?.(listenerMap)
+        } catch {
+          // A failed unsubscribe cannot keep the wait alive.
+        }
+      }
+    }
+  }
+
+  // Legacy fallback for stores without a change subscription: poll.
   const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? 25)
   const deadline = Date.now() + timeoutMs
   do {
-    if (await hasNewerCurrentAccessToken(
-      persistent,
-      checked,
-      capturedAccessToken
-    )) {
+    if (await checkOnce()) {
       return true
     }
     if (Date.now() >= deadline) return false
@@ -446,9 +553,13 @@ export const resolveEffectiveTldwConfig = async (
     expectedCookieOrigin?: string | null
   }
 ): Promise<TldwConfig | null> => {
-  const stored = await stores.persistent
-    .get<TldwConfig>("tldwConfig")
-    .catch(() => null)
+  // The config and its rotation overlay come from ONE batched storage read
+  // when the store supports it (chrome.storage.local.get([k1, k2])); the
+  // per-key fallback keeps the original sequential, error-swallowing reads.
+  const { stored, rotation } = await readPersistentConfigScope(
+    stores.persistent,
+    true
+  )
   const cookieSession = cookie?.cookieSession
 
   if (
@@ -473,10 +584,7 @@ export const resolveEffectiveTldwConfig = async (
 
   if (!stored || typeof stored !== "object") return null
 
-  const refreshRotation = await stores.persistent
-    .get<unknown>(REFRESH_ROTATION_KEY)
-    .catch(() => null)
-  const effective = { ...applyRefreshRotation(stored, refreshRotation) }
+  const effective = { ...applyRefreshRotation(stored, rotation) }
   if (await hasInvalidatedRefreshSession(stores.persistent, effective)) {
     delete effective.accessToken
     delete effective.refreshToken
