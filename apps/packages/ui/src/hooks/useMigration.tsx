@@ -29,6 +29,7 @@ interface MigrationResult {
 export const useMigration = () => {
   const message = useAntdMessage()
   const migrationMutation = useMutation<MigrationResult, Error>({
+    networkMode: "always",
     mutationFn: async () => {
       try {
         // Skip migration entirely when chrome.storage is unavailable
@@ -70,7 +71,7 @@ export const useMigration = () => {
           type: "error",
           duration: 4,
           content:
-            "We couldn't refresh your chat history. You can retry from Settings.",
+            "We couldn't refresh your chat history. Reload to try again.",
           className: "max-w-sm"
         })
         return {

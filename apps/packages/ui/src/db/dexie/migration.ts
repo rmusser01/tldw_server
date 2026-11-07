@@ -4,9 +4,16 @@ import {
 } from "@/services/model-settings"
 import { PageAssitDatabase as ChromeDB } from "../index"
 import { PageAssistDatabase as DexieDB } from "./chat"
+import { db } from "./schema"
+import type { HistoryInfo } from "./types"
 import { ModelNickname as DexieDBNick } from "./nickname"
 import { ModelDb as DexieDBM } from "./models"
 import { getAllModelNicknamesMig } from "../nickname"
+
+const hasHistoryOwner = (history?: HistoryInfo) => history && (
+  history.local_owner_key != null || history.server_scope_key != null ||
+  history.server_chat_id != null || history.message_source === "server"
+)
 
 export class DatabaseMigration {
   private chromeDB: ChromeDB
@@ -48,7 +55,9 @@ export class DatabaseMigration {
       try {
         const userId = await this.chromeDB.getUserID()
         if (userId && typeof userId === "string" && userId.trim() !== "") {
-          await this.dexieDB.setUserID(userId)
+          await db.transaction("rw", db.userSettings, async () => {
+            if (!(await this.dexieDB.getUserID())) await this.dexieDB.setUserID(userId)
+          })
           migratedCounts.userSettings = 1
         }
       } catch (error) {
@@ -62,43 +71,36 @@ export class DatabaseMigration {
         const chatHistories = await this.chromeDB.getChatHistories()
         for (const history of chatHistories) {
           try {
-
-            const lastUsedModel = await getLastUsedChatModel(history.id)
-            const lastUsedPrompt = await getLastUsedChatSystemPrompt(history.id)
-
-            await this.dexieDB.addChatHistory({
-              ...history,
-              model_id: lastUsedModel,
-              last_used_prompt: lastUsedPrompt,
+            const model = await getLastUsedChatModel(history.id)
+            const prompt = await getLastUsedChatSystemPrompt(history.id)
+            const messages = await this.chromeDB.getChatHistory(history.id)
+            if (messages.some((message) => message.history_id !== history.id)) {
+              throw new Error("Message belongs to a different history")
+            }
+            await db.transaction("rw", [db.chatHistories, db.messages, db.compareStates], async () => {
+              const existing = await db.chatHistories.get(history.id)
+              const saved = await db.messages.bulkGet(messages.map((message) => message.id))
+              if (saved.some((message) => message && message.history_id !== history.id)) {
+                throw new Error("Message ID belongs to a different history")
+              }
+              const missing = messages.filter((_, index) => !saved[index])
+              if (hasHistoryOwner(existing) && missing.length) {
+                throw new Error("Cannot add legacy messages to a claimed history")
+              }
+              await this.dexieDB.importChatHistoryV2([{
+                history: existing ? undefined : { ...history, model_id: model, last_used_prompt: prompt },
+                messages: missing
+              }])
             })
             migratedCounts.chatHistories++
-
-            // Migrate messages for this history
-            try {
-              const messages = await this.chromeDB.getChatHistory(history.id)
-              for (const message of messages) {
-                try {
-                  await this.dexieDB.addMessage(message)
-                  migratedCounts.messages++
-                } catch (msgError) {
-                  errors.push(
-                    `Failed to migrate message ${message.id}: ${msgError}`
-                  )
-                }
-              }
-
-            } catch (msgHistoryError) {
-              errors.push(
-                `Failed to get messages for history ${history.id}: ${msgHistoryError}`
-              )
-            }
+            migratedCounts.messages += messages.length
           } catch (historyError) {
             errors.push(
               `Failed to migrate chat history ${history.id}: ${historyError}`
             )
           }
         }
-        await this.chromeDB.deleteAllChatHistory()
+        // Keep the legacy copy available after an interrupted or conflicting import.
       } catch (error) {
         errors.push(`Failed to migrate chat histories: ${error}`)
       }
@@ -111,7 +113,10 @@ export class DatabaseMigration {
       try {
         console.log("Saving Nickname")
         const nicknames = await getAllModelNicknamesMig()
-        await this.dexieNick.importDataV2(nicknames)
+        await db.transaction("rw", db.modelNickname, async () => {
+          const saved = await db.modelNickname.bulkGet(nicknames.map((nickname) => nickname.model_id))
+          await this.dexieNick.importDataV2(nicknames.filter((_, index) => !saved[index]))
+        })
       } catch (error) {
         errors.push(`Failed to migrate nick: ${error}`)
       }
@@ -123,7 +128,9 @@ export class DatabaseMigration {
         const prompts = await this.chromeDB.getAllPrompts()
         for (const prompt of prompts) {
           try {
-            await this.dexieDB.migrateLegacyPrompt(prompt)
+            await db.transaction("rw", db.prompts, async () => {
+              if (!(await db.prompts.get(prompt.id))) await this.dexieDB.migrateLegacyPrompt(prompt)
+            })
             migratedCounts.prompts++
           } catch (promptError) {
             errors.push(`Failed to migrate prompt ${prompt.id}: ${promptError}`)
@@ -138,7 +145,9 @@ export class DatabaseMigration {
         const webshares = await this.chromeDB.getAllWebshares()
         for (const webshare of webshares) {
           try {
-            await this.dexieDB.addWebshare(webshare)
+            await db.transaction("rw", db.webshares, async () => {
+              if (!(await this.dexieDB.getWebshare(webshare.id))) await this.dexieDB.addWebshare(webshare)
+            })
             migratedCounts.webshares++
           } catch (webshareError) {
             errors.push(
@@ -183,13 +192,17 @@ export class DatabaseMigration {
       try {
         const sessionFiles = await this.chromeDB.getSessionFilesInfo(sessionId)
         if (sessionFiles) {
-          await this.dexieDB.setRetrievalEnabled(
-            sessionId,
-            sessionFiles.retrievalEnabled
-          )
-          for (const file of sessionFiles.files) {
-            await this.dexieDB.addFileToSession(sessionId, file)
-          }
+          await db.transaction("rw", [db.chatHistories, db.sessionFiles], async () => {
+            if (hasHistoryOwner(await db.chatHistories.get(sessionId))) {
+              const existing = await db.sessionFiles.get(sessionId)
+              const savedIds = new Set(existing?.files.map((file) => file.id))
+              if (!existing || sessionFiles.files.some((file) => !savedIds.has(file.id))) {
+                throw new Error("Cannot add legacy session files to a claimed history")
+              }
+              return
+            }
+            await this.dexieDB.importSessionFilesV2([{ ...sessionFiles, sessionId }])
+          })
           migratedCount++
         }
       } catch (error) {
@@ -332,6 +345,7 @@ export const runMigration = async (): Promise<void> => {
     console.error("Migration completed with errors:")
     console.error("Errors:", result.errors)
     console.log("Partial migration counts:", result.migratedCounts)
+    throw new Error("Local database migration did not finish")
   }
 
   // Verify migration
@@ -350,8 +364,12 @@ export const runMigration = async (): Promise<void> => {
 
 // Helper function to get all session IDs from Chrome storage
 export const getAllSessionIds = async (): Promise<string[]> => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     chrome.storage.local.get(null, (items) => {
+      if (chrome.runtime?.lastError || !items) {
+        reject(new Error(chrome.runtime?.lastError?.message || "Storage unavailable"))
+        return
+      }
       const sessionIds: string[] = []
       for (const key in items) {
         if (key.startsWith("session_files_")) {
@@ -376,6 +394,7 @@ export const runSessionFilesMigration = async (): Promise<void> => {
     } else {
       console.error("Session files migration completed with errors:")
       console.error(result.errors)
+      throw new Error("Session file migration did not finish")
     }
   } else {
     console.log("No session files found to migrate")
