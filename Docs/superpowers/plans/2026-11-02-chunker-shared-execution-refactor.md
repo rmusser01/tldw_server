@@ -10,7 +10,8 @@
 
 **Spec:** [Approved design](../specs/2026-11-02-chunker-shared-execution-refactor-design.md).
 
-**ADR:** [Accepted ADR-086](../../ADR/086-chunker-execution-live-context-boundary.md).
+**ADR:** [Accepted ADR-096](../../ADR/096-chunker-execution-live-context-boundary.md)
+(renumbered from ADR-086 on 2026-11-07; accepted decision unchanged).
 
 **Tracking:** Implementation `TASK-15416`; completed planning `TASK-15415`; approved design `TASK-15414` (renumbered from colliding TASK-15413). Implementation links this exact plan, spec and ADR rather than executing under a completed planning task.
 
@@ -350,7 +351,7 @@ git commit -m "refactor: extract lazy Chunker execution"
 
 **Independent Review:** Nash reviewed all17changed files in immutable `3ab1ce5d3a..14c6086c93`:0Critical,1Important,0Minor. The one finding was additional raw-input retention in the paused outer generator. Independently reproduced with real sanitizer/word strategy: exact pre-extraction generator releases the source in all3modes, while the new weakref test failed all3. Minimal fix creates the lazy inner iterator, drops only the outer input reference, then yield-from. Focused GREEN3passed; final fullChunking988passed/1establishedskip2619warnings44.49s (`/tmp/chunker_execution_review_final_full.txt`),99% subsystem coverage. Final90ratchets193warnings42.73s pass; mypy9newfiles/scopedlint/format/compile and production/testBandit0findings/errors pass. No re-review was dispatched under Native's single fix-pass workflow. Review and its validated remediation are complete; publication remains pending and the broad repository collection failure remains explicit.
 
-**Review Dispositions:** Preserve inherited nested-tuple ExceptionGroup behavior under the separate correction gate; do not add adapters for undocumented rebinding of implementation-only facade imports (no repository consumers found); allow relocated traceback frames/Loguru source positions while preserving promised exception/log behavior. These leave the known grouped-error limitation and require undocumented frame/import-patching consumers to adapt. Accepted ADR-086 still governs; no new architecture decision or inherited behavior correction was introduced.
+**Review Dispositions:** Preserve inherited nested-tuple ExceptionGroup behavior under the separate correction gate; do not add adapters for undocumented rebinding of implementation-only facade imports (no repository consumers found); allow relocated traceback frames/Loguru source positions while preserving promised exception/log behavior. These leave the known grouped-error limitation and require undocumented frame/import-patching consumers to adapt. Accepted ADR-096 still governs; no new architecture decision or inherited behavior correction was introduced.
 
 **Files:** Add `PreparedExecution`/`ExecutionKind` to `execution/models.py`; create `execution/preparation.py` and `execution/strategy.py`; update service calls and execution tests. Root package, existing strategies, LRU/registry/LLM helper bodies and workflow/check baselines are not edit targets. Tracking/plan updates accompany the work.
 
@@ -385,6 +386,46 @@ git commit -m "refactor: share Chunker execution preparation"
 **Required-Gate Caveat (2026-11-02, superseded by the authorized follow-up below):** Bounded independent review confirmed the import/config correction but identified that `ci.yml` full-suite matrix registration does not imply execution by `.github/workflows/backend-required.yml`. At that checkpoint the required job neither ran this file nor depended on those matrices. TASK-13950.85 AC2 was unchecked pending the explicit scope decision. Fresh Chunking on follow-up `46cbc845f0`:988passed/1establishedskip2427warnings55.05s; target module84passed and90localgates green. Those results did not establish required-job ownership.
 
 **Required-Backend Follow-Up (2026-11-03):** The requester explicitly approved adding the module to the existing `backend-required` job. A separate Workspaces API step now invokes the entire file in a fresh pytest process with the existing backend-change condition, isolated plugins and explicit asyncio plugin, without soft failure or partial selection. The contract lives in `test_license_first_workflow_contracts.py`, which that required job already executes. Contract RED1failed14warnings1.32s/GREEN1passed14warnings1.40s; six in-memory mutations prove it detects removal, step/job soft failure, skipping, partial selection and a commented-out path. Running the exact parsed YAML command with its declared environment passes84tests182warnings52.29s (`/tmp/task13950_85_required_exact_step.txt`). Expanded workflow/task-format/quality/function-size checks pass225tests463warnings72.76s; fresh Chunking passes988tests1establishedskip2451warnings68.84s. Ruff, changed-range Black and compileall pass. Bandit has zero new findings/errors; all11existing low-severity findings in the legacy contract file match its exact pre-change baseline, with only pytestB101 globally excluded and no added suppression. Structured YAML comparison proves the new step is the only configuration change. Live dev rules still include `backend-required`; no required context, branch rule, admission/license/change-detection policy or production/test assertion was changed. ADR required: no new record, existing required-job selection only. TASK-13950.85 tracks this authorized scope; actual exact-head CI execution and the human Change summary remain pending, so draft PR3405 is not merge-ready. Bounded independent review/publication evidence will be recorded in the task and PR.
+
+## Draft Rebase Checkpoint (2026-11-07)
+
+The requester approved a one-time exception to rebase this draft before
+integration because its ADR-index conflict prevented substantive PR CI.
+All 13 commits were replayed onto live dev
+`dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c`, preserving old published head
+`0c01563c09b039da96e4199d57faa55a73b65dfd` on local backup branch
+`codex/chunker-execution-pre-rebase-20261107`. Only the ADR index conflicted,
+at two historical document commits; both decisions and the Accepted status
+were preserved. A paginated scan of live dev and all 45 open PRs found 095 the
+highest allocated ADR number. The Chunker record is now ADR-096: only its
+title number changed, with its entire accepted body unchanged and operative
+index/spec/plan links repaired. Historical task notes retain their original
+numbers as provenance; TASK-15416 records the new governing path. No new ADR
+decision or policy change was made.
+
+Range-diff confirms all execution/test/required-job patches replay unchanged.
+The old Workspaces import correction is already on dev, so its patch drops
+out without a source difference. The extracted subsystem, facade and all
+Chunking tests are byte-identical to the pre-rebase head. The only inherited
+Chunking change moves boundary-assistant credential imports to the current
+dev package, and that file is byte-identical to pinned dev.
+
+Fresh local verification: Chunking 988 passed, 1 existing PyThaiNLP skip,
+3444 warnings in 157.93s; exact parsed required-Workspaces step 84 passed,
+268 warnings in 84.65s; expanded contracts/task-format/quality/function-size
+263 passed, 802 warnings in 140.08s. Logs are
+`/tmp/pr3405_rebase_20261107_{chunking,workspaces,contracts}.txt`.
+Ruff, Black (9 files), compileall, task-ID and shard guards pass (872 shards,
+5384 test files, 0 newly uncovered). Production Bandit: 0 findings, 0 errors,
+1737 LOC:
+`/tmp/bandit_pr3405_rebase_20261107_production.json`. Unique ADR IDs, indexed
+file existence, operative links and exact accepted-body identity are checked.
+No full-repository or globally clean mypy claim is made; the prior audit
+still reproduced 14 known legacy-facade errors. Bounded independent reconciliation
+review and explicit force-with-lease publication follow. PR #3405 remains draft
+and unarmed; actual exact-head CI, review feedback and the human Change
+summary are not satisfied by these local results. Never dispatch required
+gates manually or convert/merge the draft as part of this exception.
 
 ## Final Verification Commands
 

@@ -1,4 +1,4 @@
-# ADR-086: Chunker Execution Live-Context Boundary
+# ADR-096: Chunker Execution Live-Context Boundary
 
 **Status:** Accepted
 **Date:** 2026-11-02
