@@ -9,6 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from chromadb.errors import ChromaError
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import ClusterRebuildStorageError
@@ -76,6 +77,114 @@ def test_existing_only_reads_real_vectors(config, seeded):
     with open_reader(config) as read:
         assert read is not None
         assert list(read(("0",))["0"]) == [1.0, 1.0]
+
+
+@pytest.mark.parametrize("failure", [None, "budget", "identity", "sdk"])
+@pytest.mark.parametrize("outer_session", [False, True])
+def test_existing_sdk_destruction_precedes_unlock_with_retained_exception(
+    config, seeded, monkeypatch, failure, outer_session
+):
+    from contextlib import nullcontext
+
+    from tldw_Server_API.app.core.DB_Management.chroma_read_validation import ChromaPreflightLimits
+    from tldw_Server_API.app.core.Embeddings import chroma_storage
+
+    events = []
+    factory = chroma_storage.ExistingClient._factory
+    release = chroma_storage._release_platform_file_lock
+
+    class ObservedBindings:
+        def __init__(self, native):
+            self.native = native
+
+        def __getattr__(self, name):
+            return getattr(self.native, name)
+
+        def __del__(self):
+            self.native = None
+            events.append("sdk_destroyed")
+
+    def open_native(client):
+        return ObservedBindings(factory(client))
+
+    def unlock(fd):
+        events.append("unlock")
+        release(fd)
+
+    limits = ChromaPreflightLimits(returned_components=1 if failure == "budget" else 2_000_000)
+    with ChromaDBManager("1", config, existing_only=True, preflight_limits=limits) as manager:
+        collection = manager.get_existing_collection_strict("claims_for_1")
+        events.clear()
+        monkeypatch.setattr(chroma_storage.ExistingClient, "_factory", open_native)
+        monkeypatch.setattr(chroma_storage, "_release_platform_file_lock", unlock)
+        if failure in ("identity", "sdk"):
+            if failure == "identity":
+                collection.id = "00000000-0000-4000-8000-000000000000"
+            else:
+                collection.name = "missing_collection"
+            monkeypatch.setattr(collection._guard, "validate", lambda _name: collection.id)
+            # Retain the valid materialized snapshot while forcing the real
+            # native identity/missing-collection branch after SDK creation.
+            if failure == "sdk":
+                state = collection._guard._snapshot.collections["claims_for_1"]
+                collection._guard._snapshot.collections[collection.name] = state
+        retained = None
+        try:
+            with manager.storage_access() if outer_session else nullcontext():
+                result = collection.get(ids=["0"], include=["embeddings"])
+        except (ChromaStorageError, ChromaError) as exc:
+            retained = exc
+        assert (retained is not None) == (failure is not None)
+        if failure is None:
+            assert result["ids"] == ["0"]
+        # The captured exception and its complete traceback remain alive here.
+        assert events == ["sdk_destroyed", "unlock"]
+
+
+def test_competing_process_cannot_enter_during_actual_existing_sdk_destruction(config, seeded, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import chroma_storage
+
+    factory = chroma_storage.ExistingClient._factory
+    stopping, finish = threading.Event(), threading.Event()
+    completed = []
+
+    class ObservedBindings:
+        def __init__(self, native):
+            self.native = native
+
+        def __getattr__(self, name):
+            return getattr(self.native, name)
+
+        def __del__(self):
+            stopping.set()
+            completed.append(finish.wait(30))
+            self.native = None
+
+    def open_native(client):
+        return ObservedBindings(factory(client))
+
+    context = multiprocessing.get_context("spawn")
+    outcome = context.Queue()
+    process = context.Process(target=_spawn_lock_only, args=(str(seeded), outcome))
+    with ChromaDBManager("1", config, existing_only=True) as manager:
+        collection = manager.get_existing_collection_strict("claims_for_1")
+        monkeypatch.setattr(chroma_storage.ExistingClient, "_factory", open_native)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(collection.get, ids=["0"], include=["embeddings"])
+            try:
+                assert stopping.wait(10), "actual native SDK teardown did not begin"
+                process.start()
+                process.join(15)
+                assert process.exitcode == 0
+                assert outcome.get(timeout=2) == ("vector_busy", True)
+            finally:
+                finish.set()
+                if process.pid is not None and process.is_alive():
+                    process.terminate()
+                    process.join(5)
+                outcome.close()
+            assert future.result(timeout=10)["ids"] == ["0"]
+    assert completed == [True]
 
 
 def test_absent_owner_does_not_provision(config, tmp_path):

@@ -355,11 +355,14 @@ class ExistingCollection:
                 vectors = [mapping[key] for key in returned_ids]
                 snapshot.budget.charge("returned_components", sum(len(vector) for vector in vectors))
                 return {"ids": returned_ids, "embeddings": vectors}
-            client = self._guard.session.client(self._guard._factory, existing_only=True)
-            collection = client.get_collection(self.name, "default_tenant", "default_database")
+            # Keep the native SDK owned only by the session. A local alias
+            # survives in retained error frames even after the outer lock exits.
+            collection = self._guard.session.client(self._guard._factory, existing_only=True).get_collection(
+                self.name, "default_tenant", "default_database"
+            )
             if str(collection.id) != self.id:
                 raise ChromaStorageError("vector_source_changed", retryable=True)
-            response = client.get(
+            response = self._guard.session.client(self._guard._factory, existing_only=True).get(
                 self.id, ids=list(ids), include=include, tenant="default_tenant", database="default_database"
             )
             if response.embeddings is not None:

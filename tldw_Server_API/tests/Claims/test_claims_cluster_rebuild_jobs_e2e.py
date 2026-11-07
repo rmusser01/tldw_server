@@ -11,7 +11,7 @@ from tldw_Server_API.app.core.Claims_Extraction import claims_job_handlers as ha
 from tldw_Server_API.app.core.Claims_Extraction.claims_embeddings import claim_embedding_id
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 from tldw_Server_API.tests.Claims.test_claims_cluster_rebuild_jobs_api import PATH, build_app, forbidden
-from tldw_Server_API.tests.Claims.test_claims_cluster_rebuild_jobs_worker import output, run_worker
+from tldw_Server_API.tests.Claims.test_claims_cluster_rebuild_jobs_worker import EMBEDDINGS, output, run_worker
 from tldw_Server_API.tests.Claims.test_claims_cluster_rebuild_recovery import (
     jobs_pg_dsn as jobs_pg_dsn,
 )
@@ -28,6 +28,45 @@ from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import sql
 pytestmark = pytest.mark.integration
 pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_isolated_fixtures"]
 USE_SHARED_JOBS_POSTGRES = True
+
+
+@pytest.mark.parametrize("filler_count", [1, 199, 200])
+async def test_colliding_embedding_ids_publish_last_source_once_across_reader_batches(
+    recovery_scenario, filler_count, tmp_path, monkeypatch
+):
+    s = recovery_scenario
+    media, first_claim = seed(s.db, text="Repeated claim")
+    s.db.upsert_claims(
+        [
+            {"media_id": media, "chunk_index": i, "claim_text": f"Unique claim {i}", "chunk_hash": str(i)}
+            for i in range(1, filler_count + 1)
+        ]
+        + [{"media_id": media, "chunk_index": 0, "claim_text": "Repeated claim", "chunk_hash": "duplicate"}]
+    )
+    source = s.db.read_claim_cluster_source(owner_user_id="42", claim_limit=5000, text_byte_limit=33554432)
+    ids = tuple(dict.fromkeys(claim_embedding_id(row.media_id, row.chunk_index, row.claim_text) for row in source.rows))
+    config = {
+        "USER_DB_BASE_DIR": str(tmp_path / "vectors"),
+        "chroma_client_settings": {"anonymized_telemetry": False},
+    }
+    monkeypatch.setitem(handlers.settings, "USER_DB_BASE_DIR", config["USER_DB_BASE_DIR"])
+    monkeypatch.setitem(handlers.settings, "EMBEDDING_CONFIG", config)
+    with ChromaDBManager("42", config) as vectors:
+        collection = vectors.client.create_collection(
+            "claims_for_42", embedding_function=None, configuration={"hnsw": {"batch_size": 2, "sync_threshold": 2}}
+        )
+        collection.upsert(ids=list(ids), embeddings=[[1.0, 0.0] for _ in ids])
+    job = s.admit(settings=EMBEDDINGS).job
+    await run_worker(s.manager)
+    stored = s.manager.get_job(job["id"])
+    assert stored["status"] == "completed", stored
+    assert stored["result"]["claims_assigned"] == filler_count + 1
+    assert stored["result"]["claims_skipped"] == 1
+    members = s.db.execute_query("SELECT claim_id FROM claim_cluster_membership ORDER BY claim_id").fetchall()
+    assert [int(member["claim_id"]) for member in members] == [
+        row.claim_id for row in source.rows if row.claim_id != first_claim
+    ]
+    assert len(s.inventory()["receipts"]) == 1
 
 
 @pytest.mark.parametrize("method", ["exact", "embeddings"])

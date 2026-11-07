@@ -95,10 +95,11 @@ def calculate_claim_cluster_rebuild(
     ids = tuple(claim_embedding_id(row.media_id, row.chunk_index, row.claim_text) for row in rows)
     # Legacy IDs can collide: the last source row wins, not every matching row.
     by_id = dict(zip(ids, rows, strict=True))
+    ids = tuple(by_id)
     embeddings: list[tuple[ClusterSourceRow, list[float], float]] = []
     components = 0
     width = None
-    missing = 0
+    missing = len(rows) - len(ids)
     for start in range(0, len(ids), 200):
         batch = ids[start : start + 200]
         try:
