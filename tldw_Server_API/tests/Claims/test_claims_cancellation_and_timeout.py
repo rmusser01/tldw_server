@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Claims_Extraction import claims_engine, claims_service
-from tldw_Server_API.app.core.config import settings
 
 pytestmark = pytest.mark.unit
 
@@ -18,8 +17,13 @@ def test_claims_service_noncritical_exceptions_do_not_swallow_cancellation():
     assert asyncio.CancelledError not in claims_service._CLAIMS_NONCRITICAL_EXCEPTIONS
 
 
-def test_ingestion_llm_timeout_shuts_down_executor_without_waiting(monkeypatch):
+@pytest.mark.parametrize("settings_binding", ["current", "rebound"])
+def test_ingestion_llm_timeout_shuts_down_executor_without_waiting(monkeypatch, settings_binding):
     import tldw_Server_API.app.core.Claims_Extraction.ingestion_claims as ingestion_mod
+    from tldw_Server_API.app.core import config
+
+    if settings_binding == "rebound":
+        monkeypatch.setattr(ingestion_mod, "_settings", config.LazySettings(config.load_settings))
 
     shutdown_calls: list[dict[str, Any]] = []
     cancel_calls: list[bool] = []
@@ -53,9 +57,9 @@ def test_ingestion_llm_timeout_shuts_down_executor_without_waiting(monkeypatch):
             self._shutdown = True
             shutdown_calls.append({"wait": wait, "cancel_futures": cancel_futures})
 
-    monkeypatch.setitem(settings, "CLAIMS_LLM_TIMEOUT_SEC", 0.01)
-    monkeypatch.setitem(settings, "CLAIMS_EXTRACTION_PASSES", 1)
-    monkeypatch.setitem(settings, "CLAIMS_CONTEXT_WINDOW_CHARS", 0)
+    monkeypatch.setitem(ingestion_mod._settings, "CLAIMS_LLM_TIMEOUT_SEC", 0.01)
+    monkeypatch.setitem(ingestion_mod._settings, "CLAIMS_EXTRACTION_PASSES", 1)
+    monkeypatch.setitem(ingestion_mod._settings, "CLAIMS_CONTEXT_WINDOW_CHARS", 0)
     monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _RecordingExecutor)
     monkeypatch.setattr(ingestion_mod, "extract_heuristic_claims_texts", lambda *args, **kwargs: [])
     monkeypatch.setattr(ingestion_mod, "record_claims_provider_request", lambda **kwargs: None)

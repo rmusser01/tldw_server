@@ -29,7 +29,7 @@ shared-store refusal, Jobs ownership, UUID fences or existing-only access.
 **Tests**: Original failing test and implicated Admin/Audit/Config selection;
 affected Claims/Jobs backend regressions; one root attempt with default
 gates; full configured Ruff comparison, Bandit and applicable hooks.
-**Status**: In Progress
+**Status**: Complete
 
 Both production findings have focused red/green proof: native lifetime9pass;
 collision E2E/calculation33pass. Combined Audit/backup/Config91pass; full
@@ -52,7 +52,18 @@ arming. Never cancel CI, use admin merge or directly push dev.
 **Status**: In Progress
 
 Reviewed source is ready for publication and fresh CI, but auto-merge stays
-off until final wide verification and new feedback dispositions complete.
+off until final verification and new feedback dispositions complete.
+
+The wide Claims/Jobs run completed5667pass/1stale-test-settingsfailure/
+2PGsetupConnectionTimeout errors/3legacy skips. A deterministic current/
+rebound ingestion test reproduces the input problem; three overrides now
+configure the actual consumed proxy, preserving deadline/cancel/shutdown
+assertions without production changes. All3exceptionalnodes passed untouched
+in isolation; after the test correction, all Claims plus the complete affected
+PG module passed1636tests with1legacy spaCy skip, zero errors/failures. This
+closes observed outcomes, not a fresh all-green combined-suite claim.
+Final static103compilepass/Ruff113vs116dev/no new/Bandit57production1inherited
+finding/no errors. Independent final test-only review remains pending.
 
 Review focus: stale imported settings after reload; shared Audit backup
 refusal and rollback; no test-state leaks; cross-owner/stale-worker Jobs
