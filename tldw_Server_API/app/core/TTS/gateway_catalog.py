@@ -122,7 +122,10 @@ class GatewayCatalog:
                 refresh.add_done_callback(_retrieve_owned_task_exception)
                 self._inflight[key] = refresh
 
-        return await asyncio.shield(refresh)
+        if not refresh.done():
+            # wait isolates cancellation without shield's raw late-error logging.
+            await asyncio.wait({refresh})
+        return refresh.result()
 
     @staticmethod
     def _cache_key(spec: GatewaySpec, credential_scope_token: str) -> CacheKey:

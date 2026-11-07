@@ -873,7 +873,10 @@ async def _audio_cpp_discovery(
                 done.exception()
 
         wrapped.add_done_callback(consume_follower_exception)
-        return await asyncio.shield(wrapped)
+        if not wrapped.done():
+            # Keep the shared leader alive without shield's late-error logger.
+            await asyncio.wait({wrapped})
+        return wrapped.result()
 
     try:
         discovery = await _fetch_audio_cpp_discovery(
