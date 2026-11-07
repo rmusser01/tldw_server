@@ -40,6 +40,40 @@ verification environment repair. ADR085's membership transaction/version decisio
 is unchanged. Any proposed runtime behavior change must be assessed separately
 before implementation, not folded into a test-only correction.
 
+## November 7 Same-Key Draft Persistence Follow-Up
+
+Reviewed4b239's required frontend unit7 job128499323509 and aggregate
+frontend-required job128513398512 failed in run42401177625. The test observed
+visible SECOND_EDIT before actual validation/persistence, then read the old
+EDITED recovery record. A separate cold focused control failed earlier at
+initial storage; these are different observations, not exact reproduction.
+
+Source-only50f2cbb1d25f5fc1e733de66e2cb09a6874d5178 changes one test file.
+It awaits a connected current editor and actual same-key stored payload,
+preserving all nine original assertions and Save/blocked-cleanup/revoke/restore
+ordering. A companion real-WebCrypto call-through gate establishes a reachable
+pending-visible/old-stored interval: the premature storage assertion is RED;
+released real validation replaces the same key under v8 and retains the newer
+recovery across cleanup and authority restoration. Finally drains/restores
+the held work even on failure. No runtime/setup/timeout/skip/policy edit.
+
+Separate final local controls: affected workspace/editor/recovery files158/158,
+target-file TypeScript BASE/current0/0; ESLint0errors/57identical inherited
+warnings. Original other module/test AST statements are unchanged. Local
+Node25.6/Bun1.3.5 differs from CINode20.20.2/Bun1.3.2. The engineered schedule
+does not prove CI's unrecorded timing or a harmlessness claim; no whole-suite
+green claim. No new Python/Bandit scope; earlier security evidence applies to
+unchanged Python blobs only. Report and logs are retained in the ignored
+SDD workspace and /private/tmp/userprofiles15413-standalone-*.
+
+Authoritative dev advanced dfac3ca7 tocb70f0c5d134ac585c70fc30b5a99bf0ced98562
+through PR3400's twelve header/account/Watchlists/browser/tracking paths,
+without Standalone overlap. Controller must preserve those upstream objects,
+qualify the mechanical rebase, independently review the exact final candidate,
+and wait for entirely fresh exact-head required checks. The PR3404-only human
+summary waiver remains; no waiver of CI, review, latest-dev or merge gates.
+No remote retry/dispatch, body rewrite, settings/policy change or merge.
+
 ## Scope Boundaries
 WP3-WP5 retain their approved Stage 2 plan and sequential package review gates.
 WP2 tracking closeout is a separate two-file PR with the requester's explicit
