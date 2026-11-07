@@ -101,8 +101,9 @@ its working-tree rename; actual renamed task contents pass canonical checking.
 After committing the rename in `55eb4b4e4eb9ae62ec07686b2d58f20478049c9c`, the
 committed-head ratchet passed all four tests (24 warnings, exit 0, 2.49 seconds);
 `/tmp/moderation-integration-task-format-final.log`.
-Final publication identity correction requires one more committed-head metadata
-ratchet run; the actual renamed task is normalized via backlog-py before commit.
+After the final publication identity correction in `5fb43cfad3`, the
+committed-head metadata ratchet again passed all four tests (24 warnings,
+exit 0, 1.60 seconds); `/tmp/moderation-integration-task-format-publication.log`.
 
 ## Blocked-Pipe Probe Correction
 
@@ -128,6 +129,13 @@ retains only its existing B404/B603 subprocess heuristics (B101 excluded), and
 both files compile and pass Ruff. No test security suppression was added.
 
 ## Publication Gates
+
+[PR #3437](https://github.com/rmusser01/tldw_server/pull/3437) was created against
+dev from `codex/moderation-ci-triage-regex-design` after successful verification.
+The remote dev ref still matched the tested rebase target immediately before
+publication. The initial unqualified gh create selected the upstream repository
+and failed without creating a PR; explicit `--repo rmusser01/tldw_server`
+published to the intended origin. No default repository configuration was changed.
 
 Preserve the worktree for PR feedback. Required remote CI must run on the PR;
 local checks are not substituted for those statuses. A requester-owned Change
