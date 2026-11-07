@@ -17,6 +17,8 @@ os.environ.setdefault("AUTH_MODE", "single_user")
 os.environ.setdefault("AUTH_DEPS_FALLBACK_RATE_LIMIT", "1000000")
 os.environ.setdefault("AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT", "1000000")
 os.environ.pop("PROFILE", None)
+# Single-threaded numeric libraries keep joblib/loky from leaking semaphores under pytest.
+import tldw_Server_API.tests._thread_env  # noqa: E402,F401
 
 pytest_plugins = (
     "tldw_Server_API.tests.helpers.pgvector",

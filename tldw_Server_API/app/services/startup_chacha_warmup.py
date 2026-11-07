@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from tldw_Server_API.app.core.testing import is_test_mode
+
 
 async def warm_chacha_notes_on_startup(
     *,
@@ -15,7 +17,7 @@ async def warm_chacha_notes_on_startup(
 ) -> None:
     try:
         _reset_chacha_shutdown_state()
-        if _is_test_mode():
+        if is_test_mode():
             logger.debug("ChaChaNotes warm-up skipped (test mode)")
             return
         if _is_single_user_mode():
@@ -37,12 +39,6 @@ def _reset_chacha_shutdown_state() -> None:
     )
 
     reset_chacha_shutdown_state()
-
-
-def _is_test_mode() -> bool:
-    from tldw_Server_API.app.core.testing import is_test_mode
-
-    return bool(is_test_mode())
 
 
 def _is_single_user_mode() -> bool:

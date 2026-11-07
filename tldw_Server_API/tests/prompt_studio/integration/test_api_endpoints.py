@@ -1465,7 +1465,7 @@ class TestEvaluationEndpoints:
             async def close(self):
                 return None
 
-        monkeypatch.setattr(ps_eval, "_is_prompt_studio_test_mode", lambda: False)
+        monkeypatch.setattr(ps_eval, "is_test_context", lambda: False)
         monkeypatch.setattr(ps_eval, "ProviderCredentialRuntime", lambda **_kwargs: _MissingRuntime())
 
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):

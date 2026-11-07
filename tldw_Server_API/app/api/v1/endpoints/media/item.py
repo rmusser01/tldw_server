@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .....core.DB_Management.media_db.legacy_maintenance import (
@@ -39,15 +40,6 @@ from .....core.DB_Management.media_db.legacy_maintenance import (
 )
 
 router = APIRouter(tags=["Media Management"])
-
-
-def _is_test_mode() -> bool:
-    try:
-        from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode_impl
-
-        return bool(_is_test_mode_impl())
-    except Exception:
-        return False
 
 
 @router.get(
@@ -93,7 +85,7 @@ async def get_media_item(
 
     # TEST_MODE diagnostics
     try:
-        if _is_test_mode():
+        if is_test_mode():
             db_path = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
             headers = getattr(request, "headers", {}) or {}
             logger.info(

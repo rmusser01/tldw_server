@@ -306,7 +306,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     server_origin_stable_key,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.testing import is_test_context, is_truthy
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Utils.image_validation import MAX_IMAGE_PIXELS
@@ -845,18 +845,6 @@ def _config_default_llm_provider() -> str | None:
     return _extract("llm_api_settings") or _extract("API")
 
 
-def _is_char_chat_test_mode() -> bool:
-    """Return True when running under test-mode semantics."""
-    for env_key in ("TEST_MODE", "TLDW_TEST_MODE", "PYTEST_CURRENT_TEST"):
-        raw = os.getenv(env_key)
-        if isinstance(raw, str) and raw.strip():
-            if env_key == "PYTEST_CURRENT_TEST":
-                return True
-            if is_truthy(raw):
-                return True
-    return False
-
-
 def _get_default_provider() -> str:
     """Resolve default provider: config, then env, then test fallback, then get_default_provider()."""
     cfg_default = _config_default_llm_provider()
@@ -867,7 +855,7 @@ def _get_default_provider() -> str:
     if isinstance(env_default, str) and env_default.strip():
         return env_default.strip()
 
-    if _is_char_chat_test_mode():
+    if is_test_context():
         return "local-llm"
 
     return get_default_provider()
@@ -878,7 +866,7 @@ def _should_enforce_char_chat_strict_model_selection() -> bool:
     raw = os.getenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION")
     if raw is not None:
         return is_truthy(raw)
-    return not _is_char_chat_test_mode()
+    return not is_test_context()
 
 
 def _safe_replace_placeholders(value: Any, char_name: str, user_name: str) -> str:
