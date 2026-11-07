@@ -74,6 +74,15 @@ and wait for entirely fresh exact-head required checks. The PR3404-only human
 summary waiver remains; no waiver of CI, review, latest-dev or merge gates.
 No remote retry/dispatch, body rewrite, settings/policy change or merge.
 
+Mechanical integration checkpoint77d800d21e30158d7dc308835ea91bd5f49f1656
+replays all19 patches range-diff equal onto cb70. All12 upstream paths match
+dev exactly in object/type/mode; all29,069 other pre-rebase entries are exact.
+The tested Standalone blob remains6b4381ad76bc0cc8faef1f8f289ba6159de1b5ee.
+Fresh integrated six-file UI control passes220/220 with no skips: the three
+draft/editor/recovery files plus current-dev AccountMenu, ChatHeader notification
+and Watchlists PipelineWizard tests. No full-frontend/browser/CI equivalence is
+inferred. Bounded exact-head independent review and fresh required CI remain.
+
 ## Scope Boundaries
 WP3-WP5 retain their approved Stage 2 plan and sequential package review gates.
 WP2 tracking closeout is a separate two-file PR with the requester's explicit
