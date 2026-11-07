@@ -344,3 +344,78 @@ d2cbae's green statuses cannot qualify the rebased head. TASK15413 stays In
 Progress, AC4 open. Earlier broad-suite and Skills/OAuth limits remain explicit.
 Logs use /private/tmp/userprofiles15413-dev576-*; no unchanged UI suites or
 whole-PR review were restarted merely for pending CI.
+
+## November 7 Integration And Qualification
+
+Authoritative dev advanced to dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c;
+published d2cbae remains open/unmerged/unarmed. Backups preserve d2cbae and
+the unpublished8ff5 checkpoint. Only this next-to-merge verification branch
+was replayed; runtime WP4/WP5 was not rebased. At local349a6dfd,12of14 prior
+patches are range-diff equal. Upstream already contains the reviewed Parakeet
+class patch, so that replay retains only explicit plugin registration. The
+one Playground conflict keeps upstream's stronger deferred-response controls
+and our settlement comment; Slides retains upstream's removed test bypass
+and all owned policy/refusal cases. No runtime/policy/dependency change.
+
+Complete object/type/mode proof counts459 upstream path endpoints (415
+rename-aware changes),455 exact upstream entries/four overlaps,28666 other
+approved entries unchanged and18 own paths. Initial proof omitted old rename
+endpoints and falsely flagged a renamed task; corrected --no-renames inventory
+passes. James independently reproduces both this and earlier dev576 proof,
+approving frozen integration spec/static quality with no source findings,
+but explicitly withholds publication for fresh qualification failures below.
+
+Fresh four-file backend control:364pass/2fail/2998warnings, positive first-work
+assertions for audio chat/TTS saw no work after a one-second silent probe.
+Fermat causally reproduced the fixture gap using delayed REAL credential
+verification: silence is not completed authentication; disconnect can precede
+work. Source3cbd98fec903d984f64116eb180deab677f1cf39 changes only that test
+file. Real guard emits a test-owned acknowledgement after success; voice uses
+its public auth_ok. Positive checks await the existing frame-reply budget,
+not a longer silent probe. Invalid-first-frame4400/zero-work, real credentials,
+revocation/scope checks and exact positive route identity remain. No runtime,
+timeout constant, auth-result mock or guard bypass is changed. Deterministic
+RED2fail -> focused7pass; full affected file186pass/1367warnings/no skips.
+Original four-file command on3cbd then368pass/3008warnings/no skips. These
+overlap, not a sum, and do not establish the original host schedule's cause.
+
+Fresh UI seven-file V8 run initially191pass/4Studio15s timeouts. Unchanged
+Studio file16pass in isolation; one final unchanged seven-file run195pass/
+zero failures. Initial failures remain evidence; no contention causality or
+harmlessness is inferred. No UI source, mock, timeout, assertion or dependency
+change was made. Local runtime/version is not remote CI equivalence.
+
+Other separate overlapping controls: Slides/database owner224pass/684warnings;
+disabled-autoload plugin/audio87pass/457warnings; official VN resolver12pass
+(six actualPG/sixSQLite),61deselected/437warnings; official PGbenchmark2pass/
+2deselected/18warnings. No selected-case skips. Existing configured cluster,
+official isolated task/UUID databases, serial runs, no container/server changes.
+An initial wrong MCP path invocation stoppedexit4 before collection; corrected
+documented paths produce87pass. Logs /private/tmp/userprofiles15413-devdfac-*.
+
+Touched eight Python Ruff/compile/diff pass; unfiltered Bandit ignoring nosec
+639->656B101 at3cbd, unchanged4B105/3B106/2B608 contexts and zero scan errors.
+Both scans exit1 for retained findings, not clean scans. Shards871/5381/
+fourignored/baseline44/new0 pass. Full-tree quality after3cbd catches one NEW
+mock_density offense in its added regression. That is a mandatory blocker:
+Fermat owns bounded fixround1/3 to reduce actual test-design complexity without
+baseline/suppression/policy changes or heuristic evasion. Source review,
+covering tests, full quality and exact final records remain outstanding; no
+publication approval is inferred. Earlier broad-suite/Skills/OAuth/weakref
+limits remain. Task15413 InProgress/AC4open, old checks do not qualify this SHA.
+
+Quality fixround1/3 source878cc0145a176f2caa688485660393e36bbc39fb splits
+the existing five-route invalid-frame security test from the distinct two-case
+delayed-real-auth positive regression. Shared exchange helper performs only
+the real operation/reply-budget selection, with no patching; explicit patch
+sites are two in the security test and three in the delay regression. Original
+security assertions/route matrix remain exact. The regression still fails
+deterministically against the old silent exchange, then passes with explicit
+work acknowledgement: RED2fail -> focused7pass/270warnings; full affected file
+186pass/1367warnings/no skips. Full-tree quality5381 passes the unchanged
+baseline; mock_density returns347. Scanner/baseline hashes unchanged; no alias,
+helper-hidden mocking, suppression or policy change. Ruff/compile/diff/hooks
+pass. Bandit103->106B101 in this fix, unchanged2B105/1B106 contexts/errors0.
+The368-pass four-file control is pre-split3cbd evidence, not a claimed rerun
+at878; final186 covers every amended source path. Source and final-record
+scoped review remain pending. No publication or merge approval is inferred.
