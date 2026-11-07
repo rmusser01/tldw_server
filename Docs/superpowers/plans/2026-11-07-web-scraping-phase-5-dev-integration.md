@@ -1,9 +1,9 @@
 # Phase 5 Dev Integration
 
-**Task:** TASK-15452. This is integration of the already approved implementation,
+**Task:** TASK-15466 (formerly TASK-15452). This is integration of the already approved implementation,
 not a new refactor or feature. Preserve analyzer, compatibility and security
 behavior. No new architecture decision; the existing ownership ADR is renumbered
-from 093 to 094 only to avoid an unrelated open-PR record. Preserve its accepted
+from 093 to 094, then 096 at publication, only to avoid unrelated open-PR records. Preserve its accepted
 decision and rationale.
 
 ## Stage 1: Preserve And Rebase
@@ -69,7 +69,11 @@ corrections are included in the normal-hook commit. No publication or merge.
   optional live providers/curl, native Windows and merge readiness are not claimed.
 
 Exact commands, logs, intermediate failures and reviewer evidence are recorded
-under TASK-15452. Logs use `/tmp/web-phase5-nov7-*`; original accepted code remains
+under TASK-15466. Logs use `/tmp/web-phase5-nov7-*`; original accepted code remains
 at `codex/web-scraping-phase-5-pre-nov7-integration-51064cee`. The branch/worktree
-are retained locally. Publication awaits a separate decision, and any future
-merge still requires the requester's own Change summary.
+are retained. The requester subsequently approved pushing and creating a PR
+after the scoped checks; no merge was authorized. Final pre-publication review
+found collisions with two newer PRs: only our unpublished task/ADR identifiers
+were corrected to TASK-15466 through TASK-15476 and ADR-096. Runtime code and all
+recorded verification are unchanged. Any future merge still requires the
+requester's own Change summary.

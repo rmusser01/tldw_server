@@ -1,5 +1,5 @@
 ---
-id: TASK-15462
+id: TASK-15476
 title: Certify Phase 5 architecture consumers and lifecycle
 status: Done
 labels:
@@ -10,7 +10,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Execute Task 11 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15453. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
+Execute Task 11 of the approved Phase 5 plan as an independently reviewable unit. Parent TASK-15467. Scope, interfaces, exact defaults, named tests and commits are defined by that plan task; preserve all global constraints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -35,12 +35,14 @@ Task11 final implementation evidence: sanctioned minimal existing redaction-help
 Fresh independent reviewer Russell approved full Task11 range a16565207c..66b057c712: spec compliant, code quality Approved, no Critical or Important findings. Review task-11-review.md. Both Minor findings corrected: precise child-ID inventory in planning summary via official API; evidence adds existing nine-ceiling ratchet advisory without suppression/tightening. Final source4106pass28optional/envskips, consumers770pass12optional, services115pass0skip including realPostgres, native36pass0skip, postcommit67pass0skip. Controller independently extended Ruff and compile to every changed Python file, exit0/zeroRufffindings; Bandit8untouchedLOW0new including both endpoints. Parent TASK-15421 remains In Progress until independent whole-branch review; no push/PR/merge or whole-repository-green claim. Global repository collection blocked by unchanged Meetings duplicate-module names.
 2026-11-07 integration namespace correction: TASK-15430 -> TASK-15462; the former ID is held by unrelated dev/open-PR work. No historical notes, status or accepted criteria were rewritten. Tracking TASK-15452.
 Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
+Publication namespace correction after fresh45openPR paginated scan: TASK-15462 -> TASK-15476; former ID belongs to unrelated Jobs/Claims work. Original dated history/status/criteria preserved. Publication approval applies; tracking TASK-15466.
+Current publication namespace: integration TASK-15466; execution parent TASK-15467; Tasks3-11 TASK-15468 through TASK-15476; Tasks1/2 TASK-15408/TASK-15409; design/planning TASK-15431/TASK-15432; accepted ownership ADR096. Historical IDs and review results above are retained verbatim. User approved pushing and opening a PR, not merging; human-written Change summary remains required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task11 independently approved at66b057c712. Added actual architecture negative fixtures, real browser/executor/checkpoint/service drain certification, preserved true fork inheritance in safe test-only subprocesses, verified existing Watchlists behavior, removed only the proven helper dependency cycle with compatibility aliases, refreshed actual architecture/inventories, and measured four authorized HTTP security ratchets. Scoped compatibility/security/native/service/consumer gates pass with documented optional skips and existing warnings. Final whole-branch review belongs to parent TASK-15453 and remains outstanding; repository-wide collection is blocked by unrelated Meetings module-name collision. No functionality removal, startup hook, new runtime dependency/connection/subsystem, push or merge.
+Task11 independently approved at66b057c712. Added actual architecture negative fixtures, real browser/executor/checkpoint/service drain certification, preserved true fork inheritance in safe test-only subprocesses, verified existing Watchlists behavior, removed only the proven helper dependency cycle with compatibility aliases, refreshed actual architecture/inventories, and measured four authorized HTTP security ratchets. Scoped compatibility/security/native/service/consumer gates pass with documented optional skips and existing warnings. Final whole-branch review belongs to parent TASK-15467 and remains outstanding; repository-wide collection is blocked by unrelated Meetings module-name collision. No functionality removal, startup hook, new runtime dependency/connection/subsystem, push or merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

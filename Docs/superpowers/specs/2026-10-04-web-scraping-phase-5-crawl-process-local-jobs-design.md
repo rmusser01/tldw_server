@@ -56,7 +56,7 @@ Out of scope:
 ## Architecture Decision Assessment
 
 **ADR required:** Yes.
-**Accepted ADR:** [ADR-094](../../ADR/094-web-scraping-crawl-and-process-local-job-ownership.md).
+**Accepted ADR:** [ADR-096](../../ADR/096-web-scraping-crawl-and-process-local-job-ownership.md).
 
 The durable rule is that crawl and queue own their state and receive execution
 callbacks, while orchestration composes them with canonical article execution.
@@ -680,3 +680,8 @@ The accepted ownership record is now ADR-094 to avoid an unrelated open-PR
 ADR-093. Design/planning remain TASK-15431/TASK-15432; completed execution is
 TASK-15453, with Tasks 3-11 at TASK-15454 through TASK-15462. Integration is tracked
 by TASK-15452. The decision, design requirements and historical notes are unchanged.
+
+Final publication scan of 45 open PRs found later allocations of those IDs.
+Current tracking is ADR-096, integration TASK-15466, execution TASK-15467 and
+Tasks 3-11 TASK-15468 through TASK-15476. Earlier correction notes are historical;
+the accepted design and decision remain unchanged.

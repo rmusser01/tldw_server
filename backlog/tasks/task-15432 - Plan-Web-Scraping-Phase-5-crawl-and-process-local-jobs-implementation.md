@@ -11,7 +11,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create the implementation plan from the user-approved Phase 5 written specification and ADR-094. Map scoped files, exact cross-task interfaces, concrete finite safety defaults, test-first reviewable tasks, staged compatibility cutovers, and verification/rollback gates. Preserve analyzer and legacy behavior, bounded batch production, outcome/cancellation ownership, and the process-local queue; durable Jobs migration remains deferred. Documentation and tracking only: no product implementation until the user reviews this plan and selects an execution method.
+Create the implementation plan from the user-approved Phase 5 written specification and ADR-096. Map scoped files, exact cross-task interfaces, concrete finite safety defaults, test-first reviewable tasks, staged compatibility cutovers, and verification/rollback gates. Preserve analyzer and legacy behavior, bounded batch production, outcome/cancellation ownership, and the process-local queue; durable Jobs migration remains deferred. Documentation and tracking only: no product implementation until the user reviews this plan and selects an execution method.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -32,12 +32,13 @@ Namespace-only correction after fresh-dev rebase: original planning identifier T
 Historical implementation notes retain the original identifiers and observations verbatim; current descriptions/dependencies and the explicit namespace migration notes define today's identifiers. No past numeric limits or unrelated-record observations were relabeled.
 Task11 fresh reviewer Minor1 addressed: current execution-child inventory explicitly excludes unrelated task IDs and keeps parent TASK-15421 separate. Historical notes unchanged.
 Current namespace after the 2026-11-07 dev/all43openPR scan: execution parent TASK-15453; Tasks3-11 TASK-15454 through TASK-15462; Tasks1/2 remain TASK-15408/TASK-15409; design/planning remain TASK-15431/TASK-15432; governing ownership ADR094. Accepted decisions and dated historical identifiers remain unchanged. Integration tracked by TASK-15452.
+Current publication namespace: integration TASK-15466; execution parent TASK-15467; Tasks3-11 TASK-15468 through TASK-15476; Tasks1/2 TASK-15408/TASK-15409; design/planning TASK-15431/TASK-15432; accepted ownership ADR096. Historical IDs and review results above are retained verbatim. User approved pushing and opening a PR, not merging; human-written Change summary remains required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Four-stage eleven-task implementation plan written, self-reviewed, verified and presented. Human selected subagent-driven execution on 2026-11-01, satisfying plan review and execution-method gate. TASK-15453 and TASK-15408, TASK-15409, and TASK-15454 through TASK-15462 track implementation; no product completion is implied.
+Four-stage eleven-task implementation plan written, self-reviewed, verified and presented. Human selected subagent-driven execution on 2026-11-01, satisfying plan review and execution-method gate. TASK-15467 and TASK-15408, TASK-15409, and TASK-15468 through TASK-15476 track implementation; no product completion is implied.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
