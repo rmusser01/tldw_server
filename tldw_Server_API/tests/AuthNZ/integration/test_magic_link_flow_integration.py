@@ -114,6 +114,7 @@ async def test_magic_link_verify_creates_user_and_org(
         row = await pool.fetchrow(
             "SELECT is_verified, profile_version FROM users WHERE id = ?", user_id,
         )
+        assert row is not None
         assert (row["is_verified"], row["profile_version"]) == (True, verified_versions[user_id])
         await original_ensure_membership(user_id, username)
 
@@ -287,7 +288,9 @@ async def test_verification_profile_touch_failure_rolls_back_postgres_user(
         password_hash="test-hash", is_verified=False,
     )
     user_id = int(created["id"])
-    before = dict(await pool.fetchrow("SELECT * FROM users WHERE id = ?", user_id))
+    before_row = await pool.fetchrow("SELECT * FROM users WHERE id = ?", user_id)
+    assert before_row is not None
+    before = dict(before_row)
 
     async def fail_profile_touch(*_args: Any, **_kwargs: Any) -> None:
         """Fail after the real verified-field write, before its profile anchor persists."""
@@ -299,5 +302,7 @@ async def test_verification_profile_touch_failure_rolls_back_postgres_user(
             async with (connection.transaction() if caller_transaction else nullcontext()):
                 await mark_user_verified(connection, user_id, datetime.now(timezone.utc))
 
-    after = dict(await pool.fetchrow("SELECT * FROM users WHERE id = ?", user_id))
+    after_row = await pool.fetchrow("SELECT * FROM users WHERE id = ?", user_id)
+    assert after_row is not None
+    after = dict(after_row)
     assert after == before
