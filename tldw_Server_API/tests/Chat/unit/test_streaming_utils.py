@@ -366,6 +366,42 @@ class TestSafeStreamGenerator:
         assert tick_count > 1
         assert "".join(handler.full_response) == "StartEnd"
 
+    @pytest.mark.parametrize("structured", [False, True])
+    async def test_sync_transform_stop_iteration_preserves_clean_stream_completion(
+        self, structured: bool,
+    ) -> None:
+        def stop_transform(text: str) -> str:
+            if text == "stop here":
+                raise StopIteration
+            return text
+
+        handler = StreamingResponseHandler("conv_transform_stop", "gpt-4", text_transform=stop_transform)
+        save = AsyncMock()
+        finalize = AsyncMock()
+
+        async def provider() -> AsyncIterator[str]:
+            for text in ("accepted prefix", "stop here", "must not be consumed"):
+                if structured:
+                    yield "data: " + json.dumps({"choices": [{"delta": {"content": text}}]}) + "\n\n"
+                else:
+                    yield text
+
+        wire = "".join([
+            message async for message in handler.safe_stream_generator(
+                provider(), save_callback=save, finalize_callback=finalize,
+            )
+        ])
+
+        assert "stop here" not in wire
+        assert "must not be consumed" not in wire
+        assert "stream_transform_error" not in wire
+        assert handler.full_response == ["accepted prefix"]
+        assert handler.error_occurred is False
+        save.assert_awaited_once()
+        assert save.await_args.args[0] == "accepted prefix"
+        finalize.assert_not_awaited()
+        assert '"finish_reason": "stop"' in wire
+
     @pytest.mark.parametrize("stream_kind", ["sync", "async"])
     @pytest.mark.parametrize(
         "provider_chunk",

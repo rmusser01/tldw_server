@@ -194,8 +194,10 @@ def test_redact_texts_override_cannot_refresh_deadline():
         return text
 
     service.redact_text = override
-    with pytest.raises(ModerationExecutionError, match="deadline_exceeded"):
-        service.redact_texts(["a", "b"], make_policy())
+    with execution_scope() as shared:
+        with pytest.raises(ModerationExecutionError, match="deadline_exceeded"):
+            service.redact_texts(["a", "b"], make_policy())
+        assert shared.deadline == 0
     assert calls == ["a"]
 
 

@@ -174,7 +174,11 @@ async def test_provider_is_closed_before_terminal_error_is_delivered():
         async for frame in stream:
             if '"moderation_unavailable"' in frame:
                 assert closed == [True]
+                assert handler.error_occurred
+                assert payloads([frame])[0]["error"]["type"] == "moderation_unavailable"
                 break
+        else:
+            pytest.fail("missing terminal moderation failure")
     finally:
         await stream.aclose()
 
@@ -195,6 +199,8 @@ async def test_error_path_flush_failure_closes_provider_before_delivery():
         async for frame in stream:
             if '"moderation_unavailable"' in frame:
                 assert closed == [True]
+                assert handler.error_occurred
+                assert payloads([frame])[0]["error"]["type"] == "moderation_unavailable"
                 break
         else:
             pytest.fail("missing terminal moderation failure")
@@ -226,8 +232,12 @@ async def test_cancel_during_async_flush_still_closes_provider():
 
     handler = StreamingResponseHandler("1", "test", text_transform=CancelFlush())
     partial = AsyncMock()
+    frames = []
     with pytest.raises(asyncio.CancelledError):
-        async for _frame in handler.safe_stream_generator(Source(), partial_save_callback=partial):
-            pass
+        async for frame in handler.safe_stream_generator(Source(), partial_save_callback=partial):
+            frames.append(frame)
     assert closed == [True]
+    assert handler.is_cancelled
+    assert "SAFE" in "".join(frames)
+    assert "TAIL" not in "".join(frames)
     partial.assert_not_called()

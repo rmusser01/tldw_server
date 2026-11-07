@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
+import tomllib
+from packaging.requirements import Requirement
 
 from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
 from tldw_Server_API.app.core.Moderation.execution_protocol import (
@@ -21,6 +23,15 @@ from tldw_Server_API.app.core.Moderation.policy_evaluator import EvaluationLimit
 
 pytestmark = [pytest.mark.unit, pytest.mark.packaging]
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_dev_extra_includes_offline_wheel_build_requirements():
+    """The installed-release fixture must work in a fresh CI dev environment."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    required = {Requirement(spec).name for spec in project["build-system"]["requires"]} | {"build"}
+    available = {Requirement(spec).name for spec in project["project"]["optional-dependencies"]["dev"]}
+
+    assert required <= available
 
 
 @pytest.fixture(scope="module")

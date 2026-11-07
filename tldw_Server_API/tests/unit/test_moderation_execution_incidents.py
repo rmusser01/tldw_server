@@ -221,6 +221,11 @@ async def test_reporting_slot_is_not_released_before_thread_exits(store, monkeyp
     tail, in_tail = threading.Event(), threading.Event()
     original_thread = threading.Thread
     calls = []
+    persist = incidents._persist_failure
+
+    def persist_and_record(*args, **kwargs):
+        calls.append(True)
+        persist(*args, **kwargs)
 
     class TailThread(original_thread):
         def run(self):
@@ -229,7 +234,7 @@ async def test_reporting_slot_is_not_released_before_thread_exits(store, monkeyp
             tail.wait(3)
 
     monkeypatch.setattr(incidents.threading, "Thread", TailThread)
-    monkeypatch.setattr(incidents, "_persist_failure", lambda *a, **k: calls.append(True))
+    monkeypatch.setattr(incidents, "_persist_failure", persist_and_record)
     metadata = FailureMetadata("evaluate", None, 1)
     with execution_scope() as first:
         task = asyncio.create_task(
@@ -237,17 +242,28 @@ async def test_reporting_slot_is_not_released_before_thread_exits(store, monkeyp
                 ModerationExecutionError("worker_crashed"), metadata=metadata, scope=first
             )
         )
+    owner = None
     try:
         while not in_tail.is_set():
             await asyncio.sleep(0.001)
+        owner = incidents._report_thread
+        assert owner is not None and owner.is_alive()
         with execution_scope() as second:
             await incidents.report_execution_failure_async(
-                ModerationExecutionError("worker_crashed"), metadata=metadata, scope=second
+                ModerationExecutionError("worker_crashed"), metadata=FailureMetadata("redact", None, 2), scope=second
             )
         assert calls == [True]
+        assert incidents._report_thread is owner and owner.is_alive()
+        [item] = store.list_items()["items"]
+        assert item["context"]["operation"] == "evaluate"
+        assert item["context"]["input_chars"] == 1
     finally:
         tail.set()
         await task
+        if owner is not None:
+            owner.join(timeout=1)
+    assert owner is not None
+    assert not owner.is_alive()
 
 
 def test_lifecycle_prepares_isolated_schema_before_traffic(tmp_path, monkeypatch):
