@@ -193,6 +193,7 @@ async def test_scrape_article_backend_curl_uses_curl(monkeypatch: pytest.MonkeyP
 async def test_enhanced_scraper_router_backend_playwright(monkeypatch):
     from tldw_Server_API.app.core.Security import egress as egress_module
     from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
+    from tldw_Server_API.app.core.Web_Scraping.filters import RobotsCheckResult, RobotsFilter
 
     monkeypatch.setattr(
         egress_module,
@@ -200,11 +201,15 @@ async def test_enhanced_scraper_router_backend_playwright(monkeypatch):
         lambda url: types.SimpleNamespace(allowed=True),
     )
 
-    async def allow_robots(*args, **kwargs):
-        return True
+    robots_checks = []
+
+    async def allow_robots(self, url, **kwargs):
+        robots_checks.append((url, kwargs))
+        return RobotsCheckResult(allowed=True, status="allowed")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.is_allowed_by_robots_async",
+        RobotsFilter,
+        "check",
         allow_robots,
     )
 
@@ -234,3 +239,5 @@ async def test_enhanced_scraper_router_backend_playwright(monkeypatch):
 
     result = await scraper.scrape_article("https://example.com/path")
     assert result.get("method") == "playwright"
+    assert robots_checks == [("https://example.com/path", {"skip_egress_check": True, "fail_open": True})]
+    assert result["extraction_successful"] is True

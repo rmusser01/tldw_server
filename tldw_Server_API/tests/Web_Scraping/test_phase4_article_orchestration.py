@@ -690,6 +690,7 @@ def test_log_failure_normalizes_untrusted_article_fields() -> None:
 def test_log_failure_preserves_complete_guarded_browser_stage_contract() -> None:
     from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
     from tldw_Server_API.app.core.Web_Scraping.orchestration import article_browser
+    from tldw_Server_API.app.core.Web_Scraping.runtime import browser_document
 
     expected_stages = {
         "browser_transfer",
@@ -711,7 +712,7 @@ def test_log_failure_preserves_complete_guarded_browser_stage_contract() -> None
         "wait",
         "websocket_route",
     }
-    tree = ast.parse(inspect.getsource(article_browser))
+    tree = ast.parse(inspect.getsource(article_browser) + "\n" + inspect.getsource(browser_document))
     observed_stages: set[str] = set()
 
     for node in ast.walk(tree):
@@ -724,7 +725,11 @@ def test_log_failure_preserves_complete_guarded_browser_stage_contract() -> None
                 if isinstance(value, ast.Constant) and isinstance(value.value, str)
             )
         if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id == "ArticleFailure" and len(node.args) >= 2:
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id in {"ArticleFailure", "failure"}
+                and len(node.args) >= 2
+            ):
                 stage = node.args[1]
                 if isinstance(stage, ast.Constant) and isinstance(stage.value, str):
                     observed_stages.add(stage.value)

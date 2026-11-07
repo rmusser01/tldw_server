@@ -15,6 +15,27 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 pytestmark = [pytest.mark.integration]
 
 
+@pytest.fixture
+def native_batch_network_policy(monkeypatch):
+    """Allow only the native fixture hosts and ports through the real guard."""
+
+    def configure(bases):
+        ports = {80, *(urlsplit(base).port for base in bases)}
+        settings = {
+            "WORKFLOWS_EGRESS_PROFILE": "strict",
+            "WORKFLOWS_EGRESS_ALLOWLIST": "127.0.0.1,public.example",
+            "WORKFLOWS_EGRESS_DENYLIST": "",
+            "EGRESS_ALLOWLIST": "",
+            "EGRESS_DENYLIST": "",
+            "WORKFLOWS_EGRESS_BLOCK_PRIVATE": "false",
+            "WORKFLOWS_EGRESS_ALLOWED_PORTS": ",".join(str(port) for port in sorted(ports)),
+        }
+        for name, value in settings.items():
+            monkeypatch.setenv(name, value)
+
+    return configure
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("close_mode", ["failed", "held"])
 async def test_native_failed_or_held_close_keeps_guard_and_lease_until_actual_browser_exit(monkeypatch, close_mode):
@@ -275,32 +296,35 @@ async def test_native_cancel_keeps_lease_until_guard_exits_after_owned_browser_r
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_proxy", [False, True])
-async def test_native_default_batch_preserves_settings_and_same_page_dom_fallback(monkeypatch, tmp_path, use_proxy):
+async def test_native_default_batch_preserves_settings_and_same_page_dom_fallback(
+    monkeypatch, tmp_path, use_proxy, native_batch_network_policy
+):
     from dataclasses import replace
 
     from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
     from tldw_Server_API.app.core.Web_Scraping.orchestration import article
+    from tldw_Server_API.app.core.Web_Scraping.policy.probe import DefaultProbeEgressGuard
     from tldw_Server_API.tests.Web_Scraping.test_phase4_article_orchestration import _allowed_target
 
     original = article._build_default_dependencies
-
-    class Guard:
-        async def decide(self, *args, **kwargs):
-            return SimpleNamespace(allowed=True)
 
     async def allowed(url, *args, **kwargs):
         return _allowed_target(url)
 
     def local_dependencies(cookies):
         dependencies = original(cookies)
-        dependencies.browser._egress_guard = Guard()
         dependencies.browser._transport_decision = _legacy_allowed
         return replace(dependencies, evaluate_target=allowed)
 
     monkeypatch.setattr(article, "_build_default_dependencies", local_dependencies)
     monkeypatch.setattr(http_client, "PROXY_ALLOWLIST", {"127.0.0.1"})
     async with _sites() as (bases, seen):
+        native_batch_network_policy(bases)
+        denied = await DefaultProbeEgressGuard().decide(
+            "http://not-allowed.example/dom", context=RuntimeRequestContext()
+        )
+        assert not denied.allowed and denied.reason == "host_denied"
         target = "http://public.example/dom" if use_proxy else bases[0] + "/dom"
         scraper = enhanced.EnhancedWebScraper(
             config={

@@ -8,7 +8,7 @@ import json
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from functools import lru_cache
 from html import escape
 from pathlib import Path
@@ -22,6 +22,34 @@ PREFIX = "tldw_Server_API.app.core.Web_Scraping"
 LEGACY = f"{PREFIX}.Article_Extractor_Lib"
 ENHANCED = f"{PREFIX}.enhanced_web_scraping.EnhancedWebScraper"
 SERVICE = "tldw_Server_API.app.services.enhanced_web_scraping_service.WebScrapingService"
+
+
+def bind_enhanced_capabilities(scraper, dependencies):
+    """Bind fixture routing/extraction at the instance boundary now used by crawls."""
+
+    def route(url):
+        plan = dependencies.resolve_plan(url, {"web_scraper": scraper.config})
+        raw_backend = dependencies.backend_setting(plan) if dependencies.backend_setting else plan.backend
+        return (
+            SimpleNamespace(
+                **{
+                    **{field.name: getattr(plan, field.name) for field in fields(plan)},
+                    "backend": raw_backend,
+                    "extra_headers": plan.headers,
+                }
+            ),
+            plan.backend,
+            plan.handler,
+        )
+
+    def extract(html, url, **kwargs):
+        data = dict(dependencies.extract(html, url, **kwargs))
+        if data.get("content"):
+            data["content"] = dependencies.convert_content(data["content"])
+        return data
+
+    scraper._resolve_scrape_plan = route
+    scraper._extract_from_html_with_pipeline = extract
 
 
 def resolve(path: str) -> Any:
@@ -386,6 +414,15 @@ class Phase5Harness:
             if self.profile.startswith("enhanced"):
                 self.scraper = enhanced.EnhancedWebScraper(config={"max_concurrent": 1, **self.config})
                 patch.setattr(self.scraper, "scrape_article", self._page_async)
+                patch.setattr(
+                    self.scraper,
+                    "_extract_from_html_with_pipeline",
+                    lambda _html, url, **kwargs: self._page_sync(
+                        url,
+                        custom_cookies=self.credentials["custom_cookies"],
+                        **{key: value for key, value in kwargs.items() if key != "fallback_extractor"},
+                    ),
+                )
                 add_job = self.scraper.job_queue.add_job
 
                 async def submit(job: Any) -> Any:

@@ -2,7 +2,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from loguru import logger
@@ -159,7 +158,11 @@ async def test_persistence_classifies_empty_success_payload_without_storing(
 async def test_queued_timeout_reaches_persistence_with_its_safe_category(monkeypatch, message):
     _patch_db(monkeypatch)
     scraper = scraper_mod.EnhancedWebScraper(config={"max_concurrent": 1})
-    monkeypatch.setattr(scraper_mod, "afetch", AsyncMock(side_effect=NetworkError(message, classification="timeout")))
+
+    async def timeout_fetch(*_args, **_kwargs):
+        raise NetworkError(message, classification="timeout")
+
+    monkeypatch.setattr(scraper_mod, "afetch", timeout_fetch)
 
     job_ids = []
 

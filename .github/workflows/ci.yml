@@ -1777,6 +1777,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -3472,6 +3475,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -5004,6 +5010,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -6446,6 +6455,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -7879,6 +7891,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py

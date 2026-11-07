@@ -493,7 +493,7 @@ class _FakePage(_CleanupControlled):
     def __init__(self, runtime: _FakeBrowserRuntime) -> None:
         self.runtime = runtime
 
-    async def goto(self, url: str, **kwargs: object) -> None:
+    async def goto(self, url: str, **kwargs: object) -> Any:
         self.runtime.events.append(f"goto:{url}")
         self.runtime.events.append(f"goto-options:{sorted(kwargs)}")
         self.runtime.raise_at("goto")
@@ -522,6 +522,8 @@ class _FakePage(_CleanupControlled):
             assert self.runtime.cdp_sessions
             self.runtime.cdp_sessions[-1].emit(event, payload)
         await asyncio.sleep(0)
+
+        return SimpleNamespace(status=200)
 
     async def content(self) -> str:
         self.runtime.events.append("content")

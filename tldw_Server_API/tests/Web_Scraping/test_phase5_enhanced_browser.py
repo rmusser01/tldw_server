@@ -265,6 +265,7 @@ async def test_continue_failure_uses_terminal_route_completion_after_native_exit
     outcome.native_browser_disconnected = True
     await _adapter(_FakeBrowserRuntime(), _FakeGuard([True]))._http_handler(Route(), outcome)
     assert completed == [True]
+    assert outcome.failure.code == "browser_error" and outcome.failure.stage == "http_route"
 
 
 @pytest.mark.asyncio
@@ -554,6 +555,9 @@ async def test_public_recursive_binds_enhanced_browser_settings(monkeypatch, tmp
     )
     monkeypatch.setattr(article, "_build_default_dependencies", lambda *_args: fixture.dependencies)
     scraper = EnhancedWebScraper(config={})
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import bind_enhanced_capabilities
+
+    bind_enhanced_capabilities(scraper, fixture.dependencies)
 
     async def close_legacy_capability():
         pass
@@ -742,6 +746,8 @@ async def test_child_transfer_command_dispatch_precedes_next_navigation_turn():
     lease.seal()
     lease.owner_finished()
     assert trace == ["guard-dispatched", "navigation-turn"]
+    assert ports.pending == {}
+    assert pool.active_count == 0
 
 
 @pytest.mark.asyncio
@@ -851,6 +857,7 @@ async def test_transfer_target_discovery_excludes_already_owned_main_page():
     transfers._attach = attach
     await transfers.track()
     assert attached == []
+    assert transfers.targets == {} and transfers.ports.sessions == {}
 
 
 def test_native_intercepted_data_length_fallback_is_charged():

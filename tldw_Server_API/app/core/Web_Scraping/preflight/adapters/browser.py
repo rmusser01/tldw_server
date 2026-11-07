@@ -42,6 +42,9 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.requests import (
     RuntimeRequestContext,
 )
 
+from ...runtime.browser_accounting import RequestTransfers, non_negative_integer
+from ...runtime.browser_dispatch import TransferSessions
+from ...runtime.browser_document import DEFAULT_MAX_ARTICLE_BYTES, serialize_document
 from ...runtime.controls import observe_physical
 
 _HTTP_ROUTE_PATTERN = "**/*"
@@ -88,6 +91,8 @@ class _FetchGuard:
         self._commands: set[asyncio.Task] = set()
         self._exited = asyncio.Event()
         self._retired = False
+        self._transfers = None
+        self._callback_capacity = _FETCH_CALLBACK_CAPACITY
         browser.on("disconnected", self._disconnected)
 
     def _disconnected(self, *_args: Any) -> None:
@@ -99,7 +104,40 @@ class _FetchGuard:
             raise ProbeUnavailable()
         self.session = await self.browser.new_browser_cdp_session()
         self.session.on("Fetch.requestPaused", self._paused)
+        if self.probe._controls.parent is not None:
+            self._transfers = TransferSessions(self.session, self, self.probe, self._fail, self._failure)
+            self.session.on("Target.targetCreated", self._created)
+            await self.send("Target.setDiscoverTargets", {"discover": True})
         await self.send("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]})
+
+    @staticmethod
+    def _failure(_code: str, _stage: str) -> ProbeError:
+        return ProbeError("probe_error", "Probe failed.")
+
+    def _fail(self) -> None:
+        self.probe._stop_from_callback(self._failure("", ""))
+
+    def _created(self, event: dict) -> None:
+        if self._retired or len(self._callbacks) >= _FETCH_CALLBACK_CAPACITY:
+            if not self._retired:
+                self._fail()
+            return
+
+        async def observe() -> None:
+            try:
+                await self._transfers.created(event)
+            except (ParentStop, asyncio.CancelledError) as error:
+                self.probe._stop_from_callback(error)
+            except Exception:  # noqa: BLE001 - native target setup fails closed
+                self._fail()
+
+        self._own(observe(), self._callbacks, "preflight-browser-target")
+
+    def start_cleanup(self, operation, *, name):
+        if self._retired or len(self._commands) >= _FETCH_CALLBACK_CAPACITY:
+            operation.close()
+            return None, "unobserved"
+        return self._own(operation, self._commands, name), "owned"
 
     def _own(self, operation: Awaitable[Any], tasks: set[asyncio.Task], name: str) -> asyncio.Task:
         try:
@@ -128,6 +166,8 @@ class _FetchGuard:
 
         async def dispatch() -> None:
             try:
+                if self._transfers is not None and self.probe._admission_open:
+                    await self._transfers.track()
                 await self._route(_FetchRoute(self, event))
             except (asyncio.CancelledError, ParentStop, PreflightDeadlineExceeded, ProbeError) as error:
                 self.probe._stop_from_callback(error)
@@ -150,6 +190,8 @@ class _FetchGuard:
         # Neither a rejected close nor logical cancellation retires this guard.
         await self._exited.wait()
         self._retired = True
+        if self._transfers is not None:
+            self._transfers.retire(native_browser_disconnected=True)
         if self._callbacks:
             await asyncio.gather(*tuple(self._callbacks), return_exceptions=True)
         if self._commands:
@@ -391,11 +433,13 @@ class _GuardedPlaywrightPage:
         page_handle: _BrowserCleanupHandle,
         controls: PreflightRuntimeControls,
         captured_urls: list[str],
+        session: Any = None,
     ) -> None:
         self._page = page
         self._page_handle = page_handle
         self._controls = controls
         self._captured_urls = captured_urls
+        self._session = session
 
     @staticmethod
     def _normalize_timeout_ms(requested_ms: float) -> float:
@@ -483,6 +527,19 @@ class _GuardedPlaywrightPage:
             raise PreflightDeadlineExceeded()
 
     async def content(self) -> str:
+        if self._controls.parent is not None:
+
+            def failure(code, _stage):
+                if code == "response_too_large":
+                    error = ParentStop("budget_exhausted")
+                    self._controls.latch_callback_error(error)
+                    return error
+                return ProbeError("probe_error", "Probe failed.")
+
+            html, _ = await self._invoke(
+                lambda: serialize_document(self._session, DEFAULT_MAX_ARTICLE_BYTES, failure=failure)
+            )
+            return html
         return str(await self._invoke(self._page.content))
 
     async def evaluate(self, expression: str, argument: Any = None) -> Any:
@@ -527,6 +584,7 @@ class GuardedPlaywrightBrowserProbe:
         self._admission_open = True
         self._stop_task: asyncio.Task[Any] | None = None
         self._generation = 0
+        self._transfers = RequestTransfers(_FETCH_CALLBACK_CAPACITY, self._controls.charge_bytes)
 
     def _stop_from_callback(self, error: BaseException) -> None:
         self._admission_open = False
@@ -740,10 +798,36 @@ class GuardedPlaywrightBrowserProbe:
 
     def _on_transfer(self, payload: dict[str, Any]) -> None:
         """Observe raw CDP transfer lengths, not later response-body snapshots."""
-        amount = payload["encodedDataLength"]
-        if type(amount) not in (int, float) or not math.isfinite(amount) or amount < 0 or int(amount) != amount:
-            raise ProbeError("probe_error", "Invalid browser transfer event.")
-        self._controls.charge_bytes(int(amount))
+        if "requestId" in payload:
+            self._transfers.data("main", payload)
+        else:
+            amount = non_negative_integer(payload["encodedDataLength"])
+            if not amount:
+                amount = non_negative_integer(payload.get("dataLength"))
+            self._controls.charge_bytes(amount)
+
+    def _observe_transfer(self, callback, payload) -> None:
+        if not self._admission_open:
+            return
+        try:
+            self._controls.cap_timeout(None)
+            callback(payload)
+        except (ParentStop, asyncio.CancelledError) as error:
+            self._stop_from_callback(error)
+        except Exception:  # noqa: BLE001 - malformed native events fail closed
+            self._stop_from_callback(ProbeError("probe_error", "Probe failed."))
+
+    def on_request_data(self, session, payload) -> None:
+        self._observe_transfer(lambda event: self._transfers.data(session, event), payload)
+
+    def on_request_finished(self, session, payload) -> None:
+        self._observe_transfer(lambda event: self._transfers.finished(session, event), payload)
+
+    def on_request_failed(self, session, payload) -> None:
+        self._observe_transfer(lambda event: self._transfers.failed(session, event), payload)
+
+    def on_websocket_frame(self, payload) -> None:
+        self._observe_transfer(self._on_frame, payload)
 
     def _on_frame(self, payload: dict[str, Any]) -> None:
         frame = payload["response"]
@@ -756,31 +840,18 @@ class GuardedPlaywrightBrowserProbe:
             raise ProbeError("probe_error", "Invalid browser frame event.")
         self._controls.charge_bytes(amount)
 
-    async def _install_parent_transfer(self, context: Any, page: Any, handles: list[Any]) -> None:
+    async def _install_parent_transfer(self, context: Any, page: Any, handles: list[Any]) -> Any:
         if self._controls.parent is None:
             return
         session = await context.new_cdp_session(page)
         self._register(handles, session, kind="cdp")
-        closing = False
-
-        def observe(callback: Callable[[Any], None], payload: Any) -> None:
-            nonlocal closing
-            if closing:
-                return
-            try:
-                callback(payload)
-            except (ParentStop, asyncio.CancelledError) as exc:
-                # PageControls keeps the original stop; close admission/transport now.
-                closing = True
-                self._stop_from_callback(exc)
-            except Exception:  # noqa: BLE001 - malformed events fail closed at the parent boundary
-                closing = True
-                self._stop_from_callback(ProbeError("probe_error", "Invalid browser transfer event."))
-
-        session.on("Network.dataReceived", lambda payload: observe(self._on_transfer, payload))
-        session.on("Network.webSocketFrameReceived", lambda payload: observe(self._on_frame, payload))
-        session.on("Network.webSocketFrameSent", lambda payload: observe(self._on_frame, payload))
+        session.on("Network.dataReceived", lambda payload: self._observe_transfer(self._on_transfer, payload))
+        session.on("Network.loadingFinished", lambda payload: self.on_request_finished("main", payload))
+        session.on("Network.loadingFailed", lambda payload: self.on_request_failed("main", payload))
+        session.on("Network.webSocketFrameReceived", self.on_websocket_frame)
+        session.on("Network.webSocketFrameSent", self.on_websocket_frame)
         await session.send("Network.enable")
+        return session
 
     async def _cleanup_owned_resources(
         self,
@@ -816,6 +887,7 @@ class GuardedPlaywrightBrowserProbe:
         self._generation += 1
         self._admission_open = True
         self._stop_task = None
+        self._transfers = RequestTransfers(_FETCH_CALLBACK_CAPACITY, self._controls.charge_bytes)
         handles: list[_BrowserCleanupHandle] = []
         startup_stage = "launch"
         try:
@@ -895,13 +967,19 @@ class GuardedPlaywrightBrowserProbe:
                 check_after=False,
             )
             page_handle = self._register(handles, page, kind="page")
-            await self._install_parent_transfer(context, page, handles)
+            session = await self._install_parent_transfer(context, page, handles)
+            if session is not None:
+                info = (await session.send("Target.getTargetInfo"))["targetInfo"]
+                guard._transfers.context_id = info["browserContextId"]
+                guard._transfers.main_target = info["targetId"]
+                await guard._transfers.track()
             self._controls.cap_timeout(None)
             wrapped: BrowserProbePage = _GuardedPlaywrightPage(
                 page=page,
                 page_handle=page_handle,
                 controls=self._controls,
                 captured_urls=captured_urls,
+                session=session,
             )
         except (asyncio.CancelledError, ParentStop):
             await self._cleanup_owned_resources(handles)

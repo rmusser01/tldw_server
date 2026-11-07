@@ -477,9 +477,13 @@ async def test_owned_handle_cancellation_does_not_claim_physical_drain(ctx):
 async def test_attach_after_cancel_calls_owned_cancellation(ctx):
     loop = asyncio.get_running_loop()
     calls = []
+    result, drained = loop.create_future(), loop.create_future()
+    handle = WorkHandle(result, drained, lambda: calls.append(1))
     ctx.cancel()
-    ctx.attach(WorkHandle(loop.create_future(), loop.create_future(), lambda: calls.append(1)))
+    ctx.attach(handle)
     assert calls == [1]
+    assert not result.done() and not drained.done()
+    assert ctx.owned_handles() == (handle,)
 
 
 def test_cancel_callback_runs_outside_lock_and_snapshot_is_immutable(ctx):

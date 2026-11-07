@@ -249,7 +249,14 @@ async def test_enhanced_sitemap_filter_precedes_max_urls_and_keeps_credentials()
 async def test_sitemap_robots_policy_denial_prevents_fetch(profile, respect):
     harness = harness_for(profile, [{"url": BASE}])
     harness.denied_urls.add(harness.sitemap_url)
-    assert await harness.run() == []
+    if profile == "enhanced_sitemap":
+        from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlInterrupted
+
+        with pytest.raises(CrawlInterrupted) as caught:
+            await harness.run()
+        assert caught.value.report.outcome.stop_reason == "policy_denied"
+    else:
+        assert await harness.run() == []
     assert harness.fetch_calls == []
     assert harness.policy_calls[0]["respect_robots"] is respect
 
