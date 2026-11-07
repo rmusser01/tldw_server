@@ -12,6 +12,7 @@ from starlette.datastructures import State
 
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.Persona.dialogue_tree_scorers import ScoreResult, ScoreSeverity
+from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 from tldw_Server_API.app.core.Persona.runtime_explorer import (
     ExplorationFallback,
     RuntimeBudgetUsage,
@@ -65,6 +66,8 @@ def _mock_persona_ws_runtime(monkeypatch):
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
     fastapi_app.dependency_overrides.clear()
     if hasattr(fastapi_app.state, "persona_runtime_explorer_provider"):
         delattr(fastapi_app.state, "persona_runtime_explorer_provider")
@@ -87,6 +90,7 @@ def _events_for_text(text: str, *, session_id: str = "sess_runtime") -> list[dic
         events.append(data)
         return data.get("event") == "tool_plan"
 
+    persona_ep.get_session_manager().create("1", "research_assistant", resume_session_id=session_id)
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
@@ -113,6 +117,7 @@ def _notice_for_text(
     session_id: str = "sess_runtime",
     timeout: float = 2.0,
 ) -> dict:
+    persona_ep.get_session_manager().create("1", "research_assistant", resume_session_id=session_id)
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())

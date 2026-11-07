@@ -1316,9 +1316,11 @@ async def lifespan(app: FastAPI):
     _run_startup_config_validation()
 
     try:
+        from tldw_Server_API.app.services.startup_auth import refresh_provider_override_snapshot
         from tldw_Server_API.app.services.startup_openapi import warm_openapi_schema
 
         await warm_openapi_schema(app)
+        await refresh_provider_override_snapshot(services.db_pool)
         yield
     finally:
         # Forced ASGI shutdown cancels this suspended lifespan. Owned workers

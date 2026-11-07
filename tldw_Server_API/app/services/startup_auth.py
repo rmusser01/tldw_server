@@ -5,6 +5,7 @@ Auth services initialization extracted from the application lifespan startup.
 from __future__ import annotations
 
 from importlib import import_module
+from types import ModuleType
 
 from loguru import logger
 
@@ -77,6 +78,18 @@ async def init_auth_services() -> object:
             "App Startup: RBAC single-user seed ensure skipped"
         )
 
+    override_store = await refresh_provider_override_snapshot(db_pool)
+    if override_store is not None:
+        try:
+            override_store.start_llm_provider_override_refresh_service()
+        except _IMPORT_EXCEPTIONS:
+            logger.warning("App Startup: LLM provider override refresh service unavailable")
+
+    return db_pool
+
+
+async def refresh_provider_override_snapshot(db_pool: object) -> ModuleType | None:
+    """Verify provider policy against the actual store; leave failures unavailable."""
     override_store = None
     try:
         override_store = import_module(
@@ -89,13 +102,7 @@ async def init_auth_services() -> object:
         logger.warning(
             "App Startup: LLM provider overrides unavailable; server fallback disabled"
         )
-    if override_store is not None:
-        try:
-            override_store.start_llm_provider_override_refresh_service()
-        except _IMPORT_EXCEPTIONS:
-            logger.warning("App Startup: LLM provider override refresh service unavailable")
-
-    return db_pool
+    return override_store
 
 
 async def _validate_pg_serving_schema(db_pool: object) -> bool:

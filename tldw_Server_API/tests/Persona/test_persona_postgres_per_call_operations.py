@@ -41,7 +41,7 @@ def test_every_off_loop_persona_handle_call_runs_in_its_own_operation():
             else:
                 unwrapped.append(f"{rel}:{node.lineno} {callable_text}")
     assert unwrapped == [], f"wrap these in the file's chacha_operation(...)(callable): {unwrapped}"
-    assert wrapped == 21  # persona.py's 19 (TASK-13896 moved its 13 on-loop calls here) and the helpers' 2
+    assert wrapped == 24  # persona.py's 19 original calls + 3 admission/transcript calls, and the helpers' 2
 
 
 # Calls that receive the session's handle but own their ChaCha work themselves, or end the session.

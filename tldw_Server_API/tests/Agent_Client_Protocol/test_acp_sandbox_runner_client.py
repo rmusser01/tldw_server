@@ -456,6 +456,7 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
 
         async def _unregister_permission_session(self, session_id: str) -> None:
             self.unregistered.append(session_id)
+            await super()._unregister_permission_session(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -499,6 +500,7 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
 
         async def _unregister_permission_session(self, session_id: str) -> None:
             self.unregistered.append(session_id)
+            await super()._unregister_permission_session(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -541,6 +543,7 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
 
         async def _unregister_permission_session(self, session_id: str) -> None:
             self.unregistered.append(session_id)
+            await super()._unregister_permission_session(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))

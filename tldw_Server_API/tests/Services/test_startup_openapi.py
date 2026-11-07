@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
@@ -145,3 +146,75 @@ async def test_startup_openapi_cancellation_drains_build_before_teardown(
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("store_failure", [False, True], ids=["rotated-policy", "store-unavailable"])
+async def test_slow_startup_reverifies_provider_policy_before_admitting_requests(
+    monkeypatch: pytest.MonkeyPatch, fresh_services: Any, store_failure: bool,
+) -> None:
+    import time
+
+    from tldw_Server_API.app import main
+    from tldw_Server_API.app.core.AuthNZ import database, initialize
+    from tldw_Server_API.app.core.Provider_Credentials import llm_provider_overrides as store
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.services import (
+        lifespan_shutdown_sequence,
+        lifespan_startup_sequence,
+        startup_auth,
+        startup_openapi,
+    )
+
+    pool = object()
+    monkeypatch.setattr(fresh_services, "db_pool", pool)
+    get_pool = AsyncMock(return_value=pool)
+    monkeypatch.setattr(database, "get_db_pool", get_pool)
+    monkeypatch.setattr(store, "get_db_pool", get_pool)
+    monkeypatch.setattr(initialize, "ensure_authnz_schema_ready_once", AsyncMock())
+    monkeypatch.setattr(initialize, "ensure_single_user_rbac_seed_if_needed", AsyncMock())
+    elapsed = 0.0
+    prepared = False
+    monotonic = time.monotonic
+    monkeypatch.setattr(store, "time", SimpleNamespace(monotonic=lambda: monotonic() + elapsed))
+
+    class Repository:
+        def __init__(self, _pool: object) -> None:
+            pass
+
+        async def list_overrides(self) -> list[dict[str, object]]:
+            if prepared and store_failure:
+                raise OSError("synthetic credential store outage")
+            return [{"provider": "openai", "is_enabled": not prepared}]
+
+    monkeypatch.setattr(store, "AuthnzLLMProviderOverridesRepo", Repository)
+
+    async def startup(**_kwargs: object) -> SimpleNamespace:
+        await startup_auth.init_auth_services()
+        return SimpleNamespace(heavy_startup_handles=None)
+
+    warm_openapi = startup_openapi.warm_openapi_schema
+
+    async def prepare(app: FastAPI) -> None:
+        nonlocal elapsed, prepared
+        await warm_openapi(app)
+        # A startup longer than the cache's unchanged hard age must not admit stale policy.
+        elapsed += store._OVERRIDE_MAX_STALE_SECONDS + 0.1
+        prepared = True
+
+    monkeypatch.setattr(lifespan_startup_sequence, "run_lifespan_startup_sequence", startup)
+    monkeypatch.setattr(lifespan_shutdown_sequence, "run_lifespan_shutdown_sequence", AsyncMock())
+    monkeypatch.setattr(startup_openapi, "warm_openapi_schema", prepare)
+    monkeypatch.setattr(main, "_run_startup_config_validation", lambda: None)
+    try:
+        async with main.lifespan(FastAPI()):
+            if store_failure:
+                with pytest.raises(ByokResolutionError) as error:
+                    store.get_llm_provider_override("openai")
+                assert error.value.code == "credential_store_unavailable"  # nosec B101 -- An actual store outage must still deny credentials.
+            else:
+                policy = store.get_llm_provider_override("openai")
+                assert policy is not None and policy.is_enabled is False  # nosec B101 -- Admission observes the newly verified disabled policy.
+    finally:
+        await store.shutdown_llm_provider_override_recovery()
