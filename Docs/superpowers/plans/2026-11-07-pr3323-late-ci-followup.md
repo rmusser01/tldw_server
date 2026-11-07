@@ -1,6 +1,7 @@
 # PR #3323 Late CI Follow-up
 
 **Task:** TASK-15480 (original local evidence run ID: TASK-15466)
+**Follow-up PR:** https://github.com/rmusser01/tldw_server/pull/3438 (draft)
 **Base:** `dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c` (`dev`)
 **Goal:** Validate all four late CI failures and publish only confirmed, unowned repairs.
 **ADR check:** No new ADR is required for restoring existing lock configuration and generated-artifact contracts. ADR-059 governs task editing; ADR-085 governs the separately owned AuthNZ fixture repair.
@@ -37,11 +38,12 @@
 **Goal:** Open the follow-up PR with an auditable qualification record.
 **Success Criteria:** Affected tests and security/lint/format/task guards verified, independent review complete, normal hooks pass, clean published branch.
 **Tests:** Exact affected CI groups where feasible, repository-wide execution attempt, scoped Ruff/Black/compile/Bandit, whitespace/task guards.
-**Status:** In Progress
+**Status:** In Progress (publication complete; hosted qualification and human summary pending)
 
-- [ ] Run affected selections and record every failure, skip and environment limitation without relabeling them green.
+- [x] Run affected selections and record every failure, skip and environment limitation without relabeling them green.
 - [x] Review source/test scope and baseline-compare any inherited security findings.
-- [ ] Commit code and canonical task records together; open draft PR against dev with all four dispositions and #3406 dependency.
+- [x] Commit code and canonical task records together; open draft PR against dev with all four dispositions and #3406 dependency.
+- [ ] Before landing, satisfy the new PR's own human-summary and exact-current-head hosted gates. Merge is not part of this request.
 
 ## Initial Evidence
 
@@ -94,3 +96,9 @@ Final combined changed-scope tests pass 32 cases (22 Logging plus ten inventory 
 A repository-wide fail-fast run collected 88,180 tests and finished execution at 840 passes, 12 collection skips, and the existing `tests/Admin/test_backup_storage_scope.py::test_shared_audit_refuses_stale_per_user_file[backup]` failure (11,648 warnings). The fixture expected shared audit mode but observed per-user mode after full collection. PR #3406 already owns a separate settings-generation repair for that failure, binding the audit/backup consumers to the intended current config. This follow-up does not duplicate that patch or claim repository-wide success.
 
 Independent logging review found no actionable findings and reproduced baseline/repair race timings of 5.0126/0.2156 seconds; it also checked preservation of the live module's settings, queue, worker and sinks. Production, generator, guard, CI policy, dependencies and security baselines remain unchanged.
+
+### Publication Qualification
+
+The complete current integrations selection finished with **3,490 passes, 28 skips, zero failures/errors**, and 22,418 warnings in 871.64 seconds. Its 3,518 collected cases include the formerly failing inventory guard. Skips are 17 optional curl-cffi cases, nine opt-in external API cases and two cases whose management router is not enabled in this environment; none is an unavailable PostgreSQL case. The selection and CI plugin/marker settings are recorded in `/tmp/pr3323-followup-20261107/integrations-green.log` and its XML peer.
+
+Source and related task/plan records were committed normally as `1d0a61a9b3fb9c24876ab2684214df9aa18c5357`, published on `codex/jobs-postmerge-ci-followup`, and opened as draft PR #3438 against the still-current verified dev base. The committed-task ratchet and unique-ID tests pass 15 cases against that exact base. The later publication-record commit changes only this plan and the task; repaired source/generated-artifact blobs remain unchanged. No merge or auto-merge was requested for the new PR; the old #3323 summary waiver is not inherited.
