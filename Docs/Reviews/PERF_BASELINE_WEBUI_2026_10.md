@@ -795,9 +795,9 @@ to prove W5 broke nothing measured. The actual evidence, per stage:
   visible-body/tier ordering per scenario (selection present / absent /
   article empty). Per-clip host-main-thread work drops from
   full-page serialize + cheerio parse + forced `innerText` layout to one
-  `getSelection().toString()` + trim — the plan's "< 10 ms capture"
-  criterion is satisfied by construction (nothing measurable remains on
-  the path), pinned per the W3 no-wall-clock convention.
+  `getSelection().toString()` + trim. The mechanism is pinned by tests;
+  the plan's "< 10 ms capture" wall-clock criterion remains unmeasured
+  and requires real-device timing before it can be marked satisfied.
 - **S2 — copilot appends (WP-58):** a MutationObserver over the real
   render target through a 1000-chunk stream proves **appends, not
   replaces** — exactly one added text node per non-empty chunk and ZERO
