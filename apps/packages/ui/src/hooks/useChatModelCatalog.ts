@@ -8,6 +8,14 @@ import {
 
 export const EMPTY_CHAT_MODELS: Awaited<ReturnType<typeof fetchChatModels>> = []
 
+/**
+ * WP-49: revisits inside this window reuse the cached catalog instead of
+ * re-fetching the full model catalog per mount. Explicit refresh affordances
+ * (retry actions, "refresh models") and cache-generation invalidations still
+ * force fresh reads regardless of this window.
+ */
+export const CHAT_MODEL_CATALOG_STALE_MS = 15 * 60_000
+
 /** The query key of the chat model catalog for one cache generation. */
 export const chatModelCatalogQueryKey = (generation: number) =>
   ["playground:chatModels", generation] as const
@@ -29,7 +37,8 @@ export const useChatModelCatalog = (enabled = true) => {
     queryFn: () => fetchChatModels({ requireFresh: true }),
     enabled,
     retry: false,
-    staleTime: 30_000
+    staleTime: CHAT_MODEL_CATALOG_STALE_MS,
+    gcTime: CHAT_MODEL_CATALOG_STALE_MS
   })
   const [activation, setActivation] = useState({ enabled, generation,
     needsVerification: enabled && (previousPending || previousEmpty), waitForPrevious: previousPending })
