@@ -14,11 +14,22 @@ export const postAdminE2EJson = async <T>(
   path: string,
   body?: unknown,
 ): Promise<T> => {
+  const bootstrap = await fetch(`${baseUrl}/health`);
+  if (!bootstrap.ok) {
+    const detail = await bootstrap.text().catch(() => '');
+    throw new Error(`Admin e2e CSRF bootstrap failed: ${bootstrap.status} ${detail}`.trim());
+  }
+  // Node fetch has no cookie jar; the middleware returns the cookie token in this header too.
+  const csrfToken = bootstrap.headers.get('X-CSRF-Token');
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...getAdminE2ESupportHeaders(),
+      ...(csrfToken ? {
+        Cookie: `csrf_token=${csrfToken}`,
+        'X-CSRF-Token': csrfToken,
+      } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
