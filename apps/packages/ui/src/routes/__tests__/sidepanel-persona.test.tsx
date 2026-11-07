@@ -3188,13 +3188,13 @@ describe("SidepanelPersona", () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+      expect(screen.getByTestId("persona-commands-draft-banner")).toHaveTextContent(
+        "Drafted from assistant setup"
+      )
+      expect(screen.getByTestId("persona-commands-name-input")).toHaveValue(
+        "Open the pod bay doors"
+      )
     })
-    expect(screen.getByTestId("persona-commands-draft-banner")).toHaveTextContent(
-      "Drafted from assistant setup"
-    )
-    expect(screen.getByTestId("persona-commands-name-input")).toHaveValue(
-      "Open the pod bay doors"
-    )
 
     fireEvent.change(screen.getByTestId("persona-commands-name-input"), {
       target: { value: "Open Pod Bay Doors" }
@@ -3209,13 +3209,13 @@ describe("SidepanelPersona", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test")
+      expect(screen.getByPlaceholderText("Try a spoken phrase")).toHaveValue(
+        "open the pod bay doors"
+      )
+      expect(
+        screen.getByText("Command saved. Run the same phrase again to confirm setup.")
+      ).toBeInTheDocument()
     })
-    expect(screen.getByPlaceholderText("Try a spoken phrase")).toHaveValue(
-      "open the pod bay doors"
-    )
-    expect(
-      screen.getByText("Command saved. Run the same phrase again to confirm setup.")
-    ).toBeInTheDocument()
   })
 
   it("derives handoff review details when setup resumes on the test step", async () => {
