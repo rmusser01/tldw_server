@@ -1,5 +1,5 @@
 ---
-id: TASK-15415
+id: TASK-15453
 title: Implement Claims cluster source snapshot and cleanup locks
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15414
+- TASK-15452
 ---
 
 ## Description
@@ -34,6 +34,7 @@ Separate restricted owner/lock qualification: 13 passed, 8 deselected, 38 warnin
 Checkpoint follow-up qualification (no production changes): explicit old-cluster -> Media -> Claims real SELECT FOR UPDATE trace plus actual competing edit/delete/transfer statements under the official restricted role: 3 passed, 21 deselected, 18 warnings (/tmp/task5-cleanup-lock-races-final.log). Command: python -m pytest -q tldw_Server_API/tests/MediaDB2/test_claim_cluster_rebuild_snapshot_postgres.py -k cleanup_cluster_media_claim_lock_order, with required venv activation. Full configured Ruff, scoped format and compile of the additional test are clean. Base implementation commit b5fc7a5bc1; aggregate distinct focused cases now 218 (52 domain including 24 restricted-role PG, plus 166 affected characterization), not a whole-branch/repo qualification. No reference-visibility or architectural blocker found; keep In Progress for controller review.
 Independent Task5review at a2236fcf14: spec compliant / qualityApproved, no Critical/Important findings. Owner/snapshot/schema/cleanup/destination safety verified with actualrestrictedPostgresrace and parityevidence.218distinctfocusedcases passed, nofixtureskips; configuredlint/compile/scopedformat/hooks and Bandit0findings/errors. Cannotverify publication/fences/worker/rollout belongsTasks7/9/11. Minor validated typeclarity: ClusterPublicationResult.result annotationdict disagrees with read-only MappingProxyType runtime; record for Task7consumerintegration, align to Mapping rather than expose false mutability, preserve defensivecopy and explicitdict serialization. This is nonblocking beforepublisherexists, not silentlydiscarded; Task7/finalreview mustcloseit. Warning/legacyformatdebt remainsdisclosed. Fullreport/review inthisplansSDDworkspace.
 Active governance/reference update under TASK-15421: current Claims resource/publication ADR086 (metadata-only move from private085); ProposedSDKcoordinationADR087 remains Proposed. Planning/design are TASK15423/TASK15422; completed implementationTasks1/2/3 are TASK15424/TASK15425/TASK15426. Dependencies repaired viaCLI. Earlier note/commit IDs are historical evidence, not current aliases to other owners records. No accepted rationale, runtime behavior, status or verification rewritten.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

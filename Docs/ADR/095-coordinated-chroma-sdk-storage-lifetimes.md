@@ -1,10 +1,10 @@
-# ADR-087: Coordinated Chroma SDK Storage Lifetimes
+# ADR-095: Coordinated Chroma SDK Storage Lifetimes
 
 **Status:** Proposed
 **Date:** 2026-11-02
 **Backfilled from:** not backfilled
 **Decision owner:** Claims workstream; implementation under independent review
-**Related task:** TASK-15416
+**Related task:** TASK-15454
 **Related spec/plan:** `Docs/superpowers/specs/2026-11-01-claims-jobs-stage2c-cluster-rebuild-design.md`; `Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md`
 
 ## Decision

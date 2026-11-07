@@ -1,5 +1,5 @@
 ---
-id: TASK-15420
+id: TASK-15458
 title: Implement opt-in cluster Jobs API and authorized status links
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15419
+- TASK-15457
 ---
 
 ## Description
@@ -31,6 +31,7 @@ Active governance/reference update under TASK-15421: current Claims resource/pub
 BeginapprovedTask10afterTask9fix1independentreviewclean (556b226a29/57cda37a2f). Use task-10-brief.md/constraints/task-10-integration-notes +reviewedTask4/9handoffs. Capture routingonce, asyncbranchNOcreatingMediaDB dependency/lazyJobsmanagerAFTERClaimsowner/Jobsforeignlinkauth; explicitanyuser_idretainsplatform-adminrestrictionincluding self. ExistingQueryvalidationretained; exactvalidthresholdsemanticallyignored. DirectTask9enqueue neversecond-readsflags orlocalfallback, stabletyped202/409/200/OpenAPI/Location/quotamapping/sanitized503. Asyncingresseveryattempt inclreplay; disabledlegacy200/cleanupunchanged. Jobsowner/domaincontext insideactualexecutingthread, officialrestrictedPGendpointproof/restoreaftererrors. Routeavailabilitybeforeadmission. Testfirst/scopedquality/Bandit/hooks/commit, keepInProgressforreview. ADRassessment accepted086+003/058 governs,087Proposedunchanged,no newlifecycle/statusproxy. No push/PR/merge/maincheckout changes.
 Task10 implementation complete pending controller independent review. Frozen routing context avoids all creating Media dependencies in Jobs mode; legacy service signature/200 fields preserved, sync and explicit scoped admission offloaded. Claims/strict-owner and foreign Jobs-role/domain authorization precede lazy manager/request lookup; actual status mount preflight, UUID-bound own/foreign links, typed202+Location/409, async-only keys and every endpoint async attempt ingress guard, sanitized unavailable/unknown/lost-ack503 without fallback. Final affected run RUN_JOBS=1 with importlib/strict-markers retained and warning display: 478 passed,0 skips,1030 warnings17.27s (/tmp/task10-green-final2.log); dedicated70 passed,0 skips,156warnings5.57s (/tmp/task10-api-final2.log), including actual official restricted jobs_pg_dsn/jobs_rls HTTP A202+ownedread/B404, sequential replay/error/target-B admission and executing-thread context restoration/non-superuser/non-bypassRLS. Configured7fileRuff baseline4/current4 zeroNEW, compile/scopedBlack pass; touched4productionBandit0findings/errors. InitialRED46failed2passed beforeproduction, additionalOpenAPI/ingressRED recorded. Report .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-10-report.md. ADR086Accepted+003/058 govern;087remainsProposed,no newarchitecture or acceptance. Minimal admin registration remains existing unconditional behavior; producer checks actual mounted routes rather than changing registration. No Task11 qualification/Chroma rerun, no push/PR/merge. Normal hooks and scoped localcommit follow; leaveInProgress for review.
 Task10complete4db80b8fcbaac52aa87a93cf621b2d2a0f209d50. Independenttask-10-review.md SpecCompliant/QualityApproved, noCritical/Important. Controllerreadfullreview/report/savedevidence:478pass0skip incl70APIandactualrestrictedjobs_rlsHTTP/GUCthreadproof;1030warnings retained. ConfiguredRuff4exactbaseline/current0new,compile/scopedBlack/hooks pass,Banditfourprod0findings/errors. Frozenrouting/lazyJMafterauth/noasyncMediaProvision/synccleanup, explicitplatformadminoverrideinclself, awaitedforeignJobsreadguard/UUIDlinks/routegates,202/409/quota429/static503lostackno fallback/header/OpenAPI/ingress allcovered. Minorinheritednoise qualifiedTask11, no newdebt. APIcodeimplementedbutfeaturedefaultfalse; no deployment/publication/mergeauthorization.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

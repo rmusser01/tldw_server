@@ -1,5 +1,5 @@
 ---
-id: TASK-15423
+id: TASK-15461
 title: Plan Claims Jobs Stage 2C cluster rebuilds
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - planning
 dependencies:
-- TASK-15422
+- TASK-15460
 - TASK-9935
 ---
 
@@ -37,6 +37,7 @@ Revised the implementation plan for all five authorized corrections. Task 2 now 
 Fresh full-branch documentation/task-scoped pre-commit passed all applicable hooks with only normal no-code skips; log /tmp/claims-stage2c-plan-review-fixes-hooks-20261101.log. The official duplicate-task-ID checker, canonical TASK-15283 format and staged whitespace checks also passed. Only the plan and TASK-15283 are staged for the normal local correction commit, docs(claims): close stage 2c plan review gaps (TASK-15283). No implementation gate or execution checkbox has been marked complete. Task remains In Progress for requester review; preserve the selected subagent-driven method for a separately approved execution handoff.
 Execution handoff on 2026-11-01: user approved the corrected plan, paused to ask about the existing shared WorkerSDK, then said ok continue. Verified clean linked worktree and 44 baseline clustering/admission/owner-read tests passed with zero skips (101 warnings, 1.45s; /tmp/claims-stage2c-execution-baseline-20261101.log). Fresh task-ID/ADR inventory explicitly targeted origin rmusser01/tldw_server: 37 open PRs with all paginated file lists, 223 selected Backlog/ADR paths, max task ID 15410 and no collision with this plan/design or ADR-085. This supersedes the earlier planning inventory that accidentally used gh default upstream. Created TASK-15411..TASK-15421 for the eleven review units and initialized this plans isolated SDD ledger. Latest dev 61d02ed484a3c80f5423676b959cf14e7b572a62 differs only in disjoint Moderation work; no rebase needed for this local handoff. No additional ADR needed; accepted ADR-085 governs. No push/PR/merge authorized.
 Identifier-only repair under TASK-15421 after current dev and all39openPR paginated audit. This Claims record is renumbered to avoid another owners published/open task. Existing status, acceptance, rationale and historical evidence are preserved; current governing Claims ADR is086 after metadata-only move. No production behavior or publication authorization changed.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

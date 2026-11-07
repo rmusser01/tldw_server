@@ -1,5 +1,5 @@
 ---
-id: TASK-15421
+id: TASK-15459
 title: Qualify Claims cluster Jobs recovery and operations
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15420
+- TASK-15458
 ---
 
 ## Description
@@ -49,6 +49,7 @@ Final whole-branch fix wave implements BOTH authorized I1/I2 together from FIX_B
 Final I1/I2 affected qualification COMPLETE exit0:1232passed0fail/error/skip/xfail/xpass8669warnings405.39s across38explicit Jobs/Claims modules; all17added production executable lines covered. SQLite and official PG, restricted-owner real fair-share HTTP429/positive replay/status, ordinary prune and legacy BadRequest guards pass. Structured945warning records:7743Deprecation,919Resource,2Pydantic,2Starlette,1eachUser/Config/Requests. ResourceWarning newly observed relative prior fullscope:919distinct unclosed sqlite3.Connection messages, emitted at GC locations not allocation. Three bounded diagnostics then stop: two6pass tracemalloc/GC probes did not reproduce; direct ownership observer partial6bodiespass/2observer cross-thread teardownerrors,107recorded handles/98closed/9open, all66checked snapshot-helper handles closed and all9open allocated unchanged Jobs/migrations.py1379 via existing fixtures/event_stream. No new raw-connect helper; finally-close helper unchanged; cannot retrospectively prove all919origins, explicitly qualified in final-fix-report. No fourth probe/full/root rerun or blanket filter. Final compile8pass/configuredRuff0base=0current/changed-rangeBlack pass; Bandit1unchangedB608/0new/errors,295diagnostic warnings base/current. Stage canonical tracking before all9path applicable hooks, then normal scoped fixcommit. Report .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/final-fix-report.md. Keep In Progress/criteria/plan/ADR unchanged; parent independent scoped rereview/finalization required.
 Final fix self-review and all applicable explicit full9path pre-commit hooks PASS exit0 after staging canonical Task15421 (including preserved parent authorization); YAML/TOML and wizard-filtered Ruff/Black no-applicable skips, separate configured full-file Ruff and changed-range Black already pass. No installed git pre-commit/core.hooksPath, no automatic-hook claim or bypass. Cached diffcheck0, exact9path staged scope, no Claims production endpoint/plan/ledger/ADR changes. Normal scoped local commit follows; final-fix-report.md records final commit/evidence. Qualification remains1232passed0skips with disclosed919ResourceWarning provenance limit and inheritedBandit/root-collection debt; independent parent rereview pending, task stays In Progress.
 Final whole-branch review and its ONE coherent fix wave are complete. Full review checked all23Jobs mutation entries, eight approved corrections, domain/native-storage/owner/API/Watchlists/rollback/restore boundaries and listed16unqualified behaviors. Both Important findings fixed in f42867f628d1597f5fbd66d6a3bb60684563764a; independent scoped re-review reports I1 ADDRESSED and I2 ADDRESSED, no new Critical/Important/Minor breakage. Active bound Jobs survive prune across states/keys/archive settings; real resource fair-share refusal preserves typed429, savepoint rollback, legacy exceptions and replay-first behavior. Own post-fix affected gate1232passed0skips8669warnings,49targetedpass,17of17added executable statements covered. Four production files Bandit one unchanged B608/zero new/zero errors; configured8fileRuff0baseline/current, compile/scopedformat/explicitnormalhooks pass. Earlier full4184pass3legacy skips and explicit storage/config/Backlog scopes are pre-wave context, not falsely refreshed all-code evidence. Newly observed919SQLiteResourceWarnings remain partial-provenance qualification:66checkedhelperhandlesclosed,9sampledopen allocations in unchanged migration1379, two diagnosticthread-affinityerrors; not all919 traced or called inherited/clean. Single rootattempt exit2unchanged Workspaces httpx2collectionblocker/no tests executed. No further root runs, unrelated repairs, publication/rebase/merge/deployment or ADR087 acceptance. All implementation/task/final review gates closed; remove only this completed plan per repo policy, preserve approvedspec/acceptedADR/runbook and branch/worktree. Final non-code tracking/plan cleanup will use canonical checks and applicable explicit hooks before local commit.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

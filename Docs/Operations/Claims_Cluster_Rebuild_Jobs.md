@@ -3,8 +3,8 @@
 ## Contract And Configuration
 
 This opt-in Stage 2C moves `POST /api/v1/claims/clusters/rebuild` to shared
-Jobs type `claims_rebuild_clusters`. ADR-086 is Accepted and composes with
-ADR-003/058; SDK storage-lifetime ADR-087 remains Proposed. Claims owns
+Jobs type `claims_rebuild_clusters`. ADR-094 is Accepted and composes with
+ADR-003/058; SDK storage-lifetime ADR-095 remains Proposed. Claims owns
 calculation and publication, not a queue, lease loop, cancellation state,
 shutdown gate or restore-repair service.
 

@@ -1,11 +1,11 @@
-# ADR-086: Resource Admission In Jobs, Publication Fences In Domain Storage
+# ADR-094: Resource Admission In Jobs, Publication Fences In Domain Storage
 
 **Status:** Accepted
 **Date:** 2026-11-01
 **Backfilled from:** not backfilled
 **Decision owner:** Human requester, approved the revised written design on 2026-11-01
-**Related task:** TASK-15422
-**Identifier note:** Renumbered from private ADR-085 on 2026-11-02 to avoid the published AuthNZ ADR-085; accepted decision and rationale unchanged.
+**Related task:** TASK-15460
+**Identifier note:** Renumbered from private ADR-085/086 after publication-time collision audits; accepted decision and rationale unchanged.
 **Related spec/plan:** Docs/superpowers/specs/2026-11-01-claims-jobs-stage2c-cluster-rebuild-design.md; Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md
 
 ## Decision

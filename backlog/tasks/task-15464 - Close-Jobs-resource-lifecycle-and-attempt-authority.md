@@ -1,5 +1,5 @@
 ---
-id: TASK-15426
+id: TASK-15464
 title: Close Jobs resource lifecycle and attempt authority
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15425
+- TASK-15463
 ---
 
 ## Description
@@ -36,6 +36,7 @@ Independent Task3 review at e52cd86a674f82715f065e2c15ae657bbb8dd3fc returned Is
 Task3 fix round1 against e52cd86a674f82715f065e2c15ae657bbb8dd3fc addresses all four independently reviewed Important findings: frozen ID+UUID authority at PG single-row rereads/cancellation writes; actual eligible TTL/reschedule discovery and bounded metadata-only oldest-lease recovery before head locks, with head/row SKIP LOCKED; indexed target-driven null-safe SQLite live/archive matching; and all21 ordinary configured Ruff findings with explicit named local pytest fixture registration, no gates/selects/ignores/noqa weakening. New deterministic mixed-owner/corrupt-or-locked-head/row, bounded materialization, VM/query-plan and ordinary-to-resource ID-replacement regressions pass. Final same-code22-module qualification: 605 passed, 0 skipped, 5160 warnings, 208.09s, exit0 (/tmp/task3-fix1-combined-final-qualified.log). Initial602pass/3fail characterization and one interrupted run remain explicitly recorded; strict SQL hook detection was corrected without changing race assertions, final eight race checks pass. Full configured Ruff and compilation over all nine original Python files plus release race-hook test pass; scoped Black passes. Full touched-production Bandit remains exit1 only for byte-equivalent BASE B608 at manager10244, zero new findings/errors. Final source/test diff SHA256 c622d20be1765a33e37a94ffcc25644ed341074cc98eecfa8db36c1d600b9c2b. Report appended at .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-3-report.md, including precise commands, warnings triage and bounded contended-window semantics (may return less than budget; no additional heads acquired after row locking). Keep In Progress for independent controller review. No ADR/public API/schema change or Task4+ work; normal scoped hooks/local commit follow.
 Task3 fix round1/3 scoped re-review: all four Important findings ADDRESSED, no new Critical/Important breakage, zero open findings. Reviewer verified frozen authoritative reads, actual TTL eligibility and bounded metadata-only recovery with skip behavior, indexed/null-safe SQLite target matching and full configured Ruff. Release race recognizer still asserts actual locking and persisted reassignment; no assertions/gates weakened. Final same-code 605 passed, zero skips, 5160 warnings across22modules (208.09s), ten-file configured Ruff/compile, scoped format/hooks pass. Bandit exit1 for unchanged B608 only, zero new findings/errors. Recovery intentionally uses a bounded candidate window and may underfill/return zero under sustained earliest-candidate contention without refilling; no fairness/full-budget throughput guarantee. Preserve this operational limitation in Task11 handoff. Focused54warning observer traced unchanged infrastructure, not full warning triage. No producer/Task4 rollout claimed. Reports: task-3-report.md correction append and task-3-fix1-review.md in this plans SDD workspace.
 Identifier-only repair under TASK-15421 after current dev and all39openPR paginated audit. This Claims record is renumbered to avoid another owners published/open task. Existing status, acceptance, rationale and historical evidence are preserved; current governing Claims ADR is086 after metadata-only move. No production behavior or publication authorization changed.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

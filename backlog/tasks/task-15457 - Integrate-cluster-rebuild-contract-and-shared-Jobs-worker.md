@@ -1,5 +1,5 @@
 ---
-id: TASK-15419
+id: TASK-15457
 title: Integrate cluster rebuild contract and shared Jobs worker
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15418
+- TASK-15456
 ---
 
 ## Description
@@ -34,6 +34,7 @@ Task9 final implementation/evidence ready for controller review; retain In Progr
 IndependentTask9review556b226a29 Issues/Needsfixes, oneImportantI1/P1 validatedcontroller source+realWorkerSDKinjectedteardownprobe. Loadedexactreceipt alreadycommitted but newly_publishedFalse; managedMediaDBexiterror bypasses currentpostcommitsuccessguard, turns replayqueued/failed andcanexhaustretries despitecommittedoutput. Accept originalreplay/postcommitrequirement. Fix1/3 originalimplementer tracks loadedCOMMITTEDreceiptresult separately fromnewpublication; retaincapturedresultforlaterteardown/processingfailures, no vectors/calc/Watchlistsrepeat. DoNOTcallallnewly_publishedFalse durable because receiptlesssupersededexists. Precommitfaultsremainclassifiedfailures. Addexact/legitimate-skip retry+reactivationteardownregressionsactualWorkerSDK. Minor1512warningqualificationretainedTask11, no new lint/securitydebt. ConcurrentTask11testonlysidecarownsTask8testfiles/TASK15421unstaged; preserve/exclude them fromfix staging/hooks.
 FIX ROUND1/3 for I1/P1 at FIX_BASE556b226a298eecd140dfbaeab43ef85eb689bbd5: capture known committed loaded receipt result independently of newly_published invocation metadata, and preserve it across later processing/teardown faults. Newly committed results retain same protection; receiptless superseded and precommit faults remain sanitized classified failures, from None. Parent finding note preserved. Actual WorkerSDK RED /tmp/task9-fix1-red2.log: 8 expected replay failures, 14 controls passed, 62 deselected, 97 warnings; GREEN /tmp/task9-fix1-green.log: 22 passed, 62 deselected, 97 warnings. Final scoped worker/config/owned-status/service run /tmp/task9-fix1-affected.log: 256 passed, zero skips/xfails/xpasses, 585 warnings. Exact+legitimate-skip retry/reactivation faults cover transient ConnectionError/nonretryable ValueError, receipt IDs/counts/output preservation, no vectors/calculation/Watchlists repeats, executing-thread two-scope restoration, first-publication and precommit/receiptless controls. Configured whole-file Ruff FIX_BASE0/current0, compile/scoped Black pass, touched-handler Bandit0 findings/errors. Keep In Progress for controller re-review. Concurrent TASK15421/Task8 watchlist tests excluded and preserved; only handler/assigned worker tests/this task staged. Full fix evidence appended to assigned task-9-report.md.
 Task9complete556b226a29/57cda37a2f aftertask-9-fix1-review.md I1/P1ADDRESSED/no newbreakage. Controllerreadfullfixreview/report/evidence: knowncommittedreceipt+newpublication results surviveprocessing/teardown, receiptlesssuperseded/precommiterrorsremainclassified/staticfromNone, contextsrestore/no vector/calc/Watchlistsrepeat. Finalaffectedfix256pass0skip/xfail/xpass585warnings; earlierfull717+8fencecases0skips1512warnings qualifiedbeforelocalfix, notfalselypristine. ConfiguredfixRuff0baseline/current/compile/format/hooks/Bandit0findings/errors; originalconfig.py71exactinherited0new retained. ExistingWorkerSDKsolelifecycle, no secondqueue/runtime. NoTask10producerenabled.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

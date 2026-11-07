@@ -1,5 +1,5 @@
 ---
-id: TASK-15418
+id: TASK-15456
 title: Implement existing-only owner-safe cluster Watchlists evaluation
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15417
+- TASK-15455
 ---
 
 ## Description
@@ -33,6 +33,7 @@ Task8 implementation started at clean a4916a15f1d2e5d61b70ad8a840ac0d5b65e0f69 o
 Task8 implemented; keep In Progress pending controller independent review. New open_existing borrows/pins validated Media backend, verifies all 5 evaluator tables/21 required columns without bootstrap/repair; pg_catalog avoids ACL-hidden absence. New post-publication evaluator intersects owned subscriptions with owner-predicated clusters before counting/updating/notifying. All 3 aggregate helpers add optional keyword-only owner_user_id with explicit query/write ownership guards, preserving omitted-owner contracts. Narrow claims_notifications insert-catch logging sanitized. Final affected qualification: /tmp/task8-final-qualified.log and .xml, 75 passed (63 new, 18 official restricted-role PostgreSQL), 0 skips/failures/errors, 376 inherited warnings. Scoped compile/format pass; configured whole-file Ruff 12 inherited findings matching a4916a15f1 (0 new); touched-production Bandit /tmp/bandit_task8_final.json: 0 findings/errors, no new suppressions. Full evidence/interfaces/limitations: .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-8-report.md. Task9-only caller wiring/newly_published guard remains intentionally unimplemented; no lifecycle/producer/global-storage work.
 Self-review of assigned production/test diff complete; only assigned 6 Python paths plus this task changed. Normal applicable pre-commit hooks pass (/tmp/task8-hooks.log); yaml/toml and wizard-only Ruff/Black hooks correctly had no applicable files. Independent configured Ruff/scoped-format checks were run separately, not replaced by hook skips. No whole-repo/Jobs/Chroma test reruns, nested agents, producer wiring or external git operations.
 IndependentTask8review task-8-review.md: SpecCompliant/QualityApproved, noCritical/Importantfindings. Controllerreadfullreport/savedqualitysummary/BanditJSON. Task8complete d62f897baabc26285d3cb0abcad20cf173965cbc:75pass0skips incl18officialrestrictedPG,63newcases,12legacycharacterization; configuredRuff12exactlyinherited0new,compile/scopedformat/hooks pass,Bandit0findings/errors. Minor inherited376warning/nosec/lintnoise remainsdisclosed; no newruntime defect. Nonblockingphysicalpartial-columnPGtestdepthimprovement assignedTask11beforefinalqualification; existingeachcolumninventorytests mockmetadata, actualmissingtable/revokedSELECT casesalreadycovered. No Task9caller/worker/producerenabled.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -1,5 +1,5 @@
 ---
-id: TASK-15417
+id: TASK-15455
 title: Implement atomic cluster publication and replay receipts
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15416
+- TASK-15454
 ---
 
 ## Description
@@ -35,6 +35,7 @@ Independent Task7review21919902aa: Issues/Needsfixes, oneImportant I1/P1 validat
 Task7 Fix Round1/3 started at FIX_BASE21919902aa36048c428f747b294334e905f0b4dc. Read complete I1/P1 and verified the guard precedes source locks. Exact source-reader-entry gap regression plus a normal-writer post-lock contention case added before production fix; official restricted PostgreSQL only. Move bounded deletion-set validation after source/cleanup locks with no late cluster locks or broad writes. Preserve controller finding note; keep In Progress for scoped independent re-review.
 Fix Round1/3 I1/P1 implemented at FIX_BASE21919902aa: bounded deletion-set validation moved after source/cleanup locks and snapshot validation, before destructive writes; plain SELECT/no new cluster locks, no broadened writes or writer protocol. Exact source-reader-entry normal create+add regression RED2 then GREEN; lower-bound drift variant RED1/GREEN5 ensures retryable source_changed even when late arrival crosses cleanup limit. Real normal-writer barriers prove post-lock drift retries without waiting on new cluster lock, and post-final-guard membership add waits until commit then may act as a subsequent owner mutation. Final affected SQLite+PG publication/property groups 123 passed, 0 skips/fails/xfail/xpass, 259 inherited warnings, 29.23s; includes 67 actual official restricted PG cases. Full configured two-file Ruff 0/current and 0/baseline, compile/whole-file format pass, touched-production Bandit0 findings/errors; no suppressions/gate changes. Exact commands/evidence/contracts/limitations appended to assigned task-7-report.md. Preserve controller I1 note, keep In Progress for fresh scoped independent re-review. No Task8 or other-task changes.
 Task7complete after scoped independentfix1 re-review task-7-fix1-review.md: I1/P1 ADDRESSED, zero open/newbreakage. Commits21919902aa/e7757f5e7f. Finalchangedpublishergroups123passed0skips incl67realrestrictedPG,55SQLite,1real20exampleproperty; earlierfull210case scope with87PG qualified beforeguardmove andunchangedprerequisites notduplicated. ConfiguredtouchedRuff0baseline/current,compile/fullchangedformat/hooks pass,Bandit0findings/errors. Exactlateclusterarrival and post-lock/post-finalguard interleavings proven; source_changed rollbackpreservesconcurrentstate,no lateclusterlocks/broadwrites. Task5Mappingannotationminor independentlyclosed. No Jobs lifecycle, Task8orproducer enabled by this prerequisite.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

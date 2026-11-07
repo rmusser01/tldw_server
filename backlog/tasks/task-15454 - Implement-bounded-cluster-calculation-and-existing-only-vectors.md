@@ -1,5 +1,5 @@
 ---
-id: TASK-15416
+id: TASK-15454
 title: Implement bounded cluster calculation and existing-only vectors
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15415
+- TASK-15453
 ---
 
 ## Description
@@ -42,6 +42,7 @@ Proposed ADR-087 updated during fix1 to record physical identity/PID fencing, ag
 Task6 FIX ROUND1/3 implementation complete for re-review at FIX_BASE edf9fdc6ca1b647c4797ba84ee6e5d7e92012eaf. All five accepted Important findings plus adapter Minor addressed: canonical non-aliased/dangling-root rejection; PID fences before inherited sessions/cache/close; aggregate SQL/element/metadata/opcode/log/result ceilings with held-epoch snapshot reuse and pre-SDK read-mode pin against same-thread writers; default empty/buffered/mixed 1.5.5 stores via immutable checkpoint+metadata-proven existing-log reads (native SDK only for complete materialized target); non-executing typed stack/mapping metadata validation. No retuning writers, copies, persisted backend, dependency or lifecycle changes. DB helper split chroma_existing_state.py and chroma_read_validation.py stays in adapter ownership; full scope/contracts/limits/exact RED/GREEN appended to assigned task-6-report.md. Final production /tmp/task6_round1_final.log: 215 passed, 1 inherited skip, 15 xfailed, 2 xpassed, 487 warnings, 20.92s; 58 new round cases no skips. Last test-only build_from_config completion: /tmp/task6_round1_adapter_final.log 1 passed, 45 deselected, 15 inherited warnings, no EmbeddingFunction interface deprecation. Configured whole-file Ruff baseline/current 0/0, compile and format pass; final Bandit zero findings/errors. Native fork/spawn and default thresholds100/999/1001 for l2/cosine/ip exercised, logical operation property uses isolated real stores. Parent Proposed ADR087/index/plan and latest task notes preserved; no parent docs staged. Task stays In Progress for independent re-review; normal staged hooks and scoped incremental commit now follow.
 Task6 complete after scoped independent fix1 re-review: task-6-fix1-review.md verdicts all five Important findings and adapter Minor ADDRESSED, no new Critical/Important/Minor fix breakage. Runtime commits edf9fdc6ca and e3ba2dd187ecf768332f94a4b34d87ca4c943c1f. Controller read full report and review, confirmed saved final evidence/Bandit, and accepts qualified current1.5.5 default-store behavior. Platform/history/throughput/quarantine qualifications remain explicit Task11 runbook inputs, not open Task6 defects. Proposed ADR087 remains Proposed; accepted Jobs/domain boundary unchanged. No Task7 production enabled by this prerequisite.
 Active governance/reference update under TASK-15421: current Claims resource/publication ADR086 (metadata-only move from private085); ProposedSDKcoordinationADR087 remains Proposed. Planning/design are TASK15423/TASK15422; completed implementationTasks1/2/3 are TASK15424/TASK15425/TASK15426. Dependencies repaired viaCLI. Earlier note/commit IDs are historical evidence, not current aliases to other owners records. No accepted rationale, runtime behavior, status or verification rewritten.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -1,5 +1,5 @@
 ---
-id: TASK-15424
+id: TASK-15462
 title: Implement Claims Stage 2C shared contracts and schema
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15423
+- TASK-15461
 ---
 
 ## Description
@@ -33,6 +33,7 @@ Fix round 1 started from FIX_BASE 5b12a5f3fa0f31f7d77ce4bf5c3e3b91407657c2 after
 Fix round 1 TDD: before production edits, RUN_JOBS=1 python -m pytest -q -ra tldw_Server_API/tests/Jobs/test_jobs_resource_migrations.py produced 8 failed/74 passed/0 skipped (176 warnings): SQLite live/archive serialization and AES-GCM rotation, PostgreSQL live/archive AES-GCM rotation, and both installed-SQLite-trigger refresh tests failed at the existing immutability guard. Minimal correction excludes payload from bound identity comparison while retaining all five metadata fields and domain/owner/UUID/type; SQLite drops/recreates only its owned immutable trigger on every migration. GREEN same command: 82 passed/0 skipped (176 warnings). Both-table restricted-role matrix now proves successful same-scope INSERT/UPDATE/DELETE with rowcounts, rejects missing-context and foreign owner/domain INSERT and owner/domain-changing UPDATE, and proves zero-row foreign-scope updates/deletes plus unchanged foreign rows. No Task 3 API enforcement, producer, admission, lifecycle or unrelated changes; prerequisite cannot enable producers alone. Compilation/Ruff/Black check passed on 3 touched Python files; Bandit on 2 touched production modules: 0 findings/0 scanner errors, 174 LOC. Full fix evidence and regression/hooks/commit results are appended to the assigned report; keep In Progress for re-review.
 Controller completion gate: task-1-fix1-review.md from independent reviewer 01a198a5-7d7a-7561-8288-e2ec8fbb99ef verdicts both findings ADDRESSED, no new breakage, Task 1 spec PASS and quality APPROVE. Controller checked saved 494/21 test summaries and zero-finding/error Bandit JSON; read appended 8-failure RED, 82-test GREEN and 195-test final regression evidence before re-review. No unresolved Task 1 finding or cannot-verify requirement remains; future semantic replacement/admission/lifecycle behavior and whole-branch qualification are explicitly assigned to later tasks, not claimed complete. Lean interface handoff is preserved in the plan-scoped ignored SDD workspace. Controller will commit plan/checkpoint tracking only before dispatching Task 2.
 Identifier-only repair under TASK-15421 after current dev and all39openPR paginated audit. This Claims record is renumbered to avoid another owners published/open task. Existing status, acceptance, rationale and historical evidence are preserved; current governing Claims ADR is086 after metadata-only move. No production behavior or publication authorization changed.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

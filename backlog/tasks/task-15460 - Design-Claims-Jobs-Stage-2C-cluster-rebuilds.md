@@ -1,5 +1,5 @@
 ---
-id: TASK-15422
+id: TASK-15460
 title: Design Claims Jobs Stage 2C cluster rebuilds
 status: Done
 labels:
@@ -37,6 +37,7 @@ Follow-up corrections drafted in spec and Proposed ADR-085: bounded foreign-refe
 Fresh independent focused recheck reports nothing important left across all three corrections; reviewer closed. All applicable staged PR-scoped pre-commit hooks passed; normal no-code hook skips only. Hook log /tmp/claims-stage2c-review-fixes-hooks-20261101.log. The design revision and Proposed ADR remain consistent, with no remaining material findings from this recheck. Final review scope is only this task, the existing spec and Proposed ADR-085; no prior-PR closeout, product/test code, implementation plan, push or PR. Commit records the requester-approved design corrections; task stays In Progress awaiting approval of the revised written design, after which writing-plans is next. Bandit remains not applicable to the documentation-only scope.
 Requester explicitly approved the revised written design after commit 92ac607403. Design work is complete; approval covers the engineering proposals and ADR-085 but authorizes implementation planning only. Follow-up planning is tracked separately in TASK-15283. No product implementation or merge is authorized by this closeout.
 Identifier-only repair under TASK-15421 after current dev and all39openPR paginated audit. This Claims record is renumbered to avoid another owners published/open task. Existing status, acceptance, rationale and historical evidence are preserved; current governing Claims ADR is086 after metadata-only move. No production behavior or publication authorization changed.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

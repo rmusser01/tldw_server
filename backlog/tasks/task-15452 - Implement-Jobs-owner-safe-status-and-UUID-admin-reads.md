@@ -1,5 +1,5 @@
 ---
-id: TASK-15414
+id: TASK-15452
 title: Implement Jobs owner-safe status and UUID admin reads
 status: Done
 labels:
@@ -7,7 +7,7 @@ labels:
 - jobs
 - implementation
 dependencies:
-- TASK-15426
+- TASK-15464
 ---
 
 ## Description
@@ -32,6 +32,7 @@ Task4 implementation started at clean 6b1caf4af848740793b96b82ef4577dcec47d065 i
 Task4 final affected verification: RUN_JOBS=1 JOBS_DB_PATH=/tmp/task4-final-observer.db python -m pytest -q -ra on owned/admin UUID APIs plus the six brief-required compatibility modules: 235 passed, zero skips, 1049 warnings, 14.51s (exit 0), /tmp/task4-final-tests.log. RED: 17 expected missing-interface failures (/tmp/task4-red.log); admin UUID/registration RED six failures (/tmp/task4-red-contracts.log). Quarantined-state regression RED one failure then GREEN; API GREEN 18 passed. Real official Jobs PostgreSQL/restricted jobs_rls role proves unset context denies and owner active/archive reads work; route worker GUCs are false/claims/exact owner and prior tokens restored even on errors. Configured whole-file Ruff on all 11 touched Python files, py_compile and scoped Black checks pass. Touched-production Bandit exits 1 only for byte-equivalent baseline manager B608 at current line 10247; zero new findings/errors, /tmp/bandit_task4.json and /tmp/task4-bandit-comparison.log. TASK remains In Progress for controller independent review. Full assigned report: .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-4-report.md. Normal explicit scoped hooks and local commit follow; no producer/rollout claims.
 Independent Task4 review at77d215a8e646e8f7e73ddaff9a53b4b9c7626fdc: spec compliant / qualityApproved; zero Critical/Important findings. Strict owner-safe projection, same-thread actual Jobs RLS restoration, exact UUIDadmin precondition, separate role/domain authorization and full/minimal stable routekey verified. Cannot-verify producer routeavailability and worker codevocabulary are explicitly Tasks10/9; controller records those consuming checks, no missing Task4 behavior or rollout authorization. Minor warningprovenance deferred to planned Task11 qualification with category/location evidence; do not suppress or certify all1049warnings inherited. Final235passed/zero skips officialrestrictedrole/threadboundary; configured11fileRuff/compile, scopedformat/hooks pass; Banditexit1 only unchangedB608, zero newfindings/errors. Fullreport/review in this plans SDDworkspace.
 Active governance/reference update under TASK-15421: current Claims resource/publication ADR086 (metadata-only move from private085); ProposedSDKcoordinationADR087 remains Proposed. Planning/design are TASK15423/TASK15422; completed implementationTasks1/2/3 are TASK15424/TASK15425/TASK15426. Dependencies repaired viaCLI. Earlier note/commit IDs are historical evidence, not current aliases to other owners records. No accepted rationale, runtime behavior, status or verification rewritten.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

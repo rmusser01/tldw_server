@@ -2,11 +2,11 @@
 
 **Status:** Approved by the requester on 2026-11-01; revised implementation plan approved and execution authorized on 2026-11-01
 **Date:** 2026-11-01
-**Task:** TASK-15422
+**Task:** TASK-15460
 **Baseline:** dev `54b321dcec8cdbb6358581f42c1548696260570b`
 **Parent:** [Claims Jobs operational design](2026-06-24-claims-jobs-operational-control-plane-design.md)
 **ADR check:** A new ADR is required for resource-scoped Jobs admission and
-domain publication fencing. [ADR-086](../../ADR/086-jobs-resource-admission-and-domain-publication.md)
+domain publication fencing. [ADR-094](../../ADR/094-jobs-resource-admission-and-domain-publication.md)
 is Accepted with this design. ADR-003 governs Jobs ownership; ADR-058 continues
 to govern Jobs completion identity. Neither accepted decision is superseded.
 
