@@ -460,9 +460,14 @@ Logs: `/tmp/pr3405_docs_{snapshot_red,strict_red,green,strict_green}.txt`,
 `/tmp/pr3405_docs_fix_chunking.txt`, `/tmp/pr3405_docs_tracking.txt` and
 `/tmp/bandit_pr3405_docs_fix_production.json`. No global suite/type success
 is claimed. ADR required: no new decision, metadata/publication repair only.
-Independent bounded review and normal draft-branch publication follow; all
-remote gates must run on the subsequent head rather than inherit old passes.
-Keep the PR draft and preserve its human-owned summary.
+Independent bounded review approved `b3bfae3ca5..a0af6105db` with no Critical,
+Important or Minor findings; dispositions are recorded in TASK-15416. The
+actual failing shard selection (Docs plus performance) also passes 212 tests
+with the same 6 opt-in performance skips, 653 warnings in 44.52s
+(`/tmp/pr3405_gap_verified_9_green.txt`). This checkpoint accompanies normal
+draft-branch publication; all remote gates must run on the subsequent head
+rather than inherit old passes. Keep the PR draft and preserve its
+human-owned summary.
 
 ## Final Verification Commands
 
