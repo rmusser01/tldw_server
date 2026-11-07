@@ -165,23 +165,21 @@ def test_sandbox_image_store_gc_plan_ignores_files_deleted_during_size_scan(
     run_drop.mkdir(parents=True)
     vanished = run_drop / "vanished.txt"
     vanished.write_text("gone", encoding="utf-8")
-    original_stat = Path.stat
-    calls = 0
+    original_is_file = Path.is_file
 
-    def flaky_stat(path: Path, *args, **kwargs):
-        nonlocal calls
-        if path == vanished:
-            calls += 1
-            if calls > 1:
-                raise FileNotFoundError(path)
-        return original_stat(path, *args, **kwargs)
+    def delete_after_file_check(path: Path, *args, **kwargs):
+        is_file = original_is_file(path, *args, **kwargs)
+        if path == vanished and is_file:
+            path.unlink()
+        return is_file
 
-    monkeypatch.setattr(Path, "stat", flaky_stat)
+    monkeypatch.setattr(Path, "is_file", delete_after_file_check)
 
     plan = SandboxImageStore(root_path=tmp_path / "store").plan_garbage_collection(active_run_ids=set())
 
     assert plan.run_candidates[0].run_id == "run-drop"
     assert plan.run_candidates[0].size_bytes == 0
+    assert not vanished.exists()
 
 
 def test_sandbox_image_store_lists_persisted_run_clone_manifests(tmp_path: Path) -> None:

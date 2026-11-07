@@ -73,6 +73,7 @@ async def test_many_segment_payload_uses_one_real_batch_and_preserves_fields(mon
 
 @pytest.mark.asyncio
 async def test_payload_failure_never_emits_text_or_segments(monkeypatch, tmp_path, moderation):
+    from tldw_Server_API.app.core.DB_Management.Moderation_Review_DB import ModerationReviewStore
     from tldw_Server_API.app.core.exception_types import ModerationExecutionError
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
     from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
@@ -93,9 +94,16 @@ async def test_payload_failure_never_emits_text_or_segments(monkeypatch, tmp_pat
     monkeypatch.setattr(moderation, "redact_text", redact)
     policy = stt_policy.STTPolicy(None, True, 0.0, True, False, [])
     proxy = stt_policy.RedactingWebSocketProxy(Socket(), policy=policy)
-    with pytest.raises(ModerationExecutionError):
-        await proxy.send_json({"type": "final", "text": "private", "segments": [{"text": "segment private"}]})
+    payload = {"type": "final", "text": "private", "segments": [{"text": "segment private"}]}
+    with pytest.raises(ModerationExecutionError, match="worker_crashed"):
+        await proxy.send_json(payload)
     assert sent == []
+    assert payload == {"type": "final", "text": "private", "segments": [{"text": "segment private"}]}
+    [item] = ModerationReviewStore(tmp_path / "review.db").list_items()["items"]
+    assert item["context"]["reason"] == "worker_crashed"
+    assert item["context"]["operation"] == "redact_many"
+    assert item["context"]["input_chars"] == 22
+    assert "private" not in str(item)
 
 
 @pytest.mark.asyncio
@@ -110,6 +118,8 @@ async def test_disabled_payload_policy_does_not_admit_content(monkeypatch):
 
     policy = stt_policy.STTPolicy(None, True, 0.0, False, False, [])
     payload = {"type": "final", "text": "x" * 1000001}
+    result = await stt_policy.apply_transcript_payload_policy_async(payload, policy=policy)
+    assert result is payload
     await stt_policy.RedactingWebSocketProxy(Socket(), policy=policy).send_json(payload)
     assert sent == [payload]
 

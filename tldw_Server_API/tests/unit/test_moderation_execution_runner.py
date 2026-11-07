@@ -4,6 +4,7 @@ import asyncio
 import io
 import threading
 import time
+from unittest.mock import Mock
 
 import pytest
 
@@ -68,7 +69,6 @@ class Child:
 
             class Reader(io.BytesIO):
                 def read(self, count=-1):
-                    assert count > 0
                     owner.killed.wait(3)
                     return b""
 
@@ -124,12 +124,17 @@ def test_fifth_active_worker_is_refused_without_queue():
     assert len(errors) == 4
 
 
-def test_decision_and_redaction_share_original_deadline():
+def test_decision_and_redaction_share_original_deadline(monkeypatch):
     now = [10.0]
-    owner = runner(lambda *a, **k: Child(), clock=lambda: now[0])
+    child = Child()
+    read = Mock(wraps=child.stdout.read)
+    monkeypatch.setattr(child.stdout, "read", read)
+    owner = runner(lambda *a, **k: child, clock=lambda: now[0])
     shared = ExecutionScope(11.0, threading.Event(), "shared")
     with pytest.raises(ModerationExecutionError, match="worker_unavailable"):
         owner.execute(request(), shared)
+    read.assert_called()
+    assert all(0 < call.args[0] <= 65536 for call in read.call_args_list)
     now[0] = 11.01
     with pytest.raises(ModerationExecutionError, match="deadline_exceeded"):
         owner.execute(request(), shared)
@@ -198,18 +203,17 @@ def test_quarantine_stops_pid_wide_admission_even_via_another_runner():
         other.close()
 
 
-def test_oversize_header_is_rejected_before_payload_is_read():
-    class HeaderOnly(io.BytesIO):
-        def read(self, count=-1):
-            assert count == 4
-            return b"\xff\xff\xff\xff"
-
-    child = Child()
-    child.stdout = HeaderOnly()
+def test_oversize_header_is_rejected_before_payload_is_read(monkeypatch):
+    child = Child(b"\xff\xff\xff\xffunread payload")
+    read = Mock(wraps=child.stdout.read)
+    monkeypatch.setattr(child.stdout, "read", read)
     owner = runner(lambda *a, **k: child)
     try:
         with pytest.raises(ModerationExecutionError, match="size_exceeded"):
             owner.execute(request(), scope())
+        read.assert_called_once_with(4)
+        assert child.killed.is_set()
+        assert not owner._entries
     finally:
         owner.close()
 

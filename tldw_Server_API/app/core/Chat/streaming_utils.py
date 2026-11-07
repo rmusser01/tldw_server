@@ -1019,9 +1019,16 @@ def start_detached_settlement(operation: Callable[[], Any]) -> asyncio.Future[An
     return task
 
 
+class _TextTransformStopped(Exception):
+    """Carry a synchronous clean-stop signal across a coroutine boundary."""
+
+
 async def _apply_text_transform(transform: Callable[[str], str | Awaitable[str]], text: str) -> str:
     """Support synchronous transforms and callables returning actual awaitables."""
-    result = transform(text)
+    try:
+        result = transform(text)
+    except StopIteration:
+        raise _TextTransformStopped from None
     if inspect.isawaitable(result):
         result = await result
     return result
@@ -1791,7 +1798,7 @@ class StreamingResponseHandler:
                                         )
                                         self.error_occurred = True
                                         return outputs, True
-                                    except StopIteration:
+                                    except _TextTransformStopped:
                                         return outputs, True
                                     except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
                                         logger.error(
@@ -1866,7 +1873,7 @@ class StreamingResponseHandler:
                     )
                     self.error_occurred = True
                     return outputs, True
-                except StopIteration:
+                except _TextTransformStopped:
                     return outputs, True
                 except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
                     logger.error(

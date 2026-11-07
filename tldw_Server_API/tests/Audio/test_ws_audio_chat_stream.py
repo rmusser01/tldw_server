@@ -86,6 +86,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.tests.unit.test_moderation_execution_incidents import store as store
 
 _AUDIO_LABEL_TO_SAMPLE = {
     "abc": 100,
@@ -942,19 +943,20 @@ async def test_audio_chat_ws_streams_llm_and_tts(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.integration
 @pytest.mark.parametrize("reason", ["deadline_exceeded", "capacity_exhausted", "size_exceeded", "worker_unavailable", "worker_crashed", "invalid_response", "cleanup_failed"])
-async def test_audio_chat_moderation_failure_never_continues_to_llm_or_tts(monkeypatch, tmp_path, reason):
-    from unittest.mock import AsyncMock
-
+@pytest.mark.parametrize("dispatch", ["chat_api_call_async", "get_tts_service"])
+async def test_audio_chat_moderation_failure_never_continues_to_llm_or_tts(monkeypatch, store, reason, dispatch):
     from tldw_Server_API.app.core.exception_types import ModerationExecutionError
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
-    from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
 
     monkeypatch.setenv("STT_REDACT_PII", "1")
-    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
-    prepare_moderation_incident_store()
-    provider, tts = AsyncMock(), AsyncMock()
-    monkeypatch.setattr(audio, "chat_api_call_async", provider)
-    monkeypatch.setattr(audio, "get_tts_service", tts)
+    downstream_calls = 0
+
+    def forbidden_dispatch(*args, **kwargs):
+        nonlocal downstream_calls
+        downstream_calls += 1
+        raise AssertionError("failed moderation must stop downstream dispatch")
+
+    monkeypatch.setattr(audio, dispatch, forbidden_dispatch)
 
     def redact(text, *, policy, is_partial):
         if is_partial:
@@ -972,8 +974,13 @@ async def test_audio_chat_moderation_failure_never_continues_to_llm_or_tts(monke
     assert not any(frame.get("type") in {"full_transcript", "assistant_summary", "llm_delta", "tts_done", "done"} for frame in ws.sent_json)
     assert ws.sent_bytes == []
     assert ws.closed
-    provider.assert_not_called()
-    tts.assert_not_called()
+    assert ws.close_code == 1011
+    assert downstream_calls == 0
+    [item] = store.list_items()["items"]
+    assert item["context"]["reason"] == reason
+    assert item["context"]["operation"] == "redact"
+    assert item["context"]["input_chars"] == 11
+    assert "hello world" not in json.dumps(item)
 
 
 @pytest.mark.integration
