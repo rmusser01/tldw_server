@@ -351,11 +351,15 @@ async def consume_magic_link(
         jti, expiry.isoformat() if _profile_user_backend(db) == "sqlite" else expiry, actor_id, ip_address,
     )
     if isinstance(result, str):  # asyncpg command tag
-        return result == "INSERT 0 1"
-    try:
-        return result.rowcount == 1
-    finally:
-        await result.close()
+        if result in ("INSERT 0 0", "INSERT 0 1"):
+            return result == "INSERT 0 1"
+    else:
+        try:
+            if result.rowcount in (0, 1):
+                return result.rowcount == 1
+        finally:
+            await result.close()
+    raise RuntimeError("Unconfirmed magic-link insert result")
 
 
 async def verify_user_email_once(
