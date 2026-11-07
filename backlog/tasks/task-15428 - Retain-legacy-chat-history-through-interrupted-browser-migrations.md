@@ -2,6 +2,8 @@
 id: TASK-15428
 title: Retain legacy chat history through interrupted browser migrations
 status: In Progress
+references:
+- https://github.com/rmusser01/tldw_server/pull/3431
 ---
 
 ## Description
