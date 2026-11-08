@@ -754,6 +754,7 @@ export type ApiPath =
   | "/api/v1/jobs/events/stream"
   | "/api/v1/jobs/integrity/sweep"
   | "/api/v1/jobs/list"
+  | "/api/v1/jobs/owned/{job_uuid}"
   | "/api/v1/jobs/prune"
   | "/api/v1/jobs/queue/control"
   | "/api/v1/jobs/queue/status"

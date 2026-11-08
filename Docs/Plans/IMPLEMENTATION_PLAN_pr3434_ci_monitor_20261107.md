@@ -264,3 +264,75 @@ module and is not a combined total or full-root pass. All applicable final
 Only ordinary no-matching TOML and wizard-only Ruff/Black hooks skipped.
 Exact-head publication/rearming readback follows in the PR proof, not a
 tracking-only commit while waiting for ordinary CI and actual gated merge.
+
+### OpenAPI Artifact Publication And Dev Freshness
+
+At 2026-11-08T15:20Z, seven required contexts passed on `ec326c5e88`, but
+backend-required job `128761640996` failed its OpenAPI drift gate. The exported
+contract has 2,141 paths and 3,319 schemas versus the committed 2,140/3,316.
+The intended delta is the Jobs-owned status path, three typed response schemas,
+and the already-reviewed rebuild/status operations. No runtime correction or
+gate/budget change is proposed. Reproduce the exact gate, compare complete
+base/head schemas, regenerate both artifacts and rich frontend types through
+the existing generator, then verify and independently review the delta.
+
+Auto-merge was disabled and confirmed null before edits. Dev advanced to
+`2ec4e6434d6c6b73b402ee77a731911b85c307a2`; the dedicated branch rebased all
+53 commits without conflicts. All 160 existing PR-owned blobs are identical
+before/after; none overlaps upstream's 50 changed paths. Recovery ref:
+`codex/claims-pr3434-before-dev-20261108t1520`. Existing scoped runtime reviews
+retain their original meaning. Only an exact fresh remote-head lease may
+publish this rebase after canonical task checks and staged full-scope hooks.
+
+Native Python 3.14 reproduces the count/path drift but has a different full
+schema hash from hosted Python 3.12. A temporary FastAPI patch-version comparison
+produced identical native schemas, so no dependency upgrade is justified. Match
+CI's Python version in an isolated temporary environment before choosing a new
+fingerprint; do not copy an unverified hash or weaken canonicalization. Diagnostic
+dev snapshots live only under `/tmp`; the first archive command used the wrong
+cwd, and the next lacked the standalone MCP package. The completed snapshot
+exports successfully after including its shared packages. These harness errors
+are not green gate runs. The older missing-pg_dump root limit remains unchanged.
+
+The isolated Python 3.12 environment reproduces hosted RED exactly. Its dev
+export hashes to the old committed `f76f17d0de73...`; its PR export hashes to
+hosted `a6a96d3dd761...`. Existing codegen regenerated both committed artifacts
+and ignored rich types successfully; the unchanged exact gate is GREEN for
+fingerprint and path union. Complete proof:
+`/tmp/claims-pr3434-openapi-delta-proof-20261108.json`. Native/CI differences
+are only 16 existing HTTP422 descriptions and equivalent anyOf ordering in
+five schemas, not new API changes or grounds for normalization allowances.
+
+Fresh qualification: both affected API modules 119 passed, zero skips,
+including official PostgreSQL cases; complete CI/Docs/Config 1,619 passed with
+six inherited runner/environment skips, zero failures/errors. The generated
+rich types/path union pass a temporary consumer probe under repository-locked
+TypeScript 5.9.3, including legacy 200, typed 202/409 and UUID status contracts.
+Evidence prefix: `/tmp/claims-pr3434-openapi-*-20261108`. Selections are not a
+combined/full-root result. No executable source changed, so prior compilation,
+lint and 64-file production Bandit evidence remains applicable, not rerun or
+relabeled; the artifact-only delta does not require a new Python security scan.
+
+Independent requesting-code-review Archimedes approved with no actionable
+findings: `/tmp/claims-pr3434-openapi-review-20261108.md`. Hash/delta and source
+alignment checks were independent. Its restricted fresh export omitted two
+MediaWiki routes and schemas with permission/logging limits and did not pass
+the gate; cause unproved. Do not call that run green or substitute it for the
+parent's successful full export. Declined scopes are dispositioned in TASK-15466:
+unchanged runtime retains earlier reviews; parent owns environment provisioning,
+codegen/consumer probe, API/official-PG and broad CI results, rebase parity,
+canonical tasks, full staged hooks and exact GitHub publication state. Hosted
+new-head CI still must pass normally, and actual merge remains pending.
+
+Stage the verified canonical task/plan and generated artifacts before full
+162-path PR-scoped hooks. Publish only against a freshly fetched explicit
+remote-head lease, then rearm exact-head MERGE with fresh rules/dev/feedback
+checks. Record actual hook/publication readback in the PR proof; never create
+a tracking-only follow-up while waiting for unchanged CI.
+
+All applicable full 162-path staged hooks passed without rewrites; all 15
+selected task records are canonical. Only ordinary no-matching TOML and
+wizard-only Ruff/Black hooks skipped. Fresh remote head and dev remain exact,
+with auto-merge null and dev ancestry verified. Re-stage this final evidence
+before the final full-scope rerun and normal-hook commit. Publication/rearming
+readback belongs in the PR proof; actual merge is still pending.
