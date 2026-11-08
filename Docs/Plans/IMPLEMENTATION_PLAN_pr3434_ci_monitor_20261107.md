@@ -46,7 +46,8 @@ the entire CI-contract suite passed 984 cases with six existing skips.
 **Status**: In Progress
 
 Automation `monitor-pr-3434-through-merge` is active. Auto-merge is disarmed
-until the corrected, independently reviewed and verified head is published.
+until the corrected, independently reviewed and verified head is published
+and that exact head's ordinary hosted notes/chat UX regression job succeeds.
 Actual MERGED state, SHA and time remain pending; do not claim them early.
 
 ### Latest Dev Requalification
@@ -336,3 +337,108 @@ wizard-only Ruff/Black hooks skipped. Fresh remote head and dev remain exact,
 with auto-merge null and dev ancestry verified. Re-stage this final evidence
 before the final full-scope rerun and normal-hook commit. Publication/rearming
 readback belongs in the PR proof; actual merge is still pending.
+
+### XS-07 Search Settlement Investigation
+
+Current `da753fbd29` E2E UX Regression job `128783776748` reached application
+assertions: 31 passed and XS-07 Delete failed. Server DELETE succeeded with 204,
+the tab closed and GET returned 404, but the test immediately captured a cached
+Delta search row at 16:17:46.033Z. The failure screenshot still says
+"Searching chat history..."; the refreshed search completed at 16:17:46.748Z.
+Artifacts: `/tmp/claims-pr3434-e2e-ux-artifacts-20261108T1630`; exact job log:
+`/tmp/claims-pr3434-e2e-ux-128783776748-20261108T1630.log`.
+
+Auto-merge is disabled and confirmed null before repository corrections. Dev,
+rules and feedback are unchanged. Independent read-only diagnosis confirms the
+snapshot was unsettled, not that eventual correctness or a production bug is
+proved. The hook invalidation prefix matches; cached rows may render while a
+refresh is pending. The test accepts either a cached row or no-matches before
+snapshotting, so it has no positive settlement barrier. Reproduce the unchanged
+case with the existing live-tier runner and real isolated backend/extension;
+do not alter production invalidation or relax assertions without evidence.
+
+The frozen Bun 1.3.5 workspace install succeeded without lock/source changes.
+No sleeps, retries, skips, timeout/budget changes, baseline allowances, manual
+dispatch or cancellation are authorized. Preserve real server-deleted, tab
+closure, and final zero-result assertions. A test-only correction must positively
+observe settled no-matches rather than merely observe zero rows during loading,
+and must still fail for a persistently listed deleted chat. Obtain independent
+requesting-code-review for any correction; unchanged runtime qualifications and
+the known root pg_dump limit retain their original meaning.
+
+### XS-07 Correction Qualification And Hosted UX Hold
+
+Only the Delete case's permissive cached-row-or-empty wait changes: positively
+observe settled no-matches, then require zero matching rows. Server polling,
+tab closure and final server-deleted/no-match equality remain unchanged. The
+other three tests, production code, helpers, workflow, Playwright configuration,
+runner and reporter are unchanged. Assertions retain the configured 20-second
+limit individually, not a shared deadline; the test retains its 120-second limit.
+
+The unchanged real-backend/extension case passed once locally (23.5 seconds),
+which is not RED or Linux certification. The controlled Chromium probe extracts
+the actual assertion tail via TypeScript AST and uses actual page-object locators.
+Valid old-source RED reproduces deleted-server/cached-row failure; corrected
+GREEN accepts delayed settled-empty and rejects pending-empty, settled-stale,
+false-empty-with-row and server-still-live. This is controlled DOM/server-oracle
+assertion evidence, not autonomous backend certification. Initial module-path
+and asynchronous matcher-wrapper probe errors were corrected before valid RED.
+Artifacts: `/tmp/claims-pr3434-xs07-settlement-{red,green}-20261108.log` and
+`/tmp/claims-pr3434-xs07-scope-proof-20261108.json`.
+
+The complete unchanged live-tier UX runner finished 31 passed, one failed, zero
+skips: corrected Delete passed on its first attempt, but unchanged NE-04 Print
+timed out hovering its submenu. The Print cause is unproved, not claimed fixed.
+Its old-head hosted pass and a subsequent bounded real-backend run do not make
+the full local run green. That follow-up passed all four sidepanel cases plus
+the same unmodified Print case: five first-attempt passes, zero skips; backend
+health before/after and cleanup succeeded. Grep-mode is bounded diagnostic
+evidence, not a full gate. The full run's after-health was not reached; backend
+cleanup did succeed. All 13 temporary Deferred43 instrumentation targets report
+restored and their live hashes match originals. No retained source changes.
+Artifacts: `/tmp/claims-pr3434-xs07-{full-ux,followup}-20261108.log` and
+`/tmp/claims-pr3434-xs07-browser-evidence-20261108.json`.
+
+Focused frontend tests passed 134 across four files, zero skips/failures. The
+changed TS module transpiles with zero syntax errors and configured ESLint has
+zero errors, warnings or suppressions; this is not a whole-app semantic typecheck.
+No executable Python changed. Retained production/runtime/lint/Bandit evidence
+keeps its original scope and date, not rerun or relabeled for this TS/prose delta.
+The old root missing-pg_dump and historical unnamed Bun-package limits persist.
+
+Independent requesting-code-review Pascal approved the exact test-only delta
+with no actionable P0-P3 findings: `/tmp/claims-pr3434-xs07-review-20261108.md`.
+Reviewer inspected source, hosted screenshot/logs, AST parity and valid probe
+RED/GREEN, not its own live test execution. Declined scopes: unchanged whole-PR
+production/ownership/Trash/Undo retain earlier reviews; parent owns full/browser
+and broad CI results, static/security/hooks, all 13 restoration hashes and Git
+cleanliness, GitHub feedback/publication/merge state, recorded waiver, root
+prerequisite limits and future tracking updates. Neither reviewer nor parent
+claims universal future UI stability or a persistent production invalidation bug.
+
+Dev advanced to `476527719a806e005225fd358b0f830f8b9253df` with five unrelated
+docs/task paths and no overlap. With auto-merge confirmed null, all 54 committed
+PR commits rebased conflict-free; all 163 captured PR-path HEAD blobs and the
+reviewed dirty test hash are identical. Recovery ref:
+`codex/claims-pr3434-before-dev-20261108t1700`. Fresh broad CI/Docs/Config passed
+1,619 cases with six inherited skips, zero failures/errors (188.33 seconds),
+on this base. Evidence: `/tmp/claims-pr3434-xs07-rebased-ci-docs-config-20261108`.
+The pre-rebase 1,619/6 run remains separate evidence, not additive or relabeled.
+All 15 explicitly selected tasks are canonical; staged full-scope hooks must pass
+before exact fresh force-with-lease publication. No main checkout/dev edits.
+
+The new published head must run its own ordinary CI. Keep auto-merge disabled
+until its E2E UX Regression (notes/chat) succeeds; then inspect all feedback,
+effective rules, queue mode and strict dev freshness before exact-head MERGE
+auto-merge. This conservative monitor hold changes no workflow or required gate.
+No sleeps/retries/skips, budget/baseline increases, manual dispatch/cancellation,
+bot/billing changes or new architecture. TASK-15466 and this plan remain In
+Progress until actual gated merge; record final qualification/publication in
+the PR proof without a tracking-only follow-up commit.
+
+All applicable full 163-path staged PR hooks passed without rewrites; all 15
+selected task records are canonical. Log:
+`/tmp/claims-pr3434-xs07-staged-hooks-20261108.log`. Only ordinary no-matching
+TOML/wizard-only formatter hooks skipped. Restage this final evidence and rerun
+the full scope before the normal-hook commit. Publication/readback belongs in
+the PR proof; auto-merge stays disabled for the exact-head hosted UX hold.
