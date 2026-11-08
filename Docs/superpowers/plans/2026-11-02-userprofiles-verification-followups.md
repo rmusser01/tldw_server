@@ -535,3 +535,60 @@ externalrefs/body/queue/rules checks and authorizedleasedsourcepublication
 remain mandatory. Oldba74successes and its frontendfailure do not qualify this
 unpublishedrebasedcandidate. TaskInProgress/AC4open untilverifiedmerge; no CI
 retry/dispatch, policy/settings/gatechange or runtime-summary-waiver transfer.
+
+## November 8 Dev4765 Qualified Integration
+
+Published `eedf340645` genuinely passed all eight required checks, but
+authoritative dev advanced to `476527719a806e005225fd358b0f830f8b9253df`.
+The stale candidate was not merged. Current rules still require the seven
+strict Actions checks plus trusted license, all from integration 15368, and
+allow merge commits only. The PR remained open and unarmed, MERGE_QUEUE unset,
+with no review threads or changes-requested reviews. The PR-specific human
+summary waiver and body outside Cubic's generated block remain byte-identical.
+
+The qualified local rebase is `a88b7f28ddaafc3e94e3080336e869e8d207955e`:
+all 23 patches replay equal, no conflict, dropped patch or compatibility edit.
+Complete 29,094-entry object/type/mode proof preserves 55 upstream-only paths,
+19 own-only paths, zero combined paths and 29,020 untouched entries. New dev
+contains accepted WebUI W3 storage/search/cache work and two Phase 2b planning
+records; those plans were integrated, not implemented here. All 9,552 Python
+entries and the backend application subtree are unchanged from approved eedf.
+The VisualPackEditor `234fe33` and StandaloneHtmlWorkspace `6b4381ad` blobs remain
+exact. Only the owned branch and unique backup moved during the rebase window;
+later unrelated shared-ref movements were observed and left untouched.
+
+Five separate, non-overlapping frontend selections pass with no failures or
+skips: DB 525, eight owned UI files 307, folder/cache 230, mirror/hooks 1008,
+caller supplement 21. These 60 files are not a whole-frontend or CI-equivalent
+result. Default two-worker concurrency and budgets were retained. Application
+WebUI typecheck exits 0. Actual tests used Node 25.6/Bun 1.3.5, not CI's Node
+20.20.2/Bun 1.3.2; warnings and intentional diagnostic output remain explicit.
+
+Broader touched TypeScript diagnostics remain 50 inherited errors: four own
+errors reproduce byte-identically on approved eedf; 46 upstream errors reproduce
+on exact dev, with three rendered union-order/truncation differences explicitly
+retained alongside matching location/code/semantic contexts. Scoped ESLint
+retains the exact accepted 31 errors/656 warnings, no fatal errors or ignored
+files. No suppression, source repair or baseline change hides this debt. No new
+Python scope exists; prior Bandit applies only to proven identical blobs and is
+not claimed rerun. Full quality/shard guards and configured cached hooks pass,
+no newly uncovered tests, no dependency or hook installation.
+
+Old-eedf advisory CI remains non-green: six dependency-setup HTTP504 failures;
+an AuthNZ shard's 55-minute outer abort during unchanged TestClient shutdown,
+without established root cause; one WebScraping inventory assertion reproduced
+identically by the official scanner on complete exact base/head archives; and
+a report-only UI summary's frozen Bun install failure before report execution.
+These are not declared harmless, repaired or required-gate failures. No source
+fix was invented from these diagnostics, no retry/dispatch or policy change
+occurred, and no old outcome predicts the new candidate's CI.
+
+ADR assessment: no new durable decision or ADR for an object-preserving rebase;
+accepted upstream storage behavior and existing ADR-085/059/084 remain intact.
+Evidence: `dev4765-integration-report.md` in the verification SDD workspace,
+`/private/tmp/pr3404-dev4765/`, `/private/tmp/pr3404-nov8-ci-triage.md`, and the
+exact base/head inventory proof. Source author handed off with a clean tree
+and no owned process. Controller records and independent bounded exact-head
+review precede any guarded lease push. Entirely fresh current-head required CI
+and authoritative latest-dev ancestry remain mandatory before merge; no old
+green result, publication approval or PR3404 waiver transfers to runtime WP5.
