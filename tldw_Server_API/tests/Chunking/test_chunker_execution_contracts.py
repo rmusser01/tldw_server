@@ -765,3 +765,24 @@ def test_paused_generator_releases_replaced_source_buffer(mode: str) -> None:
         assert list(generator) == ["beta"]
     finally:
         generator.close()
+
+
+@pytest.mark.parametrize("mode", ["shared", "thread", "call"])
+def test_paused_generator_releases_normalized_method_object(mode: str) -> None:
+    class ReferenceableMethod:
+        value = "words"
+
+    chunker = Chunker(ChunkerConfig(enable_cache=False, strategy_cache_mode=mode))
+    method: Any = ReferenceableMethod()
+    original = weakref.ref(method)
+    generator = chunker.chunk_text_generator("alpha beta", method=method, max_size=1, overlap=0)
+    del method
+    gc.collect()
+    assert original() is not None  # Method resolution is deferred until first advance.
+    try:
+        assert next(generator) == "alpha"
+        gc.collect()
+        assert original() is None, "paused wrapper retained the normalized method object"
+        assert list(generator) == ["beta"]
+    finally:
+        generator.close()
