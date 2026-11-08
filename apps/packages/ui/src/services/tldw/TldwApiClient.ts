@@ -1790,7 +1790,13 @@ export class TldwApiClientBase {
   private headers: HeadersInit = {}
   characterCache = new BoundedTtlCache<any>()
   characterInFlight = new Map<string, Promise<any>>()
-  chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>()
+  // Keys are `${chatId}${query}` (see getChatMessagesCacheKey), so the query
+  // shape's chat is everything before the first "?". ~5 shapes per chat
+  // (WP-31 / TASK-13523) on top of the cache-wide entry/byte caps.
+  chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>({
+    maxPerGroup: 5,
+    groupOf: (key) => key.split("?")[0]!
+  })
   chatMessagesInFlight = new Map<string, Promise<ServerChatMessage[]>>()
   private domainCacheConfig: TldwConfig | null = null
   private domainCacheAccountRevision = -1
