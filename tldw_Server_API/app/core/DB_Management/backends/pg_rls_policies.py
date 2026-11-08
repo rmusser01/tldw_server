@@ -589,6 +589,55 @@ def build_dictionary_rls_sql() -> list[str]:
     ]
 
 
+def _build_guarded_chacha_owner_rls_sql() -> list[str]:
+    """Build owner policies safe to replay before study and Media tables exist."""
+    stmts: list[str] = []
+
+    # Version migrations replay this set before post-migration study tables exist.
+    study_owner = "client_id = current_setting('app.current_user_id', true)"
+    for table in (
+        "decks",
+        "flashcards",
+        "flashcard_reviews",
+        "flashcard_review_sessions",
+        "flashcard_assets",
+        "flashcard_templates",
+        "deck_shares",
+        "study_packs",
+        "study_pack_cards",
+        "flashcard_citations",
+    ):
+        stmts.append(f"""
+            DO $study_rls$
+            BEGIN
+              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
+              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
+              DROP POLICY IF EXISTS {table}_tenant_isolation ON {table};
+              CREATE POLICY {table}_tenant_isolation ON {table}
+                USING ({study_owner}) WITH CHECK ({study_owner});
+            END
+            $study_rls$;
+        """.strip())
+
+    # Publication metadata stays owner-only, even for app admins, before Media v27.
+    for table in ("claims_cluster_publication_heads", "claims_cluster_publication_receipts"):
+        stmts.append(f"""
+            DO $claims_cluster_publication_rls$
+            BEGIN
+              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
+              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
+              DROP POLICY IF EXISTS {table}_owner ON {table};
+              CREATE POLICY {table}_owner ON {table} FOR ALL
+                USING (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''))
+                WITH CHECK (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''));
+            END
+            $claims_cluster_publication_rls$;
+        """.strip())
+    return stmts
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -611,52 +660,7 @@ def build_chacha_rls_sql() -> list[str]:
     for table in ("writing_sessions", "writing_templates", "writing_themes"):
         add_tenant_policy(table, "client_id = current_setting('app.current_user_id', true)")
 
-    # Study tables (decks, flashcards, study packs). Every row carries its
-    # owner's client_id. Guarded because version migrations replay this set
-    # before the post-migration steps create the newer study tables, and a
-    # CREATE POLICY on a missing relation aborts the whole transaction.
-    study_owner = "client_id = current_setting('app.current_user_id', true)"
-    for table in (
-        "decks",
-        "flashcards",
-        "flashcard_reviews",
-        "flashcard_review_sessions",
-        "flashcard_assets",
-        "flashcard_templates",
-        "deck_shares",
-        "study_packs",
-        "study_pack_cards",
-        "flashcard_citations",
-    ):
-        add(f"""
-            DO $study_rls$
-            BEGIN
-              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
-              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
-              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
-              DROP POLICY IF EXISTS {table}_tenant_isolation ON {table};
-              CREATE POLICY {table}_tenant_isolation ON {table}
-                USING ({study_owner}) WITH CHECK ({study_owner});
-            END
-            $study_rls$;
-        """)
-
-    # Media publication metadata remains owner-only, even for app admins.
-    # Guarded because the shared installer can precede Media schema v27.
-    for table in ("claims_cluster_publication_heads", "claims_cluster_publication_receipts"):
-        add(f"""
-            DO $claims_cluster_publication_rls$
-            BEGIN
-              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
-              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
-              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
-              DROP POLICY IF EXISTS {table}_owner ON {table};
-              CREATE POLICY {table}_owner ON {table} FOR ALL
-                USING (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''))
-                WITH CHECK (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''));
-            END
-            $claims_cluster_publication_rls$;
-        """)
+    stmts.extend(_build_guarded_chacha_owner_rls_sql())
 
     # Notes
     add("ALTER TABLE IF EXISTS notes ENABLE ROW LEVEL SECURITY;")

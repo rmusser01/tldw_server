@@ -9,11 +9,6 @@ import re
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from tldw_Server_API.app.core.claims_cluster_rebuild_contract import (
-    ClusterRebuildLimits,
-    ClusterRebuildSettings,
-    canonical_cluster_settings,
-)
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import (
     ClusterCalculation,
@@ -29,6 +24,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_rebu
     _validate_owner,
     lock_claim_cluster_cleanup,
     read_claim_cluster_source_on_connection,
+)
+from tldw_Server_API.app.core.Utils.claims_cluster_rebuild_contract import (
+    ClusterRebuildLimits,
+    ClusterRebuildSettings,
+    canonical_cluster_settings,
 )
 
 if TYPE_CHECKING:

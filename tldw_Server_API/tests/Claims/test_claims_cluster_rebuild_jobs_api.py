@@ -78,6 +78,41 @@ def test_async_routing_does_not_open_creating_media_db(manager, tmp_path, monkey
     assert not missing.exists()
 
 
+def test_async_admission_accepts_injected_lazy_manager_factory(manager, monkeypatch):
+    app = build_app()
+    app.dependency_overrides[claims.get_claim_cluster_job_manager_factory] = lambda: lambda: manager
+    monkeypatch.setattr(claims, "get_job_manager", forbidden)
+    with TestClient(app) as client:
+        response = client.post(PATH, params={"method": "exact"})
+    assert response.status_code == 202, response.text
+    assert manager.get_job(response.json()["job_id"])["owner_user_id"] == "1"
+
+
+def test_async_manager_resolution_and_admission_share_worker_thread(manager, monkeypatch):
+    threads = {}
+    admit = manager.admit_resource_job
+
+    async def ingress(request):
+        threads["request"] = threading.get_ident()
+
+    def resolve():
+        threads["resolve"] = threading.get_ident()
+        return manager
+
+    def observe_admission(*args, **kwargs):
+        threads["admit"] = threading.get_ident()
+        return admit(*args, **kwargs)
+
+    monkeypatch.setattr(claims, "check_rate_limit", ingress)
+    monkeypatch.setattr(claims, "get_job_manager", resolve)
+    monkeypatch.setattr(manager, "admit_resource_job", observe_admission)
+    with TestClient(build_app()) as client:
+        response = client.post(PATH, params={"method": "exact"})
+    assert response.status_code == 202, response.text
+    assert threads["request"] != threads["resolve"] == threads["admit"]
+    assert manager.get_job(response.json()["job_id"])["status"] == "queued"
+
+
 def test_equal_settings_reuse_and_both_conflicts_have_bounded_identity(manager, monkeypatch):
     with TestClient(build_app()) as client:
         first = client.post(

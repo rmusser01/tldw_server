@@ -6,13 +6,13 @@ import hashlib
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from tldw_Server_API.app.core.claims_analytics_export_contract import is_routable_claims_owner_id_text
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import (
     ClusterRebuildStorageError,
     ClusterSourceRow,
     ClusterSourceSnapshot,
 )
+from tldw_Server_API.app.core.Utils.claims_owner_identity import is_routable_claims_owner_id_text
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase

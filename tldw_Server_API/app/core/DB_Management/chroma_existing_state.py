@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.DB_Management.chroma_read_validation import (
     invalid,
     resource_limit,
 )
-from tldw_Server_API.app.core.Embeddings.chroma_storage import ChromaStorageError
+from tldw_Server_API.app.core.DB_Management.chroma_storage_errors import ChromaStorageError
 
 
 def _identity(path: Path) -> tuple[int, ...]:

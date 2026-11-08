@@ -20,6 +20,7 @@ from chromadb.api.models.Collection import Collection
 from chromadb.api.types import validate_ids
 from chromadb.errors import DuplicateIDError, NotFoundError
 
+from tldw_Server_API.app.core.DB_Management.chroma_storage_errors import ChromaStorageError as ChromaStorageError
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import (
     _acquire_platform_file_lock,
     _release_platform_file_lock,
@@ -28,15 +29,6 @@ from tldw_Server_API.app.core.Infrastructure.distributed_lock import (
 # A failed SDK stop cannot prove quiescence. Retain its SDK AND native lock
 # until process exit; dropping a manager must not unlock a possibly live SDK.
 _FAILED_SHUTDOWNS: dict[str, StorageSession] = {}
-
-
-class ChromaStorageError(RuntimeError):
-    """Source-free storage failure; absence is a separate, proven condition."""
-
-    def __init__(self, code: str, *, retryable: bool) -> None:
-        super().__init__(code)
-        self.code = code
-        self.retryable = retryable
 
 
 class StorageSession:

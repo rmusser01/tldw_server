@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import sqlite3
 import time
 import uuid as _uuid
@@ -424,6 +423,114 @@ def _as_utc_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=_tz.utc)
     return parsed.astimezone(_tz.utc)
+
+
+def _bounded_completion_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Apply the configured JSON size cap before opening a completion transaction."""
+    max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
+    truncate = _shared_is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
+    if result is None:
+        return None
+    try:
+        serialized = json.dumps(result)
+    except (TypeError, ValueError):
+        return result
+    size = len(serialized.encode("utf-8"))
+    if size > max_bytes:
+        if truncate:
+            return {"_truncated": True, "len_bytes": size}
+        raise ValueError(f"Result too large: {size} bytes > limit {max_bytes}")  # noqa: TRY003
+    return result
+
+
+def _record_ttl_group_counts(
+    rows: list[Any],
+    *,
+    reason: str,
+    counter_deltas: dict[tuple[str, str, str], list[int]],
+    queued: bool,
+    metric_facts: list[tuple[str, tuple[str, str, str], int]],
+) -> int:
+    """Accumulate counter deltas and deferred metric facts from selected TTL rows."""
+    def value(row: Any, key: str) -> Any:
+        return row.get(key) if isinstance(row, dict) else row[key]
+
+    affected = 0
+    for row in rows:
+        key = (str(value(row, "domain")), str(value(row, "queue")), str(value(row, "job_type")))
+        total = int(value(row, "total_count") or 0)
+        ready = int(value(row, "ready_count") or 0)
+        scheduled = int(value(row, "scheduled_count") or 0)
+        affected += total
+        deltas = counter_deltas.setdefault(key, [0, 0, 0])
+        if queued:
+            deltas[0] += ready
+            deltas[1] += scheduled
+        else:
+            deltas[2] += total
+        metric_facts.append((reason, key, total))
+    return affected
+
+
+def _ttl_resource_filter(
+    *, postgres: bool, reference_time: datetime, age_seconds: int | None,
+    runtime_seconds: int | None, domain: str | None, queue: str | None,
+    job_type: str | None,
+) -> tuple[str, list[Any]]:
+    """Select the complete TTL population before entering the resource guard."""
+    marker = "%s" if postgres else "?"
+    candidates = []
+    params: list[Any] = []
+    for status, column, seconds in (
+        ("queued", "created_at", age_seconds),
+        ("processing", "COALESCE(started_at, acquired_at)", runtime_seconds),
+    ):
+        if seconds is None:
+            continue
+        if postgres:
+            candidates.append(f"(status='{status}' AND {column} <= (%s - (%s || ' seconds')::interval))")
+            params.extend((reference_time, seconds))
+        else:
+            candidates.append(f"(status='{status}' AND {column} <= DATETIME(?, ?))")
+            params.extend((reference_time.strftime("%Y-%m-%d %H:%M:%S.%f"), f"-{seconds} seconds"))
+    where = ["(" + " OR ".join(candidates) + ")"]
+    for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type)):
+        if value is not None:
+            where.append(f"{column}={marker}")
+            params.append(value)
+    return " AND ".join(where), params
+
+
+def _job_archive_projections() -> tuple[str, str]:
+    """Keep archived resource metadata while clearing obsolete terminal leases."""
+    columns = ("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS)
+    projection = ", ".join(columns)
+    selection = ", ".join(
+        (
+            "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
+            f"THEN NULL ELSE {column} END AS {column}"
+            if column in {"leased_until", "lease_id", "worker_id"}
+            else column
+        )
+        for column in columns
+    )
+    return projection, selection
+
+
+def _reschedule_filter(
+    *, marker: str, domain: str | None, queue: str | None,
+    job_type: str | None, status: str | None, set_now: bool,
+) -> tuple[str, list[Any]]:
+    """Build the same administrative selection for both reschedule backends."""
+    where = ["1=1"]
+    params: list[Any] = []
+    for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type), ("status", status)):
+        if value:
+            where.append(f"{column}={marker}")
+            params.append(value)
+    if set_now:
+        where.append("available_at IS NOT NULL")
+    return " AND ".join(where), params
 
 
 class JobManager:
@@ -7752,29 +7859,12 @@ class JobManager:
             raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
-        # Cap result size if configured
-        max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
-        truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
         outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-        res_obj = result
+        res_obj = _bounded_completion_result(result)
         res_ok = False
         post_commit_side_effects: list[
             tuple[Any, tuple[Any, ...], dict[str, Any]]
         ] = []
-        if res_obj is not None:
-            # Serialize first; only catch serialization errors, not size checks
-            try:
-                res_json = json.dumps(res_obj)
-            except (TypeError, ValueError):
-                # Non-serializable results are handled by DB layer (stored as NULL or fail later)
-                res_json = None
-            if res_json is not None:
-                res_bytes = len(res_json.encode("utf-8"))
-                if res_bytes > max_bytes:
-                    if truncate:
-                        res_obj = {"_truncated": True, "len_bytes": res_bytes}
-                    else:
-                        raise ValueError(f"Result too large: {res_bytes} bytes > limit {max_bytes}")  # noqa: TRY003
         # Optional encryption at rest for result (requires domain; will be resolved per-backend)
         conn = self._connect()
         _test_mode = _is_test_mode()
@@ -8678,7 +8768,9 @@ class JobManager:
         streak, so a later ``fail_job`` with the default ``quarantine=True`` and the same
         ``error_code`` may quarantine the job at once.
         """
-        # Strong exactly-once finalize (optional): require a completion_token when enabled
+        from .failure_lifecycle import FailureHooks, FailureOperation, execute_failure
+
+        # Keep public validation ahead of connection creation.
         if (
             JobManager._is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN", ""))
             and not completion_token
@@ -8686,1219 +8778,153 @@ class JobManager:
             raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
-        streak_code = str(error_code or error)
-        outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-        post_commit_side_effects: list[
-            tuple[Any, tuple[Any, ...], dict[str, Any]]
-        ] = []
-        post_commit_cancel_uuid: str | None = None
-        post_commit_cancel_reason: str | None = None
-        conn = self._connect()
-        _test_mode = _is_test_mode()
-        try:
-            if self.backend == "postgres":
-                with conn:  # noqa: SIM117
-                    with self._resource_pg_cursor(
-                        conn, where="id=%s", params=(int(job_id),), expected_uuid=expected_uuid
-                    ) as (cur, mutation):
-                        if expected_uuid is not None and int(job_id) not in mutation.rows:
-                            return False
-                        # For metrics and idempotency
-                        if _test_mode:
-                            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                logger.info(
-                                    f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend=pg"
-                                )
-                        cur.execute(
-                            "SELECT status, completion_token, retry_count, failure_streak_code, failure_streak_count, "
-                            "domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at "
-                            f"FROM jobs WHERE id = %s AND ({mutation.where}) FOR UPDATE",  # nosec B608 - closed resource identity predicate; values bound.
-                            (int(job_id), *mutation.params),
-                        )
-                        elem = cur.fetchone()
-                        if elem is None or (
-                            expected_uuid is not None and str(elem.get("uuid") or "") != str(expected_uuid)
-                        ):
-                            return False
-                        if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
-                            return False
-                        if elem:
-                            st = str(elem.get("status"))
-                            ct = elem.get("completion_token")
-                            if st in {"completed", "failed", "cancelled", "quarantined"}:
-                                replay_states = (
-                                    {"failed", "quarantined"}
-                                    if retryable
-                                    else {"failed"}
-                                )
-                                return bool(
-                                    st in replay_states
-                                    and completion_token
-                                    and ct
-                                    and str(ct) == str(completion_token)
-                                )
-                        if retryable:
-                            cur.execute("SELECT retry_count FROM jobs WHERE id = %s", (int(job_id),))
-                            row = cur.fetchone()
-                            current = int(row["retry_count"]) if row else 0
-                            exp_backoff = max(1, int(backoff_seconds * (2**current)))
-                            test_mode = _is_test_mode()
-                            jitter = (
-                                0
-                                if exp_backoff <= 2 or test_mode
-                                else secrets.randbelow(max(1, exp_backoff // 4) + 1)
-                            )
-                            delay = exp_backoff + jitter
-                            # In tests, enforce a generous minimum when the caller requested
-                            # immediate retry (backoff_seconds=0) so that newer jobs can be
-                            # acquired before recently failed ones.
-                            if test_mode:
-                                _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-                                # Permit immediate retry in tests when caller requests backoff=0
-                                # unless outbox mode is enabled (which needs a larger gap).
-                                if not _outbox and exp_backoff <= 1:
-                                    delay = 0
-                                try:
-                                    if _outbox and int(backoff_seconds) <= 0 and delay < 10:
-                                        delay = 10
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    if _outbox and delay < 3:
-                                        delay = 3
-                            # Poison message quarantine check: increment failure_streak_* and quarantine if threshold reached
-                            thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
-                            if not quarantine:
-                                thresh = 10**9
-                            # Update retry path with failure streak bookkeeping
-                            if enforce:
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN 'quarantined' ELSE 'queued' END, "
-                                        "retry_count = retry_count + 1, last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, "
-                                        "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                        "failure_streak_code = %s, "
-                                        "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN %s ELSE NULL END, "
-                                        "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN available_at WHEN %s <= 0 THEN NULL ELSE NOW() + (%s || ' seconds')::interval END, "
-                                        "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN NOW() ELSE quarantined_at END, "
-                                        "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                        "WHERE id = %s AND status = 'processing' AND retry_count < max_retries AND worker_id = %s AND lease_id = %s AND (completion_token IS NULL OR completion_token = %s)"
-                                    ),
-                                    (
-                                        streak_code,
-                                        int(thresh),
-                                        streak_code,
-                                        error,
-                                        error_code,
-                                        error_class,
-                                        (json.dumps(error_stack) if error_stack is not None else None),
-                                        streak_code,
-                                        streak_code,
-                                        streak_code,
-                                        int(thresh),
-                                        completion_token,
-                                        streak_code,
-                                        int(thresh),
-                                        int(delay),
-                                        int(delay),
-                                        streak_code,
-                                        int(thresh),
-                                        int(job_id),
-                                        worker_id,
-                                        lease_id,
-                                        completion_token,
-                                    ),
-                                )
-                            else:
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN 'quarantined' ELSE 'queued' END, "
-                                        "retry_count = retry_count + 1, last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, "
-                                        "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                        "failure_streak_code = %s, "
-                                        "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN %s ELSE NULL END, "
-                                        "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN available_at WHEN %s <= 0 THEN NULL ELSE NOW() + (%s || ' seconds')::interval END, "
-                                        "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN NOW() ELSE quarantined_at END, "
-                                        "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                        "WHERE id = %s AND status = 'processing' AND retry_count < max_retries AND (completion_token IS NULL OR completion_token = %s)"
-                                    ),
-                                    (
-                                        streak_code,
-                                        int(thresh),
-                                        streak_code,
-                                        error,
-                                        error_code,
-                                        error_class,
-                                        (json.dumps(error_stack) if error_stack is not None else None),
-                                        streak_code,
-                                        streak_code,
-                                        streak_code,
-                                        int(thresh),
-                                        completion_token,
-                                        streak_code,
-                                        int(thresh),
-                                        int(delay),
-                                        int(delay),
-                                        streak_code,
-                                        int(thresh),
-                                        int(job_id),
-                                        completion_token,
-                                    ),
-                                )
-                            retry_transition_changed = cur.rowcount > 0
-                            if retry_transition_changed:
-                                cur.execute(
-                                    "SELECT status, uuid FROM jobs WHERE id = %s",
-                                    (int(job_id),),
-                                )
-                                _srow = cur.fetchone()
-                                transition_status = str((_srow or {}).get("status") or "")
-                                if transition_status == "quarantined":
-                                    post_commit_cancel_uuid = (_srow or {}).get("uuid")
-                                    post_commit_cancel_reason = "dependency_failed"
-                                try:
-                                    if elem:
-                                        if transition_status == "queued":
-                                            post_commit_side_effects.append(
-                                                (
-                                                    increment_retries,
-                                                    (dict(elem),),
-                                                    {},
-                                                )
-                                            )
-                                            try:
-                                                from .metrics import observe_retry_after
+        initial_test_mode = False
 
-                                                post_commit_side_effects.append(
-                                                    (
-                                                        observe_retry_after,
-                                                        (dict(elem), float(delay)),
-                                                        {},
-                                                    )
-                                                )
-                                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                                pass
-                                        # Append to failure_timeline (retryable)
-                                        try:
-                                            cur.execute(
-                                                "SELECT failure_timeline FROM jobs WHERE id = %s", (int(job_id),)
-                                            )
-                                            _tlrow = cur.fetchone()
-                                            tl_val = _tlrow.get("failure_timeline") if _tlrow else None
-                                            if isinstance(tl_val, list):
-                                                tl = tl_val
-                                            elif isinstance(tl_val, str):
-                                                try:
-                                                    tl = json.loads(tl_val)
-                                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                                    tl = []
-                                            else:
-                                                tl = []
-                                            tl.append(
-                                                {
-                                                    "ts": datetime.utcnow().isoformat(),
-                                                    "error_code": (error_code or error),
-                                                    "retry_backoff": int(delay),
-                                                }
-                                            )
-                                            tl = tl[-10:]
-                                            cur.execute(
-                                                "UPDATE jobs SET failure_timeline = %s::jsonb WHERE id = %s",
-                                                (json.dumps(tl), int(job_id)),
-                                            )
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            pass
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                if (
-                                    elem
-                                    and JobManager._is_truthy(
-                                        os.getenv("JOBS_COUNTERS_ENABLED", "")
-                                    )
-                                ):
-                                    will_quarantine = (
-                                        transition_status == "quarantined"
-                                    )
-                                    add_ready = int(
-                                        not will_quarantine and int(delay) <= 0
-                                    )
-                                    add_sched = int(
-                                        not will_quarantine and int(delay) > 0
-                                    )
-                                    add_quar = int(will_quarantine)
-                                    cur.execute(
-                                        (
-                                            "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) VALUES(%s,%s,%s,%s,%s,0,%s) "
-                                            "ON CONFLICT (domain,queue,job_type) DO UPDATE SET "
-                                            "ready_count = job_counters.ready_count + %s, "
-                                            "scheduled_count = job_counters.scheduled_count + %s, "
-                                            "processing_count = GREATEST(job_counters.processing_count - 1, 0), "
-                                            "quarantined_count = job_counters.quarantined_count + %s, "
-                                            "updated_at = NOW()"
-                                        ),
-                                        (
-                                            elem.get("domain"),
-                                            elem.get("queue"),
-                                            elem.get("job_type"),
-                                            add_ready,
-                                            add_sched,
-                                            add_quar,
-                                            add_ready,
-                                            add_sched,
-                                            add_quar,
-                                        ),
-                                    )
-                                if _is_test_mode():
-                                    try:
-                                        # Snapshot after scheduling retry (PG)
-                                        cur.execute("SELECT failure_timeline FROM jobs WHERE id = %s", (int(job_id),))
-                                        _tlrow = cur.fetchone()
-                                        _tl_len = 0
-                                        try:
-                                            _tl_len = (
-                                                len(json.loads(_tlrow.get("failure_timeline")))
-                                                if _tlrow and _tlrow.get("failure_timeline")
-                                                else 0
-                                            )
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            _tl_len = 0
-                                        cur.execute("SELECT COUNT(*) AS c FROM jobs")
-                                        _total = (cur.fetchone() or {}).get("c", 0)
-                                        cur.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
-                                        _rows = cur.fetchall() or []
-                                        _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
-                                        logger.info(
-                                            f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={_total} dist={_dist}"
-                                        )
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        pass
-                                if elem:
-                                    post_commit_side_effects.append(
-                                        (
-                                            self._update_gauges,
-                                            (),
-                                            {
-                                                "domain": elem.get("domain"),
-                                                "queue": elem.get("queue"),
-                                                "job_type": elem.get("job_type"),
-                                            },
-                                        )
-                                    )
-                                    event_type = (
-                                        "job.quarantined"
-                                        if transition_status == "quarantined"
-                                        else "job.retry_scheduled"
-                                    )
-                                    attrs = {
-                                        "error_code": (error_code or error),
-                                        "retry_count": int(current + 1),
-                                    }
-                                    if transition_status == "queued":
-                                        attrs["backoff_seconds"] = int(delay)
-                                    event_job = {
-                                        "id": int(job_id),
-                                        "domain": elem.get("domain"),
-                                        "queue": elem.get("queue"),
-                                        "job_type": elem.get("job_type"),
-                                        "owner_user_id": elem.get("owner_user_id"),
-                                        "request_id": elem.get("request_id"),
-                                        "trace_id": elem.get("trace_id"),
-                                    }
-                                    if outbox_enabled:
-                                        _insert_lifecycle_event(
-                                            cur,
-                                            backend=self.backend,
-                                            event_type=event_type,
-                                            job=event_job,
-                                            attrs=attrs,
-                                        )
-                                    _queue_lifecycle_event_observer(
-                                        post_commit_side_effects,
-                                        event_type=event_type,
-                                        job=event_job,
-                                        attrs=attrs,
-                                    )
-                                mutation.finish()
-                                _commit_postgres_transaction(
-                                    conn,
-                                    operation="job retry scheduling",
-                                )
-                                _run_post_commit_side_effects(post_commit_side_effects)
-                                post_commit_side_effects.clear()
-                                if post_commit_cancel_uuid:
-                                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                        self._cancel_dependent_jobs(
-                                            post_commit_cancel_uuid,
-                                            reason=post_commit_cancel_reason or "dependency_failed",
-                                        )
-                                return True
-                            if completion_token:
-                                cur.execute(
-                                    "SELECT status, completion_token FROM jobs WHERE id=%s",
-                                    (int(job_id),),
-                                )
-                                replay = cur.fetchone()
-                                if (
-                                    replay
-                                    and str(replay.get("status"))
-                                    in {"failed", "quarantined"}
-                                    and str(replay.get("completion_token") or "")
-                                    == str(completion_token)
-                                ):
-                                    return True
-                        # terminal failure
-                        failed_from_queued = False
-                        if enforce:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, completion_token = %s, "
-                                    "completed_at = NOW(), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s AND (completion_token IS NULL OR completion_token = %s)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    int(job_id),
-                                    worker_id,
-                                    lease_id,
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = cur.rowcount > 0
-                        else:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, completion_token = COALESCE(completion_token, %s), "
-                                    "completed_at = NOW(), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'processing' AND (completion_token IS NULL OR completion_token = %s)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    int(job_id),
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = cur.rowcount > 0
-                            if not failed_from_processing:
-                                try:
-                                    allow = {
-                                        d.strip().lower()
-                                        for d in os.getenv(
-                                            "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
-                                            "chatbooks,embeddings",
-                                        ).split(",")
-                                        if d.strip()
-                                    }
-                                    cur.execute("SELECT domain FROM jobs WHERE id = %s", (int(job_id),))
-                                    row_dom = cur.fetchone()
-                                    dom_val = str(row_dom.get("domain") or "").lower() if row_dom else ""
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    allow = {"chatbooks", "embeddings"}
-                                    dom_val = ""
-                                if dom_val in allow:
-                                    cur.execute(
-                                        (
-                                            "UPDATE jobs SET status = 'failed', last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, completion_token = COALESCE(completion_token, %s), "
-                                            "completed_at = NOW(), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'queued' AND (completion_token IS NULL OR completion_token = %s)"
-                                        ),
-                                        (
-                                            (error_code or error),
-                                            error,
-                                            error_code,
-                                            error_class,
-                                            (json.dumps(error_stack) if error_stack is not None else None),
-                                            completion_token,
-                                            int(job_id),
-                                            completion_token,
-                                        ),
-                                    )
-                                    failed_from_queued = cur.rowcount > 0
-                        ok = failed_from_processing or failed_from_queued
-                        if not ok and completion_token:
-                            cur.execute(
-                                "SELECT status, completion_token FROM jobs WHERE id=%s",
-                                (int(job_id),),
-                            )
-                            replay = cur.fetchone()
-                            if (
-                                replay
-                                and str(replay.get("status")) == "failed"
-                                and str(replay.get("completion_token") or "")
-                                == str(completion_token)
-                            ):
-                                return True
-                        if ok and (error_code or error_class or error_stack is not None):
-                            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET error_code = COALESCE(%s, error_code), "
-                                        "error_class = COALESCE(%s, error_class), "
-                                        "error_stack = COALESCE(%s::jsonb, error_stack) "
-                                        "WHERE id = %s"
-                                    ),
-                                    (
-                                        error_code,
-                                        error_class,
-                                        (json.dumps(error_stack) if error_stack is not None else None),
-                                        int(job_id),
-                                    ),
-                                )
-                        try:
-                            if ok and elem:
-                                d = dict(elem)
-                                post_commit_side_effects.append(
-                                    (increment_failures, (d,), {"reason": "terminal"})
-                                )
-                                try:
-                                    if error_code:
-                                        from .metrics import increment_failures_by_code
+        def initialize_diagnostics() -> None:
+            """Sample the existing diagnostic flag after opening the connection."""
+            nonlocal initial_test_mode
+            initial_test_mode = _is_test_mode()
 
-                                        post_commit_side_effects.append(
-                                            (
-                                                increment_failures_by_code,
-                                                (d, error_code),
-                                                {},
-                                            )
-                                        )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                try:
-                                    # Append terminal failure to timeline (no backoff)
-                                    cur.execute(
-                                        "UPDATE jobs SET failure_timeline = COALESCE(failure_timeline, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('ts', NOW(), 'error_code', %s::text, 'retry_backoff', 0)) WHERE id = %s",
-                                        ((error_code or error), int(job_id)),
-                                    )
-
-                                    post_commit_side_effects.append(
-                                        (
-                                            _record_job_span,
-                                            ("job.fail", d),
-                                            {
-                                                "attrs": {
-                                                    "retryable": False,
-                                                    "error_code": error_code,
-                                                }
-                                            },
-                                        )
-                                    )
-                                except _PG_ERRORS:
-                                    raise
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                post_commit_side_effects.append(
-                                    (
-                                        self._update_gauges,
-                                        (),
-                                        {
-                                            "domain": d.get("domain"),
-                                            "queue": d.get("queue"),
-                                            "job_type": d.get("job_type"),
-                                        },
-                                    )
-                                )
-                                post_commit_cancel_uuid = d.get("uuid")
-                                post_commit_cancel_reason = "dependency_failed"
-                        except _PG_ERRORS:
-                            raise
-                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        if (
-                            ok
-                            and elem
-                            and JobManager._is_truthy(
-                                os.getenv("JOBS_COUNTERS_ENABLED", "")
-                            )
-                        ):
-                            d_counter = dict(elem)
-                            if failed_from_queued:
-                                is_scheduled = (
-                                    d_counter.get("available_at") is not None
-                                )
-                                cur.execute(
-                                    (
-                                        "UPDATE job_counters SET "
-                                        "ready_count = GREATEST(ready_count - %s, 0), "
-                                        "scheduled_count = GREATEST(scheduled_count - %s, 0), "
-                                        "updated_at = NOW() "
-                                        "WHERE domain=%s AND queue=%s AND job_type=%s"
-                                    ),
-                                    (
-                                        int(not is_scheduled),
-                                        int(is_scheduled),
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            else:
-                                cur.execute(
-                                    "UPDATE job_counters SET processing_count = GREATEST(processing_count - 1, 0), updated_at = NOW() WHERE domain=%s AND queue=%s AND job_type=%s",
-                                    (
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            if cur.rowcount == 0:
-                                _reconcile_lifecycle_counter_row(
-                                    cur,
-                                    backend=self.backend,
-                                    domain=d_counter.get("domain"),
-                                    queue=d_counter.get("queue"),
-                                    job_type=d_counter.get("job_type"),
-                                )
-                        if ok and elem:
-                            event_job = {
-                                "id": int(job_id),
-                                "domain": elem.get("domain"),
-                                "queue": elem.get("queue"),
-                                "job_type": elem.get("job_type"),
-                                "owner_user_id": elem.get("owner_user_id"),
-                                "request_id": elem.get("request_id"),
-                                "trace_id": elem.get("trace_id"),
-                            }
-                            attrs = {"error_code": (error_code or error)}
-                            if outbox_enabled:
-                                _insert_lifecycle_event(
-                                    cur,
-                                    backend=self.backend,
-                                    event_type="job.failed",
-                                    job=event_job,
-                                    attrs=attrs,
-                                )
-                            _queue_lifecycle_event_observer(
-                                post_commit_side_effects,
-                                event_type="job.failed",
-                                job=event_job,
-                                attrs=attrs,
-                            )
-                        if _is_test_mode():
-                            try:
-                                cur.execute("SELECT COUNT(*) AS c FROM jobs")
-                                _total = (cur.fetchone() or {}).get("c", 0)
-                                cur.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
-                                _rows = cur.fetchall() or []
-                                _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
-                                logger.info(
-                                    f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={_total} dist={_dist}"
-                                )
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
-                        if ok:
-                            mutation.finish()
-                            _commit_postgres_transaction(
-                                conn,
-                                operation="terminal job failure",
-                            )
-                            _run_post_commit_side_effects(post_commit_side_effects)
-                            post_commit_side_effects.clear()
-                            if post_commit_cancel_uuid:
-                                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                    self._cancel_dependent_jobs(
-                                        post_commit_cancel_uuid,
-                                        reason=post_commit_cancel_reason or "dependency_failed",
-                                    )
-                        return ok
-            else:
-                result = False
-                with self._resource_sqlite_transaction(
-                    conn, where="id=?", params=(int(job_id),), expected_uuid=expected_uuid
-                ) as mutation:
-                    if expected_uuid is not None and int(job_id) not in mutation.rows:
-                        return False
-                    if _test_mode:
-                        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                            logger.info(
-                                f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend=sqlite"
-                            )
-                    # For metrics, fetch labels
-                    rowl = conn.execute(
-                        "SELECT status, completion_token, domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at FROM jobs WHERE id = ?",
-                        (job_id,),
-                    ).fetchone()
-                    if rowl is None or (expected_uuid is not None and str(rowl["uuid"] or "") != str(expected_uuid)):
-                        return False
-                    if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
-                        return False
-                    if rowl:
-                        st = str(rowl[0])
-                        ct = rowl[1]
-                        if st in {"completed", "failed", "cancelled", "quarantined"}:
-                            replay_states = (
-                                {"failed", "quarantined"}
-                                if retryable
-                                else {"failed"}
-                            )
-                            return bool(
-                                st in replay_states
-                                and completion_token
-                                and ct
-                                and str(ct) == str(completion_token)
-                            )
-                    retry_scheduled = False
-                    if retryable:
-                        # compute jittered backoff based on current retry_count
-                        row = conn.execute("SELECT retry_count FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                        current = int(row[0]) if row else 0
-                        exp_backoff = max(1, int(backoff_seconds * (2**current)))
-                        test_mode = _is_test_mode()
-                        jitter = (
-                            0
-                            if exp_backoff <= 2 or test_mode
-                            else secrets.randbelow(max(1, exp_backoff // 4) + 1)
-                        )
-                        delay = exp_backoff + jitter
-                        thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
-                        if test_mode:
-                            _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-                            if not _outbox and exp_backoff <= 1:
-                                delay = 0
-                            try:
-                                if _outbox and int(backoff_seconds) <= 0 and delay < 10:
-                                    delay = 10
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                if _outbox and delay < 3:
-                                    delay = 3
-                        if not quarantine:
-                            thresh = 10**9
-                        # SQLite retry path with failure streak bookkeeping
-                        if enforce:
-                            retry_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN 'quarantined' ELSE 'queued' END, "
-                                    "retry_count = retry_count + 1, last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, "
-                                    "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                    "failure_streak_code = ?, "
-                                    "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN ? ELSE NULL END, "
-                                    "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN available_at WHEN ? <= 0 THEN NULL ELSE DATETIME('now', ?) END, "
-                                    "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
-                                    "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                    "WHERE id = ? AND status = 'processing' AND retry_count < max_retries AND worker_id = ? AND lease_id = ? AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    streak_code,
-                                    int(thresh),
-                                    streak_code,
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    streak_code,
-                                    streak_code,
-                                    streak_code,
-                                    int(thresh),
-                                    completion_token,
-                                    streak_code,
-                                    int(thresh),
-                                    int(delay),
-                                    f"+{delay} seconds",
-                                    streak_code,
-                                    int(thresh),
-                                    job_id,
-                                    worker_id,
-                                    lease_id,
-                                    completion_token,
-                                ),
-                            )
-                        else:
-                            retry_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN 'quarantined' ELSE 'queued' END, "
-                                    "retry_count = retry_count + 1, last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, "
-                                    "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                    "failure_streak_code = ?, "
-                                    "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN ? ELSE NULL END, "
-                                    "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN available_at WHEN ? <= 0 THEN NULL ELSE DATETIME('now', ?) END, "
-                                    "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
-                                    "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                    "WHERE id = ? AND status = 'processing' AND retry_count < max_retries AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    streak_code,
-                                    int(thresh),
-                                    streak_code,
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    streak_code,
-                                    streak_code,
-                                    streak_code,
-                                    int(thresh),
-                                    completion_token,
-                                    streak_code,
-                                    int(thresh),
-                                    int(delay),
-                                    f"+{delay} seconds",
-                                    streak_code,
-                                    int(thresh),
-                                    job_id,
-                                    completion_token,
-                                ),
-                            )
-                        retry_transition_changed = (retry_cursor.rowcount or 0) > 0
-                        if retry_transition_changed:
-                            retry_scheduled = True
-                            rowq = conn.execute(
-                                "SELECT status, uuid FROM jobs WHERE id = ?",
-                                (job_id,),
-                            ).fetchone()
-                            transition_status = str(rowq[0] if rowq else "")
-                            if transition_status == "quarantined":
-                                post_commit_cancel_uuid = rowq[1]
-                                post_commit_cancel_reason = "dependency_failed"
-                            try:
-                                if rowl:
-                                    dtmp = dict(rowl)
-                                    if transition_status == "queued":
-                                        post_commit_side_effects.append(
-                                            (
-                                                increment_retries,
-                                                (dtmp,),
-                                                {},
-                                            )
-                                        )
-                                        try:
-                                            from .metrics import observe_retry_after
-
-                                            post_commit_side_effects.append(
-                                                (
-                                                    observe_retry_after,
-                                                    (dtmp, float(delay)),
-                                                    {},
-                                                )
-                                            )
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            pass
-                                    post_commit_side_effects.append(
-                                        (
-                                            self._update_gauges,
-                                            (),
-                                            {
-                                                "domain": dtmp.get("domain"),
-                                                "queue": dtmp.get("queue"),
-                                                "job_type": dtmp.get("job_type"),
-                                            },
-                                        )
-                                    )
-                                    # Append to failure_timeline
-                                    try:
-                                        row_t = conn.execute(
-                                            "SELECT failure_timeline FROM jobs WHERE id = ?", (job_id,)
-                                        ).fetchone()
-                                        timeline_json = row_t[0] if row_t else None
-                                        try:
-                                            tl = json.loads(timeline_json) if timeline_json else []
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            tl = []
-                                        tl.append(
-                                            {
-                                                "ts": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                                                "error_code": (error_code or error),
-                                                "retry_backoff": int(delay),
-                                            }
-                                        )
-                                        tl = tl[-10:]
-                                        conn.execute(
-                                            "UPDATE jobs SET failure_timeline = ? WHERE id = ?",
-                                            (json.dumps(tl), int(job_id)),
-                                        )
-                                        # Update last-acquired snapshot for test-mode fallbacks to preserve timeline growth
-                                        try:
-                                            if (
-                                                _is_test_mode()
-                                                and rowl
-                                            ):
-                                                rnow = conn.execute(
-                                                    "SELECT * FROM jobs WHERE id = ?", (int(job_id),)
-                                                ).fetchone()
-                                                if rnow:
-                                                    JobManager._LAST_ACQUIRED_TEST[(rowl[2], rowl[3])] = dict(rnow)
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            pass
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        pass
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
-                            if (
-                                rowl
-                                and JobManager._is_truthy(
-                                    os.getenv("JOBS_COUNTERS_ENABLED", "")
-                                )
-                            ):
-                                will_quarantine = (
-                                    transition_status == "quarantined"
-                                )
-                                add_ready = int(
-                                    not will_quarantine and int(delay) <= 0
-                                )
-                                add_sched = int(
-                                    not will_quarantine and int(delay) > 0
-                                )
-                                add_quar = int(will_quarantine)
-                                conn.execute(
-                                    (
-                                        "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) VALUES(?,?,?, ?, ?, 0, ?) "
-                                        "ON CONFLICT(domain,queue,job_type) DO UPDATE SET ready_count = ready_count + ?, scheduled_count = scheduled_count + ?, processing_count = CASE WHEN processing_count>0 THEN processing_count-1 ELSE 0 END, quarantined_count = quarantined_count + ?, updated_at = DATETIME('now')"
-                                    ),
-                                    (
-                                        rowl[2],
-                                        rowl[3],
-                                        rowl[4],
-                                        add_ready,
-                                        add_sched,
-                                        add_quar,
-                                        add_ready,
-                                        add_sched,
-                                        add_quar,
-                                    ),
-                                )
-                            if rowl:
-                                dtmp = dict(rowl)
-                                event_type = (
-                                    "job.quarantined"
-                                    if transition_status == "quarantined"
-                                    else "job.retry_scheduled"
-                                )
-                                attrs = {
-                                    "error_code": (error_code or error),
-                                    "retry_count": int(current + 1),
-                                }
-                                if transition_status == "queued":
-                                    attrs["backoff_seconds"] = int(delay)
-                                event_job = {
-                                    "id": int(job_id),
-                                    "domain": dtmp.get("domain"),
-                                    "queue": dtmp.get("queue"),
-                                    "job_type": dtmp.get("job_type"),
-                                    "owner_user_id": dtmp.get("owner_user_id"),
-                                    "request_id": dtmp.get("request_id"),
-                                    "trace_id": dtmp.get("trace_id"),
-                                }
-                                if outbox_enabled:
-                                    _insert_lifecycle_event(
-                                        conn,
-                                        backend=self.backend,
-                                        event_type=event_type,
-                                        job=event_job,
-                                        attrs=attrs,
-                                    )
-                                _queue_lifecycle_event_observer(
-                                    post_commit_side_effects,
-                                    event_type=event_type,
-                                    job=event_job,
-                                    attrs=attrs,
-                                )
-                            if _is_test_mode():
-                                try:
-                                    _row = conn.execute(
-                                        "SELECT failure_timeline FROM jobs WHERE id = ?", (int(job_id),)
-                                    ).fetchone()
-                                    _tl_len = 0
-                                    try:
-                                        _tl_len = len(json.loads(_row[0])) if (_row and _row[0]) else 0
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        _tl_len = 0
-                                    _total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-                                    _dist = {
-                                        str(r[0]): int(r[1])
-                                        for r in conn.execute(
-                                            "SELECT status, COUNT(*) FROM jobs GROUP BY status"
-                                        ).fetchall()
-                                    }
-                                    logger.info(
-                                        f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={int(_total)} dist={_dist}"
-                                    )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                            result = True
-                        elif completion_token:
-                            replay = conn.execute(
-                                "SELECT status, completion_token FROM jobs WHERE id=?",
-                                (int(job_id),),
-                            ).fetchone()
-                            if (
-                                replay
-                                and str(replay[0])
-                                in {"failed", "quarantined"}
-                                and str(replay[1] or "") == str(completion_token)
-                            ):
-                                return True
-                    if not retry_scheduled:
-                        # terminal failure
-                        failed_from_queued = False
-                        if enforce:
-                            processing_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, completion_token = ?, "
-                                    "completed_at = DATETIME('now'), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND status = 'processing' AND worker_id = ? AND lease_id = ? AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    job_id,
-                                    worker_id,
-                                    lease_id,
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = (
-                                processing_cursor.rowcount or 0
-                            ) > 0
-                        else:
-                            # Enforcement disabled: allow failing processing without matching worker/lease,
-                            # and fall back to failing queued jobs (admin-style terminalization) when appropriate.
-                            processing_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, completion_token = COALESCE(completion_token, ?), "
-                                    "completed_at = DATETIME('now'), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND status = 'processing' AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    job_id,
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = (
-                                processing_cursor.rowcount or 0
-                            ) > 0
-                            if not failed_from_processing:
-                                # Admin-style finalize: optionally allow failing queued jobs when enforcement is disabled
-                                # Scope via allowlist of domains (default: chatbooks) to avoid global behavior in tests
-                                try:
-                                    allow = {
-                                        d.strip().lower()
-                                        for d in os.getenv(
-                                            "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
-                                            "chatbooks,embeddings",
-                                        ).split(",")
-                                        if d.strip()
-                                    }
-                                    row_dom = conn.execute("SELECT domain FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                                    dom_val = str(row_dom[0]).lower() if row_dom and row_dom[0] else ""
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    allow = {"chatbooks", "embeddings"}
-                                    dom_val = ""
-                                if dom_val in allow:
-                                    cur2 = conn.execute(
-                                        (
-                                            "UPDATE jobs SET status = 'failed', last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, completion_token = COALESCE(completion_token, ?), "
-                                            "completed_at = DATETIME('now'), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND status = 'queued' AND (completion_token IS NULL OR completion_token = ?)"
-                                        ),
-                                        (
-                                            (error_code or error),
-                                            error,
-                                            error_code,
-                                            error_class,
-                                            (json.dumps(error_stack) if error_stack is not None else None),
-                                            completion_token,
-                                            job_id,
-                                            completion_token,
-                                        ),
-                                    )
-                                    failed_from_queued = (cur2.rowcount or 0) > 0
-                        ok = failed_from_processing or failed_from_queued
-                        if not ok and completion_token:
-                            replay = conn.execute(
-                                "SELECT status, completion_token FROM jobs WHERE id=?",
-                                (int(job_id),),
-                            ).fetchone()
-                            if (
-                                replay
-                                and str(replay[0]) == "failed"
-                                and str(replay[1] or "") == str(completion_token)
-                            ):
-                                return True
-                        try:
-                            if ok and rowl:
-                                d = dict(rowl)
-                                post_commit_side_effects.append(
-                                    (increment_failures, (d,), {"reason": "terminal"})
-                                )
-                                try:
-                                    if error_code:
-                                        from .metrics import increment_failures_by_code
-
-                                        post_commit_side_effects.append(
-                                            (
-                                                increment_failures_by_code,
-                                                (d, error_code),
-                                                {},
-                                            )
-                                        )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                # Append terminal failure to timeline (no backoff)
-                                try:
-                                    row_t2 = conn.execute(
-                                        "SELECT failure_timeline FROM jobs WHERE id = ?", (job_id,)
-                                    ).fetchone()
-                                    timeline_json2 = row_t2[0] if row_t2 else None
-                                    try:
-                                        tl2 = json.loads(timeline_json2) if timeline_json2 else []
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        tl2 = []
-                                    tl2.append(
-                                        {
-                                            "ts": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                                            "error_code": (error_code or error),
-                                            "retry_backoff": 0,
-                                        }
-                                    )
-                                    tl2 = tl2[-10:]
-                                    conn.execute(
-                                        "UPDATE jobs SET failure_timeline = ? WHERE id = ?",
-                                        (json.dumps(tl2), int(job_id)),
-                                    )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                try:
-                                    post_commit_side_effects.append(
-                                        (
-                                            _record_job_span,
-                                            ("job.fail", d),
-                                            {
-                                                "attrs": {
-                                                    "retryable": False,
-                                                    "error_code": error_code,
-                                                }
-                                            },
-                                        )
-                                    )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                post_commit_side_effects.append(
-                                    (
-                                        self._update_gauges,
-                                        (),
-                                        {
-                                            "domain": d.get("domain"),
-                                            "queue": d.get("queue"),
-                                            "job_type": d.get("job_type"),
-                                        },
-                                    )
-                                )
-                                try:
-                                    if d.get("uuid"):
-                                        post_commit_cancel_uuid = d.get("uuid")
-                                        post_commit_cancel_reason = "dependency_failed"
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        if (
-                            ok
-                            and rowl
-                            and JobManager._is_truthy(
-                                os.getenv("JOBS_COUNTERS_ENABLED", "")
-                            )
-                        ):
-                            d_counter = dict(rowl)
-                            if failed_from_queued:
-                                is_scheduled = (
-                                    d_counter.get("available_at") is not None
-                                )
-                                counter_cursor = conn.execute(
-                                    (
-                                        "UPDATE job_counters SET "
-                                        "ready_count = CASE WHEN ready_count > ? THEN ready_count - ? ELSE 0 END, "
-                                        "scheduled_count = CASE WHEN scheduled_count > ? THEN scheduled_count - ? ELSE 0 END, "
-                                        "updated_at = DATETIME('now') "
-                                        "WHERE domain=? AND queue=? AND job_type=?"
-                                    ),
-                                    (
-                                        int(not is_scheduled),
-                                        int(not is_scheduled),
-                                        int(is_scheduled),
-                                        int(is_scheduled),
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            else:
-                                counter_cursor = conn.execute(
-                                    "UPDATE job_counters SET processing_count = CASE WHEN processing_count>0 THEN processing_count-1 ELSE 0 END, updated_at = DATETIME('now') WHERE domain=? AND queue=? AND job_type=?",
-                                    (
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            if (counter_cursor.rowcount or 0) == 0:
-                                _reconcile_lifecycle_counter_row(
-                                    conn,
-                                    backend=self.backend,
-                                    domain=d_counter.get("domain"),
-                                    queue=d_counter.get("queue"),
-                                    job_type=d_counter.get("job_type"),
-                                )
-                        if ok and rowl:
-                            d_event = dict(rowl)
-                            event_job = {
-                                "id": int(job_id),
-                                "domain": d_event.get("domain"),
-                                "queue": d_event.get("queue"),
-                                "job_type": d_event.get("job_type"),
-                                "owner_user_id": d_event.get("owner_user_id"),
-                                "request_id": d_event.get("request_id"),
-                                "trace_id": d_event.get("trace_id"),
-                            }
-                            attrs = {"error_code": (error_code or error)}
-                            if outbox_enabled:
-                                _insert_lifecycle_event(
-                                    conn,
-                                    backend=self.backend,
-                                    event_type="job.failed",
-                                    job=event_job,
-                                    attrs=attrs,
-                                )
-                            _queue_lifecycle_event_observer(
-                                post_commit_side_effects,
-                                event_type="job.failed",
-                                job=event_job,
-                                attrs=attrs,
-                            )
-                        if _is_test_mode():
-                            try:
-                                _total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-                                _dist = {
-                                    str(r[0]): int(r[1])
-                                    for r in conn.execute(
-                                        "SELECT status, COUNT(*) FROM jobs GROUP BY status"
-                                    ).fetchall()
-                                }
-                                logger.info(
-                                    f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={int(_total)} dist={_dist}"
-                                )
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
-                        result = bool(ok)
-            _run_post_commit_side_effects(post_commit_side_effects)
-            post_commit_side_effects.clear()
-            if post_commit_cancel_uuid:
+        def log_enter(backend: str) -> None:
+            """Retain entry diagnostics in the environment-owning facade."""
+            if initial_test_mode:
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                    self._cancel_dependent_jobs(
-                        post_commit_cancel_uuid,
-                        reason=post_commit_cancel_reason or "dependency_failed",
+                    logger.info(
+                        f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend={backend}"
                     )
-            return bool(result)
-        finally:
-            _close_connection_nonfatal(conn, operation="job failure")
+
+        def retry_parameters(current: int, backend: str) -> tuple[int, int]:
+            """Resolve existing jitter, outbox spacing and quarantine policy."""
+            import secrets
+
+            exp_backoff = max(1, int(backoff_seconds * (2**current)))
+            test_mode = _is_test_mode()
+            jitter = 0 if exp_backoff <= 2 or test_mode else secrets.randbelow(max(1, exp_backoff // 4) + 1)
+            delay = exp_backoff + jitter
+            if backend != "postgres":
+                thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
+            if test_mode:
+                _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
+                if not _outbox and exp_backoff <= 1:
+                    delay = 0
+                try:
+                    if _outbox and int(backoff_seconds) <= 0 and delay < 10:
+                        delay = 10
+                except _JOB_NONCRITICAL_EXCEPTIONS:
+                    if _outbox and delay < 3:
+                        delay = 3
+            if backend == "postgres":
+                thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
+            if not quarantine:
+                thresh = 10**9
+            return delay, thresh
+
+        def snapshot_retry(conn: Any, rowl: Any) -> None:
+            """Retain the SQLite acquisition diagnostic snapshot timing."""
+            try:
+                if _is_test_mode() and rowl:
+                    rnow = conn.execute("SELECT * FROM jobs WHERE id = ?", (int(job_id),)).fetchone()
+                    if rnow:
+                        JobManager._LAST_ACQUIRED_TEST[(rowl[2], rowl[3])] = dict(rnow)
+            except _JOB_NONCRITICAL_EXCEPTIONS:
+                pass
+
+        def log_retry(executor: Any, backend: str, delay: int) -> None:
+            """Observe retry diagnostics without owning the transaction."""
+            if backend == "postgres":
+                if _is_test_mode():
+                    try:
+                        # Snapshot after scheduling retry (PG)
+                        executor.execute("SELECT failure_timeline FROM jobs WHERE id = %s", (int(job_id),))
+                        _tlrow = executor.fetchone()
+                        _tl_len = 0
+                        try:
+                            _tl_len = (
+                                len(json.loads(_tlrow.get("failure_timeline"))) if _tlrow and _tlrow.get("failure_timeline") else 0
+                            )
+                        except _JOB_NONCRITICAL_EXCEPTIONS:
+                            _tl_len = 0
+                        executor.execute("SELECT COUNT(*) AS c FROM jobs")
+                        _total = (executor.fetchone() or {}).get("c", 0)
+                        executor.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
+                        _rows = executor.fetchall() or []
+                        _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
+                        logger.info(
+                            f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={_total} dist={_dist}"
+                        )
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+            else:
+                if _is_test_mode():
+                    try:
+                        _row = executor.execute("SELECT failure_timeline FROM jobs WHERE id = ?", (int(job_id),)).fetchone()
+                        _tl_len = 0
+                        try:
+                            _tl_len = len(json.loads(_row[0])) if (_row and _row[0]) else 0
+                        except _JOB_NONCRITICAL_EXCEPTIONS:
+                            _tl_len = 0
+                        _total = executor.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                        _dist = {
+                            str(r[0]): int(r[1])
+                            for r in executor.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall()
+                        }
+                        logger.info(
+                            f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={int(_total)} dist={_dist}"
+                        )
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+
+        def log_terminal(executor: Any, backend: str, ok: bool) -> None:
+            """Observe terminal diagnostics before the owning commit."""
+            if backend == "postgres":
+                if _is_test_mode():
+                    try:
+                        executor.execute("SELECT COUNT(*) AS c FROM jobs")
+                        _total = (executor.fetchone() or {}).get("c", 0)
+                        executor.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
+                        _rows = executor.fetchall() or []
+                        _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
+                        logger.info(f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={_total} dist={_dist}")
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+            else:
+                if _is_test_mode():
+                    try:
+                        _total = executor.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                        _dist = {
+                            str(r[0]): int(r[1])
+                            for r in executor.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall()
+                        }
+                        logger.info(f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={int(_total)} dist={_dist}")
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+
+        operation = FailureOperation(
+            job_id=job_id,
+            error=error,
+            retryable=retryable,
+            backoff_seconds=backoff_seconds,
+            worker_id=worker_id,
+            lease_id=lease_id,
+            enforce=enforce,
+            error_code=error_code,
+            error_class=error_class,
+            error_stack=error_stack,
+            completion_token=completion_token,
+            quarantine=quarantine,
+            expected_uuid=expected_uuid,
+            streak_code=str(error_code or error),
+            outbox_enabled=JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")),
+            hooks=FailureHooks(
+                initialize_diagnostics=initialize_diagnostics,
+                log_enter=log_enter,
+                retry_parameters=retry_parameters,
+                snapshot_retry=snapshot_retry,
+                log_retry=log_retry,
+                log_terminal=log_terminal,
+            ),
+        )
+        return execute_failure(self, operation)
 
     def cancel_job(
         self,
@@ -10770,16 +9796,7 @@ class JobManager:
             and queue in (None, _SLIDES_GENERATION_QUEUE)
             and job_type in (None, _SLIDES_GENERATION_JOB_TYPE)
         )
-        archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS))
-        archive_select_projection = ", ".join(
-            (
-                "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
-                f"THEN NULL ELSE {column} END AS {column}"
-                if column in {"leased_until", "lease_id", "worker_id"}
-                else column
-            )
-            for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS)
-        )
+        archive_projection, archive_select_projection = _job_archive_projections()
         conn = self._connect()
         _test_mode = _is_test_mode()
         deleted = 0
@@ -11453,59 +10470,11 @@ class JobManager:
         affected_runtime = 0
         metric_facts: list[tuple[str, tuple[str, str, str], int]] = []
 
-        def _row_value(row: Any, key: str) -> Any:
-            if isinstance(row, dict):
-                return row.get(key)
-            return row[key]
-
-        def _record_group_counts(
-            rows: list[Any],
-            *,
-            reason: str,
-            counter_deltas: dict[tuple[str, str, str], list[int]],
-            queued: bool,
-        ) -> int:
-            affected = 0
-            for row in rows:
-                key = (
-                    str(_row_value(row, "domain")),
-                    str(_row_value(row, "queue")),
-                    str(_row_value(row, "job_type")),
-                )
-                total = int(_row_value(row, "total_count") or 0)
-                ready = int(_row_value(row, "ready_count") or 0)
-                scheduled = int(_row_value(row, "scheduled_count") or 0)
-                affected += total
-                deltas = counter_deltas.setdefault(key, [0, 0, 0])
-                if queued:
-                    deltas[0] += ready
-                    deltas[1] += scheduled
-                else:
-                    deltas[2] += total
-                metric_facts.append((reason, key, total))
-            return affected
-
-        marker = "%s" if self.backend == "postgres" else "?"
-        ttl_candidates = []
-        resource_params: list[Any] = []
-        for status, column, seconds in (
-            ("queued", "created_at", age_seconds),
-            ("processing", "COALESCE(started_at, acquired_at)", runtime_seconds),
-        ):
-            if seconds is None:
-                continue
-            if self.backend == "postgres":
-                ttl_candidates.append(f"(status='{status}' AND {column} <= (%s - (%s || ' seconds')::interval))")
-                resource_params.extend((ref_dt, seconds))
-            else:
-                ttl_candidates.append(f"(status='{status}' AND {column} <= DATETIME(?, ?))")
-                resource_params.extend((ref_dt.strftime("%Y-%m-%d %H:%M:%S.%f"), f"-{seconds} seconds"))
-        resource_where = ["(" + " OR ".join(ttl_candidates) + ")"]
-        for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type)):
-            if value is not None:
-                resource_where.append(f"{column}={marker}")
-                resource_params.append(value)
-        resource_where_sql = " AND ".join(resource_where)
+        resource_where_sql, resource_params = _ttl_resource_filter(
+            postgres=self.backend == "postgres", reference_time=ref_dt,
+            age_seconds=age_seconds, runtime_seconds=runtime_seconds,
+            domain=domain, queue=queue, job_type=job_type,
+        )
         conn = self._connect()
         try:
             counter_deltas: dict[tuple[str, str, str], list[int]] = {}
@@ -11557,11 +10526,12 @@ class JobManager:
                             ),
                             (ref_dt, *where_params),
                         )
-                        affected_age = _record_group_counts(
+                        affected_age = _record_ttl_group_counts(
                             list(cur.fetchall() or []),
                             reason="ttl_age",
                             counter_deltas=counter_deltas,
                             queued=True,
+                            metric_facts=metric_facts,
                         )
 
                     if runtime_seconds is not None:
@@ -11605,11 +10575,12 @@ class JobManager:
                             ),
                             (ref_dt, *where_params),
                         )
-                        affected_runtime = _record_group_counts(
+                        affected_runtime = _record_ttl_group_counts(
                             list(cur.fetchall() or []),
                             reason="ttl_runtime",
                             counter_deltas=counter_deltas,
                             queued=False,
+                            metric_facts=metric_facts,
                         )
 
                     if counters_enabled:
@@ -11670,11 +10641,12 @@ class JobManager:
                             ).fetchall()
                             or []
                         )
-                        affected_age = _record_group_counts(
+                        affected_age = _record_ttl_group_counts(
                             age_rows,
                             reason="ttl_age",
                             counter_deltas=counter_deltas,
                             queued=True,
+                            metric_facts=metric_facts,
                         )
                         cursor = conn.execute(
                             (
@@ -11728,11 +10700,12 @@ class JobManager:
                             ).fetchall()
                             or []
                         )
-                        affected_runtime = _record_group_counts(
+                        affected_runtime = _record_ttl_group_counts(
                             runtime_rows,
                             reason="ttl_runtime",
                             counter_deltas=counter_deltas,
                             queued=False,
+                            metric_facts=metric_facts,
                         )
                         cursor = conn.execute(
                             (
@@ -11862,23 +10835,10 @@ class JobManager:
         try:
             if self.backend == "postgres":
                 with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
-                    where = ["1=1"]
-                    params: list[Any] = []
-                    if domain:
-                        where.append("domain=%s")
-                        params.append(domain)
-                    if queue:
-                        where.append("queue=%s")
-                        params.append(queue)
-                    if job_type:
-                        where.append("job_type=%s")
-                        params.append(job_type)
-                    if status:
-                        where.append("status=%s")
-                        params.append(status)
-                    if set_now:
-                        where.append("available_at IS NOT NULL")
-                    wh = " AND ".join(where)
+                    wh, params = _reschedule_filter(
+                        marker="%s", domain=domain, queue=queue, job_type=job_type,
+                        status=status, set_now=set_now,
+                    )
                     if dry_run:
                         dry_run_where = f"{wh} AND available_at IS NOT NULL" if set_now else wh
                         cur.execute(
@@ -12009,23 +10969,10 @@ class JobManager:
                                         )
                             return count
             else:
-                where = ["1=1"]
-                params: list[Any] = []
-                if domain:
-                    where.append("domain=?")
-                    params.append(domain)
-                if queue:
-                    where.append("queue=?")
-                    params.append(queue)
-                if job_type:
-                    where.append("job_type=?")
-                    params.append(job_type)
-                if status:
-                    where.append("status=?")
-                    params.append(status)
-                if set_now:
-                    where.append("available_at IS NOT NULL")
-                wh = " AND ".join(where)
+                wh, params = _reschedule_filter(
+                    marker="?", domain=domain, queue=queue, job_type=job_type,
+                    status=status, set_now=set_now,
+                )
                 if dry_run:
                     dry_run_where = f"{wh} AND available_at IS NOT NULL" if set_now else wh
                     row = conn.execute(

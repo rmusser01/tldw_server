@@ -9,7 +9,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from tldw_Server_API.app.core.Embeddings.chroma_storage import ChromaStorageError
+from tldw_Server_API.app.core.DB_Management.chroma_storage_errors import ChromaStorageError
 
 
 def invalid() -> ChromaStorageError:

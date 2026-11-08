@@ -3,7 +3,6 @@
 import math
 from uuid import UUID
 
-from tldw_Server_API.app.api.v1.schemas.jobs_owned import OwnedJobStatus
 from tldw_Server_API.app.core.claims_analytics_export_contract import (
     is_routable_claims_owner_id_text,
 )
@@ -12,6 +11,7 @@ from tldw_Server_API.app.core.claims_cluster_rebuild_contract import (
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.models import TERMINAL_JOB_STATUSES
+from tldw_Server_API.app.core.Jobs.owned_status_contract import OwnedJobStatus
 
 _FAILURE_CODES = frozenset(
     {

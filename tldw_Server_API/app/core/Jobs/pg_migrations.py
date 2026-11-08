@@ -1490,6 +1490,21 @@ def _record_slides_audit_failure_pg(dsn: str) -> None:
         _mark_slides_audit_failure_pg(cur)
 
 
+def _ensure_pg_job_attachments_schema(cur: Any) -> None:
+    """Create attachment storage and its lookup index in the caller's transaction."""
+    cur.execute("""
+                    CREATE TABLE IF NOT EXISTS job_attachments (
+                      id SERIAL PRIMARY KEY,
+                      job_id INTEGER NOT NULL,
+                      kind TEXT NOT NULL,
+                      content_text TEXT,
+                      url TEXT,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_job_attachments_job ON job_attachments(job_id)")
+
+
 def ensure_jobs_tables_pg(db_url: str) -> str:
     """Ensure the jobs table exists in the given PostgreSQL database.
 
@@ -1519,19 +1534,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     );
                     """
             )
-            cur.execute(
-                """
-                    CREATE TABLE IF NOT EXISTS job_attachments (
-                      id SERIAL PRIMARY KEY,
-                      job_id INTEGER NOT NULL,
-                      kind TEXT NOT NULL,
-                      content_text TEXT,
-                      url TEXT,
-                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                    );
-                    """
-            )
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_job_attachments_job ON job_attachments(job_id)")
+            _ensure_pg_job_attachments_schema(cur)
             cur.execute(
                 """
                     CREATE TABLE IF NOT EXISTS job_sla_policies (
@@ -1874,6 +1877,38 @@ def build_jobs_rls_predicates() -> tuple[str, str, str]:
     return admin_expr, domain_filter, owner_filter
 
 
+def _ensure_pg_idempotency_receipt_rls(cur: Any, *, admin_expr: str, domain_filter: str, owner_filter: str) -> None:
+    """Install receipt read and write policies with the Jobs tenant predicates."""
+    cur.execute("DROP POLICY IF EXISTS job_idempotency_receipts_select " "ON job_idempotency_receipts")
+    cur.execute(f"""
+                    CREATE POLICY job_idempotency_receipts_select
+                    ON job_idempotency_receipts FOR SELECT
+                    USING (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    """)
+    cur.execute("DROP POLICY IF EXISTS job_idempotency_receipts_modify " "ON job_idempotency_receipts")
+    cur.execute(f"""
+                    CREATE POLICY job_idempotency_receipts_modify
+                    ON job_idempotency_receipts FOR ALL
+                    USING (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    WITH CHECK (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    """)
+
+
 def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     """Enable Postgres Row Level Security (RLS) for domain scoping.
 
@@ -2056,43 +2091,8 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     )
                     """
             )
-            cur.execute(
-                "DROP POLICY IF EXISTS job_idempotency_receipts_select "
-                "ON job_idempotency_receipts"
-            )
-            cur.execute(
-                f"""
-                    CREATE POLICY job_idempotency_receipts_select
-                    ON job_idempotency_receipts FOR SELECT
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
-            )
-            cur.execute(
-                "DROP POLICY IF EXISTS job_idempotency_receipts_modify "
-                "ON job_idempotency_receipts"
-            )
-            cur.execute(
-                f"""
-                    CREATE POLICY job_idempotency_receipts_modify
-                    ON job_idempotency_receipts FOR ALL
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    WITH CHECK (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
+            _ensure_pg_idempotency_receipt_rls(
+                cur, admin_expr=admin_expr, domain_filter=domain_filter, owner_filter=owner_filter
             )
             # job_events policies (domain + owner, with admin bypass)
             try:

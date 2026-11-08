@@ -105,11 +105,8 @@ def _append_first_available_imported_router_spec(
         return
 
 
-def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
-    """Yield optional minimal-test router specs, skipping unavailable imports."""
-    specs: list[RouterSpec] = []
-    minimal_skip_context = "in minimal test app"
-
+def _append_minimal_llm_router_specs(specs: list[RouterSpec]) -> None:
+    """Append optional LLM providers and compatibility routers in registration order."""
     append_imported_router_spec(
         specs,
         ImportedRouterSpec(
@@ -162,6 +159,14 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         ),
     ):
         append_imported_router_spec(specs, llm_spec)
+
+
+def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
+    """Yield optional minimal-test router specs, skipping unavailable imports."""
+    specs: list[RouterSpec] = []
+    minimal_skip_context = "in minimal test app"
+
+    _append_minimal_llm_router_specs(specs)
 
     for embedding_spec in (
         ImportedRouterSpec(

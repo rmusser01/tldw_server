@@ -117,3 +117,68 @@ and scanner source remain identical to published head `d684526a20`. Existing
 runtime approvals and qualification transfer unchanged, not a new runtime audit.
 Publication and exact-head auto-merge readback will be recorded on PR #3434;
 monitoring/task remain active pending actual merge. No required gate is waived.
+
+### Current Code-Contract Gate Repair
+
+On 2026-11-08T08:40Z, published head `6b4ced6123` failed the complete code-contract
+step (five failures, 1,075 passes), after the repaired tenant gate passed.
+Auto-merge is disarmed before edits. Reproduce the current function-size,
+layering, DB-import-cycle, core/API-boundary and endpoint-getter ratchets; restore
+their existing contracts without baseline growth or scanner/test exemptions.
+Keep lifecycle and transaction fences in shared Jobs. Use scoped behavior tests,
+official PostgreSQL fixtures, compile/lint/Bandit, canonical task checks, full
+staged PR hooks and independent review before publication/rearming.
+ADR required: no new decision; these corrections restore existing module
+boundaries, DI and code-size constraints under the existing Jobs ownership rule.
+Reassess if a durable architecture change is needed. Earlier runtime evidence is
+historical, not certification of the forthcoming source changes.
+
+The stable repair restores all original ceilings and import boundaries. Shared
+Jobs failure orchestration is 185 lines; new helpers are at most 149 lines and
+retain all 47 SQL call shapes. Test-mode policy stays in manager callbacks
+(38 signal lines under the unchanged 41 ceiling); the new module has none.
+Remove only the stale fail_job size exception. Seven existing owner guards moved
+lines with identical complete ASTs and enclosing functions; all 28 entries stay.
+The supported old import paths alias the same lower-level definitions. Lazy
+manager construction and admission remain together in their executing worker.
+
+An intermittent timeout-fixture input failure was also observed. Deterministic
+global-config refresh reproduced the same 8.0 versus 0.01 symptom. Bind test-owned
+consumed settings, preserving exact timeout/cancel/nonwaiting-shutdown assertions.
+RED was one failure/five passes; its closure now passes 14 cases. The historical
+intermittent trigger is not claimed proved; production ingestion is unchanged.
+
+Final stable-source verification:
+- Full Jobs SQLite: 2,543 passed, two inherited crypto skips; 1,560 normal PG
+  marker deselections. Expanded official PostgreSQL and both-backend lifecycle,
+  retention, TTL, prune, counters, schema and restricted RLS: 471 passed, no skips.
+- Complete Claims/publication/snapshot/owned status/restricted PostgreSQL:
+  1,804 passed, one existing spaCy skip.
+- Exact backend code-contract step: 1,079 passed, one runner Bash skip, then
+  separate WebSocket checks: 193 passed, no skips.
+- Complete CI/Docs/Config: 1,613 passed, six existing runner/environment skips.
+  Tenant gate plus migration/RLS/startup closure: 109 passed, no skips.
+- Compile 117 Python paths; configured Ruff 113 versus dev 116, no new/worse
+  signatures; Bandit 64 production files, one identical inherited B608 archive
+  query, zero scan errors/new findings. All 15 tasks canonical; all applicable
+  full 157-path staged hooks passed without modifying files. Selections overlap.
+
+Five independent requesting-code-review seats approved the new scoped work with
+no actionable findings. Parent-helper differential checks, failure SQL/exception
+traces and metadata checks, boundary/cold-thread checks, migration/router parity,
+and timeout-fixture review are recorded in TASK-15466. Live backend qualification
+and final hooks remain parent evidence, not reviewer certification. Other PR
+source retains earlier independent approvals. No new ADR or quality allowance.
+
+Honest harness limits remain in the task: initial concurrent-source inspection
+failures passed unchanged in a fresh process and final suite; one bad test path
+collected zero; the diagnostic trace hit a Hypothesis generation health check,
+then the unchanged 142-case module and final Claims suite passed. No health check
+or test budget was weakened. The unchanged root pg_dump prerequisite was not
+rerun or called green. Old-head E2E Critical, Jobs PostgreSQL and gap-verified-6
+also hit GitHub uv-download HTTP 504 before install/tests; no workflow change,
+manual dispatch or cancellation was used. The next head must pass its own CI.
+
+Latest fetched dev and remote PR head are unchanged. Auto-merge remains disarmed
+for publication; exact-head MERGE rearming/readback will be recorded on PR #3434.
+Stages 3/4 and TASK-15466 remain active until actual merge, not merely publication.

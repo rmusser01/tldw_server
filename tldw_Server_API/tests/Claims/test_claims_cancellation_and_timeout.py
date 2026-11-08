@@ -17,13 +17,19 @@ def test_claims_service_noncritical_exceptions_do_not_swallow_cancellation():
     assert asyncio.CancelledError not in claims_service._CLAIMS_NONCRITICAL_EXCEPTIONS
 
 
-@pytest.mark.parametrize("settings_binding", ["current", "rebound"])
-def test_ingestion_llm_timeout_shuts_down_executor_without_waiting(monkeypatch, settings_binding):
+@pytest.mark.parametrize("settings_binding", ["snapshot", "rebound"])
+@pytest.mark.parametrize("refresh_global_settings", [False, True])
+def test_ingestion_llm_timeout_shuts_down_executor_without_waiting(
+    monkeypatch, settings_binding, refresh_global_settings
+):
     import tldw_Server_API.app.core.Claims_Extraction.ingestion_claims as ingestion_mod
     from tldw_Server_API.app.core import config
 
     if settings_binding == "rebound":
         monkeypatch.setattr(ingestion_mod, "_settings", config.LazySettings(config.load_settings))
+    else:
+        # Own the consumed inputs even when another fixture refreshes global config.
+        monkeypatch.setattr(ingestion_mod, "_settings", dict(ingestion_mod._settings))
 
     shutdown_calls: list[dict[str, Any]] = []
     cancel_calls: list[bool] = []
@@ -64,6 +70,9 @@ def test_ingestion_llm_timeout_shuts_down_executor_without_waiting(monkeypatch, 
     monkeypatch.setattr(ingestion_mod, "extract_heuristic_claims_texts", lambda *args, **kwargs: [])
     monkeypatch.setattr(ingestion_mod, "record_claims_provider_request", lambda **kwargs: None)
     monkeypatch.setattr(ingestion_mod, "record_claims_fallback", lambda **kwargs: None)
+
+    if refresh_global_settings:
+        config.clear_config_cache()
 
     ingestion_mod.extract_claims_for_chunks(
         [{"text": "Provider timeout claim.", "metadata": {"chunk_index": 0}}],

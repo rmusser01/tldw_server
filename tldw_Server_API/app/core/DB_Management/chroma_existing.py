@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.DB_Management.chroma_read_validation import (
     ReadBudget,
     read_metadata,
 )
-from tldw_Server_API.app.core.Embeddings.chroma_storage import ChromaStorageError
+from tldw_Server_API.app.core.DB_Management.chroma_storage_errors import ChromaStorageError
 
 # Complete sqlite_master signature from the real Rust 1.5.5 fresh-store profile,
 # including constraints, FTS shadow tables and indexes, not just table presence.

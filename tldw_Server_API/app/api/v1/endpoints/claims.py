@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -58,6 +59,11 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionRejectio
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 router = APIRouter(prefix="/claims", tags=["claims"])
+
+
+def get_claim_cluster_job_manager_factory() -> Callable[[], Any]:
+    """Inject lazy resolution so manager setup and admission share a worker thread."""
+    return get_job_manager
 
 
 async def _enforce_claims_export_rate_limit(request: Request) -> None:
@@ -747,6 +753,7 @@ async def rebuild_claim_clusters(
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     context: ClaimsClusterRebuildRouteContext = Depends(get_claim_cluster_rebuild_context),
+    job_manager_factory: Callable[[], Any] = Depends(get_claim_cluster_job_manager_factory),
 ) -> Any:
     """Preserve legacy rebuilds or admit an authorized, UUID-addressed Job."""
     if not context.async_enabled:
@@ -796,7 +803,7 @@ async def rebuild_claim_clusters(
                 request_key=request_key,
                 principal=principal,
                 current_user=current_user,
-                job_manager=get_job_manager(),
+                job_manager=job_manager_factory(),
             )
         )
         if admission.kind == "rejected":
