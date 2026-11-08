@@ -11,6 +11,19 @@ APP_PACKAGE_NAME = "tldw_Server_API.app"
 APP_MAIN_MODULE_NAME = "tldw_Server_API.app.main"
 
 
+def prepare_loaded_moderation_for_test() -> None:
+    """Reopen settled test admission without activating or replacing owners."""
+    execution = sys.modules.get("tldw_Server_API.app.core.Moderation.async_execution")
+    if getattr(execution, "_closed", False):
+        execution.prepare_moderation_execution()
+    incidents = sys.modules.get("tldw_Server_API.app.core.Moderation.execution_incidents")
+    if incidents is not None:
+        try:
+            incidents.prepare_moderation_incident_store()
+        except Exception:
+            incidents._reporter_failure()
+
+
 def _get_app_package():
     return importlib.import_module(APP_PACKAGE_NAME)
 

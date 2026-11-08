@@ -188,7 +188,7 @@ async def test_pathological_guardian_and_custom_rules_are_contained(mode, tmp_pa
     test_probe_hard_exit_and_invoker_disconnect_still_clean_tree(tmp_path)
     root = str(Path(__file__).resolve().parents[3])
     code = f"import sys; sys.path.insert(0, {root!r})\n" + textwrap.dedent("""
-        import asyncio, os, re, tempfile, threading
+        import asyncio, os, re, tempfile, threading, time
         from types import SimpleNamespace
         from loguru import logger
         logger.remove()
@@ -239,6 +239,19 @@ async def test_pathological_guardian_and_custom_rules_are_contained(mode, tmp_pa
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
         asyncio.run(main())
+        from tldw_Server_API.app.core.Moderation import async_execution, execution_incidents
+        end = time.monotonic() + 1
+        with async_execution._lock:
+            active = async_execution._active
+        while active and time.monotonic() < end:
+            time.sleep(0.01)
+            with async_execution._lock:
+                active = async_execution._active
+        assert active == 0
+        reporter = execution_incidents._report_thread
+        if reporter is not None:
+            reporter.join(1)
+            assert not reporter.is_alive()
         directory.cleanup()
         print("contained and responsive")
     """)

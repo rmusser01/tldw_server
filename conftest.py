@@ -21,6 +21,7 @@ os.environ.pop("PROFILE", None)
 import tldw_Server_API.tests._thread_env  # noqa: E402,F401
 
 pytest_plugins = (
+    "pytest_mock",
     "tldw_Server_API.tests.helpers.pgvector",
     "tldw_Server_API.tests._plugins.e2e_fixtures",
     "tldw_Server_API.tests._plugins.e2e_state_fixtures",

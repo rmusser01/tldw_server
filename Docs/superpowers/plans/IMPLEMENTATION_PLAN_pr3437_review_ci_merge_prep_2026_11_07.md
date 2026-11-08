@@ -26,8 +26,8 @@ correcting trusted startup; never reset PID counters or discard live owners.
 ## Stage 3: Publish and Prepare for Merge
 **Goal**: Push corrections, respond to comments and report real merge gates.
 **Success Criteria**: PR updated, every finding disposition recorded, required
-CI genuinely passing or exact external blockers stated; human Change summary
-remains mandatory before merge. Preserve worktree and never forge statuses.
+CI genuinely passing or exact external blockers stated; preserve the recorded
+requester Change summary waiver for this PR. Preserve worktree; never forge statuses.
 **Tests**: Latest remote PR head, reviews, checks, conflicts and clean worktree.
 **Status**: In Progress
 
@@ -37,3 +37,23 @@ passed/18.09 percent; native AuthNZ421passed/45.22 percent; focused lifecycle84
 passed; ratchets43passed; production/test lifecycle Bandit clean. All actionable
 independent findings addressed. Required CI awaits queued trusted license audit
 and requester-owned Change summary remains pending. No merge or auto-merge.
+
+## November 8 Follow-Up
+
+Requester explicitly waived the Change summary for this PR. This is a recorded
+requester exception, not an AI-authored human summary or merge authorization.
+Current CI has completed: backend OpenAPI drift and full-suite shard failures
+remain. Recheck all comments, group failures by root cause, fix with regression
+evidence, independently review, and publish once verified. Keep production
+shutdown admission and actual native ownership intact; test lifecycle isolation
+must use trusted preparation rather than resetting counters or dropping owners.
+
+Final local evidence is recorded in
+Docs/superpowers/reviews/moderation-backend/2026-11-08-pr3437-ci-follow-up.md.
+The six uv504 setup failures have no established application cause and the exact
+download endpoint now responds200; publication naturally retries CI. Native
+Chat1737, Audio149, global1082/18.09 percent, MCP849, VN73 including PostgreSQL,
+and minimal DB cleanup5 plus API-key3 pass. Whole-project collection88874 pass,
+not execution. Final independent review accepts every corrected scope with no
+actionable findings. Publication and current-head CI remain before closing the
+work item. No merge or auto-merge.

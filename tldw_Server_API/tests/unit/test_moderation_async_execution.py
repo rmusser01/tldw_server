@@ -29,6 +29,148 @@ async def test_callable_timeout_error_is_not_misreported_as_transport_deadline()
     assert not shared.cancelled.is_set()
 
 
+async def test_fixture_boundary_reopens_settled_execution_and_reporting(incident_store, monkeypatch):
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_incidents, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds, FailureMetadata
+    from tldw_Server_API.tests.helpers import app_main_state
+
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+    monkeypatch.setattr(async_execution, "_closed", False)
+    monkeypatch.setattr(execution_incidents, "_closed", False)
+    async_execution.close_moderation_offloads()
+    owner.close()
+    await execution_incidents.close_moderation_incident_reporting()
+    with pytest.raises(ModerationExecutionError, match="worker_unavailable"):
+        await async_execution._run_moderation_offload(lambda: "unexpected", scope=scope())
+    app_main_state.prepare_loaded_moderation_for_test()
+    assert await async_execution._run_moderation_offload(lambda: "ready", scope=scope()) == "ready"
+    assert execution_runner.get_execution_runner() is owner
+    with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+        await async_execution.run_moderation_async(
+            lambda: pytest.fail("oversized input admitted"),
+            metadata=FailureMetadata("evaluate", None, 1_000_001),
+        )
+    [item] = incident_store.list_items()["items"]
+    assert item["context"]["reason"] == "size_exceeded"
+    assert item["excerpt"] == execution_incidents.ENGINE_FAILURE_EXCERPT
+
+
+async def test_fixture_boundary_keeps_live_native_owner_closed(monkeypatch):
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
+    from tldw_Server_API.tests.helpers import app_main_state
+
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+    monkeypatch.setattr(async_execution, "_closed", False)
+    entered, release = threading.Event(), threading.Event()
+
+    def call():
+        entered.set()
+        release.wait(2)
+
+    task = asyncio.create_task(async_execution._run_moderation_offload(call, scope=scope()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        async_execution.close_moderation_offloads()
+        owner.close()
+        app_main_state.prepare_loaded_moderation_for_test()
+        assert async_execution._active == 1
+        assert owner._closed
+        with pytest.raises(ModerationExecutionError, match="worker_unavailable"):
+            await async_execution._run_moderation_offload(lambda: "unexpected", scope=scope())
+    finally:
+        release.set()
+        await task
+        async_execution.prepare_moderation_execution()
+
+
+async def test_fixture_preparation_does_not_import_moderation():
+    # Fixed isolated interpreter probe; no shell or external input.
+    import subprocess  # nosec B404
+    import sys
+    from pathlib import Path
+
+    helper = Path(__file__).resolve().parents[1] / "helpers" / "app_main_state.py"
+    code = (
+        f"import runpy,sys; state=runpy.run_path({str(helper)!r});"
+        "state['prepare_loaded_moderation_for_test']();"
+        "assert not any(name.startswith('tldw_Server_API.app.core.Moderation') for name in sys.modules)"
+    )
+    # argv/code derive only from this trusted test and its sibling helper.
+    result = subprocess.run(  # nosec B603
+        [sys.executable, "-I", "-S", "-c", code], capture_output=True, timeout=10
+    )
+    assert result.returncode == 0, result.stderr
+
+
+async def test_fixture_review_store_is_separate_from_test_scratch_directory(tmp_path, tmp_path_factory):
+    import os
+    from pathlib import Path
+
+    configured = os.environ.get("MODERATION_REVIEW_DB_PATH")
+    assert configured is not None
+    assert Path(configured).is_relative_to(tmp_path_factory.getbasetemp())
+    assert not Path(configured).is_relative_to(tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_fixture_prepares_new_store_even_when_reporter_is_already_open(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.Moderation_Review_DB import ModerationReviewStore
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import execution_incidents
+    from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata, execution_scope
+    from tldw_Server_API.tests.helpers import app_main_state
+
+    path = tmp_path / "next-test-review.db"
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(path))
+    monkeypatch.setattr(execution_incidents, "_closed", False)
+    app_main_state.prepare_loaded_moderation_for_test()
+    with execution_scope() as shared:
+        await execution_incidents.report_execution_failure_async(
+            ModerationExecutionError("worker_crashed"),
+            metadata=FailureMetadata("evaluate", None, 7), scope=shared,
+        )
+    [item] = ModerationReviewStore(path).list_items()["items"]
+    assert item["context"]["reason"] == "worker_crashed"
+    assert item["excerpt"] == execution_incidents.ENGINE_FAILURE_EXCERPT
+
+
+async def test_fixture_reporter_prepare_failure_preserves_block(incident_store, monkeypatch):
+    from loguru import logger
+
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_incidents
+    from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata
+    from tldw_Server_API.tests.helpers import app_main_state
+
+    def unavailable(*args, **kwargs):
+        raise OSError("SECRET_STORE_FAILURE")
+
+    monkeypatch.setattr(execution_incidents, "_closed", False)
+    monkeypatch.setattr(execution_incidents, "_last_error", float("-inf"))
+    await execution_incidents.close_moderation_incident_reporting()
+    monkeypatch.setattr(execution_incidents, "ModerationReviewStore", unavailable)
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        app_main_state.prepare_loaded_moderation_for_test()
+        with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+            await async_execution.run_moderation_async(
+                lambda: pytest.fail("oversized input admitted"),
+                metadata=FailureMetadata("evaluate", None, 1_000_001),
+            )
+    finally:
+        logger.remove(sink)
+    assert execution_incidents._closed
+    assert incident_store.list_items()["total"] == 0
+    assert len(messages) == 1 and "enforcement remains blocked" in messages[0]
+    assert "SECRET" not in str(messages)
+
+
 async def test_trusted_restart_waits_for_native_offload_without_resetting_slots(monkeypatch):
     from tldw_Server_API.app.core.exception_types import ModerationExecutionError
     from tldw_Server_API.app.core.Moderation import async_execution, execution_runner
