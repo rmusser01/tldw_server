@@ -48,3 +48,40 @@ the entire CI-contract suite passed 984 cases with six existing skips.
 Automation `monitor-pr-3434-through-merge` is active. Auto-merge is disarmed
 until the corrected, independently reviewed and verified head is published.
 Actual MERGED state, SHA and time remain pending; do not claim them early.
+
+### Latest Dev Requalification
+
+On 2026-11-08, dev advanced to `7a020da14ab28e220fab652269723e3a2a4abbcb`.
+Auto-merge was disarmed before the clean rebase. All 48 prior PR commits remain
+patch-equivalent; the recovery branch retains published head `7e44324c2e`.
+The dev change removes endpoint-local test-mode predicates and updates their
+tests; repository instructions and test/build configuration are unchanged.
+All 146 PR-owned paths are byte-identical before and after rebase; none overlaps
+the 32 upstream paths. Existing independent reviews remain applicable.
+
+Fresh qualification from the root venv completed:
+- Claims/publication/RLS plus both-backend coordination/prune/dependency/TTL:
+  1,923 passed, one existing spaCy skip.
+- Full Jobs SQLite selection: 2,539 passed, two inherited crypto skips;
+  1,560 PostgreSQL-marked cases deselected by the normal SQLite selection.
+- Complete CI/Docs/Config, Audit/backup and endpoint regressions: 1,739 passed,
+  six existing runner/environment skips.
+- Additional official PostgreSQL MediaFiles and cluster publication/snapshot:
+  105 passed, zero skips. No PostgreSQL availability skip in either cohort.
+- Chroma manager: 33 passed, one legacy skip, 15 inherited xfails, two xpasses.
+- Compile 108 files; full configured Ruff 113 versus dev 116 with no new/worse
+  signatures; Bandit 58 production files, one identical inherited B608,
+  zero errors/new findings; 15 PR-touched task records canonical.
+
+Selections overlap and are not a combined-suite total. An initial invocation
+with a nonexistent test path collected no tests; its corrected selection passed.
+Bandit JSON was rerun with an explicit output file after its progress-prefixed
+stdout defeated the collector. Neither required repository corrections.
+The known full-root missing-pg_dump prerequisite was not rerun or called green.
+
+Refetched dev and the remote PR head remain unchanged. All applicable full
+146-path staged PR-scoped hooks passed; only no-matching TOML and wizard-only
+Ruff/Black hooks skipped normally. Exact-lease publication and exact-head MERGE
+rearming follow; their readback is recorded on PR #3434. Monitoring remains
+active until GitHub reports the actual final state. No required CI gate or
+user-summary waiver is changed.
