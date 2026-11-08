@@ -469,6 +469,104 @@ draft-branch publication; all remote gates must run on the subsequent head
 rather than inherit old passes. Keep the PR draft and preserve its
 human-owned summary.
 
+## Renewed CI And Review Follow-Up (2026-11-08)
+
+**Status:** In Progress. The requester explicitly requested a fresh independent
+`requesting-code-review` review, skipped Qodo and waived the human Change
+summary for PR #3405 only. This is a recorded requester exception, not an
+AI-authored human summary or a repository-policy change. Keep the PR draft and
+unarmed; no ready conversion, merge or further integration rebase is authorized.
+
+The exact published `80b67eee79` head passes all eight live required contexts,
+including the real required Workspaces step. The earlier onboarding/docs and
+`gap-verified-9` failures are green. All paginated comments, submitted reviews,
+inline comments and review threads were inspected: no actionable feedback;
+CodeRabbit's draft skip is not an approval. A fresh independent reviewer is
+examining immutable `dfac3ca7f3..80b67eee79` and the bounded fixes below.
+
+Nine optional full-suite shards failed. Six fail before pytest while downloading
+uv with repeated HTTP 504 responses. No dependency/workflow workaround or blind
+rerun is warranted; subsequent normal publication will create fresh CI runs.
+The aggregate full-suite failure is not a separate test defect.
+
+Two inherited test/artifact defects are reproduced and corrected without
+production changes or weaker checks:
+
+- MCP accounting uses `mocker.spy`, unavailable with plugin autoload disabled
+  outside the main tests tree. The exact 36-case selection reproduces all 36
+  setup errors. Replace only its spy setup with standard-library `AsyncMock`
+  wrappers and built-in `monkeypatch`; all existing assertions remain intact.
+  The complete module now passes 63 tests, 4 warnings in 0.77s.
+- The unchanged WebScraping inventory freshness guard reproduces one failure
+  with 9 passes. The official generator refreshes only three stale RAG import
+  line anchors in JSON/Markdown; all 261 imports and every other field remain
+  unchanged. All 10 inventory tests now pass, 44 warnings in 25.17s.
+
+The AuthNZ `auth-integration-b-z` shard reaches its unchanged 55-minute outer
+limit during the official TestClient fixture for a VN storage case. That exact
+PostgreSQL case passes independently in 34.57s, including setup/teardown, using
+the official isolated database fixture. This does not establish the cause of
+the full-shard timeout or justify raising budgets, skipping tests or changing
+runtime authentication/storage code. A bounded adjacent matrix found a separate
+inherited fixture defect: six org/team/user cases fail because membership setup
+omits the now-required write context. A temporary probe disclosed only the
+exception type and frame locations, never raw child diagnostics. Supplying the
+same canonical BOOTSTRAP context as neighboring quota fixtures fixes all six;
+all 14 selected real SQLite/PostgreSQL cases pass, 529 warnings in 171.27s.
+All original assertions, production authorization and quota behavior are
+unchanged. The full-shard timeout remains unresolved; this fixture correction
+must not be described as its proven cause or fix.
+
+Independent whole-branch review found no Critical/Important findings and one
+Minor extraction-induced lifetime issue: a paused wrapper retains a method-like
+object after normalization, whereas the exact baseline releases it in all three
+cache modes. The new three-mode weak-reference test reproduces the failure;
+deleting only the forwarded method reference alongside the existing text
+deletion fixes it. New and existing input-lifecycle cases pass together:
+6 passed, 104 deselected, 33 warnings in 5.40s, after 3 expected RED failures.
+No public declaration, source docstring or other facade method body changed.
+
+Fresh full Chunking passes 988 tests with the one established PyThaiNLP skip,
+3446 warnings in 63.61s. Ruff, scoped Black, compileall and the five-file
+execution-package mypy check pass. Production Bandit: zero findings/errors,
+1737 LOC; changed MCP test Bandit: zero findings/errors, 326 LOC, excluding only
+pytest B101. Logs: `/tmp/pr3405_current_review_chunking.txt`,
+`/tmp/pr3405_mcp_{mocker_red,accounting_green}.txt`,
+`/tmp/pr3405_inventory_{red,green}.txt`, `/tmp/pr3405_auth_timeout_probe.txt`
+and `/tmp/bandit_pr3405_{current_review_production,mcp_spy_fix}.json`.
+No full-repository, globally clean typing or final-head remote CI claim.
+Final post-fix verification: 991 Chunking tests passed with the one established
+PyThaiNLP skip, 3439 warnings in 146.53s; 35 quality/function-size/tracking
+ratchets passed, 118 warnings in 92.49s. Execution-package plus contract mypy
+passes six files. Production Bandit remains zero findings/errors, 1737 LOC;
+all three changed test files have zero findings/errors, 1804 LOC, excluding only
+pytest B101. Structured AST checks preserve 49 MCP, 18 VN and 103 prior Chunking
+assertions plus every embedded storage-script assertion, all 33 facade
+declarations/docstrings and all other facade method bodies. Logs:
+`/tmp/pr3405_final_review_{chunking,ratchets}.txt`,
+`/tmp/pr3405_auth_matrix_green.txt`,
+`/tmp/pr3405_method_reference_{red,green}.txt` and
+`/tmp/bandit_pr3405_final_review_{production,tests}.json`.
+
+The same independent reviewer completed the bounded method/VN fixture addendum
+without further test launches: no remaining Critical, Important or Minor
+findings, approved for commit and draft publication. The initial whole-branch
+review and MCP/inventory addendum remain applicable. All declined-to-judge
+items are explicitly dispositioned in TASK-15416. Code is locally verified;
+fresh published-head CI and the unresolved hosted AuthNZ timeout still prevent
+a claim that every observed issue is closed.
+
+An additional root fail-fast diagnostic collected 88,372 items (12 skips) and
+began execution. It was deliberately stopped to bound this audit, exiting 143
+after its application lifecycle ignored two interrupts. This is neither a
+completed repository run nor a globally green result; only that verified
+diagnostic PID was signaled, not unrelated work. The diagnostic and safe AuthNZ
+probe are retained at `/tmp/pr3405_review_repository_diagnostic.txt` and
+`/tmp/pr3405_auth_safe_diagnostic.txt`. Normal draft-branch publication follows
+these local checks and review; do not transfer old-head green statuses to the
+resulting commit. ADR required: no new decision for these lifetime/test/artifact
+corrections; accepted ADR-096 and task-editor ADR-059 remain governing.
+
 ## Final Verification Commands
 
 After runtime activation, run these from the isolated root; log complete output

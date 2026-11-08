@@ -634,8 +634,8 @@ class Chunker:
         chunk_iter = ChunkExecutionService(self, _execution_hooks()).iter_chunks(
             text, method, max_size, overlap, language, **options
         )
-        # The inner iterator owns the input; do not retain a replaced source here.
-        del text
+        # The inner iterator owns inputs that sanitization or resolution replaces.
+        del text, method
         yield from chunk_iter
 
     def get_available_methods(self) -> list[str]:
