@@ -93,6 +93,22 @@ class MutableRepository(ReadOnlyRepository):
         super().__init__(project)
         self._remote_ids: RemoteIdState | None = None
 
+    def _reject_remote_id(self, task_id: str) -> None:
+        """Refuse a top-level id that origin/dev or an open PR already holds."""
+        numeric_match = re.fullmatch(r"TASK-(\d+)", task_id.upper())
+        if not numeric_match:
+            return  # child ids (TASK-N.m) are not checked remotely
+        remote_state = self._remote_id_state()
+        if not remote_state.any_source_reachable:
+            return
+        source = remote_state.source_of(int(numeric_match.group(1)))
+        if source is not None:
+            raise TaskMutationError(
+                f"Task id already exists on {source}: {task_id} "
+                "(concurrent-session collision guard; pick an id above the "
+                "max across origin/dev and open PRs)"
+            )
+
     def _remote_id_state(self) -> RemoteIdState:
         """Remote task ids (origin/dev + open PRs), collected once per run."""
         if self._remote_ids is None:
@@ -124,16 +140,7 @@ class MutableRepository(ReadOnlyRepository):
         tasks = self.list_tasks()
         if normalized_id in self._all_task_ids():
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
-        remote_state = self._remote_id_state()
-        numeric_match = re.fullmatch(r"TASK-(\d+)", normalized_id.upper())
-        if numeric_match and remote_state.any_source_reachable:
-            source = remote_state.source_of(int(numeric_match.group(1)))
-            if source is not None:
-                raise TaskMutationError(
-                    f"Task id already exists on {source}: {normalized_id} "
-                    "(concurrent-session collision guard; pick an id above the "
-                    "max across origin/dev and open PRs)"
-                )
+        self._reject_remote_id(normalized_id)
         normalized_dependencies = [_normalize_task_id(dependency) for dependency in dependencies or ()]
         _reject_missing_dependencies(normalized_dependencies, self._all_task_ids())
         _reject_circular_dependencies(normalized_id, normalized_dependencies, tasks)
