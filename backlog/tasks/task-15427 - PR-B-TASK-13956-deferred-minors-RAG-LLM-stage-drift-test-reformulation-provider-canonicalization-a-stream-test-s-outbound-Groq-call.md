@@ -2,7 +2,7 @@
 id: TASK-15427
 title: 'PR B (TASK-13956) deferred minors: RAG LLM-stage drift test, reformulation
   provider canonicalization, a stream test''s outbound Groq call'
-status: To Do
+status: In Progress
 labels:
 - quotas
 - backend
@@ -26,6 +26,7 @@ Follow-up of TASK-13956 PR B (#3426). (1) Test hygiene: RAG_NEW/integration/test
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 AC #1's socket probe: the repo has one, tldw_Server_API/tests/helpers/offline_network.block_live_network() (it blocks and records getaddrinfo, gethostbyname, connect and connect_ex); TASK-13956's runs used a local equivalent outside the repo.
+Plan: Docs/superpowers/plans/2026-11-07-rag-own-key-minors.md. Follow-ups: the RG under-commit is TASK-15421 (re-verified, Redis governor included; not re-filed); TASK-15481 (hosted plan and failover); TASK-15482 (the stream's discarded prefetch answer). Owner answers: Decision 1 (Change summary) waived, 2026-11-07 ("Yes, waive for all"); Decision 2 (TASK-15482) file it and do it next after TASK-15427, 2026-11-07.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
