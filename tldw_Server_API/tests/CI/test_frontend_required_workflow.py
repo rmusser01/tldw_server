@@ -188,10 +188,22 @@ def test_shared_coverage_merge_rejects_missing_shards(tmp_path: Path, missing: i
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("job_name", ["onboarding-gate", "smoke-gate"])
-def test_ux_browser_jobs_select_a_host_supported_by_locked_playwright(job_name: str) -> None:
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [
+        ("frontend-ux-gates.yml", "onboarding-gate"),
+        ("frontend-ux-gates.yml", "smoke-gate"),
+        ("frontend-e2e-tiers.yml", "critical"),
+        ("frontend-e2e-tiers.yml", "features"),
+        ("frontend-e2e-tiers.yml", "admin"),
+        ("frontend-e2e-tiers.yml", "ux-regression"),
+    ],
+)
+def test_ux_browser_jobs_select_a_host_supported_by_locked_playwright(
+    workflow_name: str, job_name: str,
+) -> None:
     """Playwright 1.58 cannot install Chromium on an Ubuntu 26.04 runner."""
-    data = yaml.safe_load(Path(".github/workflows/frontend-ux-gates.yml").read_text())
+    data = yaml.safe_load((Path(".github/workflows") / workflow_name).read_text())
     assert data["jobs"][job_name]["runs-on"] in {"ubuntu-22.04", "ubuntu-24.04"}
 
 

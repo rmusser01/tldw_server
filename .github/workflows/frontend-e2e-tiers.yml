@@ -133,7 +133,8 @@ jobs:
   critical:
     name: E2E Critical (Tier 1 + Journeys)
     needs: [changes, admission, await_license]
-    runs-on: ubuntu-latest
+    # Match the Ubuntu hosts supported by the locked Playwright toolchain.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: >-
       always() && !cancelled() &&
@@ -349,7 +350,7 @@ jobs:
   features:
     name: E2E Features (Tier 2 + 3)
     needs: [changes, admission, await_license]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: >-
       always() && !cancelled() &&
@@ -471,7 +472,7 @@ jobs:
   admin:
     name: E2E Admin (Tier 4 + 5)
     needs: [changes, admission, await_license]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: >-
       always() && !cancelled() &&
@@ -600,7 +601,7 @@ jobs:
   ux-regression:
     name: E2E UX Regression (notes/chat)
     needs: [admission, await_license]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     if: >-
       always() && !cancelled() &&

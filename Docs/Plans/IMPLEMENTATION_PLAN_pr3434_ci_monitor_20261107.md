@@ -223,3 +223,44 @@ canonical. All applicable final staged 159-path PR-scoped hooks passed without
 file rewrites; only ordinary no-matching TOML and wizard-only Ruff/Black hooks
 skipped. These qualifications are in TASK-15466. Exact-head publication/rearming
 readback follows in the PR proof, not a tracking-only commit while waiting.
+
+### E2E Tier Browser Host Closure
+
+On head `a4f2a70f5a`, notes/chat E2E UX Regression job `128736888966`
+failed before tests with the same explicit locked-Playwright/Ubuntu-26.04
+Chromium-install rejection. Its log is
+`/tmp/claims-pr3434-e2e-ux-128736888966-20261108T1327.log`.
+All four browser jobs in `frontend-e2e-tiers.yml` invoke the same locked JS
+toolchain. After disarming auto-merge and confirming null, extend the existing
+runner contract to those jobs, then pin critical/features/admin/ux-regression
+to `ubuntu-24.04`. Change detection and queue-tick remain `ubuntu-latest`.
+Every other parsed workflow value is identical, including commands, gates,
+conditions, permissions, admission, budgets, retries and timeouts. No dependency,
+runtime, scanner or baseline changes. ADR required: no; bounded CI host repair.
+
+RED reproduced four expected failures and two existing UX passes; the complete
+frontend workflow module is GREEN with 20 passes. Changed test compilation,
+configured Ruff and non-assert test-module Bandit (B101 excluded from that scan,
+without configuration/suppression edits) passed with zero findings/errors.
+Earlier production/runtime qualification remains applicable, not rerun or
+relabeled. Hosted browser success still requires ordinary new-head CI. The
+older unnamed Onboarding package-install failure and root pg_dump limit remain
+unproved/unchanged, not claimed fixed or green. Evidence prefix:
+`/tmp/claims-pr3434-tier-runner-*-20261108`.
+
+Independent requesting-code-review Ampere approved the narrow tier-runner delta
+with no actionable findings, independently reproducing four RED failures/two UX
+passes, then all 20 GREEN cases and complete parsed-workflow parity. Report:
+`/tmp/claims-pr3434-tier-runner-review-20261108.md`. Prior whole-PR reviews cover
+unchanged runtime; parent owns broad CI/static/security/hooks and exact GitHub
+state. Neither review nor local contracts certify hosted browser execution or
+the older unnamed package-install failure. All 15 task records are canonical;
+the full PR scope now has 160 existing paths.
+
+Final stable-source CI/Docs/Config qualification: 1,619 passed, six inherited
+runner/environment skips, zero failures/errors. This overlaps the 20-case
+module and is not a combined total or full-root pass. All applicable final
+160-path staged hooks passed without rewrites; all 15 tasks remain canonical.
+Only ordinary no-matching TOML and wizard-only Ruff/Black hooks skipped.
+Exact-head publication/rearming readback follows in the PR proof, not a
+tracking-only commit while waiting for ordinary CI and actual gated merge.
