@@ -57,3 +57,9 @@ and minimal DB cleanup5 plus API-key3 pass. Whole-project collection88874 pass,
 not execution. Final independent review accepts every corrected scope with no
 actionable findings. Publication and current-head CI remain before closing the
 work item. No merge or auto-merge.
+
+Dev subsequently advanced to476527719a. Rebase preserved all35 patches without
+conflicts; validated integration source1e2a4e801f. Post-rebase manifest271passed,
+canonical OpenAPI/path check passes,77 PR Python paths compile. Independent
+integration review accepted with no actionable findings. Final evidence update
+and exact-lease publication follow; required CI remains pending.
