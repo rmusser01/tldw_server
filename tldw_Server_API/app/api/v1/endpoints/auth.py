@@ -127,7 +127,7 @@ from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
 )
 from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+    is_test_context,
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
@@ -988,20 +988,6 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
             user_id,
         )
 
-def _is_pytest_context() -> bool:
-    """Return True when running under pytest or explicit test-mode flags."""
-    try:
-        if _is_explicit_pytest_runtime():
-            return True
-        if _is_test_mode():
-            return True
-        if _env_flag_enabled("TESTING"):
-            return True
-    except _AUTH_NONCRITICAL_EXCEPTIONS:
-        return False
-    return False
-
-
 def _is_enterprise_admin_ui_mode() -> bool:
     raw_value = os.getenv("ADMIN_UI_ENTERPRISE_MODE", "")
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
@@ -1182,7 +1168,7 @@ async def _reserve_auth_rg_requests(
 
 async def _ensure_mfa_cache_available(session_manager: SessionManager, settings: Settings) -> None:
     """Ensure MFA ephemeral storage is backed by Redis (mandatory for MFA flows)."""
-    test_context = _is_pytest_context()
+    test_context = is_test_context()
 
     def _supports_ephemeral_stub(sm: SessionManager) -> bool:
         return callable(getattr(sm, "store_ephemeral_value", None)) and callable(

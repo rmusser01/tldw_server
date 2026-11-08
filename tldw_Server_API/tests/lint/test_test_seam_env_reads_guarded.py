@@ -58,10 +58,8 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "__init__.py",
             "api/v1/endpoints/admin/__init__.py",
-            "api/v1/endpoints/character_chat_sessions.py",
             "api/v1/endpoints/embeddings_v5_production_enhanced.py",
             "api/v1/endpoints/prompt_studio/prompt_studio_evaluations.py",
-            "api/v1/endpoints/writing.py",
             "core/AuthNZ/database.py",
             "core/AuthNZ/key_resolution.py",
             "core/AuthNZ/migrations.py",

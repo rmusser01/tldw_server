@@ -36,7 +36,7 @@ async def test_get_media_item_passes_media_context_to_http_error_mapper(monkeypa
         captured.update(kwargs)
         return HTTPException(status_code=500, detail="Database error retrieving media details")
 
-    monkeypatch.setattr(item_mod, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(item_mod, "is_test_mode", lambda: False)
     monkeypatch.setattr(item_mod, "get_full_media_details_rich", _raise_db_error)
     monkeypatch.setattr(item_mod, "map_db_error_to_http", _fake_mapper)
 
