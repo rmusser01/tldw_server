@@ -213,14 +213,13 @@ def _rag_provider_http_exception(exc: BaseException) -> HTTPException:
 # Request settings whose stage makes an LLM call besides the answer, on a provider the boundary cannot
 # name before the pipeline runs (its own field, a config default or "openai"). TASK-13956.
 _RAG_OTHER_LLM_STAGES = (
-    "enable_query_classification", "enable_research_loop", "enable_query_rewriting_loop",
-    "enable_document_grading", "enable_knowledge_strips", "enable_fast_hallucination_check",
-    "enable_utility_grading", "enable_claims", "enable_post_verification", "enable_multi_turn_synthesis",
-    "enable_suggestions", "enable_web_fallback", "enable_faithfulness_eval", "enable_evidence_accumulation",
-    "enable_evidence_chains", "enable_abstention", "adaptive_rerun_on_low_confidence", "adaptive_advanced_rewrites",
+    "enable_query_classification", "enable_research_loop", "enable_document_grading",
+    "enable_fast_hallucination_check", "enable_utility_grading", "enable_claims", "enable_post_verification",
+    "enable_multi_turn_synthesis", "enable_suggestions", "enable_faithfulness_eval", "enable_evidence_accumulation",
+    "enable_evidence_chains",
 )
-# Not listed, no LLM call of their own: structured response (the answer's prompt), image and video search (inside the
-# research loop), query decomposition, intent routing and dynamic granularity (rule-based).
+# Every other switch of the RAG request schemas makes no LLM call of its own, or makes it only inside a listed
+# stage; test_rag_agentic_api.py's _NO_OTHER_LLM_CALL declares each one (TASK-15427).
 
 
 def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
