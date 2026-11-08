@@ -85,3 +85,35 @@ Ruff/Black hooks skipped normally. Exact-lease publication and exact-head MERGE
 rearming follow; their readback is recorded on PR #3434. Monitoring remains
 active until GitHub reports the actual final state. No required CI gate or
 user-summary waiver is changed.
+
+### Scope Ratchet Address Refresh
+
+Current-head `backend-required` failed the tenant-isolation step: one failure,
+73 passes. Local RED reproduced the scope-ratchet failure with 12 other passes.
+Both the live scan and baseline contain 28 entries. All ten reported additions
+are existing owner guards at moved source lines; each complete `ast.If` subtree
+and enclosing qualified function matches latest dev exactly. Ten stale addresses
+map one-to-one to the ten current addresses. No new predicate was introduced.
+
+Refresh only those ten line numbers. Keep all 28 predicates, the scanner, tests,
+thresholds and runtime behavior unchanged. Re-run the exact 74-test tenant gate,
+independently review the address mapping, check canonical tasks and full staged
+PR hooks, then publish normally and rearm exact-head MERGE after fresh checks.
+ADR required: no, this is non-behavioral ratchet maintenance. Bandit is skipped
+for this text-only delta; unchanged production evidence remains applicable.
+
+The exact CI step is GREEN: 74 passed, zero failures/errors/skips, 237 warnings
+in 108.26 seconds. Standalone scanner reports all 28 entries exact. The proof
+artifact `/tmp/claims-pr3434-scope-address-proof-20261108.json` records the ten
+complete AST hashes and one-to-one address mappings; 18 entries are unchanged.
+Independent review Zeno approved with no actionable findings and additionally
+verified all 28 subtree/function identities and unchanged enclosing functions
+for the ten moved entries. Report:
+`/tmp/claims-pr3434-scope-ratchet-review-20261108.md`.
+
+All applicable full 147-path staged PR hooks passed; 15 task records remain
+canonical. Only the ten addresses and this task/plan changed; app/test/workflow
+and scanner source remain identical to published head `d684526a20`. Existing
+runtime approvals and qualification transfer unchanged, not a new runtime audit.
+Publication and exact-head auto-merge readback will be recorded on PR #3434;
+monitoring/task remain active pending actual merge. No required gate is waived.
