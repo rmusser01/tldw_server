@@ -30,6 +30,7 @@ import { PageAssistDatabase } from "./chat"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { serverChatMirrorOwnerKey } from "./server-chat-mirror"
 import { db as chatDB } from "./schema"
+import { indexMessagesSearchTokens } from "./search-tokens"
 import {
   deletePromptByIdFB,
   getAllPromptsFB,
@@ -467,9 +468,12 @@ export const restoreChat = async (data: {
   if (data.messages.some(message => message.history_provenance && message.history_provenance.owner_key !== `local-history-v1:${profile}`)) {
     throw new Error("Undo history owner mismatch")
   }
-  await chatDB.transaction('rw', [chatDB.chatHistories, chatDB.messages], async () => {
+  await chatDB.transaction('rw', [chatDB.chatHistories, chatDB.messages, chatDB.searchTokens], async () => {
     await chatDB.chatHistories.add(data.historyInfo)
     for (const message of data.messages) await chatDB.messages.add(message)
+    // Same contract as every other message write path (WP-23): restored
+    // messages must stay findable by content search.
+    await indexMessagesSearchTokens(data.messages)
   })
 
   return data.historyInfo.id
