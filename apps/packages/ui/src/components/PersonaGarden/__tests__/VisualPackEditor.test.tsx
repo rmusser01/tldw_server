@@ -104,6 +104,9 @@ const selectCodexImportSource = async () => {
 
 const clickRecommendedStarterCopy = async () => {
   const catalog = await screen.findByTestId("buddy-builder-starter-catalog")
+  await waitFor(() =>
+    expect(within(catalog).getByRole("button", { name: "Copy as draft" })).toBeEnabled()
+  )
   fireEvent.click(within(catalog).getByRole("button", { name: "Copy as draft" }))
 }
 

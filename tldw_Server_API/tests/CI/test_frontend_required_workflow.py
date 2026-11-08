@@ -140,38 +140,80 @@ def test_frontend_coverage_reports_both_package_owned_suites() -> None:
     data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
     jobs = data["jobs"]
     webui = next(
-        step for step in jobs["frontend-required"]["steps"]
+        step
+        for step in jobs["frontend-required"]["steps"]
         if step.get("name") == "Run all WebUI-owned tests with coverage"
     )
     assert webui["working-directory"] == "apps/tldw-frontend"
     assert not webui.get("continue-on-error", False)
     coverage = jobs["shared-ui-coverage"]
     shards = coverage["strategy"]["matrix"]["shard"]
-    assert shards == list(range(1, len(shards) + 1))
-    run = next(step for step in coverage["steps"] if step.get("name") == "Run shared UI coverage shard")
+    assert shards == list(range(1, 33))
+    assert coverage["strategy"]["max-parallel"] == 8
+    assert coverage["timeout-minutes"] == 25
+    run = next(
+        step
+        for step in coverage["steps"]
+        if step.get("name") == "Run shared UI coverage shard"
+    )
     assert run["working-directory"] == "apps/packages/ui"
-    assert "--shard=" in run["run"]
+    assert "--shard=${{ matrix.shard }}/32" in run["run"]
+    assert run["timeout-minutes"] == 17
+    assert coverage["name"] == "shared-ui-coverage (${{ matrix.shard }}/32)"
+    upload = next(
+        step
+        for step in coverage["steps"]
+        if step.get("name") == "Upload shared UI coverage blob"
+    )
+    assert (
+        upload["with"]["path"]
+        == "apps/packages/ui/.vitest-reports/blob-${{ matrix.shard }}-32.json"
+    )
     assert "--exclude" not in run["run"]
     assert "timeout --kill-after=30s 15m" in run["run"]
     assert "shared-ui-coverage-report" not in jobs["frontend-required"]["needs"]
     report = jobs["shared-ui-coverage-report"]
     assert "shared-ui-coverage" in report["needs"]
     assert "needs.shared-ui-coverage.result == 'success'" in report["if"]
-    guard = next(step for step in report["steps"] if step.get("name") == "Validate coverage shards")
+    guard = next(
+        step
+        for step in report["steps"]
+        if step.get("name") == "Validate coverage shards"
+    )
     assert int(guard["env"]["SHARD_COUNT"]) == len(shards)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("missing", [None, 1, 8, 16])
-def test_shared_coverage_merge_rejects_missing_shards(tmp_path: Path, missing: int | None) -> None:
+@pytest.mark.parametrize(
+    "missing,empty",
+    [
+        (None, False),
+        (1, False),
+        (8, False),
+        (16, False),
+        (32, False),
+        (1, True),
+        (16, True),
+        (32, True),
+    ],
+)
+def test_shared_coverage_merge_rejects_missing_shards(
+    tmp_path: Path, missing: int | None, empty: bool
+) -> None:
     """Native Vitest accepts partial blob sets; our boundary must reject them."""
     data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
     report = data["jobs"]["shared-ui-coverage-report"]
-    guard = next(step for step in report["steps"] if step.get("name") == "Validate coverage shards")
+    guard = next(
+        step
+        for step in report["steps"]
+        if step.get("name") == "Validate coverage shards"
+    )
     count = int(guard["env"]["SHARD_COUNT"])
     for shard in range(1, count + 1):
-        if shard != missing:
-            (tmp_path / f"blob-{shard}-{count}.json").write_text("{}")
+        if shard != missing or empty:
+            (tmp_path / f"blob-{shard}-{count}.json").write_text(
+                "" if shard == missing else "{}"
+            )
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("Workflow guard requires bash")

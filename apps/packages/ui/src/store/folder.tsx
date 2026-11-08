@@ -251,19 +251,21 @@ const createThrottledLocalStorage = (delay = 1000): StateStorage => {
 // Server cache diffing (WP-30 / TASK-13523)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type IdRow = { id: number; last_modified?: string | null }
+type IdRow = { id: number; last_modified?: string | null; version?: number | null }
 
 type CacheDiff<T> = { changed: T[]; vanished: boolean }
 
 /**
- * Diffs id-keyed rows by `last_modified`. Rows missing `last_modified` (either
- * side) are always treated as dirty so they are safely re-upserted.
+ * Diffs id-keyed rows by timestamp and version. Rows missing either revision
+ * field (on either side) are dirty so they are safely re-upserted.
  */
 function diffRowsById<T extends IdRow>(local: T[], remote: T[]): CacheDiff<T> {
   const localById = new Map(local.map((row) => [row.id, row] as const))
   const remoteIds = new Set(remote.map((row) => row.id))
   const changed = remote.filter(
-    (row) => row.last_modified == null || localById.get(row.id)?.last_modified !== row.last_modified
+    (row) => row.last_modified == null || row.version == null ||
+      localById.get(row.id)?.last_modified !== row.last_modified ||
+      localById.get(row.id)?.version !== row.version
   )
   const vanished = local.some((row) => !remoteIds.has(row.id))
   return { changed, vanished }
