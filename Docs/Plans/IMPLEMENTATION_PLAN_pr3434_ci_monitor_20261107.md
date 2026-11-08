@@ -533,3 +533,59 @@ Log: `/tmp/claims-pr3434-local-selection-staged-hooks-20261108.log`.
 Restage this evidence and rerun the full scope before normal-hook commit and
 normal fast-forward publication. Record actual readback in PR proof, without
 another tracking-only commit. Auto-merge remains off for both new-head holds.
+
+### Research Workspace Parity Host Repair
+
+At 19:50Z, exact-head e95eac2a4d run 42513937161 failed both Research Workspace
+Parity jobs (128837900036 and 128837899955) at JS Playwright 1.58.0 Chromium
+dependency installation on ubuntu26.04-x64, before either browser test command.
+Both frozen installs and the extension production build passed. Logs:
+`/tmp/claims-pr3434-research-parity-20261108T1950-{128837900036,128837899955}.{json,log}`.
+Auto-merge was disabled and freshly confirmed null before edits. Extend the
+existing supported-host test with these two explicit cases; watch RED, then pin
+only these two browser jobs to Ubuntu 24.04. Compare the entire parsed workflow
+after restoring only the two runner labels. Commands, admission/security rules,
+triggers, dependencies, retries, timeouts and budgets must remain unchanged.
+
+ADR required: no; this restores locked-tool host compatibility under the same
+earlier host correction, with no new architecture or workflow gate. Independent
+review, full CI/Docs/Config, changed-test compile/configured Ruff/scoped Bandit,
+canonical selected tasks and staged full PR hooks precede normal publication.
+No speculative nightly, dependency, application or scanner changes. Retained
+production/runtime/PostgreSQL/security evidence keeps its original scope/date.
+The next exact head must independently pass ordinary coverage 8/16 AND notes/chat
+UX before rearming, then all effective required checks and freshness still gate
+actual MERGE. Existing local Studio/workspace and root pg_dump limits are not
+rerun or relabeled. Stage 3/4 and TASK-15466 stay In Progress until actual merge.
+
+The expanded supported-host contract produced exactly two expected failures and
+six existing passes; after the two-label correction both full workflow modules
+pass 25 tests, zero skips. Full CI/Docs/Config passes 1,621 with six inherited
+runner/environment skips, zero failures/errors (192.27s, 1,627 cases). Selections
+overlap, not additive or a full-root pass. Changed test compilation and configured
+Ruff pass; scoped Bandit reports zero findings/errors with B101 assertions excluded
+from that invocation only. Existing nosec-comment parser warnings are unchanged;
+no scanner/config/suppression edits. Whole parsed workflow parity and reviewed
+source hashes are recorded in `/tmp/claims-pr3434-parity-runner-scope-proof-20261108.json`.
+
+Independent Euclid APPROVE/no actionable P0-P3:
+`/tmp/claims-pr3434-parity-runner-review-20261108.md`. It independently inspected
+exact source/hashes, whole-workflow byte and parsed parity, hosted logs, tagged
+upstream platform code and saved RED/GREEN; it ran no tests/builds/scanners.
+Declined scopes remain parent-owned: broad qualification/static/security/hooks,
+canonical tasks, GitHub feedback/rules/freshness/waiver and task/plan bookkeeping.
+Unchanged runtime/PostgreSQL/security retain earlier evidence; existing local
+limits remain unproved/unfixed. Nightly behavior is unchanged, not certified.
+Future exact-head hosted success and the dual hold remain required; no universal
+Linux/browser/image/download or dependency-health guarantee is inferred.
+All 15 selected tasks are canonical. Stage verified four-path corrections before
+full 165-path hooks, normal-hook commit and normal fast-forward publication;
+record exact GitHub readback in the PR proof, not a tracking-only commit.
+
+All applicable full 165-path staged hooks passed without rewrites or bypass;
+all 15 explicitly selected tasks remain canonical. Only the ordinary no-matching
+TOML and wizard-only Ruff/Black hooks skipped. Log:
+`/tmp/claims-pr3434-parity-runner-staged-hooks-20261108.log`.
+Restage this final evidence and rerun the full scope before the normal-hook
+commit. Exact new-head hosted holds, publication readback and actual merge are
+still pending, not inferred from local contract success.

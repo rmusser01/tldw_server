@@ -197,6 +197,8 @@ def test_shared_coverage_merge_rejects_missing_shards(tmp_path: Path, missing: i
         ("frontend-e2e-tiers.yml", "features"),
         ("frontend-e2e-tiers.yml", "admin"),
         ("frontend-e2e-tiers.yml", "ux-regression"),
+        ("ui-research-workspace-parity.yml", "webui-research-workspace-parity"),
+        ("ui-research-workspace-parity.yml", "extension-research-workspace-parity"),
     ],
 )
 def test_ux_browser_jobs_select_a_host_supported_by_locked_playwright(
