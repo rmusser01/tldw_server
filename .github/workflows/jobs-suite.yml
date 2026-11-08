@@ -242,12 +242,26 @@ jobs:
           PY
 
       - name: Run Jobs tests (PostgreSQL only)
+        id: postgres-tests
         run: |
           pytest -vv --setup-show --disable-warnings -p pytest_cov -p pytest_asyncio.plugin \
             tldw_Server_API/tests/Jobs \
             -m "pg_jobs" \
-            --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing \
+            --cov=tldw_Server_API --cov-report= \
             --junit-xml=test-results-jobs-postgres.xml
+
+      - name: Generate PostgreSQL coverage reports
+        if: ${{ !cancelled() && (steps.postgres-tests.outcome == 'success' || steps.postgres-tests.outcome == 'failure') }}
+        run: |
+          # This job has no coverage floor, so skip pytest-cov's extra total-only pass.
+          python - <<'PY'
+          import coverage
+
+          cov = coverage.Coverage(source=["tldw_Server_API"])
+          cov.load()
+          cov.report(show_missing=True, ignore_errors=True)
+          cov.xml_report(ignore_errors=True)
+          PY
 
       - name: Upload test results (Postgres)
         if: always()

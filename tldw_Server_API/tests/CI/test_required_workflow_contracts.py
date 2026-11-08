@@ -2300,6 +2300,37 @@ def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
                 ), (path, name, dependency)
 
 
+def test_jobs_postgres_exports_recorded_coverage(tmp_path: Path, monkeypatch, capsys) -> None:
+    """Export the measured lines and the missing line in both existing report formats."""
+    import runpy
+
+    from coverage import CoverageData
+    from defusedxml import ElementTree
+
+    steps = _load(".github/workflows/jobs-suite.yml")["jobs"]["jobs-postgres"]["steps"]
+    report = _get_step(steps, "Generate PostgreSQL coverage reports")
+    module = tmp_path / "tldw_Server_API" / "measured.py"
+    module.parent.mkdir()
+    module.write_text("present = True\nif not present:\n    missing = True\n", encoding="utf-8")
+    data_path = tmp_path / ".coverage"
+    data = CoverageData(basename=str(data_path))
+    data.add_lines({str(module): {1, 2}})
+    data.write()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COVERAGE_FILE", str(data_path))
+    script = tmp_path / "report.py"
+    script.write_text(report["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0], encoding="utf-8")
+
+    runpy.run_path(str(script))
+
+    lines = ElementTree.parse(tmp_path / "coverage.xml").findall(".//class/lines/line")
+    assert [(line.attrib["number"], line.attrib["hits"]) for line in lines] == [
+        ("1", "1"), ("2", "1"), ("3", "0")
+    ]
+    total = next(row.split() for row in capsys.readouterr().out.splitlines() if row.startswith("TOTAL"))
+    assert total == ["TOTAL", "3", "1", "67%"]
+
+
 def test_selected_full_suite_summaries_reject_unexecuted_shards(tmp_path: Path) -> None:
     """Execute the real summary shell with successful, skipped and failed results."""
     import shutil
