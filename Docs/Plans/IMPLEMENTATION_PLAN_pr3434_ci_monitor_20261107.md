@@ -182,3 +182,44 @@ manual dispatch or cancellation was used. The next head must pass its own CI.
 Latest fetched dev and remote PR head are unchanged. Auto-merge remains disarmed
 for publication; exact-head MERGE rearming/readback will be recorded on PR #3434.
 Stages 3/4 and TASK-15466 remain active until actual merge, not merely publication.
+
+### UX Browser Runner Compatibility
+
+On current head `037c979499`, UX Smoke job `128710222829` failed before
+browser/backend tests: `ubuntu-latest` supplied Ubuntu 26.04, unsupported by the
+locked Playwright 1.58.0. The tagged upstream host-platform implementation
+supports Ubuntu 22.04/24.04. Auto-merge was disabled and confirmed null before
+edits. Pin only the two UX browser jobs to `ubuntu-24.04`; all parsed workflow
+data except those two labels is identical, including every step, command,
+condition, trigger, permission, admission dependency, timeout and budget.
+
+Two new runner-contract cases failed RED against floating latest, then the
+complete frontend workflow contract module passed all 16 tests. Compilation and
+configured Ruff for the changed test module passed; Bandit on that test module
+reported zero findings/errors with test assertions (B101) excluded from the scan.
+No production code changed; earlier production/runtime qualifications remain
+applicable, not newly rerun or relabeled. No quality baseline or scanner changed.
+ADR required: no; this is a bounded CI platform compatibility correction.
+
+Independent requesting-code-review Schrodinger approved this narrow delta with
+no actionable findings. Report: `/tmp/claims-pr3434-ux-runner-review-20261108.md`.
+The reviewer independently checked workflow parity and the regression's
+red/green behavior. Prior full-PR reviews cover unchanged runtime. Parent owns
+the broader CI/Docs/Config, static and full staged-hook evidence. Hosted Chromium
+installation/browser execution remains for the new head's ordinary CI; it is
+not certified by local YAML tests or this review.
+
+Onboarding job `128710222834` separately failed Bun installation with one unnamed
+package; its root cause is unproved and is not claimed fixed by the runner pin.
+Neither job reached application assertions; later always-run health checks had
+no started backend. No speculative dependency change, manual gate dispatch or
+cancellation is used. Logs and proof use `/tmp/claims-pr3434-ux-*20261108*`.
+The unchanged full-root missing-pg_dump prerequisite is not rerun or called green.
+
+Complete CI/Docs/Config qualification passed 1,615 tests with six inherited
+runner/environment skips and zero failures/errors. This overlaps the 16-test
+module run and is not a combined total. All 15 PR-touched task records remain
+canonical. All applicable final staged 159-path PR-scoped hooks passed without
+file rewrites; only ordinary no-matching TOML and wizard-only Ruff/Black hooks
+skipped. These qualifications are in TASK-15466. Exact-head publication/rearming
+readback follows in the PR proof, not a tracking-only commit while waiting.
