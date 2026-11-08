@@ -290,8 +290,11 @@ def _over_the_limit_with_own_keys(monkeypatch, own: set[str]) -> tuple[list[str]
           "enable_query_rewriting_loop": True, "adaptive_rerun_on_low_confidence": True,
           "adaptive_advanced_rewrites": True},
          {"openai"}, ["openai"]),
+        ({"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "OAI"},
+         {"openai"}, ["openai"]),
     ],
-    ids=["answer-only", "reformulated-history", "switches-without-an-llm-call", "stages-without-an-llm-call"],
+    ids=["answer-only", "reformulated-history", "switches-without-an-llm-call", "stages-without-an-llm-call",
+         "reformulated-on-an-alias-of-the-answers-provider"],
 )
 def test_rag_search_admits_an_over_limit_user_whose_llm_calls_run_on_their_own_keys(
     client_with_agentic_overrides, monkeypatch, extra, own, looked_up
@@ -302,36 +305,43 @@ def test_rag_search_admits_an_over_limit_user_whose_llm_calls_run_on_their_own_k
         "/api/v1/rag/search",
         json={"query": "q", "enable_generation": True, "generation_provider": "openai", **extra},
     )
+    assert asked == looked_up
     assert resp.status_code != 402, resp.text
     assert marked == [False]
-    assert asked == looked_up
 
 
 @pytest.mark.parametrize(
-    "extra",
+    ("extra", "looked_up"),
     [
-        {"enable_claims": True},
-        {"enable_document_grading": True, "grading_provider": "openai"},
-        {"enable_reranking": True, "reranking_strategy": "llm_scoring"},
-        {"search_depth_mode": "quality"},
-        {"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
-        {"enable_evidence_accumulation": True},
-        {"enable_evidence_chains": True},
+        ({"enable_claims": True}, []),
+        ({"enable_document_grading": True, "grading_provider": "openai"}, []),
+        ({"enable_reranking": True, "reranking_strategy": "llm_scoring"}, []),
+        ({"search_depth_mode": "quality"}, []),
+        ({"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
+         ["openai", "groq"]),
+        ({"enable_evidence_accumulation": True}, []),
+        ({"enable_evidence_chains": True}, []),
     ],
     ids=["claims", "grading", "llm-rerank", "quality-depth", "history-on-a-server-key", "evidence-accumulation",
          "evidence-chains"],
 )
-def test_rag_search_still_refuses_an_own_key_answer_with_another_llm_stage(client_with_agentic_overrides, monkeypatch, extra):
-    """An LLM stage the boundary cannot place on the user's own key keeps the 402 before any retrieval (TASK-13956)."""
+def test_rag_search_still_refuses_an_own_key_answer_with_another_llm_stage(
+    client_with_agentic_overrides, monkeypatch, extra, looked_up
+):
+    """An LLM stage the boundary cannot place on the user's own key keeps the 402 before any retrieval (TASK-13956).
+
+    A stage on an unnamed provider is refused without a lookup; a named one on a server key, after it (TASK-15427).
+    """
     from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
 
-    _asked, marked = _over_the_limit_with_own_keys(monkeypatch, {"openai"})
+    asked, marked = _over_the_limit_with_own_keys(monkeypatch, {"openai"})
     resp = client_with_agentic_overrides.post(
         "/api/v1/rag/search",
         json={"query": "q", "enable_generation": True, "generation_provider": "openai", **extra},
     )
     assert_llm_quota_402(resp)
     assert marked == []
+    assert asked == looked_up
 
 
 # Every boolean switch of the RAG request schemas makes an LLM call besides the answer and the reformulation

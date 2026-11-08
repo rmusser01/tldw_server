@@ -226,10 +226,12 @@ def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
     """The provider of each LLM call a RAG request makes, for ``enforce_llm_quota`` (TASK-13956).
 
     The answer's provider, as the generator resolves it, and the reformulation's when a chat history
-    is reformulated. Any other LLM stage adds None, so an over-limit user is refused as before.
+    is reformulated, both canonical (TASK-15427). Any other LLM stage adds None, so an over-limit user
+    is refused as before.
     """
     # ponytail: a stage this list misses is still checked at its own call (refused there, never counted).
     from tldw_Server_API.app.core.config import load_and_log_configs
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
     from tldw_Server_API.app.core.RAG.rag_service.generation_defaults import resolve_generation_defaults
 
     named = settings.get("generation_provider")
@@ -237,7 +239,7 @@ def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
         resolve_generation_defaults(load_and_log_configs() or {}, named, settings.get("generation_model"))[0]
     ]
     if settings.get("chat_history") and settings.get("enable_query_reformulation", True):
-        providers.append(settings.get("classifier_provider") or named or "openai")
+        providers.append(canonical_provider_name(settings.get("classifier_provider") or named or "openai"))
     if (
         str(settings.get("strategy") or "standard") != "standard"
         or settings.get("search_depth_mode") == "quality"
