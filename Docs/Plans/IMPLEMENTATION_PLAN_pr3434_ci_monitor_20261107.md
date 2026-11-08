@@ -589,3 +589,88 @@ TOML and wizard-only Ruff/Black hooks skipped. Log:
 Restage this final evidence and rerun the full scope before the normal-hook
 commit. Exact new-head hosted holds, publication readback and actual merge are
 still pending, not inferred from local contract success.
+
+### MCP Default-Selection Settlement Investigation
+
+At 22:08Z, ad1a5a8dbe shared UI coverage 1/16 job 128867956306 failed one
+McpToolsStep default-selection assertion: Research was present but unchecked.
+The other 1,962 cases and 174 files passed. Both current-head hosted holds and
+both repaired parity jobs succeeded, but this new failure keeps auto-merge off;
+it was disabled and freshly confirmed null before edits. Logs:
+`/tmp/claims-pr3434-shared-ui-coverage1-128867956306-20261108T2210.{json,log}`.
+The unchanged real module passes all 11 locally with V8 coverage (14.15s), not
+deterministic RED or Linux certification. Component and test match dev.
+
+Hypothesis: the catalog exposes inputs before the separate passive defaults
+effect settles; findByLabelText waits only for presence. A temporary probe uses
+the actual component and source-extracted assertion tail/catalog, holding only
+that initialization effect. Release after its first real checked-predicate
+sample; preserve the matcher return/throw behavior and reject permanently
+unchecked Research, missing catalog and incorrectly selected Writing controls.
+This is controlled scheduling evidence, not proof of the original hosted trigger
+or a persistent application defect. Remove the temporary probe before final scope.
+Only a validated awaited checked-predicate correction is in scope; no production,
+helper, workflow, dependency, skip/retry/sleep or timeout/budget changes. ADR
+required: no for test-settlement repair. TASK-15466/Stage 3/4 stay In Progress.
+
+The valid controlled probe reproduces the exact unchecked-Research assertion:
+old source RED one failed/three passed, then corrected source plus the complete
+real module GREEN 15 passed/zero skips (11 real, four probe cases). The original
+unchanged real module's 11-pass run remains separate, not RED. The probe's first
+jsdom URL/createRequire setup error ran no tests and is not RED. Probe source and
+all outcomes are retained under `/tmp/claims-pr3434-mcp-defaults-*`; the temporary
+repository file is removed. No instrumentation or helper changes remain.
+
+Replace only the Research assertion statement with an awaited waitFor around
+the same checked predicate. Complete TS-AST/scope proof records all 11 tests and
+45 assertions retained, every byte outside that statement identical, no waitFor
+options or test-budget changes, and production source identical. New source
+SHA256: `2c9936abea2b8d61d8f35a98ae06c4109043618b6edda257d7fe2000b1ef672d`.
+Syntax transpilation has zero errors (not whole-app semantic TSC); the established
+apps-base locked ESLint command has zero diagnostics, suppressions or stderr.
+The initial root-cwd lint had no file diagnostics but emitted a pages-path
+environment warning; only the corrected invocation is clean qualification.
+Full native coverage shard 1 with unchanged 4 GB/15-minute bounds, broad
+CI/Docs/Config and independent review remain in progress. No production Python
+security scope changed; earlier production Bandit/runtime/PostgreSQL evidence
+retains its original scope/date, not rerun or relabeled.
+
+Complete native V8 coverage shard 1 is GREEN: 1,963 passed, zero failures/skips,
+175 files, 365.34s (366.50s wrapper elapsed) under the unchanged 4 GB/900-second
+bound. JSON/default reporters are local evidence only; workflow/report settings
+are unchanged. Corrected McpToolsStep passes all 11 there. Complete CI/Docs/Config
+is GREEN: 1,621 passed, six inherited runner/environment skips, zero failures/errors,
+234.59s. These selections and the 15-case probe/module run overlap, not additive
+or full-root totals. Independent Laplace APPROVE/no actionable P0-P3:
+`/tmp/claims-pr3434-mcp-defaults-review-20261108.md`. It personally inspected
+source/hash, real component/effects, installed Testing Library behavior and saved
+probe/hosted evidence; it ran no tests/scanners or hosted commands.
+
+Reviewer-declined scopes: unchanged whole-PR/runtime/Jobs/Claims/PostgreSQL/security
+retain prior reviews at original meaning. Parent owns broad/full-shard/static/
+security/hooks/canonical-task verification, task/plan bookkeeping, source/probe
+cleanup, live feedback/rules/queue/dev freshness and the existing summary waiver.
+Original natural scheduler cause, early production interactions, broader onboarding
+behavior and universal future checked-state stability are unproved/not recertified.
+Existing dependency/config/workflow policy adequacy and root pg_dump/native local
+Studio/workspace limits are unchanged, not re-reviewed, rerun or called green.
+
+Before normal publication, stage only the three verified owned paths and run
+canonical selected-task checks plus full 166-path staged hooks. Keep auto-merge
+OFF until the exact next head's ordinary shared-ui-coverage 1/16 AND 8/16 AND
+notes/chat UX all succeed; then freshly inspect feedback, effective rules,
+MERGE_QUEUE and strict dev freshness before exact-head MERGE auto-merge. This
+extends only the conservative monitor hold, not a workflow gate or budget.
+All eight effective required contexts still control actual merge. Prior ad
+coverage8/UX/parity success does not transfer; no all-eight-required-success claim.
+
+All applicable full 166-path staged hooks passed without rewrites/bypass; all 15
+explicitly selected tasks are canonical. Only ordinary no-matching TOML and
+wizard-only Ruff/Black hooks skipped. Log:
+`/tmp/claims-pr3434-mcp-defaults-staged-hooks-20261108.log`.
+Laplace's report-only remote-status wording now explicitly distinguishes shard8
+success from the eight required contexts; code/hash approval is unchanged.
+Restage this final evidence and rerun full scoped hooks before normal commit and
+fast-forward publication. Record actual GitHub readback in PR proof, without a
+tracking-only follow-up commit. New-head hosted holds and actual merge remain
+pending; TASK-15466 and this plan stay In Progress.
