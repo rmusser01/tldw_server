@@ -462,3 +462,39 @@ pass. Bandit103->106B101 in this fix, unchanged2B105/1B106 contexts/errors0.
 The368-pass four-file control is pre-split3cbd evidence, not a claimed rerun
 at878; final186 covers every amended source path. Source and final-record
 scoped review remain pending. No publication or merge approval is inferred.
+
+## November 7 Copy-Draft Readiness Qualification
+
+Publishedba74 exacthead frontendunit5 job128551726965/run42414634295 failed
+one VisualPackEditor copy-default selection assertion: expected copied-draft,
+received undefined. Head347files3873pass/1fail/1skip; exactbasecb70 failedfile
+and fullcontext347files3874pass/1skip, then strict identity/order comparison
+rejects. No harmlessness, exactCI scheduling cause or gate waiver is inferred.
+Latest authoritative dev remains cb70f0c5d134ac585c70fc30b5a99bf0ced98562.
+
+Source d838852656a6a6172a25bb5bbe876c831adf094c changes only four lines in
+VisualPackEditor.test.tsx's existing local copy helper: observe the real Copy
+button enabled before its original single click. Actual StarterChoice disables
+copying until artwork readiness, including the existing test stub's passive
+effect. A controlled first-commit Profiler probe proves disabled/noPOST, original
+click dropped and original copied-value assertion RED; identical probe plus
+the default enabled wait GREEN/onePOST/alloriginaloracles. Probe/diagnostic
+mutations removed. This establishes a reachable synchronization defect, not
+the exact remote schedule or harmlessness. No runtime/mock/setup/dependency/
+workflow/timeout/skip/policy change, no retry or manually dispatched gate.
+
+Removing the four inserted lines restores the entire exactba74 file bytes:
+all66cases/names/order,375originalexpects and prior review fix unchanged.
+Separate focused original1pass, controlledRED1fail, matchedGREEN1pass and final
+restoredfocused1pass; complete editor+real-artwork files68/68pass/no skips/
+warnings,8.32s. TargetTypeScript0BASE/0current; ESLint0errors/50sameinherited
+warnings. Configuredhooks/diffpass. LocalNode25.6/Bun1.3.5 differsCI20.20.2/
+1.3.2; no wholefrontend/shard/equivalence claim. No newPython/Banditscope;
+prior Pythonsecurity evidence applies only to identical blobs, not rerun.
+
+Report copy-draft-ci-report.md and /private/tmp/userprofiles15413-copy-* retain
+raw logs/patches/static/oracle/process evidence. Sourceauthorfinished/closed,
+controllerrecords separate. Bounded exactfinalhead independentreview and fresh
+automatic exactheadrequiredCI still govern; oldba74sevenrequiredsuccesses do
+not qualify this unpublishedrepair. TASK15413 staysInProgress/AC4open until
+verifiedmerge; verification-onlyhumanwaiver preserved, never runtime-transferred.
