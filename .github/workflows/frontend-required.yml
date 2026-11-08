@@ -67,7 +67,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
       frontend_changed: ${{ steps.detect.outputs.frontend_changed || steps.detect_admitted.outputs.frontend_changed }}
@@ -1122,7 +1122,7 @@ jobs:
       (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: write

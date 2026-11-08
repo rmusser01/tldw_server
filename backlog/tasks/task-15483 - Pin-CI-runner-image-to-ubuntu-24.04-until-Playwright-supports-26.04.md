@@ -25,6 +25,7 @@ On 2026-11-08 GitHub rolled ubuntu-latest to Ubuntu 26.04. The repo's pinned Pla
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Pinned runs-on: ubuntu-24.04 across all ubuntu-latest jobs in the 7 playwright workflows (ux-regression-nightly, frontend-ux-gates, frontend-required, ui-research-workspace-parity, ui-research-workspace-nightly, ui-watchlists-extension-e2e, frontend-e2e-tiers) — 20 job pins total, runs-on lines only.
+Contract ratchet caught over-pinning: queue-tick/changes (merge-queue + change-detection machinery, no playwright) in frontend-required.yml and frontend-e2e-tiers.yml were collateral pins; reverted to ubuntu-latest. Playwright-running jobs stay pinned. Net: 18 job pins.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
