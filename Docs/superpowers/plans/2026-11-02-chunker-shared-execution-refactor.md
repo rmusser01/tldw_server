@@ -1,0 +1,630 @@
+# Chunker Shared Execution Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Extract the three chunk execution paths into an internal service while preserving their public and path-specific behavior.
+
+**Architecture:** Keep `Chunker` as the public facade and owner of mutable facilities. Move each execution body into active service delegation first, then share proven-equivalent preparation and strategy setup. Use a live structural context and facade-supplied observability hooks, with no reverse imports or new result normalization.
+
+**Tech Stack:** Existing Python >=3.12, protocols/frozen dataclasses, Loguru, pytest/Hypothesis, Ruff/Black/mypy, Bandit and repository CI guards; no new dependencies.
+
+**Spec:** [Approved design](../specs/2026-11-02-chunker-shared-execution-refactor-design.md).
+
+**ADR:** [Accepted ADR-096](../../ADR/096-chunker-execution-live-context-boundary.md)
+(renumbered from ADR-086 on 2026-11-07; accepted decision unchanged).
+
+**Tracking:** Implementation `TASK-15416`; completed planning `TASK-15415`; approved design `TASK-15414` (renumbered from colliding TASK-15413). Implementation links this exact plan, spec and ADR rather than executing under a completed planning task.
+
+**Status:** Approved by requester on 2026-11-02 for Native execution followed by independent whole-branch review. Implementation tracked in TASK-15416.
+
+## Global Constraints
+
+- "No new public configuration, dependency, async API or output model."
+- "No strategy implementation, factory registry or strategy-cache redesign."
+- "No movement of `LRUCache`, result-cache key construction or cache ownership."
+- "No sanitizer, security policy, method-resolution or LLM-scope redesign."
+- "No changes to file buffering, overlap retention or split-point algorithms."
+- "No telemetry framework migration or new metric names/labels."
+- "No private seam removal is proposed in this phase."
+- "Do not create newly reserved option names or use internal parameter names as implicit filters."
+- Preserve all three public declarations, annotations, defaults and docstrings; preserve `inspect.isgeneratorfunction` for the generator.
+- Preserve option copies/value identities, source alignment, returned objects, logging/metrics, exact catch regions and generator lifecycle; do not merge distinct execution policies.
+- The new subsystem imports neither the facade nor process_text/hierarchy, including local imports. Existing parent-package eager exports remain unchanged.
+- Use only the isolated worktree on `codex/chunker-execution-refactor-design`; main, the bookkeeping branch/PR and historical records are not edit targets.
+- Track edits using backlog-py under ADR-059. Commit related task/plan updates with each stage. Never use Node Backlog/MCP or broad staging.
+- Reproduced inherited defects need a separate requester-approved correction; refactor-induced failures must be repaired before the next stage.
+- Plan approval/execution selection is not permission for an ungated merge. A future PR needs independent review, fresh verification, its own human Change summary and live required CI.
+
+## Review Focus
+
+1. A custom strategy receives `mode/context/hooks/source/path/request/strategy/options` and internal-plumbing names without collision or value replacement: Task 1 contracts, Task 5 helper tests.
+2. Config/helpers/observability change after generator creation or during execution: Task 1 characterization, Tasks 2/4 wiring tests, Task 5 live-helper tests.
+3. A shared-mode generator is paused, sent a value, thrown into, closed or never started: Task 1 characterization, Task 4 lifecycle/concurrency tests.
+4. A cache returns a mutable hit or fails during lookup/key/signature/write: Task 1 identity/error characterization and Task 2 service tests.
+5. Metadata has out-of-range, boolean, missing or raising offset attributes: Task 1 source-alignment characterization and Task 3 metadata tests.
+
+## Baseline, Runtime And File Map
+
+Approved design baseline: `3ab1ce5d3a49d5a7fd130e8939d55d7639e5a373`.
+Planning-time refreshed dev: `5937f33065c4b5b5b2d0f731d1914c0651532eb5`.
+The scoped diff in Chunking production/tests, AGENTS and ADRs is empty between
+them. Fresh unchanged-code full Chunking: **796 passed, one existing PyThaiNLP
+skip, 2000 warnings, 41.41s** (`/tmp/chunker_execution_plan_baseline.txt`).
+These are baseline results, not proof of the future extraction.
+
+Run commands from the isolated repository root in a shell where this setup has
+been applied. Repeat activation in a fresh shell; do not assume a local `.venv`
+exists inside the worktree:
+
+```bash
+source "${TLDW_VENV:-$(git rev-parse --path-format=absolute --git-common-dir)/../.venv}/bin/activate"
+export PYTHONPATH="$PWD/tools/backlog-py/src${PYTHONPATH:+:$PYTHONPATH}"
+```
+
+At execution start, search for an existing implementation record first. If
+none exists, use backlog-py to create `Implement Chunker shared execution
+subsystem refactor` with a unique ID above HEAD/latest-dev/all paginated open-PR
+task IDs. Record its exact ID/path as `IMPLEMENTATION_TASK_ID` and
+`IMPLEMENTATION_TASK_FILE` in the shell/task notes. Each commit below stages
+that record explicitly; never substitute the unrelated record now using 15413.
+
+```bash
+: "${IMPLEMENTATION_TASK_ID:?set from the official implementation task record}"
+: "${IMPLEMENTATION_TASK_FILE:?set to the exact repository-relative task path}"
+test -f "$IMPLEMENTATION_TASK_FILE"
+```
+
+Production files, introduced only when actively wired:
+
+| Path | Owner / first stage |
+| --- | --- |
+| `tldw_Server_API/app/core/Chunking/execution/__init__.py` | Docstring-only internal package initializer; Task 2 |
+| `tldw_Server_API/app/core/Chunking/execution/models.py` | Context/cache protocols and hooks; Task 2. Prepared request added in Task 5 |
+| `tldw_Server_API/app/core/Chunking/execution/service.py` | Text entry in Task 2, metadata in Task 3, lazy iterator in Task 4 |
+| `tldw_Server_API/app/core/Chunking/execution/preparation.py` | Shared option preparation; Task 5 |
+| `tldw_Server_API/app/core/Chunking/execution/strategy.py` | Strategy selection/setup without owning locks; Task 5 |
+| `tldw_Server_API/app/core/Chunking/chunker.py` | Three public delegates and private `_execution_hooks()` factory; Tasks 2-4 |
+
+Test paths:
+
+- `tldw_Server_API/tests/Chunking/_execution_test_support.py`: deterministic recording strategy/cache/lock and a minimal fake context, without constructing/importing the facade directly.
+- `tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py`: frozen public baseline behavior, parametrized over the relevant paths.
+- `tldw_Server_API/tests/Chunking/test_chunker_execution_components.py`: direct fake-context component tests.
+- `tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py`: active facade wiring, static dependencies and fresh-process imports.
+
+The three test modules match the existing `test_chunker_*.py` assignment in all
+six full-suite matrices (including the inherited release matrix). The support
+file is not a collected test module. No workflow, ignore-list or baseline edit
+is planned; prove coverage with the guard after the files exist.
+
+## Fixed Internal Interfaces
+
+These choices complete the spec's allowed private-interface discretion. Types
+such as `Any` below deliberately retain dynamic baseline inputs/outputs; they
+are not instructions to add validation or blanket mypy suppression.
+
+`execution.models`:
+
+```python
+class ResultCache(Protocol):
+    def get(self, key: str) -> Any: ...
+    def put(self, key: str, value: Any) -> None: ...
+
+@dataclass(frozen=True)
+class ExecutionHooks:
+    get_logger: Callable[[], Any]
+    increment_counter: Callable[..., Any]
+```
+
+`ExecutionContext` has read-only protocol properties `config: ChunkerConfig`,
+`_cache: ResultCache | None`, `_strategy_cache_mode: str`, `_strategy_lock: Any`.
+Actual `Chunker` attributes still remain writable/live; the read-only protocol
+avoids narrowing mutable protocol fields to a concrete `LRUCache` type.
+Declare only these existing context methods, retaining their names/defaults:
+
+```python
+def _sanitize_input(self, text: str, *, suppress_security_log: bool = False) -> str: ...
+def _enforce_text_size(self, text: str, *, source: str) -> None: ...
+def _normalize_method_argument(self, method: Any) -> Any: ...
+def _resolve_method(self, method: Any, language: Any, options: dict[str, Any] | None = None) -> str: ...
+def _apply_option_aliases(self, method: str, options: dict[str, Any]) -> dict[str, Any]: ...
+def _override_overlap_for_method(self, method: str, overlap: Any, options: dict[str, Any]) -> Any: ...
+def _get_effective_llm_hooks(self) -> tuple[Any, Any]: ...
+def _get_llm_signature(self, *, llm_call_func: Any = _LLM_UNSET, llm_config: Any = _LLM_UNSET) -> str: ...
+def _get_cache_key(self, text: str, method: str, max_size: int, overlap: int, language: str, options: dict, *, llm_signature: str = "") -> str: ...
+def _create_strategy_instance(self, method: str) -> Any: ...
+def _get_strategy_for_call(self, method: str) -> Any: ...
+def _sync_strategy_llm(self, strategy: Any, *, llm_call_func: Any = _LLM_UNSET, llm_config: Any = _LLM_UNSET) -> None: ...
+def _apply_strategy_language(self, strategy: Any, language: str) -> None: ...
+```
+
+Import `_LLM_UNSET` from the existing neutral `llm_context` module. The service
+constructor is `ChunkExecutionService(context: ExecutionContext, hooks:
+ExecutionHooks) -> None`; it only stores those two references. Its entries
+mirror the public argument names/defaults exactly, adding no internal keyword:
+
+```python
+def chunk_text(self, text: str, method: Optional[str] = None, max_size: Optional[int] = None, overlap: Optional[int] = None, language: Optional[str] = None, **options: Any) -> list[str]: ...
+def chunk_text_with_metadata(self, text: str, method: Optional[str] = None, max_size: Optional[int] = None, overlap: Optional[int] = None, language: Optional[str] = None, **options: Any) -> list[ChunkResult]: ...
+def iter_chunks(self, text: str, method: Optional[str] = None, max_size: Optional[int] = None, overlap: Optional[int] = None, language: Optional[str] = None, **options: Any) -> Generator[str, None, None]: ...
+```
+
+The explicit `Any` on internal variadic options does not change binding;
+leave the existing public facade annotations verbatim.
+
+`chunker.py._execution_hooks() -> ExecutionHooks` returns forwarding callbacks:
+`get_logger()` resolves current `chunker.py.logger`, and `increment_counter`
+forwards to the current module function when called. Do not capture either
+global in a default argument or delegate to a newly imported metrics function.
+Emit log calls through `hooks.get_logger().debug/info/warning/error` with the
+original arguments and original suppression boundaries.
+
+Task 5 adds frozen `PreparedExecution` with fields `method`, `max_size`,
+`overlap`, `language`, `tokenizer_override` typed `Any`; `options_raw` and
+`strategy_options` typed `dict[str, Any]`; and `use_per_call_strategy`,
+`align_text_to_source` typed `bool`. No runtime coercion occurs in its constructor.
+Private helper signatures are:
+
+```python
+ExecutionKind = Literal["text", "metadata", "generator"]
+def prepare_execution(context: ExecutionContext, *, method: Any, max_size: Any, overlap: Any, language: Any, user_options: dict[str, Any], kind: ExecutionKind, hooks: ExecutionHooks) -> PreparedExecution: ...
+def prepare_strategy(context: ExecutionContext, prepared: PreparedExecution, *, effective_llm: tuple[Any, Any], ephemeral: bool, hooks: ExecutionHooks) -> Any: ...
+```
+
+The service sanitizes/handles early return/enforces size before preparation.
+Only its fixed internal keywords accompany `user_options=options`; never
+unpack user options into these helper calls. The service controls the lock.
+It computes the generator's `ephemeral` flag before entering the lock at the
+baseline point, then passes it explicitly. The strategy helper never rereads
+cache mode to reinterpret that decision or performs a second LLM-hook lookup.
+
+## Task 1: Freeze Public Execution Contracts (Stage 1)
+
+**Goal:** Establish an independent, passing compatibility oracle before extraction.
+**Success Criteria:** New characterization passes on the reconciled unextracted implementation; no product edit or new skip.
+**Status:** Complete
+
+**Evidence:** Fresh original baseline 796 passed/1 established skip; initial characterization 81 passed and full suite 877 passed/1 skip. Final frozen characterization 103 passed, 280 warnings, 3.00s (`/tmp/chunker_execution_task1_frozen.txt`). Ruff/Black/compileall, task-ID/shard guards and test Bandit (B101 only excluded) pass; no production files changed. Independent literal docstrings use `inspect.cleandoc` for Python 3.12 versus 3.13+ compiler indentation portability; final source AST proof will preserve original docstrings exactly. Official implementation task is TASK-15416; all 39 open PR file lists paginated to allocate it.
+
+**Files:** Create the support module and `test_chunker_execution_contracts.py` listed above; update only the active implementation task and this plan's stage evidence.
+
+**Interfaces:** Consumes the current three public methods. Produces test helpers `RecordingLock` (`depth`, event log), `RecordingCache` (configurable get/put result/failure), `RecordingStrategy` (configurable text/metadata/iterator outputs), and `FakeExecutionContext` (neutral config plus the fixed protocol methods). Keep these private to tests; use existing `ChunkResult`/`ChunkMetadata`, not copies of their implementations. A `facade_case` fixture in the contracts module constructs a real `Chunker` with deterministic facilities; component tests later construct only `FakeExecutionContext`.
+
+- [x] **Step 1: Allocate/find the execution record.** Follow the tracking procedure above and record the actual implementation task ID/path; this is required before the first product/test edit.
+- [x] **Step 2: Reconcile the execution baseline.** Fetch dev and inspect scoped source/tests, AGENTS, ADR, `pyproject.toml`, `.github/workflows/ci.yml` and relevant guard changes. Follow current queue policy before rebasing the unpublished isolated branch if needed. Preserve all design commits and record the actual base SHA. Relevant behavior changes return to design review.
+- [x] **Step 3: Verify the baseline.** Run `python -m pytest tldw_Server_API/tests/Chunking -q`; require zero failures and document the existing optional skip. Do not install dependencies or start services to hide a failure.
+- [x] **Step 4: Write characterization tests with frozen expectations.** Capture complete signatures using independent expected `inspect.Signature` objects and resolved annotations; preserve literal baseline public docstrings. Add the named cases below. They assert existing behavior, so their initial expected result is GREEN, not fabricated RED.
+
+| Test name | Required assertions |
+| --- | --- |
+| `test_public_execution_contracts` | All three signatures/defaults/docstrings equal the frozen baseline; generator is a generator function. |
+| `test_path_input_and_option_contracts` | Text/metadata return `[]` before size/default work for sanitized whitespace; generator still invokes size/strategy on first advancement. Invalid text/size source and exceptions match each path. |
+| `test_option_namespace_survives_all_paths` | Injected strategy emits the supplied options as actual output; the eight spec names, chosen helper names and nested object identity survive all three paths. Only documented path filters differ. |
+| `test_path_alias_overlap_tokenizer_order` | Aliases, None-versus-zero, bool/non-integer controls, code routing, tokenizer precedence/reset and LLM/language order match baseline. Include `align_text_to_source` absent/None/false/true differences. |
+| `test_text_cache_identity_and_error_regions` | Cache hit returns the controlled object, avoids factory work and emits exact labels; disabled/threshold/empty controls match. Get/key/signature failures propagate raw; put failures retain original suppression and metrics. |
+| `test_metadata_alignment_identity_and_error_regions` | Same list/items/metadata are returned; sanitized source slicing/clamping, bool offsets, missing/raising attributes and per-item failure controls match. Strategy errors translate; alignment/success logging keep their original regions. |
+| `test_generator_baseline_lifecycle_and_live_state` | No effects until first advance; later context patches are observed. Iterator setup is locked, next/send/throw/close is not; closing an unstarted generator does no work. Outer completion value remains `None`. |
+
+For a namespace test case, set `user_options` to the three literal values in
+the assertion below, and configure the controlled strategy to emit their JSON
+as its actual result. Decode that result as `decoded_result`. A separate
+identity case includes a mutable `payload` and inspects the exact mapping
+received by the strategy as `strategy_options`; do not JSON-round-trip it:
+
+```python
+assert decoded_result == {"mode": "user-mode", "context": "user-context", "hooks": "user-hooks"}
+assert strategy_options["payload"] is payload
+```
+
+Add three concrete Hypothesis contracts in this same stage, with a fresh case
+constructed inside each example (`max_examples=50`, `deadline=None`, without
+fixture-health-check suppression):
+
+- `test_generated_user_options_reach_each_path`: draw JSON-compatible nested
+  values under the eight spec names and `kind/user_options/effective_llm/ephemeral`;
+  none is a public formal argument or recognized path option. The controlled
+  strategy emits those values as JSON; assert decoded output equals the input
+  mapping and received mutable values retain identity.
+- `test_generated_alignment_preserves_objects_and_slices`: draw nonempty text
+  prefixed with `a` and signed integer start/end offsets. Configure one existing
+  `ChunkResult`/metadata object, align via the public metadata path, and assert
+  those exact objects survive and `item.text == sanitized_source[start:end]`
+  after the baseline clamp. Assert original metadata offsets are not repaired.
+- `test_words_eager_generator_equivalence`: draw ASCII word lists, size 1-10
+  and overlap 0 through size-1; compare actual public text output with fully
+  consumed generator output for the real word strategy. Its eager and
+  generator implementations both use `_prepare_chunk_records` on these
+  inputs; first verify this invariant on the reconciled baseline. Do not
+  generalize it to other strategies or malformed inputs.
+
+Also characterize real LRU `copy_on_access=True/False`, all strategy-cache modes,
+injected strategy/factory behavior, unchanged source offsets, cache metric
+replacement during a strategy call, and a generator created in one thread and
+first advanced under another thread's LLM override. Use events and bounded
+joins, with cleanup in `finally`, not synchronization sleeps.
+
+- [x] **Step 5: Run the new contracts against the unextracted baseline.** `python -m pytest tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py -q`; require all pass. Run `python Helper_Scripts/ci/check_shard_coverage.py`; require zero newly uncovered test files. Do not raise its baseline/ignore list.
+- [x] **Step 6: Freeze the oracle and verify integration.** Run `python -m pytest tldw_Server_API/tests/Chunking -q`; require zero failures/no new skips. Run Ruff, Black check, compileall and test Bandit (`-s B101`) on only the two new test/support files, using the same command shapes as Final Verification. Existing assertions and frozen expectations are not editable to accommodate extraction. A correction needs baseline RED and separate requester approval.
+- [x] **Step 7: Commit the independently reviewable characterization.**
+
+```bash
+git add -- tldw_Server_API/tests/Chunking/_execution_test_support.py tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md
+git commit -m "test: characterize Chunker execution paths"
+```
+
+## Task 2: Move Plain Text Execution Behind The Facade (Stage 2)
+
+**Goal:** Actively delegate the cached text path without changing its control flow.
+**Success Criteria:** Direct fake-context tests and public wiring pass; all frozen paths still pass.
+**Status:** Complete
+
+**Evidence:** RED18 failed; final execution tests123 passed,332 warnings,4.85s. Full suite918 passed/1 established skip before adding the grouped-metric regression. Original nested suppress calls preserved with narrow arg-type ignores after Python3.12/3.13/3.14 probe disproved expansion equivalence. Normalized plain-body AST and every other facade method/signature/source docstring unchanged; Ruff/Black/compileall/mypy3files and production/test Bandit pass. Logs `/tmp/chunker_execution_task2_*`; official postcommit full gate follows.
+
+**Files:** Create `execution/__init__.py`, `models.py`, `service.py`, `test_chunker_execution_components.py` and `test_chunker_execution_boundaries.py`. Modify only the `chunk_text` body/imports and `_execution_hooks()` in `chunker.py`, plus tracking.
+
+**Interfaces:** Consume Task 1's oracle/support. Produce `ResultCache`, `ExecutionContext`, `ExecutionHooks`, the storing-only service constructor, `ChunkExecutionService.chunk_text` and facade `_execution_hooks()` as defined above. Do not add unused prepared-request/strategy-helper modules yet.
+
+- [x] **Step 1: Add failing component and wiring tests.** `test_text_facade_delegates_without_extra_binding` replaces `chunker.py.ChunkExecutionService` with a sentinel service, asserts unchanged positional/keyword values and `result is sentinel_result`. `test_text_service_constructor_is_inert` uses a context that raises on attribute reads: construction emits no events. `test_text_service_cache_boundaries` asserts actual returned identity/output plus the cache/error/metric cases from Task 1 using a fake context. `test_hooks_resolve_replacement_during_execution` changes logger/counter after hook creation and verifies the replacement receives the original event arguments while output remains correct.
+- [x] **Step 2: Run only these new cases and capture RED.** `python -m pytest tldw_Server_API/tests/Chunking/test_chunker_execution_components.py tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py -q`; expected failure is absent service/import or the old public body bypassing the sentinel, not an environment/network failure.
+- [x] **Step 3: Move the plain body mechanically.** Introduce the interfaces, store live context/hooks and replace only facade-owned accesses with context/hook lookups. Keep sanitization, early return, defaults, cache policy/signature/get and lock selection before the original try region; strategy execution/cache writes/success logging remain in their exact old regions. Preserve the exception tuple, identity, event ordering and exception chaining. Keep local setup duplication temporarily; do not consolidate here. The public method retains its declaration/docstring and returns the service result directly.
+- [x] **Step 4: Add active dependency and cold-import coverage.** At this stage require the real `execution`, `execution.models`, `execution.service` modules, with no missing-module skip. AST checks reject facade/sibling imports and `__getattr__` facade adapters. Fresh-process root-first and each introduced-module-first imports must resolve root `Chunker` and service `ChunkExecutionService` without preloading/stubbing modules.
+- [x] **Step 5: Verify GREEN.** Run the three execution test modules, then full Chunking; both must pass. Run scoped Ruff/Black/compileall, new-package mypy and production Bandit using the final verification commands restricted to introduced files. If a facade's pre-existing typing issue appears, prove its baseline rather than broadening this stage.
+- [x] **Step 6: Commit the active text migration and tracking.** No dormant helper or unrelated legacy formatting is included.
+
+```bash
+git add -- tldw_Server_API/app/core/Chunking/execution/__init__.py tldw_Server_API/app/core/Chunking/execution/models.py tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_chunker_execution_components.py tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md
+git commit -m "refactor: extract Chunker text execution"
+```
+
+## Task 3: Move Metadata Execution (Stage 3)
+
+**Goal:** Delegate metadata execution while preserving direct strategy results and alignment.
+**Success Criteria:** Same metadata/list identities, mutation, error regions and no result-cache calls.
+**Status:** Complete
+
+**Evidence:** Metadata wiring/component RED15 failed20 passed; GREEN305 focused integration cases,680 warnings,6.38s. Full Chunking934 passed/1 established skip,2296 warnings,43.58s. Both moved bodies are normalized-AST identical; retained methods, public signatures and original source docstrings unchanged. Ruff/Black/compileall/mypy3files and production/test Bandit pass. Logs `/tmp/chunker_execution_task3_*`.
+
+**Files:** Modify `execution/service.py`, the `chunk_text_with_metadata` body in `chunker.py`, and the two component/boundary test modules; tracking only elsewhere.
+
+**Interfaces:** Consume the Task 2 context/hooks/constructor. Produce `ChunkExecutionService.chunk_text_with_metadata` with the fixed mirrored signature. Do not route through `chunk_text` or introduce shared request preparation yet.
+
+- [x] **Step 1: Write `test_metadata_facade_returns_service_object` and `test_metadata_service_keeps_alignment_regions`.** For controlled results, assert the exact list/item/metadata identities and source-sliced `item.text`. Include out-of-range/boolean offsets, missing/raising metadata attributes, a non-list result, false/None alignment and an early empty-input control. For each case also assert no result-cache access and unchanged errors/events.
+
+```python
+assert result is strategy_result
+assert result[0] is original_item
+assert result[0].metadata is original_metadata
+assert result[0].text == sanitized_source[clamped_start:clamped_end]
+assert cache_events == []
+```
+
+- [x] **Step 2: Capture wiring/component RED.** Run the execution component and boundary modules; require failure because the service metadata entry is absent or the public method bypasses it. Frozen baseline tests must not be changed.
+- [x] **Step 3: Move the metadata body, then wire its public delegate.** Keep raw alignment extraction/coercion before resolution, conditional strategy-option reinsertion and tokens-only ephemeral selection. Hold the lock only through direct `strategy.chunk_with_metadata`; leave per-item alignment and success logging outside the execution catch region. Add no copies, conversion, repairs or validation. Keep all retained context helpers on the facade.
+- [x] **Step 4: Run GREEN and regressions.** Run all execution modules, `test_process_text_components.py`, `test_process_text_refactor_equivalence.py`, `test_hierarchy_refactor_contracts.py` and `test_streaming_overlap.py` under `tldw_Server_API/tests/Chunking/`, then full Chunking. Require zero failures/new skips; run scoped static/type/Bandit checks.
+- [x] **Step 5: Commit the metadata migration and tracking.**
+
+```bash
+git add -- tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_chunker_execution_components.py tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md
+git commit -m "refactor: extract Chunker metadata execution"
+```
+
+## Task 4: Move Lazy Generator Execution (Stage 4)
+
+**Goal:** Delegate generator execution without changing when work or failures happen.
+**Success Criteria:** Generator protocol/timing is preserved and a paused consumer never retains the shared lock.
+**Status:** Complete
+
+**Evidence:** RED10 failed35 passed; GREEN327 focused execution/concurrency/integration cases,770 warnings,6.45s. Full Chunking945 passed/1 established skip,2366 warnings,40.95s. All three moved bodies are normalized-AST identical; retained methods/public declarations/source docstrings unchanged. Paused-generator competitor returns real chunks, protocol/setup/iteration/close boundaries covered; old assertions unchanged. Ruff/Black/compileall/mypy3files and production/test Bandit pass. Logs `/tmp/chunker_execution_task4_*`.
+
+**Files:** Modify `execution/service.py`, `chunk_text_generator` in `chunker.py`, and execution component/boundary tests. Add new lifecycle cases to the execution contracts module without editing its frozen expectations. Tracking only elsewhere.
+
+**Interfaces:** Consume the same context/hooks. Produce lazy `ChunkExecutionService.iter_chunks` with the fixed signature. Public `chunk_text_generator` remains a generator using a plain `yield from` statement; do not return an iterator from an eager wrapper or propagate a new completion value.
+
+- [x] **Step 1: Write failing active-wiring/lifecycle tests.** `test_generator_facade_defers_service_creation` asserts zero constructor calls until first advance, then actual yielded text. `test_generator_delegates_send_throw_close` controls each underlying protocol operation and asserts yielded values, cleanup and outer completion `None`. `test_generator_shared_selection_and_lock_regions` requires ephemeral factory selection even with an injected strategy, locked iterator creation and unlocked first/next/throw/close operations. Include callable/noncallable/missing `chunk_generator`, eager fallback, setup-versus-iteration failure and an unstarted close control.
+
+```python
+assert events == []  # after generator creation
+assert next(generator) == "first"
+assert generator.throw(SentinelError()) == "recovered"
+generator.close()
+assert events == [("factory", 1), ("iterator_created", 1), ("next", 0), ("throw", 0), ("close", 0)]
+```
+
+- [x] **Step 2: Capture RED from the absent iterator entry or bypassed lazy delegate.** Run the relevant execution component/boundary tests; reject a RED caused only by a test-fixture mistake or optional provider initialization.
+- [x] **Step 3: Move and wire the generator body.** Construct the service inside the public generator body, not in facade initialization or a default argument. Preserve sanitize/size/default sequencing, lack of an eager empty return, LLM-hook lookup and `ephemeral` calculation before lock entry. Construct the iterator or eager fallback under the lock; delegate via `yield from` outside it. Do not add a generic exception handler, result caching, prefetch or a state-restoration scope around iteration.
+- [x] **Step 4: Add `test_paused_generator_allows_competing_call` and live-state controls.** Use events with bounded waits/joins and `finally` cleanup. Assert a competing text call returns actual expected chunks while the first generator remains paused. Check helpers/config/LLM override changes after generator creation, cross-thread first advancement, and no work when closing an unstarted generator. Keep the existing thread-safety test assertions unchanged.
+- [x] **Step 5: Run GREEN.** Run execution tests plus `test_thread_safety.py`, `test_streaming_overlap.py`, process_text and hierarchy contracts, then full Chunking and scoped static/type/Bandit checks. Require no lock leak, new skip or exception-translation change.
+- [x] **Step 6: Commit the lazy migration and tracking.**
+
+```bash
+git add -- tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_chunker_execution_contracts.py tldw_Server_API/tests/Chunking/test_chunker_execution_components.py tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md
+git commit -m "refactor: extract lazy Chunker execution"
+```
+
+## Task 5: Share Preparation And Complete Integration (Stage 5)
+
+**Goal:** Remove proven setup duplication and verify the fully active subsystem.
+**Success Criteria:** Every new helper is used by all applicable paths; all frozen contracts, real cold imports, guards and local verification pass before publication.
+**Status:** Complete
+
+**Evidence:** Helper RED30 failed50 passed; active-helper GREEN184 cases, followed by189 final execution cases448 warnings6.22s. Final full Chunking985 passed/1 established skip2422 warnings43.28s (`/tmp/chunker_execution_task5_final_full.txt`); earlier coverage run measured99% new-subsystem statements (256/258). All5new source and4test/support files pass mypy; scoped Ruff/Black/compileall and production/test Bandit pass. All6CI matrices cover all3new modules, shard/ID guards pass. Quality ratchet initially rejected2locally injected fakes; existing support utilities now provide lock-entry/tokenizer-failure controls with unchanged output assertions, and all90workflow/tracking/function-size/quality checks pass. No scanner/baseline/policy edit. Broader legacy-facade mypy14errors are an exact scope/message subset of23baseline errors. Repository-wide pytest stopped during collection because unchanged Workspaces tests import missing `httpx2` (12skips/9warnings/1error83.16s); unrelated environment/test correction is not included. This pre-review checkpoint is superseded by the review/fix evidence below; publication remains pending.
+
+**Independent Review:** Nash reviewed all17changed files in immutable `3ab1ce5d3a..14c6086c93`:0Critical,1Important,0Minor. The one finding was additional raw-input retention in the paused outer generator. Independently reproduced with real sanitizer/word strategy: exact pre-extraction generator releases the source in all3modes, while the new weakref test failed all3. Minimal fix creates the lazy inner iterator, drops only the outer input reference, then yield-from. Focused GREEN3passed; final fullChunking988passed/1establishedskip2619warnings44.49s (`/tmp/chunker_execution_review_final_full.txt`),99% subsystem coverage. Final90ratchets193warnings42.73s pass; mypy9newfiles/scopedlint/format/compile and production/testBandit0findings/errors pass. No re-review was dispatched under Native's single fix-pass workflow. Review and its validated remediation are complete; publication remains pending and the broad repository collection failure remains explicit.
+
+**Review Dispositions:** Preserve inherited nested-tuple ExceptionGroup behavior under the separate correction gate; do not add adapters for undocumented rebinding of implementation-only facade imports (no repository consumers found); allow relocated traceback frames/Loguru source positions while preserving promised exception/log behavior. These leave the known grouped-error limitation and require undocumented frame/import-patching consumers to adapt. Accepted ADR-096 still governs; no new architecture decision or inherited behavior correction was introduced.
+
+**Files:** Add `PreparedExecution`/`ExecutionKind` to `execution/models.py`; create `execution/preparation.py` and `execution/strategy.py`; update service calls and execution tests. Root package, existing strategies, LRU/registry/LLM helper bodies and workflow/check baselines are not edit targets. Tracking/plan updates accompany the work.
+
+**Interfaces:** Consume the first four tasks. Produce exactly `PreparedExecution`, `prepare_execution` and `prepare_strategy` defined above. All execution entry signatures and context/hook interfaces remain unchanged.
+
+- [x] **Step 1: Write helper RED tests.** `test_preparation_preserves_path_specific_options` parametrizes the three kinds and raw alignment states; assert complete prepared fields, exact forwarded option values/identities and observed resolver order. `test_preparation_does_not_reserve_user_keys` includes every actual plumbing parameter name inside `user_options`, including `kind`, `user_options`, `effective_llm` and `ephemeral`. `test_strategy_preparation_uses_supplied_llm_and_selection` asserts a single supplied LLM pair, create-versus-lookup, tokenizer resets then conditional language update and no lock acquisition. Add active-helper spies asserting actual public outputs plus exactly one preparation/setup call on uncached paths and no setup call on a cache hit.
+- [x] **Step 2: Run RED.** Run the execution component/boundary modules; expect absent helpers or active service bypass. Do not edit previously frozen public expectations to make consolidation easier.
+- [x] **Step 3: Extract only equivalent preparation and strategy setup.** The preparation helper performs the original shallow copy, path-specific alignment handling, normalization/default/resolution/alias/overlap order, overlap handling/logging, tokenizer flag and forwarded-option copy. It performs no sanitization, size check, cache/LLM lookup or strategy work. The strategy helper uses supplied LLM hooks/ephemeral decision and the existing context hooks for create/lookup/sync/language; it changes no ownership, lock scope or error region. Pass user options as a mapping, never expanded with internal helper keywords.
+- [x] **Step 4: Expand required-module and cold-import coverage to the final module set.** Add `test_execution_cold_import` parametrized over the full root name and `execution`, `execution.models`, `execution.preparation`, `execution.strategy`, `execution.service` under that root. For each first-requested import, start a fresh interpreter with `sys.executable`, repository cwd/import path and isolated configuration. Use the fixed module allowlist, `shell=False`, `capture_output=True`, `text=True`, and a 30-second subprocess timeout. Have the child emit a final JSON line after real import/export checks, deriving names from the actual imported class objects rather than constants; keep diagnostics available. Assert the following. Do not preload/stub/delete modules, require the facade to remain absent, skip missing modules, call providers/download models or retry failures.
+
+```python
+assert completed.returncode == 0, completed.stdout + completed.stderr
+assert json.loads(completed.stdout.splitlines()[-1]) == {
+    "requested": requested_module,
+    "chunker": "Chunker",
+    "service": "ChunkExecutionService",
+}
+```
+- [x] **Step 5: Verify all matrix assignments and final gates.** Use the commands below. New test names must remain under `test_chunker_*.py`; require zero new uncovered files and prove coverage in each of the six parsed matrices, not just the guard's union. Do not edit YAML/ignore/baseline files if the existing patterns already cover them. Investigate any contrary result before changing scope.
+- [x] **Step 6: Review the complete diff and update evidence.** Prove only the three facade bodies/import/hook wiring and the new subsystem changed; retained facility bodies, declarations, public docstrings, existing assertions and sibling/file-streaming implementations remain intact. Record RED/GREEN and full test output, known skip/warnings, lint/type/security results and a spec-to-test map in the active implementation task. Remove no unrelated baseline exception or historical record.
+- [x] **Step 7: Commit the shared preparation and verified tracking.**
+
+```bash
+git add -- tldw_Server_API/app/core/Chunking/execution/models.py tldw_Server_API/app/core/Chunking/execution/preparation.py tldw_Server_API/app/core/Chunking/execution/strategy.py tldw_Server_API/app/core/Chunking/execution/service.py tldw_Server_API/tests/Chunking/test_chunker_execution_components.py tldw_Server_API/tests/Chunking/test_chunker_execution_boundaries.py "$IMPLEMENTATION_TASK_FILE" Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md
+git commit -m "refactor: share Chunker execution preparation"
+```
+- [x] **Step 8: Obtain independent whole-branch review.** Use `superpowers:requesting-code-review` on the immutable reconciled-base-to-final-head range; resolve confirmed in-scope findings with focused regressions and fresh verification. Disposition every declined-to-judge item explicitly. The requester-replaced Qodo provider/credit gate is not reinstated.
+- [x] **Step 9: Publish only after review and fresh verification.** Explicitly push the named execution branch, never a bare push to its possible `origin/dev` upstream. Prepare a draft PR against dev with rationale, compatibility/testing evidence, spec/ADR/plan links and a blank human-owned Change-summary gate. Do not reuse the old hierarchy summary. No merge is authorized by this plan alone; require separate authorization, live rules, exact-head CI and the new human summary. Preserve the isolated worktree.
+
+**Publication Checkpoint (2026-11-02):** The requester explicitly authorized the separate inherited Workspaces import correction and draft publication. [Draft PR #3405](https://github.com/rmusser01/tldw_server/pull/3405) is open against dev; initial published head `fe62cc3006`, no auto-merge. Existing TASK-13950.85 tracks the import/CI follow-up. `httpx.Response` is the declared dependency and the actual TestClient response; restore it and match the import ordering already on dev. All84existing module tests pass,180warnings59.72s. Register this existing file in5primary CI matrices (sixth inherited), remove only its obsolete uncovered-baseline entry, and add only its filename to the exact expected shard-ownership set; all assertions/thresholds/status contexts remain intact. Coverage RED0of6/GREEN6of6; ownership-contract RED1/GREEN1; all90gates pass,193warnings61.08s. Whole repository now collects86,125tests/12skips; exploratory fail-fast execution was deliberately interrupted after772passes/0failures (9299warnings340.31s), so no full-suite pass is claimed. No dependency installation or unrelated runtime edit. This completes implementation/review/draft-publication milestones, not merge readiness: human Change summary and live final-head CI remain required. Follow-up commit publication and bounded independent review are recorded in the tasks/PR.
+
+**Required-Gate Caveat (2026-11-02, superseded by the authorized follow-up below):** Bounded independent review confirmed the import/config correction but identified that `ci.yml` full-suite matrix registration does not imply execution by `.github/workflows/backend-required.yml`. At that checkpoint the required job neither ran this file nor depended on those matrices. TASK-13950.85 AC2 was unchecked pending the explicit scope decision. Fresh Chunking on follow-up `46cbc845f0`:988passed/1establishedskip2427warnings55.05s; target module84passed and90localgates green. Those results did not establish required-job ownership.
+
+**Required-Backend Follow-Up (2026-11-03):** The requester explicitly approved adding the module to the existing `backend-required` job. A separate Workspaces API step now invokes the entire file in a fresh pytest process with the existing backend-change condition, isolated plugins and explicit asyncio plugin, without soft failure or partial selection. The contract lives in `test_license_first_workflow_contracts.py`, which that required job already executes. Contract RED1failed14warnings1.32s/GREEN1passed14warnings1.40s; six in-memory mutations prove it detects removal, step/job soft failure, skipping, partial selection and a commented-out path. Running the exact parsed YAML command with its declared environment passes84tests182warnings52.29s (`/tmp/task13950_85_required_exact_step.txt`). Expanded workflow/task-format/quality/function-size checks pass225tests463warnings72.76s; fresh Chunking passes988tests1establishedskip2451warnings68.84s. Ruff, changed-range Black and compileall pass. Bandit has zero new findings/errors; all11existing low-severity findings in the legacy contract file match its exact pre-change baseline, with only pytestB101 globally excluded and no added suppression. Structured YAML comparison proves the new step is the only configuration change. Live dev rules still include `backend-required`; no required context, branch rule, admission/license/change-detection policy or production/test assertion was changed. ADR required: no new record, existing required-job selection only. TASK-13950.85 tracks this authorized scope; actual exact-head CI execution and the human Change summary remain pending, so draft PR3405 is not merge-ready. Bounded independent review/publication evidence will be recorded in the task and PR.
+
+## Draft Rebase Checkpoint (2026-11-07)
+
+The requester approved a one-time exception to rebase this draft before
+integration because its ADR-index conflict prevented substantive PR CI.
+All 13 commits were replayed onto live dev
+`dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c`, preserving old published head
+`0c01563c09b039da96e4199d57faa55a73b65dfd` on local backup branch
+`codex/chunker-execution-pre-rebase-20261107`. Only the ADR index conflicted,
+at two historical document commits; both decisions and the Accepted status
+were preserved. A paginated scan of live dev and all 45 open PRs found 095 the
+highest allocated ADR number. The Chunker record is now ADR-096: only its
+title number changed, with its entire accepted body unchanged and operative
+index/spec/plan links repaired. Historical task notes retain their original
+numbers as provenance; TASK-15416 records the new governing path. No new ADR
+decision or policy change was made.
+
+Range-diff confirms all execution/test/required-job patches replay unchanged.
+The old Workspaces import correction is already on dev, so its patch drops
+out without a source difference. The extracted subsystem, facade and all
+Chunking tests are byte-identical to the pre-rebase head. The only inherited
+Chunking change moves boundary-assistant credential imports to the current
+dev package, and that file is byte-identical to pinned dev.
+
+Fresh local verification: Chunking 988 passed, 1 existing PyThaiNLP skip,
+3444 warnings in 157.93s; exact parsed required-Workspaces step 84 passed,
+268 warnings in 84.65s; expanded contracts/task-format/quality/function-size
+263 passed, 802 warnings in 140.08s. Logs are
+`/tmp/pr3405_rebase_20261107_{chunking,workspaces,contracts}.txt`.
+Ruff, Black (9 files), compileall, task-ID and shard guards pass (872 shards,
+5384 test files, 0 newly uncovered). Production Bandit: 0 findings, 0 errors,
+1737 LOC:
+`/tmp/bandit_pr3405_rebase_20261107_production.json`. Unique ADR IDs, indexed
+file existence, operative links and exact accepted-body identity are checked.
+No full-repository or globally clean mypy claim is made; the prior audit
+still reproduced 14 known legacy-facade errors. Bounded independent review
+approved `179bf6939d..800c36a066` with no Critical, Important or Minor findings;
+all declined items are dispositioned in TASK-15416. This checkpoint accompanies
+explicit force-with-lease publication, whose readback is recorded on the PR.
+PR #3405 remains draft
+and unarmed; actual exact-head CI, review feedback and the human Change
+summary are not satisfied by these local results. Never dispatch required
+gates manually or convert/merge the draft as part of this exception.
+
+## Docs Publication Follow-Up (2026-11-07)
+
+The all-pages CI/review audit of published `b3bfae3ca5` found all eight live
+required contexts successful, including an actually executed Workspaces API
+step. No submitted reviews or inline threads exist; CodeRabbit skipped the
+draft and cubic explicitly skipped the rewritten history, not approved it.
+Two non-required jobs failed: onboarding docs and the `gap-verified-9` shard.
+Their root causes were a missing checked-in published ADR/index and two
+relative ADR metadata links to spec/plan files outside the curated site.
+
+Existing snapshot tests reproduce 3 failures in 4.70s; refreshing the
+unchanged generator before correcting links reproduces the strict-build
+failure with exactly those 2 warnings (14.50s). Only ADR-096 metadata line 8
+now links to the immutable public repository sources at `b3bfae3ca5`, following
+existing ADR precedent. Its accepted decision, rationale, status, date and
+owner remain unchanged. The unchanged refresh script generated only
+`Docs/Published/ADR/096-chunker-execution-live-context-boundary.md` and its
+index row; a second refresh is byte-identical. No tests, warning policies,
+publication manifest, workflow or application code changed.
+
+GREEN: all 212 Docs tests pass (653 warnings, 58.75s); direct strict MkDocs
+build succeeds with zero warning-level diagnostics (13.94s), retaining
+existing informational anchor notices. Public/private docs, onboarding
+command boundaries and endpoint drift checks pass. Fresh Chunking: 988
+passed, 1 established PyThaiNLP skip, 3412 warnings in 108.55s. Task-format:
+4 passed, 24 warnings in 1.83s. Production Bandit: 0 findings/errors, 1737 LOC.
+Logs: `/tmp/pr3405_docs_{snapshot_red,strict_red,green,strict_green}.txt`,
+`/tmp/pr3405_docs_fix_chunking.txt`, `/tmp/pr3405_docs_tracking.txt` and
+`/tmp/bandit_pr3405_docs_fix_production.json`. No global suite/type success
+is claimed. ADR required: no new decision, metadata/publication repair only.
+Independent bounded review approved `b3bfae3ca5..a0af6105db` with no Critical,
+Important or Minor findings; dispositions are recorded in TASK-15416. The
+actual failing shard selection (Docs plus performance) also passes 212 tests
+with the same 6 opt-in performance skips, 653 warnings in 44.52s
+(`/tmp/pr3405_gap_verified_9_green.txt`). This checkpoint accompanies normal
+draft-branch publication; all remote gates must run on the subsequent head
+rather than inherit old passes. Keep the PR draft and preserve its
+human-owned summary.
+
+## Renewed CI And Review Follow-Up (2026-11-08)
+
+**Status:** In Progress. The requester explicitly requested a fresh independent
+`requesting-code-review` review, skipped Qodo and waived the human Change
+summary for PR #3405 only. This is a recorded requester exception, not an
+AI-authored human summary or a repository-policy change. Keep the PR draft and
+unarmed; no ready conversion, merge or further integration rebase is authorized.
+
+The exact published `80b67eee79` head passes all eight live required contexts,
+including the real required Workspaces step. The earlier onboarding/docs and
+`gap-verified-9` failures are green. All paginated comments, submitted reviews,
+inline comments and review threads were inspected: no actionable feedback;
+CodeRabbit's draft skip is not an approval. A fresh independent reviewer is
+examining immutable `dfac3ca7f3..80b67eee79` and the bounded fixes below.
+
+Nine optional full-suite shards failed. Six fail before pytest while downloading
+uv with repeated HTTP 504 responses. No dependency/workflow workaround or blind
+rerun is warranted; subsequent normal publication will create fresh CI runs.
+The aggregate full-suite failure is not a separate test defect.
+
+Two inherited test/artifact defects are reproduced and corrected without
+production changes or weaker checks:
+
+- MCP accounting uses `mocker.spy`, unavailable with plugin autoload disabled
+  outside the main tests tree. The exact 36-case selection reproduces all 36
+  setup errors. Replace only its spy setup with standard-library `AsyncMock`
+  wrappers and built-in `monkeypatch`; all existing assertions remain intact.
+  The complete module now passes 63 tests, 4 warnings in 0.77s.
+- The unchanged WebScraping inventory freshness guard reproduces one failure
+  with 9 passes. The official generator refreshes only three stale RAG import
+  line anchors in JSON/Markdown; all 261 imports and every other field remain
+  unchanged. All 10 inventory tests now pass, 44 warnings in 25.17s.
+
+The AuthNZ `auth-integration-b-z` shard reaches its unchanged 55-minute outer
+limit during the official TestClient fixture for a VN storage case. That exact
+PostgreSQL case passes independently in 34.57s, including setup/teardown, using
+the official isolated database fixture. This does not establish the cause of
+the full-shard timeout or justify raising budgets, skipping tests or changing
+runtime authentication/storage code. A bounded adjacent matrix found a separate
+inherited fixture defect: six org/team/user cases fail because membership setup
+omits the now-required write context. A temporary probe disclosed only the
+exception type and frame locations, never raw child diagnostics. Supplying the
+same canonical BOOTSTRAP context as neighboring quota fixtures fixes all six;
+all 14 selected real SQLite/PostgreSQL cases pass, 529 warnings in 171.27s.
+All original assertions, production authorization and quota behavior are
+unchanged. The full-shard timeout remains unresolved; this fixture correction
+must not be described as its proven cause or fix.
+
+Independent whole-branch review found no Critical/Important findings and one
+Minor extraction-induced lifetime issue: a paused wrapper retains a method-like
+object after normalization, whereas the exact baseline releases it in all three
+cache modes. The new three-mode weak-reference test reproduces the failure;
+deleting only the forwarded method reference alongside the existing text
+deletion fixes it. New and existing input-lifecycle cases pass together:
+6 passed, 104 deselected, 33 warnings in 5.40s, after 3 expected RED failures.
+No public declaration, source docstring or other facade method body changed.
+
+Fresh full Chunking passes 988 tests with the one established PyThaiNLP skip,
+3446 warnings in 63.61s. Ruff, scoped Black, compileall and the five-file
+execution-package mypy check pass. Production Bandit: zero findings/errors,
+1737 LOC; changed MCP test Bandit: zero findings/errors, 326 LOC, excluding only
+pytest B101. Logs: `/tmp/pr3405_current_review_chunking.txt`,
+`/tmp/pr3405_mcp_{mocker_red,accounting_green}.txt`,
+`/tmp/pr3405_inventory_{red,green}.txt`, `/tmp/pr3405_auth_timeout_probe.txt`
+and `/tmp/bandit_pr3405_{current_review_production,mcp_spy_fix}.json`.
+No full-repository, globally clean typing or final-head remote CI claim.
+Final post-fix verification: 991 Chunking tests passed with the one established
+PyThaiNLP skip, 3439 warnings in 146.53s; 35 quality/function-size/tracking
+ratchets passed, 118 warnings in 92.49s. Execution-package plus contract mypy
+passes six files. Production Bandit remains zero findings/errors, 1737 LOC;
+all three changed test files have zero findings/errors, 1804 LOC, excluding only
+pytest B101. Structured AST checks preserve 49 MCP, 18 VN and 103 prior Chunking
+assertions plus every embedded storage-script assertion, all 33 facade
+declarations/docstrings and all other facade method bodies. Logs:
+`/tmp/pr3405_final_review_{chunking,ratchets}.txt`,
+`/tmp/pr3405_auth_matrix_green.txt`,
+`/tmp/pr3405_method_reference_{red,green}.txt` and
+`/tmp/bandit_pr3405_final_review_{production,tests}.json`.
+
+The same independent reviewer completed the bounded method/VN fixture addendum
+without further test launches: no remaining Critical, Important or Minor
+findings, approved for commit and draft publication. The initial whole-branch
+review and MCP/inventory addendum remain applicable. All declined-to-judge
+items are explicitly dispositioned in TASK-15416. Code is locally verified;
+fresh published-head CI and the unresolved hosted AuthNZ timeout still prevent
+a claim that every observed issue is closed.
+
+An additional root fail-fast diagnostic collected 88,372 items (12 skips) and
+began execution. It was deliberately stopped to bound this audit, exiting 143
+after its application lifecycle ignored two interrupts. This is neither a
+completed repository run nor a globally green result; only that verified
+diagnostic PID was signaled, not unrelated work. The diagnostic and safe AuthNZ
+probe are retained at `/tmp/pr3405_review_repository_diagnostic.txt` and
+`/tmp/pr3405_auth_safe_diagnostic.txt`. Normal draft-branch publication follows
+these local checks and review; do not transfer old-head green statuses to the
+resulting commit. ADR required: no new decision for these lifetime/test/artifact
+corrections; accepted ADR-096 and task-editor ADR-059 remain governing.
+
+## Final Verification Commands
+
+After runtime activation, run these from the isolated root; log complete output
+to unique `/tmp` paths and record exit status/counts, not just the last line.
+
+```bash
+python -m pytest tldw_Server_API/tests/Chunking -q
+python Helper_Scripts/ci/check_shard_coverage.py
+python Helper_Scripts/ci/check_backlog_task_ids.py
+python -m pytest tldw_Server_API/tests/CI/test_required_workflow_contracts.py tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py tldw_Server_API/tests/lint/test_function_size_ratchet.py tldw_Server_API/tests/CI/test_test_quality_ratchet.py -q
+python -m ruff check tldw_Server_API/app/core/Chunking/execution tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/_execution_test_support.py tldw_Server_API/tests/Chunking/test_chunker_execution_*.py
+python -m black --check tldw_Server_API/app/core/Chunking/execution tldw_Server_API/tests/Chunking/_execution_test_support.py tldw_Server_API/tests/Chunking/test_chunker_execution_*.py
+python -m compileall -q tldw_Server_API/app/core/Chunking/execution tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking
+python -m mypy tldw_Server_API/app/core/Chunking/execution
+python -m bandit -r tldw_Server_API/app/core/Chunking/execution tldw_Server_API/app/core/Chunking/chunker.py -f json -o /tmp/bandit_chunker_execution_production.json
+python -m bandit tldw_Server_API/tests/Chunking/_execution_test_support.py tldw_Server_API/tests/Chunking/test_chunker_execution_*.py -s B101 -f json -o /tmp/bandit_chunker_execution_tests.json
+git diff --check
+```
+
+Expected: full Chunking zero failures/no new skips; the existing PyThaiNLP
+availability skip remains documented. New component/wiring/cold-import tests
+all execute. Guard/ratchet/lint/format/compile/type commands exit zero without
+raised baselines or new suppressions masking defects. Run Black separately on
+only changed facade line ranges; never format the legacy file wholesale.
+Production Bandit must have zero new findings/errors. In new pytest files,
+exclude only B101 globally; any diagnostic on the fixed-argv subprocess smoke
+test must be resolved or narrowly justified per line with its trusted inputs
+and no-shell guarantee, not silenced through a new blanket skip.
+
+Broader changed-file mypy/CI may expose inherited errors; reproduce them on the
+immutable reconciled base and report them accurately. Fix extraction-local
+typing without coercing runtime values. The future PR must pass all substantive
+required checks on its exact head; missing/pending/failed/cancelled/skipped
+required contexts block integration. Read current branch rules and MERGE_QUEUE
+at that time; never dispatch required gates manually or bypass policy.
+
+## Planning Self-Review And Handoff
+
+Planner self-review completed on 2026-11-02, without a subagent dispatch:
+
+| Check | Result |
+| --- | --- |
+| Spec coverage | Input/options/cache/error contracts map to Tasks 1/2/5; metadata to 1/3/5; generator/live hooks to 1/4/5; dependencies/cold imports to 2/5; CI/security/publication gates to 5. Task 1 pins concrete property-based option/alignment/word-equivalence invariants. No uncovered requirement remains. |
+| Step scan | Baseline characterization is explicitly GREEN; extraction-only cases require meaningful RED. Removed an undefined example collector, separated operational steps and provided exact commit paths. Code bodies are moved rather than prescribed twice. |
+| Type/interface consistency | Context/cache are structural protocols; entry names/defaults match facade bindings; prepared fields and helper signatures are defined once and reused unchanged in consumers. Internal Any annotations preserve dynamic inputs rather than adding coercion. |
+| Review Focus | All five named failure classes have tests in the contract stage and the stage that owns their extraction; no silent outside-scope omission. |
+| Proportion | Five independently testable stages, a single shared interface contract and one verification bundle; no implementation transcript or speculative subsystem. |
+
+Record this review in TASK-15415. No product/test files change while writing or
+reviewing this plan; documentation-only Bandit is not applicable. This is
+planning verification, not proof that future extraction tests already pass.
+
+Requester plan approval and the **Native** execution choice were received on
+2026-11-02. The chosen workflow requires independent whole-branch review after
+implementation. Native means
+one implementer owns these tightly coupled sequential migrations with an
+independent whole-branch review at the end. **Subagent-driven** adds fresh
+implementers and per-task review gates before the next task. Native is the
+planner's recommendation for this five-stage plan because shared context,
+exception timing and fixed interfaces span all paths; the requester selected
+that cost/review tradeoff before implementation began.
