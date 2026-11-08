@@ -163,6 +163,8 @@ def test_rag_streaming_generation_provider_override(
     client_with_stream_overrides: TestClient,
 ) -> None:
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.tests.helpers.offline_network import block_live_network
 
     captured = {"generation_config": None}
 
@@ -193,8 +195,13 @@ def test_rag_streaming_generation_provider_override(
         context.metadata = {"streaming": True}
         return context
 
+    async def no_provider_call(**_kwargs: Any) -> dict[str, Any]:
+        """The standard pipeline's answer call (the stream's retrieval makes one, TASK-15482): nothing leaves."""
+        return {"choices": [{"message": {"content": "stub answer"}}]}
+
     monkeypatch.setattr(rag_ep, "MultiDatabaseRetriever", StubRetriever)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", no_provider_call)
 
     payload = {
         "query": "Provider override parity",
@@ -205,10 +212,14 @@ def test_rag_streaming_generation_provider_override(
         "generation_model": "llama-3.3-70b-versatile",
     }
 
-    with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
+    with (
+        block_live_network() as attempts,
+        client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp,
+    ):
         assert resp.status_code == 200
         list(resp.iter_lines())
 
+    assert attempts == []
     generation_config = captured["generation_config"]
     assert generation_config is not None
     assert generation_config["provider"] == "groq"
