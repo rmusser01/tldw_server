@@ -1406,8 +1406,8 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     authedPage,
     serverInfo,
     diagnostics
-  }) => {
-    test.setTimeout(300_000)
+  }, testInfo) => {
+    test.setTimeout(660_000)
     skipIfServerUnavailable(serverInfo)
     const chatBootstrapPreflight = await canReachChatBootstrapEndpoint()
     test.skip(
@@ -1421,11 +1421,19 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     const probeToken = `${fixtureId}-quiz-token`
     const selectedSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Quiz`,
-      `Workspace quiz source for ${probeToken}. The source is intentionally specific so the generated study artifact has stable content.`
+      `Beacon trial reference ${probeToken}. This fictional field trial used three sensors: ` +
+        "sensor A at the north gate, sensor B at the reservoir, and sensor C in the garden. " +
+        "Each sensor sampled every 15 minutes. The trial lasted 14 days. " +
+        "The team stored raw measurements in CSV files with UTC timestamps."
     )
     const companionSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Quiz Companion`,
-      `Workspace quiz companion source for ${probeToken}-companion. The second source keeps the generation path aligned with the existing workspace output matrix.`
+      `Beacon trial protocol ${probeToken}-companion. Technicians calibrated all three sensors every Monday. ` +
+        "They flagged readings below zero or above 50 as invalid. " +
+        "For example, a reading of 55 was flagged as invalid. " +
+        "Daily reports used the median of valid readings, not the mean. " +
+        "Missing readings were marked as missing and were never replaced with zero. " +
+        "The protocol required keeping the original CSV files unchanged."
     )
 
     const tracker = trackChatBootstrapResponses(authedPage)
@@ -1453,7 +1461,37 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
 
       const beforeArtifacts = await workspacePage.getStudioArtifactCards().count()
       await disableNextJsPortalPointerInterception(authedPage)
+      const isQuizGenerationRequest = (request: { method(): string; url(): string }) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/quizzes/generate"
+      const generationResponsePromise = Promise.race([
+        authedPage.waitForResponse(
+          (response) => isQuizGenerationRequest(response.request()),
+          { timeout: 600_000 }
+        ),
+        authedPage.waitForEvent("requestfailed", {
+          predicate: isQuizGenerationRequest,
+          timeout: 600_000
+        }).then((request) => {
+          throw new Error(`Quiz generation request failed: ${request.failure()?.errorText}`)
+        })
+      ])
       await clickActionable(workspacePage.getStudioOutputButton("Quiz"))
+      const generationResponse = await generationResponsePromise
+      const generationBody = await generationResponse.json()
+      await testInfo.attach("research-workspace-quiz-generation.json", {
+        body: JSON.stringify({
+          status: generationResponse.status(),
+          request: generationResponse.request().postDataJSON(),
+          response: generationBody,
+          sources: [selectedSource, companionSource]
+        }),
+        contentType: "application/json"
+      })
+      expect(generationResponse.status(), JSON.stringify(generationBody)).toBe(200)
+      expect(generationBody.claim_verification?.verdict).toBe("grounded")
+      const requestedQuestionTypes = generationResponse.request().postDataJSON()?.question_types
+      expect(requestedQuestionTypes).toEqual(["multiple_choice", "true_false"])
 
       await expect(workspacePage.getStudioArtifactCards()).toHaveCount(
         beforeArtifacts + 1,
@@ -1469,9 +1507,23 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       expect(workspaceId).toBeTruthy()
 
       const quizQuestions = await fetchJsonWithApiKey<{
-        items: Array<{ id: number }>
+        items: Array<{
+          id: number
+          question_type: string
+          source_citations: Array<{ source_type: string; source_id: string; media_id: number }>
+        }>
       }>(`/api/v1/quizzes/${quizId}/questions?include_answers=true&limit=100&offset=0`)
       expect(quizQuestions.items.length).toBeGreaterThan(0)
+      expect(quizQuestions.items.every((question) => requestedQuestionTypes.includes(question.question_type))).toBe(true)
+      const selectedMediaIds = [String(selectedSource.mediaId), String(companionSource.mediaId)]
+      for (const question of quizQuestions.items) {
+        expect(question.source_citations.length).toBeGreaterThan(0)
+        for (const citation of question.source_citations) {
+          expect(citation.source_type).toBe("media")
+          expect(selectedMediaIds).toContain(citation.source_id)
+          expect(citation.media_id).toBe(Number(citation.source_id))
+        }
+      }
 
       const persistedQuizList = await listQuizRecords({
         include_workspace_items: true,
@@ -1493,7 +1545,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       })
 
       await expect(quizPage.manageShowWorkspaceQuizzesToggle).toBeVisible({
-        timeout: 10_000
+        timeout: 90_000
       })
       await quizPage.manageShowWorkspaceQuizzesToggle.click()
       await expect(quizPage.getManageQuizStartButton(quizId)).toBeVisible({
