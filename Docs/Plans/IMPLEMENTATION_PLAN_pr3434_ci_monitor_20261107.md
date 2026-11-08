@@ -442,3 +442,94 @@ selected task records are canonical. Log:
 TOML/wizard-only formatter hooks skipped. Restage this final evidence and rerun
 the full scope before the normal-hook commit. Publication/readback belongs in
 the PR proof; auto-merge stays disabled for the exact-head hosted UX hold.
+
+### Shared UI Local Selection Investigation
+
+At 18:45Z, current-head shared UI coverage shard 8/16 failed one accepted
+LocalChatList selection assertion; 1,891 tests across 173 other files passed.
+Job `128816245763`, run `42503741289`, failed waiting for model preference at
+`useLoadLocalConversation.test.tsx:294`, after successful install/setup. Logs:
+`/tmp/claims-pr3434-ui-coverage8-128816245763-20261108T1845.{json,log}`.
+Auto-merge was disarmed and confirmed null before repository edits. No new
+feedback or dev/rules changes. Prior exact-head hosted UX success remains real,
+but does not override this new failure or transfer to another head.
+
+The unchanged module passes locally: 26 tests without coverage, then 26 with
+V8 coverage. These are not deterministic RED or Linux certification. The test,
+hook and list match dev byte-for-byte. Investigate a controlled initial-owner
+completion ordering: selecting while the reader scope changes must retire the
+old read rather than weaken production ownership. This is a hypothesis, not
+proof of the original trigger. Add a regression before choosing a correction;
+preserve all selection/cancellation/failure assertions and configured budgets.
+No production change, dependency upgrade, manual dispatch/cancellation or gate
+relaxation is justified. Reopen only the validated-correction stage; independent
+review and new-head qualification remain prerequisites for any publication.
+
+Controlled owner ordering now reproduces two failures with 25 passes: the
+ready-owner variant stops at the message-read wait, the pending-owner variant
+at the model-preference wait. Neither is a final-callback failure. The first
+wrong-root-cwd shell launch is a harness error, not RED. Valid evidence:
+`/tmp/claims-pr3434-local-selection-owner-red-corrected-20261108.{json,log}`.
+The minimal fixture correction completes controlled owner initialization in
+awaited act and observes the real public provider lease before clicking. The
+complete module then passes 27 tests. All 55 original assertion ASTs remain;
+only one owner-readiness assertion is added. No production source changes.
+
+Independent Boole requesting-code-review approves without actionable P0-P3:
+`/tmp/claims-pr3434-local-selection-review-20261108.md`. Its precise limitation
+governs: provider and list own independent owner hooks; shared/immediate scope
+completion and awaited act establish this fixture's happy-path precondition,
+not a general production synchronization contract. Pending clicks, independently
+delayed production resolutions, later account/route/profile changes and account
+unavailability are not recertified. Existing guards and adjacent profile-owned
+browsing qualifications stay intact. The original hosted trigger is unproved.
+Parent owns the complete shard/broad CI/static/security/hooks, prior runtime/PG
+evidence, new hosted CI and Linux results, GitHub/waiver/cleanup and bookkeeping;
+reviewer read saved RED/GREEN artifacts but ran no concurrent tests or scanners.
+
+Changed TS syntax compiles; actual repository-locked shared UI ESLint is clean
+with no suppressions. Initial outside-base ignored-file and temporary bunx-latest
+incompatible-ESLint launches were harness errors, not lint passes. Corrected
+explicit local CLI uses unchanged config/dependencies/suppressions; no lock edit.
+No new executable Python security scope; retained production Bandit evidence
+keeps its original meaning, not rerun or relabeled. Root pg_dump limit unchanged.
+
+Full coverage shard 8/16 completed with the unchanged 4 GB/15-minute bound:
+1,889 passed, four failed, zero skips; 172 passed/two failed files (174 total).
+The corrected 27-case module passed. Complete CI/Docs/Config passed 1,619 with
+six inherited skips, zero failures/errors (345.65s). Before publish, finish
+canonical 15-task checks and staged 164-path PR hooks. Keep auto-merge off until
+the next exact reviewed head's own
+ordinary notes/chat UX AND shared UI coverage 8/16 succeed. This monitor hold
+changes no workflow gate, budget or test. Then fresh rules/queue/dev/feedback
+and all eight required contexts govern exact-head MERGE. No tracking-only commit.
+
+The native full shard is NOT green: unchanged workspace.persist-diff failed
+the unchanged-keys, exactly-one-serialization and legacy-revision-rewrite cases;
+unchanged Studio.model-targets failed legacy output visibility. A complete
+five-module native closure passed 258 and failed four (63.95s): the same three
+workspace cases plus Studio canonical output visibility instead. All 243 actual
+selection/reader cases passed: target 27, H1 controller 172, on-device list 44.
+
+Activation selects Node 25.6.0 locally. The same closure under already-installed
+Node 22.16.0 passed 260 and failed two (46.44s): workspace all four pass and all
+243 selection cases pass; Studio canonical and legacy PRE visibility still fail.
+Neither Studio nor workspace or their production/config/lock files changed.
+Both complete exceptional modules passed hosted c474f3c8e9 (15 and four cases).
+Record all outcomes; no unrelated speculative fixes or broad-green claim. The
+runtime comparison does not prove specific causes or equal hosted Node20/Bun1.3.2
+qualification; local Bun remains 1.3.5 and no dependency/lock upgrade was made.
+
+Logs/JSON: `/tmp/claims-pr3434-local-selection-{full-coverage8,closure-coverage,node22-closure}-20261108`;
+CI evidence: `/tmp/claims-pr3434-local-selection-ci-docs-config-20261108`.
+Fresh remote head/dev are unchanged and dev is an ancestor; no rebase needed.
+Auto-merge remains null and no new feedback; preserve the eight effective
+required contexts, queue-unset and MERGE-only policy. Publish only this reviewed
+test delta plus linked tracking via a normal fast-forward, after final hooks.
+
+All applicable full 164-path staged hooks passed without rewrites; all 15
+explicitly selected task records are canonical. Reviewed test hash is unchanged.
+Log: `/tmp/claims-pr3434-local-selection-staged-hooks-20261108.log`.
+Restage this evidence and rerun the full scope before normal-hook commit and
+normal fast-forward publication. Record actual readback in PR proof, without
+another tracking-only commit. Auto-merge remains off for both new-head holds.
