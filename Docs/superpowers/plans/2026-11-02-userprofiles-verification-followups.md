@@ -498,3 +498,40 @@ controllerrecords separate. Bounded exactfinalhead independentreview and fresh
 automatic exactheadrequiredCI still govern; oldba74sevenrequiredsuccesses do
 not qualify this unpublishedrepair. TASK15413 staysInProgress/AC4open until
 verifiedmerge; verification-onlyhumanwaiver preserved, never runtime-transferred.
+
+## November 7 Dev7a Qualified Integration
+
+Before publication, authoritative dev advanced to
+7a020da14ab28e220fab652269723e3a2a4abbcb through mergedPR3432's32 endpoint/
+test-mode paths. Unpublished reviewedeb6 was not pushed stale. FreshPR3404
+readback remained OPEN atba74, unarmed/noqueueentry/MERGE_QUEUEunset. Only this
+next-to-merge branch was rebased, preserving backup
+codex/userprofiles-verification-pre-7a020d=eb6; runtime branch stayed untouched.
+
+Local f5be9844b59e276480ff93466b861109436d10c9 replays22/22patches range-diff
+equal with no conflict, dropped patch or compatibility edit. Full29,081path
+union proof:32upstream-only exactnewdev (including2deletions),19own-only exact
+acceptedeb6,0combined,29,030untouched exact;29,079finalpresent. Entireapp subtree
+matchesnewdev, apps subtree matcheseb6; copytest234fe33 andStandalone6b4381ad
+blobs unchanged. Unrelated refs/worktrees/FETCH_HEAD preserved, no sourcepush.
+
+Nine separate bounded compatibility runs pass822/no failures/errors/skips,
+5351warnings: endpoint errors202, evaluations113, PromptStudio125, audio38,
+credentialmatrix186, sharedHTTPcredentials120, writing18, testmodeguards17,
+authMFA3. These are not a fullsuite or CI-equivalence claim. Actual fixture
+closures inspected; SQLite media case explicit, no PGexecution/provisioning,
+no unchanged UI rerun. LocalPython3.14 differsCI, warnings remain visible.
+
+Full37existingPythoncompilepass; Ruff23exactinheritedupstream findings, own8
+files0. UnfilteredBandit --ignore-nosec allcurrent1732findings incl1669B101,
+35B105/22B106/3B311/3B608;0scanerrors,0newcontexts againstexactdev/acceptedeb6.
+ThreeMEDIUMand63nonassertfindings remain inherited, not pristine or waived.
+Fullquality5379baselineunchanged/shard871/5379/4ignored/baseline44/new0,
+normalconfiguredhooks/diffpass. Reports/raw manifests andactualcommands in
+dev7a-integration-report.md and /private/tmp/userprofiles15413-dev7a/.
+
+Finaltwo-recordcheckpoint/independent bounded exacthead review then fresh
+externalrefs/body/queue/rules checks and authorizedleasedsourcepublication
+remain mandatory. Oldba74successes and its frontendfailure do not qualify this
+unpublishedrebasedcandidate. TaskInProgress/AC4open untilverifiedmerge; no CI
+retry/dispatch, policy/settings/gatechange or runtime-summary-waiver transfer.
