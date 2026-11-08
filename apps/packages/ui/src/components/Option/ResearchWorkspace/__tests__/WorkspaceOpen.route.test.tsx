@@ -14,11 +14,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mirror = vi.hoisted(() => ({
   histories: new Map<string, Record<string, unknown>>(), messages: new Map<string, Record<string, unknown>>(),
   compare: new Map<string, Record<string, unknown>>(), selections: new Map<string, Record<string, unknown>>(), files: new Map<string, Record<string, unknown>>(),
+  searchTokens: new Map<string, Record<string, unknown>>(),
   transactions: [] as string[],
 }));
 vi.mock("@/db/dexie/schema", () => {
   const table = (rows: Map<string, Record<string, unknown>>) => ({
     get: async (id: string) => structuredClone(rows.get(id)),
+    bulkGet: async (ids: string[]) => ids.map(id => structuredClone(rows.get(id))),
+    bulkPut: async (list: Record<string, unknown>[]) => {
+      for (const row of list) rows.set(String(row.id), structuredClone(row));
+      return list.map(row => row.id);
+    },
     add: async (row: Record<string, unknown>) => { if (rows.has(String(row.id))) throw new Error("duplicate"); rows.set(String(row.id), structuredClone(row)); },
     put: async (row: Record<string, unknown>) => { rows.set(String(row.id), structuredClone(row)); },
     update: async (id: string, patch: Record<string, unknown>) => { rows.set(id, { ...rows.get(id), ...structuredClone(patch) }); },
@@ -28,6 +34,11 @@ vi.mock("@/db/dexie/schema", () => {
   });
   return { db: {
     chatHistories: table(mirror.histories), messages: table(mirror.messages),
+    searchTokens: {
+      bulkPut: async (rows: Array<{ token: string; history_id: string }>) => {
+        for (const row of rows) mirror.searchTokens.set(JSON.stringify([row.token, row.history_id]), structuredClone(row));
+      },
+    },
     compareStates: table(mirror.compare), historySelections: table(mirror.selections), sessionFiles: table(mirror.files),
     transaction: async (mode: string, _tables: unknown[], fn: (tx: { abort: () => void }) => unknown) => {
       mirror.transactions.push(mode);
@@ -97,6 +108,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
 import { WorkspacesManagerPage } from "../../Workspaces/WorkspacesManagerPage";
 import { ResearchWorkspaceRouteGate } from "../ResearchWorkspaceRouteGate";
+import { readSavedResearchWorkspaceChatReference } from "@/store/workspace-migration";
 
 const TARGET = "workspace-A";
 const PREVIOUS = "workspace-B";
@@ -240,7 +252,7 @@ const mount = async (entry = "/workspaces") => {
 };
 
 beforeEach(() => {
-  mirror.histories.clear(); mirror.messages.clear(); mirror.compare.clear(); mirror.selections.clear(); mirror.files.clear(); mirror.transactions = [];
+  mirror.histories.clear(); mirror.messages.clear(); mirror.compare.clear(); mirror.selections.clear(); mirror.files.clear(); mirror.searchTokens.clear(); mirror.transactions = [];
   localStorage.clear();
   useWorkspaceStore.getState().reset();
   useWorkspaceStore.setState({ storeHydrated: true });
@@ -499,8 +511,9 @@ it.each(["retained-hint", "pre-hint"])("opens a saved canonical Chat after real 
   await useWorkspaceStore.persist.rehydrate();
   expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.messages).toEqual(messages);
   if (hint === "pre-hint") {
-    const key = Object.keys(localStorage).find(key => key.startsWith("tldw:research-workspace:chat-reference:"))!;
-    localStorage.removeItem(key);
+    const savedHint = readSavedResearchWorkspaceChatReference(localStorage, TARGET, boundary.scopeKey);
+    expect(savedHint.raw).not.toBeNull();
+    localStorage.removeItem(savedHint.key);
   }
   boundary.request.mockImplementation((request: { path: string }) =>
     request.path.startsWith("/api/v1/chats/verified-chat/messages")
@@ -559,7 +572,9 @@ it.each([
   await flushWorkspacePersistence();
   await useWorkspaceStore.persist.rehydrate();
   let preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
-  const hintKey = Object.keys(localStorage).find(key => key.startsWith("tldw:research-workspace:chat-reference:"))!;
+  const savedHint = readSavedResearchWorkspaceChatReference(localStorage, TARGET, boundary.scopeKey);
+  expect(savedHint.raw).not.toBeNull();
+  const hintKey = savedHint.key;
   if (change.startsWith("absent-")) localStorage.removeItem(hintKey);
   if (change === "history") {
     preserved = { ...preserved!, history: [{ role: "system", content: "Keep local instruction" }] };
@@ -758,7 +773,9 @@ const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocal
   await flushWorkspacePersistence();
   await useWorkspaceStore.persist.rehydrate();
   // The original producer predates the independent Chat hint.
-  for (const key of Object.keys(localStorage)) if (key.startsWith("tldw:research-workspace:chat-reference:")) localStorage.removeItem(key);
+  const savedHint = readSavedResearchWorkspaceChatReference(localStorage, TARGET, boundary.scopeKey);
+  expect(savedHint.raw).not.toBeNull();
+  localStorage.removeItem(savedHint.key);
   boundary.request.mockImplementation((request: { path: string }) =>
     request.path.startsWith("/api/v1/chats/verified-chat/messages")
       ? Promise.resolve({ messages: serverMessages, total: 2 })
@@ -771,6 +788,12 @@ const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocal
 it("opens the producer's acknowledged Workspace mirror after cold persistence without changing its session or rows", async () => {
   const { historyId } = await prepareOwnedMirror();
   const before = structuredClone([...mirror.messages]);
+  expect([...mirror.searchTokens.values()]).toEqual([
+    { token: "saved", history_id: historyId },
+    { token: "question", history_id: historyId },
+    { token: "cited", history_id: historyId },
+    { token: "answer", history_id: historyId },
+  ]);
   const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
   mirror.transactions = [];
   await mount("/research-workspace?source_workspace_id=" + TARGET);
