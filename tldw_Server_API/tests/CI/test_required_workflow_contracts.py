@@ -7,6 +7,7 @@ import math
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -358,6 +359,72 @@ def test_e2e_required_explicitly_loads_pytest_asyncio_plugin() -> None:
     retry = _get_step(steps, "Run critical e2e suite (retry)")
     assert "-p pytest_asyncio.plugin" in primary["run"]
     assert "-p pytest_asyncio.plugin" in retry["run"]
+
+
+# Checked-in browser bundles predate ubuntu-latest's move to Ubuntu 26.
+PLAYWRIGHT_BROWSER_JOBS = {
+    "frontend-e2e-tiers.yml": [
+        "critical",
+        "features",
+        "admin",
+        "ux-regression"
+    ],
+    "frontend-required.yml": [
+        "frontend-required"
+    ],
+    "frontend-ux-gates.yml": [
+        "onboarding-gate",
+        "smoke-gate"
+    ],
+    "ui-research-workspace-nightly.yml": [
+        "webui-research-workspace-real-backend",
+        "extension-research-workspace-real-backend"
+    ],
+    "ui-research-workspace-parity.yml": [
+        "webui-research-workspace-parity",
+        "extension-research-workspace-parity"
+    ],
+    "ui-watchlists-extension-e2e.yml": [
+        "watchlists-extension-e2e"
+    ],
+    "ux-regression-nightly.yml": [
+        "ux-regression"
+    ]
+}
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [
+        (workflow_name, job_name)
+        for workflow_name, job_names in PLAYWRIGHT_BROWSER_JOBS.items()
+        for job_name in job_names
+    ],
+)
+def test_playwright_browser_jobs_use_supported_ubuntu_image(
+    workflow_name: str, job_name: str
+) -> None:
+    job = _load(f".github/workflows/{workflow_name}")["jobs"][job_name]
+    assert job["runs-on"] in {"ubuntu-22.04", "ubuntu-24.04"}
+
+
+def test_playwright_browser_job_inventory_is_complete() -> None:
+    actual = set()
+    for path in sorted(Path(".github/workflows").glob("*.y*ml")):
+        for job_name, job in _load(str(path)).get("jobs", {}).items():
+            if not str(job.get("runs-on", "")).startswith("ubuntu"):
+                continue
+            if any(
+                re.search(r"\bplaywright\s+install\b", step.get("run", ""))
+                for step in job.get("steps", [])
+            ):
+                actual.add((path.name, job_name))
+    expected = {
+        (workflow_name, job_name)
+        for workflow_name, job_names in PLAYWRIGHT_BROWSER_JOBS.items()
+        for job_name in job_names
+    }
+    assert actual == expected
 
 
 def test_watchlists_extension_e2e_uses_playwright_chromium() -> None:

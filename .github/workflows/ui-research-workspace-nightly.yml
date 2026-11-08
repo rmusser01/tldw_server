@@ -15,7 +15,7 @@ concurrency:
 jobs:
   webui-research-workspace-real-backend:
     name: WebUI Research Workspace Real Backend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
       PYTHONPATH: .
@@ -118,7 +118,7 @@ jobs:
 
   extension-research-workspace-real-backend:
     name: Extension Research Workspace Real Backend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
       PYTHONPATH: .
