@@ -350,9 +350,30 @@ const ensureChatInput = async (page: Page) => {
       })
     )
     .filter({ visible: true })
-  await expect(input).toHaveCount(1, { timeout: 20_000 })
-  await expect(input).toBeVisible({ timeout: 20_000 })
-  await expect(input).toBeEditable()
+  try {
+    await expect(input).toHaveCount(1, { timeout: 20_000 })
+    await expect(input).toBeVisible({ timeout: 20_000 })
+    await expect(input).toBeEditable()
+  } catch (error) {
+    console.error("[prompt-improvement:composer-readiness]", {
+      ...await page.evaluate(() => {
+        const store = Reflect.get(window, "__tldw_useConnectionStore")
+        const state = store?.getState?.()?.state
+        return {
+          storeReady: typeof store?.getState === "function",
+          connected: state?.isConnected === true,
+          checking: state?.isChecking === true,
+          rootChildCount: document.querySelector("#root")?.children.length ?? 0,
+          restoreBusy: !!document.querySelector('[aria-busy="true"][aria-label="Restoring previous chat"]'),
+          composerDockCount: document.querySelectorAll('[data-testid="sidepanel-composer-dock"]').length,
+          alertCount: document.querySelectorAll('[role="alert"]').length,
+        }
+      }).catch(() => ({ snapshotUnavailable: true })),
+      visibleInputCount: await input.count().catch(() => null),
+      startButtonVisible: await startButton.first().isVisible().catch(() => false),
+    })
+    throw error
+  }
   return input
 }
 
@@ -1886,12 +1907,14 @@ test.describe("Packaged extension prompt improvement parity", () => {
     const mock = await startPromptMockServer()
     let context: BrowserContext | null = null
     try {
-      const launched = await launchChatSurface(mock, "sidepanel", {
-        mode: "pro",
-        nextgen: true,
-        variant: "v5",
-        viewport: { width: 390, height: 844 }
-      })
+      const launched = await test.step("Launch the V5 sidepanel", () =>
+        launchChatSurface(mock, "sidepanel", {
+          mode: "pro",
+          nextgen: true,
+          variant: "v5",
+          viewport: { width: 390, height: 844 }
+        })
+      )
       context = launched.context
       const page = launched.chatPage
       await forceConnected(page, { serverUrl: mock.baseUrl })
@@ -1900,31 +1923,45 @@ test.describe("Packaged extension prompt improvement parity", () => {
       const originalDraft = "V5 retained feedback {{topic}} draft."
       await input.fill(originalDraft)
 
-      const firstMenu = await openPromptActions(page)
-      await clickThroughPaintedCenter(
-        page,
-        firstMenu.actions.getByRole("button", { name: /Improve now/ })
+      const firstMenu = await test.step("Open the initial Prompt Assist menu", () =>
+        openPromptActions(page)
+      )
+      await test.step("Apply the improvement through its painted center", () =>
+        clickThroughPaintedCenter(
+          page,
+          firstMenu.actions.getByRole("button", { name: /Improve now/ })
+        )
       )
       await expect(input).toHaveValue("Improved user request for {{topic}}.")
       const feedback = getPromptAssistFeedback(page, "Improvement applied.")
       await expect(feedback).toBeVisible()
 
-      const reopened = await openPromptActions(page)
+      const reopened = await test.step("Reopen Prompt Assist after applied feedback", () =>
+        openPromptActions(page)
+      )
       const reviewChanges = reopened.actions.getByRole("button", {
         name: /Review changes/
       })
-      await clickThroughPaintedCenter(page, reviewChanges)
+      await test.step("Open Review changes through its painted center", () =>
+        clickThroughPaintedCenter(page, reviewChanges)
+      )
       const reviewDrawer = page.getByRole("dialog", {
         name: "Prompt improvement"
       })
-      await expect(reviewDrawer).toBeVisible()
+      await test.step("Observe the review drawer", () =>
+        expect(reviewDrawer).toBeVisible()
+      )
       await expect(feedback).not.toBeVisible()
       await page.keyboard.press("Escape")
       await expect(reviewDrawer).not.toBeVisible()
       await expect(input).toHaveValue("Improved user request for {{topic}}.")
     } finally {
+      console.info("[PROMPT_E2E_PHASE] V5 context close: start")
       await context?.close()
+      console.info("[PROMPT_E2E_PHASE] V5 context close: complete")
+      console.info("[PROMPT_E2E_PHASE] V5 mock server close: start")
       await stopPromptMockServer(mock)
+      console.info("[PROMPT_E2E_PHASE] V5 mock server close: complete")
     }
   })
 

@@ -1,3 +1,5 @@
+import { useResearchActorScene } from "./useResearchActorScene"
+import { projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { sha256Text } from "@/store/workspace-migration"
 import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
@@ -1256,6 +1258,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [workspaceId]
   )
 
+  const { capturePrivateScene, captureChatReferenceOwner } = useResearchActorScene(workspaceId, workspaceChatReferenceId)
+
   // Message option hook
   const {
     selectedModel,
@@ -1279,7 +1283,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     serverChatId,
     setServerChatId,
     selectedModelIsLoading
-  } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
+  } = useMessageOption({ scope: chatScope, hydrateServerChat: true, capturePrivateScene })
 
   // RAG state from store
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds)
@@ -1382,6 +1386,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         workspaceChatReferenceId || workspaceId || WORKSPACE_CONVERSATION_ID
       ),
     [workspaceChatReferenceId, workspaceId]
+  )
+
+  const saveOwnedChatSession = React.useCallback(
+    (session: Parameters<typeof saveWorkspaceChatSession>[1], clear = false) => {
+      const owner = captureChatReferenceOwner()
+      if (!owner) return
+      try {
+        saveWorkspaceChatSession(workspaceSessionId, session, { ...owner, clear })
+        messageApi.destroy("research-chat-reference-save")
+      } catch {
+        messageApi.error({
+          key: "research-chat-reference-save",
+          duration: 0,
+          content: t(
+            "playground:chat.referenceSaveFailed",
+            "Your answer is retained in this session, but its saved chat could not be remembered for reload. Free browser storage before leaving this page."
+          )
+        })
+      }
+    },
+    [
+      captureChatReferenceOwner,
+      messageApi,
+      saveWorkspaceChatSession,
+      t,
+      workspaceSessionId
+    ]
   )
 
   // Smart scroll for chat messages
@@ -1914,7 +1945,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     if (!workspaceSessionId) return
     if (workspaceSessionRef.current !== workspaceSessionId) return
 
-    saveWorkspaceChatSession(workspaceSessionId, {
+    saveOwnedChatSession({
       messages,
       history,
       historyId,
@@ -1926,7 +1957,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     history,
     historyId,
     serverChatId,
-    saveWorkspaceChatSession
+    saveOwnedChatSession
   ])
 
   React.useEffect(() => {
@@ -2566,6 +2597,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleClearChat = () => {
     if (!hasMessages) return
+    const owner = captureChatReferenceOwner()
+    if (!owner?.isCurrent()) return
 
     Modal.confirm({
       title: t("playground:chat.clearTitle", "Clear chat?"),
@@ -2576,6 +2609,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       okText: t("common:clear", "Clear"),
       cancelText: t("common:cancel", "Cancel"),
       onOk: () => {
+        if (!owner.isCurrent()) return
         const previousMessages = [...messages]
         const previousHistory = [...history]
         const previousHistoryId = historyId
@@ -2583,6 +2617,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
         const undoHandle = scheduleWorkspaceUndoAction({
           apply: () => {
+            if (!owner.isCurrent()) return
             setMessages([])
             setHistory([])
             setHistoryId(null, { preserveServerChatId: true })
@@ -2590,14 +2625,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
-            saveWorkspaceChatSession(workspaceSessionId, {
+            saveOwnedChatSession({
               messages: [],
               history: [],
               historyId: null,
               serverChatId: null
-            })
+            }, true)
           },
           undo: () => {
+            if (!owner.isCurrent()) return
             setMessages(previousMessages)
             setHistory(previousHistory)
             setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2605,7 +2641,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
-            saveWorkspaceChatSession(workspaceSessionId, {
+            saveOwnedChatSession({
               messages: previousMessages,
               history: previousHistory,
               historyId: previousHistoryId,
@@ -2658,6 +2694,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const handleDeleteMessageWithUndo = React.useCallback(
     async (messageIndex: number) => {
       if (!Number.isInteger(messageIndex) || messageIndex < 0) return
+      const owner = captureChatReferenceOwner()
+      if (!owner?.isCurrent()) return false
       const previousMessages = [...messages]
       const previousHistory = [...history]
       const previousHistoryId = historyId
@@ -2672,13 +2710,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       )
 
       const accepted = await deleteMessage(messageIndex)
-      if (accepted === false) return false
+      if (accepted === false || !owner.isCurrent()) return false
       // A canonical server tombstone cannot be undone by restoring browser rows.
       if (previousServerChatId) return true
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {
-          saveWorkspaceChatSession(workspaceSessionId, {
+          if (!owner.isCurrent()) return
+          saveOwnedChatSession({
             messages: nextMessages,
             history: nextHistory,
             historyId: previousHistoryId,
@@ -2686,6 +2725,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           })
         },
         undo: () => {
+          if (!owner.isCurrent()) return
           setMessages(previousMessages)
           setHistory(previousHistory)
           setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2693,7 +2733,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           setStreaming(false)
           setIsProcessing(false)
           setSubmitError(null)
-          saveWorkspaceChatSession(workspaceSessionId, {
+          saveOwnedChatSession({
             messages: previousMessages,
             history: previousHistory,
             historyId: previousHistoryId,
@@ -2744,12 +2784,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       }
     },
     [
+      captureChatReferenceOwner,
       deleteMessage,
       history,
       historyId,
       messageApi,
       messages,
-      saveWorkspaceChatSession,
+      saveOwnedChatSession,
       serverChatId,
       setHistory,
       setHistoryId,
@@ -2757,8 +2798,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       setMessages,
       setServerChatId,
       setStreaming,
-      t,
-      workspaceSessionId
+      t
     ]
   )
 
@@ -2938,39 +2978,58 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSaveMessageToNotes = React.useCallback(
     (msg: {
-      isBot: boolean
-      message: string
-      name?: string
-      sources?: unknown[]
+      isBot: boolean;
+      message: string;
+      name?: string;
+      sources?: unknown[];
     }) => {
-      const snippet = String(msg.message || "").trim()
-      if (!snippet) return
-      const citedMediaIds = new Set(
-        (msg.sources || []).map(extractCitationMediaId)
-      )
-      const citedCaptures = sources.filter(
-        (source) => source.webCapture && citedMediaIds.has(source.mediaId)
-      )
-      const provenance = citedCaptures.length
-        ? appendCapturedNoteProvenance(
-            useWorkspaceStore.getState().currentNote,
-            citedCaptures
-          )
-        : null
-      captureToCurrentNote({
-        ...(provenance ? { provenance } : {}),
-        title: buildCapturedMessageTitle(
-          msg.isBot,
-          snippet,
-          t("playground:chat.savedAssistantPrefix", "Assistant"),
-          t("playground:chat.savedUserPrefix", "User")
-        ),
-        content: snippet,
-        mode: "append"
-      })
+      const snippet = String(msg.message || "").trim();
+      if (!snippet) return;
+      try {
+        const citedMediaIds = new Set(
+          (msg.sources || []).map(extractCitationMediaId),
+        );
+        const citedCaptures = sources.filter(
+          (source) => source.webCapture && citedMediaIds.has(source.mediaId),
+        );
+        const capturedMediaIds = new Set(
+          citedCaptures.map((source) => source.mediaId),
+        );
+        const citedPlainSources = (msg.sources || []).filter(
+          (source) => !capturedMediaIds.has(extractCitationMediaId(source)),
+        );
+        const plainProvenance = citedPlainSources.length
+          ? projectWorkspaceRagSources(citedPlainSources)
+          : null;
+        if (citedPlainSources.length && !plainProvenance)
+          throw new Error("Source history is invalid or too large to save");
+        const provenance = appendCapturedNoteProvenance(
+          useWorkspaceStore.getState().currentNote,
+          citedCaptures,
+          plainProvenance?.sources || [],
+        );
+        captureToCurrentNote({
+          ...(provenance ? { provenance } : {}),
+          title: buildCapturedMessageTitle(
+            msg.isBot,
+            snippet,
+            t("playground:chat.savedAssistantPrefix", "Assistant"),
+            t("playground:chat.savedUserPrefix", "User"),
+          ),
+          content: snippet,
+          mode: "append",
+        });
+      } catch {
+        messageApi.error(
+          t(
+            "option:researchWorkspace.sourceHistorySaveError",
+            "Source history is invalid or too large to save. Your Note has not changed.",
+          ),
+        );
+      }
     },
-    [captureToCurrentNote, sources, t]
-  )
+    [captureToCurrentNote, messageApi, sources, t],
+  );
 
   // Share conversation handler (UX-044)
   const handleShareConversation = React.useCallback(async () => {

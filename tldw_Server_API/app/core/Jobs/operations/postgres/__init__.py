@@ -16,6 +16,7 @@ from .lifecycle import (
     renew_lease,
     renew_leases_batch,
 )
+from .resource import ensure_resource_rls, ensure_resource_schema
 from .terminal_result import patch_terminal_operation_result
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "apply_prepared_disposition",
     "create_job_admission",
     "ensure_lease_horizon",
+    "ensure_resource_rls",
+    "ensure_resource_schema",
     "find_job_by_identity",
     "get_job_or_archived_by_idempotency_key",
     "get_job_or_archived_by_uuid",

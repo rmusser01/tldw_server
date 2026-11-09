@@ -60,6 +60,20 @@ def storage_scope(tmp_path, monkeypatch):
         reset_settings()
 
 
+@pytest.fixture(params=["current", "rebound"])
+def audit_settings(storage_scope, monkeypatch, request):
+    """Exercise Audit admission with stable and replaced configuration bindings."""
+    from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
+    from tldw_Server_API.app.core import config
+
+    if request.param == "rebound":
+        monkeypatch.setattr(config, "settings", config.LazySettings(config.load_settings))
+    # Collection-time config reloads can leave consumers holding older proxies.
+    monkeypatch.setattr(Audit_DB_Deps, "settings", config.settings)
+    monkeypatch.setattr(data_ops, "app_settings", config.settings)
+    return config.settings
+
+
 @pytest.mark.parametrize("dataset", ["media", "chacha", "evaluations"])
 @pytest.mark.parametrize("operation", ["backup", "restore"])
 def test_pg_content_operations_refuse_stale_local_files_before_mutation(storage_scope, monkeypatch, dataset, operation):
@@ -176,13 +190,12 @@ async def test_backup_endpoints_explain_unsupported_storage(storage_scope, monke
 
 
 @pytest.mark.parametrize("operation", ["backup", "restore"])
-def test_shared_audit_refuses_stale_per_user_file(storage_scope, monkeypatch, operation):
+def test_shared_audit_refuses_stale_per_user_file(storage_scope, audit_settings, monkeypatch, operation):
     from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
-    from tldw_Server_API.app.core import config
 
     root, shadow, incoming = storage_scope
-    monkeypatch.setitem(config.settings, "AUDIT_STORAGE_MODE", "shared")
-    monkeypatch.setitem(config.settings, "AUDIT_STORAGE_ROLLBACK", False)
+    monkeypatch.setitem(audit_settings, "AUDIT_STORAGE_MODE", "shared")
+    monkeypatch.setitem(audit_settings, "AUDIT_STORAGE_ROLLBACK", False)
     assert Audit_DB_Deps._resolve_audit_storage_mode() == "shared"  # nosec B101 -- confirm the actual HTTP storage owner.
     monkeypatch.setitem(data_ops.DATASET_DB_RESOLVERS, "audit", lambda _owner: shadow)
     before = shadow.read_bytes()
@@ -219,13 +232,13 @@ def test_authnz_refuses_shared_or_unresolved_pg_database(storage_scope, monkeypa
 
 
 @pytest.mark.parametrize("dataset", ["media", "chacha", "prompts", "evaluations", "audit"])
-def test_sqlite_dataset_backup_and_restore_still_use_the_recorded_user(storage_scope, monkeypatch, dataset):
-    from tldw_Server_API.app.core import config
-
+def test_sqlite_dataset_backup_and_restore_still_use_the_recorded_user(
+    storage_scope, audit_settings, monkeypatch, dataset
+):
     root, target, incoming = storage_scope
     monkeypatch.setenv("TLDW_CONTENT_DB_BACKEND", "sqlite")
-    monkeypatch.setitem(config.settings, "AUDIT_STORAGE_MODE", "per_user")
-    monkeypatch.setitem(config.settings, "AUDIT_STORAGE_ROLLBACK", False)
+    monkeypatch.setitem(audit_settings, "AUDIT_STORAGE_MODE", "per_user")
+    monkeypatch.setitem(audit_settings, "AUDIT_STORAGE_ROLLBACK", False)
     monkeypatch.setitem(data_ops.DATASET_DB_RESOLVERS, dataset, lambda _owner: target)
     before = read_marker(target)
     snapshot = data_ops.create_backup_snapshot(dataset=dataset, user_id=7, backup_type="full", max_backups=None)
@@ -237,13 +250,12 @@ def test_sqlite_dataset_backup_and_restore_still_use_the_recorded_user(storage_s
 
 
 @pytest.mark.parametrize("rollback", [True, "true", "1"])
-def test_audit_rollback_preserves_per_user_admission(storage_scope, monkeypatch, rollback):
+def test_audit_rollback_preserves_per_user_admission(storage_scope, audit_settings, monkeypatch, rollback):
     from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
-    from tldw_Server_API.app.core import config
 
     _, shadow, _ = storage_scope
-    monkeypatch.setitem(config.settings, "AUDIT_STORAGE_MODE", "shared")
-    monkeypatch.setitem(config.settings, "AUDIT_STORAGE_ROLLBACK", rollback)
+    monkeypatch.setitem(audit_settings, "AUDIT_STORAGE_MODE", "shared")
+    monkeypatch.setitem(audit_settings, "AUDIT_STORAGE_ROLLBACK", rollback)
     monkeypatch.setitem(data_ops.DATASET_DB_RESOLVERS, "audit", lambda _owner: shadow)
     assert Audit_DB_Deps._resolve_audit_storage_mode() == "per_user"  # nosec B101 -- rollback has precedence in the actual HTTP owner.
     assert data_ops._resolve_dataset_db_path("audit", 7) == (str(shadow), 7)  # nosec B101 -- the same selector must preserve per-user backup access.

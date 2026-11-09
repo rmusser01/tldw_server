@@ -5775,3 +5775,46 @@ it.each(["character", "ordinary"])("B02 sidepanel saved-question dispatch is exp
     expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({view_session_id: "origin"}), "existing-answer")
   } else expect(h1.wire).not.toHaveBeenCalled()
 })
+
+it("binds Auto native character Sidepanel sends to the current exact catalog provider", async () => {
+  const catalog = vi.spyOn(tldwModels, "getModels").mockResolvedValue([
+    { id: "gemma3:1b", name: "gemma3:1b", provider: "ollama", type: "chat" }
+  ])
+  const settings = (await import("@/store/model")).useStoreChatModelSettings.getState()
+  const previousProvider = settings.apiProvider
+  let unmount: (() => void) | undefined
+  try {
+    settings.apiProvider = undefined
+    mocks.storeState.selectedModel = "tldw:gemma3:1b"
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    installWorkspaceCharacterFixture()
+    h1.wire.mockImplementation(async function* (request) {
+      yield { tldw_history_admission_v1: nativeAdmission(request) }
+      yield { choices: [{ delta: { content: "native answer" } }] }
+      yield { tldw_message_id: "native-result", tldw_conversation_id: "tracked-chat-1" }
+    })
+    const hook = renderHook(() => useMessage())
+    unmount = hook.unmount
+    const { result } = hook
+    await act(async () => { await result.current.onSubmit({ message: "Hello", image: "" }) })
+    expect(mocks.notification.error.mock.calls).toEqual([])
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0]).toMatchObject({
+      model: "gemma3:1b", api_provider: "ollama", save_to_db: true,
+      conversation_id: "tracked-chat-1", messages: [{ role: "user", content: "Hello" }]
+    })
+    expect(catalog).toHaveBeenCalledWith(true, { requireFresh: true })
+    expect(h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages.map((row: { id: string }) => row.id)).toEqual(["u-old", "a1"])
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({ view_session_id: "origin" }), "native-result")
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(h1.create).not.toHaveBeenCalled()
+    expect(h1.roleplayAppend).not.toHaveBeenCalled()
+    expect(h1.roleplayComplete).not.toHaveBeenCalled()
+  } finally {
+    unmount?.()
+    settings.apiProvider = previousProvider
+    catalog.mockRestore()
+  }
+})

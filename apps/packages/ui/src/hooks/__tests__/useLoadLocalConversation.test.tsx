@@ -1,3 +1,5 @@
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -16,6 +18,7 @@ const io = vi.hoisted(() => ({
   scopeSignal: new AbortController(),
   profileSnapshot: { status: "ready", profileId: "profile", epoch: 0 },
   selection: null as ReturnType<typeof useHistorySelectionContext>,
+  resolveScope: vi.fn(),
   readMessages: vi.fn(),
   readInfo: vi.fn(),
   readModelPreference: vi.fn(),
@@ -25,7 +28,7 @@ const io = vi.hoisted(() => ({
   deps: null as Parameters<typeof useLoadLocalConversation>[0] | null
 }))
 vi.mock("@/services/service-prompts", () => ({
-  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob" }),
+  resolveServicePromptScope: () => io.resolveScope(),
   subscribeToServicePromptConfigChanges: () => () => {},
   loadServicePromptSnapshot: async () => ({
     requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob" },
@@ -113,6 +116,8 @@ beforeEach(async () => {
   vi.clearAllMocks()
   for (const read of [io.readMessages, io.readInfo, io.readModelPreference, io.readPrompt, io.readFiles]) read.mockReset()
   io.scopeSignal = new AbortController()
+  io.resolveScope.mockReset()
+  io.resolveScope.mockResolvedValue({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob" })
   usePlaygroundSessionStore.setState({ restoreRevision: 0 })
   document.title = "Current page"
   io.readMessages.mockImplementation(async (id: string) => [{ id, content: `Message ${id}` }])
@@ -260,7 +265,14 @@ describe("local selection preparation", () => {
   })
 })
 describe("accepted LocalChatList selections", () => {
-  it.each(["current", "unmounted", "failed"] as const)("reports only an accepted LocalChatList selection: %s", async outcome => {
+  it.each([
+    ["current", "ready"],
+    ["current", "pending"],
+    ["unmounted", "ready"],
+    ["failed", "ready"]
+  ] as const)("reports only an accepted LocalChatList selection: %s (%s owner)", async (outcome, ownerReadiness) => {
+    const initialOwner = deferred<{ config: { serverUrl: string; authMode: string }; userId: string }>()
+    if (ownerReadiness === "pending") io.resolveScope.mockReturnValue(initialOwner.promise)
     const pending = deferred<unknown[]>()
     io.readMessages.mockReturnValueOnce(pending.promise)
     const { state, unmount: unmountUnusedHook } = setup()
@@ -281,6 +293,15 @@ describe("accepted LocalChatList selections", () => {
     })
     const view = render(<MemoryRouter><QueryClientProvider client={queryClient}><HistorySelectionProvider><SelectionProbe /><LocalChatList searchQuery="" selectedChatId={null} onSelectChat={onSelectChat} /></HistorySelectionProvider></QueryClientProvider></MemoryRouter>)
     try {
+      if (ownerReadiness === "pending") {
+        await act(async () => initialOwner.resolve({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob" }))
+      }
+      // A current selection must start after initial account verification settles.
+      await waitFor(() => expect(io.selection?.draftAccount?.isCurrent()).toBe(true))
+      // Initial owner publication replaces the list reader; open only its qualified result.
+      const expectedOwner = chatDraftOwnerKey(await resolveServicePromptScope())
+      await waitFor(() => expect(queryClient.getQueriesData({ queryKey: ["fetchChatHistory", "on-device"] })
+        .some(([key, data]) => key[4] === expectedOwner && data !== undefined)).toBe(true))
       fireEvent.click(await screen.findByRole("button", { name: "Owned local chat" }))
       await waitFor(() => expect(io.readMessages).toHaveBeenCalledWith("owned"))
       if (outcome === "unmounted") view.unmount()

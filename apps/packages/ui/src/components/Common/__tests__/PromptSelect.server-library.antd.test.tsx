@@ -26,18 +26,30 @@ import {
   HistorySelectionContext,
   useHistorySelection,
 } from "@/hooks/chat/useHistorySelection";
-vi.mock("@/hooks/usePromptLocalAuthority", () => ({
-  usePromptLocalAuthority: () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), ready: true, boundaryKey: "server-library-fixture" })
+vi.mock("@/hooks/usePromptLocalAuthority", async original => {
+  const actual = await original<typeof import("@/hooks/usePromptLocalAuthority")>()
+  return { usePromptLocalAuthority: () => mocks.realAuthority
+    ? actual.usePromptLocalAuthority()
+    : { ownerId: "recipe-owner:sha256:" + "a".repeat(64), ready: true, boundaryKey: "server-library-fixture" } }
+})
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: mocks.config, authorityLoading: false })
+}))
+vi.mock("@/services/tldw/direct-browser-config", () => ({
+  resolveDirectBrowserConfig: async () => mocks.config
 }))
 vi.mock("@/services/recipe-persistence-uncertainty", async original => ({
   ...await original<typeof import("@/services/recipe-persistence-uncertainty")>(),
-  resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "server-library-fixture" })
+  resolveRecipePersistenceOwnerView: () => mocks.ownerView()
 }))
 vi.mock("@/services/api-send", () => ({
   apiSend: async (payload: any) => ({ ok: true, status: 200, data: await mocks.bgRequest(payload) })
 }))
 
 const mocks = vi.hoisted(() => ({
+  realAuthority: false,
+  config: { serverUrl: "http://fixture.localhost", authMode: "multi-user", accessToken: "synthetic-unit-token" },
+  ownerView: vi.fn(),
   bgRequest: vi.fn(),
   getAllPrompts: vi.fn(async () => [] as unknown[]),
   getPromptById: vi.fn(async () => undefined),
@@ -74,6 +86,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   updatePrompt: vi.fn(),
   markPromptSyncError: vi.fn(),
   getAllPrompts: mocks.getAllPrompts,
+  getSharedLocalPrompts: async () => [],
   getPromptById: mocks.getPromptById,
   upsertServerLibraryPromptCopy: mocks.upsertServerLibraryPromptCopy,
 }));
@@ -105,6 +118,10 @@ describe(
 
     beforeEach(() => {
       vi.clearAllMocks();
+      mocks.realAuthority = false;
+      mocks.ownerView.mockReset().mockResolvedValue({
+        ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "server-library-fixture"
+      });
       useStoreMessageOption.getState().startNewChatDraft(false);
       detailGate = createDeferred();
       const api = createFakePromptsApi([
@@ -194,6 +211,41 @@ describe(
       await waitFor(() => expect(isMenuOpen()).toBe(true));
 
       expect(tooltipShown()).toBe(false);
+    });
+
+    it("shows ownership resolution as loading, then admits the verified server library", async () => {
+      mocks.realAuthority = true;
+      let release!: (value: unknown) => void;
+      mocks.ownerView.mockReturnValue(new Promise(resolve => { release = resolve }));
+      const user = userEvent.setup();
+      renderPicker();
+      try {
+      await user.click(await screen.findByTestId("chat-prompt-select"));
+      expect(await screen.findByText("Loading server prompts")).toBeInTheDocument();
+      expect(screen.queryByText("No saved prompts")).not.toBeInTheDocument();
+      expect(mocks.bgRequest.mock.calls.some(([request]) => /^\/api\/v1\/prompts\?/.test(String(request.path)))).toBe(false);
+      await act(async () => { release({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "server-library-fixture" }) });
+      // Resolving ownership remounts its private picker, so reopen normally.
+      await user.click(await screen.findByTestId("chat-prompt-select"));
+      expect(await screen.findByRole("menuitem", { name: /Rewrite plainly/ })).toBeInTheDocument();
+      } finally { await act(async () => { release(null) }); }
+    });
+
+    it.each(["throw", "null"])("shows %s ownership refusal as unavailable and retries verification before listing", async refusal => {
+      mocks.realAuthority = true;
+      if (refusal === "null") mocks.ownerView.mockResolvedValue(null);
+      else mocks.ownerView.mockRejectedValue(new Error("Principal lookup unavailable"));
+      const user = userEvent.setup();
+      renderPicker();
+      await user.click(await screen.findByTestId("chat-prompt-select"));
+      expect(await screen.findByText("Server prompts unavailable")).toBeInTheDocument();
+      expect(screen.queryByText("No saved prompts")).not.toBeInTheDocument();
+      expect(mocks.bgRequest.mock.calls.some(([request]) => /^\/api\/v1\/prompts\?/.test(String(request.path)))).toBe(false);
+      mocks.ownerView.mockResolvedValue({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "server-library-fixture" });
+      await user.click(await screen.findByRole("menuitem", { name: "Retry server prompts" }));
+      await waitFor(() => expect(screen.queryByText("Server prompts unavailable")).not.toBeInTheDocument());
+      await user.click(await screen.findByTestId("chat-prompt-select"));
+      expect(await screen.findByRole("menuitem", { name: /Rewrite plainly/ })).toBeInTheDocument();
     });
 
     it("keeps the menu open while a server prompt loads, then closes it once applied", async () => {

@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
@@ -157,6 +158,7 @@ def _provider_outbound_policy_decision(
     *,
     source: str,
     stage: str = "provider_request",
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> WebOutboundPolicyDecision:
     """Return the shared outbound-policy decision for a websearch provider URL."""
     try:
@@ -165,6 +167,7 @@ def _provider_outbound_policy_decision(
             respect_robots=False,
             source=source,
             stage=stage,
+            **({"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}),
         )
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as exc:
         raise ValueError(f"Outbound policy evaluation failed: {exc}") from exc
@@ -175,8 +178,9 @@ def _enforce_provider_outbound_policy(
     *,
     source: str,
     stage: str = "provider_request",
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> None:
-    decision = _provider_outbound_policy_decision(url, source=source, stage=stage)
+    decision = _provider_outbound_policy_decision(url, source=source, stage=stage, configured_endpoint=configured_endpoint)
     if not decision.allowed:
         raise ValueError(f"Blocked by outbound policy: {decision.reason}")
 
@@ -686,6 +690,7 @@ def generate_and_search(question: str, search_params: dict) -> dict:
     if not web_search_results_dict["warnings"]:
         web_search_results_dict.pop("warnings", None)
 
+    web_search_results_dict["result_count"] = len(web_search_results_dict["results"])
     return {
         "web_search_results_dict": web_search_results_dict,
         "sub_query_dict": sub_query_dict
@@ -1642,8 +1647,8 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
 
             # Call the search_web_google function with the prepared arguments
             web_search_results = search_web_google(**google_args)  # raw JSON
-            web_search_results_dict = process_web_search_results(web_search_results, "google")
-            return web_search_results_dict
+            # Keep Google's established normalized name at the shared result boundary.
+            search_engine = "google"
 
         elif search_engine.lower() == "kagi":
             # Limit uses result_count; content_country is not applicable
@@ -1719,6 +1724,11 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
 
         # Process the raw search results
         web_search_results_dict = process_web_search_results(web_search_results, search_engine)
+        results = web_search_results_dict.get("results")
+        if isinstance(results, list):
+            if type(result_count) is int and result_count > 0:
+                web_search_results_dict["results"] = results[:result_count]
+            web_search_results_dict["result_count"] = len(web_search_results_dict["results"])
         # FIXME
         #logging.debug("After process_web_search_results:")
         #logging.debug(json.dumps(web_search_results_dict, indent=2))
@@ -1853,9 +1863,15 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
 
 def parse_html_search_results_generic(soup):
     results = []
-    for result in soup.find_all('div', class_='result'):
-        title = result.find('h3').text if result.find('h3') else ''
-        url = result.find('a', class_='url')['href'] if result.find('a', class_='url') else ''
+    for result in soup.select("div.result, article.result"):
+        heading = result.find("h3")
+        link = result.find("a", class_="url")
+        if link is None and heading is not None:
+            link = heading.find("a", href=True)
+        url = link.get("href", "") if link is not None else ""
+        if not url:
+            continue
+        title = heading.text if heading is not None else ""
         content = result.find('p', class_='content').text if result.find('p', class_='content') else ''
         published_date = result.find('span', class_='published_date').text if result.find('span',
                                                                                           class_='published_date') else ''
@@ -2574,14 +2590,23 @@ def search_web_searx(
     Returns:
         Dict: Dictionary containing the search results or an error message.
     """
-    # Use the provided Searx URL or fall back to the configured one
-    if not searx_url:
-        searx_url = get_loaded_config()['search_engines']['searx_search_api_url']
+    # Only the current server configuration can grant a local-provider origin.
+    configured_url = (load_and_log_configs() or {}).get("search_engines", {}).get("searx_search_api_url")
+    searx_url = searx_url or configured_url
     if not searx_url:
         return {"error": "SearX Search is disabled and no content was found. This functionality is disabled because the user has not set it up yet."}
 
     # Validate and construct URL
     try:
+        configured_endpoint = None
+        if configured_url:
+            try:
+                candidate_scope = ConfiguredEndpointScope.from_url(configured_url)
+            except ValueError:
+                pass  # Invalid server configuration cannot grant request authority.
+            else:
+                if candidate_scope.matches(searx_url):
+                    configured_endpoint = candidate_scope
         parsed_url = urlparse(searx_url)
         params = {
             'q': search_query,
@@ -2601,7 +2626,7 @@ def search_web_searx(
 
     # Perform the search request
     try:
-        _enforce_provider_outbound_policy(search_url, source="websearch_searx")
+        _enforce_provider_outbound_policy(search_url, source="websearch_searx", configured_endpoint=configured_endpoint)
 
         # Mimic browser headers via centralized UA builder
         headers = _websearch_browser_headers(accept_lang="en-US,en;q=0.5", restrict_encodings_for_requests=True)
@@ -2610,7 +2635,13 @@ def search_web_searx(
         delay = random.uniform(2, 5)  # Random delay between 2 and 5 seconds
         time.sleep(delay)
 
-        response = fetch(method="GET", url=search_url, headers=headers, timeout=15.0)
+        response = fetch(
+            method="GET",
+            url=search_url,
+            headers=headers,
+            timeout=15.0,
+            **({"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}),
+        )
         try:
             # Check if the response is JSON
             content_type = response.headers.get('Content-Type', '')

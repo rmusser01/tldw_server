@@ -36,13 +36,13 @@ def _db_params():
     dsn = (os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or "").strip()
     if dsn:
         try:
-            from urllib.parse import urlparse
+            from urllib.parse import unquote, urlparse
             p = urlparse(dsn)
             if p.scheme.startswith("postgres"):
                 host = p.hostname or "localhost"
                 port = int(p.port or 5432)
-                user = p.username or "tldw_user"
-                password = p.password or "TestPassword123!"
+                user = unquote(p.username or "tldw_user")
+                password = unquote(p.password or "TestPassword123!")
                 return host, port, user, password
         except Exception:
             _ = None
@@ -51,6 +51,20 @@ def _db_params():
     user = os.getenv("TEST_DB_USER", "tldw_user")
     password = os.getenv("TEST_DB_PASSWORD", "TestPassword123!")
     return host, port, user, password
+
+
+@pytest.mark.parametrize(
+    "username,password",
+    [("fixture-owner", "TestPassword123!"), ("owner+fixture", "test@pass/word#?")],
+)
+def test_db_params_decodes_quoted_fixture_credentials(monkeypatch, username, password):
+    from urllib.parse import quote
+
+    monkeypatch.setenv(
+        "TEST_DATABASE_URL",
+        f"postgresql://{quote(username, safe='')}:{quote(password, safe='')}@127.0.0.1:15492/isolated",
+    )
+    assert _db_params() == ("127.0.0.1", 15492, username, password)  # nosec B101 -- Exact fixture DSN round trip.
 
 
 async def _insert_team(db_name: str, *, org_id: int, name: str) -> int:

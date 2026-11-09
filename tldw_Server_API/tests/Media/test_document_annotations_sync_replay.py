@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.media import document_annotations as annotations_endpoint
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
@@ -65,7 +66,9 @@ async def test_resent_sync_batch_creates_each_annotation_once(media_db) -> None:
     assert repo.soft_delete_annotation(
         annotation_id=first.id_mapping["ann_client_1"], media_id=media_id, user_id="1", updated_at="2026-10-25T00:00:00+00:00"
     )
-    await annotations_endpoint.sync_annotations(media_id=media_id, body=_batch(), db=media_db, current_user=_user(1))
+    with pytest.raises(HTTPException) as failure:
+        await annotations_endpoint.sync_annotations(media_id=media_id, body=_batch(), db=media_db, current_user=_user(1))
+    assert failure.value.status_code == 409  # nosec B101 -- A deleted creation intent is refused without resurrection.
     assert [row["id"] for row in repo.list_annotations(media_id=media_id, user_id="1")] == [
         first.id_mapping["ann_client_2"]
     ]

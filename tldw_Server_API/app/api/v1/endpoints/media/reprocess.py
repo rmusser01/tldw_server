@@ -238,6 +238,7 @@ async def reprocess_media_item(
             chunk_request,
             db,
             chunk_options,
+            owner_user_id=getattr(current_user, "id", None),
             TemplateClassifier=TemplateClassifier,
             first_url=media_item.get("url"),
             first_filename=media_item.get("filename"),

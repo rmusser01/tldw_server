@@ -1,4 +1,5 @@
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -315,10 +316,11 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
   })
 
   it("renders keyword-only summary after applying keyword picker selection", async () => {
+    const user = userEvent.setup()
     renderPage()
     fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await screen.findByText("Apply filters")
-    fireEvent.click(screen.getByText(/^research\b/i))
+    await user.click(await screen.findByRole("checkbox", { name: /^research\b/i }))
     expect(screen.getByRole("checkbox", { name: /^research\b/i })).toBeChecked()
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }))
 
@@ -343,6 +345,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
   })
 
   it("renders combined query + keyword summary and preserves clear action labeling", async () => {
+    const user = userEvent.setup()
     renderPage()
     fireEvent.change(screen.getByPlaceholderText("Search notes... (use quotes for exact match)"), {
       target: { value: "ML" }
@@ -355,7 +358,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await screen.findByText("Apply filters")
-    fireEvent.click(screen.getByText(/^research\b/i))
+    await user.click(await screen.findByRole("checkbox", { name: /^research\b/i }))
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }))
 
     await waitFor(() => {

@@ -17,16 +17,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
-    SemanticChunkRecord,
-    SemanticDimensionState,
-    SemanticSnapshotSeed,
-)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.Notes_Graph.semantic_content import (
-    build_semantic_chunks,
-    semantic_content_fingerprint,
-)
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
@@ -84,7 +75,8 @@ def _fake_postgres_initializer(
     )
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: True)
+    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
     monkeypatch.setattr(db, "_ensure_note_graph_suggestion_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_ensure_note_semantic_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(
@@ -96,114 +88,55 @@ def _fake_postgres_initializer(
 
 
 def _seed_complete_semantic_generation(db: CharactersRAGDB) -> tuple[str, str, str, str]:
+    """Seed the genuine v86 columns without invoking a newer store contract."""
     note_id = "11111111-1111-4111-8111-111111111111"
-    dataset_id = "dataset-a"
-    root_job_id = "migration-job-fence"
+    dataset_id, generation_id, work_id = "dataset-a", "generation-a", "work-a"
+    digest = "sha256:" + "a" * 64
     db.note_store.add_note("Title", "Body", note_id=note_id)
-    config = db.note_semantic_store.create_configuration(
-        dataset_id=dataset_id,
-        capability_revision="capability-v1",
-        disclosure_hash="disclosure-v1",
-        provider="openai",
-        model="embedding-model-v1",
-        endpoint_origin_revision="origin-v1",
-        endpoint_origin_display="https://api.example.test",
-        data_boundary="provider",
-        vector_backend="chromadb",
-        storage_boundary="server_local",
-        storage_label="local semantic vectors",
-        normalization_version="notes-semantic-normalization-v1",
-        chunker_version="notes-semantic-chunker-v1",
-        now=_NOW,
-    )
-    enabled = db.note_semantic_store.enable_configuration(
-        dataset_id=dataset_id,
-        expected_configuration_revision=config.configuration_revision,
-        capability_revision="capability-v1",
-        now=_NOW,
-    )
-    assert enabled is not None
-    generation = db.note_semantic_store.create_generation(
-        dataset_id=dataset_id,
-        configuration_revision=enabled.configuration_revision,
-        compatibility_hash=None,
-        dimension_state=SemanticDimensionState.PENDING,
-        dimensions=None,
-        root_job_id=root_job_id,
-        now=_NOW,
-    )
-    resolved = db.note_semantic_store.resolve_generation_dimensions(
-        dataset_id=dataset_id,
-        generation_id=generation.id,
-        expected_configuration_revision=enabled.configuration_revision,
-        dimensions=2,
-        compatibility_hash="compatibility-v1",
-        now=_NOW,
-    )
-    assert resolved is not None
-    chunks = build_semantic_chunks(
-        generation_id=generation.id,
-        note_id=note_id,
-        title="Title",
-        content="Body",
-        content_version=1,
-    )
-    assert db.note_semantic_store.seed_generation_snapshot(
-        dataset_id=dataset_id,
-        generation_id=generation.id,
-        expected_configuration_revision=resolved.configuration_revision,
-        generation_fencing_token=root_job_id,
-        seeds=(
-            SemanticSnapshotSeed(
-                note_id=note_id,
-                content_version=1,
-                content_fingerprint=semantic_content_fingerprint("Title", "Body", 1),
-                state="pending",
-                planned_chunk_count=len(chunks),
-                error_code=None,
-            ),
-        ),
-        now=_NOW,
-    )
-    work = db.note_semantic_store.claim_work_batch(
-        dataset_id=dataset_id,
-        generation_id=generation.id,
-        kind="index_note",
-        limit=1,
-        now=_NOW,
-    )[0]
-    publication = db.note_semantic_store.publish_indexed_manifest(
-        owner_user_id="owner-a",
-        dataset_id=dataset_id,
-        generation_id=generation.id,
-        generation_fencing_token=root_job_id,
-        expected_configuration_revision=resolved.configuration_revision,
-        work_id=work.id,
-        claim_token=work.claim_token or "",
-        work_fencing_token=work.fencing_token,
-        claimed_dirty_generation=work.dirty_generation or 0,
-        content_version=1,
-        content_fingerprint=chunks[0].content_fingerprint,
-        chunks=tuple(
-            SemanticChunkRecord(
-                chunk_id=chunk.vector_id,
-                generation_id=chunk.generation_id,
-                note_id=chunk.note_id,
-                content_version=chunk.content_version,
-                ordinal=chunk.ordinal,
-                field=chunk.field,
-                start_offset=chunk.start_offset,
-                end_offset=chunk.end_offset,
-                chunk_fingerprint=chunk.chunk_fingerprint,
-                normalization_version=chunk.normalization_version,
-                chunker_version=chunk.chunker_version,
-            )
-            for chunk in chunks
-        ),
-        now=_NOW,
-    )
-    assert publication is not None
-    return dataset_id, generation.id, note_id, work.id
+    with db.backend.transaction() as conn:
+        db.backend.execute("SELECT set_config('app.current_user_id', %s, true)", ("owner-a",), connection=conn)
+        db.backend.execute("SELECT set_config('app.current_dataset_id', %s, true)", (dataset_id,), connection=conn)
+        db.backend.execute(
+            """INSERT INTO note_semantic_index_configs(
+                owner_user_id,dataset_id,desired_state,active_generation_id,configuration_revision,
+                semantic_index_revision,metric,dimension_state,dimensions,compatibility_hash,
+                normalization_version,chunker_version,updated_at
+            ) VALUES ('owner-a',%s,'enabled',%s,1,1,'cosine','resolved',2,
+                      'compatibility-v1','v1','v1',%s)""",
+            (dataset_id, generation_id, _NOW), connection=conn,
+        )
+        db.backend.execute(
+            """INSERT INTO note_semantic_generations(
+                id,owner_user_id,dataset_id,configuration_revision,state,compatibility_hash,
+                dimension_state,dimensions,expected_note_count,expected_chunk_count,
+                published_note_count,published_chunk_count,created_at
+            ) VALUES (%s,'owner-a',%s,1,'active','compatibility-v1','resolved',2,1,1,1,1,%s)""",
+            (generation_id, dataset_id, _NOW), connection=conn,
+        )
+        db.backend.execute(
+            """INSERT INTO note_semantic_note_state(
+                owner_user_id,dataset_id,generation_id,note_id,content_version,
+                content_fingerprint,dirty_generation,state,chunk_count
+            ) VALUES ('owner-a',%s,%s,%s,1,%s,1,'indexed',1)""",
+            (dataset_id, generation_id, note_id, digest), connection=conn,
+        )
+        db.backend.execute(
+            """INSERT INTO note_semantic_chunks(
+                chunk_id,owner_user_id,dataset_id,generation_id,note_id,content_version,
+                ordinal,field,start_offset,end_offset,chunk_fingerprint,
+                normalization_version,chunker_version
+            ) VALUES ('chunk-a','owner-a',%s,%s,%s,1,0,'content',0,4,%s,'v1','v1')""",
+            (dataset_id, generation_id, note_id, digest), connection=conn,
+        )
+        db.backend.execute(
+            """INSERT INTO note_semantic_work(
+                id,owner_user_id,dataset_id,kind,note_id,generation_id,dirty_generation,
+                fencing_token,claim_state,attempt_count,next_eligible_at,created_at,updated_at
+            ) VALUES (%s,'owner-a',%s,'index_note',%s,%s,1,'migration-job-fence',
+                      'completed',1,%s,%s,%s)""",
+            (work_id, dataset_id, note_id, generation_id, _NOW, _NOW, _NOW), connection=conn,
+        )
+    return dataset_id, generation_id, note_id, work_id
 
 
 def test_postgres_v87_ddl_is_owner_scoped_forced_rls_and_has_no_cascading_authority() -> None:
@@ -314,18 +247,14 @@ def test_postgres_v87_live_schema_has_cleanup_constraints_indexes_and_forced_rls
 def test_postgres_v86_to_v87_upgrade_preserves_all_semantic_rows(
     pg_database_config: DatabaseConfig,
 ) -> None:
+    class LegacyV86(CharactersRAGDB):
+        _POSTGRES_SCHEMA_VERSION = 86
+
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    db = LegacyV86(":memory:", client_id="owner-a", backend=backend)
     db_after: CharactersRAGDB | None = None
     try:
         dataset_id, generation_id, note_id, work_id = _seed_complete_semantic_generation(db)
-        with backend.transaction() as conn:
-            backend.execute(f"DROP TABLE {_TABLE}", connection=conn)  # nosec B608
-            backend.execute(
-                "UPDATE db_schema_version SET version=86 WHERE schema_name=%s",
-                (CharactersRAGDB._SCHEMA_NAME,),
-                connection=conn,
-            )
         db.close_connection()
 
         db_after = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)

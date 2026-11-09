@@ -360,6 +360,9 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
 
     if (kinds.media && !mediaApiUnavailable) {
       try {
+        // Snapshot for O(1) membership checks in the row loops below; state
+        // updates inside the loops are already deduped by their updaters.
+        const availableMediaTypesSet = new Set(availableMediaTypes)
         if (searchMode === 'metadata') {
           const normalizedFilters = normalizeMetadataSearchFilters(metadataFilters)
           const validationError = validateMetadataSearchFilters(normalizedFilters)
@@ -405,7 +408,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
                 typeof row?.type === 'string'
                   ? row.type.toLowerCase().trim()
                   : 'document'
-              if (type && !availableMediaTypes.includes(type)) {
+              if (type && !availableMediaTypesSet.has(type)) {
                 setAvailableMediaTypes((prev) =>
                   prev.includes(type) ? prev : [...prev, type]
                 )
@@ -458,7 +461,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
             const id = m?.id ?? m?.media_id ?? m?.pk ?? m?.uuid
             const meta = deriveMediaMeta(m)
             const type = meta.type
-            if (type && !availableMediaTypes.includes(type)) {
+            if (type && !availableMediaTypesSet.has(type)) {
               setAvailableMediaTypes((prev) =>
                 prev.includes(type) ? prev : [...prev, type]
               )
@@ -506,7 +509,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
             const id = m?.id ?? m?.media_id ?? m?.pk ?? m?.uuid
             const meta = deriveMediaMeta(m)
             const type = meta.type
-            if (type && !availableMediaTypes.includes(type)) {
+            if (type && !availableMediaTypesSet.has(type)) {
               setAvailableMediaTypes((prev) =>
                 prev.includes(type) ? prev : [...prev, type]
               )

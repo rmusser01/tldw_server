@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+import json
 import subprocess  # nosec B404
 
 import pytest
@@ -14,6 +15,14 @@ NODE_BIN = shutil.which("node")
 def _write_worker(path: Path, contents: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents, encoding="utf-8")
+
+
+def _write_viewer_packages(node_modules: Path) -> None:
+    """Resolve the worker through the same shared-viewer package chain."""
+    for name in ("@tldw/ui", "react-pdf", "pdfjs-dist"):
+        package = node_modules / name / "package.json"
+        package.parent.mkdir(parents=True, exist_ok=True)
+        package.write_text(json.dumps({"name": name, "version": "1.0.0"}), encoding="utf-8")
 
 
 def _require(condition: bool, message: str) -> None:
@@ -31,6 +40,7 @@ def test_copy_pdf_worker_script_supports_local_workspace_node_modules(tmp_path: 
     expected = "local-worker"
     local_worker = project_root / "node_modules" / "pdfjs-dist" / "build" / "pdf.worker.min.mjs"
     _write_worker(local_worker, expected)
+    _write_viewer_packages(project_root / "node_modules")
 
     # Invokes local Node script with test-controlled args.
     result = subprocess.run(
@@ -56,6 +66,7 @@ def test_copy_pdf_worker_script_supports_hoisted_workspace_node_modules(tmp_path
     expected = "hoisted-worker"
     hoisted_worker = tmp_path / "apps" / "node_modules" / "pdfjs-dist" / "build" / "pdf.worker.min.mjs"
     _write_worker(hoisted_worker, expected)
+    _write_viewer_packages(tmp_path / "apps" / "node_modules")
 
     # Invokes local Node script with test-controlled args.
     result = subprocess.run(

@@ -360,7 +360,9 @@ def test_sqlite_release_runs_post_commit_observers(
         *,
         command: Any,
         counters_enabled: bool,
+        clock: Any,
     ) -> LifecycleResult:
+        assert clock == manager._clock.now_utc
         captured.update(command=command, counters_enabled=counters_enabled)
         observed.append("operation-returned")
         return LifecycleResult.applied(
@@ -798,7 +800,9 @@ def test_postgres_release_runs_post_commit_observers(
         *,
         command: Any,
         counters_enabled: bool,
+        clock: Any,
     ) -> LifecycleResult:
+        assert clock == manager._clock.now_utc
         captured.update(
             command=command,
             counters_enabled=counters_enabled,

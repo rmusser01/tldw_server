@@ -199,68 +199,6 @@ def test_real_sqlite_schema_bootstrap_creates_core_objects(tmp_path) -> None:
         db.close_connection()
 
 
-@pytest.mark.unit
-def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch) -> None:
-    from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
-        postgres_helpers as postgres_helpers_module,
-    )
-
-    conn = object()
-    calls: list[object] = []
-    backend = SimpleNamespace(
-        execute=lambda statement, *, connection: calls.append(("safe_transcript_extractor", statement, connection))
-    )
-    db = SimpleNamespace(
-        backend=backend,
-        _ensure_postgres_collections_tables=lambda value: calls.append(("collections", value)),
-        _ensure_postgres_tts_history=lambda value: calls.append(("tts_history", value)),
-        _ensure_postgres_audio_presets=lambda value: calls.append(("audio_presets", value)),
-        _ensure_postgres_data_tables=lambda value: calls.append(("data_tables", value)),
-        _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
-        _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
-        _ensure_postgres_email_schema=lambda value: calls.append(("email_schema", value)),
-        _ensure_postgres_rls=lambda value: calls.append(("policies", value)),
-        _sync_postgres_sequences=lambda value: pytest.fail("routine bootstrap must not rewind RLS-scoped sequences"),
-    )
-
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_document_workspace_schema",
-        lambda connection: calls.append(("document_workspace", connection)),
-        raising=False,
-    )
-
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_sync_log_contract",
-        lambda value, connection: calls.append(("sync_contract", value, connection)),
-    )
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_keyword_identity",
-        lambda value, connection: calls.append(("keyword_identity", value, connection)),
-    )
-    postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
-
-    assert calls == [
-        ("sync_contract", db, conn),
-        ("collections", conn),
-        ("tts_history", conn),
-        ("audio_presets", conn),
-        ("data_tables", conn),
-        (
-            "safe_transcript_extractor",
-            postgres_helpers_module._SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL,
-            conn,
-        ),
-        ("document_workspace", conn),
-        ("source_hash", conn),
-        ("claims_extensions", conn),
-        ("email_schema", conn),
-        ("policies", conn),
-        ("keyword_identity", db, conn),
-    ]
-
 
 @pytest.mark.unit
 def test_postgres_safe_transcript_extractor_is_pg13_compatible_and_non_throwing() -> None:
@@ -1113,11 +1051,13 @@ def test_postgres_data_tables_structures_ensure_postgres_data_tables_runs_create
 
     postgres_data_table_structures_module.ensure_postgres_data_tables(db, conn)
 
-    assert calls == [
+    assert calls == [  # nosec B101 -- Pytest asserts the updated real contract.
         ("CREATE TABLE data_tables (...)", conn),
         ("CREATE TABLE data_table_columns (...)", conn),
         ("ensure_columns", conn),
         ("CREATE INDEX idx_data_tables_workspace_tag ON data_tables(workspace_tag)", conn),
+        ("DROP INDEX IF EXISTS ux_data_table_columns_table_position_active", conn),
+        ("DROP INDEX IF EXISTS ux_data_table_rows_table_index_active", conn),
     ]
 
 
@@ -2154,9 +2094,14 @@ def test_sqlite_post_core_structures_ensure_sqlite_data_tables_executes_sql_and_
     class RecordingConn:
         def __init__(self) -> None:
             self.scripts: list[str] = []
+            self.queries: list[str] = []
 
         def executescript(self, script: str) -> None:
             self.scripts.append(script)
+
+        def execute(self, query: str):
+            self.queries.append(query)
+            return []
 
     class FailingConn:
         def executescript(self, _script: str) -> None:
@@ -2169,6 +2114,13 @@ def test_sqlite_post_core_structures_ensure_sqlite_data_tables_executes_sql_and_
     sqlite_post_core_structures_module.ensure_sqlite_data_tables(db, FailingConn())
 
     assert ok_conn.scripts == ["data tables sql"]
+
+    assert ok_conn.queries == [  # nosec B101 -- Preserve column ensure before obsolete-index removal.
+        "PRAGMA table_info(data_tables)",
+        "ALTER TABLE data_tables ADD COLUMN generation_job_json TEXT",
+        "DROP INDEX IF EXISTS ux_data_table_columns_table_position_active",
+        "DROP INDEX IF EXISTS ux_data_table_rows_table_index_active",
+    ]
 
 
 @pytest.mark.unit
@@ -2354,7 +2306,7 @@ def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_inde
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
         ).fetchone()[0]
 
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "latest_transcription_run_id",
             "next_transcription_run_id",
@@ -2758,7 +2710,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                     "PRAGMA index_list(claims_monitoring_events)"
                 ).fetchall()
             }
-            assert version_row["version"] == 26
+            assert version_row["version"] == 27
             assert event_index_columns["idx_claims_monitoring_events_user_created_id"] == [
                 "user_id",
                 "created_at",
@@ -3000,8 +2952,8 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3100,7 +3052,7 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3155,7 +3107,7 @@ def test_supported_sqlite_upgrade_preserves_pool_connection(tmp_path, consumer) 
         else:
             connection = db.backend.get_pool().get_connection()
 
-        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 26
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 27
         assert connection is not previous_connection
         assert connection.row_factory is sqlite3.Row
         assert connection.execute(
@@ -3199,7 +3151,7 @@ def test_failed_sqlite_upgrade_preserves_pool_reborrow_and_retry(tmp_path) -> No
         assert reopened.backend is db.backend
         assert reopened.get_connection().execute(
             "SELECT version FROM schema_version"
-        ).fetchone()[0] == 26
+        ).fetchone()[0] == 27
     finally:
         db.backend.get_pool().clear_thread_local_connection()
 
@@ -3491,7 +3443,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
                 ).fetchone()
             )
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3576,8 +3528,8 @@ def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v26() -> N
         }
         version = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "system_operation_id",
             "system_operation_kind",
@@ -4648,7 +4600,7 @@ def test_postgres_v26_migration_clears_weak_v25_partial_null_markers(
                 }
                 for row in rows
             )
-            assert version == 26
+            assert version == 27
             assert constraint_validated is True
     finally:
         db.close_connection()

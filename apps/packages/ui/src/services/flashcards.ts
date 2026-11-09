@@ -737,12 +737,23 @@ export async function updateDeck(
 }
 
 // Flashcard templates
-export async function listFlashcardTemplates(options?: {
-  signal?: AbortSignal
-}): Promise<FlashcardTemplateListResponse> {
-  return await flashcardTemplatesClient.list<FlashcardTemplateListResponse>({}, {
-    abortSignal: options?.signal
-  })
+export async function listFlashcardTemplates(
+  options?: FlashcardsRequestOptions
+): Promise<FlashcardTemplateListResponse> {
+  if (options?.requestScope) {
+    return bgRequest<FlashcardTemplateListResponse, AllowedPath, "GET">({
+      path: "/api/v1/flashcards/templates",
+      method: "GET",
+      ...requestScopeFields(options.requestScope),
+      abortSignal: options.signal
+    })
+  }
+  return await flashcardTemplatesClient.list<FlashcardTemplateListResponse>(
+    {},
+    {
+      abortSignal: options?.signal
+    }
+  )
 }
 
 export async function getFlashcardTemplate(
@@ -956,7 +967,8 @@ export async function getNextReviewCard(
   params?: {
     workspace_id?: string | null
     include_workspace_items?: boolean | null
-  }
+  },
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardNextReviewResponse> {
   const query = buildQuery({
     deck_id,
@@ -965,7 +977,9 @@ export async function getNextReviewCard(
   })
   return await bgRequest<FlashcardNextReviewResponse, AllowedPath, "GET">({
     path: `/api/v1/flashcards/review/next${query}` as AllowedPath,
-    method: "GET"
+    method: "GET",
+    ...requestScopeFields(options?.requestScope),
+    abortSignal: options?.signal
   })
 }
 

@@ -36,8 +36,15 @@ _WEBHOOK_EVENTS = {
 }
 _WEBHOOK_MAX_URL_LENGTH = 2048
 
+
+def _default_store_path() -> Path:
+    """Select a configured Admin store without consulting another profile's root."""
+    configured = os.getenv("SYSTEM_OPS_STORE_PATH", "").strip()
+    return Path(configured) if configured else Path(get_database_dir()) / "system_ops.json"
+
+
 _STORE_LOCK = Lock()
-_STORE_PATH = Path(get_database_dir()) / "system_ops.json"
+_STORE_PATH = _default_store_path()
 _LOCK_TIMEOUT_SECONDS = float(os.getenv("SYSTEM_OPS_LOCK_TIMEOUT", "5"))
 _STRICT_STORE_MAX_BYTES = 67_108_864
 _STRICT_STORE_READ_CHUNK_BYTES = 1024 * 1024

@@ -15,6 +15,8 @@ import {
   type OfflineDraftEntry,
 } from "../notes-manager-utils";
 
+import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
+
 const storageKey = "tldw:notesOfflineDraftQueue:v1:alice";
 const draft = (key: string, requestKey: string): OfflineDraftEntry => ({
   key,
@@ -425,6 +427,130 @@ describe("Quick Notes mutable draft and accepted receipt under the house record 
       metadata: { quickNotesAcceptedKey: "frozen-key", quickNotesDirty: false },
     });
     expect(retained.pendingWrite).toBeUndefined();
+  });
+
+  it("matches a pending capture only while its canonical write base remains compatible", () => {
+    const canonical = {
+      origin: "knowledge_qa" as const,
+      question: "original",
+      sources: [],
+    };
+    const replacement = { ...canonical, question: "captured" };
+    const original = quick();
+    const pending = {
+      ...original,
+      metadata: {
+        ...original.metadata,
+        knowledge_provenance_state: "active",
+        knowledge_provenance_version: 2,
+        knowledge_provenance: canonical,
+        pendingKnowledgeProvenance: replacement,
+      },
+    };
+    const body = {
+      ...original.pendingWrite!.body,
+      content: retainKnowledgeNoteProvenance(original.content, {
+        knowledge_provenance_state: "active",
+        knowledge_provenance: replacement,
+      }),
+      knowledge_provenance: replacement,
+      expected_provenance_version: 2,
+    };
+    expect(quickNotesDraftMatchesWrite(pending, body)).toBe(true);
+    expect(
+      quickNotesDraftMatchesWrite(
+        {
+          ...pending,
+          metadata: { ...pending.metadata, knowledge_provenance_version: 1 },
+        },
+        body,
+      ),
+    ).toBe(true);
+    for (const expected of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, "2"]) {
+      expect(
+        quickNotesDraftMatchesWrite(pending, {
+          ...body,
+          expected_provenance_version: expected,
+        }),
+      ).toBe(false);
+    }
+    for (const patch of [
+      {
+        knowledge_provenance_version: 3,
+        knowledge_provenance: { ...canonical, question: "newer canonical" },
+      },
+      { knowledge_provenance_version: 1.5 },
+      { knowledge_provenance_state: "deleted", knowledge_provenance: null },
+      { knowledge_provenance_state: "unsupported" },
+      {
+        pendingKnowledgeProvenance: { ...replacement, question: "later capture" },
+      },
+    ]) {
+      expect(
+        quickNotesDraftMatchesWrite(
+          { ...pending, metadata: { ...pending.metadata, ...patch } },
+          body,
+        ),
+      ).toBe(false);
+    }
+    expect(
+      quickNotesDraftMatchesWrite(
+        { ...pending, content: "Later human edit" },
+        body,
+      ),
+    ).toBe(false);
+    expect(
+      quickNotesDraftMatchesWrite(pending, {
+        ...body,
+        expected_provenance_version: "2",
+      }),
+    ).toBe(false);
+    expect(
+      quickNotesDraftMatchesWrite(
+        {
+          ...pending,
+          metadata: {
+            ...pending.metadata,
+            pendingKnowledgeProvenance: undefined,
+            knowledge_provenance: replacement,
+            knowledge_provenance_version: 3,
+          },
+        },
+        body,
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a same-as-canonical capture clean when no provenance write is necessary", () => {
+    const provenance = { origin: "knowledge_qa" as const, sources: [] };
+    const original = quick();
+    const current = {
+      ...original,
+      metadata: {
+        ...original.metadata,
+        knowledge_provenance_state: "active",
+        knowledge_provenance_version: 2,
+        knowledge_provenance: provenance,
+        pendingKnowledgeProvenance: provenance,
+      },
+    };
+    const body = {
+      ...original.pendingWrite!.body,
+      content: retainKnowledgeNoteProvenance(original.content, current.metadata),
+    };
+    expect(quickNotesDraftMatchesWrite(current, body)).toBe(true);
+    expect(
+      quickNotesDraftMatchesWrite(
+        {
+          ...current,
+          metadata: {
+            ...current.metadata,
+            knowledge_provenance: { ...provenance, question: "new head" },
+          },
+        },
+        body,
+      ),
+    ).toBe(false);
   });
 
   it("compares keyword casing and pending provenance against the frozen body", () => {

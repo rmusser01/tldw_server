@@ -5,11 +5,13 @@ Candidate starts at dev 17c47c49d857a2a1fd1e58602b704213760a4a85.
 ADR required: no. Restore existing migration and retry contracts; retain ADR-003, ADR-059 and ADR-064.
 
 
-## Current UAT tracking index — 2026-10-20
+## Current UAT tracking index — 2026-11-02
 
-**Active workflow: C10 — Model/runtime administration to real inference. C09 is closed.** 30/43 selected accepted, 13 open. Four native restore modes, repaired real health outage/recovery, exact original Chat/draft/saved-record handback and independent closeout CLEAR. Current API52868/owner52843, frontend50832/owner50736/build9fW2FVTzfI054S_pnJB8P; one existing Chrome tab and private profile/data/keys retained. Completed C09 fixture/archive roots and stopped old build (2538.5 MiB) removed. Frozen523+WIP unpublished/not latest dev; heartbeat PAUSED. [C09 closure](#c09-health-backup-restore-and-maintenance-selected-closure).
+**All43 selected workflow families have functional and human UX acceptance.** The S06 closure below records the final eight variants, actual-provider/Skill actions, saved results/reload, recovery and declared database/account composition. Historical failed runs retain their status; S03's unexplained Kanban timeout remains an open incident by explicit human ruling.
 
-The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01 through C09 selected acceptances are closed;13 families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
+Current qualified backend882e1ae880ddd5d0cf8b83d17d5b1554484d8a64 and frontenddb9495e876262379b178e1417f8074d7f4a2326c/BUILD_2AjagsPaWq3agNLU2rMQ compose on frozen deva412f6580b7ed0cf48fd7d222a47a20cfc0dde92, including3309/3310/3311. Latest November-dev integration/validation and broader release gates remain outstanding. Original API/frontend and canonical data remain preserved; historical original Chrome is absent and its DOM remains untouched/unverified. Heartbeat paused.
+
+The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. A01–A12, B01–B09, C01–C12, X01–X04 and S01–S06 selected acceptances are closed. Selected acceptance does not certify all426 variants, close broader release gates or convert historical failed runs into passing runs.
 
 - [TASK-13260](../../backlog/tasks/task-13260%20-%20Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md): existing overall single-user/multi-user UAT, In Progress.
 - [TASK-13260.281](../../backlog/tasks/task-13260.281%20-%20Correct-root-causes-from-resumed-release-UAT-before-continuing.md): existing resumed-UAT root-cause work, In Progress.
@@ -49,19 +51,19 @@ The43 IDs below are existing workflow families in [the release catalog](../../ap
 | C07 | Repository text bundle | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit composition;40tests/client, repaired build,15live observations/one exactdownload, screenshot and finalcanonicalpreservation reviewed. Both overall operatorfailures retained. [Closure](#c07-repository-export-selected-closure). |
 | C08 | Admin account, role and quota | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit four-mode/recovery composition; source, live account/permission/key/quota/expiry checks, original handback and cleanup independently reviewed. Failed histories retained. [Closure](#c08-administrator-controls-selected-closure). |
 | C09 | Health, backup, restore and maintenance | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED: four native restore modes, maintenance/operation history, causal repairs and actual health outage/recovery; full canonical handback and cleanup independently reviewed. Explicit external-adapter exclusion and service/component fault-coverage limits retained. [Closure](#c09-health-backup-restore-and-maintenance-selected-closure). |
-| C10 | Model runtime admin and inference | In Progress: human declared installed Splash/Qwen3.8-27B; separate bounded owned-runtime preparation. No C10 native acceptance. |
-| C11 | MCP discovery and scoped execution | Open |
-| C12 | Workflow scheduled/monitored result | Open |
-| X01 | Upgrade without data loss | Open |
-| X02 | Account/browser isolation | Open |
-| X03 | Usability, accessibility and responsive UI | Open |
-| X04 | Extension capture and sidepanel continuity | Open |
-| S01 | Quiz and study assistance | Open |
-| S02 | Chatbooks and portable backup | Open |
-| S03 | Artifact editors | Open |
-| S04 | Research and source workspace | Open |
-| S05 | Moderation and claims review | Open |
-| S06 | Specialized tools and discovery | Open |
+| C10 | Model runtime admin and inference | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED: actual SQLiteSingle owned engine/inference/stop/restart/retained-input Retry/saved512/fresh-document persistence, four-mode profile configuration and explicit fault composition; full handback/cleanup independently reviewed. Other native-engine/hardware/release variants remain open. [Closure](#c10-managed-runtime-and-inference-selected-closure). |
+| C11 | MCP discovery and scoped execution | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit native/component/mode composition; controlled transport, scope/recovery, credentials/logs/exports, corrected UI contrast, exact original handback and cleanup independently reviewed. Failed outcomes and mode/cancellation/API-L limits retained. [Closure](#c11-mcp-discovery-and-scoped-execution-selected-closure). |
+| C12 | Workflow scheduled/monitored result | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by reviewed core4/recovery7 and four-mode composition; repaired timezone, Retry/dependency, provider policy and PostgreSQL timestamp contracts. Exact original handback and owned cleanup passed. [Closure](#c12-workflow-scheduled-and-monitored-result-selected-closure). |
+| X01 | Upgrade without data loss | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit twelve-mode/current22c composition and recovery; original session preserved and disposable payloads removed. [Closure scope](#x01-supported-upgrade-selected-closure). |
+| X02 | Account/browser isolation | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit ten-variant SQLite/PostgreSQL composition, current redesigned Chat checks, original preservation and guarded cleanup. [Closure](#x02-account-and-browser-isolation-selected-closure). |
+| X03 | Usability, accessibility and responsive UI | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit native/component/locale/ratchet composition; original session preserved and completed staging removed. [Closure](#x03-usability-accessibility-and-responsive-selected-closure). |
+| X04 | Extension capture and sidepanel continuity | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit native11-variant and four-mode binding/ownership composition; causal repairs, exact original preservation and guarded completed-profile disposal passed. [Closure](#x04-extension-capture-and-continuity-selected-closure). |
+| S01 | Quiz and study assistance | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by five-variant native/component and four-mode API composition; reviewed repairs, original preservation and guarded completed-payload disposal. [Closure](#s01-quiz-and-study-assistance-selected-closure). |
+| S02 | Chatbooks and portable backup | Accepted selected scope; native archive/JSON/database roundtrip and per-format failure/Retry, four-mode composition, exact saved content/assets/ownership and human UX. Original handback and completed-payload disposal pass. |
+| S03 | Artifact editors | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED; Data Tables, Presentations, Kanban and Document Workspace qualified by recorded composition in the official task. Historical Kanban timeout remains unexplained by explicit human ruling. |
+| S04 | Research and source workspace | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED; Research Workspace, Sources and Deep Research console/saved-draft details accepted with recorded mode, identity and recovery qualification in the official task. |
+| S05 | Moderation and claims review | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED; Rules, Review/Claims decisions and actual-provider advisory classification, four-mode recovery/ownership composition and guarded cleanup. [Closure](#s05-moderation-claims-and-model-classification-selected-closure--2026-11-01). |
+| S06 | Specialized tools and discovery | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED; eight variants, real provider/approved Skill, evidence/report/export/reload/recovery and explicit mode/owner composition, final independent review and guarded cleanup. [Closure](#s06-specialized-tools-and-discovery-selected-closure--2026-11-02). |
 
 Heartbeat stays PAUSED; no tracking-only commit, new task, window or proof artifact follows from this index.
 
@@ -75,7 +77,7 @@ Heartbeat stays PAUSED; no tracking-only commit, new task, window or proof artif
 **Goal**: Combine new fixes, committed bf8 repairs, six qualified readers and published fe117 repairs onto fresh current dev, preserving original worktrees and all published behavior.
 **Success Criteria**: Exact source/ref and owned patch guards, resolved conflicts without assertion loss, supported combined API export/types, scoped lint/security and final actual/staged review.
 **Tests**: Genuinely affected incoming suites and new regressions; preserve VN call_soon_threadsafe/release_observed/direct-await/finally-drain oracle, audio finite quota/cache/DSN cleanup, offline accounting mock and causal guard.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Qualification and acceptance
 **Goal**: Publish with normal hooks/exact lease and exact human-summary readback; satisfy current-head hosted and real UAT/native/installer gates before merge.
@@ -83,7 +85,7 @@ Heartbeat stays PAUSED; no tracking-only commit, new task, window or proof artif
 **Tests**: 43 UAT/15 runtime bug acceptance, native first-import and whole-process Prompt shutdown, installer 53/55/56, fresh runtime/client/principal context, applicable queue-platform acceptance. After a qualified source freeze, use the approved fresh private runtime/build/browser cell within the 120-second startup and 600-second build caps, preserving previous runtimes. No queue mutation, model/environment reconstruction or proof bundles.
 **Status**: In Progress
 
-## Current qualification
+## Historical qualification checkpoints
 
 - Local rebase completed: 143282af365cd8b462f842c6b8907d6120ce0ea7 on guarded dev 7ba48f251ec47a1e0bb680f49f9b7d86ec2b988d; 14 committed patches compare equal to the previous range. Five-path owned WIP is byte-identical, and only two incoming docs/task paths changed the committed tree. Unpublished.
 - Independent integrated-source review clear; published main/control-plane/Sync/lifetime files, VN loop-release oracle, audio assertions, offline guards/accounting regressions and task history preserved.
@@ -1463,8 +1465,428 @@ C09 selected functional checks and human UX are accepted. Independent final outc
 30/43 selected families accepted; 13 open. C10 is next. Full 426-variant release matrix, latest-dev integration, full TypeScript, final combined security/review/hooks/publication and other native/installer gates remain open. Frozen523ef3 plus unpublished WIP; heartbeat remains PAUSED; no Git/ref/index/fetch/commit/push/rebase/merge action.
 
 
-## C10 started — 2026-10-20
+## C10 managed runtime and inference selected closure
 
-C09 selected closure is complete, 30/43 accepted and 13 open. [C10 working plan](IMPLEMENTATION_PLAN_uat_c10_managed_runtime_inference_20261020.md). Current managed backend is disabled/unconfigured with no registered models; read-only profiles/instances give truthful503 setup guidance. User service8010 advertises Qwen3.8-27B and installed llama-server is /opt/homebrew/bin/llama-server. Its unsupported /props404 is not an outage. Awaiting one declared existing GGUF path for a run-owned instance; one information request is pending. No model scan/file access/start/stop/download, config write, build, new tab or native C10 attempt. Current restored API/frontend/Chat remain retained; C11 unopened and all broader gates remain.
+C10 selected functional and human UX acceptance is complete. Independent actual-source, storage-error consumer, outcome and canonical-handback reviews are CLEAR. Earlier failed receipts remain failed. The completed owned C10 working plan is removed; this is the retained selected outcome.
 
-C10 declaration update: human supplied the installed Splash offline Qwen3.8-27B command; the earlier missing-path question is answered. Exact selection metadata identifies the installed27.052GiB GGUF. Separate bounded owned-runtime preparation continues; existing8010 remains protected, no model lifecycle or native C10 attempt yet.
+- Shared repairs restore POSIX uvloop process ownership, STARTING until actual readiness, bounded90s default llama.cpp readiness, exact configured-origin readiness scope, startup-only120s client timeout and authority/pending-save boundaries. Affected causal and connected Python/UI/WebUI checks passed by recorded composition; touched TypeScript semantic checks and baseline/current security are clear within their existing limits. Current203-binding build QgVcAnA0XXC4XlUlpkJKa passed compiler/token-sync/budget; inherited full-build type skipping remains disclosed. ADR030/043/059 govern; no new durable architecture decision.
+- Native engine scope is SQLite single-user with the declared installed llama-server0.5.0/build11146 and private APFS clone of Qwen3.8-27B-Q8_0. Actual managed startup/inference returned4, owned Stop produced a real unavailable Send retaining its input, and saved512-context restart plus exactly one legitimate Retry returned4. Exact argv/settings, four canonical rows/two user turns, unchanged prior metadata and fresh-document persistence passed. Startup18.987s and saved51236.677s remained within120s. No inference was replayed to repair operator selectors or metadata expectations. Four SQLite/PostgreSQL single-/multi-user profile create/edit/reload workflows passed separately; this does not imply four native-engine runs.
+- Fault coverage is explicit: real disabled/unconfigured503 and connected missing/config validation; actual low-memory launch admission refusals without induced OOM; real failed starts with truthful unavailable state followed by causal repairs; component/service model-storage ENOSPC/EDQUOT at prepare/write/promote. The storage bug now reports terminal insufficient_storage with actionable space/quota guidance, cleans partials and preserves prior assets. Six tiny-file causal cases failed before repair. Acquisition worker/service/API results compose38passes plus failed-only2passes after a new comparison-fixture correction; no single clean40-case run is claimed. Ordinary retry behavior is retained. Ruff lint/compile clear; formatter flags inherited; Bandit worker0/test43identical/new0/errors0. No physical disk exhaustion, arbitrary model download or unsupported hardware/backend acceptance.
+- Final approved no-generation finish verified full metadata, saved512 and new-document persistence with zero model actions/admission tickets/inference. Private API released in1.110s; originalAPI90991/monitor90982 restored in9.369s. Full normal-login/original five-message Character7 Chat/Interrupted/exact unsent draft and specified prior Chats/C03/Studio/C04/C05/C06 records passed handback. One original Chrome context/window/tab remains; frontend2966/owner2935 serves the current build. Human accepted the settled screenshot.
+- Reviewed owner/release/inode/open-file/no-follow cleanup removed the completed private SQLite fixture, APFS model clone and accepted screenshot:27.062logicalGiB, not measured physical disk savings. Earlier replaced builds/completed mode fixtures were also removed. Original installed model/cache/Splash/profile/data/current build and tiny functional ownership controls remain protected.
+
+31/43 selected families accepted;12 open. C11 is next. Full426-variant release matrix, unsupported native hardware/runtime variants, latest-dev integration, full TypeScript, combined final security/review/hooks/publication and broader native/installer gates remain open. Frozen523ef323e9f56bc31559f6c5b8e506c27e599dcb plus unpublished WIP; heartbeat PAUSED; no Git/ref/index/fetch/stage/commit/push/rebase/merge.
+
+
+## C11 current partial outcome
+
+Actual isolated MCP external-federation profile initialized normally. First native attempt failed in the driver after Admin login when it tried clearing a removed password field; no MCP writes. Its normal recovery completed real UI server creation201 and discovery200, both request bodies/identities/completions bound, readiness ready/tool_count2 and actual stdio child observed. It then failed a first-match name visibility selector. Hidden native option precedence is a source-supported hypothesis, not captured failure-time DOM proof. No gateway tool execution or C11 acceptance is claimed.
+
+Saved test server disabled through acknowledged cleanup; upstream/private API/browser owners released. OriginalAPI45045/monitor45033 is ready on the same private profile/data/keys; full canonical original Chat/five rows/Interrupted/draft and named prior records passed. Prepared unexecuted saved-server finish omits repeated create, opens the visible list/catalog and runs previously unexecuted schema/README/echo/invalid checks. Initial plus one normal recovery are consumed; specific additional native exception will be requested only after final preparation review.31/43 accepted;12open;C12 unopened.
+
+
+C11 approved saved-server finish is CONSUMED/PASS: exactschemas/README200/echo200/invalid400 and catalognames, actualownedupstreamrelease and normal original51214/51203 restoration/fullcanonicalhandback passed; independent reviewCLEAR.31/43unchanged. No finish approval pending. Next is source-level REST Hub-policy consistency causal investigation; no reproduced product bypass or productionfix yet.
+
+
+C11 first distinct authority case FAILED at a strict authenticated actor check after actual ordinary users/scoped role/profile/binding were created; no MCP session/tool/revocation checks reached. Normal changed-driver recovery remains unexecuted. Private API/upstream released and server disabled. Original90273/90258 restoredready7.410s and full canonical original Chat/draft/prior-record handback PASS after a reviewed exact-relative monitor guard correction; failed histories preserved. No C11 acceptance;31/43 selected accepted,12 open.
+
+
+C11 normal authority recovery reached ordinary-account/Admin-denial/session/catalog checks but FAILED at the first actual README protocol outcome. Original93270/93261 full canonical handback PASS. Source no-auth resolver defect reproduced2failed5controls, minimal repair now passes new7 in48pass1fail connected batch; separate fixture patch-ownership leak corrected and changed3cases pass. All source/outcome scopes and failed histories retained in working plan. Additional repaired-source authority run is prepared but needs a specific exception to consumed native initial+one recovery; final review pending/question not yet asked.31/43selectedaccepted/12open,C12 unopened.
+
+
+C11 specifically approved repaired live authority case CONSUMED/PASS: real exact ordinary accounts/session/README, invalid/ungranted/foreign-session denials and same-session current-policy revocation. Private owners released/serverdisabled. Original7630/7621 restoredready7.163s/fullcanonical Chat/draft/priorrecord handback PASS/zero protected mutations. Earlier failed histories retained; no extra grant pending or unchanged authority replay. Remaining C11 transport/recovery/UX/applicable modes stay open;31/43selectedaccepted12open;C12 unopened.
+
+C11 checkpoint2026-10-21: real cancellation subcase and truthful Tools display qualified with full original handback; current source repairs for credential encryption rejection/partial-write prevention, membership audit owner, PostgreSQL inventory nullable filters and mutation-result acknowledgement have causal and connected checks plus independent/security review. Native remaining SQLiteSingle and PGsingle reached real credential persistence but their full receipts remainFAILED; no log/whole-case acceptance is inferred. PGsingle initial+normal consumed; PGmulti initial remains unattempted. Confirmed UI secret-draft target carryover is next source unit. Original59639/59632 API/current Zi frontend/oneChrome and original Chat/draft preserved; latest backend repairs not yet loaded into originalAPI.31/43selectedaccepted12open/C11open/C12unopened; frozen523ef+unpublishedWIP/notlatestdev, heartbeatPAUSED/noGit/publication.
+
+
+C11 current progress: scoped PostgreSQL multi-user remaining cell passed with released owners and full canary log checks; completed generated fixture removed/control retained. Credential-context source defect repaired with15new real-component regressions: compositional UI27+8passes and complete35WebUIpasses, finalsource reviewclear/touchedtypes0/no newlint/security findings. Explicit bounded3-run test exception consumed. Live credential UI/export/remaining failed-mode validation andhumanUX stillopen; counts31accepted12open/C12unopened. New205binding build prepared, not executed at this note; no Git/runtime/publication.
+
+
+C11 latest2026-10-21: uod/205 build/frontend transition COMPLETE with fullcanonicalhandback. All four database/auth-mode credential/log slices now qualified compositionally: PGmulti initial plus unusedSQLiteSinglelogrecovery and specifically approved SQLiteMulti/PGSingle credential-only finishes. Both extra grants EXECUTED/CONSUMED, no pendingquestion; failed historicalreceipts stayFAILED. Completedfreshroots removed promptly (7.33+5.75MiB), controlsretained. Read-only repairedHub/Back handbackPASS. First distinct U credentialUI/auditJSON+Markdown/screenshot case concretely prepared, reviewpending, no nativeexecution; remaining humanUX stillopen. Original59639/59632/API unchanged/currentuodfrontend35215/35185;31accepted12open/C12unopened; frozen523ef+unpublishedWIP/notlatestdev; heartbeatPAUSED/noGit/publication.
+
+
+C11 current: both specifically approved credential-only finishes CONSUMED/PASS; first distinct actual credentialUI/Save/Clear/freshreads/configured-secret realJSON+Markdown downloads PASS, fulloriginalhandback and independentoutcomeCLEAR. Screenshot then exposed contrast; fourclass repairbuilt49/205 and switchedfrontend59244/59183 with fullhandback. Read-only visual recoveryFAILED after darkpass; exacttheme/cleanup/original61998/61989fullPOSTPASS. Two placeholder-token sourcecorrection prepared/lintclear; one extra concretebuild/runtime/read-onlyfinish underreview, NOTexecuted/NOTyetasked. Retired uod2515.5MiB removed; currentprofile retainedonlyforpendingvisualfinish. C11UXunaccepted/31accepted12open/C12unopened; frozen523ef+WIP/notlatestdev/noGit/heartbeatPAUSED.
+
+
+## Reviewed contrast finish exception pending
+
+Final extra-cohort admission requires explicit no-write/no-download flags, released download ownership, Logout200 exactly once/local settlement and all three zero write-pending ledgers. Eleven pure admission controls PASS; changed operator Ruff/Bandit clear (existing narrow B102 comment-parser warnings only); independent final blocker-only review CLEAR. ONE specific extra contrast cohort question asked once and PENDING: one600s build/frontend transition plus one guarded original API cycle/private read-only light-dark contrast and clean screenshot/original restoration, same Chrome/data/keys120s startup15s graceful cleanup. No dependent action executed without the explicit reply. Both prior credential-only grants remain consumed/PASS. C11open31accepted12open/C12unopened; frozen523ef+unpublishedWIP/notlatestdev/heartbeatPAUSED/noGit.
+
+
+## Contrast cohort consumed; original restored; read-only retry prepared
+
+Human extra contrast cohort grant executed/CONSUMED. BuildPASS114.554s/natural0/154pages/token+bundle0/_msoW6hILf-GQcaNKZd8T/205bindingsrestored; inherited fullbuildtypevalidation skip retained. Frontend73605/73557ready0.491; full PRE/Logoutdrain/POST and readPRE protected0. Native FAILED before browser login at exact-owner subprocess: root launched host using operatorfixall Python, api() uses sys.executable while browser requires BASE/.venv. Browserfailure did not reach contrast/theme/credential controls or replace screenshot. Host private Admin login/me did occur. Private73986/browser74084 released/APIgrace2.462/EOF/no upstream; historical browser cleanup errors remain verbatim.
+
+Restoration-only signed-out/drain/blank receipt independently establishes retirement, without promoting visual failure.14pureadmission+3publication controls PASS; interpreter root-cause guard adds2purechecks and rejects wrong interpreter before APIownership. Ruff/Bandit0errors0findings; independent finalsource/outcomeCLEAR. Correct retained application environment restored original76560/76551ready8.201s/fullcanonicalPOSTPASS/protected0, exactChat/fivemessages/Interrupted/draft and all named C03StudioC04C05C06records. Two earlier restore preflight errors started noAPI and consumed no startup. Currentbuild_mso preserved; reviewed stopped49 cleanup removed2515.6MiB logical output.
+
+Prepared ONE additional read-only visual check (no build/frontend switch) via c11_theme_validation.py/_host.py/_browser.cjs/_preservation.cjs, separate failed-history-preserving receipts. Exact original76560/76551/current_mso guard; correctBASE/.venv admission before API startup; same existingChrome/private data/keys,600s workflow/120s startup/15s grace. One original stop/privatecontrast+screenshot/originalrestore; no credentials/exports/tools/models/init/install/newtab/force/oldlog. Owner/startup/admission compilechecks and Ruff/Bandit clear; finalreview pending. No new question asked or extra native action executed at this entry. C11 remainsopen31accepted12open/C12unopened/frozen523ef+unpublishedWIP/notlatestdev/heartbeatPAUSED/noGit.
+
+
+Final four-source additional read-only visual preparation reviewed CLEAR. ONE new specific exception question asked once and PENDING; no extra native action or build. CorrectBASE interpreter, current_mso205 and76560/76551 cycle, separate historical-failure-preserving controls and full handback remain. Earlier contrast/credential approvals consumed; C11open/C12unopened.
+
+## C11 MCP discovery and scoped execution selected closure
+
+**Selected FUNCTIONAL + HUMAN UX ACCEPTED on frozen523ef plus unpublished WIP;32/43 accepted,11 open.** Existing reviewer audited both core oracles and all nine recovery categories CLEAR using the recorded native/component composition. Controlled real stdio profile/schema/trust/README/echo and account/session linkage, denied invalid/ungranted/foreign access and revocation, actual disconnect/same-input Retry, honest empty/stale/unavailable results, real permission focus/Stop, four-mode credential/log checks and actual UI Save/Clear/audit downloads passed. Causal policy/discovery/ACP wire/credential/database/presentation fixes retained their affected test, security and source reviews; no unchanged suite replay.
+
+Final corrected interface passed actual dark selected13.294:1/placeholder8.271:1 and light selected13.520:1/placeholder5.119:1; exact stored dark restored. Human explicitly accepted the settled screenshot. Final private API82068/browser82139 released/APIgrace2.853s/outputEOF/no upstream; Logout200once/allthreepending+writepending0/cohort/observer/download ownership clear. Original API82260/monitor82246 ready7.897s; exact canonical Character7 Chat/five messages/Interrupted/draft and named C03/Studio/C04/C05/C06 records passed, protected mutations0. Current frontend73605/73557/_mso205 preserved. Reviewed completed credential profile10.04MiB and accepted screenshot removed; stopped49 build2515.6MiB removed earlier. Needed functional guards/controls and concise failed outcomes retained. Only the completed owned C11 plan is removed after final review.
+
+**Limits retained:** real-agent L is API admission plus exact two MCP tool events/results and saved UI-history inspection, not realtime browser Send or all-mode L. Cancellation proves Stop ACK before later upstream completion and truthful502/no late history, not immediate upstream abort. Four-mode, test and recovery results are compositional; UI27+8 is not a fresh full35-case run. Historical failures remain failures. No full426 variant, supported-upgrade/release-wide/latest-dev/full-TypeScript qualification, publication, rebase or merge is implied. Existing governing ADR016/030/033/052/059 apply; no new durable architecture decision. C12 remains unopened until its separate entry.
+
+
+## C12 workflow scheduled and monitored result selected closure
+
+Selected C12 is accepted on frozen523+unpublished WIP, with human UX acceptance. Existing TASK-13260.278.18.83.45 retains detailed causal and execution notes; its broader status/AC/DoD remain open.
+
+- Actual editor Save/reopen, named-input refusal, ordered dependent steps/events/output and exact run identity passed. Real provider denial/blocked dependent and legitimate same-run Retry, delayed cancellation/drain and duplicate-key recovery passed in SQLiteMulti.
+- Real minute-cron task/worker/run linkage, disable through the next minute, invalid cron/timezone, restart between completed executions, and actual manual/due queue contention with exactly three serialized outputs passed. This is not in-flight crash/replay qualification.
+- SQLite single/multi and official restricted PostgreSQL single/multi saved execution cells passed. Multi-user cells used normal Admin-provisioned narrow workflow permissions and reciprocal ordinary-user read/run/control/list boundaries; this does not assert those permissions are default grants.
+- Causal repairs preserve existing contracts: timezone-only update validation; atomic failed-run Retry/typed dependency continuation; real llm provider snapshot/default policy; and native PostgreSQL datetime projection at eight public string/null fields. Component scopes and earlier failed/harness outcomes remain explicitly separate in task notes. Timestamp scope passed25cases; scoped security has no new findings.
+- Final independent actual-source/new-body/outcome/catalog composition review CLEAR. Full original Chat/five IDs/Interrupted/draft/other records/owners/build handback passed. Original API was not restarted; fresh private same-source APIs qualified backend repairs.
+- Exact disposable original workflow1 was soft-retired through the normal API after complete DSL/run checks; its succeeded run491050b4-c4e0-48c3-83aa-fd8c3b84f973, steps and events remain unchanged. All C12 private fixture bulk and accepted screenshot removed.68 obsolete own operator/control/cache files removed484914bytes. Completed own C12 plan and temporary native fixture entry removed; production code/regressions retained.
+
+Selected total:33/43 accepted,10open. Latest-dev integration/rebase, complete426release variants, CI/native/installer/publication/merge and other retained gates remain separate; no Git/ref/publication change occurred.
+
+### X01 entry and preflight repair
+
+At this historical checkpoint X01 was active; its completed plan has been removed. See the [retained closure](#x01-supported-upgrade-selected-closure). Exact latest public v0.1.46 tag/commit verified read-only; oldest supported starting release awaits product answer. Two real preflight defects reproduced with4failed4passed, then fixed minimally: Python>=3.12 and recursive nested SQLite-store inspection. Full existing18+new8=26passed30warnings/0.74pytest1.885outer/natural0; scoped compile/security and independent actual source/full test/caller review clear. New tests lint/format clear; production inherited diagnostics unchanged. This is helper qualification only: prior-release installation, complete backup/separate restore, published upgrade, intended PostgreSQL role and recovery cases remain open. Other upgrade.sh source hazards are recorded in the plan; no actual Git/install/download/runtime/browser/publication action occurred. Original runtime/Chat/data/keys preserved; frozen523+WIP/not latestdev and heartbeat paused remain. Selected total33/43 accepted,10open.
+
+X01 script component follow-up: causal3failed2passed then corrected5passed; terminal postcheck failures, explicit offline acknowledgement, unique temporary output and truthful startup/recovery guidance independently reviewed CLEAR. These separate helper26/script5 runs do not accept native backup/restore/upgrade. Requester selected oldestv0.1.3; no exact public artifact found, source clarification pending. Verified latestpublicv0.1.46 wheel setup is being prepared. Selected33/43 accepted,10open; X01soleactive. Originalruntime/Chat/data and all remaining boundaries preserved.
+
+X01 starting releases clarified by requester: oldestv0.1.43 plus latestpublicv0.1.46; earlier unavailablev0.1.3 answer superseded. Realv0.1.46 publishedwheel now installed in separateprivatepiptarget with complete declared requirements and allpackage/metadata bindings verified, retainedBASEunchanged and redundantdownloadremoved. v0.1.43 requires its own compatibleFastAPI0.136.3 rather than currentBASE0.142.4; separatetarget in preparation. No appstartup/upgrade/restore acceptance;33/43 remains.
+
+X01 oldest-safe scope: requester wants the oldest verified data-preserving path, so v0.1.43/v0.1.46 are checkpoints rather than an arbitrary permanent floor. v0.1.43 plus its required FastAPI0.136.3 private install now passes complete metadata/dependency/binding checks; current BASE unchanged and redundant wheels removed. Source-only v0.1.32 Media23 is within the documented22+ migration boundary; classic Beta/PoC stores need further recovery mapping. No earlier-version support, application startup or native upgrade acceptance is claimed. X01 sole active;33/43 accepted,10open.
+
+X01 real-artifact progress: v0.1.43 private ordinary CLI setup passed; v0.1.46 publishedwheel initializer failed on missingEmail and remains unqualified. Current-candidate packaging repair adds19 docstring-only markers after exact causal failures; full19 discovery checks, scoped static checks and independent review pass. A normal private wheel build verifies complete selected3726 packagefiles/47datafiles including MCPpy.typed. Temporary build bulk removed. No installed-app startup or native upgrade/restore acceptance;33/43 accepted,10open, X01soleactive and heartbeatpaused.
+
+X01 corrected-candidate installed artifact and ordinary CLI bootstrap now pass after complete337-node708-edge requirements/binding checks. Retained BASE/runtime owners unchanged; completed bootstrap and redundant wheel removed, only active candidate site retained. Real prior-release record creation, backup/separate restore, upgrades and oldest support remain open; selected acceptance still33/43,10open.
+
+
+X01 PostgreSQL role-contract repair is component-qualified: official nonowner regressions and exact catalog/RLS/FTS drift refusals pass across separately recorded cohorts; affected existing163controls pass, scoped lint/compile/security and independent final review clear. Owner migration authority/private journal preserved; original runtime unchanged. The active installed candidate predates this repair and needs rebuilding before native acceptance. Earliest publishedv0.1.32 private CLI bootstrap succeeded0.954s; real historical records, backup/separate restore and oldest safe upgrade remain open. Selected33/43 accepted,10open; X01soleactive, X02untouched; no latest-dev/Git/publication/runtime transition and heartbeatpaused.
+
+X01 focused genuine0.1.32 PostgreSQL Jobs plus per-owner SQLite Prompt-sidecar upgrade passed1test4.777s with official separated fixtures, restricted runtime/RLS, exact source/archive preservation and immediate disposable cleanup; this excludes AuthNZ/Media/Notes and full-mode acceptance. The subsequent approved repaired browser cycle passed0132 old/new saved Chat and reload, then failed Disconnect drain; mandatory full original handback passed62.894s to API16501/monitor16488. Raw named sender is confirmed to render as You in shared selected-history display; causal repair in progress, actual pending Disconnect metadata still unknown.0143/0146 browser checks unattempted; cycle grant consumed.33/43 accepted; X01 sole active, X02 untouched.
+
+X01 named-sender display repair passes37connected checks in each client; raw capture/provider-history contracts retained and semantic tool/function sibling variants corrected after causal review. New failed-drain metadata retention/clone controls5pass. Scoped static checks add no diagnostics; actual UI build/live Disconnect and release-checkpoint finishes remain open. One build-only wrapper is prepared/unexecuted/unapproved.33/43 accepted; X01 sole active, X02 untouched.
+
+X01 independent historical PostgreSQL AuthNZ component remains OPEN: two current-owner comparison failures led to a verified strict UTC-instant oracle correction (nine controls pass); third actual cohort stopped before migration on generated test-password policy. Fixture correction now guarantees complexity/no forbidden triples with128 random bits; final source review/static/security clear. No fourth cohort or new runtime/build executed; separate specific retry exception needed. Both obsolete failed AuthNZ roots promptly removed; protected session intact. Selected33/43 remains; X02 untouched.
+
+
+X01 current outcome supersedes prior pending-build/retry prose: both explicit grants are consumed. New frontend build passed109.634s/205bindings restored and is NOT serving. Genuine historical AuthNZ preservation passed through current-owner migration, then restricted runtime startup failed. Shared nonowner-readiness repair is source/security-qualified;10-file changed-source official PostgreSQL validation is running. No further historical or browser/API/frontend transition has run or been approved.33/43 accepted; X01 remains sole active; X02 untouched; oldest support floor unaccepted.
+
+
+X01 current: the first changed-source AuthNZ cohort recorded 118 passes, two failures and ten fixture setup errors. Final catalog-code, parser and fixture-input corrections are independently reviewed. The next actual test run completed but its reporter lost the outcome before a cleanup guard rejected normal pytest links; it is explicitly UNQUALIFIED. Its payload is removed. The corrected 19-case reporter passes safety/static/security checks and review; one specific fourth-run exception is pending. Earlier build/account-check approvals are consumed, the new build is not serving, and historical account-runtime preservation remains unaccepted. Selected 33/43 accepted; X01 sole active, X02 untouched; no Git/latest-dev/runtime transition.
+
+
+X01 current: explicitly approved corrected AuthNZ follow-up passed 19 cases / 33.02s pytest / 36.650s outer with clean supervision, preserved live owners and immediate fixture cleanup. Source/component qualification is complete in this scope; installed candidate and genuine historical runtime account reads remain open. Build-only and account-check grants plus this fourth test grant are all consumed. Preparing a separately reviewed artifact refresh/historical check; no such action executed. 33/43 accepted, X01 sole active, X02 untouched.
+
+
+X01 installed-artifact preparation is reviewed and static/security checks pass. One combined candidate refresh (normal isolated build tools/local private install) plus genuine historical-account validation exception is now pending, asked once. No build/install/activation/historical replay followed. The approved19-case source validation is consumed/PASS. Selected33/43 accepted, X01 sole active, X02 untouched.
+
+
+X01: both combined exceptions granted and consumed. Refreshed installed candidate qualified all3775 bodies and dependency/source/owner boundaries in19.778s; old artifact/build/cache removed. Genuine0.1.32 PostgreSQL account/password/role whole-backup/separate-restore/current-migration/nonowner-runtime check passed1case/12.36pytest14.434outer; source/archive and live owners preserved, fixture payload removed. Selected AuthNZ defect resolved; remaining X01 store/mode/browser/support-floor cells still open.33/43 accepted; X02 untouched. No pending approval remains from this cohort.
+
+
+X01 cleanup complete: two completed operators removed (31632 bytes) after qualified generic-helper relocation; temporary security baseline2395 bytes removed. Product regressions, active candidate/profiles/archives/build retained. Refresh/account approvals consumed/PASS; no pending approval. Preparing the already-built display transition; no live frontend/API/Chrome action yet.33/43 accepted; X01 open; X02 untouched.
+
+
+X01 frontend-only transition is prepared and independently reviewed CLEAR, unapproved/unexecuted: already-built display fix, original API/Chrome protected, full normal handback plus one cleanup-only retained-build fallback. Actual operator guard/session/deadline controls pass; no live action. Completed unused build operator removed2838bytes, build retained. Both installed-refresh/account grants consumed/PASS;33/43 accepted; X01 open; X02 untouched.
+
+
+X01 approved frontend transition consumed/PASS: built1XNm nowserving1680/1666, ready0.858s; full original Chat/draft/records restored, both control sessionsclosed,0 protectedmutations, API16501/16488/Chrome58150/58135 unchanged,133.62sworkflow/fallbackunused. Shared frontend ownerpair verified/securityclear; completed wrapper+3stepcontrols removed15385bytes. No pendingapproval. Remaining historical browser/API and PGstore/mode/floor gatesopen;33/43accepted/X01active/X02untouched; no Git/model/install/build action.
+
+
+X01 remains sole active33/43; X02 untouched. Frontend-only transition consumed/PASS on1XNm, current frontend1680/1666, API16501/16488 and Chrome58150/58135 preserved. Separate historical Chat/reload API-cycle proposal is now GET-only and independently reviewed CLEAR;14 pure/MockTransport controls plus owner/deadline/restoration/output-drain controls and static checks pass. No application constructor/store read, fixture HTTP, browser check or next API cycle executed. The explicit exception is not yet granted; no pending frontend approval. See X01 plan GET-only historical browser validation preparation. All remaining PG store/mode/support-floor gates stay open.
+
+
+X01 sole active33/43; historical Chat cycle exception consumed/FAILED at0132 strict drain after old/new/reload/named-assistant display assertions passed.0143/0146 unattempted. Stale C11 frontend handback guard corrected/tested/reviewed; original API52271/52241 ready16.972s and original Chat/draft/five IDs restored within original600s. Fresh handback canonical snapshots compare; lost pre-cycle full baseline remains unverified. Temporary control session closed,0exact stale-session matches/no revocation. Frontend1680/1666/build1XNm and Chrome58150/58135 preserved. No further live check or approval pending; strict-drain cause and other PG/support-floor gates remain open; X02 untouched.
+
+
+X01 current next step: ONE reviewed60s/two-reload document/request diagnostic question askedonce/PENDING; no API cycle, Logout, Send, build/install/model action. Driver19operatorcontrols andindependentreviewCLEAR; no live diagnostic executed. Original API52271/52241 and Chat/draft restored; strict-drain cause remainsopen.33accepted10open;X02untouched.
+
+
+X01 ONE approved document diagnostic consumed/FAILED12.794s: original Chat/five IDs/draft and all owners preserved, child/group released. All3ledgers retained3 old-document GETs after two reloads; ONE unexpected write lacks path, so no causal/no-write qualification. No approval pending/live replay. Preparing actual NotificationLifecycleProvider pagehide/eligible-pageshow causal component tests before any product fix; sole caller/test/config scope recorded in task, ADR:no new rule. Other Chat/audio requests and write unexplained;33/43accepted10open,X01active/X02untouched.
+
+
+X01 local notification document-retirement fix now component-qualified: causal3red, final50provider passes and separate15shared passes; source-review credential-return edge separately reproduced1red then fixed. Final lint/syntax clear; peer reviewCLEAR; exact16functionalbindings restored/protectedowners unchanged/groupsreleased. Running build unchanged; no browser/API/build/Git action and no X01 acceptance. Next method/path-only bounded diagnostic prepared with4controls, review pending, unapproved/unexecuted. Other pendingGETs/unexpectedwrite and all remainingmode/store/floor gates open;33/43accepted10open,X01active/X02untouched.
+
+
+X01 second explicit diagnostic consumed/FAILED12.3s, originalChat/5IDs/draft and allowners preserved, groupreleased. Unexpectedwrite nowidentified POST RAGimplicitfeedback; source has normal3s last-answer dwell timer but actualpayload unobserved. Same3oldpendingGETs remain; notificationrepair stillcomponent-only/notserving. No approval pending/live replay; strict narrow feedback-admission and changed-build preparation under source review.33/43accepted10open,X01soleactive/X02untouched.
+
+
+X01 notification build-only proposal is concretely reviewedCLEAR, unapproved/unexecuted: normal205bindings/600s/owned15s cleanup;7publication+5realfile-cleanup controls andpreflight/static/security clear. Completed diagnostic10083bytes/privateexport removed afterreleaseguards; no old bulk added. Sourcefix50+15 remains local/notserving, feedbackpayload andotherGET causes unqualified.33/43accepted10open/X01active/X02untouched; no pendingapproval yet.
+
+
+ONE distinct notification build-only exception askedONCE/PENDING: reviewed existing-stack205bindings/600s/15s-owned-cleanup, packagingonly, no runtime transition/install/download/model/Git. Old single-build and both diagnostic grants consumed; never reask/replay them. No build hasrun; no answer inferred from elapsedtime/genericcontinue.33/43accepted,X01open/X02untouched.
+
+
+X01 ONE notification build grant consumed/PASS108.394s/0,0,0: s0corf3qTeC_KPhCwhzN2 packagedonly,205bindingsrestored/buildgroupsreleased/allliveownersunchanged,reviewCLEAR. Completedoperator+ownbytecode 1files/13939bytesremoved; normalartifact/controlretained. No fulltypecheck/liveclaim, no transition/checkgrant orpendingapproval.33/43accepted/X01open/X02untouched.
+
+
+X01 corrected notification cohort consumed: frontend replacement PASS, current80335/80282/builds0cor ready0.943s; API52271/52241 and Chrome58150/58135 unchanged. Two-reload validation FAILED: three old-document requests have no terminal event after10s. Original five messages/draft preserved, control tokens closed; full other-record comparisons completed, but Chat/settings response hashes differ from PRE while saved messages match exactly. Full canonical preservation and cancellation cause remain open; no rewrite/new baseline. New frontend remains running, fallback unused, no extra native action authorized. Source-only lifecycle/metadata diagnosis preparation may continue.33/43 accepted, X01 sole active, X02 untouched.
+
+
+X01 bounded diagnostics consumed: corrected final run natural0/17.602s, CDP cleanup fixed and original5messages/draft preserved; strict old-request termination and original Chat/settings response hashes remain failed. Current objects unchanged within the run. Frontend80335/80282/builds0cor/API52271/52241/Chrome58150/58135 preserved.33/43accepted; X01 sole active, X02 untouched. No additional native scope inferred.
+
+
+X01 private API diagnostic preparation is tested/security-checked and independently reviewed CLEAR; ONE distinct private-startup diagnostic exception is GRANTED/CONSUMED; its private API47030 failed graceful cleanup, then the separately approved exact force-stop released API and host47027; no overall qualification claimed. Isolated installed-Next proxy cancellation passed, but live Chrome terminal/historical Chat-settings hash gates remain open. Prior native3/proxy1 grants consumed;33/43 accepted, X01 sole active, X02 untouched.
+
+
+X01 private diagnostic graceful shutdown FAILED; API47030 remains passively supervised by host47027/exec16259. ONE exact-private-API force-stop cleanup is tested/reviewedCLEAR and askedonce/PENDING, no signal executed. Current UAT owners preserved; no acceptance/retry/restart implied.33/43 accepted, X01open, X02untouched.
+
+
+X01 exact-private-API cleanup grant consumed/PASS: API47030 and host47027 released; no pending approval. Final data showed normal stream/Chat returns and unchanged private canonical objects, but shutdown failed and required the approved force-stop. Overalldiagnostic FAILED, no exact teardowncause proved. Source-only shutdown follow-up continues; no new startup/retry inferred.33/43accepted, X01open/X02untouched.
+
+
+X01 launcher/cleanup guards are now privately runtime-validated: readiness11.099s, actual ASGI shutdown receipts, graceful exit0.174s/no force, protected owners unchanged. This resolves the operator signal-mask/receipt issues; historical browser, canonical baseline, remaining stores/modes/support-floor and UX gates remain open. Human authorized necessary X01 diagnostics/retries; no pending approval.33/43 accepted, X02 untouched.
+
+
+X01 genuine v0.1.32 PostgreSQL backup exposed and now source-validates two minimal repairs: canonicalize four legacy Sync policy predicates during owner migration, and avoid settings CREATE for an already-existing table during ordinary runtime access. Policy/strict-refusal controls5+5 and settings15 passed separately; selected existing-archive restore/readback passed1 with actual restricted runtime and preserved archive hashes. Installed candidate is still stale; full14-family/artifact/browser/mode/recovery gates remain open. Protected original owners unchanged, no new export or runtime/Git action.33/43 accepted, X01 sole active, X02 untouched.
+
+
+X01 launcher/startup/graceful shutdown and the two newly demonstrated PostgreSQL upgrade repairs are now qualified at their stated scopes. Approved isolated candidate build/install PASS24.898s,3,775files/336nodes; actual installed fourteen-family historical archive PASS1/9.025pytest9.358outer, strict runtime privileges/archive preservation/cleanup allpass, originalownersunchanged. Stage2Complete; X01 Stage1/3/4 and browser/original-baseline/mode/support-floor gates open. Completed failed fixtures/packaging operators removed, necessary current artifact/archive/ownership helper retained.33/43accepted, X01 soleactive, X02untouched.
+
+
+Human accepted only X01's irrecoverable original Chat/settings comparison limitation; no exact historical response preservation claim or replacement baseline. Other browser/mode/support-floor/UX gates remain open.33/43accepted,X01soleactive,X02untouched.
+
+
+### X01 requirement-backed continuation
+
+Private repaired installed-API task/connection observation PASS9.023s,ready8.647s,graceful shutdown0.201s/exit-15/no force; original owners/data/archive preserved. Completed private host/CLI/controls removed. Independent requirement traceability removed retrospective closure of three historical Chrome IDs as an investigator-only prerequisite; their old results remain failed/unknown. Future cohorts require actual server completion/teardown plus strict write/principal/UI/canonical guards. Stage1 identification Complete and Stage2repairComplete; Stage3actual workflows/recovery and Stage4UX/review/cleanup remain open. The ownedX01plan now maps3startingdeployments×4cells and9variants, with component/API credit separated from whole-cell acceptance.33/43accepted10open/X01soleactive/X02untouched; frozen523+WIP/unpublished/notlatestdev/heartbeatpaused.
+
+
+### X01 original runtime restored after launcher repair
+
+X01remainssoleactive33/43accepted10open; X02untouched. The prospective three-checkpoint cycle failed before any target check and remainsfailed. Normal original Logout/drain/blank succeeded, but fresh teardown log proof was inconclusive; restoration preflight then exposed a PermissionError/PID-reuse guard defect. Minimal shared strict-birth repair qualified/reviewed; originalAPI31541/monitor31524 ready9.952s. Normal original UI/5message content+IDs/draft handback and post-startup object comparison passed, temp controlsessionclosed. Frontend80335/Chrome58150 unchanged. No old PRE recovered/retrospectivepass; accepted original preservation limitation remains narrow. Completed permission testremoved; active monitor retained. SeeownedX01plan for exactscope/failures; next preparation protects currentAPI via existingprivate18908 route, no further originalstop.
+
+
+## X01 isolated frontend preparation
+
+Current quickstart18906 rewrites prevent supported private18908 historical Chat validation without stopping the original API. Normal isolated205-binding packaging prepared, operator controls/static/security checks qualified, final narrow review pending; no build/startup/transition. Current API31541/31524 and original UI/Chat remain preserved. X01 sole active33/43accepted/10open; X02 untouched. Narrow original-comparison limitation accepted; no other gate waived.
+
+
+## X01 malformed-old-data component passed
+
+Real v0.1.32 non-object settings+saved message survived normal backup, two separate current installed restores/migrations and explicit DB-level correction.1passed1warning/1.85s; source/archive/current owners preserved, completed disposable data and2temporary operators13,546bytes removed. Component only; native resume/browser/remaining modes/final UX open. Private18908 frontend build preparation/review clear; distinct one-build decision pending, no build/transition. X01 sole active33/43accepted/10open; X02 untouched.
+
+
+## X01 isolated private build qualified
+
+ONE approved build passed215.648s/natural0: compiler/token-sync/bundle-budget and four private18908 rewrites pass. Build4PkHAe6Y4Ip6ZKjj5HX74 retained;205bindings restored and original API/frontend/Chrome/build preserved. Build grant consumed, no startup/transition or TypeScript qualification. Completed build-only operators removed. X01 remains sole active33/43accepted/10open; X02 untouched.
+
+
+## X01 private UI and linked-account progress — 2026-10-23
+
+Human accepted X01 UX. All three historical SQLite-single built UI checks pass; whole linked SQLite-multi cohorts pass for published v0.1.32 and genuine-source v0.1.46, with actual Admin/Alice/Bob permissions/content/Jobs, old backup/separate restore/migration, new writes/provider turns and both real UI logins/reloads. Genuine-source v0.1.43 API/UI work passed, final read-only lifecycle finish remains active after correcting the intentional404 oracle. Original runtime/Chat/draft and source/archives preserved. PostgreSQL/shared recovery and final review remain open.33/43accepted10open, X01 sole active, X02 untouched; frozen523+WIP/unpublished/notlatestdev/heartbeatpaused.
+
+
+X01 SQLite continuation: corrected0143 read-only lifecycle finish PASS2.338s/no generation/browser, preserving saved work/source/archive/config/owners; preceding source-hash failure staysfailed. Six SQLite cells now have their explicitly scoped upgrade/API/UI/lifecycle evidence and human X01 UX acceptance. PostgreSQL/shared recovery/finalreview remain open;33/43accepted10open,X01soleactive,X02untouched. Completed546fixturefiles141544881bytes removed; active0143target and genuine releases retained for remaining work.
+
+
+X01 PostgreSQL foundation repairs now have real causal/green coverage: ordinary-role startup, required schema/default/backfill/refusal, one-free-slot handoff and connected read-only STT repository. Fifteen finalstartup checks pass; STT pool/direct positives and9admincontrols pass plus2correctedrefusals. All6touchedfiles lintclear, real-file Bandit0new/0errors, production0; independent source review clear at recorded scope. Installed candidate refresh must use fresh /private/tmp/tldw-x01-startup-20261023/site because the previous repaired site serves the protected original API. WholePG/sharedrecovery/finalreview remainopen.33/43accepted10open,X01soleactive,X02untouched;noGit/originalruntimecycle.
+
+
+X01 2026-10-23 continuation: ordinary PostgreSQL startup/STT permission repairs pass focused causal/affected checks and independent source review; whole linked PostgreSQL modes remain open. Original runtime processes were unexpectedly absent (cause unproved, no stop issued). Flat same-profile/build/Chrome restoration passed seven distinct operator controls and source/security review; actual restoration is underway. Source-binding inference corrected in X01 plan.33/43accepted10open,X01soleactive,X02untouched; no Git action.
+
+## Latest-dev integration — 2026-10-23
+
+The committed-history rebase is complete; all34old commits are equivalent/superseded upstream. The unpublished source was preserved through an exact finite copy and retained Git stash, then resolved against newer contracts. X01 stays open until actual installed combined-source mode/recovery qualification and final review; no acceptance is transferred from old artifacts. In the qualified separate Python3.12.13/pytest9.0.3 environment, the integration migration collision reproduced3failures and is repaired by numbering only the MCP addition104, preserving101–103; all3regressions pass. The legacy Character display defect reproduced8failures/10passes; the minimal display-only projection now passes the complete28-casefile in both UI/WebUI, preserving canonical provider history/native metadata isolation. No new live/runtime/latest-dev-completion claim. Remaining combined scope and new native-quota readiness/private-pool cleanup review findings are open.
+
+
+## X01 supported-upgrade selected closure
+
+Selected functional and human UX acceptance is complete by the scoped composition
+below. Prior failed runs remain failed; wider release gates remain open.
+
+The twelve cells are v0.1.32 published package, v0.1.43 source and v0.1.46 source
+across SQLite/PostgreSQL and single-/multi-user modes. They passed on their
+recorded4e-based installed artifacts, including the later profile-read fixes.
+The current310642 candidate rebases those fixes onto dev22c9;744 affected checks
+(one inherited streaming skip), a fresh3817-file package, unchanged TH frontend
+and the current live recovery pass complete the explicit composition. This is
+not a fresh repetition of all twelve cells on22c9.
+
+| Required variant | Selected outcome |
+|---|---|
+| Prior-data inventory | Genuine old writers created fourteen content families plus real accounts, credentials, roles and queued Jobs; IDs/content/counts/settings compared. |
+| Pre-upgrade restore | Whole configured backups restored into separate targets before migration; source/archive/sidecars preserved. |
+| Published migration | Actual candidate migrations and store outcomes verified under owner provisioning followed by restricted runtime, without role elevation. |
+| Post-upgrade operations | Old data/account scope, new Chat/source/Note/card writes, real saved provider reply, login/reload and lifecycle passed in the twelve declared cells. |
+| Interrupted upgrade | Actual disposable SQLite permission failure, correction/resume and separate-backup restoration passed. No PostgreSQL crash or old-binary rollback claim. |
+| Old browser assets/storage | Current persisted stale URL was observed before reload, canonical recovery afterward with authority unchanged, followed by authenticated retained Chat access. Obsolete JavaScript and older serialized storage formats remain untested. |
+| Changed routes | Legacy /chat/settings reached /settings/chat with its real heading; returning to and reloading the old Chat retained IDs/content. |
+| Malformed legacy records | Genuine v0.1.32 non-object settings survived backup/two separate restores/migration; explicit database correction preserved saved work. No malformed-specific native Resume claim. |
+| Settings migration | Documented settings/scope and post-UI historical values preserved. The human-accepted original PRE-payload comparison gap remains a specific limitation. |
+
+The final live recovery passed1case/1warning43.43s pytest44.222s outer.
+API/frontend release0.174/0.006s, actual lifespan completion/EOF/process-group
+release and zero pending work passed. Full original canonical objects, five
+message IDs/content, draft, URL, owners, configuration, source and archives were
+preserved; cleanup errors were empty. No model request or original runtime
+cycle occurred. The prior three recovery runs remain failed; no auth-expiry
+guidance result or exact bootstrap-branch attribution is claimed.
+
+The earliest tested published path is v0.1.32/Media23. Existing automatic Media22+
+support is unchanged; no all-intermediate-release or lossless pre22 guarantee
+follows. v0.1.32 PostgreSQL single-user is hybrid AuthSQLite/content+JobsPG;
+v0.1.43/v0.1.46 source qualification does not accept their failed published wheels.
+Fresh-install, release-wide/native/installer/publication gates remain separate.
+
+Completed disposable cleanup removed five historical/superseded roots and28
+retired operator/check files:181,807entries/5,387,693,120bytes. Exact process,
+environment, open-handle, UID/inode and no-follow boundaries passed; private
+venv dependency assets were admitted only through their installed RECORD
+metadata. Shared BASE/.venv, current22c package/build/environment, user models,
+original data/runtime/session and restoration dependency closure were preserved.
+Both completed owned X01 plans were removed; their task history remains.
+
+
+## X02 account and browser isolation selected closure
+
+**Selected FUNCTIONAL + HUMAN UX ACCEPTED;35/43 families accepted, eight open.** Human X02 UX is accepted. This is explicit composition across the recorded source and artifact versions, rather than a claim that one run executed every variant.
+
+| Catalog variant | SQLite multi-user | PostgreSQL multi-user |
+|---|---|---|
+| Reciprocal resources | Own read/write positives and reciprocal Note/Chat/card/draft/Job denials; per-user Media identity and exact original bytes | Six owned resource families, reciprocal valid-ID denials and foreign mutations denied; final asset-only check requires both foreign-file 404s with exact own bytes before/after |
+| Same-browser account switch | Recorded login/logout/old-tab controls, exact Back/history finish, and current normal-navigation/static continuation | Recorded 14 visible controls plus exact history finish; current static browser run passes both handoffs, Prompt suggestions, notifications and clean Bob re-entry |
+| Private retrieval | Real Bob cold/cache positives, Alice same-query candidate/citation/answer exclusion and saved usable Chat | Corresponding real generated RAG/cache and saved Chat isolation |
+| Share and revoke | Organization grant allows its declared read; forbidden rename and immediate same-session revocation deny access | Same real grant/read/forbidden mutation/revoke controls |
+| Admin operational scope | Authorized operational metadata positive with ordinary-user denials | Same; Admin never substitutes for either ordinary-user direction |
+| Switch during fetch/generation | Real helper stream interrupted by Logout; independent browser cancellation receipts; Bob helper empty | Same real helper-flight cancellation and clean account re-entry |
+| Old tabs | Held documents, old-tab state clearing, reload and exact Back/history composition | Same; current held Chat/notification documents reach login |
+| Same-name resources | Actual owner IDs/canaries and normal Media handoff/Prompt suggestions remain distinct | Distinct global Media IDs, owner controls and current handoff/picker positives |
+| Export isolation | Owned Note/card/Chat bodies plus legitimate original reupload and separate fresh-process exact-byte GET; foreign exclusions | Owned exports and foreign exclusions; separate final reciprocal original-file check |
+| Background Job isolation | Durable owned content/result positives and reciprocal Job denials | Actual worker/SDK completion under restricted role, reciprocal Job denials and current owned completion notifications |
+
+### Source and execution composition
+
+- Current local repair is e388823fe23e89fb82fb58dc04e788db7f6944f2 on frozen dev17141ff73c3caee7998d93a290598d6c3ab4ec0c, with all18 rebased commits retained. Normal hooks and the independently reviewed outbox patch match exactly. PR3309 is included; the then-reviewed PR3310 c0cd and PR3311 8d369 heads were reference-only. At closeout, PR3310 is newly merged as devc90 and PR3311 has advanced to fad63; those new heads are not integrated or qualified by this closure.
+- Earlier API, export, history and generated RAG/cache/Chat results retain their recorded dev22c/artifact scopes. Incoming source checks and the current redesigned build's affected checks compose with those results. This is not a release-wide replay.
+- Current frontend9Uple2O8HVh_i7zqXSUtk and private API package3817files/3roots/337dependencyNodes/722edges are qualified. The API-only outbox refresh took7.062s with no downloads; no frontend rebuild was needed.
+- Current read-drain finish passed32.936s. SQLite helper-flight passed33.642s; PostgreSQL helper-flight passed40.803s. Both observed typed answer content before real Logout and independent cancelled transport receipts, then empty Bob state. No natural EOF/DONE credit was substituted for cancellation.
+- SQLite static content assertions were reached in the failed43.542s whole run. Its separate normal Media navigation/reload/Logout continuation passed29.770s. The original whole run remains failed.
+- Current PostgreSQL static/browser phase passed45.744s: both owner handoffs/suggestions/actual Job notifications, held-document retirement, unsent helper clearing, clean Bob re-entry and real reload. All11 selected ASGI tasks completed; fresh pending/server/queued counters were integer zero; the frontend had only LISTEN before closure. Its outer wrapper failed only because an asset receipt was absent; the browser phase retains its scoped pass.
+- The separate asset-only PostgreSQL finish passed25.467s, native exit0 and zero parse errors. Exact structured Alice/Bob records require int404 and boolTrue owned-byte preservation. No browser, provider, worker or notification controls were replayed.
+- Causal repairs cover profile-owned file storage, PostgreSQL request/worker scope, RAG explicit-setting precedence, empty-answer persistence, helper account scope, document-lifetime cancellation and Jobs outbox context restoration. The outbox repair passed four causal tests, two SQLite event/filter checks and two explicit-disabled-outbox worker controls; compile/Ruff/security passed. Its production Black flag is identical to baseline.
+
+### Limits retained
+
+One prospectively registered old-loader reload stream remains UNKNOWN with completionEvidence=false, matching the independent synthetic calibration. It is not an endpoint-success or EOF receipt; fresh actual server-task/zero-work/socket proof precedes context closure. Other requests and auth writes keep strict completion gates.
+
+PostgreSQL uses the official isolated schema-owning NOSUPERUSER/NOBYPASSRLS role, not a DML-only role. Single-user reciprocal-account cells are N/A. Historical failed and unqualified runs remain failed/unqualified in the official task. Missing old fixture blobs were not recovered: later normal uploads and fresh reads qualify only their stated recovery. No model/service workaround, assertion weakening, original runtime cycle, publication or merge occurred.
+
+The protected original source, running owners, profile/data/keys, URL, five messages, draft and canonical objects remain preserved. Broader release qualification, the eight remaining workflow families and any future integrated open redesign PRs remain open.
+
+
+### X02 cleanup and handoff
+
+Guarded disposal removed two released private profiles, two superseded API packages,25 completed operators plus the accepted screenshot, and two untracked transient repository files:176,771,875 bytes. Current outbox package/frontend9U, dependencies, original22c package and complete original restoration closure remain. Fresh protected-owner and original-control byte checks passed; no original service, browser or data action occurred. Detailed failed outcomes remain in the official task. X03 remains next, without replaying X02.
+
+
+## X03 usability, accessibility and responsive selected closure
+
+X03 SELECTED FUNCTIONAL + HUMAN UX ACCEPTED,36/43 selected families accepted and7open. Human accepted redesigned Chat/Notes/Preferences screenshots. Current product7c10e740dd364097f29a42712597e6ad70838009 on frozen dev a412f6580b7ed0cf48fd7d222a47a20cfc0dde92 includes merged3309/3310/3311; frontend eSscMqvjgbFlezbusZlXw qualified72.214s/shared598.7KB. Recorded composition covers normal navigation/empty handoffs, real keyboard/inert/skip focus, expanded-desktop-mobile-desktop,1440/1024/390 and actual native200% zoom, light/dark, long multilingual Note, Spanish rendered text/document.lang/dir and English restoration, honest loading/saved/error and offline keyboard recovery with preserved key. Six minimal repair commits af06a8c,51b3c29,4e84449,512b38e,6321bc1,7c10e74 have causal/connected checks, static review and normal hooks. Final three unchanged original Notes ratchet cases on fresh library PASS18.703s,3executed/no skips/retries; measured zero blocking violations permits removal of exactly six stale baseline entries. Connected baseline unit reproduced1failure/10pass1.084s then13pass0pending0.671s after correcting only its nonempty-defects premise and adding empty-baseline regression guards. Wrapper output mislabeled that unit UI; actual cwd/config was WebUI. TypeScript parse and proper ESLint0errors0warnings/noignored, inherited Pages-discovery diagnostic. Ratchet retains normal readiness bypass, qualified as controlled existing E2E fixture separately from actual manual native connection; no new response mock/fixture/tolerance/comparator change. One sandbox browser failure and one closed-stdin host failure remain failed; both safely released without app qualification. Green actual ASGI shutdown active/pending/server/connections0/private groups released/original canonical objects and owners preserved. Before-context-close quiet is separately qualified by native cohort13;11passive browser reads remain UNKNOWN/no terminal credit. Exact guarded cleanup removed only11completed X03 profiles/operators/output/screenshots, original/current API/site/frontend/restoration dependencies retained. No full TypeScript, formal accessibility, all-language/date/plural/all-browser/device or extension certification; prior output/listening judgments and waivers retain their scopes. No Python product delta; Bandit N/A for TS/test/JSON/prose scope. ADR nonew; existing semantic/ratchet contracts and ADR049/059. Own completed X03 plan removed; durable closure in master/task, broader status/AC/DoD/history remainopen. Normal final review/hooks/local commit pending; no publication/queue/merge. X04 next; heartbeat remains paused.
+
+
+## X04 extension capture and continuity selected closure
+
+Selected acceptance37/43 after independent closure review CLEAR and human acceptance of Flashcards, native Chat and denied-access recovery UX. S01–S06 remain open. Candidate5b834 is local/unpublished on frozen dev a412 (includes3309/3310/3311); API package a264 and existing private WebUI build eSscMqvjgbFlezbusZlXw compose with the rebuilt current extension. This is selected workflow acceptance, not all426 catalog variants or broader release gates.
+
+| Selected X04 variant | Qualified scope |
+|---|---|
+| Packaged install/login | Fresh owned Chrome156 unpacked production package and normal private connect/login. |
+| Capture/WebUI handoff | Human real context-menu action; exact Selene sentence/source saved once as Note d50d5ce5-f497-40a7-af90-66b90e54668b; exact canonical body in initial WebUI document and true reload. |
+| Native card study | Real provider produces3drafts; remove third/edit first/save2exactcards; one real Good review and native/full-workspace reload counters. Later current-package account/Save and review-read bindings compose with controlled connected review tests. |
+| Native Chat continuity | Real grounded Selene answer to explicit captured text/source, two saved messages and draft survive real panel close/reopen/source reload. |
+| Account/server scope | Actual SQLite/PostgreSQL single-/multi-user binding composition, official restricted PG fixtures, Alice/Bob own catalogs/opposite absence and exact saved-card WebUI reload. |
+| Restricted page | Corrected native chrome:// guidance; no unrelated permission or false draft. |
+| No selection | Actual native guidance with zero fabricated draft fields. |
+| Permission denied/recovery | Normal Chrome Onclick withholding plus cross-origin navigation denies capture and retains exact unsaved draft; original access restored, fresh authenticated normal TestConnection, one toolbar activation, same native document/draft and one recovered capture; both test drafts removed without Save/generation. Optional prompt alone is undeclared/N/A. |
+| Offline server | Real private API outage preserves failed Save draft; normal same-profile reconnect and one legitimate Retry save exactly once. |
+| Invalid session | Supported own-session DELETE yields exact signed same-session401; normal login recovers and retained card survives exact WebUI reload. |
+| Narrow native UI | Flashcards360x905 real keyboard/axe triage13passes/0violations/0incomplete; native Chat360x905 essential-control overflow0; three human UX acceptances. |
+
+Repairs reuse existing boundaries: locationless-window initializer guard588d6c0, shared restricted-page guidance06ab244, artifact verifier/provider omitted-model contracta264651, and native owner/query/async retirement5b8345f. Source causals, connected checks, scoped security, independent actual/staged reviews and normal hooks passed before their local commits. Latest owner repair152checks per normal UI/WebUI configuration uses actual route/QueryClient with mocked identity/transport/browser boundaries; it does not certify native worker/storage races. Real replacement SQLite/PG account flows passed on the rebuilt package. Final own-session recovery required complete post-shutdown exact signed/prior-identity/revocation/window proof and a real own_session401; empty/ordinary-Logout reports cannot pass.
+
+Final permission browser observed222requests/218finished/4failed/pending0, independent cleanup empty; failure reasons not retained. All private ASGI active/pending/server/connections0 and API/frontend/browser/source graceful release passed, final API shutdown0.251s, original canonical/owner/current-control Logout guards preserved within600. A fresh read-only original Chrome check confirms its exact URL, B02 retained draft and five message IDs; temporary CDP client released and original owner bindings unchanged.
+
+Completed SQLsingle, SQLmulti and PG profile payloads are disposed. The last22superseded synthetic roots—including retained failed-attempt roots whose recovery purpose is now resolved—were removed only after fresh exact UID/path/inode/no-alias, empty warning-free scoped lsof, free private ports and original-owner guards. The first OS-wide handle guard hit a protected process and removed nothing; scoped queries supplied the actual no-handle check. Original profiles/control bytes, current artifacts/dependencies/models and unrelated WIP were preserved; no old pytest-temp/shared-cache cleanup. Human review screenshots are disposed. The completed owned X04 plan is removed; task history retains failures as failures.
+
+Limits remain explicit: unpacked rather than marketplace/persistent install; explicit source input rather than automatic Chat attachment; deliberate supported revocation rather than elapsed natural expiry; composed artifact/mode proof rather than repeating every workflow in every mode; narrow keyboard/axe triage rather than accessibility certification. Earlier unclassified401, predecode400 and checkpoint ReadTimeout runs remain causally unattributed failures, not application fixes. No publication, queue action, original-runtime cycle, model/install/download or S01 execution occurred during X04 closeout. Heartbeat remains paused.
+
+## S01 quiz and study assistance selected closure
+
+S01 SELECTED FUNCTIONAL + HUMAN UX ACCEPTED:38/43 selected families accepted, five open. Human accepted the settled study-assistant screenshot. All five selected catalog variants pass by this explicit composition:
+
+| Selected variant | Qualified behavior |
+| --- | --- |
+| Quiz scoring | Real Qwen generates five reviewed Biology questions with exact supported citations. One intentional wrong answer yields4/5 and80%; question scores, attempt identity and canonical reload match. |
+| Remediation cards | Exactly one missed-question card links the reviewed Mitochondria answer to the same quiz/attempt/deck. Default repeat creates no duplicate; true reload and one real Good rating retain the exact IDs, schedule and completed review session. |
+| Study assistant | Actual contextual answers identify Mitochondria, retain the source fact and persist the intended conversation. |
+| Assistant conflict | Two real clients write the same version, producing200/409. Rejected input survives explicit Reload latest; one deliberate resubmit succeeds. The eight-message conversation and canonical true reload match; no automatic resend. |
+| Generation failure | A real unavailable-Ollama request returns safe502 with the exact useful toast. Provider/count/selected source remain; complete prior quiz,4of5 attempt, conversion, card, eight-message assistant and Note match before/after failure and true reload. |
+
+Current frontend2a0245057b17a100442b33ce395f6bea4636e49c / BUILD54RnDCNE10vzciCahlGRn composes with installed2c50 API. Provider identity/model resolution, citation instructions, bounded output budget, shared409 extraction, typed API failures, PostgreSQL response timestamps and structured error detail received causal red/affected green, scoped syntax/lint/security, independent actual/staged review and normal local hooks/commits. No publication occurred. Frozen deva412 includes3309/3310/3311; no fresh live-dev or full-release claim.
+
+Native UI and real-model execution are SQLite single-user. The other three cells exercise the actual installed API, auth and storage with controlled generation fixtures, precise scoring/conversion/card/review/context checks, own-positive/foreign-refusal controls and physical engine witnesses. PostgreSQL uses the official isolated schema-owning NOSUPERUSER/NOBYPASSRLS role, not a DML-only role. Repaired PG single/multi passes37.988/41.481outer; SQLite multi changed-verifier recovery passes32.410outer. These are declared composition limits, not native/model replay in every mode or acceptance of all426 catalog variants.
+
+Final provider browser479started/473finished/6failed/pending0; failure reasons were not retained. Normal browser close173ms and independent cleanup passed. API47451/frontend47797 released0.268/0.005s; complete post-EOF ASGI active/pending/server/connections zero, original canonical/current-session Logout/owner and600s gates pass. Fresh read-only original Chrome verification confirms the exact URL, five message IDs and retained B02 draft; its temporary CDP client disconnected.
+
+Earlier failed runs remain failed. The first frontend build84.277s lost its original compiler output and remains causally unattributed; the second71.716s proves Node's default4GiB heap exhaustion. The reviewed private compiler8GiB setting with12GiB available-memory guard passes actual heap configuration checks and a105.469s normal build, preserving7752 inputs/owners and passing token/bundle budgets. Build configuration still skips type validation; this is not a full TypeScript pass. Earlier diagnostic, selector, startup and slow-close failures are not converted into passes by later scoped recoveries.
+
+Guarded completed disposal passed16.137s: nine S01 private profile/Chrome roots, superseded output-budget package,23 completed operators, accepted screenshot, temporary untracked mode wrapper and inactive webpack compiler cache are removed. Fresh exact UID/canonical/dev-inode, two empty warning-free scoped lsof checks, free ports and original owner/control/build guards precede disposal. Current installed2c50/compiled54Rn artifacts, shared helpers, dependencies, original profiles/data/keys and unrelated WIP remain. No shared/model/old pytest-cache cleanup. Only the completed owned S01 plan is removed; durable failures/results remain in the official task. Heartbeat remains paused; S02 is next.
+
+### S02 provisional acceptance withheld by final review — 2026-10-26
+
+S02 positive roundtrip, advertised-format, full-account and four-mode checks pass by explicit composition; human accepted its import-job, partial-failure and recovery UX. Final review found that corrupt/retry catalog instances cover each advertised format. Archive native recovery is qualified; JSON/database controlled tests are not live negative/retry acceptance. Those live instances remain before closure. Selected acceptance38/43; S02–S06 remain open.
+
+Native SQLite single-user checks cover the19-category full-account contract with exact content, remapped links, assets, ownership, manifest scope and secret exclusions; the independent reader passed38 checks. Corrupt/failed jobs retain truthful history; corrected Retry avoids duplicates. Genuine OpenWebUI JSON and database imports preserve exact Chat text, parent links and image references/bytes after reload. The database preview requires selecting one of two real source users and excludes the other. Real hydration reports missing/unsupported refs; legitimate recovery reports already-hydrated data. The final canonical reader passed31 checks. Declared reference-only and non-restorable categories keep their explicit warnings; this does not promise credential or complete relationship recovery.
+
+Additional live HTTP composition covers SQLite multi-user (21.996s/23.302s outer), PostgreSQL single-user (26.252s/27.675s outer) and PostgreSQL multi-user (25.692s/26.86s outer). Real background import/export and a nonempty Chat/Note allowlist restore preserve exact text and remap IDs/links. Alice/Bob resource, job and download denials retain source data; PostgreSQL single-user has a separate real foreign-row positive witness and stale-account guard. Each private API retires cleanly, preserving original canonical data and all three protected runtime owners. The native variants are not claimed as rerun in every mode.
+
+The final PostgreSQL repairc607 uses current-schema metadata presence and portable job upserts. Four real SQLite/restricted-PostgreSQL current/legacy tests pass, including every persisted field, NULL clearing, explicit completion counts and caller rollback. Scoped compilation/lint/security, independent actual/staged review and normal hooks pass; inherited Ruff17 diagnostics remain. Normal private packaging verifies3817 files and337 dependencies. Existing frontend9Nh is retained; no new build or model action. Live JSON/database negative/retry instances and completed-fixture disposal remain pending; broader release/security/native/installer and remaining family gates remain separate.
+
+
+### S02 final per-format recovery and selected acceptance — 2026-10-26
+
+The withheld live JSON/database gate above is now complete. Both genuine containers include one valid Chat and one semantic corruption with no importable user/assistant turn. Each actual invalid import remains FAILED with total2/processed2/successful1/failed1/skipped0. Each legitimate corrected-source Retry completes with2/2/1/0/1, retaining the failed history and skipping the unchanged prior success. Native saved-content checks preserve exact full titles, question/answer, message UUIDs and no invalid shell; the corrected Chat appears once. This exercises format-valid semantic corruption; no additional byte-corruption claim is made for JSON/SQLite. Archive byte-corruption recovery is independently qualified.
+
+The final actor resumes the two already-completed JSON jobs without resending them, then submits only the two unexecuted database jobs. It passes21.847s,271/271 terminal receipts in both browser ledgers, normal Logout and334ms Chrome release, with no model/export/hydration calls or cleanup errors. The independent installed-candidate reader passes all32 checks in4.435s across four Chats and four Jobs: exact source mapping, owner, message bytes/UUIDs/parents, no duplicate or unexpected assets, truthful counts and original source-format/filename metadata. Host132.925s passes: selected request lifecycles retired, API/frontend released, ASGI active/pending/server tasks/connections zero, original canonical records/current-control Logout and all three protected owners preserved.
+
+Earlier failures remain failed. Passive diagnosis distinguished an ended preview POST without headers from later actual200 previews; the original failed-preview cause remains unproven. The driver also incorrectly looked for archive-only Advanced options, and waited for network on unchanged60-second cached search keys. Normal inline controls and fresh partial search terms corrected those operator assumptions while retaining exact title/count/body/UUID assertions. One lost operator report is not qualification; its zero-job journal was preserved until disposal. No speculative product transport change or passing-job replay was used. Human S02 UX acceptance and all earlier positive/archive/four-mode qualifications retain their recorded boundaries. Selected acceptance39/43; S03–S06 remain open. Final independent review, original DOM guard, guarded completed-payload disposal and local closure recording follow; no release-wide or fresh live-dev claim.
+
+
+S02 final disposal and closure: fresh read-only original Chrome DOM verification passes exact URL/draft/build with one matching original tab and other four untouched, no navigation or writes. Guarded completed cleanup passes4.797s:30 task-owned roots and44 completed operators removed, followed by the three exact closed S02 bytecode files in0.888s. Shared bytecode directory/other entries, current3817-file c607 private site, BUILD9Nh, shared helpers/dependencies, original profiles/data/keys and all protected owners remain. Both cleanups require canonical UID/type/inode bindings and two complete warning-free open-file inventories; no content reads or shared/model/old pytest-cache disposal. Independent final prose/scope review CLEAR. Only the completed owned S02 plan is removed; durable results/failures remain here and in the official task. Selected39/43; S03 is next. Heartbeat remains paused; no publication or remote Git action.
+
+## S05 moderation, claims and model-classification selected closure — 2026-11-01
+
+S05 SELECTED FUNCTIONAL + HUMAN UX ACCEPTED. The previously qualified deterministic Rules, selected/bulk Review, Claims decisions, audit attribution, stale conflicts and role denials retain their recorded composition in the official task. The human-selected model-classification variant now also passes: explicit configured llama.cpp, one criterion and sample, source-grounded benign/flagged advisory results, and deliberate human decisions. Neither verdict automatically enforces moderation.
+
+The backend f8c8e56f60ee05ceeb28d2c89c7bc1abb813e625 is installed at /private/tmp/tldw-s05-classification-20261101/site. Frontend a56940932f8b3790d6c8a44584b81d4f9fbe61a3/build mGTZqAja6jYViLeN34z28 includes the causal canonical-model-alias correction and lazy-copy bundle correction. Existing 600KiB shared budget is unchanged. Provider/credential/accounting/egress, actor-scoped receipt replay, atomic Review/audit persistence and client authority/cancellation boundaries received causal tests, affected qualification, scoped lint/type/security, independent actual/staged review and normal local hooks. Canonical generation adds exactly one path/request schema; all other schema values remain identical. Full-project TypeScript remains unqualified; the normal frontend build skips type validation and scoped checks have no new diagnostics.
+
+SQLite single-user acceptance composes its recorded partial native run (real Stop, same-receipt benign Retry, real disabled-provider503, restored-provider flagged Retry and benign Approve) with the reviewed no-generation saved finish:23.84s pytest/24.467s outer. That finish blocks the sole pending flagged item, replays only saved receipts and verifies exact histories/audit, unselected data and fresh resource retirement. It does not convert the earlier whole-run failure into a protocol pass. The other full native cases pass: SQLite multi-user38.10/38.736s, PostgreSQL single-user41.19/42.042s and PostgreSQL multi-user41.66/42.404s. Both Retry UUID pairs are retained; actual classifications499/200/503/200, decisions, persistence/reload, evidence and item/audit identities pass. Multi-user Bob classification and foreign-review access return403 without mutation. PostgreSQL uses official isolated restricted AuthNZ/Media fixtures; Moderation Review itself remains its supported SQLite store. Human accepted the classification screenshot in addition to the earlier Review/Rules/Claims UX.
+
+All completed classification profiles and private API/frontend/Chrome processes are released. Final independently reviewed cleanup removed the old partial fixture, superseded1582 package,43 obsolete S05 helper/test/image files and its own cleanup script. Exact UID/type/dev/inode/path, no-open-handle and saved-result guards precede disposal; known generated package paths were checked by metadata only, with no key/log contents read. The first cleanup refused before deletion on unexpected generated paths; its failed outcome remains recorded. Active backend package, current frontend build, shared helpers and reusable owner guard test remain. Original API/frontend owner and canonical preservation checks pass; historical original Chrome is absent and its DOM remains untouched/unverified. No GitHub, fresh live-dev, publication, queue, model-service or broader native/installer qualification is claimed. Only the completed owned S05 plan is removed. Selected acceptance42/43; S06 is next. Heartbeat stays paused.
+
+## S06 specialized tools and discovery selected closure — 2026-11-02
+
+S06 SELECTED FUNCTIONAL + HUMAN UX ACCEPTED in the explicitly composed scope below. This closes the selected43/43 workflow-family ledger, not all426 planned catalog variants or broader release gates. Every variant received its named human UX acceptance; completed screenshots were disposed. Prior failed runs remain failed in the official task.
+
+| Selected variant | Qualified behavior |
+| --- | --- |
+| Chunking | Primary SQLite single-user UI, exact22-word coverage/offsets and independent JSON export, saved-template reload and invalid-input recovery. Remaining SQLite multi-user/PostgreSQL single-/multi-user native template/storage/owner checks pass69.285/64.105/68.568s outer; public builtins remain usable and foreign private templates are refused without changing Alice's data. |
+| Documentation | Built UI, exact committed11,801-byte Chunking Templates guide, source/title/content identity, search/no-match recovery and true reload. Stateless unchanged frontend binding is reused; no invented database-mode coverage. |
+| Model Playground | Primary accepted UI/provider/retained-input recovery, saved Chat handoff and true reload. SQLite multi-user composes one actual403/no-admission failure and one real Retry with the no-generation saved finish93.669s; fresh PostgreSQL single/multi cases pass103.057/99.880s. Actual bounded SSE returnsORBIT-742, one input/assistant pair, exact parent/model/provider/complete/stop metadata and persistence after fresh API restart. Normal API proof binds distinct admission-row/composite-history revisions; multi-user Bob refusals and intact Alice state pass. |
+| Skills | Exact human-approved no-tool ORBIT-742 fork, saved definition/UUID/version and UI handoff/reload. SQLite multi-user composed finish100.067s, PostgreSQL single129.473s and repaired PostgreSQL multi102.183s. Scoped signed trust and real execution, precise version1/content after restart, foreign read/execute/list refusals and original-state preservation pass. |
+| Researchers / Journalists / OSINT | All three explicit report presets use bounded fictional Rowan feeds. Source identity, evidence dates, citations, full immutable report data and Markdown download survive restart; missing-input recovery preserves prior reports and CTI keeps its no-alert-evidence caveat. Remaining three native modes pass90.321/104.910/115.309s, including multi-user report/download refusals. |
+| Rowan guide / Companion | Primary saved profile/defaults/check-in/consent, actual typed replies, history, unavailable-provider recovery and true reload. Remaining SQLite multi-user composed finish28.106s and repaired PostgreSQL single/multi51.992/57.152s verify two real replies/four exact saved turns across fresh API restart, cold/warm owner refusals and intact owner state. |
+
+Backend repairs through local882e1ae880ddd5d0cf8b83d17d5b1554484d8a64 are normally committed and privately installed at /private/tmp/tldw-s06-skill-owner-20261102/site. Frontend db9495e876262379b178e1417f8074d7f4a2326c/build_2AjagsPaWq3agNLU2rMQ is unchanged by the final backend fixes. Frozen deva412 includes Chat3309/3310/3311; this is not current November-dev acceptance. Product repairs retain causal tests, affected composed checks, scoped lint/security, independent actual/staged reviews and normal hooks. Final independent review read all six Model operator files (1,568lines), affected contexts and closure evidence and found no Critical/Important/Minor issue; the separate exact dependency-pruning review is also CLEAR. These verdicts are recorded in the official task; no all-green full-suite or four fresh browser replays are claimed.
+
+Every completed S06 primary/native profile is removed after successful retirement/official-fixture teardown, exact identity/no-handle and original canonical/owner guards. The original API/frontend/data and original Chrome absence are preserved; its DOM remains untouched/unverified. Four obsolete private package copies (15,384 files/312,907,665 bytes) are removed. Current qualified artifacts and shared dependencies remain; 91 completed helper/test files (846,548 bytes) are removed after independently reviewed removal of obsolete S06-only shared-helper branches, exact file identities, no references/open handles/processes and protected-owner checks. No S06 bytecode files remain. The shared-helper candidate has identical non-S06 top-level ASTs, compiles, and retains only2 inherited Bandit findings/3 inherited Ruff diagnostics with0new/0errors. Normal local closure is recorded in the task.
+
+Proposed ADR086 explicitly retains the unowned legacy PostgreSQL Skill identity/Trash recovery limitation; this repair does not guess ownership or certify that recovery. Historical canonical-body preservation loss, owner-probe failure and Kanban timeout retain their accepted limitations/open incident status. Latest-dev integration, genuinely affected validation, native/installer/release/human-summary/landing gates remain separate. No source publication, queue or merge action occurred. Heartbeat remains paused.
+
+## Latest-dev source integration closeout — 2026-11-02
+
+All 160 accepted UAT commits are preserved on verified dev `b2b7d5d2b04256458fe6f33e02a36019e2c46795` (127 patch-identical,33 adapted), followed by the final integration repair in this commit. Independent actual/staged source review is clear after fixing annotation replay-index validation and the old-owned104 migration collision. Normal hooks and genuinely affected checks pass: full client TypeScript,60 tests per client,49 composed owner/runtime/annotation checks (SQLite/PostgreSQL),9 migration checks,34 PDF checks, scoped security/lint, canonical API/types and the155-page production build. Counts overlap and are separate scoped runs; task notes retain failures, warnings, fixture corrections and exact results.
+
+The completed owned latest-dev rebase plan is removed. All43 selected workflow families retain their recorded functional/humanUX acceptance on frozen/composed live artifacts; this source integration does not manufacture a fresh all43 UAT run on the new candidate. Stage3, native first-import/whole-Prompt shutdown, installer and broader release/CI/human-summary/publication/merge gates remain open. Original runtime/Chat/data, backup refs, WIP and needed functional artifacts remain preserved; no publication or runtime transition occurred.

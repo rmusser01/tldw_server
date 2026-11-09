@@ -75,12 +75,6 @@ async def refresh_harness(tmp_path, monkeypatch):
     # Keep the route's real dependency, forcing its production transaction branch.
     monkeypatch.setattr(auth_deps, "_is_test_mode", lambda: False)
     monkeypatch.setattr(auth, "_is_test_mode", lambda: False)
-    original_configure = database.configure_sqlite_connection_async
-
-    async def configure_for_bounded_lock_test(conn):
-        await original_configure(conn, busy_timeout_ms=50)
-
-    monkeypatch.setattr(database, "configure_sqlite_connection_async", configure_for_bounded_lock_test)
     users = AuthnzUsersRepo(pool)
     user_id = await users.create_user(  # nosec B106 - deliberately unusable synthetic fixture hash
         username="refresh-user", email="refresh-user@example.com", password_hash="unused-test-hash"
@@ -126,7 +120,15 @@ async def test_expired_access_refreshes_through_real_sqlite_request_dependency(r
 
 
 @pytest.mark.asyncio
-async def test_competing_sqlite_writer_is_retryable_without_spending_refresh(refresh_harness):
+async def test_competing_sqlite_writer_is_retryable_without_spending_refresh(refresh_harness, monkeypatch):
+    # Use the short busy timeout only for this held-writer refusal.
+    original_configure = database.configure_sqlite_connection_async
+
+    async def configure_for_bounded_lock_test(conn):
+        await original_configure(conn, busy_timeout_ms=50)
+
+    monkeypatch.setattr(database, "configure_sqlite_connection_async", configure_for_bounded_lock_test)
+
     h = refresh_harness
     session = await h.create_session()
 

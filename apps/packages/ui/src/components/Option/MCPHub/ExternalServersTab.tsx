@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
 import { QuestionCircleOutlined } from "@ant-design/icons"
 import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
@@ -321,6 +321,10 @@ export const ExternalServersTab = ({
   const [slotSecretValue, setSlotSecretValue] = useState("")
   const [slotSecretSaving, setSlotSecretSaving] = useState(false)
   const [slotSecretClearing, setSlotSecretClearing] = useState(false)
+  const credentialTargetRef = useRef<{ serverId: string; slotName: string } | null>(null)
+  const credentialWriteRef = useRef(false)
+  const credentialFeedbackRef = useRef<{ success?: string; error?: string } | null>(null)
+  const credentialPending = saving || slotSecretSaving || slotSecretClearing
   const [focusedServerId, setFocusedServerId] = useState<string | null>(null)
   const [authTemplateMappings, setAuthTemplateMappings] = useState<McpHubExternalServerAuthTemplateMapping[]>([])
   const [authTemplateLoading, setAuthTemplateLoading] = useState(false)
@@ -400,12 +404,12 @@ export const ExternalServersTab = ({
   }, [importConfigText, setupMode])
 
   const canSave = useMemo(
-    () => activeServerId.trim().length > 0 && secretValue.trim().length > 0 && !saving,
-    [activeServerId, secretValue, saving]
+    () => activeServerId.trim().length > 0 && secretValue.trim().length > 0 && !credentialPending,
+    [activeServerId, secretValue, credentialPending]
   )
   const canSaveSlotSecret = useMemo(
-    () => activeServerId.trim().length > 0 && activeSlotName.trim().length > 0 && slotSecretValue.trim().length > 0 && !slotSecretSaving,
-    [activeServerId, activeSlotName, slotSecretValue, slotSecretSaving]
+    () => activeServerId.trim().length > 0 && activeSlotName.trim().length > 0 && slotSecretValue.trim().length > 0 && !credentialPending,
+    [activeServerId, activeSlotName, slotSecretValue, credentialPending]
   )
   const canSaveAuthTemplate = useMemo(
     () =>
@@ -460,10 +464,8 @@ export const ExternalServersTab = ({
         setReadinessWarningMessage(`${warningDetails.join("; ")}.`)
       }
       const managedRows = getManagedExternalServers(nextServers)
-      if (managedRows.some((server) => server.id === activeServerId)) {
-        return
-      }
-      setActiveServerId(managedRows[0]?.id || "")
+      setActiveServerId((current) => managedRows.some((server) => server.id === current)
+        ? current : managedRows[0]?.id || "")
     } catch (err) {
       setServers([])
       setRegistryEntries([])
@@ -522,6 +524,20 @@ export const ExternalServersTab = ({
     }
   }, [activeSlotName, activeSlots])
 
+  useLayoutEffect(() => {
+    // A new token also retires requests that return after A -> B -> A navigation.
+    credentialTargetRef.current = { serverId: activeServerId, slotName: activeSlotName }
+    setSecretValue("")
+    setSlotSecretValue("")
+    const feedback = credentialFeedbackRef.current
+    credentialFeedbackRef.current = null
+    if (feedback) {
+      setSuccessMessage((current) => current === feedback.success ? null : current)
+      setErrorMessage((current) => current === feedback.error ? null : current)
+    }
+    return () => { credentialTargetRef.current = null }
+  }, [activeServerId, activeSlotName])
+
   useEffect(() => {
     let cancelled = false
 
@@ -572,52 +588,74 @@ export const ExternalServersTab = ({
   }
 
   const handleSaveSecret = async () => {
-    if (!canSave) return
+    const target = credentialTargetRef.current
+    if (!canSave || !target || credentialWriteRef.current) return
+    credentialWriteRef.current = true
     setSaving(true)
     setErrorMessage(null)
     setSuccessMessage(null)
     try {
-      await setExternalServerSecret(activeServerId, secretValue)
+      await setExternalServerSecret(target.serverId, secretValue)
+      if (credentialTargetRef.current !== target) return
       setSecretValue("")
+      credentialFeedbackRef.current = { success: "Secret configured" }
       setSuccessMessage("Secret configured")
       await loadServers()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error"
-      setErrorMessage(`Failed to save external server secret: ${msg}`)
+      if (credentialTargetRef.current !== target) return
+      const error = `Failed to save external server secret: ${getErrorMessage(err)}`
+      credentialFeedbackRef.current = { error }
+      setErrorMessage(error)
     } finally {
+      credentialWriteRef.current = false
       setSaving(false)
     }
   }
 
   const handleSaveSlotSecret = async () => {
-    if (!canSaveSlotSecret) return
+    const target = credentialTargetRef.current
+    if (!canSaveSlotSecret || !target || credentialWriteRef.current) return
+    credentialWriteRef.current = true
     setSlotSecretSaving(true)
     setErrorMessage(null)
     setSuccessMessage(null)
     try {
-      await setExternalServerSlotSecret(activeServerId, activeSlotName, slotSecretValue)
+      await setExternalServerSlotSecret(target.serverId, target.slotName, slotSecretValue)
+      if (credentialTargetRef.current !== target) return
       setSlotSecretValue("")
+      credentialFeedbackRef.current = { success: "Slot secret configured" }
       setSuccessMessage("Slot secret configured")
       await loadServers()
-    } catch {
-      setErrorMessage("Failed to save slot secret.")
+    } catch (err) {
+      if (credentialTargetRef.current !== target) return
+      const error = `Failed to save slot secret: ${getErrorMessage(err)}`
+      credentialFeedbackRef.current = { error }
+      setErrorMessage(error)
     } finally {
+      credentialWriteRef.current = false
       setSlotSecretSaving(false)
     }
   }
 
   const handleClearSlotSecret = async () => {
-    if (!activeServerId || !activeSlotName) return
+    const target = credentialTargetRef.current
+    if (!target?.serverId || !target.slotName || credentialWriteRef.current) return
+    credentialWriteRef.current = true
     setSlotSecretClearing(true)
     setErrorMessage(null)
     setSuccessMessage(null)
     try {
-      await clearExternalServerSlotSecret(activeServerId, activeSlotName)
+      await clearExternalServerSlotSecret(target.serverId, target.slotName)
+      if (credentialTargetRef.current !== target) return
+      credentialFeedbackRef.current = { success: "Slot secret cleared" }
       setSuccessMessage("Slot secret cleared")
       await loadServers()
     } catch {
+      if (credentialTargetRef.current !== target) return
+      credentialFeedbackRef.current = { error: "Failed to clear slot secret." }
       setErrorMessage("Failed to clear slot secret.")
     } finally {
+      credentialWriteRef.current = false
       setSlotSecretClearing(false)
     }
   }
@@ -1530,6 +1568,7 @@ export const ExternalServersTab = ({
           <label htmlFor="mcp-external-server">Server</label>
           <select
             id="mcp-external-server"
+            className="rounded-md border border-border bg-surface2 px-3 py-2 text-text placeholder:text-text-subtle focus:outline-none focus:ring-2 focus:ring-focus"
             aria-label="Server"
             value={activeServerId}
             onChange={(event) => setActiveServerId(event.target.value)}
@@ -1821,6 +1860,7 @@ export const ExternalServersTab = ({
                   <label htmlFor="mcp-external-slot">Slot</label>
                   <select
                     id="mcp-external-slot"
+                    className="rounded-md border border-border bg-surface2 px-3 py-2 text-text placeholder:text-text-subtle focus:outline-none focus:ring-2 focus:ring-focus"
                     aria-label="Credential Slot"
                     value={activeSlotName}
                     onChange={(event) => setActiveSlotName(event.target.value)}
@@ -1836,9 +1876,11 @@ export const ExternalServersTab = ({
                   <label htmlFor="mcp-external-slot-secret">Slot Secret</label>
                   <input
                     id="mcp-external-slot-secret"
+                    className="rounded-md border border-border bg-surface2 px-3 py-2 text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-focus"
                     aria-label="Slot Secret"
                     type="password"
                     value={slotSecretValue}
+                    disabled={credentialPending}
                     onChange={(event) => setSlotSecretValue(event.target.value)}
                     placeholder="Paste slot secret"
                   />
@@ -1847,7 +1889,7 @@ export const ExternalServersTab = ({
                   <Button type="primary" onClick={handleSaveSlotSecret} disabled={!canSaveSlotSecret} loading={slotSecretSaving}>
                     Save Slot Secret
                   </Button>
-                  <Button onClick={handleClearSlotSecret} disabled={!activeSlotName} loading={slotSecretClearing}>
+                  <Button onClick={handleClearSlotSecret} disabled={!activeSlotName || credentialPending} loading={slotSecretClearing}>
                     Clear Slot Secret
                   </Button>
                 </Space>
@@ -1870,9 +1912,11 @@ export const ExternalServersTab = ({
                 <label htmlFor="mcp-external-secret">Secret</label>
                 <input
                   id="mcp-external-secret"
+                  className="rounded-md border border-border bg-surface2 px-3 py-2 text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-focus"
                   aria-label="Secret"
                   type="password"
                   value={secretValue}
+                  disabled={credentialPending}
                   onChange={(event) => setSecretValue(event.target.value)}
                   placeholder="Paste secret token"
                 />

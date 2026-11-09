@@ -24,27 +24,18 @@ const require = createRequire(import.meta.url)
 const workerDest = join(projectRoot, "public", "pdf.worker.min.mjs")
 
 function resolveWorkerCandidates() {
-  const candidates = []
-
-  // Workspace-local install (bun and some npm layouts).
-  candidates.push(join(projectRoot, "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs"))
-  candidates.push(join(projectRoot, "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.min.mjs"))
-
-  // Workspace-hoisted install (`apps/node_modules` when workdir is `apps/`).
-  candidates.push(join(projectRoot, "..", "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs"))
-  candidates.push(join(projectRoot, "..", "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.min.mjs"))
-
-  // Resolution-based lookup for layouts npm/bun may create.
   try {
-    const pkgJsonPath = require.resolve("pdfjs-dist/package.json", { paths: [projectRoot] })
-    const packageRoot = dirname(pkgJsonPath)
-    candidates.unshift(join(packageRoot, "build", "pdf.worker.min.mjs"))
-    candidates.unshift(join(packageRoot, "legacy", "build", "pdf.worker.min.mjs"))
+    // The worker must match the PDF.js instance exported by the shared viewer.
+    const sharedRequire = createRequire(require.resolve("@tldw/ui/package.json"))
+    const viewerRequire = createRequire(sharedRequire.resolve("react-pdf/package.json"))
+    const packageRoot = dirname(viewerRequire.resolve("pdfjs-dist/package.json"))
+    return [
+      join(packageRoot, "legacy", "build", "pdf.worker.min.mjs"),
+      join(packageRoot, "build", "pdf.worker.min.mjs")
+    ]
   } catch {
-    // Keep explicit candidates above.
+    return []
   }
-
-  return [...new Set(candidates)]
 }
 
 function resolveWorkerSource() {

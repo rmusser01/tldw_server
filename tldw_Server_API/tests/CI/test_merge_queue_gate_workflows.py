@@ -556,3 +556,99 @@ def test_conditions_read_only_the_jobs_they_need(name):
         conditions = [job["if"], *(str(step.get("if", "")) for step in job["steps"])]
         read = {match for condition in conditions for match in re.findall(r"needs\.([\w-]+)\.", condition)}
         assert read <= set(job["needs"]), (job_id, read)
+
+
+def test_non_utc_workload_has_its_own_required_job_budget():
+    """The 14-minute timezone axis must not starve the backend's later gates."""
+    jobs = _wf("backend-required.yml")["jobs"]
+    assert "non-utc-tests" in jobs, "timezone work still shares the backend job budget"  # nosec B101
+    timezone = jobs["non-utc-tests"]
+    backend = jobs["backend-required"]
+    assert "non-utc-tests" in backend["needs"]  # nosec B101
+    assert timezone["timeout-minutes"] == 30  # nosec B101 - The isolated timezone budget stays bounded.
+    assert backend["timeout-minutes"] == 45  # nosec B101 - Preserve the upstream backend gate budget.
+    offset = _step(timezone, "Confirm the runner is not on UTC")
+    suite = _step(timezone, "Timestamp-sensitive tests under a non-UTC timezone")
+    assert offset["env"]["TZ"] == suite["env"]["TZ"] == "America/Los_Angeles"  # nosec B101
+    assert timezone["steps"].index(offset) < timezone["steps"].index(suite)  # nosec B101
+    assert "--timeout=300" in suite["run"] and "-p pytest_timeout" in suite["run"]  # nosec B101
+    expected_paths = {
+        "AuthNZ_SQLite/test_admin_endpoints_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_api_keys_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_llm_provider_overrides_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_mfa_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_monitoring_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_rate_limits_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_token_blacklist_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_usage_repo_rollups_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_usage_repo_sqlite.py",
+        "AuthNZ_SQLite/test_authnz_user_provider_secrets_repo_sqlite.py",
+        "AuthNZ_SQLite/test_byok_endpoints_sqlite.py",
+        "AuthNZ_SQLite/test_byok_oauth_state_repo_sqlite.py",
+        "AuthNZ_SQLite/test_byok_rotation_sqlite.py",
+        "AuthNZ_SQLite/test_byok_runtime_sqlite.py",
+        "AuthNZ_SQLite/test_llm_budget_402_sqlite.py",
+        "AuthNZ_SQLite/test_scheduler_auth_failure_monitor_sqlite.py",
+        "Discord/test_discord_oauth_lifecycle.py",
+        "Embeddings/test_request_signing_nonce_cleanup.py",
+        "Flashcards/test_flashcards_endpoint_integration.py",
+        "Flashcards/test_flashcards_timestamp_contract.py",
+        "Flashcards/test_review_response_timestamp_contract.py",
+        "Flashcards/test_source_review_plans_api.py",
+        "Flashcards/test_study_response_timestamp_contract.py",
+        "Media_DB/test_media_clone_snapshot_repository.py",
+        "Personalization/test_companion_derivations.py",
+        "Personalization/test_companion_proactive_policy.py",
+        "Personalization/test_companion_reflection_jobs.py",
+        "Personalization/test_personalization_endpoints.py",
+        "Research/test_research_broker.py",
+        "Research/test_research_discovery_legacy_execution_contract.py",
+        "Sharing/test_shared_workspace_chat_endpoint.py",
+        "Sharing/test_shared_workspace_clone_operations.py",
+        "Sharing/test_shared_workspace_recipient_security_matrix.py",
+    }
+    paths = re.findall(r"tldw_Server_API/tests/([\w/]+\.py)", suite["run"])
+    assert set(paths) == expected_paths and len(paths) == len(expected_paths)  # nosec B101
+    assert suite not in backend["steps"] and offset not in backend["steps"]  # nosec B101
+    assert not timezone.get("continue-on-error") and not suite.get("continue-on-error")  # nosec B101
+
+
+@pytest.mark.parametrize("changed", ["true", "false", "", "unknown"])
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
+def test_timezone_prerequisite_cannot_silently_satisfy_the_required_gate(changed, result):
+    """Execute the real gate refusal, including missing and cancelled child results."""
+    gate = _gate("backend-required.yml")
+    guard = _step(gate, "Require non-UTC timestamp tests to have passed")
+    row = Row("pull_request", "skipped", "", "success", "true", "success", False)
+    values = {**row.values, "needs.non-utc-tests.result": result}
+    assert _evaluate(gate["if"], values), "a negative child result skipped the protected gate"  # nosec B101
+    assert "if" not in guard, "the prerequisite result must always be checked after admission"  # nosec B101
+    assert guard["env"] == {  # nosec B101
+        "BACKEND_CHANGED": "${{ needs.changes.outputs.backend_changed }}",
+        "TIMEZONE_RESULT": "${{ needs.non-utc-tests.result }}",
+    }
+    run = subprocess.run(  # nosec B603, B607 - execute the reviewed workflow guard with bounded literal cases
+        ["bash", "-e", "-c", guard["run"]],
+        env={**os.environ, "BACKEND_CHANGED": changed, "TIMEZONE_RESULT": result},
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    allowed = (changed, result) in {("true", "success"), ("false", "skipped")}
+    assert run.returncode == (0 if allowed else 1)  # nosec B101
+    assert [s.get("name") for s in gate["steps"][:3]] == [  # nosec B101
+        LICENSE_STEP, CHANGES_STEP, guard["name"],
+    ]
+    assert not guard.get("continue-on-error") and not gate.get("continue-on-error")  # nosec B101
+
+
+def test_timezone_prerequisite_only_runs_after_admitted_backend_change():
+    """No timezone checkout or test may outrun licensing or failed change detection."""
+    jobs = _wf("backend-required.yml")["jobs"]
+    assert "non-utc-tests" in jobs, "timezone prerequisite is missing"  # nosec B101
+    child = jobs["non-utc-tests"]
+    assert {"changes", "admission", "await_license"} <= set(child["needs"])  # nosec B101
+    for row, relevant in product(_rows(reachable_only=False), (False, True)):
+        row = row._replace(relevant=relevant)
+        expected = row.admitted and row.changes == "success" and relevant and not row.cancelled
+        assert _evaluate(child["if"], row.values, row.cancelled) is expected, row  # nosec B101

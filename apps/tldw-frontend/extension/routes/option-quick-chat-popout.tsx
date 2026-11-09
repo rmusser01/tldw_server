@@ -1,3 +1,4 @@
+import { useQuickChatPopoutRestore } from "@/components/Common/QuickChatHelper/popout-state"
 import React, { useEffect, useRef } from "react"
 import { Select } from "antd"
 import { useQuery } from "@tanstack/react-query"
@@ -10,13 +11,11 @@ import { QuickChatMessage as QuickChatMessageView } from "@/components/Common/Qu
 import { QuickChatInput } from "@/components/Common/QuickChatHelper/QuickChatInput"
 import { AlertCircle } from "lucide-react"
 import { useChatModelsSelect } from "@/hooks/useChatModelsSelect"
-import type { QuickChatMessage } from "@/store/quick-chat"
 
 const QuickChatPopout: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const [searchParams] = useSearchParams()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const hasRestoredRef = useRef(false)
 
   const {
     messages,
@@ -46,80 +45,9 @@ const QuickChatPopout: React.FC = () => {
   const showModelsError = modelsError && models.length === 0
   const modelsErrorHintId = "quick-chat-models-error-hint"
 
-  // Restore state from sessionStorage on mount
-  useEffect(() => {
-    if (hasRestoredRef.current) return
-
-    const stateKey = searchParams.get("state")
-    if (!stateKey) {
-      hasRestoredRef.current = true
-      return
-    }
-    if (!/^[a-zA-Z0-9:_-]{1,128}$/.test(stateKey)) {
-      console.warn("Invalid quick chat state key")
-      hasRestoredRef.current = true
-      return
-    }
-    try {
-      const savedState = sessionStorage.getItem(stateKey)
-      if (!savedState) return
-
-      const parsed = JSON.parse(savedState) as unknown
-      // Validate parsed state structure before restoring
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        "messages" in parsed &&
-        Array.isArray((parsed as { messages: unknown }).messages)
-      ) {
-        const parsedState = parsed as {
-          messages: unknown[]
-          modelOverride?: unknown
-        }
-        const isValidMsg = (m: unknown): m is QuickChatMessage => {
-          if (!m || typeof m !== "object") return false
-          if (
-            !("id" in m) ||
-            !("role" in m) ||
-            !("content" in m) ||
-            !("timestamp" in m)
-          ) {
-            return false
-          }
-          const candidate = m as {
-            id: unknown
-            role: unknown
-            content: unknown
-            timestamp: unknown
-          }
-          return (
-            typeof candidate.id === "string" &&
-            (candidate.role === "user" || candidate.role === "assistant") &&
-            typeof candidate.content === "string" &&
-            typeof candidate.timestamp === "number"
-          )
-        }
-
-        const nextMessages = parsedState.messages.filter(isValidMsg)
-        const nextModelOverride =
-          typeof parsedState.modelOverride === "string"
-            ? parsedState.modelOverride
-            : null
-        useQuickChatStore.getState().restoreFromState({
-          messages: nextMessages,
-          modelOverride: nextModelOverride
-        })
-      } else {
-        console.warn("Invalid quick chat state structure in sessionStorage")
-      }
-    } catch (error) {
-      console.error("Failed to restore quick chat state:", error)
-    } finally {
-      // Clean up sessionStorage regardless of validity or parse errors
-      sessionStorage.removeItem(stateKey)
-      hasRestoredRef.current = true
-    }
-  }, [searchParams])
+  useQuickChatPopoutRestore(searchParams.get("state"), parsedState => {
+    useQuickChatStore.getState().restoreFromState(parsedState)
+  })
 
   // Scroll to bottom when messages change
   useEffect(() => {

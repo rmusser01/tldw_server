@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
     ACP_STREAM_BUFFER_MAX_BYTES,
     bounded_session_update_payload,
     make_session_update_queue,
+    prepare_mcp_servers_for_session,
     validate_acp_session_launch_inputs,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.permission_tiers import determine_permission_tier
@@ -658,7 +659,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
 
         params: dict[str, Any] = {
             "cwd": cwd,
-            "mcpServers": mcp_servers if mcp_servers is not None else [],
+            "mcpServers": prepare_mcp_servers_for_session(mcp_servers),
         }
         if agent_type:
             params["agentType"] = agent_type
@@ -678,7 +679,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
                 try:
                     response = await self._client.call("session/new", fallback_params)
                 except ACPResponseError as second_exc:
-                    if "invalid params" not in str(second_exc).lower():
+                    if "invalid params" not in str(second_exc).lower() or mcp_servers:
                         raise
                     fallback_params.pop("mcpServers", None)
                     logger.debug(
@@ -686,6 +687,8 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
                     )
                     response = await self._client.call("session/new", fallback_params)
             else:
+                if mcp_servers:
+                    raise
                 fallback_params.pop("mcpServers", None)
                 logger.debug(
                     "ACP session/new rejected mcpServers for this runner; retrying without mcpServers"

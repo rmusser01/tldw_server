@@ -153,8 +153,9 @@ def _hook_completion_read(
 
 
 @pytest.fixture(autouse=True)
-def _completion_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _completion_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Enable atomic bookkeeping and isolate completion policy settings."""
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "observer-jobs.db"))
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_EVENTS_ENABLED", "false")
@@ -693,3 +694,71 @@ def test_sqlite_completion_preflight_precedes_identity_lookup(
     else:
         assert _raw_job(manager, job_id) is None
         assert _events(manager, job_id) == []
+
+
+@pytest.mark.parametrize("enforce", [False, True])
+def test_failure_expected_uuid_mismatch_is_noop(jm, enforce):
+    job = _create_job(jm, processing=True)
+    before = _snapshot(jm, job["id"])
+    assert not jm.fail_job(
+        job["id"],
+        error="stale",
+        expected_uuid="old-uuid",
+        retryable=False,
+        worker_id=job["worker_id"],
+        lease_id=job["lease_id"],
+        enforce=enforce,
+    )
+    assert _snapshot(jm, job["id"]) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enforce", [False, True])
+@pytest.mark.parametrize("retryable", [False, True])
+@pytest.mark.parametrize("resource_bound", [False, True])
+async def test_old_worker_failure_cannot_fail_reused_id(jm, monkeypatch, enforce, retryable, resource_bound):
+    from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+    from tldw_Server_API.tests.Jobs.test_jobs_resource_admission_sqlite import make_command, make_request, snapshot, sql
+
+    monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", "true" if enforce else "false")
+    assert jm.should_enforce_leases() is enforce
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "false")
+
+    def create(*, processing=False):
+        if not resource_bound:
+            return _create_job(jm, processing=processing)
+        admitted = jm.admit_resource_job(make_command(), request=make_request(key=None)).job
+        if processing:
+            return jm.acquire_next_job(
+                domain="claims", queue="default", worker_id="replacement-worker", lease_seconds=300
+            )
+        return admitted
+
+    old = create()
+    sdk = WorkerSDK(jm, WorkerConfig(domain=old["domain"], queue=_QUEUE, worker_id="old-worker"))
+    snapshots = []
+
+    class HandlerError(RuntimeError):
+        pass
+
+    async def handler(acquired):
+        assert acquired["uuid"] == old["uuid"]
+        assert jm.cancel_job(old["id"], expected_uuid=old["uuid"])
+        assert jm.prune_jobs(older_than_days=0, domain=old["domain"]) == 1
+        if jm.backend == "postgres":
+            # Sequence reuse is deliberate, inside the official isolated fixture.
+            sql(jm, "SELECT setval(pg_get_serial_sequence('jobs','id'), ?, false)", (old["id"],), rows=True)
+        replacement = create(processing=True)
+        assert replacement["id"] == old["id"] and replacement["uuid"] != old["uuid"]
+        if resource_bound:
+            assert sql(jm, "SELECT active_job_uuid FROM job_resource_heads", rows=True) == [
+                {"active_job_uuid": replacement["uuid"]}
+            ]
+        snapshots.append(snapshot(jm))
+        sdk.stop()
+        error = HandlerError("old handler failed")
+        error.retryable = retryable
+        raise error
+
+    await sdk.run(handler=handler)
+    assert snapshot(jm) == snapshots[0]

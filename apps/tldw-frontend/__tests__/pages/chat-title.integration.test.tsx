@@ -22,7 +22,7 @@ const fixture = vi.hoisted(() => ({
   updateChat: vi.fn(),
   snapshot: vi.fn(),
 }));
-vi.mock('next/dynamic', () => ({ default: () => () => <main>Chat workspace</main> }));
+vi.mock('@/routes/option-chat', () => ({ default: () => <main>Chat workspace</main> }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: fixture.t }) }));
 vi.mock('react-router-dom', () => ({
   useLocation: () => ({ pathname: '/chat' }),
@@ -148,7 +148,7 @@ vi.mock('antd', async (importOriginal) => ({
   ),
 }));
 
-import ChatPage from '@web/pages/chat';
+import ChatPage from '@web/components/ChatPageContent';
 import { Header } from '@/components/Layouts/Header';
 import { useStoreMessageOption } from '@/store/option';
 import { usePlaygroundSessionStore } from '@/store/playground-session';

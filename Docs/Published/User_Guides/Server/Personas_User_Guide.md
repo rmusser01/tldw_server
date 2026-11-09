@@ -219,6 +219,17 @@ websocat -H "X-API-KEY: $API_KEY" "ws://127.0.0.1:8000/api/v1/persona/stream"
 The `?token=` / `?api_key=` query still works but is deprecated (it ends up in
 access logs) and logs a warning. MCP-issued tokens are not accepted.
 
+Use the owned session ID returned by `POST /api/v1/persona/session`. To resume,
+send that saved ID as `resume_session_id`; a caller-chosen unknown ID is refused
+rather than becoming a new saved session.
+
+For temporary scaffold interaction, the `WS_CONNECTED` notice offers a fresh
+session ID for that connection. Use that ID or omit `session_id`. A custom first
+ID without an owned saved session or existing owned runtime receives
+`SESSION_ID_UNAVAILABLE` before any message, voice configuration or tool work.
+An ownership lookup error receives `SESSION_ADMISSION_FAILED`; it never authorizes a new
+temporary alias.
+
 Send a user turn:
 
 ```json

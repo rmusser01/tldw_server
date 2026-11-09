@@ -497,9 +497,12 @@ describe("ReviewTab study assistant panel", () => {
     expect(screen.getByTestId("flashcards-review-show-answer")).toBeInTheDocument()
   })
 
-  it("reloads the latest thread and offers retry actions after a conflict", async () => {
+  it.each([
+    ["nested response", { response: { status: 409 } }],
+    ["transport status", { status: 409 }]
+  ])("reloads the latest thread and offers retry actions after a conflict (%s)", async (_shape, status) => {
     assistantMutateAsync
-      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), { response: { status: 409 } }))
+      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), status))
       .mockResolvedValueOnce({
         assistant_message: { content: "Retried explanation" }
       })

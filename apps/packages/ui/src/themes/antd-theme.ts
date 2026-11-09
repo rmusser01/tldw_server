@@ -125,9 +125,9 @@ export function buildAntdThemeConfig(
   const secondaryText = rgbTripleToHex(
     firstReadableColor([tokens.textMuted, tokens.text], pageSurfaces)
   )
-  // tailwind-shared.css paints inputs and selects --color-surface-2.
+  // Inputs and selects share page, panel and popup surfaces.
   const placeholder = rgbTripleToHex(
-    firstReadableColor([tokens.textSubtle, tokens.textMuted, tokens.text], [tokens.surface2])
+    firstReadableColor([tokens.textSubtle, tokens.textMuted, tokens.text], pageSurfaces)
   )
 
   const algorithms: MappingAlgorithm[] = [isDark ? theme.darkAlgorithm : theme.defaultAlgorithm]
@@ -186,7 +186,7 @@ export function buildAntdThemeConfig(
     },
     components: {
       ...components,
-      Button: { ...focusOutline, primaryColor: onPrimary, dangerColor: onDanger },
+      Button: { ...focusOutline, primaryColor: onPrimary, dangerColor: onDanger, colorLink: link, colorLinkHover: linkHover, colorLinkActive: linkActive },
       Radio: { ...focusOutline, buttonSolidCheckedColor: onPrimary },
       DatePicker: { colorTextLightSolid: onPrimary },
       // Text on primary and danger fills elsewhere (AX-07).

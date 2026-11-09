@@ -1224,11 +1224,12 @@ export const ROUTE_METADATA = [
     path: "/companion/conversation",
     canonicalPath: "/companion",
     label: "Companion Conversation",
-    group: "extension",
-    surface: "extension_sidepanel",
-    availability: sidepanel,
-    smoke: "exclude",
-    rationale: "Extension-only companion conversation sidepanel route."
+    group: "chat",
+    surface: "default_self_hosted",
+    availability: ["web", "extension_options", "extension_sidepanel"],
+    requiresBackend: true,
+    smoke: "manual",
+    rationale: "Companion conversation requires an enabled profile and configured provider."
   }),
   defineRoute({
     path: "/error-boundary-test",

@@ -453,7 +453,7 @@ async def _invoke_rolling_endpoint(kind: str, text: str):
 
 
 class _RollingTemplateDatabase:
-    def get_chunking_template(self, *, name):
+    def get_chunking_template(self, *, name, owner_user_id):
         assert name == "rolling-template"
         return {
             "name": name,
@@ -1481,7 +1481,7 @@ async def test_non_llm_chunking_ignores_saturated_provider_pool(
         return ["ordinary template chunk"]
 
     class NonLlmTemplateDatabase:
-        def get_chunking_template(self, *, name):
+        def get_chunking_template(self, *, name, owner_user_id):
             assert name == "ordinary-template"
             return {
                 "name": name,

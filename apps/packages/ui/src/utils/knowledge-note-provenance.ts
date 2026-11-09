@@ -370,6 +370,7 @@ export const appendCapturedNoteProvenance = (
     content?: string;
   },
   cited: WorkspaceSource[],
+  references: KnowledgeNoteSource[] = [],
 ): KnowledgeNoteProvenance | null => {
   if (
     head.knowledge_provenance_state === "deleted" ||
@@ -377,7 +378,7 @@ export const appendCapturedNoteProvenance = (
   )
     return null;
   const captures = cited.filter((source) => source.webCapture);
-  if (!captures.length) return null;
+  if (!captures.length && !references.length) return null;
   const original =
     head.pendingKnowledgeProvenance ||
     resolveKnowledgeNoteProvenance(head).provenance;
@@ -406,9 +407,12 @@ export const appendCapturedNoteProvenance = (
       )
         sources.push(reference);
   }
+  for (const reference of references)
+    if (!sources.some(existing => knowledgeNoteProvenanceMatches(existing, reference)))
+      sources.push(reference);
   const result = validateKnowledgeNoteProvenance({
     ...original,
-    origin: original?.origin || "reviewed_sources",
+    origin: original?.origin || (references.length ? "knowledge_qa" : "reviewed_sources"),
     sources,
   });
   if (!result)

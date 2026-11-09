@@ -57,7 +57,7 @@ export function CompanionHomePage({
   surface,
   onPersonalizationEnabled
 }: CompanionHomePageProps) {
-  const { capabilities, loading: capsLoading } = useServerCapabilities()
+  const { capabilities, loading: capsLoading, refresh: refreshCapabilities } = useServerCapabilities()
   const [customizeOpen, setCustomizeOpen] = React.useState(false)
 
   const isConnected = useIsConnected()
@@ -68,6 +68,7 @@ export function CompanionHomePage({
   }, [isConnected, homeScope, markScopedMilestone])
 
   const hasPersonalization = Boolean(capabilities?.hasPersonalization)
+  const hasCompanion = Boolean(capabilities?.hasCompanion)
   const { layout, updateLayout } = useCompanionHomeLayout(surface)
   const {
     snapshot,
@@ -82,6 +83,7 @@ export function CompanionHomePage({
     surface,
     capsLoading,
     hasPersonalization,
+    hasCompanion,
     onPersonalizationEnabled
   })
   const {
@@ -95,12 +97,14 @@ export function CompanionHomePage({
     enabled: !capsLoading && isConnected
   })
   const refreshHome = React.useCallback(() => {
+    void refreshCapabilities()
     refresh()
     refreshScheduledTaskSignals()
-  }, [refresh, refreshScheduledTaskSignals])
+  }, [refresh, refreshScheduledTaskSignals, refreshCapabilities])
   const hasConversationRoute =
     Boolean(capabilities?.hasPersonalization) &&
     Boolean(capabilities?.hasPersona) &&
+    hasCompanion &&
     profileLoaded &&
     Boolean(profile?.enabled)
 
@@ -128,6 +132,12 @@ export function CompanionHomePage({
       return {
         label: SETUP_REQUIRED_LABEL,
         description: "Connect your tldw server and enable personalization to unlock this feature. " + setupDescription
+      }
+    }
+    if (!hasCompanion) {
+      return {
+        label: "Companion unavailable",
+        description: "Enable Companion in the server configuration, then refresh."
       }
     }
     if (profileLoaded && !profile?.enabled) {
@@ -246,7 +256,14 @@ export function CompanionHomePage({
             </a>
           )
         }
-      : profileLoaded && !profile?.enabled
+      : !hasCompanion
+        ? {
+            eyebrow: "Setup",
+            title: "Companion routes are unavailable",
+            description: "Enable Companion in the server configuration, then refresh. Your personalization setting is unchanged.",
+            action: null
+          }
+        : profileLoaded && !profile?.enabled
         ? {
             eyebrow: "Setup",
             title: "Companion setup required",

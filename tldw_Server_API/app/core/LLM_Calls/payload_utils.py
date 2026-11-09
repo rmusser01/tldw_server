@@ -399,6 +399,7 @@ def merge_extra_headers(headers: dict[str, str], request: Mapping[str, Any]) -> 
 
 
 __all__ = [
+    "build_openai_chat_payload",
     "EMBEDDING_REDIRECT_STATUS_CODES",
     "_sanitize_payload_for_logging",
     "encode_google_model_path",
@@ -410,3 +411,68 @@ __all__ = [
     "merge_extra_headers",
     "resolve_runtime_embedding_base_url",
 ]
+
+
+def build_openai_chat_payload(request: dict[str, Any]) -> dict[str, Any]:
+    messages = request.get("messages") or []
+    system_message = request.get("system_message")
+    payload_messages: list[dict[str, Any]] = []
+    if system_message:
+        payload_messages.append({"role": "system", "content": system_message})
+    # Assume messages are already OpenAI format
+    payload_messages.extend(messages)
+    payload: dict[str, Any] = {
+        "model": request.get("model"),
+        "messages": payload_messages,
+    }
+    temperature = request.get("temperature")
+    if temperature is not None:
+        payload["temperature"] = temperature
+    top_p = request.get("top_p")
+    if top_p is not None:
+        payload["top_p"] = top_p
+    max_completion = request.get("max_completion_tokens")
+    if max_completion is not None:
+        payload["max_completion_tokens"] = max_completion
+    else:
+        max_tokens = request.get("max_tokens")
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+    n = request.get("n")
+    if n is not None:
+        payload["n"] = n
+    presence_penalty = request.get("presence_penalty")
+    if presence_penalty is not None:
+        payload["presence_penalty"] = presence_penalty
+    frequency_penalty = request.get("frequency_penalty")
+    if frequency_penalty is not None:
+        payload["frequency_penalty"] = frequency_penalty
+    logit_bias = request.get("logit_bias")
+    if logit_bias is not None:
+        payload["logit_bias"] = logit_bias
+    user = request.get("user")
+    if user is not None:
+        payload["user"] = user
+    # Propagate explicit stream flag for testability and parity with legacy path
+    if request.get("stream") is not None:
+        payload["stream"] = bool(request.get("stream"))
+    # Tools and tool_choice gating to mirror legacy behavior
+    tools = request.get("tools")
+    if tools is not None:
+        payload["tools"] = tools
+    tool_choice = request.get("tool_choice")
+    if tool_choice == "none":
+        payload["tool_choice"] = "none"
+    elif tool_choice is not None and tools:
+        payload["tool_choice"] = tool_choice
+    if request.get("response_format") is not None:
+        payload["response_format"] = request.get("response_format")
+    if request.get("seed") is not None:
+        payload["seed"] = request.get("seed")
+    if request.get("stop") is not None:
+        payload["stop"] = request.get("stop")
+    if request.get("logprobs") is not None:
+        payload["logprobs"] = request.get("logprobs")
+    if request.get("top_logprobs") is not None and request.get("logprobs"):
+        payload["top_logprobs"] = request.get("top_logprobs")
+    return payload

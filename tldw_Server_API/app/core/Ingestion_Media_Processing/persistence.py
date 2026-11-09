@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
     persist_claims_if_applicable,
 )
 from tldw_Server_API.app.core.config import loaded_config_data, settings
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -36,6 +37,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
+    media_owner_identity,
     normalize_media_dedupe_url,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -61,6 +63,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
     record_email_native_persist,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import first_saved_filename
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
     exception_frames_for_log,
     exception_type_for_log,
@@ -3083,10 +3086,8 @@ async def add_media_orchestrate(
                     )
 
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0]["original_filename"]
+                first_filename = first_saved_filename(saved_files_info)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 first_filename = None
             first_source = all_valid_input_sources[0] if all_valid_input_sources else first_url or first_filename
@@ -3110,6 +3111,7 @@ async def add_media_orchestrate(
                         form_data=form_data,
                         db=db,
                         chunking_options_dict=chunking_options_dict,
+                        owner_user_id=getattr(current_user, "id", None),
                         TemplateClassifier=TemplateClassifier,
                         first_url=first_url,
                         first_filename=first_filename,
@@ -3778,7 +3780,9 @@ async def persist_primary_av_item(
                 )
 
         # Build plaintext chunks for chunk-level FTS if chunking is requested.
-        chunks_for_sql: list[dict[str, Any]] | None = None
+        chunks_for_sql: list[dict[str, Any]] | None = (
+            [] if getattr(form_data, "perform_chunking", True) is False else None
+        )
         try:
             _opts = effective_chunk_options or {}
             if _opts:
@@ -3851,16 +3855,11 @@ async def persist_primary_av_item(
                     seen_extra_keys.add(dedupe_key)
                     raw_chunk_type = ec.get("chunk_type") or "vlm"
                     try:
-                        normalized_chunk_type = _ck.normalize_chunk_type(raw_chunk_type)  # type: ignore[name-defined]
-                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                        try:
-                            from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
-                                Chunker as _Chunker,
-                            )
+                        from tldw_Server_API.app.core.Chunking.chunker import Chunker as _Chunker
 
-                            normalized_chunk_type = _Chunker.normalize_chunk_type(raw_chunk_type)
-                        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                            normalized_chunk_type = raw_chunk_type
+                        normalized_chunk_type = _Chunker.normalize_chunk_type(raw_chunk_type)
+                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                        normalized_chunk_type = raw_chunk_type
                     chunks_for_sql.append(
                         {
                             "text": ec.get("text", ""),
@@ -4250,50 +4249,42 @@ async def process_batch_media(
                 if source_hash and not is_url:
 
                     def _source_hash_precheck(
-                        db: MediaDatabase, *, source_hash=source_hash, url_clause=url_clause,
-                        url_clause_alias=url_clause_alias, url_params=url_params, url_params_alias=url_params_alias,
+                        db: MediaDatabase,
+                        *,
+                        source_hash=source_hash,
+                        url_clause=url_clause,
+                        url_clause_alias=url_clause_alias,
+                        url_params=url_params,
+                        url_params_alias=url_params_alias,
                     ) -> Any:
                         nonlocal source_hash_column_available
+                        owner_clause = (
+                            "AND COALESCE(CAST(m.owner_user_id AS TEXT),m.client_id) = ? AND m.system_operation_id IS NULL"
+                            if getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+                            else ""
+                        )
+                        owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         if source_hash_column_available is None:
                             source_hash_column_available = _media_has_source_hash_column(db)
+                        existing_record = None
                         if source_hash_column_available:
                             pre_check_query_template = """
-                                SELECT id
-                                FROM Media
+                                SELECT m.id
+                                FROM Media m
                                 WHERE {url_clause}
                                   AND source_hash = ?
                                   AND is_trash = 0
                                   AND deleted = 0
+                                {owner_clause}
                                 LIMIT 1
                             """
-                            pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
+                            pre_check_query = pre_check_query_template.format(url_clause=url_clause, owner_clause=owner_clause)  # nosec B608
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params, source_hash),
+                                (*url_params, source_hash, *owner_params),
                             )
                             existing_record = cursor.fetchone()
-                            if not existing_record:
-                                pre_check_query_template = """
-                                    SELECT m.id
-                                    FROM Media m
-                                    JOIN DocumentVersions dv ON dv.media_id = m.id
-                                    WHERE {url_clause_alias}
-                                      AND m.is_trash = 0
-                                      AND m.deleted = 0
-                                      AND dv.deleted = 0
-                                      AND dv.safe_metadata LIKE ?
-                                    LIMIT 1
-                                """
-                                pre_check_query = pre_check_query_template.format(
-                                    url_clause_alias=url_clause_alias
-                                )  # nosec B608
-                                hash_fragment = f'%"source_hash":"{source_hash}"%'
-                                cursor = db.execute_query(
-                                    pre_check_query,
-                                    (*url_params_alias, hash_fragment),
-                                )
-                                existing_record = cursor.fetchone()
-                        else:
+                        if not existing_record:
                             pre_check_query_template = """
                                 SELECT m.id
                                 FROM Media m
@@ -4303,15 +4294,14 @@ async def process_batch_media(
                                   AND m.deleted = 0
                                   AND dv.deleted = 0
                                   AND dv.safe_metadata LIKE ?
+                                {owner_clause}
                                 LIMIT 1
                             """
-                            pre_check_query = pre_check_query_template.format(
-                                url_clause_alias=url_clause_alias
-                            )  # nosec B608
+                            pre_check_query = pre_check_query_template.format(url_clause_alias=url_clause_alias, owner_clause=owner_clause)  # nosec B608
                             hash_fragment = f'%"source_hash":"{source_hash}"%'
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params_alias, hash_fragment),
+                                (*url_params_alias, hash_fragment, *owner_params),
                             )
                             existing_record = cursor.fetchone()
                         return existing_record
@@ -4339,18 +4329,25 @@ async def process_batch_media(
                 else:
 
                     def _url_precheck(db: MediaDatabase, *, url_clause=url_clause, url_params=url_params) -> Any:
+                        owner_clause = (
+                            "AND COALESCE(CAST(m.owner_user_id AS TEXT),m.client_id) = ? AND m.system_operation_id IS NULL"
+                            if getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+                            else ""
+                        )
+                        owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         pre_check_query_template = """
-                                          SELECT id
-                                          FROM Media
+                                          SELECT m.id
+                                          FROM Media m
                                           WHERE {url_clause}
                                             AND is_trash = 0
                                             AND deleted = 0
+                                          {owner_clause}
                                           LIMIT 1
                                           """
-                        pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
+                        pre_check_query = pre_check_query_template.format(url_clause=url_clause, owner_clause=owner_clause)  # nosec B608
                         cursor = db.execute_query(
                             pre_check_query,
-                            url_params,
+                            (*url_params, *owner_params),
                         )
                         return cursor.fetchone()
 
@@ -5634,6 +5631,21 @@ async def process_document_like_item(
     return final_result
 
 
+def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
+    """Recognize successful parsed mail; synthetic envelopes lack email fields."""
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("parser_used") != "builtin-email":
+        return False
+    email_metadata = metadata.get("email")
+    return (
+        result.get("status") in ("Success", "Warning")
+        and isinstance(email_metadata, dict)
+        and isinstance(email_metadata.get("format"), str)
+        and bool(email_metadata["format"])
+        and isinstance(email_metadata.get("headers_map"), dict)
+    )
+
+
 async def persist_doc_item_and_children(
     *,
     final_result: dict[str, Any],
@@ -5653,19 +5665,6 @@ async def persist_doc_item_and_children(
     Persist a single document/email item (and any children) produced by the /add
     orchestration, mirroring the previous post-processing DB logic.
     """
-    def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
-        """Recognize successful parsed mail; synthetic envelopes lack email fields."""
-        metadata = result.get("metadata")
-        if not isinstance(metadata, dict) or metadata.get("parser_used") != "builtin-email":
-            return False
-        email_metadata = metadata.get("email")
-        return (
-            result.get("status") in ("Success", "Warning")
-            and isinstance(email_metadata, dict)
-            and isinstance(email_metadata.get("format"), str)
-            and bool(email_metadata["format"])
-            and isinstance(email_metadata.get("headers_map"), dict)
-        )
 
     resolved_email_tenant_id = email_tenant_id or str(client_id)
     email_scope = get_scope() if media_type == "email" else None
@@ -5814,7 +5813,9 @@ async def persist_doc_item_and_children(
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 source_hash_for_db = None
 
-            chunks_for_sql: list[dict[str, Any]] | None = None
+            chunks_for_sql: list[dict[str, Any]] | None = (
+                [] if getattr(form_data, "perform_chunking", True) is False else None
+            )
             try:
                 opts = resolved_chunk_options or {}
                 if opts:
@@ -6016,7 +6017,9 @@ async def persist_doc_item_and_children(
                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                         safe_child_meta_json = None
 
-                                    child_chunks_for_sql: list[dict[str, Any]] | None = None
+                                    child_chunks_for_sql: list[dict[str, Any]] | None = (
+                                        [] if getattr(form_data, "perform_chunking", True) is False else None
+                                    )
                                     try:
                                         opts_child = resolved_chunk_options or {}
                                         if opts_child:
@@ -6297,7 +6300,9 @@ async def persist_doc_item_and_children(
                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                         pass
 
-                                    child_chunks_for_sql: list[dict[str, Any]] | None = None
+                                    child_chunks_for_sql: list[dict[str, Any]] | None = (
+                                        [] if getattr(form_data, "perform_chunking", True) is False else None
+                                    )
                                     try:
                                         opts_child = resolved_chunk_options or {}
                                         if opts_child:

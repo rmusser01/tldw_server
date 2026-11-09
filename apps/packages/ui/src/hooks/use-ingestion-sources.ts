@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import {
   useMutation,
   useQuery,
@@ -72,14 +73,36 @@ export const useIngestionSourcesQuery = (
 export const useIngestionSourceDetailQuery = (
   sourceId: string | null | undefined,
   api?: IngestionSourcesApiClient,
-  options?: { enabled?: boolean }
+  options?: { enabled?: boolean; refetchInterval?: number | false }
 ): UseQueryResult<IngestionSourceSummary, Error> => {
   const client = useResolvedApiClient(api)
-  return useQuery({
+  const queryClient = useQueryClient()
+  const query = useQuery({
     queryKey: ingestionSourceKeys.detail(sourceId ?? "unknown"),
     queryFn: () => client.getIngestionSource(String(sourceId)),
-    enabled: Boolean(sourceId) && (options?.enabled ?? true)
+    enabled: Boolean(sourceId) && (options?.enabled ?? true),
+    refetchInterval: options?.refetchInterval
   })
+  const completedAt = query.data?.last_sync_completed_at
+  useEffect(() => {
+    if (
+      options?.refetchInterval &&
+      (options?.enabled ?? true) &&
+      sourceId &&
+      completedAt
+    ) {
+      void queryClient.invalidateQueries({
+        queryKey: ingestionSourceKeys.itemsRoot(sourceId)
+      })
+    }
+  }, [
+    completedAt,
+    sourceId,
+    queryClient,
+    options?.refetchInterval,
+    options?.enabled
+  ])
+  return query
 }
 
 export const useIngestionSourceItemsQuery = (
@@ -161,6 +184,9 @@ export const useSyncIngestionSourceMutation = (
         }),
         queryClient.invalidateQueries({
           queryKey: ingestionSourceKeys.detail(sourceId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ingestionSourceKeys.itemsRoot(sourceId)
         })
       ])
     }

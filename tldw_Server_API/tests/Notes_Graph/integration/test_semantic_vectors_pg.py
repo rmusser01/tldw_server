@@ -663,7 +663,7 @@ def test_notes_graph_ci_shard_requires_pgvector_service_and_failure_flag() -> No
     notes_shard = next(
         shard
         for shard in job["strategy"]["matrix"]["shard"]
-        if shard["name"] == "gap-verified-5"
+        if shard["name"] == "gap5-notes-graph"
     )
 
     assert "tldw_Server_API/tests/Notes_Graph" in notes_shard["paths"]

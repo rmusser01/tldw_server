@@ -24,6 +24,15 @@ const compare = (observed: Record<string, number>, baseline: RatchetEntry[]) =>
   })
 
 describe("compareRatchet", () => {
+  it("passes a clean observation against an empty baseline", () => {
+    expect(compare({}, [])).toEqual([])
+  })
+
+  it("rejects a new problem against an empty baseline", () => {
+    const [problem] = compare({ "color-contrast": 1 }, [])
+    expect(problem).toContain('new axe violation "color-contrast" (1)')
+  })
+
   it("passes when observations match the baseline", () => {
     expect(compare({ "color-contrast": 3 }, [entry()])).toEqual([])
   })

@@ -1,4 +1,4 @@
-import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient";
 import type { WorkspaceNote } from "@/types/workspace"
 import type { ResearchWorkspacePrefill } from "../research-workspace-prefill"
 import type { BgRequestInit } from "@/services/background-proxy"
@@ -43,6 +43,7 @@ const render: typeof renderUI = (ui, options) =>
   })
 
 const mocks = vi.hoisted(() => ({
+  migrationMessages: [] as string[],
   owner: "alice",
   answerState: {} as Record<string, unknown>,
   navigate: vi.fn(),
@@ -181,8 +182,11 @@ vi.mock("@/components/Option/ResearchWorkspace/StudioPane", () => ({
   StudioPane: () => null,
 }))
 vi.mock("@/components/Option/ResearchWorkspace/WorkspaceStatusBar", () => ({
-  WorkspaceStatusBar: () => null,
-}))
+  WorkspaceStatusBar: ({ statusMessages }: { statusMessages: string[] }) => {
+    mocks.migrationMessages = statusMessages;
+    return null;
+  },
+}));
 const payload = () =>
   buildKnowledgeQaWorkspacePrefill({
     threadId: "thread-1",
@@ -238,6 +242,7 @@ beforeEach(() => {
       },
     }),
   );
+  mocks.migrationMessages = [];
   mocks.navigate.mockReset();
   mocks.persistent = true;
   mocks.multiUser = false;
@@ -757,7 +762,7 @@ it.each([false, true])(
   "retains canonical Quick Notes and reused source evidence through reconcile and tombstoned reload (lost response=%s)",
   async (loseResponse) => {
     const { restoreMigratedResearchWorkspace } =
-      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+      await import("@/services/workspace-server-restore")
     const { reconcileResearchWorkspaceServerState } =
       await import("@/components/Option/ResearchWorkspace/workspace-server-reconcile")
     localStorage.setItem(
@@ -1204,7 +1209,7 @@ it.each(["unchanged", "edited", "replaced", "cleared", "unversioned"] as const)(
   "acknowledges a restored legacy numeric note only while owned (%s) and saves its canonical UUID",
   async (change) => {
     const { restoreMigratedResearchWorkspace } =
-      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+      await import("@/services/workspace-server-restore")
     const { QuickNotesSection } =
       await import("@/components/Option/ResearchWorkspace/StudioPane/QuickNotesSection")
     localStorage.setItem(
@@ -1663,7 +1668,7 @@ it.each([false, true])(
       selectedSourceIds: [],
     })
     const { restoreMigratedResearchWorkspace } =
-      await import("@/components/Option/ResearchWorkspace/workspace-server-restore")
+      await import("@/services/workspace-server-restore")
     await restoreMigratedResearchWorkspace({
       signal: new AbortController().signal,
       apply: useWorkspaceStore.getState().restoreServerWorkspace,
@@ -2433,3 +2438,66 @@ it.each([
   expect(writes[2].headers).toEqual(writes[0].headers)
   view.unmount()
 })
+
+
+it("retires mounted migration loading and prevents cleanup when the account changes", async () => {
+  const key = "tldw-workspace:workspace:workspace-a:snapshot";
+  const raw = JSON.stringify({
+    workspaceId: "workspace-a",
+    currentNote: { content: "Keep Alice" },
+  });
+  localStorage.setItem(key, raw);
+  let release!: () => void;
+  const methods = {
+    upsertWorkspace: vi.fn(async (id: string) => ({ id, name: "Workspace A", version: 1 })),
+    getWorkspaceSources: vi.fn(async () => []),
+    addWorkspaceSource: vi.fn(async () => ({})),
+    createWorkspaceMigration: vi.fn(async (body: { id: string }) => ({
+      id: body.id,
+      status: "created",
+      client_delete_eligible: false,
+    })),
+    putWorkspaceMigrationChunk: vi.fn(async () => ({})),
+    finalizeWorkspaceMigration: vi.fn(async (id: string) => ({
+      id,
+      status: "finalized",
+      client_delete_eligible: true,
+    })),
+    getWorkspaceMigration: vi.fn(
+      (id: string) =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ id, status: "finalized", client_delete_eligible: true });
+        }),
+    ),
+    ackWorkspaceMigrationClientDelete: vi.fn(async () => ({})),
+  };
+  const previous = Object.getOwnPropertyDescriptors(tldwClient);
+  Object.assign(tldwClient, methods);
+  const view = render(<ResearchWorkspace />);
+  try {
+    await waitFor(() =>
+      expect(methods.getWorkspaceMigration).toHaveBeenCalledOnce(),
+    );
+    expect(mocks.migrationMessages).toContain("Checking local workspace data");
+    act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")));
+    await waitFor(() =>
+      expect(mocks.migrationMessages).not.toContain(
+        "Checking local workspace data",
+      ),
+    );
+  } finally {
+    await act(async () => {
+      release?.();
+      await Promise.resolve();
+    });
+    view.unmount();
+    for (const name of Object.keys(methods)) {
+      const descriptor = previous[name];
+      if (descriptor) Object.defineProperty(tldwClient, name, descriptor);
+      else Reflect.deleteProperty(tldwClient, name);
+    }
+  }
+  expect(localStorage.getItem(key)).toBe(raw);
+  expect(methods.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
+});

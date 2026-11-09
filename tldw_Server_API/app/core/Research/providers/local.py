@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic_core import to_jsonable_python
+
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MultiDatabaseRetriever,
@@ -79,16 +81,24 @@ class LocalResearchProvider:
         if not db_paths:
             return []
 
-        retriever = self._retriever_cls(db_paths=db_paths, user_id=str(owner_user_id))
+        use_vector = config.get("use_vector", True)
+        if not isinstance(use_vector, bool):
+            raise ValueError("local use_vector must be a boolean")
+        retrieval_config = RetrievalConfig(
+            max_results=int(config.get("top_k", 5)),
+            use_fts=True,
+            use_vector=use_vector,
+        )
+        retriever = self._retriever_cls(
+            db_paths=db_paths,
+            user_id=str(owner_user_id),
+            media_config=retrieval_config,
+        )
         try:
             documents = await retriever.retrieve(
                 _build_query(query, focus_area),
                 sources=[_SOURCE_TO_DATA_SOURCE[name] for name in sources if name in _SOURCE_TO_DATA_SOURCE],
-                config=RetrievalConfig(
-                    max_results=int(config.get("top_k", 5)),
-                    use_fts=True,
-                    use_vector=True,
-                ),
+                config=retrieval_config,
             )
         finally:
             close_fn = getattr(retriever, "close", None)
@@ -99,7 +109,7 @@ class LocalResearchProvider:
 
     @staticmethod
     def _normalize_document(document: Document) -> dict[str, Any]:
-        metadata = dict(document.metadata or {})
+        metadata = to_jsonable_python(dict(document.metadata or {}))
         title = str(
             metadata.get("title")
             or metadata.get("document_title")

@@ -162,6 +162,18 @@ _CREATE_MCP_HUB_TABLES = [
         (),
     ),
     (
+        "ALTER TABLE mcp_external_servers ADD COLUMN IF NOT EXISTS last_discovery_at TIMESTAMPTZ",
+        (),
+    ),
+    (
+        "ALTER TABLE mcp_external_servers ADD COLUMN IF NOT EXISTS last_successful_discovery_at TIMESTAMPTZ",
+        (),
+    ),
+    (
+        "ALTER TABLE mcp_external_servers ADD COLUMN IF NOT EXISTS last_error_category TEXT",
+        (),
+    ),
+    (
         """
         CREATE TABLE IF NOT EXISTS mcp_external_server_secrets (
             server_id TEXT PRIMARY KEY REFERENCES mcp_external_servers(id) ON DELETE CASCADE,
@@ -4396,3 +4408,27 @@ async def ensure_virtual_key_counters_pg(pool: DatabasePool | None = None) -> bo
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL virtual-key counters tables: {exc}")
         return False
+
+
+async def ensure_authnz_lockout_tables_pg(db_pool: DatabasePool) -> bool:
+    """Provision login protection as owner or validate it read-only when serving."""
+    from .repos.rate_limits_repo import AuthnzRateLimitsRepo
+
+    await AuthnzRateLimitsRepo(db_pool).ensure_schema()
+    return True
+
+
+async def ensure_authnz_token_blacklist_pg(db_pool: DatabasePool) -> bool:
+    """Provision revocation storage as owner or validate it read-only when serving."""
+    from .repos.token_blacklist_repo import AuthnzTokenBlacklistRepo
+
+    await AuthnzTokenBlacklistRepo(db_pool).ensure_schema()
+    return True
+
+
+async def ensure_resource_daily_ledger_pg(db_pool: DatabasePool) -> bool:
+    """Provision accounting as owner or validate its runtime schema read-only."""
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
+
+    await ResourceDailyLedger(db_pool=db_pool).initialize()
+    return True

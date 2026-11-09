@@ -3,6 +3,7 @@ import { Empty, Form, Input, Modal, Select, Spin, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { FlashcardCreate } from "@/services/flashcards"
 import { useFlashcardTemplatesQuery } from "../hooks"
 import {
@@ -13,6 +14,7 @@ import {
 const { Text } = Typography
 
 interface FlashcardTemplateValueModalProps {
+  scope?: ServicePromptSnapshot | null
   open: boolean
   onClose: () => void
   onApply: (
@@ -30,14 +32,16 @@ export const FlashcardTemplateValueModal: React.FC<FlashcardTemplateValueModalPr
   open,
   onClose,
   onApply,
-  draftDefaults
+  draftDefaults,
+  scope
 }) => {
   const { t } = useTranslation(["option", "common"])
   const message = useAntdMessage()
   const [form] = Form.useForm<TemplateValueModalFormValues>()
   const initializedRef = React.useRef(false)
   const templatesQuery = useFlashcardTemplatesQuery({
-    enabled: open
+    enabled: open,
+    scope
   })
   const templates = templatesQuery.data?.items ?? []
   const selectedTemplateId = Form.useWatch("template_id", form)

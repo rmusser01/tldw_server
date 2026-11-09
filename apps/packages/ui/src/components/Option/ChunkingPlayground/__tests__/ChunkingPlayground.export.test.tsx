@@ -1,7 +1,8 @@
 import React from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { message } from "antd"
+import { ConfigProvider, message } from "antd"
+import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { ChunkingResponse } from "@/services/chunking"
@@ -152,8 +153,21 @@ describe("ChunkingPlayground completed output export", () => {
     await complete()
     expect(screen.getByRole("button", { name: /Export JSON$/ })).toBeEnabled()
     chunkResult.mockResolvedValueOnce({ ...RESPONSE, chunks: [] })
-    fireEvent.click(screen.getByRole("button", { name: /Chunk Text$/ }))
-    await screen.findByText("Enter text and click 'Chunk Text' to see results")
+    const rerunButton = screen.getByRole("button", { name: /Chunk Text$/ })
+    const loadingBeforeClick = rerunButton.classList.contains("ant-btn-loading")
+    const requestsBeforeClick = chunkResult.mock.calls.length
+    fireEvent.click(rerunButton)
+    try {
+      await screen.findByText("Enter text and click 'Chunk Text' to see results")
+    } catch (error) {
+      console.error("Chunking rerun diagnostics", JSON.stringify({
+        loadingBeforeClick,
+        loadingAfterWait: rerunButton.classList.contains("ant-btn-loading"),
+        requestsBeforeClick,
+        requestsAfterWait: chunkResult.mock.calls.length
+      }))
+      throw error
+    }
     expect(screen.queryByRole("button", { name: /Export JSON$/ })).not.toBeInTheDocument()
     expect(downloads).toHaveLength(0)
   }, 30000)
@@ -210,4 +224,150 @@ describe("ChunkingPlayground completed output export", () => {
     expect(downloads).toHaveLength(0)
     expect(await exported()).toEqual(RESPONSE)
   }, 30000)
+})
+
+
+describe("ChunkingPlayground saved template settings", () => {
+  const mountSettings = () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    clients.push(client)
+    return render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <QueryClientProvider client={client}>
+          <ChunkingPlayground />
+        </QueryClientProvider>
+      </ConfigProvider>
+    )
+  }
+  const loadSettings = async () => {
+    const user = userEvent.setup()
+    await user.click(screen.getByText("Advanced Options"))
+    const label = await screen.findByText("Template name", { exact: true })
+    const row = label.closest(".ant-form-item")
+    if (!row) throw new Error("Template settings row missing")
+    await user.type(
+      within(row as HTMLElement).getByRole("combobox"),
+      "s06-words"
+    )
+    await user.click(screen.getByRole("button", { name: /Load$/ }))
+    await waitFor(() => expect(numberInput("Max Size")).toHaveValue("25"))
+    expect(numberInput("Overlap")).toHaveValue("0")
+    fireEvent.change(screen.getByPlaceholderText("Paste text here..."), {
+      target: { value: INPUT }
+    })
+    await user.click(screen.getByRole("button", { name: /Chunk Text$/ }))
+    await screen.findByText(FIRST)
+    const writes = mocks.request.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.path === "/api/v1/chunking/chunk_text")
+    expect(writes).toHaveLength(1)
+    expect(writes[0].body.options).toMatchObject({
+      method: "words",
+      max_size: 25,
+      overlap: 0,
+      adaptive: false
+    })
+    expect(writes[0].body.options).not.toHaveProperty("config")
+  }
+
+  it("loads the exact settings saved through its real template modal after remount", async () => {
+    const originalRequest = mocks.request.getMockImplementation()!
+    let saved: Record<string, unknown> | undefined
+    mocks.request.mockImplementation(
+      async (request: {
+        path: string
+        method?: string
+        body?: { name: string; template: { chunking: Record<string, unknown> } }
+      }) => {
+        if (
+          request.path === "/api/v1/chunking/templates" &&
+          request.method === "POST"
+        ) {
+          const body = request.body!
+          // The real API validator adds an empty config when a flat template omits it.
+          saved = {
+            id: 7,
+            uuid: "e5f7529b-7702-4e81-b8ec-532433bd8408",
+            name: body.name,
+            template_json: JSON.stringify({
+              ...body.template,
+              chunking: { config: {}, ...body.template.chunking }
+            })
+          }
+          return saved
+        }
+        if (request.path === "/api/v1/chunking/templates/s06-words")
+          return saved
+        return originalRequest(request)
+      }
+    )
+    const user = userEvent.setup()
+    const view = mountSettings()
+    await screen.findByText("Max Size")
+    fireEvent.change(numberInput("Max Size"), { target: { value: "25" } })
+    fireEvent.change(numberInput("Overlap"), { target: { value: "0" } })
+    await user.click(screen.getByRole("button", { name: /Save as Template$/ }))
+    const dialog = await screen.findByRole("dialog")
+    await waitFor(() => expect(dialog).toBeVisible())
+    expect(
+      within(dialog).getByText("Save as Template", { exact: true })
+    ).toBeVisible()
+    fireEvent.change(
+      within(dialog).getByPlaceholderText("e.g., my-custom-chunking"),
+      {
+        target: { value: "s06-words" }
+      }
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(saved).toBeDefined())
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    view.unmount()
+    mountSettings()
+    await screen.findByText("Max Size")
+    await loadSettings()
+    expect(
+      mocks.request.mock.calls.filter(
+        ([request]) =>
+          request.path === "/api/v1/chunking/templates" &&
+          request.method === "POST"
+      )
+    ).toHaveLength(1)
+  }, 30000)
+
+  it.each([
+    ["legacy flat", { method: "words", max_size: 25, overlap: 0 }],
+    [
+      "legacy flat with API config",
+      { method: "words", max_size: 25, overlap: 0, config: {} }
+    ],
+    ["nested", { method: "words", config: { max_size: 25, overlap: 0 } }],
+    [
+      "explicit top-level override",
+      {
+        method: "words",
+        max_size: 25,
+        overlap: 0,
+        adaptive: false,
+        config: { max_size: 100, overlap: 10, adaptive: true }
+      }
+    ]
+  ])(
+    "restores %s settings without resetting zero overlap",
+    async (_name, chunking) => {
+      const originalRequest = mocks.request.getMockImplementation()!
+      mocks.request.mockImplementation(async (request: { path: string }) =>
+        request.path === "/api/v1/chunking/templates/s06-words"
+          ? { name: "s06-words", template_json: JSON.stringify({ chunking }) }
+          : originalRequest(request)
+      )
+      mountSettings()
+      await screen.findByText("Max Size")
+      await loadSettings()
+    },
+    30000
+  )
 })

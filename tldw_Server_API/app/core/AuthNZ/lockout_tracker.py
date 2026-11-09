@@ -73,6 +73,8 @@ class LockoutTracker:
         try:
             await self._repo.ensure_schema()
         except Exception:
+            if getattr(self.db_pool, "pool", None):
+                raise
             logger.warning("LockoutTracker schema ensure warning")
         self._initialized = True
 

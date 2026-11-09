@@ -42,11 +42,12 @@ const storage = vi.hoisted(() => {
     beforeHistoryAdd: undefined as (() => Promise<void>) | undefined,
     beforeMessageAdd: undefined as (() => Promise<void>) | undefined
   }
-  for (const name of ["chatHistories", "messages", "userSettings", "sessionFiles", "compareStates", "historySelections", "historyProjections", "forkOperations", "modelNickname", "prompts"]) {
+  for (const name of ["chatHistories", "messages", "userSettings", "sessionFiles", "compareStates", "historySelections", "historyProjections", "forkOperations", "modelNickname", "prompts", "searchTokens"]) {
     const rows = new Map<string, Row>()
     const key = (row: Row) => JSON.stringify(name === "historySelections"
       ? [row.profile_id, row.client_session_id, row.owner_key, row.conversation_id]
-      : name === "forkOperations" ? [row.owner_key, row.operation_id] : row.id)
+      : name === "forkOperations" ? [row.owner_key, row.operation_id]
+      : name === "searchTokens" ? [row.token, row.history_id] : row.id)
     const collection = (matches: (row: Row) => boolean): Collection => ({
       toArray: async () => structuredClone([...rows.values()].filter(matches)),
       and: predicate => collection(row => matches(row) && predicate(row)),
@@ -3463,6 +3464,53 @@ describe("real full and compact Scene consumers across persistence and steering"
       expect(tldwChat.streamMessage).not.toHaveBeenCalled()
     } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }) }
   })
+
+
+  it.each(["refused", "unknown", "admitted", "message-only", "wrong-status"] as const)(
+    "S06 native provider recovery distinguishes %s input ownership", async boundary => {
+      const scoped = answerSnapshot();
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped);
+      const { rows, append } = declareNativeMirrorTransport(true);
+      const initialConnection = useConnectionStore.getState().state;
+      useConnectionStore.setState({ state: { ...initialConnection, isConnected: true,
+        phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } });
+      const consumer = mountConsumer("full", scoped, { actualOption: true, keepInterruptedTurns: true });
+      vi.mocked(tldwChat.streamMessage).mockImplementation(async function* (_messages, options, onChunk) {
+        yield* [];
+        options.onDispatch?.();
+        if (boundary === "admitted") {
+          const selection = options.preparedRequest!.tldw_history_selection_v1!;
+          rows.push({ id: "refused-input", role: "user", content: "Retain refused Model question", parent_message_id: null });
+          const admission = { version: 1, owner_key: "server-owner", conversation_id: newServerId,
+            input_message_id: "refused-input", input_message_revision: "1", selection_digest: selection.selection_digest,
+            messages: selection.messages, originating_selection_revision: selection.selection_revision };
+          const chunk: Parameters<NonNullable<typeof onChunk>>[0] & { tldw_history_admission_v1: typeof admission } = {
+            tldw_history_admission_v1: admission
+          };
+          await onChunk?.(chunk);
+        }
+        if (boundary === "unknown") throw new TypeError("Network response lost");
+        if (boundary === "message-only") throw new Error("provider_disabled");
+        throw new Error("Stream completion failed", { cause: Object.assign(new Error("Provider disabled"), {
+          status: boundary === "wrong-status" ? 503 : 403, details: { detail: { error_code: "provider_disabled" } }
+        }) });
+      });
+      try {
+        let outcome: ChatSubmitResult | void;
+        await act(async () => { outcome = await consumer.mounted.result.current.onSubmit({ message: "Retain refused Model question", image: "" }); });
+        expect(normalizeChatSubmitResult(outcome!)).toMatchObject({ status: "failed" });
+        expect((outcome! as Extract<ChatSubmitResult, { status: "failed" }>).restoreDraft).toBe(boundary === "refused" ? true : undefined);
+        if (boundary === "refused") {
+          const refused = outcome! as Extract<ChatSubmitResult, { status: "failed" }>;
+          expect(refused.restoreDraftIsCurrent?.()).toBe(true);
+          consumer.selection.reset();
+          expect(refused.restoreDraftIsCurrent?.()).toBe(false);
+        }
+        expect(rows).toHaveLength(boundary === "admitted" ? 1 : 0);
+        expect(append).not.toHaveBeenCalled();
+      } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }); }
+    }
+  );
 
   it.each((["full", "compact"] as const).flatMap(surface =>
     (["complete", "duplicate", "provider partial", "drop after saved", "missing admission", "missing final", "foreign CID", "foreign user", "conflicting admission", "conflicting final", "final before admission", "Stop before admission", "Stop after admission"] as const)

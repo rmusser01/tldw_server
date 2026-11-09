@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     IdempotentOperationUnavailableError,
 )
 
+from ...resource_policy import reject_resource_required
 from .admission import (
     _bump_counters,
     _future_available_at,
@@ -290,6 +291,8 @@ def replay_idempotent_operation(
 ) -> IdempotentOperationAdmission | None:
     """Return a validated exact-key replay without applying admission policy."""
 
+    reject_resource_required(command.job.domain, command.job.job_type)
+
     receipt = _find_exact_receipt(conn, command)
     if receipt is None:
         return None
@@ -319,6 +322,8 @@ def admit_idempotent_operation(
     counters_enabled: bool,
 ) -> IdempotentOperationAdmission:
     """Atomically create, replay, or converge one receipt-backed Job."""
+
+    reject_resource_required(command.job.domain, command.job.job_type)
 
     now_sql = _sqlite_timestamp(now)
     available_at = _future_available_at(command.job.available_at, now=now)

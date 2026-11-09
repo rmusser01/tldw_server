@@ -8,12 +8,13 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 class FakePGCursor:
     def __init__(self, jobs):
-             # jobs: dict id -> dict(row)
+        # jobs: dict id -> dict(row)
         self.jobs = jobs
         self._last = None
         self.rowcount = 0
         self._fetch_buffer = None
         self.job_event_inserts = []
+        self._fetch_rows = []
 
     def __enter__(self):
 
@@ -28,6 +29,11 @@ class FakePGCursor:
         s = str(sql)
         self.rowcount = 0
         self._fetch_buffer = None
+        self._fetch_rows = []
+        if s.startswith("SELECT * FROM jobs WHERE") and "ORDER BY id" in s:
+            ids = params[0]
+            self._fetch_rows = [dict(row) for job_id, row in self.jobs.items() if job_id in ids]
+            return self
         # Idempotent insert returning * (first insert returns a row, later returns None)
         if "ON CONFLICT (domain, queue, job_type, idempotency_key) DO NOTHING RETURNING *" in s:
             # params: uuid, identity, payload, immutable execution controls, scheduling, trace context
@@ -117,8 +123,8 @@ class FakePGCursor:
         return val
 
     def fetchall(self):
-
-        return []
+        rows, self._fetch_rows = self._fetch_rows, []
+        return rows
 
 
 class FailingJobEventsPGCursor(FakePGCursor):
@@ -377,7 +383,7 @@ def test_pg_non_idempotent_create_uses_command_context_for_job_created_event(mon
 
 @pytest.mark.unit
 def test_pg_batch_complete_encrypts_results(monkeypatch, tmp_path):
-     # Enable encryption for domain SECURE and provide AES key
+    # Enable encryption for domain SECURE and provide AES key
     monkeypatch.setenv("JOBS_ENCRYPT_SECURE", "true")
     monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", base64.b64encode(b"1" * 32).decode("ascii"))
 
@@ -385,8 +391,21 @@ def test_pg_batch_complete_encrypts_results(monkeypatch, tmp_path):
     jm.backend = "postgres"
     # Fake jobs store: two processing jobs in domain 'secure'
     jobs = {
-        1: {"id": 1, "domain": "secure", "status": "processing"},
-        2: {"id": 2, "domain": "secure", "status": "processing"},
+        job_id: {
+            "id": job_id,
+            "uuid": f"00000000-0000-0000-0000-{job_id:012d}",
+            "domain": "secure",
+            "queue": "default",
+            "job_type": "work",
+            "owner_user_id": None,
+            "status": "processing",
+            "resource": None,
+            "resource_authority_uuid": None,
+            "resource_generation": None,
+            "resource_settings_json": None,
+            "resource_settings_fingerprint": None,
+        }
+        for job_id in (1, 2)
     }
     monkeypatch.setattr(jm, "_connect", lambda: FakePGConn())
     monkeypatch.setattr(jm, "_pg_cursor", lambda conn: FakePGCursor(jobs))

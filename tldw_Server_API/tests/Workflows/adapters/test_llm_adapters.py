@@ -32,7 +32,7 @@ from tldw_Server_API.app.core.Workflows.adapters import (
     run_translate_adapter,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
 
 
 def _real_moderation_service(policy: ModerationPolicy) -> ModerationService:

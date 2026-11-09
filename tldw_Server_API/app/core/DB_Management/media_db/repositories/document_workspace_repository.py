@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 
 _UNSET = object()
 # document_annotations.deleted is INTEGER on both backends. The Postgres query
@@ -139,6 +140,35 @@ class DocumentWorkspaceRepository:
         with self.db.transaction() as conn:
             rows: list[dict[str, Any]] = self.db._fetchall_with_connection(conn, query, (media_id, user_id, _ACTIVE))
         return rows
+
+    def list_annotations_for_export(self, *, media_id: int, user_id: str) -> list[dict[str, Any]]:
+        """Bound rows and text before materializing the canonical export payload."""
+        # SQLite SUBSTR stops at NUL; PostgreSQL TEXT cannot contain NUL.
+        if self._is_postgres():
+            query = """
+        SELECT 0 AS invalid_text, SUBSTR(location, 1, 65) AS location, SUBSTR(text, 1, 6001) AS text,
+               SUBSTR(color, 1, 16) AS color, SUBSTR(note, 1, 6001) AS note,
+               SUBSTR(annotation_type, 1, 32) AS annotation_type
+        FROM document_annotations
+        WHERE media_id = ? AND user_id = ? AND deleted = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 501
+        """
+        else:
+            query = """
+        SELECT CASE WHEN
+            INSTR(CAST(location AS BLOB), X'00') > 0 OR INSTR(CAST(text AS BLOB), X'00') > 0 OR
+            INSTR(CAST(note AS BLOB), X'00') > 0 OR INSTR(CAST(color AS BLOB), X'00') > 0 OR
+            INSTR(CAST(annotation_type AS BLOB), X'00') > 0 THEN 1 ELSE 0 END AS invalid_text, SUBSTR(location, 1, 65) AS location, SUBSTR(text, 1, 6001) AS text,
+               SUBSTR(color, 1, 16) AS color, SUBSTR(note, 1, 6001) AS note,
+               SUBSTR(annotation_type, 1, 32) AS annotation_type
+        FROM document_annotations
+        WHERE media_id = ? AND user_id = ? AND deleted = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 501
+        """
+        with self.db.transaction() as conn:
+            return self.db._fetchall_with_connection(conn, query, (media_id, user_id, 0))
 
     def create_annotation(
         self,
@@ -280,6 +310,7 @@ class DocumentWorkspaceRepository:
         media_id: int,
         user_id: str,
         annotation_rows: list[dict[str, Any]],
+        allow_replay: bool = False,
     ) -> list[dict[str, Any]]:
         """Insert a batch of annotation rows and return the saved active rows.
 
@@ -294,6 +325,9 @@ class DocumentWorkspaceRepository:
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (user_id, media_id, client_id) DO NOTHING
         """
+        if allow_replay:
+            insert_sql = insert_sql.replace("ON CONFLICT (user_id, media_id, client_id)", "ON CONFLICT")
+        admitted = []
         # An empty client id is stored as NULL, which never conflicts.
         client_ids = [row["client_id"] for row in annotation_rows if row.get("client_id")]
         stored_id_by_client: dict[str, str] = {}
@@ -318,6 +352,24 @@ class DocumentWorkspaceRepository:
                         row.get("client_id") or None,
                     ),
                 )
+                if allow_replay:
+                    saved = self.db._fetchone_with_connection(
+                        conn,
+                        "SELECT * FROM document_annotations WHERE media_id = ? AND user_id = ? AND client_id = ?"
+                        if row.get("client_id")
+                        else "SELECT * FROM document_annotations WHERE media_id = ? AND user_id = ? AND id = ?",
+                        (media_id, user_id, row.get("client_id") or row["id"]),
+                    )
+                    fields = ("location", "text", "color", "note", "annotation_type", "chapter_title", "percentage")
+                    if (
+                        not saved
+                        or saved["media_id"] != media_id
+                        or str(saved["user_id"]) != user_id
+                        or saved["deleted"]
+                        or any(saved.get(key) != row.get(key) for key in fields)
+                    ):
+                        raise ConflictError("Annotation creation intent conflicts")
+                    admitted.append(dict(saved))
             if client_ids:
                 placeholders = ", ".join("?" for _ in client_ids)
                 lookup_sql = f"""
@@ -329,6 +381,8 @@ class DocumentWorkspaceRepository:
                 ):
                     found_row = _row_to_dict(found)
                     stored_id_by_client[found_row["client_id"]] = str(found_row["id"])
+        if allow_replay:
+            return admitted
         resolved_ids = [
             stored_id_by_client.get(row.get("client_id") or "", str(row["id"])) for row in annotation_rows
         ]

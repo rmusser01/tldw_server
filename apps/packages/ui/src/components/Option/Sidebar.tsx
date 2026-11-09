@@ -162,7 +162,8 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
     [serverChats]
   )
 
-  // Using infinite query for pagination
+  // Using infinite query for pagination. Keyset pagination (WP-27): each
+  // page is fetched by the previous page's last row, not by page offset.
   const {
     data: chatHistoriesData,
     status,
@@ -172,13 +173,18 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
     isLoading
   } = useInfiniteQuery({
     queryKey: ["fetchChatHistory", debouncedSearchQuery],
-    queryFn: async ({ pageParam = 1 }) => {
+    queryFn: async ({ pageParam }) => {
       try {
         const db = new PageAssistDatabase()
-        const result = await db.getChatHistoriesPaginated(
+        const result = await db.getChatHistoriesPaginatedOptimized(
           pageParam,
           debouncedSearchQuery || undefined
         )
+        // The next page's cursor: the last row of this page.
+        const lastEntry =
+          result.histories.length > 0
+            ? result.histories[result.histories.length - 1]
+            : undefined
 
         // If searching, don't group by date - just return all results in a single group
         if (debouncedSearchQuery) {
@@ -189,7 +195,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
                 ? [{ label: "searchResults", items: result.histories }]
                 : [],
             hasMore: result.hasMore,
-            totalCount: result.totalCount
+            lastEntry
           }
         }
 
@@ -236,23 +242,27 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
         return {
           groups,
           hasMore: result.hasMore,
-          totalCount: result.totalCount
+          lastEntry
         }
       } catch (e) {
         setDexiePrivateWindowError(isDatabaseClosedError(e))
         return {
           groups: [],
           hasMore: false,
-          totalCount: 0
+          lastEntry: undefined
         }
       }
     },
-    getNextPageParam: (lastPage, allPages) => {
-      return lastPage.hasMore ? allPages.length + 1 : undefined
+    getNextPageParam: (lastPage) => {
+      return lastPage.hasMore && lastPage.lastEntry
+        ? lastPage.lastEntry
+        : undefined
     },
     placeholderData: undefined,
     enabled: isOpen,
-    initialPageParam: 1
+    initialPageParam: undefined as
+      | { createdAt: number; id: string }
+      | undefined
   })
 
   // Flatten all groups from all pages

@@ -7,6 +7,7 @@ import math
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -358,6 +359,72 @@ def test_e2e_required_explicitly_loads_pytest_asyncio_plugin() -> None:
     retry = _get_step(steps, "Run critical e2e suite (retry)")
     assert "-p pytest_asyncio.plugin" in primary["run"]
     assert "-p pytest_asyncio.plugin" in retry["run"]
+
+
+# Checked-in browser bundles predate ubuntu-latest's move to Ubuntu 26.
+PLAYWRIGHT_BROWSER_JOBS = {
+    "frontend-e2e-tiers.yml": [
+        "critical",
+        "features",
+        "admin",
+        "ux-regression"
+    ],
+    "frontend-required.yml": [
+        "frontend-required"
+    ],
+    "frontend-ux-gates.yml": [
+        "onboarding-gate",
+        "smoke-gate"
+    ],
+    "ui-research-workspace-nightly.yml": [
+        "webui-research-workspace-real-backend",
+        "extension-research-workspace-real-backend"
+    ],
+    "ui-research-workspace-parity.yml": [
+        "webui-research-workspace-parity",
+        "extension-research-workspace-parity"
+    ],
+    "ui-watchlists-extension-e2e.yml": [
+        "watchlists-extension-e2e"
+    ],
+    "ux-regression-nightly.yml": [
+        "ux-regression"
+    ]
+}
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [
+        (workflow_name, job_name)
+        for workflow_name, job_names in PLAYWRIGHT_BROWSER_JOBS.items()
+        for job_name in job_names
+    ],
+)
+def test_playwright_browser_jobs_use_supported_ubuntu_image(
+    workflow_name: str, job_name: str
+) -> None:
+    job = _load(f".github/workflows/{workflow_name}")["jobs"][job_name]
+    assert job["runs-on"] in {"ubuntu-22.04", "ubuntu-24.04"}
+
+
+def test_playwright_browser_job_inventory_is_complete() -> None:
+    actual = set()
+    for path in sorted(Path(".github/workflows").glob("*.y*ml")):
+        for job_name, job in _load(str(path)).get("jobs", {}).items():
+            if not str(job.get("runs-on", "")).startswith("ubuntu"):
+                continue
+            if any(
+                re.search(r"\bplaywright\s+install\b", step.get("run", ""))
+                for step in job.get("steps", [])
+            ):
+                actual.add((path.name, job_name))
+    expected = {
+        (workflow_name, job_name)
+        for workflow_name, job_names in PLAYWRIGHT_BROWSER_JOBS.items()
+        for job_name in job_names
+    }
+    assert actual == expected
 
 
 def test_watchlists_extension_e2e_uses_playwright_chromium() -> None:
@@ -884,7 +951,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "auth-core-unit-m-z",
             "auth-integration-admin-auth",
             "auth-integration-authnz",
-            "auth-integration-b-z",
+            "auth-integration-b-o",
+            "auth-integration-postgres-profiles",
+            "auth-integration-prompts-providers",
+            "auth-integration-s-z",
             "auth-postgres",
             "auth-sqlite",
             "auth-unit-a-l",
@@ -994,6 +1064,14 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "product-watchlists-core",
             "product-watchlists-pipeline",
         } | workflow_shards
+        if job_name in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+            product_shards.remove("product-notes-persona")
+            product_shards.update({
+                "product-notes-legacy",
+                "product-notes-new",
+                "product-persona",
+                "product-personalization",
+            })
         assert product_shards.issubset(shard_names)
         assert "product-workflows" not in shard_names
         assert "product-workflows-adapters" not in shard_names
@@ -1430,6 +1508,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Workspaces/test_workspace_job_status.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_upsert_owner_boundary.py",
         }
         auth_db_files = {
             str(path)
@@ -1883,8 +1962,13 @@ def test_db_management_partitions_cover_each_file_once() -> None:
     files = {path.as_posix() for path in root.glob("test_[a-z]*.py")}
     patterns = {
         "db-management-a-c": (
-            "test_[a-b]*.py", "test_character_*.py", "test_chat_*.py",
-            "test_claims_*.py", "test_con*.py", "test_core_*.py",
+            "test_[a-b]*.py",
+            "test_character_*.py",
+            "test_chat_*.py",
+            "test_claims_*.py",
+            "test_claim_cluster_rebuild_*.py",
+            "test_con*.py",
+            "test_core_*.py",
         ),
         "db-management-d-l": ("test_[d-l]*.py",),
         "db-management-m": ("test_m*.py",),
@@ -1924,6 +2008,101 @@ def test_db_management_partitions_cover_each_file_once() -> None:
         )
         assert len(covered) == len(set(covered))
         assert set(covered) == files
+
+
+
+def test_writing_partitions_isolate_app_setup_and_preserve_every_module() -> None:
+    """Keep repeated real-app setup within independent existing shard budgets."""
+    from Helper_Scripts.ci.check_shard_coverage import is_covered
+
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests/Writing")
+    files = {path.as_posix() for path in root.glob("test*.py")}
+    groups = {
+        "writing-manuscript-api": {
+            (root / "test_manuscript_endpoint_integration.py").as_posix(),
+            (root / "test_manuscript_phase2_integration.py").as_posix(),
+        },
+        "writing-annotations-api": {
+            (root / "test_manuscript_annotations_api.py").as_posix(),
+        },
+        "writing-session-analysis-api": {
+            (root / "test_writing_endpoint_integration.py").as_posix(),
+            (root / "test_manuscript_analysis_integration.py").as_posix(),
+        },
+    }
+    groups["writing-db-services"] = files - set().union(*groups.values())
+    for job in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        assert all(shard["name"] != "gap-verified-10" for shard in shards)  # nosec B101 -- Old combined budget is retired.
+        owners: dict[str, list[str]] = {path: [] for path in files}
+        for shard in shards:
+            paths = str(shard["paths"]).split()
+            if shard["name"] in groups:
+                assert set(paths) == groups[shard["name"]], (job, shard)  # nosec B101 -- Exact complete workload.
+            for pattern in paths:
+                for path in files:
+                    if is_covered(path, [pattern]):
+                        owners[path].append(shard["name"])
+        assert files and all(len(names) == 1 for names in owners.values()), (  # nosec B101 -- No test loss or duplication.
+            job,
+            {path: names for path, names in owners.items() if len(names) != 1},
+        )
+        assert {names[0] for names in owners.values()} == set(groups), (  # nosec B101 -- Distinct app/DB budgets.
+            job,
+            owners,
+        )
+
+def test_auth_integration_separates_expensive_suites_and_preserves_every_file() -> None:
+    """Keep the four expensive auth families independent under existing job budgets."""
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests/AuthNZ/integration")
+    files = {path.as_posix() for path in root.glob("test_[b-z]*.py")}
+    expensive = (
+        "test_evaluations_cookie_session.py",
+        "test_postgres_runtime_schema.py",
+        "test_prompt_studio_cookie_session.py",
+        "test_single_user_cookie_session.py",
+    )
+    jobs = (
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
+    )
+    for job in jobs:
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        owners: dict[str, list[str]] = {filename: [] for filename in files}
+        for shard in shards:
+            for pattern in str(shard["paths"]).split():
+                for filename in files:
+                    if fnmatch.fnmatch(filename, pattern):
+                        owners[filename].append(shard["name"])
+        assert files and all(
+            len(names) == 1 for names in owners.values()
+        ), (  # nosec B101 -- Preserve all original test paths exactly once.
+            job,
+            {path: names for path, names in owners.items() if len(names) != 1},
+        )
+        assigned_shards = {names[0] for names in owners.values()}
+        for shard in shards:
+            if shard["name"] in assigned_shards:
+                for pattern in str(shard["paths"]).split():
+                    assert any(
+                        fnmatch.fnmatch(filename, pattern) for filename in files
+                    ), (  # nosec B101 -- Unmatched shell globs would fail pytest collection.
+                        job,
+                        pattern,
+                    )
+        assignments = {
+            owners[(root / filename).as_posix()][0] for filename in expensive
+        }
+        assert len(assignments) == len(expensive), (
+            job,
+            assignments,
+        )  # nosec B101 -- Independent real-app/database workloads need separate job budgets.
 
 
 def test_auth_core_unit_partitions_cover_each_file_once() -> None:
@@ -2119,6 +2298,97 @@ def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
                     f"{reference}.result == 'success'" in condition
                     for reference in (f"needs['{dependency}']", f"needs.{dependency}")
                 ), (path, name, dependency)
+
+
+def test_jobs_postgres_hands_recorded_coverage_to_bounded_report_job() -> None:
+    """The job deadline covers tests and handoff, and neither job hides a failed test."""
+    jobs = _load(".github/workflows/jobs-suite.yml")["jobs"]
+    tests = jobs["jobs-postgres"]
+    report = jobs["jobs-postgres-coverage"]
+    assert tests["timeout-minutes"] == 60
+    assert 0 < report["timeout-minutes"] <= 10
+    assert report["needs"] == "jobs-postgres"
+    assert "services" not in report
+    run = _get_step(tests["steps"], "Run Jobs tests (PostgreSQL only)")
+    assert run["id"] == "postgres-tests"
+    assert ' -m "pg_jobs"' in run["run"]
+    assert "--cov=tldw_Server_API --cov-report=" in run["run"]
+    assert not any("cov.xml_report(" in step.get("run", "") for step in tests["steps"])
+
+    upload = _get_step(tests["steps"], "Upload PostgreSQL coverage data")
+    assert upload["if"] == (
+        "${{ !cancelled() && (steps.postgres-tests.outcome == 'success' || "
+        "steps.postgres-tests.outcome == 'failure') }}"
+    )
+    assert upload["with"] == {
+        "name": "jobs-postgres-coverage-data-${{ github.run_attempt }}",
+        "path": ".coverage",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
+    }
+    download = _get_step(report["steps"], "Download PostgreSQL coverage data")
+    assert download["with"]["name"] == upload["with"]["name"]
+    assert download["with"]["path"] == "."
+    assert _get_step(tests["steps"], "Checkout")["with"] == _get_step(report["steps"], "Checkout")["with"]
+    assert tests["outputs"] == {
+        "tests_outcome": "${{ steps.postgres-tests.outcome }}",
+        "coverage_version": "${{ steps.postgres-coverage-runtime.outputs.version }}",
+    }
+    reporter = _get_step(report["steps"], "Install matching coverage.py")
+    assert reporter["env"]["COVERAGE_VERSION"] == "${{ needs.jobs-postgres.outputs.coverage_version }}"
+    assert '"coverage==$COVERAGE_VERSION"' in reporter["run"]
+    assert _get_step(report["steps"], "Upload coverage (Postgres)")["with"] == {
+        "name": "jobs-postgres-coverage", "path": "coverage.xml",
+    }
+    assert _get_step(tests["steps"], "Upload test results (Postgres)")["with"] == {
+        "name": "jobs-postgres-results", "path": "test-results-jobs-postgres.xml",
+    }
+
+
+@pytest.mark.parametrize("same_checkout", [True, False], ids=["same-checkout", "foreign-checkout"])
+def test_jobs_postgres_exports_recorded_coverage(
+    tmp_path: Path, monkeypatch, capsys, same_checkout: bool,
+) -> None:
+    """Export the measured lines and the missing line in both existing report formats."""
+    import runpy
+
+    from coverage import CoverageData
+    from defusedxml import ElementTree
+
+    steps = _load(".github/workflows/jobs-suite.yml")["jobs"]["jobs-postgres-coverage"]["steps"]
+    report = _get_step(steps, "Generate PostgreSQL coverage reports")
+    source = tmp_path / "tldw_Server_API"
+    source.mkdir()
+    module = (source if same_checkout else tmp_path / "foreign-checkout") / "measured.py"
+    module.parent.mkdir(exist_ok=True)
+    module.write_text("present = True\nif not present:\n    missing = True\n", encoding="utf-8")
+    artifact = tmp_path / "artifact" / ".coverage"
+    artifact.parent.mkdir()
+    data = CoverageData(basename=str(artifact))
+    data.add_lines({str(module): {1, 2}})
+    data.write()
+    data_path = tmp_path / ".coverage"
+    artifact.replace(data_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("COVERAGE_FILE", str(data_path))
+    script = tmp_path / "report.py"
+    script.write_text(report["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0], encoding="utf-8")
+
+    if not same_checkout:
+        with pytest.raises(SystemExit, match="does not match this checkout"):
+            runpy.run_path(str(script))
+        assert not (tmp_path / "coverage.xml").exists()
+        return
+
+    runpy.run_path(str(script))
+
+    lines = ElementTree.parse(tmp_path / "coverage.xml").findall(".//class/lines/line")
+    assert [(line.attrib["number"], line.attrib["hits"]) for line in lines] == [
+        ("1", "1"), ("2", "1"), ("3", "0")
+    ]
+    total = next(row.split() for row in capsys.readouterr().out.splitlines() if row.startswith("TOTAL"))
+    assert total == ["TOTAL", "3", "1", "67%"]
 
 
 def test_selected_full_suite_summaries_reject_unexecuted_shards(tmp_path: Path) -> None:
@@ -2366,3 +2636,82 @@ def test_release_python313_platforms_keep_the_same_complete_suite() -> None:
             assert job[key] == reference[key], key
     assert sorted(platforms) == ["macos-latest", "windows-latest"]
     assert sum(job["strategy"]["max-parallel"] for job in release) == 20
+
+
+
+def test_gap5_partitions_preserve_workload_pgvector_and_admission() -> None:
+    """Give the large Notes/Slides workloads separate unchanged Linux budgets."""
+    from Helper_Scripts.ci.check_shard_coverage import is_covered
+
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests")
+    groups = {
+        "gap5-notes-graph": {(root / "Notes_Graph").as_posix()},
+        "gap5-slides": {(root / "Slides").as_posix()},
+        "gap5-agent-chat-text-wizard": {
+            (root / directory).as_posix()
+            for directory in ("Agent_Orchestration", "Chat_Workflows", "Text2SQL", "wizard")
+        },
+    }
+    files = {
+        path.as_posix()
+        for directory in set().union(*groups.values())
+        for path in Path(directory).rglob("*.py")
+        if path.name.startswith("test_") or path.name.endswith("_test.py")
+    }
+    for job in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        assert len(shards) <= 256  # nosec B101 -- Preserve GitHub matrix admission.
+        assert all(shard["name"] != "gap-verified-5" for shard in shards)  # nosec B101 -- Retire the combined budget.
+        owners: dict[str, list[str]] = {path: [] for path in files}
+        for shard in shards:
+            paths = str(shard["paths"]).split()
+            if shard["name"] in groups:
+                assert set(paths) == groups[shard["name"]], (job, shard)  # nosec B101 -- Exact workload.
+                expected = (
+                    {"postgres_image": "pgvector/pgvector:pg18", "pgvector_required": "1"}
+                    if job == "full-suite-linux-312-shards" else {}
+                )
+                assert {key: value for key, value in shard.items() if key not in {"name", "paths"}} == expected  # nosec B101 -- Original per-matrix database requirements.
+            for path in files:
+                if is_covered(path, paths):
+                    owners[path].append(shard["name"])
+        assert files and all(len(names) == 1 for names in owners.values()), (job, owners)  # nosec B101 -- No omission or duplication.
+        assert {names[0] for names in owners.values()} == set(groups)  # nosec B101 -- Three independent budgets.
+
+def test_notes_persona_linux_partitions_preserve_every_module_once() -> None:
+    """Give the timed-out product families independent unchanged Linux budgets."""
+    from Helper_Scripts.ci.check_shard_coverage import is_covered
+
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests")
+    groups = {
+        f"product-{name}": {(root / directory).as_posix()}
+        for name, directory in (
+            ("notes-legacy", "Notes"),
+            ("notes-new", "Notes_NEW"),
+            ("persona", "Persona"),
+            ("personalization", "Personalization"),
+        )
+    }
+    files = {
+        path.as_posix()
+        for directory in set().union(*groups.values())
+        for path in Path(directory).rglob("*.py")
+        if path.name.startswith("test_") or path.name.endswith("_test.py")
+    }
+    for job in ("full-suite-linux-312-shards", "full-suite-linux-313-shards"):
+        shards = workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        assert len(shards) <= 256  # nosec B101 -- Preserve matrix admission.
+        assert all(shard["name"] != "product-notes-persona" for shard in shards)  # nosec B101 -- Retire the combined budget.
+        owners: dict[str, list[str]] = {path: [] for path in files}
+        for shard in shards:
+            paths = str(shard["paths"]).split()
+            if shard["name"] in groups:
+                assert set(paths) == groups[shard["name"]], (job, shard)  # nosec B101 -- Keep the original workload.
+                assert set(shard) == {"name", "paths"}, (job, shard)  # nosec B101 -- Preserve original row metadata.
+            for path in files:
+                if is_covered(path, paths):
+                    owners[path].append(shard["name"])
+        assert files and all(len(names) == 1 for names in owners.values()), (job, owners)  # nosec B101 -- No omitted or repeated module.
+        assert {names[0] for names in owners.values()} == set(groups)  # nosec B101 -- Four complete independent budgets.

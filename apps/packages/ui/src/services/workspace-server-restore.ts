@@ -1,3 +1,12 @@
+import { projectWorkspaceRagSources, readWorkspaceRagSourceProvenance, WORKSPACE_RAG_SOURCES_KEY } from "@/utils/workspace-rag-sources";
+import { formatToMessage } from "@/db/dexie/helpers";
+import { readWorkspaceServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
+import { canonicalHistoryJson } from "@/db/dexie/history-selection";
+import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
+import { tldwClient } from "@/services/tldw/TldwApiClient";
+import type { Message } from "@/store/option";
+import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { recoverWebCapturePin, WebCaptureNotCurrentError } from "@/utils/research-web-capture";
 import {
   getResearchWorkspaceOwner,
@@ -18,12 +27,14 @@ import type {
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
 import {
   createEmptyWorkspaceSnapshot,
+  deriveHistoryFromMessages,
   createSlug,
   useWorkspaceStore,
   type WorkspaceState,
+  type WorkspaceChatSession,
 } from "@/store/workspace";
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api";
-import { RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX } from "@/store/workspace-migration";
+import { RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX, readResearchWorkspaceChatReference, readSavedResearchWorkspaceChatReference } from "@/store/workspace-migration";
 import { normalizeWorkspaceAssistantDefaults } from "@/types/workspace-assistant-defaults";
 import type { WorkspaceSourceStatus } from "@/types/workspace";
 
@@ -34,12 +45,15 @@ const INFORMATIONAL_CONTEXT_ERRORS = new Set([
   "membership_summary_unavailable",
 ]);
 
+type CachedWorkspaceChat = { referenceId: string; session: WorkspaceChatSession };
+
 type MigrationReceipt = {
   id: string;
   deletedAt: number;
   key: string;
   scopeKey?: string;
   value: Record<string, unknown>;
+  raw: string;
 };
 
 const readMigrationReceipts = (storage: Storage): MigrationReceipt[] => {
@@ -49,7 +63,8 @@ const readMigrationReceipts = (storage: Storage): MigrationReceipt[] => {
     if (!key?.startsWith(`${RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX}:`))
       continue;
     try {
-      const receipt = JSON.parse(storage.getItem(key) || "null");
+      const raw = storage.getItem(key) || "null";
+      const receipt = JSON.parse(raw);
       if (
         receipt?.contentRetained !== false ||
         receipt.restoreInvalidated === true ||
@@ -66,6 +81,7 @@ const readMigrationReceipts = (storage: Storage): MigrationReceipt[] => {
           deletedAt,
           key,
           value: receipt,
+          raw,
           scopeKey:
             typeof receipt.serverScopeKey === "string"
               ? receipt.serverScopeKey
@@ -83,20 +99,80 @@ export const readMigratedResearchWorkspaceId = (
   storage: Storage,
 ): string | null => readMigrationReceipts(storage)[0]?.id ?? null;
 
-/** Restore one migrated workspace atomically while its captured account lease remains live. */
+const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[], retainLegacyLinearParent = false): boolean => {
+  const ids = cached.map(message => message.serverMessageId || message.id);
+  if (cached.length !== canonical.length || ids.some(id => !id) ||
+      new Set(ids).size !== ids.length) return false;
+  try {
+    const localIds = new Map<string, string>();
+    cached.forEach((message, index) => {
+      if (!message.id || localIds.has(message.id)) throw new Error("Ambiguous local message identity");
+      localIds.set(message.id, ids[index]!);
+    });
+    const parentId = (value: unknown) => {
+      if (value == null) return null;
+      if (typeof value !== "string") throw new Error("Unknown message parent");
+      const candidates = new Set([localIds.get(value), ids.includes(value) ? value : undefined].filter(Boolean));
+      if (candidates.size !== 1) throw new Error("Unverified message parent");
+      return [...candidates][0];
+    };
+    return cached.every((message, index) => {
+      const saved = retainLegacyLinearParent && index === 1
+        ? { ...canonical[index], parentMessageId: canonical[0].serverMessageId }
+        : canonical[index];
+      if (ids[index] !== saved.serverMessageId || message.isBot !== saved.isBot) return false;
+      // Optimistic display labels and timing are retained, not canonical payload.
+      const display = ["id", "name", "createdAt", "modelId", "modelName", "modelImage", "reasoning_time_taken"];
+      const fields = Object.keys(message).filter(key => !display.includes(key) && message[key as keyof Message] !== undefined);
+      const payload = (row: Message, local: boolean) => Object.fromEntries(fields.map(key => {
+        // Text-only local saves retain an empty image marker and document list.
+        if (key === "images") {
+          if (row.images !== undefined && (!Array.isArray(row.images) || row.images.some(image => typeof image !== "string")))
+            throw new Error("Unverified local image context");
+          return [key, row.images?.filter(image => image !== "")];
+        }
+        if (key === "documents" && Array.isArray(row.documents) && row.documents.length === 0)
+          return [key, undefined];
+        if (key === "sources" && (message.sources?.length || saved.sources?.length)) {
+          const provenance = local ? projectWorkspaceRagSources(row.sources)
+            : readWorkspaceRagSourceProvenance(saved.metadataExtra?.[WORKSPACE_RAG_SOURCES_KEY]);
+          if (!provenance) throw new Error("Unverified saved citation projection");
+          return [key, provenance];
+        }
+        return [key, key === "parentMessageId" && local ? parentId(row.parentMessageId) : row[key as keyof Message]];
+      }));
+      return canonicalHistoryJson(payload(message, true)) === canonicalHistoryJson(payload(saved, false));
+    });
+  } catch {
+    return false; // Opaque or unverified local work must remain untouched.
+  }
+};
+
+/** Restore an owned target or the latest migration while its captured account lease remains live. */
 export const restoreMigratedResearchWorkspace = async (options: {
+  workspaceId?: string;
   signal: AbortSignal;
-  apply: (snapshot: WorkspaceSnapshot) => void;
+  isCurrent?: () => boolean;
+  apply: (snapshot: WorkspaceSnapshot, chatSession?: WorkspaceChatSession, verifiedCachedChat?: CachedWorkspaceChat) => void;
+  getCachedChat?: () => CachedWorkspaceChat | null;
   storage?: Storage;
 }): Promise<boolean> => {
+  const requestedId = options.workspaceId;
+  if (
+    requestedId !== undefined &&
+    (!requestedId.trim() || requestedId !== requestedId.trim() || requestedId.length > 128)
+  )
+    throw new Error("Invalid requested workspace");
   const storage = options.storage ?? window.localStorage;
-  const receipts = readMigrationReceipts(storage);
-  if (!receipts.length) return false;
+  const receipts = readMigrationReceipts(storage).filter(
+    (receipt) => !requestedId || receipt.id === requestedId,
+  );
+  if (!receipts.length && !requestedId) return false;
   const scope = await loadServicePromptSnapshot([], { signal: options.signal });
   const assertCurrent = () => {
     if (scope.scopeInvalidatedSignal.aborted)
       throw createServicePromptScopeChangedError();
-    if (options.signal.aborted || scope.scopeSignal.aborted)
+    if (options.signal.aborted || scope.scopeSignal.aborted || options.isCurrent?.() === false)
       throw new DOMException("Workspace restoration cancelled", "AbortError");
   };
   const request = {
@@ -109,26 +185,28 @@ export const restoreMigratedResearchWorkspace = async (options: {
     let receipt = receipts.find((value) => value.scopeKey === scope.scopeKey);
     if (!receipt) {
       const unbound = receipts.filter((value) => !value.scopeKey);
-      if (!unbound.length) return false;
-      const listed = await bgRequest<WorkspaceListApiResponse>({
-        ...request,
-        path: "/api/v1/workspaces/",
-      });
-      assertCurrent();
-      if (!Array.isArray(listed.items))
-        throw new Error("The current account's workspaces could not be listed");
-      receipt = unbound.find((value) =>
-        listed.items.some(
-          (workspace) =>
-            workspace.id === value.id &&
-            !workspace.deleted &&
-            !workspace.archived,
-        ),
-      );
-      if (!receipt) return false;
+      if (unbound.length) {
+        const listed = await bgRequest<WorkspaceListApiResponse>({
+          ...request,
+          path: "/api/v1/workspaces/",
+        });
+        assertCurrent();
+        if (!Array.isArray(listed.items))
+          throw new Error("The current account's workspaces could not be listed");
+        receipt = unbound.find((value) =>
+          listed.items.some(
+            (workspace) => workspace.id === value.id && !workspace.deleted && !workspace.archived,
+          ),
+        );
+      }
+      if (!receipt && !requestedId) return false;
     }
-    const workspaceId = receipt.id;
+    const workspaceId = requestedId ?? receipt!.id;
     const invalidateReceipt = () => {
+      assertCurrent();
+      if (!receipt) return false;
+      if (storage.getItem(receipt.key) !== receipt.raw)
+        throw new Error("Saved workspace changed during restoration. Retry to load the current chat.");
       // Retain the migration tombstone so deleted legacy content cannot reappear.
       storage.setItem(
         receipt.key,
@@ -305,7 +383,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
             ),
         ),
     );
-    snapshot.generatedArtifacts = local.artifacts;
+    snapshot.generatedArtifacts = local.artifacts.map(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId));
     snapshot.workspaceBanner = {
       ...snapshot.workspaceBanner,
       title: workspace.banner_title || "",
@@ -349,8 +427,10 @@ export const restoreMigratedResearchWorkspace = async (options: {
     });
     assertCurrent();
     let canonical: NonNullable<typeof found.notes>[number] | undefined;
+    const seenNotes = new Set<string>();
     for (const candidate of found.notes || []) {
-      if (typeof candidate.id !== "string") continue;
+      if (typeof candidate.id !== "string" || seenNotes.has(candidate.id)) continue;
+      seenNotes.add(candidate.id);
       // Search rows may omit metadata or truncate content. Resolve the exact owned head.
       const full = await bgRequest<NonNullable<typeof found.notes>[number]>({
         ...request, path: `/api/v1/notes/${encodeURIComponent(candidate.id)}`,
@@ -359,8 +439,9 @@ export const restoreMigratedResearchWorkspace = async (options: {
       if (full.id !== candidate.id) throw new Error("Research note identity changed");
       const belongsToWorkspace = (full.keywords || []).map(normalizeNoteKeyword).includes(`workspace:${workspaceId}`);
       if (belongsToWorkspace || resolveKnowledgeNoteProvenance(full).provenance?.research?.workspace_id === workspaceId) {
+        // Several associated Notes require the visible Load choice.
+        if (canonical) { canonical = undefined; break; }
         canonical = full;
-        break;
       }
     }
     if (canonical) {
@@ -391,12 +472,100 @@ export const restoreMigratedResearchWorkspace = async (options: {
           : source;
       });
     }
+    const savedChat = readSavedResearchWorkspaceChatReference(storage, workspaceId, scope.scopeKey);
+    const markerReference = readResearchWorkspaceChatReference(receipt?.value.chatReference);
+    if (savedChat.value && markerReference &&
+        canonicalHistoryJson(savedChat.value) !== canonicalHistoryJson(markerReference))
+      throw new Error("Saved workspace chat references conflict. Your local work has been kept.");
+    const cachedSelection = options.getCachedChat?.();
+    const cachedChat = cachedSelection?.session;
+    const provisional = !savedChat.value && !markerReference && cachedChat?.messages.length &&
+      cachedChat.serverChatId
+      ? readResearchWorkspaceChatReference({
+          referenceId: cachedSelection!.referenceId, serverChatId: cachedChat.serverChatId,
+        }) : undefined;
+    const chatReference = savedChat.value ?? markerReference ?? provisional;
+    let chatSession: WorkspaceChatSession | undefined;
+    if (chatReference) {
+      if (chatReference.serverChatId) {
+        const head = await bgRequest<{ id: string; scope_type: string; workspace_id: string | null; deleted?: boolean }>({
+          ...request,
+          path: `/api/v1/chats/${encodeURIComponent(chatReference.serverChatId)}?scope_type=workspace&workspace_id=${encodeURIComponent(workspaceId)}`,
+        });
+        assertCurrent();
+        if (head.id !== chatReference.serverChatId || head.scope_type !== "workspace" ||
+            head.workspace_id !== workspaceId || head.deleted === true)
+          throw new Error("Saved workspace chat is unavailable in this account and workspace");
+      }
+      if (!provisional) {
+        snapshot.workspaceChatReferenceId = chatReference.referenceId;
+        chatSession = { messages: [], history: [], historyId: null, serverChatId: chatReference.serverChatId };
+      }
+    }
+    let verifiedCachedChat: CachedWorkspaceChat | undefined;
+    const mirrorBinding = chatReference?.serverChatId && cachedChat?.historyId ? {
+      historyId: cachedChat.historyId, chatId: chatReference.serverChatId,
+      ownerKey: serverChatMirrorOwnerKey(scope), workspaceId,
+    } : undefined;
+    const mirror = mirrorBinding ? await readWorkspaceServerChatMirror(mirrorBinding) : undefined;
     assertCurrent();
-    storage.setItem(
-      receipt.key,
-      JSON.stringify({ ...receipt.value, serverScopeKey: scope.scopeKey }),
-    );
-    options.apply(snapshot);
+    if (chatReference?.serverChatId && cachedChat?.serverChatId === chatReference.serverChatId &&
+        cachedChat.messages.length) {
+      const signal = AbortSignal.any([scope.scopeSignal, AbortSignal.timeout(15000)]);
+      const serverMessages = await fetchAllServerChatMessages(
+        ({ limit, offset }) => tldwClient.listChatMessages(chatReference.serverChatId!, {
+          limit, offset, include_metadata: "true", include_images: "true",
+          include_deleted: "false", render_placeholders: "false",
+        }, { signal, fresh: true, requestScope: scope.requestScope,
+          scope: { type: "workspace", workspaceId } }),
+        { signal },
+      );
+      assertCurrent();
+      const canonical = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
+      const mirrorMessages = mirror ? formatToMessage(mirror.rows) : undefined;
+      // Older manual two-message saves omitted parents. Retain that exact local
+      // linear graph; it is not a canonical parent or permission to rewrite it.
+      const retainLegacyLinearParent = !!mirror && serverMessages.length === 2 &&
+        serverMessages[0].role === "user" && serverMessages[1].role === "assistant" &&
+        serverMessages.every(row => row.parent_message_id === null && row.version === 1);
+      const matches = (legacy: boolean) => cachedMessagesMatchCanonical(cachedChat.messages, canonical, legacy) &&
+        (!mirrorMessages || (mirror!.rows.length === mirrorMessages.length &&
+          cachedMessagesMatchCanonical(mirrorMessages, canonical, legacy)));
+      if ((matches(false) || (retainLegacyLinearParent && matches(true))) &&
+          (cachedChat.history.length === 0 ||
+            canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical))))
+        verifiedCachedChat = cachedSelection!;
+    }
+    if (provisional && verifiedCachedChat) {
+      snapshot.workspaceChatReferenceId = provisional.referenceId;
+      chatSession = { messages: [], history: [], historyId: null, serverChatId: provisional.serverChatId };
+    }
+    if (mirror && verifiedCachedChat) {
+      if (canonicalHistoryJson(await readWorkspaceServerChatMirror(mirrorBinding!)) !== canonicalHistoryJson(mirror))
+        throw new Error("Workspace Chat mirror changed during restoration");
+      // Keep its exact local settings association and optimistic display data.
+      chatSession = cachedChat;
+    }
+    assertCurrent();
+    const relevantReceipts = (rows: MigrationReceipt[]) => rows
+      .filter(row => row.id === workspaceId && (!row.scopeKey || row.scopeKey === scope.scopeKey))
+      .map(row => [row.key, row.raw]);
+    if (canonicalHistoryJson(relevantReceipts(readMigrationReceipts(storage))) !==
+        canonicalHistoryJson(relevantReceipts(receipts)))
+      throw new Error("Saved workspace changed during restoration. Retry to load the current chat.");
+    if (storage.getItem(savedChat.key) !== savedChat.raw)
+      throw new Error("Saved workspace changed during restoration. Retry to load the current chat.");
+    if (receipt) {
+      if (storage.getItem(receipt.key) !== receipt.raw)
+        throw new Error("Saved workspace changed during restoration. Retry to load the current chat.");
+      storage.setItem(
+        receipt.key,
+        JSON.stringify({ ...receipt.value, serverScopeKey: scope.scopeKey }),
+      );
+    }
+    assertCurrent();
+    rememberCanonicalArtifactWorkspace(workspaceId, scope.scopeKey);
+    options.apply(snapshot, chatSession, verifiedCachedChat);
     return true;
   } finally {
     scope.release();

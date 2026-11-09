@@ -36,16 +36,18 @@ class AuthnzOrgSttSettingsRepo:
         return callable(getattr(self.db, "fetchrow", None))
 
     async def ensure_tables(self) -> None:
-        """Ensure the org STT settings table exists when a pool is available."""
+        """Validate owner-provisioned STT settings before serving requests."""
         try:
             if self._is_postgres():
-                from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
-                    ensure_org_stt_settings_pg,
+                from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                    validate_postgres_org_stt_runtime,
                 )
 
-                ok = await ensure_org_stt_settings_pg(self.db)
-                if not ok:
-                    raise RuntimeError("PostgreSQL org_stt_settings schema ensure failed")
+                if self._is_db_pool():
+                    async with self.db.transaction() as conn:
+                        await validate_postgres_org_stt_runtime(conn)
+                else:
+                    await validate_postgres_org_stt_runtime(self.db)
                 return
 
             if self._is_db_pool():

@@ -170,6 +170,23 @@ async def test_startup_seed_revokes_a_stale_test_key_row_stored_by_an_older_boot
             scope="admin",
             is_virtual=False,
         )
+        ordinary_keys = [
+            await manager.create_api_key(
+                user_id=1,
+                name="single-user test key",
+                scope=scope,
+                description=description,
+                actor_user_id=1,
+                actor_kind="user",
+                actor_roles=["admin"],
+            )
+            for scope, description in (
+                ("read", "Deterministic API key for test automation"),
+                ("admin", "User-created integration key"),
+            )
+        ]
+        for ordinary in ordinary_keys:
+            assert await manager.validate_api_key(ordinary["key"], ip_address="127.0.0.1")  # nosec B101 - real-key preservation regression
         assert await manager.validate_api_key(stale, ip_address="127.0.0.1")
 
         await ensure_single_user_rbac_seed_if_needed()
@@ -178,6 +195,8 @@ async def test_startup_seed_revokes_a_stale_test_key_row_stored_by_an_older_boot
         def _req() -> Request:
             return Request({"type": "http", "method": "GET", "path": "/t", "headers": [], "client": ("127.0.0.1", 0)})
 
+        for ordinary in ordinary_keys:
+            assert await manager.validate_api_key(ordinary["key"], ip_address="127.0.0.1")  # nosec B101 - real-key preservation regression
         assert await manager.validate_api_key(stale, ip_address="127.0.0.1") is None
         assert await mcp_ep._resolve_token_data_compat(credentials=None, x_api_key=stale, request=_req()) is None
         with pytest.raises(HTTPException) as exc:

@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Ingestion_Media_Processing.document_upload_preflight import (
     DEFAULT_MAX_CHAT_UPLOAD_BYTES,
 )
-from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
 DRAFT_TTL_SECONDS = 15 * 60
 MAX_DRAFT_PAYLOAD_BYTES = DEFAULT_MAX_CHAT_UPLOAD_BYTES
@@ -71,8 +71,8 @@ class DocumentUploadDraftStore:
 
     @staticmethod
     def _default_db_path() -> Path:
-        """Return the shared repository database path for upload drafts."""
-        return Path(get_project_root()) / "Databases" / "document_upload_drafts.db"
+        """Share drafts between workers within the configured deployment only."""
+        return DatabasePaths.get_user_db_base_dir() / "document_upload_drafts.db"
 
     def _connect(self) -> sqlite3.Connection:
         """Open a configured SQLite connection for one operation."""
@@ -195,6 +195,11 @@ class DocumentUploadDraftStore:
 
 
 @lru_cache(maxsize=1)
+def _store_for_database_path(db_path: Path) -> DocumentUploadDraftStore:
+    """Reuse only a handle bound to the resolved deployment path."""
+    return DocumentUploadDraftStore(db_path=db_path)
+
+
 def get_document_upload_draft_store() -> DocumentUploadDraftStore:
-    """Return the process-local handle to the shared SQLite draft database."""
-    return DocumentUploadDraftStore()
+    """Return the worker-local handle for the current deployment's shared store."""
+    return _store_for_database_path(DocumentUploadDraftStore._default_db_path())

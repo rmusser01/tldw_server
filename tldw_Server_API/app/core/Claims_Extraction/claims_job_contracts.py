@@ -10,9 +10,13 @@ from typing import Any
 from tldw_Server_API.app.core import (
     claims_analytics_export_contract as _analytics_export_contract,
 )
+from tldw_Server_API.app.core import claims_cluster_rebuild_contract as _cluster_contract
 from tldw_Server_API.app.core.claims_analytics_export_contract import (
     CLAIMS_MAX_OWNER_USER_ID,
     is_routable_claims_owner_id_text,
+)
+from tldw_Server_API.app.core.claims_cluster_rebuild_contract import (
+    CLAIMS_REBUILD_CLUSTERS_JOB_TYPE,
 )
 
 # Compatibility aliases for callers that imported these limits from this module.
@@ -43,6 +47,14 @@ CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE = "claims_deliver_review_notificatio
 CLAIMS_DELIVER_ALERT_JOB_TYPE = "claims_deliver_alert"
 CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE = "claims_generate_analytics_export"
 CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE = "claims_aggregate_review_metrics"
+CLAIMS_SUPPORTED_JOB_TYPES = (
+    CLAIMS_REBUILD_MEDIA_JOB_TYPE,
+    CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
+    CLAIMS_DELIVER_ALERT_JOB_TYPE,
+    CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
+    CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE,
+    CLAIMS_REBUILD_CLUSTERS_JOB_TYPE,
+)
 
 CLAIMS_JOB_PAYLOAD_VERSION = 1
 CLAIMS_ALERT_JOB_CHANNELS = {"slack", "webhook"}
@@ -378,6 +390,20 @@ def validate_review_metrics_payload(value: Any) -> dict[str, Any]:
         "start_date": start_text,
         "end_date": end_text,
     }
+
+
+def validate_cluster_rebuild_payload(value: Any) -> dict[str, Any]:
+    """Translate the neutral immutable contract into the Claims error protocol."""
+    try:
+        return _cluster_contract.validate_cluster_rebuild_payload(value)
+    except (TypeError, ValueError):
+        code = "claims_invalid_payload"
+        if isinstance(value, dict):
+            if not is_routable_claims_owner_id_text(value.get("owner_user_id")):
+                code = "claims_missing_owner"
+            elif any(type(value.get(key)) is int and value[key] != 1 for key in ("version", "algorithm_version")):
+                code = "claims_unsupported_payload_version"
+        raise ClaimsJobError("Invalid Claims cluster rebuild contract.", failure_code=code) from None
 
 
 def skipped_result(reason: str, /, **extra: Any) -> dict[str, Any]:

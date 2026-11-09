@@ -346,21 +346,33 @@ def release_job(
     *,
     command: ReleaseJobCommand,
     counters_enabled: bool,
+    clock: Callable[[], datetime] | None = None,
 ) -> LifecycleResult:
     """Release one processing Postgres job back to the ready queue."""
 
+    from ..resource import resource_mutation
+
     with conn:
-        with cursor_factory(conn) as cur:
+        with (
+            cursor_factory(conn) as cur,
+            resource_mutation(cur, postgres=True, where="id=%s", params=(command.job_id,), clock=clock) as mutation,
+        ):
+            if not mutation.worker_allowed(command.job_id, command.worker_id, command.lease_id):
+                return LifecycleResult.no_transition(NoTransitionReason.STALE_LEASE)
+            target = mutation.rows.get(command.job_id)
+            if target is None:
+                return LifecycleResult.no_transition(NoTransitionReason.MISSING)
             enrollment = workflow_enrollment_projection(conn, backend="postgres")
             selected_sql = (
-                "SELECT id, domain, queue, job_type, status, worker_id, lease_id " "FROM jobs WHERE id = %s FOR UPDATE"
+                "SELECT id, domain, queue, job_type, status, worker_id, lease_id "
+                "FROM jobs WHERE id = %s AND uuid IS NOT DISTINCT FROM %s FOR UPDATE"
             )
             if enrollment == "workflow_capability_version":
                 selected_sql = (
                     "SELECT id, domain, queue, job_type, status, worker_id, lease_id, "
-                    "workflow_capability_version FROM jobs WHERE id = %s FOR UPDATE"
+                    "workflow_capability_version FROM jobs WHERE id = %s AND uuid IS NOT DISTINCT FROM %s FOR UPDATE"
                 )
-            cur.execute(selected_sql, (command.job_id,))
+            cur.execute(selected_sql, (command.job_id, target["uuid"]))
             selected = cur.fetchone()
             if selected is None:
                 return LifecycleResult.no_transition(NoTransitionReason.MISSING)

@@ -61,7 +61,9 @@ describe("docs-info discovery fetch mode", () => {
     await getServerCapabilities({ forceRefresh: true })
     expect(mocks.bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/config/docs-info", method: "GET", noAuth: true, configSnapshot: config,
+      abortSignal: expect.any(AbortSignal),
     })
+    expect(mocks.bgRequest.mock.calls[0][0].abortSignal?.aborted).toBe(false)
     expectPublicFetch()
   })
 
@@ -74,7 +76,9 @@ describe("docs-info discovery fetch mode", () => {
     await getServerCapabilities({ forceRefresh: true })
     expect(mocks.bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/config/docs-info", method: "GET", noAuth: false, configSnapshot: config,
+      abortSignal: expect.any(AbortSignal),
     })
+    expect(mocks.bgRequest.mock.calls[0][0].abortSignal?.aborted).toBe(false)
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
     const [url, init] = mocks.fetch.mock.calls[0]
     expect(url).toBe("https://api.example.test/api/v1/config/docs-info")

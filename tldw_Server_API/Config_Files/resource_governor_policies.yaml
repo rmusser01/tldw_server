@@ -370,6 +370,7 @@ route_map:
     "/api/v1/outputs/templates*": core.default
     "/api/v1/outputs*": core.default
     "/api/v1/connectors*": core.default
+    "/api/v1/moderation/classify": chat.default
     "/api/v1/moderation*": core.default
     "/api/v1/sandbox*": core.default
     "/api/v1/ocr*": core.default

@@ -828,3 +828,22 @@ def test_step_attempt_optional_database_capability(workflows_db, monkeypatch, ca
         tenant_id="tenant",
     )
     assert result == expected
+
+@pytest.mark.unit
+@pytest.mark.parametrize("malformed", [False, True])
+def test_prefix_recovery_preserves_context_on_later_malformed_output(workflows_db, monkeypatch, malformed):
+    rows = [
+        {"step_id": "first", "status": "succeeded", "outputs_json": '{"saved": 1}'},
+        {"step_id": "unknown", "status": "succeeded", "outputs_json": "{"},
+        {"step_id": "future", "status": "succeeded", "outputs_json": "{"},
+        {"step_id": "first", "status": "failed", "outputs_json": "{"},
+        {"step_id": "second", "status": "succeeded", "outputs_json": "{" if malformed else '{"saved": 2}'},
+    ]
+    monkeypatch.setattr(workflows_db, "list_step_runs", lambda **_kwargs: rows)
+    engine = WorkflowEngine(workflows_db)
+    context = {"inputs": {"retained": True}}
+    last = engine._recover_successful_step_outputs("resume", {"first": 0, "second": 1, "future": 2}, 2, context)
+    expected = {"inputs": {"retained": True}, "first": {"saved": 1}}
+    if not malformed:
+        expected["second"] = {"saved": 2}
+    assert (last, context) == ({} if malformed else {"saved": 2}, expected)  # nosec B101 -- Preserve valid prior outputs and partial context without admitting failed/future steps.

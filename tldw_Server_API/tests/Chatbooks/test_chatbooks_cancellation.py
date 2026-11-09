@@ -45,7 +45,7 @@ def client(tmp_path_factory, monkeypatch):
             if sql_norm.startswith("create table if not exists import_jobs"):
                 return _DummyCursor([])
 
-            if sql_norm.startswith("insert or replace into export_jobs"):
+            if sql_norm.startswith("insert into export_jobs") and "on conflict(job_id) do update" in sql_norm:
                 (
                     job_id, user_id, status, chatbook_name, output_path,
                     created_at, started_at, completed_at, error_message,
@@ -73,7 +73,7 @@ def client(tmp_path_factory, monkeypatch):
                 }
                 return _DummyCursor([])
 
-            if sql_norm.startswith("insert or replace into import_jobs"):
+            if sql_norm.startswith("insert into import_jobs") and "on conflict(job_id) do update" in sql_norm:
                 (
                     job_id, user_id, status, chatbook_path,
                     created_at, started_at, completed_at, error_message,
@@ -136,7 +136,6 @@ def client(tmp_path_factory, monkeypatch):
                     row["error_message"] = error_message
                     row["progress_percentage"] = progress_percentage
                 return _DummyCursor([])
-
 
             return _DummyCursor([])
 
