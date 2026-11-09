@@ -101,6 +101,13 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_ops 
     list_claim_cluster_members,
     list_claim_clusters,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_rebuild_publication import (
+    load_claim_cluster_publication,
+    publish_claim_cluster_rebuild,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_cluster_rebuild_snapshot import (
+    read_claim_cluster_source,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_fts_ops import (
     rebuild_claims_fts,
 )
@@ -447,6 +454,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.pos
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_analytics_export_jobs import (
     run_postgres_migrate_to_v24,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_cluster_rebuild_publication import (
+    run_postgres_migrate_to_v27,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_collections import (
     run_postgres_migrate_to_v12,
     run_postgres_migrate_to_v13,
@@ -548,7 +558,7 @@ class MediaDatabase:
     backend: DatabaseBackend
     _persistent_conn: sqlite3.Connection | None
 
-    _CURRENT_SCHEMA_VERSION = 26  # Final staged shared Workspace clone persistence
+    _CURRENT_SCHEMA_VERSION = 27  # Owner cluster publication fences and replay receipts
 
     # <<< Schema Definition (Version 1) >>>
 
@@ -1152,6 +1162,36 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_claims_review_metrics_user ON claims_review_extractor_metrics_daily(user_id);
     CREATE INDEX IF NOT EXISTS idx_claims_review_metrics_date ON claims_review_extractor_metrics_daily(report_date);
     CREATE INDEX IF NOT EXISTS idx_claims_review_metrics_extractor ON claims_review_extractor_metrics_daily(extractor);
+
+    CREATE TABLE IF NOT EXISTS claims_cluster_publication_heads (
+        owner_user_id TEXT PRIMARY KEY NOT NULL CHECK (length(owner_user_id) BETWEEN 1 AND 255),
+        authority_uuid TEXT,
+        generation BIGINT NOT NULL DEFAULT 0 CHECK (generation >= 0),
+        job_uuid TEXT,
+        CHECK ((generation = 0 AND authority_uuid IS NULL AND job_uuid IS NULL)
+            OR (generation > 0 AND authority_uuid IS NOT NULL AND length(authority_uuid) = 36
+                AND job_uuid IS NOT NULL AND length(job_uuid) = 36))
+    );
+    CREATE TABLE IF NOT EXISTS claims_cluster_publication_receipts (
+        owner_user_id TEXT NOT NULL CHECK (length(owner_user_id) BETWEEN 1 AND 255),
+        job_uuid TEXT NOT NULL CHECK (length(job_uuid) = 36),
+        authority_uuid TEXT NOT NULL CHECK (length(authority_uuid) = 36),
+        generation BIGINT NOT NULL CHECK (generation > 0),
+        settings_fingerprint TEXT NOT NULL CHECK (length(settings_fingerprint) = 64),
+        method TEXT NOT NULL CHECK (method IN ('exact', 'embeddings')),
+        similarity_threshold REAL,
+        clusters_created INTEGER NOT NULL CHECK (clusters_created BETWEEN 0 AND 50000),
+        claims_assigned INTEGER NOT NULL CHECK (claims_assigned BETWEEN 0 AND 50000),
+        claims_skipped INTEGER NOT NULL CHECK (claims_skipped BETWEEN 0 AND 50000),
+        outcome TEXT NOT NULL CHECK (outcome IN ('ok', 'skipped')),
+        reason TEXT CHECK (reason IS NULL OR length(reason) BETWEEN 1 AND 128),
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (owner_user_id, job_uuid),
+        UNIQUE (owner_user_id, authority_uuid, generation),
+        CHECK ((method = 'exact' AND similarity_threshold IS NULL)
+            OR (method = 'embeddings' AND similarity_threshold IS NOT NULL AND similarity_threshold BETWEEN 0 AND 1)),
+        CHECK ((outcome = 'ok' AND reason IS NULL) OR (outcome = 'skipped' AND reason IS NOT NULL))
+    );
 
     CREATE TABLE IF NOT EXISTS claims_review_rules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2011,6 +2051,7 @@ class MediaDatabase:
     _postgres_migrate_to_v24 = run_postgres_migrate_to_v24
     _postgres_migrate_to_v25 = run_postgres_migrate_to_v25
     _postgres_migrate_to_v26 = run_postgres_migrate_to_v26
+    _postgres_migrate_to_v27 = run_postgres_migrate_to_v27
     _get_db_version = get_db_version
     _update_schema_version_postgres = update_schema_version_postgres
     _sync_postgres_sequences = sync_postgres_sequences
@@ -2145,6 +2186,9 @@ class MediaDatabase:
     list_claims_review_user_ids_page = list_claims_review_user_ids_page
     get_claims_review_metrics_window_rows = get_claims_review_metrics_window_rows
     lock_claims_review_metrics_owner = lock_claims_review_metrics_owner
+    read_claim_cluster_source = read_claim_cluster_source
+    load_claim_cluster_publication = load_claim_cluster_publication
+    publish_claim_cluster_rebuild = publish_claim_cluster_rebuild
     get_claims_review_latency_stats = get_claims_review_latency_stats
     get_claim_clusters_by_ids = get_claim_clusters_by_ids
     get_claim_cluster_member_counts = get_claim_cluster_member_counts

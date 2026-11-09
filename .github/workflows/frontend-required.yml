@@ -675,7 +675,7 @@ jobs:
     # A dispatch publishes a diagnostic name, so it can never satisfy the protected check (D2 of the
     # 2026-10-11 merge-queue redesign: the queue no longer dispatches this gate, so no actor is exempt).
     name: ${{ github.event_name == 'workflow_dispatch' && 'frontend-required-diagnostic' || 'frontend-required' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [changes, admission, frontend-unit-tests, await_license]
     # Same condition as the changes job, and deliberately no test of its result: GitHub counts
     # a skipped required job as satisfied, so a change detection that did not succeed has to

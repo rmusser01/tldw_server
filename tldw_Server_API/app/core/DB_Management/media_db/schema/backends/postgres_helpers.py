@@ -19,6 +19,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import 
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.policies import (
     ensure_postgres_policies,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_cluster_rebuild_publication import (
+    run_postgres_migrate_to_v27,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migrations import (
     run_postgres_migrations,
 )
@@ -113,6 +116,7 @@ def ensure_postgres_post_core_structures(
     ensure_postgres_document_workspace_schema(conn)
     db._ensure_postgres_source_hash_column(conn)
     db._ensure_postgres_claims_extensions(conn)
+    run_postgres_migrate_to_v27(db, conn)
     db._ensure_postgres_email_schema(conn)
     # Sequence repair belongs to explicit migrations. A routine unscoped
     # handle may see no rows under forced RLS and must not rewind global IDs.

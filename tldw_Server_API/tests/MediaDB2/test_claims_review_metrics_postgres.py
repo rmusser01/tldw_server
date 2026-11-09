@@ -6,12 +6,15 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 
+import psycopg
 import pytest
+from psycopg import sql
 
 from tldw_Server_API.app.core.Claims_Extraction import claims_job_handlers, claims_jobs
 from tldw_Server_API.app.core.Claims_Extraction.claims_review_metrics import (
     aggregate_claims_review_metrics_window,
 )
+from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import ensure_chacha_rls
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
@@ -32,6 +35,113 @@ def pg_review_db(pg_restricted_backend):
             yield db
         finally:
             db.close_connection()
+
+
+@pytest.fixture(
+    params=[
+        ("claims_cluster_publication_heads", "migration"),
+        ("claims_cluster_publication_heads", "shared-installer"),
+        ("claims_cluster_publication_receipts", "migration"),
+        ("claims_cluster_publication_receipts", "shared-installer"),
+    ],
+    ids=["heads-migration", "heads-repair", "receipts-migration", "receipts-repair"],
+)
+def pg_cluster_publication(request, pg_review_db):
+    """Exercise real Media migrations and shared-installer repair independently."""
+    backend = pg_review_db.backend
+    table_name, installation = request.param
+    table = sql.Identifier(table_name)
+    if table_name == "claims_cluster_publication_heads":
+        insert = sql.SQL(
+            "INSERT INTO {} (owner_user_id, authority_uuid, generation, job_uuid) "
+            "VALUES (%s, '11111111-1111-4111-8111-111111111111', 1, "
+            "'22222222-2222-4222-8222-222222222222')"
+        ).format(table)
+    else:
+        insert = sql.SQL(
+            "INSERT INTO {} (owner_user_id, authority_uuid, generation, job_uuid, "
+            "settings_fingerprint, method, clusters_created, claims_assigned, claims_skipped, outcome) "
+            "VALUES (%s, '11111111-1111-4111-8111-111111111111', 1, "
+            "'22222222-2222-4222-8222-222222222222', repeat('a', 64), 'exact', 0, 0, 0, 'ok')"
+        ).format(table)
+    for owner in (42, 43):
+        with scoped_context(user_id=owner, is_admin=False), backend.transaction() as conn:
+            conn.execute(insert, (str(owner),))
+    if installation == "shared-installer":
+        with backend.transaction() as conn:
+            conn.execute(sql.SQL("DROP POLICY {} ON {}").format(sql.Identifier(table_name + "_owner"), table))
+            conn.execute(sql.SQL("ALTER TABLE {} NO FORCE ROW LEVEL SECURITY").format(table))
+            conn.execute(sql.SQL("ALTER TABLE {} DISABLE ROW LEVEL SECURITY").format(table))
+        for _ in range(2):
+            if ensure_chacha_rls(backend) is not True:
+                pytest.fail("shared PostgreSQL policy installation did not complete")
+    return backend, table, insert
+
+
+def test_cluster_publication_policies_enforce_owner_isolation(pg_cluster_publication):
+    """Missing registrations or admin/team widening must expose foreign rows here."""
+    backend, table, _ = pg_cluster_publication
+    for owner, admin, expected in (
+        (42, False, ["42"]),
+        (43, False, ["43"]),
+        (42, True, ["42"]),
+        (999, True, []),
+        (None, True, []),
+    ):
+        with scoped_context(user_id=owner, is_admin=admin, org_ids=[8], team_ids=[9]):
+            with backend.transaction() as conn:
+                rows = conn.execute(sql.SQL("SELECT owner_user_id FROM {} ORDER BY owner_user_id").format(table))
+                assert [row["owner_user_id"] for row in rows] == expected
+                flags = conn.execute(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+                ).fetchone()
+                assert flags == {"rolsuper": False, "rolbypassrls": False}
+                security = conn.execute(
+                    "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = %s::regclass",
+                    (table.as_string(conn),),
+                ).fetchone()
+                assert security == {"relrowsecurity": True, "relforcerowsecurity": True}
+
+
+def test_cluster_publication_unscoped_mutations_only_change_owned_rows(pg_cluster_publication):
+    """RLS must constrain UPDATE/DELETE even when domain SQL omits its owner WHERE."""
+    backend, table, insert = pg_cluster_publication
+    with scoped_context(user_id=42, is_admin=True), backend.transaction() as conn:
+        updated = conn.execute(sql.SQL("UPDATE {} SET generation = 2 RETURNING owner_user_id").format(table))
+        assert [row["owner_user_id"] for row in updated] == ["42"]
+        deleted = conn.execute(sql.SQL("DELETE FROM {} RETURNING owner_user_id").format(table))
+        assert [row["owner_user_id"] for row in deleted] == ["42"]
+        conn.execute(insert, ("42",))
+    with scoped_context(user_id=43, is_admin=False), backend.transaction() as conn:
+        rows = conn.execute(sql.SQL("SELECT owner_user_id, generation FROM {}").format(table)).fetchall()
+        assert rows == [{"owner_user_id": "43", "generation": 1}]
+
+
+def test_cluster_publication_rejects_foreign_inserts_and_owner_transfer(pg_cluster_publication):
+    """WITH CHECK must reject both new foreign rows and moving an owned row."""
+    backend, table, insert = pg_cluster_publication
+    with scoped_context(user_id=42, is_admin=True):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), backend.transaction() as conn:
+            conn.execute(insert, ("44",))
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), backend.transaction() as conn:
+            conn.execute(sql.SQL("UPDATE {} SET owner_user_id = '44' WHERE owner_user_id = '42'").format(table))
+        with backend.transaction() as conn:
+            rows = conn.execute(sql.SQL("SELECT owner_user_id, generation FROM {}").format(table)).fetchall()
+            assert rows == [{"owner_user_id": "42", "generation": 1}]
+
+
+def test_cluster_publication_without_session_owner_fails_closed(pg_cluster_publication):
+    """A fresh restricted session has no GUC; an explicitly empty one is also denied."""
+    backend, table, insert = pg_cluster_publication
+    for owner in (None, ""):
+        with psycopg.connect(backend.config.postgres_connection_string(), autocommit=True) as conn:
+            assert conn.execute("SELECT current_setting('app.current_user_id', true)").fetchone() == (None,)
+            if owner is not None:
+                conn.execute("SELECT set_config('app.current_user_id', %s, false)", (owner,))
+            conn.execute("SELECT set_config('app.is_admin', '1', false)")
+            assert conn.execute(sql.SQL("SELECT count(*) FROM {}").format(table)).fetchone() == (0,)
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(insert, ("44",))
 
 
 def _add_event(db, claim_id, *, timestamp="2026-09-06T00:00:00Z", reason="spam"):

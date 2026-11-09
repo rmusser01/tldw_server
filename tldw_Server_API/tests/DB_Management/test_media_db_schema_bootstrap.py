@@ -204,6 +204,9 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
     from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
         postgres_helpers as postgres_helpers_module,
     )
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_cluster_rebuild_publication import (
+        POSTGRES_PUBLICATION_DDL,
+    )
 
     conn = object()
     calls: list[object] = []
@@ -256,6 +259,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("document_workspace", conn),
         ("source_hash", conn),
         ("claims_extensions", conn),
+        *[("safe_transcript_extractor", statement, conn) for statement in POSTGRES_PUBLICATION_DDL],
         ("email_schema", conn),
         ("policies", conn),
         ("keyword_identity", db, conn),
@@ -2354,7 +2358,7 @@ def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_inde
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
         ).fetchone()[0]
 
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "latest_transcription_run_id",
             "next_transcription_run_id",
@@ -2758,7 +2762,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                     "PRAGMA index_list(claims_monitoring_events)"
                 ).fetchall()
             }
-            assert version_row["version"] == 26
+            assert version_row["version"] == 27
             assert event_index_columns["idx_claims_monitoring_events_user_created_id"] == [
                 "user_id",
                 "created_at",
@@ -3000,8 +3004,8 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3100,7 +3104,7 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3155,7 +3159,7 @@ def test_supported_sqlite_upgrade_preserves_pool_connection(tmp_path, consumer) 
         else:
             connection = db.backend.get_pool().get_connection()
 
-        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 26
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 27
         assert connection is not previous_connection
         assert connection.row_factory is sqlite3.Row
         assert connection.execute(
@@ -3199,7 +3203,7 @@ def test_failed_sqlite_upgrade_preserves_pool_reborrow_and_retry(tmp_path) -> No
         assert reopened.backend is db.backend
         assert reopened.get_connection().execute(
             "SELECT version FROM schema_version"
-        ).fetchone()[0] == 26
+        ).fetchone()[0] == 27
     finally:
         db.backend.get_pool().clear_thread_local_connection()
 
@@ -3491,7 +3495,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
                 ).fetchone()
             )
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3576,8 +3580,8 @@ def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v26() -> N
         }
         version = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "system_operation_id",
             "system_operation_kind",
@@ -4648,7 +4652,7 @@ def test_postgres_v26_migration_clears_weak_v25_partial_null_markers(
                 }
                 for row in rows
             )
-            assert version == 26
+            assert version == 27
             assert constraint_validated is True
     finally:
         db.close_connection()

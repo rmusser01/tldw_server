@@ -40,6 +40,28 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
     backend = db.backend
     ident = backend.escape_identifier
 
+    # These tables hold domain output metadata, not lifecycle. No admin/team
+    # widening: only the actual Media scope owner may read or write a receipt.
+    for table in ("claims_cluster_publication_heads", "claims_cluster_publication_receipts"):
+        present = backend.execute(
+            "SELECT to_regclass(%s) IS NOT NULL AS present",
+            (table,),
+            connection=conn,
+        )
+        # Older migration steps refresh RLS before v27 creates these tables.
+        if not present.rows or not present.rows[0].get("present"):
+            continue
+        quoted = ident(table)
+        policy = ident(table + "_owner")
+        predicate = "owner_user_id = NULLIF(current_setting('app.current_user_id', true), '')"
+        backend.execute(f"ALTER TABLE {quoted} ENABLE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(f"ALTER TABLE {quoted} FORCE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(f"DROP POLICY IF EXISTS {policy} ON {quoted}", connection=conn)
+        backend.execute(
+            f"CREATE POLICY {policy} ON {quoted} FOR ALL USING ({predicate}) WITH CHECK ({predicate})",
+            connection=conn,
+        )
+
     # Uncorrelated scalar reads become statement InitPlans. Scope installation
     # still replaces these values on every pool checkout; no session identity
     # or membership result is cached between statements.

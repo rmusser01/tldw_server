@@ -177,6 +177,11 @@ def test_completion_identity_short_circuits_result_work(
             original_dumps(result)
 
     def serialize(value, *args, **kwargs):
+        if value is not result:
+            # The shared JSON module also encodes frozen resource identities, never result data.
+            if sys._getframe(1).f_code is manager_module.ResourceMutation._freeze_rows.__code__:
+                assert value == [{"id": job["id"], "uuid": stored_uuid}]
+            return original_dumps(value, *args, **kwargs)
         serializations.append(value)
         try:
             return original_dumps(value, *args, **kwargs)
@@ -259,6 +264,11 @@ def test_completion_early_exit_never_prepares_result(
             original_dumps(result)
 
     def serialize(value, *args, **kwargs):
+        if value is not result:
+            # Keep metadata encoding distinct from the exact result size-probe count.
+            if sys._getframe(1).f_code is manager_module.ResourceMutation._freeze_rows.__code__:
+                assert value == [{"id": job["id"], "uuid": job["uuid"]}]
+            return original_dumps(value, *args, **kwargs)
         serializations.append(value)
         try:
             return original_dumps(value, *args, **kwargs)

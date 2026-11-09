@@ -1050,6 +1050,11 @@ describe("LlamacppAdminPage", () => {
 
     apiMock.listLlamacppAssetDownloads.mockResolvedValueOnce({ jobs: [] })
 
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Refresh downloads/ })
+      ).not.toHaveClass("ant-btn-loading")
+    })
     fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
 
     await waitFor(() => {

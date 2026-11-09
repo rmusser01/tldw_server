@@ -131,7 +131,6 @@
   "tldw_Server_API.app.core.Jobs.manager:JobManager.admit_job": {"lines": 464, "params": 19, "reason": null},
   "tldw_Server_API.app.core.Jobs.manager:JobManager.apply_ttl_policies": {"lines": 360, "params": 8, "reason": null},
   "tldw_Server_API.app.core.Jobs.manager:JobManager.complete_job": {"lines": 607, "params": 8, "reason": null},
-  "tldw_Server_API.app.core.Jobs.manager:JobManager.fail_job": {"lines": 1226, "params": 13, "reason": null},
   "tldw_Server_API.app.core.Jobs.manager:JobManager.prune_jobs": {"lines": 563, "params": 8, "reason": null},
   "tldw_Server_API.app.core.Jobs.manager:JobManager.terminalize_slides_generation_job_from_reconciler": {"lines": 368, "params": 10, "reason": null},
   "tldw_Server_API.app.core.Jobs.pg_migrations:ensure_jobs_rls_policies_pg": {"lines": 421, "params": 1, "reason": null},
