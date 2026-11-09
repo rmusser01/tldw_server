@@ -760,3 +760,40 @@ Auto stays off pending exact new-head ordinary shards 1/3/8 and notes/chat
 UX success, with parity and new failures inspected before fresh feedback,
 rules, queue and dev checks. Old outcomes never transfer; all eight
 effective required contexts still gate merge. Stages 3/4 remain open.
+
+### Required Frontend Chromium Runner
+
+Exact d540 ordinary frontend-required run 42545967988, job 128976634564,
+passed setup, lint/typechecks and WebUI coverage (2,492 passed, 14 existing
+skips). The Ubuntu 26.04 image selected by ubuntu-latest was rejected by
+locked JS Playwright 1.58.0 during Chromium install, before browser tests.
+That head passed all four hosted holds and both parity jobs. MERGE auto-merge
+was armed on d540 at 04:34:32Z and verified off before this repair.
+
+Pin only the frontend-required job to Ubuntu 24.04. Tagged Playwright host
+support and three exact-d540 Ubuntu 24.04 UX/parity installs corroborate
+compatibility. Both parsed YAML loaders and byte reconstruction prove the
+job runner label is the only workflow difference. Both browser installs,
+check identity, triggers, admission, tests, gates, dependencies and budgets
+are unchanged. Extend the existing supported-host test by one case only.
+
+Contract RED: one expected unsupported-label failure, eight passes. GREEN:
+146 workflow, queue and license contracts. Complete CI/Docs/Config: 1,622
+passed, six inherited skips, zero failures/errors (195.64s); selections
+overlap and are not full-root qualification. Test compilation and configured
+Ruff passed. Unfiltered Bandit comparison: 63 identical inherited B101
+assertions, zero scanner errors or new findings; no scanner changes.
+Feynman independently approved the exact source with no actionable findings
+and did not rerun tests. Artifacts: `/tmp/claims-pr3434-required-runner-*-20261109.*`.
+
+The separate d540 Jobs PostgreSQL job 128962907227 hit its existing one-hour
+limit with last reported progress 95%; no final suite/coverage report or
+demonstrated assertion failure. Underlying runtime cause is not proved.
+No Jobs source or budget change. Prior production and official PostgreSQL
+qualification keeps its original scope and date.
+
+Publish with auto-merge off after canonical-task and full staged PR hooks.
+Require the new head's own ordinary shards 1/3/8 and notes/chat UX successes,
+inspect parity and fresh failures, then recheck feedback, rules, queue and
+dev freshness. All effective required contexts still gate actual merge.
+Stages 3/4 and TASK-15466 stay In Progress.

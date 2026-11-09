@@ -191,6 +191,7 @@ def test_shared_coverage_merge_rejects_missing_shards(tmp_path: Path, missing: i
 @pytest.mark.parametrize(
     ("workflow_name", "job_name"),
     [
+        ("frontend-required.yml", "frontend-required"),
         ("frontend-ux-gates.yml", "onboarding-gate"),
         ("frontend-ux-gates.yml", "smoke-gate"),
         ("frontend-e2e-tiers.yml", "critical"),
