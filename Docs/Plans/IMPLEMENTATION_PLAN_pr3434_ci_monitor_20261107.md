@@ -674,3 +674,47 @@ Restage this final evidence and rerun full scoped hooks before normal commit and
 fast-forward publication. Record actual GitHub readback in PR proof, without a
 tracking-only follow-up commit. New-head hosted holds and actual merge remain
 pending; TASK-15466 and this plan stay In Progress.
+
+### Llama.cpp Downloads Retry Settlement
+
+Exact df1d0b2ba3 ordinary frontend-required shard 3/16 failed one
+LlamacppAdminPage stale-download-list-error test at the third request assertion:
+two calls, 1,873 passes and two skips. Unchanged local V8 module passed all 32
+and is not RED. The real Ant Design Button blocks clicks via its inner loading
+state, which settles in a passive effect in tests. Error visibility alone
+does not guarantee that the retry button will accept a click.
+
+A temporary probe delays only the real loading-clear effect until the retry
+query, retaining the real click guard and request assertions. The old sequence
+failed at the same two-versus-three call assertion. This demonstrates ordering
+sensitivity, not the original hosted scheduling trigger. Add a readiness
+assertion before the retry, preserve all existing assertions, remove the probe,
+then run the complete module, shard, broad CI/Docs/Config and full staged hooks.
+No production, dependency, workflow, timeout or scanner changes. ADR not needed.
+Auto-merge remains off. Stage 3/4 and TASK-15466 remain In Progress.
+
+The same controlled probe passes with the added readiness wait. The 31
+non-selected cases are diagnostic filter exclusions, not gate skips.
+Removing the temporary probe leaves a five-line insertion and preserves all
+32 tests, fixtures, assertions and every other source byte. Exact reviewed
+SHA256: `322d64587f97fea70fffffbe2467533b5af12be23ce21340df9bb673d3710437`.
+Native V8 shard 3 passes 1,874 tests with two existing WorldBooks skips
+(175 files, 247.22s) using the unchanged 4 GB and 900s command bounds.
+Local Node 25.6/Bun 1.3.5 and JSON/default reporting are not exact hosted
+qualification. Full CI/Docs/Config passes 1,621 with six skips and zero
+failures/errors (202.05s). Selections overlap, not a full-root result.
+Locked TS syntax transpile has zero diagnostics; configured ESLint has zero
+errors, zero suppressions and the same four warnings as the unchanged file.
+Initial CLI/module/config discovery errors were harness errors, not passes.
+No executable Python changed. Prior production runtime, official PostgreSQL
+and Bandit evidence retains its original scope; old root/local limits remain.
+
+Independent Carson APPROVE/no actionable P0-P3. The reviewer verified the
+actual Button guard, probe, exact source and retained assertions, and ran no
+tests. Report: `/tmp/claims-pr3434-llamacpp-review-20261109.md`. Declined scope
+is recorded in TASK-15466; parent owns broad qualification, hooks, tracking
+and live GitHub state. No natural hosted trigger or wider runtime claim.
+After full staged hooks and normal fast-forward publication, keep auto-merge
+off until exact new-head ordinary coverage shards 1 and 8 and notes/chat UX
+all succeed; also verify the repaired shard 3 before rearming. All effective
+required contexts still gate actual merge. Prior df1 results do not transfer.
