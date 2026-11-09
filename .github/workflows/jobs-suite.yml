@@ -145,6 +145,9 @@ jobs:
     # admission is skipped outside workflow_run; without always() that skipped
     # ancestor skips this job on every pull_request.
     if: always() && !cancelled() && needs.jobs-sqlite.result == 'success'
+    outputs:
+      tests_outcome: ${{ steps.postgres-tests.outcome }}
+      coverage_version: ${{ steps.postgres-coverage-runtime.outputs.version }}
     services:
       postgres:
         image: postgres:18-bookworm
@@ -241,6 +244,11 @@ jobs:
           print('pytest-benchmark plugin OK')
           PY
 
+      - name: Read PostgreSQL coverage.py version
+        id: postgres-coverage-runtime
+        run: |
+          python -c 'import coverage; print(f"version={coverage.__version__}")' >> "$GITHUB_OUTPUT"
+
       - name: Run Jobs tests (PostgreSQL only)
         id: postgres-tests
         run: |
@@ -250,25 +258,74 @@ jobs:
             --cov=tldw_Server_API --cov-report= \
             --junit-xml=test-results-jobs-postgres.xml
 
-      - name: Generate PostgreSQL coverage reports
-        if: ${{ !cancelled() && (steps.postgres-tests.outcome == 'success' || steps.postgres-tests.outcome == 'failure') }}
-        run: |
-          # This job has no coverage floor, so skip pytest-cov's extra total-only pass.
-          python - <<'PY'
-          import coverage
-
-          cov = coverage.Coverage(source=["tldw_Server_API"])
-          cov.load()
-          cov.report(show_missing=True, ignore_errors=True)
-          cov.xml_report(ignore_errors=True)
-          PY
-
       - name: Upload test results (Postgres)
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: jobs-postgres-results
           path: test-results-jobs-postgres.xml
+
+      - name: Upload PostgreSQL coverage data
+        if: ${{ !cancelled() && (steps.postgres-tests.outcome == 'success' || steps.postgres-tests.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: jobs-postgres-coverage-data-${{ github.run_attempt }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  jobs-postgres-coverage:
+    name: Jobs PostgreSQL coverage
+    needs: jobs-postgres
+    if: >-
+      always() && !cancelled() &&
+      (needs.jobs-postgres.outputs.tests_outcome == 'success' ||
+      needs.jobs-postgres.outputs.tests_outcome == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Python for coverage reporting
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install matching coverage.py
+        env:
+          COVERAGE_VERSION: ${{ needs.jobs-postgres.outputs.coverage_version }}
+        run: |
+          [[ "$COVERAGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          python -m pip install "coverage==$COVERAGE_VERSION"
+
+      - name: Download PostgreSQL coverage data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: jobs-postgres-coverage-data-${{ github.run_attempt }}
+          path: .
+
+      - name: Generate PostgreSQL coverage reports
+        run: |
+          test -s .coverage
+          python - <<'PY'
+          from pathlib import Path
+
+          import coverage
+
+          cov = coverage.Coverage(source=["tldw_Server_API"])
+          cov.load()
+          source = Path("tldw_Server_API").resolve()
+          files = cov.get_data().measured_files()
+          if not files or any(not Path(name).resolve().is_relative_to(source) for name in files):
+              raise SystemExit("PostgreSQL coverage data does not match this checkout")
+          cov.report(show_missing=True, ignore_errors=True)
+          cov.xml_report(ignore_errors=True)
+          PY
 
       - name: Upload coverage (Postgres)
         if: always()

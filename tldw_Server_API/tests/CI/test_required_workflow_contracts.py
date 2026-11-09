@@ -2300,26 +2300,86 @@ def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
                 ), (path, name, dependency)
 
 
-def test_jobs_postgres_exports_recorded_coverage(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_jobs_postgres_hands_recorded_coverage_to_bounded_report_job() -> None:
+    """The job deadline covers tests and handoff, and neither job hides a failed test."""
+    jobs = _load(".github/workflows/jobs-suite.yml")["jobs"]
+    tests = jobs["jobs-postgres"]
+    report = jobs["jobs-postgres-coverage"]
+    assert tests["timeout-minutes"] == 60
+    assert 0 < report["timeout-minutes"] <= 10
+    assert report["needs"] == "jobs-postgres"
+    assert "services" not in report
+    run = _get_step(tests["steps"], "Run Jobs tests (PostgreSQL only)")
+    assert run["id"] == "postgres-tests"
+    assert ' -m "pg_jobs"' in run["run"]
+    assert "--cov=tldw_Server_API --cov-report=" in run["run"]
+    assert not any("cov.xml_report(" in step.get("run", "") for step in tests["steps"])
+
+    upload = _get_step(tests["steps"], "Upload PostgreSQL coverage data")
+    assert upload["if"] == (
+        "${{ !cancelled() && (steps.postgres-tests.outcome == 'success' || "
+        "steps.postgres-tests.outcome == 'failure') }}"
+    )
+    assert upload["with"] == {
+        "name": "jobs-postgres-coverage-data-${{ github.run_attempt }}",
+        "path": ".coverage",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
+    }
+    download = _get_step(report["steps"], "Download PostgreSQL coverage data")
+    assert download["with"]["name"] == upload["with"]["name"]
+    assert download["with"]["path"] == "."
+    assert _get_step(tests["steps"], "Checkout")["with"] == _get_step(report["steps"], "Checkout")["with"]
+    assert tests["outputs"] == {
+        "tests_outcome": "${{ steps.postgres-tests.outcome }}",
+        "coverage_version": "${{ steps.postgres-coverage-runtime.outputs.version }}",
+    }
+    reporter = _get_step(report["steps"], "Install matching coverage.py")
+    assert reporter["env"]["COVERAGE_VERSION"] == "${{ needs.jobs-postgres.outputs.coverage_version }}"
+    assert '"coverage==$COVERAGE_VERSION"' in reporter["run"]
+    assert _get_step(report["steps"], "Upload coverage (Postgres)")["with"] == {
+        "name": "jobs-postgres-coverage", "path": "coverage.xml",
+    }
+    assert _get_step(tests["steps"], "Upload test results (Postgres)")["with"] == {
+        "name": "jobs-postgres-results", "path": "test-results-jobs-postgres.xml",
+    }
+
+
+@pytest.mark.parametrize("same_checkout", [True, False], ids=["same-checkout", "foreign-checkout"])
+def test_jobs_postgres_exports_recorded_coverage(
+    tmp_path: Path, monkeypatch, capsys, same_checkout: bool,
+) -> None:
     """Export the measured lines and the missing line in both existing report formats."""
     import runpy
 
     from coverage import CoverageData
     from defusedxml import ElementTree
 
-    steps = _load(".github/workflows/jobs-suite.yml")["jobs"]["jobs-postgres"]["steps"]
+    steps = _load(".github/workflows/jobs-suite.yml")["jobs"]["jobs-postgres-coverage"]["steps"]
     report = _get_step(steps, "Generate PostgreSQL coverage reports")
-    module = tmp_path / "tldw_Server_API" / "measured.py"
-    module.parent.mkdir()
+    source = tmp_path / "tldw_Server_API"
+    source.mkdir()
+    module = (source if same_checkout else tmp_path / "foreign-checkout") / "measured.py"
+    module.parent.mkdir(exist_ok=True)
     module.write_text("present = True\nif not present:\n    missing = True\n", encoding="utf-8")
-    data_path = tmp_path / ".coverage"
-    data = CoverageData(basename=str(data_path))
+    artifact = tmp_path / "artifact" / ".coverage"
+    artifact.parent.mkdir()
+    data = CoverageData(basename=str(artifact))
     data.add_lines({str(module): {1, 2}})
     data.write()
+    data_path = tmp_path / ".coverage"
+    artifact.replace(data_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("COVERAGE_FILE", str(data_path))
     script = tmp_path / "report.py"
     script.write_text(report["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0], encoding="utf-8")
+
+    if not same_checkout:
+        with pytest.raises(SystemExit, match="does not match this checkout"):
+            runpy.run_path(str(script))
+        assert not (tmp_path / "coverage.xml").exists()
+        return
 
     runpy.run_path(str(script))
 
