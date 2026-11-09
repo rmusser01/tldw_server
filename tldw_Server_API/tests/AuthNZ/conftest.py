@@ -1432,15 +1432,8 @@ async def isolated_test_environment(monkeypatch, tmp_path):
     )
 
     try:
-        await cleanup_conn.execute(
-            """
-            SELECT pg_terminate_backend(pid)
-            FROM pg_stat_activity
-            WHERE datname = $1 AND pid <> pg_backend_pid()
-            """,
-            db_name,
-        )
-        await cleanup_conn.execute(f"DROP DATABASE IF EXISTS {db_name}")
+        # Terminate sessions and drop only this disposable database in one operation.
+        await cleanup_conn.execute(f"DROP DATABASE IF EXISTS {db_name} WITH (FORCE)")
         logger.info(f"Dropped test database: {db_name}")
     finally:
         await cleanup_conn.close()
