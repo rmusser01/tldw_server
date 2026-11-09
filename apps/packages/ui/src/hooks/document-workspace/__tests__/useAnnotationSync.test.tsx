@@ -1,8 +1,10 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, renderHook } from "@testing-library/react"
+import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { useAnnotationSyncOnClose } from "@/hooks/document-workspace/useAnnotationSync"
 import { tldwClient } from "@/services/tldw"
 import { useConnectionStore } from "@/store/connection"
@@ -17,6 +19,21 @@ vi.mock("@/services/tldw", () => ({
     subscribeInvalidation: vi.fn(),
   },
 }))
+
+const authority = vi.hoisted(() => ({ owner: null as QuickIngestOperation | null }))
+vi.mock("@/hooks/document-workspace/useDocumentOperation", () => ({
+  useDocumentOperation: () => authority.owner
+}))
+const makeOwner = (config: TldwConfig) => {
+  const controller = new AbortController()
+  const owner: QuickIngestOperation = {
+    authorityKey: "verified-owner", authorityRevision: 1,
+    requestScope: { config, userId: 1 }, signal: controller.signal,
+    isCurrent: () => authority.owner === owner && !controller.signal.aborted,
+    assertCurrent: () => { if (!owner.isCurrent()) throw new Error("Retired owner") }
+  }
+  return owner
+}
 
 const SERVER_URL = "http://127.0.0.1:8000"
 const SYNC_URL = "/api/v1/media/42/annotations/sync"
@@ -34,7 +51,7 @@ const buildWrapper = () => {
 
 const pendingAnnotation = (text = "Important") => ({
   id: "ann-1",
-  documentId: 1,
+  documentId: 42,
   location: "1",
   text,
   color: "yellow" as const,
@@ -85,10 +102,17 @@ describe("useAnnotationSyncOnClose", () => {
       authMode: "single-user",
       apiKey: "unload-test-key",
     })
+    authority.owner = makeOwner({
+      serverUrl: SERVER_URL, authMode: "single-user", apiKey: "unload-test-key"
+    })
     vi.mocked(tldwClient.syncAnnotations).mockResolvedValue({
-      media_id: 42,
-      synced_count: 1,
-      annotations: [],
+      media_id: 42, synced_count: 1,
+      annotations: [{
+        id: "saved-ann-1", media_id: 42, location: "1", text: "Important",
+        color: "yellow", annotation_type: "highlight",
+        created_at: "2026-05-25T00:00:00Z", updated_at: "2026-05-25T00:00:00Z"
+      }],
+      id_mapping: { "ann-1": "saved-ann-1" }
     })
 
     useConnectionStore.setState({
@@ -105,6 +129,7 @@ describe("useAnnotationSyncOnClose", () => {
   })
 
   afterEach(() => {
+    cleanup()
     if (originalDeploymentMode === undefined) {
       delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
     } else {
@@ -174,14 +199,14 @@ describe("useAnnotationSyncOnClose", () => {
     ],
   ])("authenticates the unload request in %s mode", async (_mode, config, header, value) => {
     document.cookie = "csrf_token=csrf-from-cookie; path=/"
-    vi.mocked(tldwClient.getConfig).mockResolvedValue(config as any)
+    authority.owner = makeOwner(config as TldwConfig)
 
     renderOnClose()
     await settle()
     closePage()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ [header]: value })
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ [header]: value, "X-TLDW-Expected-User-ID": "1" })
   })
 
   it("persists pending annotations locally before sending", async () => {
@@ -229,6 +254,74 @@ describe("useAnnotationSyncOnClose", () => {
     )
   })
 
+  it("does not persist or dispatch through a retired owner", async () => {
+    renderOnClose()
+    await settle()
+    authority.owner = null
+    closePage()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(storedValues()).not.toContain('"ann-1"')
+  })
+
+  it("keeps persisted writes when the replay acknowledgement is incomplete", async () => {
+    const firstPage = renderOnClose()
+    await settle()
+    closePage()
+    firstPage.unmount()
+    vi.mocked(tldwClient.syncAnnotations).mockResolvedValue({
+      media_id: 42, synced_count: 0, annotations: []
+    })
+    renderOnClose()
+    await settle()
+    expect(storedValues()).toContain('"ann-1"')
+  })
+
+  it("keeps document queues separate when unloading multiple documents", async () => {
+    useDocumentWorkspaceStore.setState({
+      pendingAnnotations: [
+        pendingAnnotation(),
+        { ...pendingAnnotation("Other document"), id: "ann-99", documentId: 99 }
+      ]
+    })
+    renderOnClose()
+    await settle()
+    closePage()
+    expect(fetchMock.mock.calls.map(([url, request]) => [
+      url, JSON.parse(request.body).client_ids
+    ])).toEqual([
+      ["/api/v1/media/42/annotations/sync", ["ann-1"]],
+      ["/api/v1/media/99/annotations/sync", ["ann-99"]]
+    ])
+    expect(storedValues()).toContain('"ann-99"')
+  })
+
+  it("does not publish headers prepared after owner retirement", async () => {
+    renderOnClose()
+    authority.owner = null
+    await settle()
+    closePage()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(storedValues()).not.toContain('"ann-1"')
+  })
+
+  it("retains a persisted queue whose document identity disagrees with its key", async () => {
+    const firstPage = renderOnClose()
+    await settle()
+    closePage()
+    firstPage.unmount()
+    const key = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
+      .find(key => key.startsWith("tldw:document-workspace:pending-annotations:"))!
+    const stored = JSON.parse(localStorage.getItem(key)!)
+    stored[0].documentId = 99
+    localStorage.setItem(key, JSON.stringify(stored))
+    renderOnClose()
+    await settle()
+    expect(tldwClient.syncAnnotations).not.toHaveBeenCalled()
+    closePage()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem(key)).toContain('"documentId":99')
+  })
+
   it("replays persisted annotations on the next load and clears them once synced", async () => {
     const firstPage = renderOnClose()
     await settle()
@@ -246,7 +339,8 @@ describe("useAnnotationSyncOnClose", () => {
     expect(tldwClient.syncAnnotations).toHaveBeenCalledWith(
       42,
       [{ location: "1", text: "Important", color: "yellow", annotation_type: "highlight" }],
-      ["ann-1"]
+      ["ann-1"],
+      authority.owner
     )
     expect(storedValues()).not.toContain('"ann-1"')
   })

@@ -492,13 +492,15 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
         throw new Error("Template contains invalid JSON")
       }
       const chunking = config.chunking || {}
-      const chunkingConfig = chunking.config || {}
+      const { method, config: nestedConfig, ...flatConfig } = chunking
+      // Saved UI templates use flat options; built-ins also support nested config.
+      const chunkingConfig = { ...(nestedConfig || {}), ...flatConfig }
 
       const nextOptions: ChunkingOptions = {
         ...options
       }
 
-      if (chunking.method) nextOptions.method = String(chunking.method)
+      if (method) nextOptions.method = String(method)
       Object.entries(chunkingConfig).forEach(([key, value]) => {
         if (value !== undefined) {
           ;(nextOptions as Record<string, any>)[key] = value
@@ -1163,7 +1165,7 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
                         "settings:chunkingPlayground.advanced.templateNameLabel",
                         "Template name"
                       )}>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <AutoComplete
                           value={templateName}
                           onChange={setTemplateName}
@@ -1178,7 +1180,7 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
                               .toLowerCase()
                               .includes(inputValue.toLowerCase())
                           }
-                          className="flex-1"
+                          className="w-full"
                         />
                         <Button
                           size="small"

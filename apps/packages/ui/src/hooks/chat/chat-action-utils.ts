@@ -75,7 +75,7 @@ export type TldwChatMeta =
 export type ChatSubmitResult =
   | { status: "submitted" }
   // Only a refusal before any input admission may restore the composer.
-  | { status: "failed"; errorMessage: string; restoreDraft?: true }
+  | { status: "failed"; errorMessage: string; restoreDraft?: true; restoreDraftIsCurrent?: () => boolean }
   // questionKept: the question stays in the transcript (a Stop before the
   // first token), so the composer must not get it back as well (CM-02).
   | { status: "skipped"; reason: string; questionKept?: true };

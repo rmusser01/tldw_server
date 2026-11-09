@@ -397,7 +397,7 @@ def test_legacy_dictionary_v86_composes_with_semantic_migrations(pg_restricted_b
             return
         upgraded = CharactersRAGDB(":memory:", client_id="1", backend=backend)
         try:
-            assert int(backend.execute("SELECT version FROM db_schema_version WHERE schema_name=?", (old._SCHEMA_NAME,)).scalar) == 89  # nosec B101 - Both published semantic and dictionary migrations must finish.
+            assert int(backend.execute("SELECT version FROM db_schema_version WHERE schema_name=?", (old._SCHEMA_NAME,)).scalar) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION  # nosec B101 - Both published semantic and dictionary migrations must finish.
             assert ChatDictionaryService(upgraded).get_dictionary(dictionary_id)["name"] == "Retained legacy v86"  # nosec B101 - Preserve the original owned row.
             assert backend.table_exists("note_semantic_index_configs") and backend.table_exists("note_semantic_operation_receipts")  # nosec B101 - Reach both ends of semantic86-88.
         finally:

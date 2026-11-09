@@ -5,6 +5,10 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from tldw_Server_API.app.core.Moderation.classification_models import (
+    ModerationClassificationRequest as ModerationClassificationRequest,
+)
+
 
 class ModerationOverrideRule(BaseModel):
     """A single phrase rule that can block or warn during input/output moderation."""

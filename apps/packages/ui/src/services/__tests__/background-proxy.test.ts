@@ -5008,3 +5008,93 @@ it.each([
   await bgRequest({path: path as `/api/v1/${string}`, method: method as "GET" | "PUT", servicePromptConfig, headers: {"X-TLDW-Expected-User-ID": "7"}, ...(method === "PUT" ? {body: {settings: {authorNote: "explicit"}}} : {})})
   expect(mocks.sendMessage).toHaveBeenCalledWith(expect.objectContaining({payload: expect.objectContaining({path, method, servicePromptConfig})}))
 })
+
+
+describe("classification captured worker scope", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useRealTimers();
+    mocks.runtimeId = "test-extension";
+    mocks.sendMessage.mockReset();
+    mocks.tldwRequest.mockReset();
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null);
+    mocks.storageGet.mockResolvedValue(null);
+    mocks.sessionStorageGet.mockResolvedValue(null);
+  });
+  const body = {
+    request_id: "0a348e21-7cd9-4ab6-8f22-06665df99685",
+    provider: "llama.cpp",
+    model: "existing-model",
+    criterion: "Flag unpublished access codes.",
+    text: "Fictional sample.",
+  };
+  const config = {
+    serverUrl: "https://original.test",
+    authMode: "single-user" as const,
+    apiKey: "classification-fixture-key",
+  };
+
+  it("classification Stop sends cancellation for the exact authority-checked worker request", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.sendMessage.mockImplementation((message: { type?: string }) => {
+      if (message.type === "tldw:connection-authority")
+        return Promise.resolve({ ok: true, epoch: "checked-epoch" });
+      if (message.type === "tldw:cancel-request")
+        return Promise.resolve({ ok: true, cancelled: true });
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const { classifyModeration } = await import("@/services/moderation");
+    const controller = new AbortController();
+    const pending = classifyModeration(body, {
+      configSnapshot: config,
+      abortSignal: controller.signal,
+    });
+    const rejection = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.waitFor(() =>
+      expect(
+        mocks.sendMessage.mock.calls.some(
+          ([message]) => message.type === "tldw:request",
+        ),
+      ).toBe(true),
+    );
+    const request = mocks.sendMessage.mock.calls.find(
+      ([message]) => message.type === "tldw:request",
+    )![0];
+    expect(request.payload).toMatchObject({
+      expectedConnectionAuthority: expect.any(String),
+      expectedConnectionEpoch: "checked-epoch",
+      requestId: expect.any(String),
+      path: "/api/v1/moderation/classify",
+    });
+    controller.abort();
+    await rejection;
+    expect(mocks.sendMessage).toHaveBeenCalledWith({
+      type: "tldw:cancel-request",
+      payload: { requestId: request.payload.requestId },
+    });
+    finish({ ok: true, status: 200, data: {} });
+    await Promise.resolve();
+    expect(mocks.tldwRequest).not.toHaveBeenCalled();
+  });
+
+  it("classification refuses a changed account before handing any body to the worker", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: false });
+    const { classifyModeration } = await import("@/services/moderation");
+    await expect(
+      classifyModeration(body, {
+        configSnapshot: config,
+        abortSignal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/changed|scope/i);
+    expect(
+      mocks.sendMessage.mock.calls.every(
+        ([message]) => message.type === "tldw:connection-authority",
+      ),
+    ).toBe(true);
+    expect(mocks.tldwRequest).not.toHaveBeenCalled();
+  });
+});

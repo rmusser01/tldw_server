@@ -535,7 +535,7 @@
       {
         "import_kind": "from",
         "imported_name": "search_discussions",
-        "line": 3387,
+        "line": 3265,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -543,7 +543,7 @@
       {
         "import_kind": "from",
         "imported_name": "perform_websearch",
-        "line": 3416,
+        "line": 3294,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -551,7 +551,7 @@
       {
         "import_kind": "from",
         "imported_name": "process_web_search_results",
-        "line": 3416,
+        "line": 3294,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
@@ -831,6 +831,14 @@
       {
         "import_kind": "from",
         "imported_name": "WebSearch_APIs",
+        "line": 9,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/WebSearch/test_search_result_budget.py",
+        "target_name": "WebSearch_APIs"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "WebSearch_APIs",
         "line": 8,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebSearch/test_websearch_core.py",
@@ -978,6 +986,22 @@
         "line": 4,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase3_3_sanitizers.py",
+        "target_name": "WebSearch_APIs"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "WebSearch_APIs",
+        "line": 8,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_searx_configured_endpoint.py",
+        "target_name": "WebSearch_APIs"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "WebSearch_APIs",
+        "line": 7,
+        "module": "tldw_Server_API.app.core.Web_Scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_searx_html_results.py",
         "target_name": "WebSearch_APIs"
       },
       {
@@ -1971,7 +1995,7 @@
       {
         "import_kind": "from",
         "imported_name": "build_browser_headers",
-        "line": 45,
+        "line": 46,
         "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
         "path": "tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py",
         "target_name": "ua_profiles"
@@ -1979,7 +2003,7 @@
       {
         "import_kind": "from",
         "imported_name": "pick_ua_profile",
-        "line": 45,
+        "line": 46,
         "module": "tldw_Server_API.app.core.Web_Scraping.ua_profiles",
         "path": "tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py",
         "target_name": "ua_profiles"
@@ -2077,7 +2101,7 @@
       {
         "import_kind": "from",
         "imported_name": "normalize_for_crawl",
-        "line": 56,
+        "line": 73,
         "module": "tldw_Server_API.app.core.Web_Scraping.url_utils",
         "path": "tldw_Server_API/app/core/DB_Management/media_db/dedupe_urls.py",
         "target_name": "url_utils"

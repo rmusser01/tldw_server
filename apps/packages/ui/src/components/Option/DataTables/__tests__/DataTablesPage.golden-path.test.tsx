@@ -142,4 +142,13 @@ describe("DataTablesPage golden path guardrails", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Create Table" }))
     expect(state.setActiveTab).toHaveBeenCalledWith("create")
   })
+it.each(['tldw:auth-principal-changed', 'tldw:auth-credentials-changed', 'tldw:config-updated'])(
+  'retires the complete table wizard on %s', (event) => {
+    render(<MemoryRouter><DataTablesPage /></MemoryRouter>);
+    state.resetStore.mockClear();
+    fireEvent(window, new CustomEvent(event, { detail: { authorityChanged: true } }));
+    expect(state.resetStore).toHaveBeenCalledOnce();
+  }
+);
+
 })

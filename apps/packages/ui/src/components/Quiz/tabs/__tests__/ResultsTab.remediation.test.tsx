@@ -860,10 +860,13 @@ describe("ResultsTab remediation panel", { timeout: 60_000 }, () => {
     )
   })
 
-  it("recovers remediation assistant conflicts in place", async () => {
+  it.each([
+    ["nested response", { response: { status: 409 } }],
+    ["transport status", { status: 409 }]
+  ])("recovers remediation assistant conflicts in place (%s)", async (_shape, status) => {
     mocks.assistantRespond
-      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), { response: { status: 409 } }))
-      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), { response: { status: 409 } }))
+      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), status))
+      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), status))
       .mockResolvedValueOnce({
         assistant_message: {
           id: 401,

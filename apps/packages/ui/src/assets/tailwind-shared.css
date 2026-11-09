@@ -435,6 +435,17 @@ body {
   color: rgb(var(--color-text)) !important;
 }
 
+/* Keep Ant Design solid actions on the same readable pairs as shared buttons. */
+.ant-btn-color-primary.ant-btn-variant-solid:not(:disabled):not([aria-disabled="true"]):not(.ant-btn-disabled):not(.ant-btn-dangerous):not(.ant-btn-background-ghost) {
+  background-color: rgb(var(--color-primary)) !important;
+  color: rgb(var(--color-primary-foreground)) !important;
+}
+
+.ant-btn-color-primary.ant-btn-variant-solid:not(:disabled):not([aria-disabled="true"]):not(.ant-btn-disabled):not(.ant-btn-dangerous):not(.ant-btn-background-ghost):is(:hover, :active) {
+  background-color: rgb(var(--color-primary-strong)) !important;
+  color: rgb(var(--color-primary-strong-foreground)) !important;
+}
+
 .ant-card-head {
   border-color: rgb(var(--color-border)) !important;
 }
@@ -678,8 +689,9 @@ body {
 .ant-input-textarea textarea::placeholder,
 .ant-input-affix-wrapper input::placeholder,
 .ant-picker-input > input::placeholder,
-.ant-select-selection-placeholder {
-  color: rgb(var(--color-text-muted)) !important;
+.ant-select-selection-placeholder,
+.ant-select-placeholder {
+  color: var(--ant-color-text-placeholder, rgb(var(--color-text-muted))) !important;
 }
 
 .ant-input-password-icon,

@@ -4,6 +4,8 @@ import {
   type TldwConfig
 } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { createServicePromptScopeChangedError } from "./service-prompt-scope-error"
 import { requestScopeFields, type ServicePromptRequestScope } from "./domains/service-prompts"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
@@ -59,6 +61,7 @@ export type ServerCapabilities = {
   hasPersona: boolean
   hasPersonaLiveControl: boolean
   hasPersonalization: boolean
+  hasCompanion: boolean
   hasGuardian: boolean
   hasSelfMonitoring: boolean
   ffmpegAvailable: boolean | null
@@ -112,6 +115,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasPersona: false,
   hasPersonaLiveControl: false,
   hasPersonalization: false,
+  hasCompanion: false,
   hasGuardian: false,
   hasSelfMonitoring: false,
   ffmpegAvailable: null,
@@ -225,7 +229,7 @@ type IngestionSourceCapabilitiesResponse = {
 }
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV6"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV7"
 
 type CapabilitiesCachePayload = {
   key: string
@@ -904,6 +908,7 @@ const computeCapabilities = (
       has("/api/v1/persona/stream") ||
       hasPersonaLiveControl,
     hasPersonaLiveControl,
+    hasCompanion: has("/api/v1/companion/check-ins"),
     hasPersonalization:
       has("/api/v1/personalization/profile") ||
       has("/api/v1/personalization/opt-in") ||
@@ -925,7 +930,7 @@ const computeCapabilities = (
 }
 
 const inMemoryCapabilitiesCache = new Map<string, CapabilitiesCachePayload>()
-const inFlightByCacheKey = new Map<string, Promise<ServerCapabilities>>()
+const inFlightByCacheKey = new Map<string, { promise: Promise<ServerCapabilities>; signal: AbortSignal }>()
 let capabilitiesStorage: ReturnType<typeof createSafeStorage> | null = null
 
 const isDevRuntime = (): boolean => {
@@ -1089,30 +1094,35 @@ const persistCapabilities = async (
 }
 
 const fetchCapabilitiesFromServer = async (
-  { configSnapshot, shouldProbeIngestionSourceCapabilities: shouldProbeSourceCapabilities }: CapabilitiesFetchContext
+  { configSnapshot, shouldProbeIngestionSourceCapabilities: shouldProbeSourceCapabilities }: CapabilitiesFetchContext,
+  signal: AbortSignal
 ): Promise<ServerCapabilities> => {
+  signal.throwIfAborted()
   const startedAt = Date.now()
   capabilitiesDiagnostics.networkFetches += 1
   let spec: any | null = null
   let docsInfo: DocsInfoResponse | null = null
   try {
     const [openApiSpec, docsInfoResponse] = await Promise.all([
-      tldwClient.getOpenAPISpec({ configSnapshot }),
+      tldwClient.getOpenAPISpec({ configSnapshot, signal }),
       bgRequest<DocsInfoResponse, any>({
         path: "/api/v1/config/docs-info" as any,
         method: "GET" as any,
         noAuth: !shouldProbeSourceCapabilities,
-        configSnapshot
+        configSnapshot,
+        abortSignal: signal
       }).catch(() => null)
     ])
     spec = openApiSpec
     docsInfo = docsInfoResponse
     capabilitiesDiagnostics.lastError = null
   } catch (error) {
+    signal.throwIfAborted()
     capabilitiesDiagnostics.networkErrors += 1
     capabilitiesDiagnostics.lastError = toErrorString(error)
     // ignore, fall back to bundled spec
   }
+  signal.throwIfAborted()
   let diagnosticsSource: ServerCapabilitiesCacheDiagnostics["lastSource"] = "network"
   let specSource: "authoritative" | "fallback" = "authoritative"
   if (!spec) {
@@ -1140,17 +1150,20 @@ const fetchCapabilitiesFromServer = async (
         await bgRequest<IngestionSourceCapabilitiesResponse, any>({
           path: "/api/v1/ingestion-sources/capabilities" as any,
           method: "GET" as any,
-          configSnapshot
+          configSnapshot,
+          abortSignal: signal
         })
       capabilities = applyIngestionSourceCapabilityGates(
         capabilities,
         sourceCapabilities
       )
     } catch {
+      signal.throwIfAborted()
       // Source entitlements are user-scoped. Failure should not hide generic source support.
     }
   }
 
+  signal.throwIfAborted()
   return capabilities
 }
 
@@ -1170,65 +1183,81 @@ export const getServerCapabilities = async (
     return applyDocsInfoFeatureGates({ ...defaultCapabilities }, docsInfo)
   }
 
-  const context = await getCapabilitiesFetchContext()
-  const { cacheKey } = context
-  const now = Date.now()
-  const forceRefresh = options?.forceRefresh === true
-  capabilitiesDiagnostics.calls += 1
-  capabilitiesDiagnostics.lastCacheKey = cacheKey
+  const controller = new AbortController()
+  const signal = controller.signal
+  const release = watchChatAccountChanges(invalidated => {
+    if (invalidated) controller.abort(createServicePromptScopeChangedError())
+  })
+  try {
+    const context = await getCapabilitiesFetchContext()
+    signal.throwIfAborted()
+    const { cacheKey } = context
+    const now = Date.now()
+    const forceRefresh = options?.forceRefresh === true
+    capabilitiesDiagnostics.calls += 1
+    capabilitiesDiagnostics.lastCacheKey = cacheKey
 
-  if (forceRefresh) {
-    capabilitiesDiagnostics.forceRefreshCalls += 1
-  }
+    if (forceRefresh) {
+      capabilitiesDiagnostics.forceRefreshCalls += 1
+    }
 
-  if (!forceRefresh) {
-    const inMemory = inMemoryCapabilitiesCache.get(cacheKey)
-    if (inMemory) {
-      if (!isFreshCache(inMemory.fetchedAt, now)) {
-        capabilitiesDiagnostics.staleMemoryMisses += 1
-      } else {
-        capabilitiesDiagnostics.inMemoryHits += 1
-        capabilitiesDiagnostics.lastSource = "in-memory"
-        maybeLogDiagnostics("in-memory-hit")
-        return inMemory.capabilities
+    if (!forceRefresh) {
+      const inMemory = inMemoryCapabilitiesCache.get(cacheKey)
+      if (inMemory) {
+        if (!isFreshCache(inMemory.fetchedAt, now)) {
+          capabilitiesDiagnostics.staleMemoryMisses += 1
+        } else {
+          capabilitiesDiagnostics.inMemoryHits += 1
+          capabilitiesDiagnostics.lastSource = "in-memory"
+          maybeLogDiagnostics("in-memory-hit")
+          return inMemory.capabilities
+        }
+      }
+
+      const persisted = await readPersistedCapabilities(cacheKey, now)
+      signal.throwIfAborted()
+      if (persisted) {
+        capabilitiesDiagnostics.persistedHits += 1
+        capabilitiesDiagnostics.lastSource = "persisted"
+        inMemoryCapabilitiesCache.set(cacheKey, persisted)
+        maybeLogDiagnostics("persisted-hit")
+        return persisted.capabilities
       }
     }
 
-    const persisted = await readPersistedCapabilities(cacheKey, now)
-    if (persisted) {
-      capabilitiesDiagnostics.persistedHits += 1
-      capabilitiesDiagnostics.lastSource = "persisted"
-      inMemoryCapabilitiesCache.set(cacheKey, persisted)
-      maybeLogDiagnostics("persisted-hit")
-      return persisted.capabilities
+    const existing = inFlightByCacheKey.get(cacheKey)
+    if (existing && !existing.signal.aborted) {
+      capabilitiesDiagnostics.inFlightHits += 1
+      capabilitiesDiagnostics.lastSource = "in-flight"
+      maybeLogDiagnostics("in-flight-hit")
+      const capabilities = await existing.promise
+      signal.throwIfAborted()
+      return capabilities
     }
-  }
 
-  const existing = inFlightByCacheKey.get(cacheKey)
-  if (existing) {
-    capabilitiesDiagnostics.inFlightHits += 1
-    capabilitiesDiagnostics.lastSource = "in-flight"
-    maybeLogDiagnostics("in-flight-hit")
-    return existing
-  }
+    const request = (async () => {
+      const capabilities = await fetchCapabilitiesFromServer(context, signal)
+      signal.throwIfAborted()
+      const payload: CapabilitiesCachePayload = {
+        key: cacheKey,
+        fetchedAt: Date.now(),
+        capabilities
+      }
+      inMemoryCapabilitiesCache.set(cacheKey, payload)
+      void persistCapabilities(payload)
+      return capabilities
+    })()
 
-  const request = (async () => {
-    const capabilities = await fetchCapabilitiesFromServer(context)
-    const payload: CapabilitiesCachePayload = {
-      key: cacheKey,
-      fetchedAt: Date.now(),
-      capabilities
+    inFlightByCacheKey.set(cacheKey, { promise: request, signal })
+    try {
+      const capabilities = await request
+      signal.throwIfAborted()
+      return capabilities
+    } finally {
+      if (inFlightByCacheKey.get(cacheKey)?.promise === request) inFlightByCacheKey.delete(cacheKey)
+      publishCapabilitiesDiagnostics()
     }
-    inMemoryCapabilitiesCache.set(cacheKey, payload)
-    void persistCapabilities(payload)
-    return capabilities
-  })()
-
-  inFlightByCacheKey.set(cacheKey, request)
-  try {
-    return await request
   } finally {
-    inFlightByCacheKey.delete(cacheKey)
-    publishCapabilitiesDiagnostics()
+    release()
   }
 }

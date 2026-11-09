@@ -1,10 +1,11 @@
-import React, { useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { Button, Card, Input, message, Result } from "antd"
 import { CheckCircle, Download, Save, Table2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useQueryClient } from "@tanstack/react-query"
 import { useDataTablesStore } from "@/store/data-tables"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { createServicePromptScopeLease, resolveServicePromptScope } from "@/services/service-prompts"
 import { exportAndDownload } from "@/utils/data-table-export"
 import { Alert } from "@/components/ui/primitives"
 import type { ExportFormat } from "@/types/data-tables"
@@ -36,15 +37,16 @@ export const SaveTablePanel: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [saved, setSaved] = useState(false)
+  const saveController = useRef<AbortController | null>(null)
+  useEffect(() => () => saveController.current?.abort(), [])
 
   // Handle save to library
   const handleSave = async () => {
-    if (!generatedTable) return
+    if (!generatedTable || saveController.current) return
 
     const name = tableName.trim() || "Untitled Table"
     const description = tableDescription.trim() || undefined
-    const fallbackId = `local-${Date.now()}`
-    const tableId = generatedTable.id ? String(generatedTable.id) : fallbackId
+    const tableId = generatedTable.id
     const serverId =
       typeof generatedTable.id === "string" &&
       generatedTable.id &&
@@ -53,33 +55,56 @@ export const SaveTablePanel: React.FC = () => {
       !generatedTable.id.startsWith("local-")
         ? generatedTable.id
         : undefined
+    const controller = new AbortController()
+    const lease = createServicePromptScopeLease(controller.signal)
+    saveController.current = controller
+    const isCurrent = () => !lease.signal.aborted &&
+      useDataTablesStore.getState().generatedTable === generatedTable
     setIsSaving(true)
 
     try {
-      // If table has an ID, update it; otherwise the server should have assigned one
-      if (serverId) {
-        await tldwClient.updateDataTable(serverId, {
-          name,
-          description
-        })
+      if (!serverId) {
+        throw new Error(
+          t(
+            "dataTables:saveRequiresGeneratedTable",
+            "Generate a table before saving to the library. You can still export this preview."
+          )
+        )
       }
+      const scope = await resolveServicePromptScope({ signal: lease.signal })
+      if (!isCurrent()) return
+      if (scope.clientPrincipalVerified === false) throw new Error("Authenticated account is unresolved")
+      lease.bind(scope)
+      const options = {
+        requestScope: { config: scope.config, userId: scope.userId },
+        signal: lease.signal
+      }
+      const savedTable = await tldwClient.saveDataTableContent(serverId, {
+        columns: generatedTable.columns,
+        rows: generatedTable.rows
+      }, options)
+      if (!isCurrent()) return
+      await tldwClient.updateDataTable(serverId, { name, description }, options)
+      if (!isCurrent()) return
 
-      // Add to local store
+      // Publish the library entry only after both server writes succeed.
       addTable({
         id: tableId,
         name,
         description,
-        row_count: generatedTable.row_count || generatedTable.rows?.length || 0,
-        column_count: generatedTable.columns?.length || 0,
-        created_at: generatedTable.created_at || new Date().toISOString(),
+        row_count: savedTable.row_count,
+        column_count: savedTable.columns.length,
+        created_at: savedTable.created_at,
         updated_at: new Date().toISOString(),
-        source_count: generatedTable.sources?.length || 0
+        source_count: savedTable.sources.length
       })
 
       await queryClient.invalidateQueries({ queryKey: ["dataTables"] })
+      if (!isCurrent()) return
       setSaved(true)
       message.success(t("dataTables:saveSuccess", "Table saved to library!"))
     } catch (error) {
+      if (!isCurrent()) return
       console.error("[SaveTablePanel] Save table failed", {
         error,
         tableId,
@@ -88,6 +113,8 @@ export const SaveTablePanel: React.FC = () => {
       const errorMessage = error instanceof Error ? error.message : "Failed to save table"
       message.error(errorMessage)
     } finally {
+      lease.release()
+      if (saveController.current === controller) saveController.current = null
       setIsSaving(false)
     }
   }

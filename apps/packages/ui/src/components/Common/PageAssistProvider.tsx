@@ -1,5 +1,4 @@
 import { PageAssistContext } from "@/context"
-import { useStoreMessageOption } from "@/store/option"
 import React from "react"
 
 // Note: messages state has been moved to useStoreMessageOption (Zustand store)
@@ -29,13 +28,22 @@ export const PageAssistProvider = ({
     if (typeof window === "undefined") return
 
     const w = window as any
-    w.__tldw_pageAssist = {
-      setMessages: useStoreMessageOption.getState().setMessages,
-      getMessages: () => useStoreMessageOption.getState().messages
-    }
+    let active = true
+    let bridge: typeof w.__tldw_pageAssist
+    void import("@/store/option").then(({ useStoreMessageOption }) => {
+      if (!active) return
+      bridge = {
+        setMessages: useStoreMessageOption.getState().setMessages,
+        getMessages: () => useStoreMessageOption.getState().messages
+      }
+      w.__tldw_pageAssist = bridge
+    }).catch((error) => {
+      console.warn("Unable to load development Chat helpers", error)
+    })
 
     return () => {
-      delete w.__tldw_pageAssist
+      active = false
+      if (w.__tldw_pageAssist === bridge) delete w.__tldw_pageAssist
     }
   }, [])
 

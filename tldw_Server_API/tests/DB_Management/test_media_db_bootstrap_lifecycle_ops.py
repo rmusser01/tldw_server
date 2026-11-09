@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import types
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -107,3 +108,86 @@ def test_constructor_failure_calls_close_connection_before_raising(monkeypatch) 
         MediaDatabase(db_path="bootstrap-boom.db", client_id="bootstrap-boom")
 
     assert close_calls == ["close_connection"]
+
+
+@pytest.mark.unit
+def test_ensure_postgres_post_core_structures_runs_followup_ensures(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
+        postgres_helpers as postgres_helpers_module,
+    )
+
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_claims_cluster_rebuild_publication import (
+        POSTGRES_PUBLICATION_DDL,
+    )
+
+    conn = object()
+    calls = Mock()
+    backend = types.SimpleNamespace(execute=calls.safe_transcript_extractor)
+    db = types.SimpleNamespace(
+        backend=backend,
+        _ensure_postgres_collections_tables=calls.collections,
+        _ensure_postgres_tts_history=calls.tts_history,
+        _ensure_postgres_audio_presets=calls.audio_presets,
+        _ensure_postgres_data_tables=calls.data_tables,
+        _ensure_postgres_source_hash_column=calls.source_hash,
+        _ensure_postgres_claims_extensions=calls.claims_extensions,
+        _ensure_postgres_email_schema=calls.email_schema,
+        _ensure_postgres_rls=calls.policies,
+        _sync_postgres_sequences=lambda value: pytest.fail(
+            "routine bootstrap must not rewind RLS-scoped sequences"
+        ),
+    )
+
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_document_workspace_schema",
+        calls.document_workspace,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_sync_log_contract",
+        calls.sync_contract,
+    )
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_keyword_identity",
+        calls.keyword_identity,
+    )
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_media_owner_identity",
+        calls.media_owner_identity,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation.validate_postgres_annotation_replay_index",
+        calls.annotation_replay,
+    )
+    postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
+
+    assert (  # nosec B101 -- Preserve the real coordinator order and arguments.
+        calls.mock_calls
+        == [
+            call.sync_contract(db, conn),
+            call.media_owner_identity(db, conn),
+            call.collections(conn),
+            call.tts_history(conn),
+            call.audio_presets(conn),
+            call.data_tables(conn),
+            call.safe_transcript_extractor(
+                postgres_helpers_module._SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL,
+                connection=conn,
+            ),
+            call.document_workspace(conn),
+            call.annotation_replay(db, conn),
+            call.source_hash(conn),
+            call.claims_extensions(conn),
+            *(call.safe_transcript_extractor(statement, connection=conn) for statement in POSTGRES_PUBLICATION_DDL),
+            call.email_schema(conn),
+            call.policies(conn),
+            call.keyword_identity(db, conn),
+        ]
+    )

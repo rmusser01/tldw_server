@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 import tldw_Server_API.app.core.Jobs.manager as manager_module
+import tldw_Server_API.app.core.Jobs.operations.resource as resource_module
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.tests.Jobs._completion_characterization_support import (
     CompletionConnection,
@@ -177,10 +180,8 @@ def test_completion_identity_short_circuits_result_work(
             original_dumps(result)
 
     def serialize(value, *args, **kwargs):
-        if value is not result:
-            # The shared JSON module also encodes frozen resource identities, never result data.
-            if sys._getframe(1).f_code is manager_module.ResourceMutation._freeze_rows.__code__:
-                assert value == [{"id": job["id"], "uuid": stored_uuid}]
+        if sys._getframe(1).f_code is resource_module.ResourceMutation._freeze_rows.__code__:
+            assert value == [{"id": job["id"], "uuid": stored_uuid}]
             return original_dumps(value, *args, **kwargs)
         serializations.append(value)
         try:
@@ -189,7 +190,9 @@ def test_completion_identity_short_circuits_result_work(
             serialization_errors.append(type(error))
             raise
 
-    monkeypatch.setattr(manager_module.json, "dumps", serialize)
+    json_probe = SimpleNamespace(**{**vars(json), "dumps": serialize})
+    monkeypatch.setattr(manager_module, "json", json_probe)
+    monkeypatch.setattr(resource_module, "json", json_probe)
     original_getattribute = JobManager.__getattribute__
 
     def lookup(self, name):
@@ -224,6 +227,29 @@ def test_completion_identity_short_circuits_result_work(
     assert serialization_errors == ([] if serialization_error is None else [serialization_error])
     assert calls == []
     assert durable_state(reader, job["id"]) == before
+
+
+@pytest.mark.parametrize("probe", ["identity", "early-exit"])
+def test_completion_json_probe_ignores_unrelated_serialization(completion_manager, monkeypatch, probe):
+    """Unrelated template JSON must not become a completion serialization."""
+    manager = completion_manager
+    original_connect = manager._connect
+    unrelated: list[str] = []
+
+    def connect():
+        unrelated.append(json.dumps({"body": "unrelated template"}))
+        return original_connect()
+
+    monkeypatch.setattr(manager, "_connect", connect)
+    if probe == "identity":
+        test_completion_identity_short_circuits_result_work(
+            manager, monkeypatch, "  NONcanonical-UUID  ", True, "object", TypeError
+        )
+    else:
+        test_completion_early_exit_never_prepares_result(
+            manager, monkeypatch, "missing", "object", TypeError
+        )
+    assert unrelated and set(unrelated) == {'{"body": "unrelated template"}'}  # nosec B101 -- Pytest verdict, never a runtime security guard.
 
 
 @pytest.mark.parametrize("state", ["missing", "stale", "failed", "cancelled", "quarantined", "completed-no-token"])
@@ -264,10 +290,8 @@ def test_completion_early_exit_never_prepares_result(
             original_dumps(result)
 
     def serialize(value, *args, **kwargs):
-        if value is not result:
-            # Keep metadata encoding distinct from the exact result size-probe count.
-            if sys._getframe(1).f_code is manager_module.ResourceMutation._freeze_rows.__code__:
-                assert value == [{"id": job["id"], "uuid": job["uuid"]}]
+        if sys._getframe(1).f_code is resource_module.ResourceMutation._freeze_rows.__code__:
+            assert value == [{"id": job["id"], "uuid": job["uuid"]}]
             return original_dumps(value, *args, **kwargs)
         serializations.append(value)
         try:
@@ -276,7 +300,9 @@ def test_completion_early_exit_never_prepares_result(
             serialization_errors.append(type(error))
             raise
 
-    monkeypatch.setattr(manager_module.json, "dumps", serialize)
+    json_probe = SimpleNamespace(**{**vars(json), "dumps": serialize})
+    monkeypatch.setattr(manager_module, "json", json_probe)
+    monkeypatch.setattr(resource_module, "json", json_probe)
     original_getattribute = JobManager.__getattribute__
 
     def lookup(self, name):
@@ -345,7 +371,9 @@ def test_completion_serialization_and_connection_error_precedence(completion_man
         phases.append("transform")
         return transformed
 
-    monkeypatch.setattr(manager_module.json, "dumps", serialize)
+    monkeypatch.setattr(
+        manager_module, "json", SimpleNamespace(**{**vars(manager_module.json), "dumps": serialize})
+    )
     monkeypatch.setattr(manager, "_connect", connect)
     monkeypatch.setattr(manager, "_maybe_encrypt_json", transform)
     if scenario.endswith("-connect"):

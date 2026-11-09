@@ -2,9 +2,11 @@ import React from "react"
 import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { useDocumentWorkspaceStore as store } from "@/store/document-workspace"
 import { DocumentWorkspacePage } from "../DocumentWorkspacePage"
 
 const testState = vi.hoisted(() => ({
+  owner: null as QuickIngestOperation | null,
   openFromPicker: null as null | ((id: number, hint: "pdf", operation: QuickIngestOperation) => Promise<void>),
   workspace: {} as Record<string, unknown>,
   searchParams: new URLSearchParams(),
@@ -13,6 +15,7 @@ const testState = vi.hoisted(() => ({
   setStorage: vi.fn(),
   retrySync: vi.fn(),
   forceSync: vi.fn(),
+  closeFromTabs:null as null|((id:number)=>void),
   forceSave: vi.fn(),
   messageError: vi.fn()
 }))
@@ -42,10 +45,7 @@ vi.mock("@/hooks/useAntdMessage", () => ({
   })
 }))
 
-vi.mock("@/store/document-workspace", () => ({
-  useDocumentWorkspaceStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector(testState.workspace)
-}))
+vi.mock("@/hooks/document-workspace/useDocumentOperation", () => ({useDocumentOperation: () => testState.owner}))
 
 vi.mock("@/hooks/document-workspace", () => ({
   useAnnotations: vi.fn(),
@@ -54,7 +54,7 @@ vi.mock("@/hooks/document-workspace", () => ({
     forceSync: testState.forceSync
   }),
   useAnnotationSyncOnClose: vi.fn(),
-  useReadingProgress: vi.fn(),
+  useReadingProgress: () => ({isPending:false,isError:false}),
   useReadingProgressAutoSave: () => ({
     forceSave: testState.forceSave
   }),
@@ -107,7 +107,7 @@ vi.mock("../DocumentShortcutsModal", () => ({
 }))
 
 vi.mock("../DocumentTabBar", () => ({
-  DocumentTabBar: () => null
+  DocumentTabBar: ({onCloseDocument}:{onCloseDocument:(id:number)=>void}) => {testState.closeFromTabs=onCloseDocument;return null}
 }))
 
 vi.mock("../SyncStatusIndicator", () => ({
@@ -158,8 +158,13 @@ const findRenderedAlert = async (container: HTMLElement, text: string) =>
 describe("DocumentWorkspacePage design-system alerts", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    URL.revokeObjectURL = vi.fn()
     testState.openFromPicker = null
+    store.getState().reset()
+    const controller = new AbortController()
+    testState.owner = {authorityKey:"alice",authorityRevision:1,requestScope:{config:{serverUrl:"https://a.test",authMode:"multi-user"},userId:1},signal:controller.signal,isCurrent:()=>!controller.signal.aborted,assertCurrent:()=>controller.signal.throwIfAborted()}
     testState.workspace = createWorkspaceState()
+    store.setState({...testState.workspace,workspaceAuthority:'["alice",1]'} as never)
     testState.searchParams = new URLSearchParams()
     testState.getMediaDetails.mockImplementation(() => new Promise(() => {}))
   })
@@ -177,8 +182,8 @@ describe("DocumentWorkspacePage design-system alerts", () => {
     const operation: QuickIngestOperation = { authorityKey: "owner-a", authorityRevision: 0, requestScope: { config: { serverUrl: "https://a.test", authMode: "multi-user" }, userId: 1 }, signal: controller.signal, isCurrent: () => !controller.signal.aborted, assertCurrent: () => controller.signal.throwIfAborted() }
     let pending!: Promise<void>
     await act(async () => { pending = testState.openFromPicker!(7, "pdf", operation); await Promise.resolve() })
-    expect(testState.getMediaDetails).toHaveBeenCalledWith(7, expect.objectContaining({ requestScope: operation.requestScope, signal: operation.signal }))
-    if (stage === "file") expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ servicePromptConfig: expect.objectContaining({ serverUrl: "https://a.test", expectedUserId: 1 }), abortSignal: operation.signal }))
+    expect(testState.getMediaDetails).toHaveBeenCalledWith(7, expect.objectContaining({ requestScope: operation.requestScope, signal: expect.any(AbortSignal) }))
+    if (stage === "file") expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ servicePromptConfig: expect.objectContaining({ serverUrl: "https://a.test", expectedUserId: 1 }), abortSignal: expect.any(AbortSignal) }))
     controller.abort()
     await act(async () => { release(stage === "metadata" ? { type: "pdf", title: "Bob private" } : new ArrayBuffer(3)); await pending })
     if (stage === "metadata") expect(bgRequest).not.toHaveBeenCalled()
@@ -205,6 +210,7 @@ describe("DocumentWorkspacePage design-system alerts", () => {
       progressHealth: "error"
     })
 
+    store.setState(testState.workspace)
     const { container } = render(<DocumentWorkspacePage />)
 
     const healthMessage = screen.getByText("Document workspace storage unavailable")
@@ -220,4 +226,78 @@ describe("DocumentWorkspacePage design-system alerts", () => {
     ).toBeInTheDocument()
     expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
   })
+  it("retires another account's documents before displaying the workspace", () => {
+    const view=render(<DocumentWorkspacePage />)
+    store.setState({openDocuments:[{id:7,title:"Alice private",type:"pdf",url:"blob:alice"}],activeDocumentId:7})
+    testState.owner={...testState.owner!,authorityKey:"bob",authorityRevision:2,requestScope:{config:{serverUrl:"https://a.test",authMode:"multi-user"},userId:2}}
+    view.rerender(<DocumentWorkspacePage />)
+    expect(store.getState().openDocuments).toEqual([])
+  })
+  it("does not publish a held URL-open after leaving the page", async()=>{
+    let release!:(value:unknown)=>void
+    testState.searchParams=new URLSearchParams("open=42")
+    testState.getMediaDetails.mockReturnValue(new Promise(resolve=>{release=resolve}))
+    const {bgRequest}=await import("@/services/background-proxy")
+    vi.mocked(bgRequest).mockResolvedValue(new ArrayBuffer(3))
+    const view=render(<DocumentWorkspacePage />)
+    await waitFor(()=>expect(testState.getMediaDetails).toHaveBeenCalled())
+    view.unmount()
+    await act(async()=>{release({type:"pdf",title:"Late private"});await Promise.resolve();await Promise.resolve()})
+    expect(bgRequest).not.toHaveBeenCalled()
+    expect(testState.workspace.openDocument).not.toHaveBeenCalled()
+  })
+
+  it("keeps the pending-save confirmation for an errored document",async()=>{
+    store.setState({annotationSyncStatus:"error",pendingAnnotations:[{id:"pending",documentId:7,location:1,text:"Pending",color:"yellow",createdAt:new Date(0),updatedAt:new Date(0)}]})
+    render(<DocumentWorkspacePage />)
+    const {Modal}=await import("antd")
+    act(()=>testState.closeFromTabs!(7))
+    expect(Modal.confirm).toHaveBeenCalled()
+    const dialog=vi.mocked(Modal.confirm).mock.calls[0][0]
+    await expect(dialog.onOk!()).rejects.toThrow("Annotations are still saving")
+    expect(testState.forceSync).toHaveBeenCalledWith(7)
+    expect(testState.workspace.closeDocument).not.toHaveBeenCalled()
+  })
+
+  it("does not rewrite a newly requested URL to the previous active document",async()=>{
+    testState.searchParams=new URLSearchParams("open=2")
+    store.setState({activeDocumentId:1,openDocuments:[{id:1,title:"Existing A",type:"pdf",url:"blob:a"}]})
+    render(<DocumentWorkspacePage />)
+    await waitFor(()=>expect(testState.getMediaDetails).toHaveBeenCalledWith(2,expect.anything()))
+    expect(testState.setSearchParams.mock.calls.some(([params])=>params.get("open")==="1")).toBe(false)
+  })
+
+  it("retires owned close notices and fences their old Undo after account replacement",async()=>{
+    store.setState({activeDocumentId:7,openDocuments:[{id:7,title:"Private Alice title",type:"pdf",url:"blob:alice"}]})
+    const view=render(<DocumentWorkspacePage />)
+    const {notification}=await import("antd")
+    act(()=>testState.closeFromTabs!(7))
+    const notice=vi.mocked(notification.info).mock.calls[0][0]
+    testState.owner={...testState.owner!,authorityKey:"bob",authorityRevision:2}
+    view.rerender(<DocumentWorkspacePage />)
+    const noticeRetired=vi.mocked(notification.destroy).mock.calls.some(([key])=>key===notice.key)
+    const undoButton = notice.btn
+    if (!React.isValidElement<{onClick:()=>void}>(undoButton)) throw new Error("Expected the owned Undo button")
+    act(()=>undoButton.props.onClick())
+    expect({undoCalls:vi.mocked(testState.workspace.undoCloseDocument as ()=>void).mock.calls.length,noticeRetired}).toEqual({undoCalls:0,noticeRetired:true})
+  })
+  it("destroys only its owned pending-close confirmation on account replacement",async()=>{
+    const {Modal}=await import("antd")
+    const destroy=vi.fn();vi.mocked(Modal.confirm).mockReturnValueOnce({destroy,update:vi.fn()})
+    store.setState({pendingAnnotations:[{id:"pending",documentId:7,location:1,text:"Private pending",color:"yellow",createdAt:new Date(0),updatedAt:new Date(0)}]})
+    const view=render(<DocumentWorkspacePage />)
+    act(()=>testState.closeFromTabs!(7))
+    testState.owner={...testState.owner!,authorityKey:"bob",authorityRevision:2}
+    view.rerender(<DocumentWorkspacePage />)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not rewrite a warm URL target before its tab selection commits",()=>{
+    testState.searchParams=new URLSearchParams("open=2")
+    store.setState({activeDocumentId:1,openDocuments:[{id:1,title:"A",type:"pdf",url:"blob:a"},{id:2,title:"B",type:"pdf",url:"blob:b"}]})
+    render(<DocumentWorkspacePage />)
+    expect(store.getState().activeDocumentId).toBe(2)
+    expect(testState.setSearchParams.mock.calls.some(([params])=>params.get("open")==="1")).toBe(false)
+  })
+
 })

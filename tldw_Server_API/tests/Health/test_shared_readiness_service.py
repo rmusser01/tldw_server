@@ -275,3 +275,71 @@ async def test_public_liveness_never_collects_readiness_snapshot(monkeypatch: py
 
     assert response.status_code == 200
     assert collect.await_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case,expected",
+    [
+        ("rejected", False),
+        ("unknown", False),
+        ("older", False),
+        ("current", True),
+        ("sqlite", True),
+        ("constructor-error", False),
+        ("probe-error", False),
+        ("backend-error", False),
+    ],
+)
+async def test_healthy_auth_cannot_hide_rejected_postgres_workflows(monkeypatch, case, expected):
+    """Canonical readiness rejects an incomplete PG store while keeping SQLite optional metadata."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.Chat import provider_manager
+    from tldw_Server_API.app.core.DB_Management import DB_Manager
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
+    from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsSchemaError
+    from tldw_Server_API.app.core.Workflows.engine import WorkflowScheduler
+
+    monkeypatch.setattr(WorkflowScheduler, "instance", staticmethod(lambda: SimpleNamespace(stats=lambda: {})))
+    monkeypatch.setattr(
+        database,
+        "get_db_pool",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                health_check=AsyncMock(return_value={"status": "healthy", "type": "postgresql"})
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        DB_Manager,
+        "get_content_backend_instance",
+        lambda: SimpleNamespace(backend_type=BackendType.SQLITE if case == "sqlite" else BackendType.POSTGRESQL),
+    )
+    monkeypatch.setattr(provider_manager, "get_provider_manager", lambda: None)
+
+    def workflow_store(**kwargs):
+        if case == "rejected":
+            raise WorkflowsSchemaError("synthetic-private-missing-schema")
+        if case == "constructor-error":
+            raise RuntimeError("synthetic-private-constructor")
+        version = None if case in {"unknown", "sqlite"} else 8 if case == "older" else 9
+
+        def health_probe():
+            if case == "probe-error":
+                raise RuntimeError("synthetic-private-probe")
+            if case == "backend-error":
+                raise DatabaseError("synthetic-private-backend")
+            return {
+                "schema_version": version,
+                "expected_version": None if case in {"unknown", "sqlite"} else 9,
+            }
+
+        return SimpleNamespace(_using_backend=lambda: case != "sqlite", health_probe=health_probe)
+
+    monkeypatch.setattr(DB_Manager, "create_workflows_database", workflow_store)
+    actual = await readiness_service.collect_readiness_snapshot(FastAPI())
+    assert actual.ready is expected  # nosec B101 -- actual canonical admission with healthy AuthNZ.
+    assert internal_readiness_payload(actual) == {"status": "ready" if expected else "not_ready"}  # nosec B101 -- public projection preserves refusal.
+    assert "synthetic-private" not in json.dumps(operator_readiness_payload(actual))  # nosec B101 -- no raw schema failure leakage.

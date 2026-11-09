@@ -55,6 +55,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
+    first_saved_filename,
     save_uploaded_files,
 )
 
@@ -308,10 +309,8 @@ async def process_videos_endpoint(
     try:
         if form_data.perform_chunking:
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0].get("original_filename")
+                first_filename = first_saved_filename(saved_files_info)
             except Exception:
                 first_filename = None
 
@@ -330,6 +329,7 @@ async def process_videos_endpoint(
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options_dict,
+                    owner_user_id=getattr(current_user, "id", None),
                     TemplateClassifier=TemplateClassifier,
                     first_url=first_url,
                     first_filename=first_filename,

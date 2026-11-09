@@ -171,3 +171,59 @@ describe("moderation service contract", () => {
     })
   })
 })
+
+
+describe("model classification response contract", () => {
+  const body = {
+    request_id: "0a348e21-7cd9-4ab6-8f22-06665df99685",
+    provider: "llama.cpp",
+    model: "existing-model",
+    criterion: "Flag unpublished access codes.",
+    text: "Fictional sample.",
+  };
+  const scope = {
+    configSnapshot: {
+      serverUrl: "https://original.test",
+      authMode: "single-user" as const,
+      apiKey: "classification-fixture-key",
+    },
+    abortSignal: new AbortController().signal,
+  };
+  it("keeps the checked authority and response provenance on a successful result", async () => {
+    const item = {
+      id: "review-item",
+      context: {
+        classification: {
+          provider: "llama.cpp",
+          model: "existing-model",
+          criterion: body.criterion,
+          label: "benign",
+          reason: "No access code.",
+          evidence: null,
+        },
+      },
+    };
+    mocks.bgRequest.mockResolvedValueOnce(item);
+    const { classifyModeration } = await import("@/services/moderation");
+    await expect(classifyModeration(body, scope)).resolves.toEqual(item);
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/moderation/classify",
+        method: "POST",
+        body,
+        ...scope,
+        timeoutMs: 150_000,
+      }),
+    );
+  });
+  it("rejects a malformed result instead of letting it appear benign", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      id: "review-item",
+      context: { classification: { label: "safe" } },
+    });
+    const { classifyModeration } = await import("@/services/moderation");
+    await expect(classifyModeration(body, scope)).rejects.toThrow(
+      /invalid classification/i,
+    );
+  });
+});

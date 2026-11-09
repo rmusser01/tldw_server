@@ -147,18 +147,22 @@ const isKeywordMatch = (keyword: string, target: string): boolean =>
 
 const stripWorkspaceTagFromKeywords = (
   keywords: string[],
-  workspaceTag: string
+  workspaceTag: string,
+  workspaceId: string
 ): string[] =>
-  keywords.filter((keyword) => !isKeywordMatch(keyword, workspaceTag))
+  keywords.filter((keyword) =>
+    !isKeywordMatch(keyword, workspaceTag) &&
+    !isKeywordMatch(keyword, `workspace:${workspaceId}`))
 
 const buildPersistedKeywords = (
   keywords: string[],
-  workspaceTag: string
-): string[] => {
-  const normalized = normalizeKeywords(keywords)
-  if (!workspaceTag.trim()) return normalized
-  return normalizeKeywords([...normalized, workspaceTag.trim()])
-}
+  workspaceTag: string,
+  workspaceId: string
+): string[] => normalizeKeywords([
+  ...keywords,
+  workspaceTag,
+  ...(workspaceId.trim() ? [`workspace:${workspaceId.trim()}`] : [])
+])
 
 export const isWorkspaceTaggedNote = (
   note: NoteListItem,
@@ -208,15 +212,14 @@ export const prioritizeWorkspaceNotes = (
 
 const normalizeNotesForDisplay = (
   notes: NoteListItem[],
-  workspaceTag: string
+  workspaceTag: string,
+  workspaceId: string
 ): NoteListItem[] =>
   notes.map((note) => {
     const normalizedKeywords = extractNoteKeywords(note)
     return {
       ...note,
-      keywords: workspaceTag.trim()
-        ? stripWorkspaceTagFromKeywords(normalizedKeywords, workspaceTag)
-        : normalizedKeywords
+      keywords: stripWorkspaceTagFromKeywords(normalizedKeywords, workspaceTag, workspaceId)
     }
   })
 
@@ -758,12 +761,10 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       title: note.title || "",
       content: retainKnowledgeNoteProvenance(note.content || "", note),
       ...knowledgeNoteHead(note),
-      keywords: workspaceTag
-        ? stripWorkspaceTagFromKeywords(extractNoteKeywords(note), workspaceTag)
-        : extractNoteKeywords(note),
+      keywords: stripWorkspaceTagFromKeywords(extractNoteKeywords(note), workspaceTag, activeWorkspaceId),
       version: note.version
     }),
-    [workspaceTag]
+    [workspaceTag, activeWorkspaceId]
   )
 
   // Search/list notes
@@ -800,7 +801,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       }
 
       const prioritized = prioritizeWorkspaceNotes(mergedNotes, workspaceTag)
-      setNotesList(normalizeNotesForDisplay(prioritized, workspaceTag))
+      setNotesList(normalizeNotesForDisplay(prioritized, workspaceTag, activeWorkspaceId))
     } catch (error) {
       messageApi.error(
         t("playground:studio.loadNotesError", "Failed to load notes")
@@ -809,7 +810,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     } finally {
       setIsSearching(false)
     }
-  }, [messageApi, t, workspaceTag])
+  }, [messageApi, t, workspaceTag, activeWorkspaceId])
 
   const loadWorkspaceNotes = useCallback(
     async (operation?: {
@@ -839,14 +840,14 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         if (!isCurrent()) return
         const notes = pickNotesArray(response)
         const prioritized = prioritizeWorkspaceNotes(notes, workspaceTag)
-        setWorkspaceNotes(normalizeNotesForDisplay(prioritized, workspaceTag))
+        setWorkspaceNotes(normalizeNotesForDisplay(prioritized, workspaceTag, activeWorkspaceId))
       } catch {
         if (isCurrent()) setWorkspaceNotes([])
       } finally {
         setIsLoadingWorkspaceNotes(false)
       }
     },
-    [workspaceTag]
+    [workspaceTag, activeWorkspaceId]
   )
 
   // Debounced search for typing
@@ -1218,7 +1219,8 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
               ]
             : [])
         ],
-        draftWorkspaceTag
+        draftWorkspaceTag,
+        workspaceId
       )
       const payload: Record<string, unknown> = {
         title: draft.title || "Untitled Note",
@@ -1518,6 +1520,8 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       // operation remains recoverable only through the explicit previous-save action.
       if (!canonicalUpdateBound && !migrationSuppressed) {
         const persistence = useWorkspaceStore.persist.getOptions();
+        await flushWorkspacePersistence();
+        if (!isCurrent()) return;
         const persistedWorkspace = await persistence.storage?.getItem(
           persistence.name,
         );
@@ -1581,6 +1585,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           metadata: {
             ...knowledgeNoteHead(latest),
             quickNotesWorkspaceTag: draftWorkspaceTag,
+            quickNotesWorkspaceId: workspaceId,
             pendingKnowledgeProvenance: latest.pendingKnowledgeProvenance,
           },
         },
@@ -1620,6 +1625,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       // its immutable operation can be removed. Known UUID updates already
       // have that independent identity; migration never recreates snapshots.
       if (
+        !migrationSuppressed &&
         !(
           canonicalUpdateBound &&
           canonicalWikilinkNoteId(String(saved.id)) === canonicalNoteId
@@ -1650,7 +1656,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           );
       }
       const binding = draftBindingRef.current;
-      await checkpointQuickNotesOfflineDraft(
+      const checkpointed = await checkpointQuickNotesOfflineDraft(
         authorityScope,
         pending.entry.key,
         pending.entry.pendingWrite!.key,
@@ -1658,6 +1664,23 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         saved,
       );
       if (!isCurrent()) return;
+      // Migrated Workspaces keep the accepted identity in the owned draft, not a deleted snapshot.
+      if (
+        migrationSuppressed &&
+        !canonicalUpdateBound &&
+        (!isQuickNotesRetainedDraft(checkpointed ?? undefined) ||
+          checkpointed?.key !== pending.entry.key ||
+          checkpointed.noteId !== String(saved.id) ||
+          checkpointed.baseVersion !== saved.version ||
+          checkpointed.metadata?.quickNotesAcceptedKey !==
+            pending.entry.pendingWrite!.key ||
+          checkpointed.metadata?.quickNotesAuthorityId !== authorityId ||
+          checkpointed.metadata?.quickNotesWorkspaceId !== workspaceId ||
+          checkpointed.metadata?.quickNotesWorkspaceTag !== draftWorkspaceTag)
+      )
+        throw new Error(
+          "Could not retain the accepted note checkpoint. Retry the same save.",
+        );
       pendingSaveRef.current = null;
       const acknowledgedDraft = useWorkspaceStore.getState().currentNote;
       if (!acknowledgedDraft.isDirty) showSavedIndicatorTemporarily();

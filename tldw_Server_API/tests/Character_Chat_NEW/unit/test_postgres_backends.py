@@ -67,6 +67,8 @@ class RecordingConnection:
         if self._fail_on and self._fail_on in sql.lower():
             raise CharactersRAGDBError("injected statement failure")
         row = self._selected_row if sql.strip().lower().startswith("select") else None
+        if "AS can_migrate" in sql:
+            row = {"can_migrate": True}
         if "returning id" in sql.lower():
             row = {"id": self._next_id}
             self._next_id += 1

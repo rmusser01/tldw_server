@@ -7,6 +7,7 @@ import {
 import { buildPersonaWebSocketUrl } from "@/services/persona-stream"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { toAllowedPath } from "@/services/tldw/path-utils"
 import { downloadBlob } from "@/utils/download-blob"
 
 import type { PersonaGardenTabKey } from "@/utils/persona-garden-route"
@@ -107,6 +108,7 @@ const formatMemoryResultsLabel = (count: number) => `Memory results: ${count}`
 // ── Deps interface ──
 
 export interface UsePersonaLiveSessionDeps {
+  historyScope: string | null
   isCompanionMode: boolean
   selectedPersonaId: string
   setSelectedPersonaId: React.Dispatch<React.SetStateAction<string>>
@@ -180,7 +182,7 @@ export interface UsePersonaLiveSessionDeps {
   setPendingPlan: React.Dispatch<React.SetStateAction<PendingPlan | null>>
   pendingPlan: PendingPlan | null
   /** Capabilities */
-  capabilities: { hasPersonalization?: boolean; hasAudio?: boolean } | null
+  capabilities: { hasPersonalization?: boolean; hasCompanion?: boolean; hasAudio?: boolean } | null
   capsLoading: boolean
   /** Route bootstrap */
   routeBootstrapSessionId?: string | null
@@ -190,6 +192,7 @@ export interface UsePersonaLiveSessionDeps {
 
 export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   const {
+    historyScope,
     isCompanionMode,
     selectedPersonaId,
     setSelectedPersonaId,
@@ -303,7 +306,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
 
   // ── Companion prompts loader ──
   React.useEffect(() => {
-    if (!isCompanionMode || capsLoading || !capabilities?.hasPersonalization) {
+    if (!isCompanionMode || capsLoading || !capabilities?.hasPersonalization || !capabilities?.hasCompanion) {
       setCompanionPrompts([])
       return
     }
@@ -344,7 +347,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
       cancelled = true
       window.clearTimeout(timeoutId)
     }
-  }, [capabilities?.hasPersonalization, capsLoading, input, isCompanionMode])
+  }, [capabilities?.hasPersonalization, capabilities?.hasCompanion, capsLoading, input, isCompanionMode])
 
   // ── Session preferences applicator ──
   const applySessionPreferences = React.useCallback(
@@ -874,7 +877,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   const canSend = connected && Boolean(sessionId) && Boolean(input.trim())
   const canSaveCompanionCheckIn =
     Boolean(input.trim()) &&
-    Boolean(capabilities?.hasPersonalization) &&
+    Boolean(capabilities?.hasPersonalization && capabilities?.hasCompanion) &&
     !savingCompanionCheckIn
 
   // ── sendUserMessage ──
@@ -999,10 +1002,59 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   )
 
   // ── loadSessionHistory ──
+  const historyOwnerRef = React.useRef<string | null>(null)
   const clearResumeSelection = React.useCallback(() => {
     setResumeSessionId("")
     setSessionHistory([])
   }, [])
+
+  React.useEffect(() => {
+    const personaId = isCompanionMode ? DEFAULT_PERSONA_ID : selectedPersonaId
+    const owner = historyScope ? JSON.stringify([historyScope, personaId, isCompanionMode]) : null
+    if (!owner) {
+      setSessionHistory([])
+      if (historyOwnerRef.current) setResumeSessionId("")
+      return
+    }
+    if (historyOwnerRef.current && historyOwnerRef.current !== owner) clearResumeSelection()
+    historyOwnerRef.current = owner
+    if (connected || connecting || wsRef.current) return
+
+    setSessionHistory([])
+    const controller = new AbortController()
+    const stopWatching = watchChatAccountChanges((invalidated) => {
+      if (!invalidated) return
+      controller.abort()
+      clearResumeSelection()
+      setError("Saved conversations could not be loaded. Reload this page to retry.")
+    })
+    const attempt = connectAttemptRef.current
+    const current = () => !controller.signal.aborted && mountedRef.current &&
+      connectAttemptRef.current === attempt
+    void (async () => {
+      try {
+        const response = await tldwClient.fetchWithAuth(
+          toAllowedPath(
+            "/api/v1/persona/sessions?persona_id=" + encodeURIComponent(personaId) +
+              (isCompanionMode ? "&surface=companion.conversation" : "") + "&limit=50"
+          ),
+          { method: "GET", signal: controller.signal }
+        )
+        if (!current()) return
+        if (!response?.ok) throw new Error("Saved conversations unavailable")
+        const sessions = await response.json()
+        if (!current()) return
+        if (!Array.isArray(sessions)) throw new Error("Invalid saved conversations")
+        setSessionHistory(sessions)
+      } catch {
+        if (current()) setError("Saved conversations could not be loaded. Reload this page to retry.")
+      }
+    })()
+    return () => {
+      controller.abort()
+      stopWatching()
+    }
+  }, [clearResumeSelection, connected, connecting, historyScope, isCompanionMode, selectedPersonaId, setError, wsRef])
 
   const loadSessionHistory = React.useCallback(async () => {
     if (!sessionId) return
@@ -1183,7 +1235,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     if (
       !trimmed ||
       savingCompanionCheckIn ||
-      !capabilities?.hasPersonalization
+      (!capabilities?.hasPersonalization || !capabilities?.hasCompanion)
     )
       return
     setSavingCompanionCheckIn(true)
@@ -1222,6 +1274,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   }, [
     appendLog,
     capabilities?.hasPersonalization,
+    capabilities?.hasCompanion,
     input,
     isCompanionMode,
     savingCompanionCheckIn,

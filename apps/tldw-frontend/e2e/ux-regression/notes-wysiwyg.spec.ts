@@ -181,13 +181,13 @@ for (const surface of ['WebUI', 'extension options'] as const) {
         )
       }
       await page.goto(route)
-      await page.getByTestId(`notes-open-button-${noteId}`).click()
       if (extension) {
         const prompt = page.getByText('New to this page?', { exact: true })
         await expect(prompt).toBeVisible()
         await page.getByRole('button', { name: 'Not now', exact: true }).click()
         await expect(prompt).toBeHidden()
       }
+      await page.getByTestId(`notes-open-button-${noteId}`).click()
       await page.getByTestId('notes-input-mode-wysiwyg').click()
       const editor = page.getByTestId('notes-wysiwyg-editor')
       await editor.click()

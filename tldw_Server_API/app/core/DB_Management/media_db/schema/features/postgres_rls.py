@@ -7,6 +7,7 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import SchemaError
 
 try:
     from loguru import logger
@@ -14,6 +15,12 @@ except ImportError:  # pragma: no cover - defensive fallback
     import logging
 
     logger = logging.getLogger("media_db_postgres_rls")
+
+
+POSTGRES_CLAIMS_PUBLICATION_TABLES = (
+    "claims_cluster_publication_heads",
+    "claims_cluster_publication_receipts",
+)
 
 
 def _postgres_policy_exists(db: Any, conn: Any, table: str, policy: str) -> bool:
@@ -34,33 +41,10 @@ def _postgres_policy_exists(db: Any, conn: Any, table: str, policy: str) -> bool
         return False
 
 
-def _ensure_postgres_rls(db: Any, conn: Any) -> None:
-    """Ensure row-level security policies exist for shared content tables."""
+def postgres_policy_sets(backend: Any) -> dict[str, list[tuple[str, str]]]:
+    """Return the canonical shared-content predicates for setup and validation."""
 
-    backend = db.backend
     ident = backend.escape_identifier
-
-    # These tables hold domain output metadata, not lifecycle. No admin/team
-    # widening: only the actual Media scope owner may read or write a receipt.
-    for table in ("claims_cluster_publication_heads", "claims_cluster_publication_receipts"):
-        present = backend.execute(
-            "SELECT to_regclass(%s) IS NOT NULL AS present",
-            (table,),
-            connection=conn,
-        )
-        # Older migration steps refresh RLS before v27 creates these tables.
-        if not present.rows or not present.rows[0].get("present"):
-            continue
-        quoted = ident(table)
-        policy = ident(table + "_owner")
-        predicate = "owner_user_id = NULLIF(current_setting('app.current_user_id', true), '')"
-        backend.execute(f"ALTER TABLE {quoted} ENABLE ROW LEVEL SECURITY", connection=conn)
-        backend.execute(f"ALTER TABLE {quoted} FORCE ROW LEVEL SECURITY", connection=conn)
-        backend.execute(f"DROP POLICY IF EXISTS {policy} ON {quoted}", connection=conn)
-        backend.execute(
-            f"CREATE POLICY {policy} ON {quoted} FOR ALL USING ({predicate}) WITH CHECK ({predicate})",
-            connection=conn,
-        )
 
     # Uncorrelated scalar reads become statement InitPlans. Scope installation
     # still replaces these values on every pool checkout; no session identity
@@ -110,7 +94,7 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
         "AND owned_media.system_content_hash IS NOT NULL))"
     )
 
-    policy_sets = {
+    return {
         "media": [
             ("media_visibility_access", media_access_predicate),
         ],
@@ -129,7 +113,49 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
         "operationownedclonekeywords": [
             ("owned_clone_pending_keyword_access", pending_keyword_predicate),
         ],
+        **{
+            table: [(f"{table}_owner", "owner_user_id = NULLIF(current_setting('app.current_user_id', true), '')")]
+            for table in POSTGRES_CLAIMS_PUBLICATION_TABLES
+        },
     }
+
+
+
+def _ensure_postgres_rls(db: Any, conn: Any) -> None:
+    """Ensure row-level security policies exist for shared content tables."""
+    backend = db.backend
+    ident = backend.escape_identifier
+    policy_sets = postgres_policy_sets(backend)
+
+    # These tables hold domain output metadata, not lifecycle. No admin/team
+    # widening: only the actual Media scope owner may read or write a receipt.
+    for table in POSTGRES_CLAIMS_PUBLICATION_TABLES:
+        present = backend.execute(
+            "SELECT to_regclass(%s) IS NOT NULL AS present",
+            (table,),
+            connection=conn,
+        )
+        # Older migration steps refresh RLS before v27 creates these tables.
+        if not present.rows or not present.rows[0].get("present"):
+            continue
+        quoted = ident(table)
+        policy_name, predicate = policy_sets[table][0]
+        policy = ident(policy_name)
+        backend.execute(f"ALTER TABLE {quoted} ENABLE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(f"ALTER TABLE {quoted} FORCE ROW LEVEL SECURITY", connection=conn)
+        unexpected = backend.execute(
+            "SELECT 1 FROM pg_policies WHERE schemaname = current_schema() "
+            "AND tablename = %s AND policyname <> %s",
+            (table, policy_name),
+            connection=conn,
+        )
+        if unexpected.rows:
+            raise SchemaError(f"PostgreSQL publication RLS policy catalog drifted for {table}")
+        backend.execute(f"DROP POLICY IF EXISTS {policy} ON {quoted}", connection=conn)
+        backend.execute(
+            f"CREATE POLICY {policy} ON {quoted} FOR ALL USING ({predicate}) WITH CHECK ({predicate})",
+            connection=conn,
+        )
 
     old_media_policies = [
         "media_scope_admin",
@@ -231,7 +257,16 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
 
     for policy_name, predicate in policy_sets["sync_log"]:
         try:
-            if not db._postgres_policy_exists(conn, "sync_log", policy_name):
+            if db._postgres_policy_exists(conn, "sync_log", policy_name):
+                backend.execute(
+                    f"""
+                    ALTER POLICY {backend.escape_identifier(policy_name)} ON {ident("sync_log")}
+                    USING ({predicate})
+                    WITH CHECK ({predicate})
+                    """,
+                    connection=conn,
+                )
+            else:
                 backend.execute(
                     f"""
                     CREATE POLICY {backend.escape_identifier(policy_name)} ON {ident('sync_log')}
@@ -242,7 +277,7 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
                     connection=conn,
                 )
         except BackendDatabaseError as exc:
-            logger.warning(f"Skipping creation of sync_log policy '{policy_name}': {exc}")
+            logger.warning(f"Skipping setup of sync_log policy '{policy_name}': {exc}")
 
 
 __all__ = [

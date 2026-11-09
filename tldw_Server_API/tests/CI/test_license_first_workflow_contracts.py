@@ -108,7 +108,7 @@ DIRECT_TRIGGER_DIGESTS = {
 }
 ORIGINAL_JOB_NAMES = {
     "actionlint.yml": ("actionlint",),
-    "backend-required.yml": ("changes", "backend-required", "queue-tick"),
+    "backend-required.yml": ("changes", "non-utc-tests", "backend-required", "queue-tick"),
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
@@ -142,7 +142,7 @@ ORIGINAL_JOB_NAMES = {
         "shared-ui-coverage-report", "frontend-required", "queue-tick",
     ),
     "frontend-ux-gates.yml": ("onboarding-gate", "smoke-gate"),
-    "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres"),
+    "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres", "jobs-postgres-coverage"),
     "mcp-unified-rc.yml": ("internal-rc", "portable-stdio"),
     "notes-remediation-targeted.yml": ("notes-ui-remediation", "notes-backend-remediation"),
     "onboarding-docs-gate.yml": ("onboarding-docs-gate",),
@@ -164,7 +164,8 @@ ORIGINAL_JOB_NAMES = {
     "ui-worldbooks-tests.yml": ("worldbooks-vitest",),
 }
 ORIGINAL_DEPENDENCIES = {
-    ("backend-required.yml", "backend-required"): ("changes",),
+    ("backend-required.yml", "non-utc-tests"): ("changes",),
+    ("backend-required.yml", "backend-required"): ("changes", "non-utc-tests"),
     ("backend-required.yml", "queue-tick"): ("backend-required",),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
@@ -199,6 +200,7 @@ ORIGINAL_DEPENDENCIES = {
     ),
     ("frontend-required.yml", "queue-tick"): ("frontend-required",),
     ("jobs-suite.yml", "jobs-postgres"): ("jobs-sqlite",),
+    ("jobs-suite.yml", "jobs-postgres-coverage"): ("jobs-postgres",),
     ("security-required.yml", "security-required"): ("changes",),
     ("security-required.yml", "queue-tick"): ("security-required",),
 }
@@ -221,6 +223,7 @@ LICENSE_RED_GATES = {
     ("security-required.yml", "security-required"),
 }
 DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
+    ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "backend-required"),
     ("frontend-e2e-tiers.yml", "critical"),
     ("frontend-e2e-tiers.yml", "features"),
@@ -253,6 +256,7 @@ NON_PR_FULL_SUITE_JOBS = {
     "full-suite-windows-312-summary",
 }
 FETCH_DEPTH_CHECKOUTS = {
+    ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "changes"),
     ("backend-required.yml", "backend-required"),
     ("ci.yml", "changes"),
@@ -706,6 +710,11 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     extra_condition = non_pr
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     extra_condition = backend_changed
+                elif (name, job_name) == ("backend-required.yml", "non-utc-tests"):
+                    extra_condition = (
+                        "needs.changes.result == 'success' && "
+                        "needs.changes.outputs.backend_changed == 'true'"
+                    )
                 elif (name, job_name) == ("frontend-required.yml", "frontend-unit-tests"):
                     extra_condition = (
                         "needs.changes.result == 'success' && "
@@ -787,6 +796,12 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert _normalized(job.get("if")) == _normalized(expected), (name, job_name)
                 elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
                     assert _normalized(job.get("if")) == _normalized(dependencies_succeeded)
+                elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres-coverage"):
+                    assert _normalized(job.get("if")) == _normalized(
+                        "always() && !cancelled() && "
+                        "(needs.jobs-postgres.outputs.tests_outcome == 'success' || "
+                        "needs.jobs-postgres.outputs.tests_outcome == 'failure')"
+                    )
                 else:
                     assert job.get("if") is None, (name, job_name)
 
@@ -819,7 +834,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 59
+    assert checkout_count == 61
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -862,8 +877,9 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 58
-    assert combined_text.count("github.event.pull_request.head.sha") == 54
+    # The PostgreSQL coverage job checks out the same immutable event head as its test job.
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 60
+    assert combined_text.count("github.event.pull_request.head.sha") == 56
     # +1 each: backend-required passes the admitted-or-PR base to the backlog
     # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.
     assert combined_text.count("github.event.pull_request.base.sha") == 6
@@ -1148,7 +1164,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 26
+    assert setup_helper_count == 27
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7

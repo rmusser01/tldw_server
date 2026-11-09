@@ -10,6 +10,7 @@ from typing import Any
 from tldw_Server_API.app.core.AuthNZ.database import _convert_question_mark_to_dollar
 from tldw_Server_API.app.core.DB_Management.Ingestion_Sources_DB import (
     ensure_postgres_source_item_presence,
+    postgres_source_schema_is_ready,
     update_ingestion_source_record,
 )
 from tldw_Server_API.app.core.exceptions import (
@@ -184,6 +185,10 @@ def normalize_source_payload(data: dict[str, Any]) -> dict[str, Any]:
 
 @_with_service_connection
 async def ensure_ingestion_sources_schema(db) -> None:
+    if db.backend == "postgres" and await postgres_source_schema_is_ready(db):
+        await ensure_postgres_source_item_presence(db)
+        return
+
     sqlite_schema_script = """
         CREATE TABLE IF NOT EXISTS ingestion_sources (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1486,12 +1486,15 @@ export const workspaceApiMethods = {
 
   async upsertWorkspace(
     workspaceId: string,
-    data: WorkspaceUpsertRequest
+    data: WorkspaceUpsertRequest,
+    options?: ScopedRequestOptions
   ): Promise<WorkspaceApiResponse> {
     const response = await bgRequest<WorkspaceApiResponse>({
       path: workspacePath(workspaceId),
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body: data
     })
     return normalizeWorkspaceApiResponse(response)
@@ -1790,24 +1793,30 @@ export const workspaceApiMethods = {
 
   async submitWorkspaceOutput(
     workspaceId: string,
-    data: ResearchWorkspaceOutputSubmitRequest
+    data: ResearchWorkspaceOutputSubmitRequest,
+    options?: ScopedRequestOptions
   ): Promise<ResearchWorkspaceOutputSubmitResponse> {
     return await bgRequest<ResearchWorkspaceOutputSubmitResponse>({
       path: workspacePath(workspaceId, "/outputs"),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body: data
     })
   },
 
   async getWorkspaceOutputStatus(
     workspaceId: string,
-    jobId: number | string
+    jobId: number | string,
+    options?: ScopedRequestOptions
   ): Promise<ResearchWorkspaceOutputStatusResponse> {
     const encodedJobId = encodeWorkspacePathSegment(String(jobId), "jobId")
     return await bgRequest<ResearchWorkspaceOutputStatusResponse>({
       path: workspacePath(workspaceId, `/outputs/${encodedJobId}`),
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 

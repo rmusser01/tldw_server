@@ -3491,22 +3491,7 @@ async def control_run(
     elif action == "cancel":
         result = engine.cancel(run_id)
     elif action == "retry":
-        run = db.get_run(run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail="Run not found")
-        # Delegate to retry behavior
-        failed_step = db.get_last_failed_step_id(run_id)
-        if failed_step:
-            asyncio.create_task(
-                engine.continue_run(
-                    run_id,
-                    after_step_id=failed_step,
-                    last_outputs=None,
-                    retry_resume=True,
-                )
-            )
-        else:
-            engine.submit(run_id, RunMode.ASYNC)
+        result = engine.retry(run_id)
     else:
         raise HTTPException(status_code=400, detail="Unsupported action")
     return {"ok": True, "result": result}
@@ -4225,20 +4210,8 @@ async def retry_run(
     if str(run.user_id) != str(current_user.id) and not is_admin:
         raise HTTPException(status_code=404, detail="Run not found")
     engine = WorkflowEngine(db)
-    # Resume from last failed step if present
-    failed_step = db.get_last_failed_step_id(run_id)
-    if failed_step:
-        asyncio.create_task(
-            engine.continue_run(
-                run_id,
-                after_step_id=failed_step,
-                last_outputs=None,
-                retry_resume=True,
-            )
-        )
-    else:
-        engine.submit(run_id, RunMode.ASYNC)
-    return {"ok": True}
+    result = engine.retry(run_id)
+    return {"ok": True, "result": result}
 
 
 @router.get(

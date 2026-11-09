@@ -454,7 +454,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     : t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
                 </div>
                 <span
-                  className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle"
+                  className="ml-2 text-xs uppercase tracking-[0.16em] text-text-muted"
                   data-testid="notes-header-count"
                 >
                   {headerCountLabel}

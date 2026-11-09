@@ -194,6 +194,57 @@ describe("folder store diff-sync (WP-30)", () => {
     expect(dbMock.db.folders.rows.size).toBe(3)
   })
 
+  it.each(["folders", "keywords"] as const)(
+    "persists %s updates when the version advances at the same timestamp",
+    async (table) => {
+      const original = table === "folders"
+        ? folder(1, "2026-01-02T00:00:00Z")
+        : keyword(1, "2026-01-02T00:00:00Z")
+      const updated = {
+        ...original,
+        version: 2,
+        ...(table === "folders" ? { name: "renamed folder" } : { keyword: "renamed keyword" })
+      }
+      dbMock.db[table].rows.set("id:1", original)
+      mockFetches({
+        folders: [],
+        keywords: [],
+        folderKeywordLinks: [],
+        conversationKeywordLinks: [],
+        [table]: [updated]
+      })
+
+      await useFolderStore.getState().refreshFromServer()
+
+      expect([...dbMock.db[table].rows.values()]).toEqual([updated])
+    }
+  )
+
+  it.each(["local", "remote", "both"] as const)(
+    "refreshes cached rows with a missing %s version",
+    async (missing) => {
+      const original = {
+        ...folder(1, "2026-01-02T00:00:00Z"),
+        version: missing === "remote" ? 1 : undefined
+      }
+      const remote = {
+        ...folder(1, "2026-01-02T00:00:00Z", "fresh folder"),
+        version: missing === "local" ? 1 : undefined
+      }
+      dbMock.db.folders.rows.set("id:1", original)
+      mockFetches({
+        folders: [remote],
+        keywords: [],
+        folderKeywordLinks: [],
+        conversationKeywordLinks: []
+      })
+
+      await useFolderStore.getState().refreshFromServer()
+
+      expect([...dbMock.db.folders.rows.values()]).toEqual([remote])
+    }
+  )
+
   it("falls back to clear-and-rewrite only for tables with vanished rows", async () => {
     seedLocal({
       folders: [folder(1, "2026-01-02T00:00:00Z"), folder(2, "2026-01-02T00:00:00Z")],

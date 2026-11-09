@@ -350,7 +350,7 @@ describe("Quick Notes save ownership across requests and acknowledgment", () => 
         body: {
           title: "Newer title",
           content: "Newer body",
-          keywords: ["newer", "workspace:a"]
+          keywords: ["newer", "workspace:a", "workspace:workspace-a"]
         }
       })
       await waitFor(() =>
@@ -643,12 +643,134 @@ it.each(["unchanged", "body", "new-history", "failed", "stale"])(
         "later citation"
       )
     else expect(current.pendingKnowledgeProvenance).toBeUndefined()
+    if (change === "unchanged") expect(current.isDirty).toBe(false)
     if (change === "body") {
       expect(current.content).toBe("later human edit")
       expect(current.isDirty).toBe(true)
     }
   }
 )
+it("marks an unchanged real cited capture saved after its canonical acknowledgement", async () => {
+  useWorkspaceStore.setState({
+    currentNote: { title: "", content: "", keywords: [], isDirty: false }
+  })
+  act(() => {
+    useWorkspaceStore.getState().captureToCurrentNote({
+      title: "Captured cited answer",
+      content:
+        "Example Domain is for documentation examples without permission [0].",
+      provenance: {
+        origin: "knowledge_qa",
+        sources: [
+          {
+            originalId: 5,
+            mediaId: 5,
+            title: "Example Domain",
+            excerpt:
+              "This domain is for use in documentation examples without needing permission.",
+            type: "document",
+            sourceType: "document",
+            url: "https://example.com/"
+          }
+        ]
+      }
+    })
+  })
+  mocks.request.mockImplementation(async (request: BgRequestInit) =>
+    request.path.includes("/search/")
+      ? []
+      : {
+          ...request.body,
+          id: request.body.id,
+          version: 1,
+          knowledge_provenance_state: "active",
+          knowledge_provenance_version: 1,
+          knowledge_provenance: request.body.knowledge_provenance
+        }
+  )
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  expect(writes()).toHaveLength(1)
+  expect(writes()[0][0].body.keywords).toContain("workspace:workspace-a")
+  expect(useWorkspaceStore.getState().currentNote.isDirty).toBe(false)
+  expect(screen.getByTestId("quick-notes-saved-indicator")).toBeVisible()
+  const currentId = String(useWorkspaceStore.getState().currentNote.id)
+  const queue = await readSurfaceOfflineDraftQueue(
+    createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId)
+  )
+  const retained = Object.values(queue).filter(
+    (entry) => entry.noteId === currentId
+  )
+  expect(retained).toHaveLength(1)
+  expect(retained[0]).toMatchObject({
+    noteId: currentId,
+    baseVersion: 1,
+    metadata: { quickNotesDirty: false }
+  })
+  expect(retained[0].pendingWrite).toBeUndefined()
+})
+
+it("marks a cited replacement saved after refreshing its missing Note version", async () => {
+  const replacement = {
+    origin: "knowledge_qa" as const,
+    question: "captured",
+    sources: []
+  }
+  useWorkspaceStore.setState({
+    currentNote: {
+      ...draft(),
+      knowledge_provenance_state: "active",
+      knowledge_provenance_version: 2,
+      knowledge_provenance: { ...replacement, question: "old" },
+      pendingKnowledgeProvenance: replacement
+    }
+  })
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    if (request.method === "GET")
+      return {
+        ...draft(),
+        version: 40,
+        knowledge_provenance_state: "active",
+        knowledge_provenance_version: 3,
+        knowledge_provenance: { ...replacement, question: "remote" }
+      }
+    return {
+      ...request.body,
+      id: noteId,
+      version: 41,
+      knowledge_provenance_state: "active",
+      knowledge_provenance_version: 4,
+      knowledge_provenance: request.body.knowledge_provenance
+    }
+  })
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole("button", { name: "Update" }))
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled())
+  await waitFor(() =>
+    expect(document.querySelector("button.ant-btn-loading")).toBeNull()
+  )
+  expect(writes()).toHaveLength(1)
+  expect(writes()[0][0].body.expected_provenance_version).toBe(3)
+  expect(writes()[0][0].headers["expected-version"]).toBe("40")
+  expect(useWorkspaceStore.getState().currentNote.isDirty).toBe(false)
+  expect(screen.getByTestId("quick-notes-saved-indicator")).toBeVisible()
+  const queue = await readSurfaceOfflineDraftQueue(
+    createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId)
+  )
+  const retained = Object.values(queue).filter(
+    (entry) => entry.noteId === noteId
+  )
+  expect(retained).toHaveLength(1)
+  expect(retained[0]).toMatchObject({
+    noteId,
+    baseVersion: 41,
+    metadata: { quickNotesDirty: false, knowledge_provenance_version: 4 }
+  })
+  expect(retained[0].pendingWrite).toBeUndefined()
+})
+
 it("version read discovering removed provenance cannot resend a pending replacement", async () => {
   const history = { origin: "reviewed_sources" as const, sources: [] }
   useWorkspaceStore.setState({
@@ -897,6 +1019,47 @@ it.each(["base-path", "org", "auth-source"])(
   },
 );
 
+it("flushes the real coalesced recovery pointer before a fresh Note is dispatched", async () => {
+  useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } })
+  await act(async () => {
+    await flushWorkspacePersistence()
+  })
+  mocks.request.mockImplementation(async (request: BgRequestInit) => {
+    if (request.path.includes("/search/")) return []
+    if (request.method === "POST") {
+      const persistence = useWorkspaceStore.persist.getOptions()
+      const stored = await persistence.storage!.getItem(persistence.name)
+      expect(
+        stored?.state.workspaceSnapshots?.["workspace-a"]?.currentNote
+          .pendingNoteWriteKey
+      ).toBe(useWorkspaceStore.getState().currentNote.pendingNoteWriteKey)
+      expect(
+        useWorkspaceStore.getState().currentNote.pendingNoteWriteKey
+      ).toMatch(/^surface:quick-notes:/)
+    }
+    return { ...request.body, id: request.body.id, version: 1 }
+  })
+  vi.useFakeTimers()
+  // Chrome can defer idle delivery; keep the real coalescer buffered until its explicit drain.
+  vi.stubGlobal("requestIdleCallback", () => 0)
+  vi.stubGlobal("cancelIdleCallback", vi.fn())
+  const view = render(<QuickNotesSection />)
+  try {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    })
+    expect(writes()).toHaveLength(1)
+    expect(mocks.error).not.toHaveBeenCalled()
+    expect(writes()[0][0].body.content).toBe("Original draft body")
+    expect(writes()[0][0].servicePromptConfig.expectedUserId).toBe("alice")
+  } finally {
+    view.unmount()
+    await flushWorkspacePersistence()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  }
+})
+
 it("refuses dispatch if the operation record succeeds but the real Workspace pointer persistence fails", async () => {
   useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } });
   // The coalescing persist writer defers the setup write above; drain it so
@@ -1115,19 +1278,15 @@ it("allows a genuinely unbound new Quick Note in a migrated server Workspace", a
   );
   render(<QuickNotesSection />);
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() =>
-    expect(
-      mocks.error.mock.calls.length + mocks.success.mock.calls.length,
-    ).toBeGreaterThan(0),
-  );
+  await waitFor(() => expect(mocks.success).toHaveBeenCalled());
   expect(writes()).toHaveLength(1);
-  expect(mocks.error).toHaveBeenCalled();
+  expect(mocks.error).not.toHaveBeenCalled();
   expect(
     Object.values(
       await readSurfaceOfflineDraftQueue(
         createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId),
       ),
-    )[0].pendingWrite?.body.id,
+    )[0].noteId,
   ).toBe(writes()[0][0].body.id);
 });
 
@@ -1454,11 +1613,11 @@ it.each(["422", "409", "policy", "uncertain"])(
       if (boundary === "422") {
         deliberate = true;
         fireEvent.click(screen.getByRole("button", { name: "Save" }));
-        await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(3));
-        expect(
-          Object.values(await readSurfaceOfflineDraftQueue(owner))[0].pendingWrite
-            ?.body.id,
-        ).toBe(writes()[2][0].body.id);
+        await waitFor(() => expect(mocks.success).toHaveBeenCalled());
+        expect(mocks.error).toHaveBeenCalledTimes(2);
+        const accepted = Object.values(await readSurfaceOfflineDraftQueue(owner))[0];
+        expect(accepted.noteId).toBe(writes()[2][0].body.id);
+        expect(accepted.pendingWrite).toBeUndefined();
         expect(writes()).toHaveLength(3);
         expect(writes()[2][0].body.content).toBe(
           "An unrelated deliberate new draft",
@@ -1714,6 +1873,14 @@ it("keeps a migrated acknowledged new create recoverable until explicit previous
     serverNotes.set(id, request.body);
     return { ...request.body, id, version: 1 };
   });
+  let failCheckpoint = true;
+  const set = PlasmoStorage.prototype.set;
+  vi.spyOn(PlasmoStorage.prototype, "set").mockImplementation(async function (key, value) {
+    const retained = value as { value?: { metadata?: Record<string, unknown> } };
+    if (failCheckpoint && retained?.value?.metadata?.quickNotesAcceptedKey)
+      throw new Error("Accepted checkpoint unavailable");
+    return set.call(this, key, value);
+  });
   render(<CollapsibleQuickNotes />);
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(mocks.error).toHaveBeenCalled());
@@ -1736,6 +1903,7 @@ it("keeps a migrated acknowledged new create recoverable until explicit previous
   fireEvent.click(screen.getByRole("button", { name: "Reopen Quick Notes" }));
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(mocks.open).toHaveBeenCalled());
+  failCheckpoint = false;
   const recovery = render(mocks.open.mock.calls.at(-1)![0].content);
   fireEvent.click(screen.getByRole("button", { name: "Retry previous save" }));
   await waitFor(async () => {
@@ -1781,6 +1949,14 @@ it("keeps the durable create operation through migrated in-memory UUID edits and
     const id = String(request.body.id);
     serverNotes.set(id, request.body);
     return { ...request.body, id, version: 1 };
+  });
+  let failCheckpoint = true;
+  const set = PlasmoStorage.prototype.set;
+  vi.spyOn(PlasmoStorage.prototype, "set").mockImplementation(async function (key, value) {
+    const retained = value as { value?: { metadata?: Record<string, unknown> } };
+    if (failCheckpoint && retained?.value?.metadata?.quickNotesAcceptedKey)
+      throw new Error("Accepted checkpoint unavailable");
+    return set.call(this, key, value);
   });
   render(<CollapsibleQuickNotes />);
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -3208,3 +3384,165 @@ describe("Quick Notes native provenance typing", () => {
     expect(useWorkspaceStore.getState().currentNote.knowledge_provenance).toEqual(history)
   })
 })
+
+it.each(["single-user", "multi-user"] as const)(
+  "confirms a cited create in a migrated %s Workspace without reviving legacy snapshots",
+  async (mode) => {
+    mocks.authMode = mode;
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+        deletedAt: "2026-10-08T00:00:00Z",
+      }),
+    );
+    useWorkspaceStore.setState({
+      currentNote: { title: "", content: "", keywords: [], isDirty: false },
+    });
+    act(() => {
+      useWorkspaceStore.getState().captureToCurrentNote({
+        title: "Migrated cited capture",
+        content: "The telescope is Selene [0].",
+        provenance: {
+          origin: "knowledge_qa",
+          sources: [
+            {
+              originalId: 1,
+              mediaId: 1,
+              title: "Rowan Observatory",
+              excerpt: "The telescope is named Selene.",
+              type: "document",
+              sourceType: "document",
+            },
+          ],
+        },
+      });
+    });
+    mocks.request.mockImplementation(async (request: BgRequestInit) =>
+      request.path.includes("/search/")
+        ? []
+        : {
+            ...request.body,
+            id: request.body.id,
+            version: 1,
+            knowledge_provenance_state: "active",
+            knowledge_provenance_version: 1,
+            knowledge_provenance: request.body.knowledge_provenance,
+          },
+    );
+    render(<QuickNotesSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalled());
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(screen.getByTestId("quick-notes-saved-indicator")).toBeVisible();
+    const current = useWorkspaceStore.getState().currentNote;
+    expect(current.isDirty).toBe(false);
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][0].body.keywords).toContain("workspace:workspace-a");
+    const queue = Object.values(
+      await readSurfaceOfflineDraftQueue(
+        createNotesGraphAuthorityScope(mocks.serverUrl, mocks.userId),
+      ),
+    );
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({
+      noteId: current.id,
+      baseVersion: 1,
+      metadata: { quickNotesDirty: false },
+    });
+    expect(queue[0].pendingWrite).toBeUndefined();
+    await flushWorkspacePersistence();
+    const persisted = await useWorkspaceStore.persist
+      .getOptions()
+      .storage!.getItem(useWorkspaceStore.persist.getOptions().name);
+    expect(
+      persisted?.state?.workspaceSnapshots?.["workspace-a"],
+    ).toBeUndefined();
+  },
+);
+
+it.each([
+  "checkpoint",
+  "checkpoint-missing",
+  "later-edits",
+  "account",
+  "workspace",
+] as const)(
+  "retains migrated create safety through %s at acknowledgement",
+  async (boundary) => {
+    localStorage.setItem(
+      "tldw:research-workspace:migration:tombstone:workspace-a",
+      JSON.stringify({
+        legacyWorkspaceId: "workspace-a",
+        serverWorkspaceId: "workspace-a",
+        migrationId: "migration-a",
+        contentRetained: false,
+        deletedAt: "2026-10-08T00:00:00Z",
+      }),
+    );
+    const { gate } = await beginSave("POST");
+    let restoreCheckpointRead: (() => void) | undefined;
+    if (boundary === "checkpoint-missing") {
+      const get = PlasmoStorage.prototype.get;
+      const reading = vi
+        .spyOn(PlasmoStorage.prototype, "get")
+        .mockImplementation(async function (key: string) {
+          if (key.startsWith("tldw:notesOfflineDraftQueue:v1:"))
+            return undefined;
+          return get.call(this, key);
+        });
+      restoreCheckpointRead = () => reading.mockRestore();
+    } else if (boundary === "checkpoint") {
+      const set = PlasmoStorage.prototype.set;
+      vi.spyOn(PlasmoStorage.prototype, "set").mockImplementation(
+        async function (key, value) {
+          const retained = value as {
+            value?: { metadata?: Record<string, unknown> };
+          };
+          if (retained?.value?.metadata?.quickNotesAcceptedKey)
+            throw new Error("Accepted checkpoint unavailable");
+          return set.call(this, key, value);
+        },
+      );
+    } else {
+      act(() =>
+        changeContext(boundary === "later-edits" ? "newer-edits" : boundary),
+      );
+    }
+    const beforeAck = useWorkspaceStore.getState().currentNote;
+    await finishSave(gate);
+    restoreCheckpointRead?.();
+    const queue = Object.values(
+      await readSurfaceOfflineDraftQueue(
+        createNotesGraphAuthorityScope("https://research-a.example", "alice"),
+      ),
+    );
+    expect(writes()).toHaveLength(1);
+    expect(queue).toHaveLength(1);
+    if (boundary === "later-edits") {
+      expect(mocks.success).toHaveBeenCalled();
+      expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+        content: "Newer human body",
+        isDirty: true,
+      });
+      expect(screen.queryByTestId("quick-notes-saved-indicator")).toBeNull();
+      expect(queue[0]).toMatchObject({
+        noteId,
+        baseVersion: 4,
+        content: "Newer human body",
+        metadata: { quickNotesDirty: true },
+      });
+      expect(queue[0].pendingWrite).toBeUndefined();
+    } else {
+      expect(mocks.success).not.toHaveBeenCalled();
+      expect(queue[0].pendingWrite?.body.id).toBe(noteId);
+      expect(screen.queryByTestId("quick-notes-saved-indicator")).toBeNull();
+      if (boundary.startsWith("checkpoint"))
+        expect(mocks.error).toHaveBeenCalled();
+      else expect(useWorkspaceStore.getState().currentNote).toBe(beforeAck);
+    }
+  },
+);

@@ -2747,7 +2747,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const hydrationJobResult = hydrationJob?.result
   const hydrationJobSummary =
     hydrationJobResult && typeof hydrationJobResult === "object"
-      ? (hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary
+      ? ((hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary ??
+          (hydrationJobResult as OpenWebUIHydrationSummary))
       : undefined
 
   const importTab = (
@@ -3627,24 +3628,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                         )
                       },
                       {
-                        value: "overwrite",
-                        label: t(
-                          "settings:chatbooksPlayground.conflictOverwrite",
-                          "Overwrite"
-                        )
-                      },
-                      {
                         value: "rename",
                         label: t(
                           "settings:chatbooksPlayground.conflictRename",
                           "Rename"
-                        )
-                      },
-                      {
-                        value: "merge",
-                        label: t(
-                          "settings:chatbooksPlayground.conflictMerge",
-                          "Merge"
                         )
                       }
                     ]}

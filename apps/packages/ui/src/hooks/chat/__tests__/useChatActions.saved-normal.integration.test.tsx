@@ -1,3 +1,5 @@
+import { useResearchActorScene } from "@/components/Option/ResearchWorkspace/ChatPane/useResearchActorScene"
+import { useWorkspaceStore } from "@/store/workspace"
 import type { MessageHistory } from "@/db/dexie/types"
 import React from "react"
 import i18n from "i18next"
@@ -45,6 +47,7 @@ const mocks = vi.hoisted(() => {
   const nextServerReceiptId = () => `m${String(++serverIdCounter).padStart(12, "0")}`
   const nextClientMessageId = () => `z${String(++clientIdCounter).padStart(12, "0")}`
   return {
+  researchAccount: null as null | { requestScope: import("@/services/tldw/domains/service-prompts").ServicePromptRequestScope; isCurrent: () => boolean },
   capability: true as boolean | "error",
   bgRequest: vi.fn(),
   removeMessageById: vi.fn(),
@@ -77,7 +80,7 @@ const mocks = vi.hoisted(() => {
   assistantLoading: false,
   serverRows: new Map<
     string,
-    Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown>; images?: string[]; version?: number }>
+    Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown>; images?: string[]; version?: number; parent_message_id?: string | null }>
   >(),
   watches: new Set<{ tldwConfig: (change: { newValue: unknown }) => void }>(),
   config: {
@@ -88,6 +91,13 @@ const mocks = vi.hoisted(() => {
   nextServerReceiptId,
   nextClientMessageId
 }})
+
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({
+    requestScope: mocks.researchAccount?.requestScope ?? null,
+    isCurrent: mocks.researchAccount?.isCurrent ?? (() => false)
+  })
+}))
 
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => mocks.bgRequest(...args), bgStream: vi.fn(), bgUpload: vi.fn() }))
 
@@ -521,7 +531,8 @@ const replaceAuthority = (apiKey: string) => {
   mocks.config = { ...mocks.config, apiKey }
   window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
   for (const watch of mocks.watches)
-    watch.tldwConfig({ newValue: mocks.config })
+    if (typeof watch.tldwConfig === "function")
+      watch.tldwConfig({ newValue: mocks.config })
 }
 
 const seedLocalDraft = () =>
@@ -982,6 +993,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.getModels.mockResolvedValue([])
     mocks.ragSearch.mockReset()
     mocks.getModel.mockResolvedValue({ id: "test-model", name: "Test model", capabilities: [] })
+    mocks.researchAccount = null
     mocks.ocr.mockResolvedValue("Explicit OCR text")
     mocks.selectionRevision = 0
     mocks.serverRows.clear()
@@ -3094,18 +3106,26 @@ describe("saved normal Chat pipeline with autosave", () => {
     // No H1 provider is installed: these are legacy save_to_db/stream ACK cases.
     // Only SDK create/link and scene-read I/O are declared doubles. The real
     // mirror hook publishes the local alias into the actual option store.
-    const mountSdkScene = async (scope: ChatScope = { type: "global" }) => {
+    const mountSdkScene = async (scope: ChatScope = { type: "global" }, research = false) => {
       const state = useStoreMessageOption.getState()
       const address = state.chatDraftAddress!
-      if (address.kind !== "fresh") throw new Error("Expected a fresh SDK source")
-      state.setChatDraftAddress({ ...address, scope })
+      if (!research) {
+        if (address?.kind !== "fresh") throw new Error("Expected a fresh SDK source")
+        state.setChatDraftAddress({ ...address, scope })
+      }
       const originalAddress = useStoreMessageOption.getState().chatDraftAddress!
       const originalConfig = mocks.config
       const verifiedScope = await resolveServicePromptScope()
       const requestScope = { config: verifiedScope.config, userId: verifiedScope.userId }
       const account = { requestScope, isCurrent: () => mocks.config === originalConfig }
+      if (research) {
+        if (scope.type !== "workspace") throw new Error("Research requires a workspace")
+        mocks.researchAccount = account
+        useWorkspaceStore.setState({ workspaceId: scope.workspaceId, workspaceChatReferenceId: "research-reference" })
+        mocks.getChat.mockImplementation(async id => ({ id, scope_type: "workspace", workspace_id: scope.workspaceId }))
+      }
       const source = captureChatDraftSource(account.isCurrent)
-      const target = captureActorSettingsTarget({
+      const target = research ? null : captureActorSettingsTarget({
         address: originalAddress, requestScope, accountIsCurrent: account.isCurrent,
         isCurrent: source.isCurrent
       })!
@@ -3116,7 +3136,7 @@ describe("saved normal Chat pipeline with autosave", () => {
         target: readTarget!, settings: structuredClone(settings), originalRecord: record,
         origin: "scene", profileUnavailable: false
       }))
-      const scene = await captureActorSceneSendForTarget(target, account, source.isCurrent, account.isCurrent)!.read()
+      const scene = research ? undefined : await captureActorSceneSendForTarget(target, account, source.isCurrent, account.isCurrent)!.read()
       const captureSdkScene = async () => {
         const currentSource = captureChatDraftSource(() => account.isCurrent() &&
           useStoreMessageOption.getState().chatDraftAddress === originalAddress)
@@ -3129,6 +3149,7 @@ describe("saved normal Chat pipeline with autosave", () => {
           currentSource.isCurrent, account.isCurrent)!.read()
       }
       const hook = renderHook(() => {
+        const { capturePrivateScene } = useResearchActorScene(scope.type === "workspace" ? scope.workspaceId : null, "research-reference")
         const current = useStoreMessageOption()
         const [controller, updateController] = React.useState<AbortController | null>(null)
         const controllerRef = React.useRef<AbortController | null>(null)
@@ -3143,6 +3164,7 @@ describe("saved normal Chat pipeline with autosave", () => {
         })
         const actions = useRawChatActions({
           ...createHookOptions(), ...current, scope,
+          capturePrivateScene: research ? capturePrivateScene : undefined,
           abortController: controller, setAbortController: setController,
           getAbortController: getController,
           ensureServerChatHistoryId: mirror.ensureServerChatHistoryId
@@ -3150,10 +3172,557 @@ describe("saved normal Chat pipeline with autosave", () => {
         return { actions, state: current }
       })
       const send = () => hook.result.current.actions.onSubmit({
-        message: "SDK original question", image: "", actorSceneSend: scene
+        message: "SDK original question", image: "", ...(research ? {} : { actorSceneSend: scene })
       })
       return { ...hook, send, captureSdkScene, scene, target, record, originalAddress, requestScope }
     }
+
+    it.each(["missing", "foreign"] as const)("S04 standalone Research retains its real private Scene across first Send, next turn and cold reload with %s draft state", async cold => {
+      const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+      mocks.realFormatter = true
+      mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Selene is the telescope.", metadata: { media_id: 42, title: "Rowan", type: "text" } }] })
+      mocks.streamMessage.mockImplementation(async function* () { yield "The telescope is Selene." })
+      const scope = { type: "workspace", workspaceId: "sdk-original-workspace" } as const
+      act(() => useStoreMessageOption.setState({ chatDraftAddress: null }))
+      let view = await mountSdkScene(scope, true)
+      expect(mocks.getActorScene).not.toHaveBeenCalled()
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      try {
+        let outcome: unknown
+        await act(async () => { outcome = await view.send() })
+        expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" })
+        const originalKey = mocks.getActorScene.mock.calls.at(-1)![0].target!.key
+        await act(async () => { expect(await view.send()).toMatchObject({ status: "submitted" }) })
+        expect(mocks.getActorScene.mock.calls.at(-1)![0].target!.key).toBe(originalKey)
+        view.unmount()
+        act(() => useStoreMessageOption.setState({ chatDraftAddress: cold === "missing" ? null : { kind: "native", id: "foreign-chat", ownerKey: "foreign-owner", scope: { type: "global" } } }))
+        view = await mountSdkScene(scope, true)
+        expect(view.result.current.state.serverChatId).toBe("chat-1")
+        await act(async () => { expect(await view.send()).toMatchObject({ status: "submitted" }) })
+        expect(mocks.getActorScene.mock.calls.at(-1)![0].target!.key).toBe(originalKey)
+        expect(mocks.createChat).toHaveBeenCalledOnce()
+        expect(mocks.ragSearch).toHaveBeenCalledTimes(3)
+        expect(mocks.streamMessage).toHaveBeenCalledTimes(3)
+        expect(mocks.serverRows.get("chat-1")).toHaveLength(6)
+      } finally { view.unmount() }
+    })
+
+    it.each(["New reference", "workspace", "account", "selection", "unmount"] as const)("S04 retires a held Research scene before inference on %s", async boundary => {
+      const view = await mountSdkScene({ type: "workspace", workspaceId: "sdk-original-workspace" }, true)
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      const held = deferred<void>()
+      mocks.getActorScene.mockClear()
+      mocks.getActorScene.mockImplementationOnce(async ({ target }) => {
+        await held.promise
+        return { target: target!, settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }
+      })
+      let pending!: ReturnType<typeof view.send>
+      try {
+        act(() => { pending = view.send() })
+        await waitFor(() => expect(mocks.getActorScene).toHaveBeenCalledOnce())
+        act(() => {
+          if (boundary === "New reference") useWorkspaceStore.setState({ workspaceChatReferenceId: "replacement-reference" })
+          if (boundary === "workspace") useWorkspaceStore.setState({ workspaceId: "replacement-workspace" })
+          if (boundary === "selection") useWorkspaceStore.setState({ selectedSourceIds: ["replacement-source"] })
+          if (boundary === "account") replaceAuthority("synthetic-b")
+          if (boundary === "unmount") view.unmount()
+        })
+        await act(async () => { held.resolve(); expect(await pending).not.toMatchObject({ status: "submitted" }) })
+        expect(mocks.ragSearch).not.toHaveBeenCalled()
+        expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+        expect(mocks.createChat).not.toHaveBeenCalled()
+      } finally { held.resolve(); await pending; view.unmount() }
+    })
+
+    it.each([false, true])(
+      'S04 retries a failed workspace query with raw question and retained citations; prior user ACK %s',
+      async (alreadyAcknowledged) => {
+        vi.spyOn(i18n, 't').mockImplementation((...args) => {
+          const [key, fallback] = args;
+          return typeof fallback === 'string' ? fallback : String(key);
+        });
+        const actualModels = await vi.importActual<typeof import('@/models')>('@/models');
+        mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+        mocks.realFormatter = true;
+        mocks.realPersistence = true;
+        mocks.ragSearch.mockResolvedValue({
+          documents: [
+            {
+              content: 'Visitors enter through the east gate.',
+              metadata: { media_id: 42, title: 'Rowan report', type: 'text' },
+            },
+          ],
+        });
+        let attempt = 0;
+        mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+          attempt += 1;
+          if (attempt === 2) throw new Error('Provider temporarily unavailable');
+          const answer = attempt === 1 ? 'Prior cited answer.' : 'Visitors use the east gate.';
+          if (options.saveToDb) {
+            const userId = `native-user-${attempt}`,
+              answerId = `native-answer-${attempt}`;
+            mocks.serverRows
+              .get(options.conversationId)!
+              .push(
+                { id: userId, role: 'user', content: String(messages.at(-1)!.content) },
+                { id: answerId, role: 'assistant', content: answer }
+              );
+            onChunk({
+              tldw_conversation_id: options.conversationId,
+              tldw_user_message_id: userId,
+              tldw_message_id: answerId,
+            });
+          }
+          yield answer;
+        });
+        const originalNotes = useWorkspaceStore.getState().notes;
+        useWorkspaceStore.setState({ notes: 'Retained S04 report.' });
+        const view = await mountSdkScene(
+          { type: 'workspace', workspaceId: 'sdk-original-workspace' },
+          true
+        );
+        act(() =>
+          useStoreMessageOption.setState({
+            ragMediaIds: [42],
+            fileRetrievalEnabled: true,
+            chatMode: 'rag',
+          })
+        );
+        try {
+          await act(async () => {
+            await view.send();
+          });
+          const priorRows = structuredClone(mocks.serverRows.get('chat-1')!);
+          const priorMessage = structuredClone(view.result.current.state.messages.at(-1));
+          await act(async () => {
+            await view.result.current.actions.onSubmit({ message: 'Which entrance?', image: '' });
+          });
+          const question = view.result.current.state.messages.filter((row) => !row.isBot).at(-1)!;
+          expect(view.result.current.state.messages.at(-1)?.message).toContain('__tldw_error__:');
+          expect(
+            decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)
+          ).not.toBeNull();
+          if (alreadyAcknowledged) {
+            // A reconciled failed turn may already own its canonical user row.
+            const ack = await mocks.addChatMessage('chat-1', {
+              role: 'user',
+              content: question.message,
+            });
+            act(() =>
+              useStoreMessageOption
+                .getState()
+                .setMessages((rows) =>
+                  rows.map((row) =>
+                    row.id === question.id ? { ...row, serverMessageId: ack.id } : row
+                  )
+                )
+            );
+            const local = mocks.rows.find((row) => row.id === question.id)!;
+            local.serverMessageId = ack.id;
+          }
+          const writesBeforeRetry = mocks.addChatMessage.mock.calls.length;
+          await act(async () => {
+            await view.result.current.actions.regenerateLastMessage();
+          });
+          expect(
+            mocks.addChatMessage.mock.calls.slice(writesBeforeRetry).map((call) => call[1].role)
+          ).toEqual(alreadyAcknowledged ? ['assistant'] : ['user', 'assistant']);
+          expect(mocks.streamMessage).toHaveBeenCalledTimes(3);
+          expect(mocks.ragSearch).toHaveBeenCalledTimes(3);
+          expect(mocks.pageAssistModel.mock.calls.at(-1)![0]).toMatchObject({
+            saveToDb: false,
+            retryFailedTurn: true,
+          });
+          expect(mocks.streamMessage.mock.calls.at(-1)![1]).toMatchObject({ saveToDb: false });
+          const saved = mocks.serverRows.get('chat-1')!;
+          expect(saved.slice(0, priorRows.length)).toEqual(priorRows);
+          expect(saved.slice(priorRows.length).map((row) => [row.role, row.content])).toEqual([
+            ['user', 'Which entrance?'],
+            ['assistant', 'Visitors use the east gate.'],
+          ]);
+          expect(saved.at(-1)?.metadata_extra).toMatchObject({
+            workspace_rag_sources_v1: {
+              origin: 'knowledge_qa',
+              sources: [
+                {
+                  mediaId: 42,
+                  title: 'Rowan report',
+                  excerpt: 'Visitors enter through the east gate.',
+                },
+              ],
+            },
+          });
+          expect(
+            view.result.current.state.messages.find((row) => row.id === question.id)?.serverMessageId
+          ).toBe(saved[priorRows.length].id);
+          expect(view.result.current.state.messages.find((row) => row.id === priorMessage?.id)).toEqual(
+            priorMessage
+          );
+          expect(useWorkspaceStore.getState().notes).toBe('Retained S04 report.');
+        } finally {
+          view.unmount();
+          useWorkspaceStore.setState({ notes: originalNotes });
+        }
+      }
+    );
+
+    it.each(['account', 'workspace'] as const)(
+      'S04 retires a held manual user acknowledgement after %s replacement',
+      async (boundary) => {
+        const actualModels = await vi.importActual<typeof import('@/models')>('@/models');
+        mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+        mocks.realFormatter = true;
+        mocks.ragSearch.mockResolvedValue({
+          documents: [
+            {
+              content: 'Selene is the telescope.',
+              metadata: { media_id: 42, title: 'Rowan', type: 'text' },
+            },
+          ],
+        });
+        mocks.streamMessage.mockImplementation(async function* () {
+          yield 'The telescope is Selene.';
+        });
+        const held = deferred<void>();
+        const add = mocks.addChatMessage.getMockImplementation()!;
+        mocks.addChatMessage.mockImplementationOnce(async (...args) => {
+          const ack = await add(...args);
+          await held.promise;
+          return ack;
+        });
+        const view = await mountSdkScene(
+          { type: 'workspace', workspaceId: 'sdk-original-workspace' },
+          true
+        );
+        act(() =>
+          useStoreMessageOption.setState({
+            ragMediaIds: [42],
+            fileRetrievalEnabled: true,
+            chatMode: 'rag',
+          })
+        );
+        let pending: ReturnType<typeof view.send> | undefined;
+        try {
+          act(() => {
+            pending = view.send();
+          });
+          await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalledOnce());
+          act(() => {
+            if (boundary === 'account') replaceAuthority('synthetic-b');
+            else {
+              useStoreMessageOption.getState().startNewChatDraft(false);
+              useStoreMessageOption.setState({
+                messages: [
+                  {
+                    id: 'replacement-user',
+                    isBot: false,
+                    name: 'You',
+                    message: 'Keep replacement',
+                    sources: [],
+                  },
+                ],
+              });
+            }
+          });
+          await act(async () => {
+            held.resolve();
+            await pending;
+          });
+          expect(mocks.addChatMessage).toHaveBeenCalledOnce();
+          expect(mocks.serverRows.get('chat-1')!.map((row) => row.role)).toEqual(['user']);
+          expect(view.result.current.state.messages).toEqual(
+            boundary === 'account'
+              ? []
+              : [
+                  {
+                    id: 'replacement-user',
+                    isBot: false,
+                    name: 'You',
+                    message: 'Keep replacement',
+                    sources: [],
+                  },
+                ]
+          );
+        } finally {
+          held.resolve();
+          await pending;
+          view.unmount();
+        }
+      }
+    );
+
+    it('S04 leaves healthy workspace regeneration on its existing server persistence policy', async () => {
+      const actualModels = await vi.importActual<typeof import('@/models')>('@/models');
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+      mocks.realFormatter = true;
+      mocks.ragSearch.mockResolvedValue({
+        documents: [
+          {
+            content: 'Selene is the telescope.',
+            metadata: { media_id: 42, title: 'Rowan', type: 'text' },
+          },
+        ],
+      });
+      mocks.streamMessage.mockImplementation(async function* () {
+        yield 'The telescope is Selene.';
+      });
+      const view = await mountSdkScene(
+        { type: 'workspace', workspaceId: 'sdk-original-workspace' },
+        true
+      );
+      act(() =>
+        useStoreMessageOption.setState({
+          ragMediaIds: [42],
+          fileRetrievalEnabled: true,
+          chatMode: 'rag',
+        })
+      );
+      try {
+        await act(async () => {
+          await view.send();
+        });
+        const saved = structuredClone(mocks.serverRows.get('chat-1')!);
+        await act(async () => {
+          await view.result.current.actions.regenerateLastMessage();
+        });
+        expect(mocks.streamMessage.mock.calls.map((call) => call[1].saveToDb)).toEqual([false, true]);
+        expect(mocks.pageAssistModel.mock.calls.at(-1)![0]).toMatchObject({
+          retryFailedTurn: false,
+          regenerateFromMessageId: saved[1].id,
+        });
+        expect(mocks.addChatMessage).toHaveBeenCalledTimes(2);
+        expect(mocks.serverRows.get('chat-1')).toEqual(saved);
+      } finally {
+        view.unmount();
+      }
+    });
+
+    it.each(["first", "prior-local", "duplicate-ack", "server-alias", "unknown-parent"])("S04 retains cited workspace source references through the actual SDK model and manual server save (%s)", async parentCase => {
+      const actualModels =
+        await vi.importActual<typeof import("@/models")>("@/models");
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+      mocks.realFormatter = true;
+      mocks.ragSearch.mockResolvedValue({
+        documents: [
+          {
+            content: "Selene is the telescope.",
+            metadata: {
+              media_id: 42,
+              title: "Rowan field report",
+              type: "text",
+              secret_unknown: "must-not-persist",
+            },
+          },
+        ],
+      });
+      mocks.streamMessage.mockImplementation(
+        async function* (messages, options, onChunk) {
+          if (options.saveToDb) {
+            mocks.serverRows
+              .get(options.conversationId)!
+              .push(
+                {
+                  id: "native-source-user",
+                  role: "user",
+                  content: String(messages.at(-1)!.content),
+                },
+                {
+                  id: "native-source-answer",
+                  role: "assistant",
+                  content: "The telescope is Selene.",
+                },
+              );
+            onChunk({
+              tldw_conversation_id: options.conversationId,
+              tldw_user_message_id: "native-source-user",
+              tldw_message_id: "native-source-answer",
+            });
+          }
+          yield "The telescope is Selene.";
+        },
+      );
+      const view = await mountSdkScene({
+        type: "workspace",
+        workspaceId: "sdk-original-workspace",
+      }, parentCase !== "first");
+      act(() =>
+        useStoreMessageOption.setState({
+          ragMediaIds: [42],
+          fileRetrievalEnabled: true,
+          chatMode: "rag",
+        }),
+      );
+      try {
+        let result: unknown;
+        await act(async () => {
+          result = await view.send();
+        });
+        expect(result, JSON.stringify(result)).toMatchObject({
+          status: "submitted",
+        });
+        expect(mocks.streamMessage).toHaveBeenCalledOnce();
+        expect(mocks.pageAssistModel.mock.calls[0][0]).toMatchObject({
+          conversationId: "chat-1",
+          saveToDb: false,
+        });
+        expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({
+          saveToDb: false,
+        });
+        expect(mocks.addChatMessage).toHaveBeenCalledTimes(2);
+        const saved = mocks.serverRows.get("chat-1")!;
+        expect(saved.map((row) => [row.role, row.content])).toEqual([
+          ["user", "SDK original question"],
+          ["assistant", "The telescope is Selene."],
+        ]);
+        expect(saved.map(row => row.parent_message_id ?? null)).toEqual([null, saved[0].id]);
+        expect(saved[1].metadata_extra).toMatchObject({
+          workspace_rag_sources_v1: {
+            origin: "knowledge_qa",
+            sources: [
+              {
+                mediaId: 42,
+                title: "Rowan field report",
+                excerpt: "Selene is the telescope.",
+              },
+            ],
+          },
+        });
+        expect(JSON.stringify(saved[1].metadata_extra)).not.toContain(
+          "must-not-persist",
+        );
+        if (parentCase !== "first") {
+          const state = useStoreMessageOption.getState();
+          const prior = state.messages.find(row => row.isBot && row.serverMessageId === saved[1].id)!;
+          expect(prior).toBeDefined();
+          act(() => useStoreMessageOption.setState({
+            ...(["duplicate-ack", "server-alias"].includes(parentCase) ? { messages: [...state.messages, { ...prior,
+              id: parentCase === "server-alias" ? prior.serverMessageId! : "duplicate-local-parent",
+              ...(parentCase === "server-alias" ? { serverMessageId: "different-server-parent" } : {}),
+            }] } : {}),
+            replyTarget: { id: parentCase === "unknown-parent" ? "missing-local-parent" : prior.id!,
+              preview: "The telescope is Selene.", isBot: true },
+          }));
+          await act(async () => { await view.send(); });
+          const rows = mocks.serverRows.get("chat-1")!;
+          if (parentCase === "prior-local") {
+            expect(rows).toHaveLength(4);
+            expect(rows.slice(2).map(row => row.parent_message_id)).toEqual([saved[1].id, rows[2].id]);
+          } else {
+            expect(rows).toHaveLength(2);
+            expect(mocks.addChatMessage).toHaveBeenCalledTimes(2);
+          }
+        }
+      } finally {
+        view.unmount();
+      }
+    });
+
+    it.each(["current", "account retired", "workspace retired"] as const)(
+      "S04 keeps a partial server save truthful when %s",
+      async (boundary) => {
+        const { getServerChatSaveStatus, resetServerChatSaveStatus } =
+          await import("@/store/server-chat-save-status");
+        resetServerChatSaveStatus();
+        const actualModels =
+          await vi.importActual<typeof import("@/models")>("@/models");
+        mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+        mocks.realFormatter = true;
+        mocks.ragSearch.mockResolvedValue({
+          documents: [
+            {
+              content: "Selene is the telescope.",
+              metadata: { media_id: 42, title: "Rowan", type: "text" },
+            },
+          ],
+        });
+        mocks.streamMessage.mockImplementation(async function* () {
+          yield "The telescope is Selene.";
+        });
+        const held = deferred<void>();
+        const client = {
+          invalidateChatMessagesCache: vi.fn(),
+        } as unknown as import("@/services/tldw/TldwApiClient").TldwApiClientCore;
+        mocks.addChatMessage.mockImplementation((id, row, options) =>
+          chatRagMethods.addChatMessage.call(client, id, row, options),
+        );
+        mocks.bgRequest.mockImplementation(async (request) => {
+          if (request.body.role === "assistant") {
+            await held.promise;
+            throw new Error("Assistant save acknowledgement lost");
+          }
+          const row = { ...request.body, id: "confirmed-user", version: 1 };
+          mocks.serverRows.get("chat-1")!.push(row);
+          return row;
+        });
+        const view = await mountSdkScene({
+          type: "workspace",
+          workspaceId: "sdk-original-workspace",
+        });
+        act(() =>
+          useStoreMessageOption.setState({
+            ragMediaIds: [42],
+            fileRetrievalEnabled: true,
+            chatMode: "rag",
+          }),
+        );
+        let pending!: ReturnType<typeof view.send>;
+        try {
+          act(() => {
+            pending = view.send();
+          });
+          await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledTimes(2));
+          expect(getServerChatSaveStatus("chat-1")).toBe("saving");
+          expect(view.result.current.state.messages.find(row => !row.isBot)?.serverMessageId).toBe("confirmed-user")
+          if (boundary === "account retired")
+            act(() => replaceAuthority("synthetic-b"));
+          if (boundary === "workspace retired")
+            act(() => {
+              useStoreMessageOption.getState().startNewChatDraft(false);
+              useStoreMessageOption.setState({
+                messages: [
+                  {
+                    id: "new-draft",
+                    isBot: false,
+                    name: "You",
+                    message: "Keep replacement",
+                    sources: [],
+                  },
+                ],
+              });
+            });
+          await act(async () => {
+            held.resolve();
+            await pending;
+          });
+          expect(getServerChatSaveStatus("chat-1")).toBe("failed");
+          expect(mocks.bgRequest).toHaveBeenCalledTimes(2);
+          expect(mocks.streamMessage).toHaveBeenCalledOnce();
+          expect(mocks.serverRows.get("chat-1")!.map((row) => row.role)).toEqual([
+            "user",
+          ]);
+          if (boundary === "current") {
+            expect(mocks.rows.find(row => row.role === "user")?.serverMessageId).toBe("confirmed-user")
+            const answer = view.result.current.state.messages.find(
+              (row) => row.isBot,
+            )!;
+            expect(answer.message).toBe("The telescope is Selene.");
+            expect(answer.metadataExtra).toMatchObject({
+              workspace_rag_sources_v1: { sources: [{ mediaId: 42 }] },
+            });
+            expect(answer.sources).toHaveLength(1);
+          } else if (boundary === "workspace retired")
+            expect(
+              view.result.current.state.messages.map((row) => row.message),
+            ).toEqual(["Keep replacement"]);
+          else expect(view.result.current.state.messages).toEqual([]);
+        } finally {
+          held.resolve();
+          await pending;
+          view.unmount();
+        }
+      },
+    );
 
     it.each([
       { type: "global" } as const,

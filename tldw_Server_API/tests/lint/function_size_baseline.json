@@ -136,7 +136,6 @@
   "tldw_Server_API.app.core.Jobs.pg_migrations:ensure_jobs_rls_policies_pg": {"lines": 421, "params": 1, "reason": null},
   "tldw_Server_API.app.core.Jobs.pg_migrations:ensure_jobs_tables_pg": {"lines": 316, "params": 1, "reason": null},
   "tldw_Server_API.app.core.LLM_Calls.providers.cohere_adapter:_cohere_request": {"lines": 376, "params": 22, "reason": null},
-  "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters:_chat_with_openai_compatible_local_server": {"lines": 304, "params": 36, "reason": null},
   "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule.execute_tool": {"lines": 324, "params": 4, "reason": null},
   "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule.get_tools": {"lines": 470, "params": 1, "reason": null},
   "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule.validate_tool_arguments": {"lines": 398, "params": 3, "reason": null},

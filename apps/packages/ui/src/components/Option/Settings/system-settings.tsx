@@ -375,7 +375,7 @@ export const DataManagementSettings = () => {
 }
 
 export const SystemSettings = () => {
-  const { t } = useTranslation(["settings", "knowledge", "common"])
+  const { t } = useTranslation(["settings", "common"])
   const { increase, decrease, scale } = useFontSize()
   const notification = useAntdNotification()
 
@@ -720,7 +720,7 @@ export const SystemSettings = () => {
             htmlFor="background-image-upload"
             className="inline-flex cursor-pointer gap-2 rounded-md bg-primaryStrong px-4 py-2 text-white transition hover:brightness-95">
             <Upload className="size-4" />
-            {t("knowledge:form.uploadFile.label")}
+            {t("settings:chatAppearance.backgroundImage.upload", "Upload image")}
           </label>
           <input
             type="file"

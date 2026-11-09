@@ -74,6 +74,26 @@ def test_persona_sessions_list_and_detail_roundtrip(monkeypatch, persona_db: Cha
     fastapi_app.dependency_overrides.clear()
 
 
+def test_legacy_runtime_transcript_preserves_detail_and_export_limit(monkeypatch, persona_db):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
+    try:
+        with _client_for_user(1, persona_db) as client:
+            created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
+            session_id = created.json()["session_id"]
+            turns = [manager.append_turn(session_id=session_id, user_id="1", persona_id="research_assistant",
+                                         role="user", content=str(index)) for index in range(3)]
+            detail = client.get(f"/api/v1/persona/sessions/{session_id}?limit_turns=1")
+            exported = client.get(f"/api/v1/persona/sessions/{session_id}/export?limit_turns=1")
+            assert detail.status_code == exported.status_code == 200  # nosec B101
+            assert detail.json()["turn_count"] == 3  # nosec B101
+            assert detail.json()["turns"] == turns[-1:]  # nosec B101
+            assert [turn["turn_id"] for turn in exported.json()["turns"]] == [turns[-1]["turn_id"]]  # nosec B101
+    finally:
+        fastapi_app.dependency_overrides.clear()
+
+
 def test_materialized_session_reads_memory_top_k_from_settings_attributes(monkeypatch, persona_db: CharactersRAGDB):
     class AttributeSettings:
         PERSONA_MEMORY_TOP_K = "6"
@@ -227,7 +247,7 @@ def test_persona_session_export_is_user_scoped(monkeypatch, persona_db: Characte
     fastapi_app.dependency_overrides.clear()
 
 
-def test_persona_session_export_requires_live_snapshot(monkeypatch, persona_db: CharactersRAGDB):
+def test_persona_session_export_refuses_unrecoverable_legacy_snapshot(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
@@ -256,7 +276,7 @@ def test_persona_session_export_requires_live_snapshot(monkeypatch, persona_db: 
     with _client_for_user(1, persona_db) as client:
         resp = client.get("/api/v1/persona/sessions/sess_export_not_live/export")
         assert resp.status_code == 409
-        assert "active live sessions" in resp.json()["detail"]
+        assert "No retained transcript" in resp.json()["detail"]  # nosec B101 -- Assert truthful refusal for a legacy session with no retained transcript.
 
     fastapi_app.dependency_overrides.clear()
 
@@ -688,3 +708,74 @@ def test_session_detail_with_pending_plan_rejects_other_owner(persona_db, pendin
     sid, _ = pending_plan_session
     with _client_for_user(2, persona_db) as other:
         assert other.get(f"/api/v1/persona/sessions/{sid}").status_code == 404
+
+
+def test_cold_foreign_resume_cannot_occupy_owner_session(monkeypatch, persona_db, tmp_path):
+    """A cold process must preserve the legitimate owner's separate SQLite session."""
+    owner = materialize_persona_session(
+        persona_db,
+        session_manager=SessionManager(),
+        user_id="1",
+        persona_id="research_assistant",
+    )
+    session_id = owner.session_id
+    original = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
+    other_db = CharactersRAGDB(str(tmp_path / "other_user.db"), client_id="cold-resume-other")
+    cold_manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: cold_manager)
+    try:
+        with _client_for_user(2, other_db) as client:
+            refused = client.post(
+                "/api/v1/persona/session",
+                json={
+                    "persona_id": "research_assistant",
+                    "resume_session_id": session_id,
+                },
+            )
+        assert refused.status_code == 403  # nosec B101 -- A foreign cold ID cannot become an owned session.
+        assert other_db.get_persona_session(session_id, user_id="2", include_deleted=False) is None  # nosec B101
+        assert cold_manager.get(session_id) is None  # nosec B101 -- Refusal must precede global manager occupation.
+        with _client_for_user(1, persona_db) as client:
+            resumed = client.post(
+                "/api/v1/persona/session",
+                json={
+                    "persona_id": "research_assistant",
+                    "resume_session_id": session_id,
+                },
+            )
+        assert resumed.status_code == 200 and resumed.json()["session_id"] == session_id  # nosec B101
+        assert persona_db.get_persona_session(session_id, user_id="1", include_deleted=False) == original  # nosec B101
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        other_db.close_connection()
+
+
+@pytest.mark.parametrize("saved_runtime", [False, True])
+def test_resume_without_owned_parent_cannot_create_from_supplied_id(persona_db, saved_runtime):
+    manager = SessionManager()
+    session_id = "unowned-cold-resume-id"
+    if saved_runtime:
+        manager.create(user_id="1", persona_id="research_assistant", resume_session_id=session_id, persisted=True)
+    with pytest.raises(PermissionError):
+        materialize_persona_session(
+            persona_db,
+            session_manager=manager,
+            user_id="1",
+            persona_id="research_assistant",
+            resume_session_id=session_id,
+        )
+    assert persona_db.get_persona_session(session_id, user_id="1", include_deleted=False) is None  # nosec B101
+
+
+def test_existing_owned_unpersisted_scaffold_can_materialize(persona_db):
+    manager = SessionManager()
+    pending = manager.create(user_id="1", persona_id="research_assistant", resume_session_id="owned-temporary-id")
+    materialized = materialize_persona_session(
+        persona_db,
+        session_manager=manager,
+        user_id="1",
+        persona_id="research_assistant",
+        resume_session_id=pending.session_id,
+    )
+    assert materialized.session_id == pending.session_id and materialized.created_new_session  # nosec B101
+    assert manager.get(pending.session_id) is pending and pending.persisted  # nosec B101

@@ -13,6 +13,7 @@ import type { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const mocks = vi.hoisted(() => ({
   isOnline: true,
+  historyScope: "account-a" as string | null,
   uxState: "connected_ok" as
     | "connected_ok"
     | "configuring_url"
@@ -22,11 +23,11 @@ const mocks = vi.hoisted(() => ({
     | "unconfigured",
   hasCompletedFirstRun: true,
   capabilitiesState: {
-    capabilities: { hasPersona: true, hasPersonalization: true },
+    capabilities: { hasPersona: true, hasPersonalization: true, hasCompanion: true },
     loading: false
   } as {
     capabilities:
-      | { hasPersona: boolean; hasPersonalization?: boolean }
+      | { hasCompanion?: boolean; hasPersona: boolean; hasPersonalization?: boolean }
       | null
     loading: boolean
   },
@@ -49,6 +50,10 @@ const mocks = vi.hoisted(() => ({
   buildPersonaWebSocketUrl: vi.fn(() => "ws://persona.test/api/v1/persona/stream"),
   fetchCompanionConversationPrompts: vi.fn(),
   buddyShellContextSnapshots: [] as Array<Record<string, any> | null>
+}))
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({
+  useHomeMilestoneScope: () => mocks.historyScope
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -307,6 +312,23 @@ const getSentPayloads = (ws: MockWebSocket) =>
   ws.send.mock.calls.map(([payload]) => JSON.parse(String(payload)))
 
 describe("SidepanelPersona", () => {
+  it("keeps Persona usable but omits check-in when the Companion router is absent", async () => {
+    mocks.capabilitiesState.capabilities = { hasPersona: true, hasPersonalization: true, hasCompanion: false }
+    render(<SidepanelPersona />)
+    expect((await screen.findByPlaceholderText("Ask Persona...")).isConnected).toBe(true)
+    expect((screen.getByRole("button", { name: "Connect" })).isConnected).toBe(true)
+    expect(screen.queryByRole("button", { name: "Save check-in" })).toBeNull()
+  })
+
+  it("refuses Companion mode and prompts when the Companion router is absent", async () => {
+    mocks.capabilitiesState.capabilities = { hasPersona: true, hasPersonalization: true, hasCompanion: false }
+    render(<SidepanelPersona mode="companion" />)
+    expect((await screen.findByText("Companion unavailable")).isConnected).toBe(true)
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Save check-in" })).toBeNull()
+    expect(mocks.fetchCompanionConversationPrompts).not.toHaveBeenCalled()
+  })
+
   const originalWebSocket = globalThis.WebSocket
   const originalResizeObserver = globalThis.ResizeObserver
 
@@ -335,11 +357,12 @@ describe("SidepanelPersona", () => {
     MockWebSocket.instances = []
     window.localStorage.clear()
     mocks.isOnline = true
+    mocks.historyScope = "account-a"
     mocks.uxState = "connected_ok"
     mocks.hasCompletedFirstRun = true
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
-      hasPersonalization: true
+      hasPersonalization: true, hasCompanion: true
     }
     mocks.capabilitiesState.loading = false
     mocks.navigate.mockReset()
@@ -438,7 +461,7 @@ describe("SidepanelPersona", () => {
   it("shows unavailable state when persona capability is missing", () => {
     mocks.capabilitiesState.capabilities = {
       hasPersona: false,
-      hasPersonalization: true
+      hasPersonalization: true, hasCompanion: true
     }
     render(<SidepanelPersona />)
 
@@ -505,7 +528,7 @@ describe("SidepanelPersona", () => {
       hasPersona: true,
       hasPersonalization: true,
       hasAudio: true,
-      hasMcp: true
+      hasMcp: true, hasCompanion: true
     } as any
     usePersonaVisualRuntimeStore.setState({
       runtimeDiagnostics: {
@@ -586,7 +609,7 @@ describe("SidepanelPersona", () => {
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
       hasPersonalization: true,
-      hasMcp: true
+      hasMcp: true, hasCompanion: true
     } as any
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
@@ -3165,13 +3188,13 @@ describe("SidepanelPersona", () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+      expect(screen.getByTestId("persona-commands-draft-banner")).toHaveTextContent(
+        "Drafted from assistant setup"
+      )
+      expect(screen.getByTestId("persona-commands-name-input")).toHaveValue(
+        "Open the pod bay doors"
+      )
     })
-    expect(screen.getByTestId("persona-commands-draft-banner")).toHaveTextContent(
-      "Drafted from assistant setup"
-    )
-    expect(screen.getByTestId("persona-commands-name-input")).toHaveValue(
-      "Open the pod bay doors"
-    )
 
     fireEvent.change(screen.getByTestId("persona-commands-name-input"), {
       target: { value: "Open Pod Bay Doors" }
@@ -3186,13 +3209,13 @@ describe("SidepanelPersona", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test")
+      expect(screen.getByPlaceholderText("Try a spoken phrase")).toHaveValue(
+        "open the pod bay doors"
+      )
+      expect(
+        screen.getByText("Command saved. Run the same phrase again to confirm setup.")
+      ).toBeInTheDocument()
     })
-    expect(screen.getByPlaceholderText("Try a spoken phrase")).toHaveValue(
-      "open the pod bay doors"
-    )
-    expect(
-      screen.getByText("Command saved. Run the same phrase again to confirm setup.")
-    ).toBeInTheDocument()
   })
 
   it("derives handoff review details when setup resumes on the test step", async () => {
@@ -4775,7 +4798,7 @@ describe("SidepanelPersona", () => {
     mocks.capabilitiesState.capabilities = {
       hasPersona: true,
       hasPersonalization: true,
-      hasAudio: true
+      hasAudio: true, hasCompanion: true
     } as any
     mocks.fetchWithAuth.mockImplementation((path: string) => {
       if (path.includes("/persona/catalog")) {
@@ -4870,7 +4893,7 @@ describe("SidepanelPersona", () => {
       mocks.capabilitiesState.capabilities = {
         hasPersona: true,
         hasPersonalization: true,
-        hasAudio: true
+        hasAudio: true, hasCompanion: true
       } as any
       mocks.fetchWithAuth.mockImplementation((path: string) => {
         if (path.includes("/persona/catalog")) {
@@ -5507,6 +5530,151 @@ describe("SidepanelPersona", () => {
         }
       })
     })
+  })
+
+  it("loads cold saved Companion conversations before any Connect or session POST", async () => {
+    mocks.fetchWithAuth.mockImplementation((path: string) => Promise.resolve({
+      ok: true,
+      json: async () => path.startsWith("/api/v1/persona/sessions?")
+        ? [{ session_id: "saved-companion", created_at: null }]
+        : []
+    }))
+    render(<SidepanelPersona mode="companion" />)
+    await waitFor(() => expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+      "/api/v1/persona/sessions?persona_id=research_assistant&surface=companion.conversation&limit=50",
+      expect.objectContaining({ method: "GET" })
+    ))
+    fireEvent.keyDown(within(screen.getByTestId("persona-resume-session-select")).getByRole("combobox"), { key: "ArrowDown", keyCode: 40, which: 40 })
+    fireEvent.click(await screen.findByText("Conversation 1"))
+    expect(mocks.fetchWithAuth.mock.calls.some(([path]) => path === "/api/v1/persona/session")).toBe(false)
+    expect(MockWebSocket.instances).toHaveLength(0)
+  })
+
+  it.each(["offline", "loading", "persona", "personalization", "companion", "account"] as const)(
+    "does not cold-load saved conversations when %s is unavailable",
+    async (missing) => {
+      if (missing === "offline") mocks.isOnline = false
+      if (missing === "loading") mocks.capabilitiesState.loading = true
+      if (missing === "persona") mocks.capabilitiesState.capabilities!.hasPersona = false
+      if (missing === "personalization") mocks.capabilitiesState.capabilities!.hasPersonalization = false
+      if (missing === "companion") mocks.capabilitiesState.capabilities!.hasCompanion = false
+      if (missing === "account") mocks.historyScope = null
+      render(<SidepanelPersona mode="companion" />)
+      await act(async () => {})
+      expect(mocks.fetchWithAuth.mock.calls.some(([path]) => String(path).startsWith("/api/v1/persona/sessions?"))).toBe(false)
+      expect(mocks.fetchWithAuth.mock.calls.some(([path]) => path === "/api/v1/persona/session")).toBe(false)
+    }
+  )
+
+  it("discards a deferred cold conversation list after an account change", async () => {
+    let releaseOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    let oldSignal: AbortSignal | undefined
+    let reads = 0
+    const oldDate = "2026-01-01T12:00:00Z"
+    const newDate = "2026-02-01T12:00:00Z"
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { signal?: AbortSignal }) => {
+      if (path.startsWith("/api/v1/persona/sessions?")) {
+        reads++
+        if (reads === 1) {
+          oldSignal = init?.signal
+          return new Promise(resolve => { releaseOld = resolve })
+        }
+        return Promise.resolve({ ok: true, json: async () => [{ session_id: "current-owner", created_at: newDate }] })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+    const view = render(<SidepanelPersona mode="companion" />)
+    await waitFor(() => expect(reads).toBe(1))
+    mocks.historyScope = "account-b"
+    view.rerender(<SidepanelPersona mode="companion" />)
+    await waitFor(() => expect(reads).toBe(2))
+    expect(oldSignal?.aborted).toBe(true)
+    await act(async () => releaseOld({ ok: true, json: async () => [{ session_id: "old-owner", created_at: oldDate }] }))
+    fireEvent.keyDown(within(screen.getByTestId("persona-resume-session-select")).getByRole("combobox"), { key: "ArrowDown", keyCode: 40, which: 40 })
+    expect((await screen.findByText(new Date(newDate).toLocaleString())).isConnected).toBe(true)
+    expect(screen.queryByText(new Date(oldDate).toLocaleString())).toBeNull()
+    expect(mocks.fetchWithAuth.mock.calls.some(([path]) => path === "/api/v1/persona/session")).toBe(false)
+  })
+
+  it("discards a cold conversation read after a real credential boundary event", async () => {
+    let release!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    let signal: AbortSignal | undefined
+    let reads = 0
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { signal?: AbortSignal }) => {
+      if (path.startsWith("/api/v1/persona/sessions?")) {
+        reads++
+        signal = init?.signal
+        return new Promise(resolve => { release = resolve })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+    render(<SidepanelPersona mode="companion" />)
+    await waitFor(() => expect(reads).toBe(1))
+    act(() => window.dispatchEvent(new Event("tldw:auth-credentials-changed")))
+    expect(signal?.aborted).toBe(true)
+    await act(async () => release({ ok: true, json: async () => [{ session_id: "foreign", created_at: "2026-01-01T12:00:00Z" }] }))
+    fireEvent.keyDown(within(screen.getByTestId("persona-resume-session-select")).getByRole("combobox"), { key: "ArrowDown", keyCode: 40, which: 40 })
+    expect(screen.queryByText(new Date("2026-01-01T12:00:00Z").toLocaleString())).toBeNull()
+    expect(reads).toBe(1)
+    expect(mocks.fetchWithAuth.mock.calls.some(([path]) => path === "/api/v1/persona/session")).toBe(false)
+  })
+
+  it("aborts a cold conversation read on unmount", async () => {
+    let signal: AbortSignal | undefined
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { signal?: AbortSignal }) => {
+      if (path.startsWith("/api/v1/persona/sessions?")) {
+        signal = init?.signal
+        return new Promise(() => {})
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+    const view = render(<SidepanelPersona mode="companion" />)
+    await waitFor(() => expect(signal).toBeDefined())
+    view.unmount()
+    expect(signal!.aborted).toBe(true)
+  })
+
+  it("does not let a cold conversation read overwrite a newer explicit Connect", async () => {
+    const oldDate = "2026-01-01T12:00:00Z"
+    const newDate = "2026-02-01T12:00:00Z"
+    let releaseOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    let releaseFresh!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    let oldSignal: AbortSignal | undefined
+    let reads = 0
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "persona-key" })
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { signal?: AbortSignal }) => {
+      if (path.includes("/persona/catalog")) return Promise.resolve({ ok: true, json: async () => [{ id: "research_assistant", name: "Research Assistant" }] })
+      if (path.startsWith("/api/v1/persona/sessions?")) {
+        reads++
+        if (reads === 1) {
+          oldSignal = init?.signal
+          return new Promise(resolve => { releaseOld = resolve })
+        }
+        if (reads === 2) return Promise.resolve({ ok: true, json: async () => [] })
+        return new Promise(resolve => { releaseFresh = resolve })
+      }
+      if (path === "/api/v1/persona/session") return Promise.resolve({ ok: true, json: async () => ({ session_id: "connected", persona: { id: "research_assistant" } }) })
+      return Promise.resolve({ ok: true, json: async () => ({ preferences: {} }) })
+    })
+    render(<SidepanelPersona mode="companion" />)
+    await waitFor(() => expect(reads).toBe(1))
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    await waitFor(() => expect(MockWebSocket.instances[0].onopen).toBeTypeOf("function"))
+    act(() => MockWebSocket.instances[0].emitOpen())
+    await screen.findByText("Persona stream connected")
+    expect(oldSignal?.aborted).toBe(true)
+    const disconnectButton = await screen.findByRole("button", { name: /Disconnect$/ })
+    expect(disconnectButton.textContent?.trim()).toBe("Disconnect")
+    fireEvent.click(disconnectButton)
+    await waitFor(() => expect(reads).toBe(3))
+    await act(async () => releaseOld({ ok: true, json: async () => [{ session_id: "old", created_at: oldDate }] }))
+    fireEvent.keyDown(within(screen.getByTestId("persona-resume-session-select")).getByRole("combobox"), { key: "ArrowDown", keyCode: 40, which: 40 })
+    expect(screen.queryByText(new Date(oldDate).toLocaleString())).toBeNull()
+    await act(async () => releaseFresh({ ok: true, json: async () => [{ session_id: "connected", created_at: newDate }] }))
+    expect((await screen.findByText(new Date(newDate).toLocaleString(), { selector: ".ant-select-item-option-content" })).isConnected).toBe(true)
+    expect(screen.queryByText(new Date(oldDate).toLocaleString())).toBeNull()
+    expect(mocks.fetchWithAuth.mock.calls.filter(([path]) => path === "/api/v1/persona/session")).toHaveLength(1)
   })
 
   it("filters companion-mode session history to companion conversations", async () => {

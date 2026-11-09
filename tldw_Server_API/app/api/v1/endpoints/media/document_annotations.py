@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.document_annotations import (
     AnnotationUpdate,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
     DocumentWorkspaceRepository,
 )
@@ -331,6 +332,7 @@ async def delete_annotation(
     responses={
         200: {"description": "Annotations synced successfully"},
         404: {"description": "Media item not found"},
+        409: {"description": "Annotation creation intent changed or is no longer active"},
     },
 )
 async def sync_annotations(
@@ -347,7 +349,8 @@ async def sync_annotations(
 
     If client_ids are provided, the response includes a mapping from
     client IDs to server-generated IDs. The sync is idempotent on client_id:
-    resending a batch returns the stored annotations instead of duplicating them.
+    exact replays return the stored annotations instead of duplicating them. Changed
+    creation intents or deleted annotations are rejected without overwriting data.
     """
     user_id = str(getattr(current_user, "id", current_user))
     logger.debug(
@@ -393,8 +396,11 @@ async def sync_annotations(
             media_id=media_id,
             user_id=user_id,
             annotation_rows=annotation_rows,
+            allow_replay=body.client_ids is not None,
         )
 
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail="Annotation creation intent changed or is no longer active") from exc
     except Exception as e:
         logger.error("Error syncing annotations")
         raise HTTPException(

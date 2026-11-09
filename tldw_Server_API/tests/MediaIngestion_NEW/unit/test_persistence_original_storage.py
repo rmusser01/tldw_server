@@ -1120,3 +1120,17 @@ async def test_process_batch_media_test_mode_accepts_single_letter_y(
     assert captured.get("block_private_override") is False
     assert len(results) == 1
     assert "URL blocked by security policy" in str(results[0].get("error"))
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("saved_files", "expected"),
+    [(None, None), ([], None), ([{}], None), ([{"original_filename": "first.txt"}, {"original_filename": "later.txt"}], "first.txt")],
+)
+def test_first_saved_filename_preserves_upload_selection(saved_files, expected):
+    assert input_sourcing.first_saved_filename(saved_files) == expected  # nosec B101 -- Preserve first-upload selection and absence.
+
+
+@pytest.mark.unit
+def test_first_saved_filename_leaves_malformed_input_to_the_callers_error_policy():
+    with pytest.raises(AttributeError):
+        input_sourcing.first_saved_filename([None])

@@ -3,6 +3,7 @@
  */
 
 import { bgRequest as sendRequest, type BgRequestInit } from "./background-proxy"
+import type { GeneratedBoardDraft } from "./kanban-generation"
 import type {
   Board,
   BoardCreate,
@@ -39,11 +40,23 @@ export function createKanbanClient(
   requestOptions?: () => Pick<BgRequestInit, "configSnapshot" | "abortSignal">
 ) {
   async function bgRequest<T>(init: BgRequestInit): Promise<T> {
-    const options = requestOptions?.()
-    if (options?.abortSignal?.aborted) throw new DOMException("Kanban workspace retired", "AbortError")
-    const result = await sendRequest<T>({ ...init, ...options })
-    if (options?.abortSignal?.aborted) throw new DOMException("Kanban workspace retired", "AbortError")
-    return result
+    const options = requestOptions?.();
+    const signal =
+      options?.abortSignal && init.abortSignal
+        ? AbortSignal.any([options.abortSignal, init.abortSignal])
+        : (options?.abortSignal ?? init.abortSignal);
+    if (options?.abortSignal?.aborted)
+      throw new DOMException("Kanban workspace retired", "AbortError");
+    signal?.throwIfAborted();
+    const result = await sendRequest<T>({
+      ...init,
+      ...options,
+      abortSignal: signal,
+    });
+    if (options?.abortSignal?.aborted)
+      throw new DOMException("Kanban workspace retired", "AbortError");
+    signal?.throwIfAborted();
+    return result;
   }
 
   // =============================================================================
@@ -140,6 +153,48 @@ export function createKanbanClient(
       method: "POST",
       body: { data, board_name: boardName }
     })
+  }
+
+  /** Generate an unsaved foreground draft under this same account/server lifetime. */
+  async function generateBoardDraft(
+    input: {
+      instructions: string;
+      model: string;
+      provider: string;
+      temperature?: number;
+      topP?: number;
+      maxTokens?: number;
+    },
+    abortSignal: AbortSignal,
+  ): Promise<GeneratedBoardDraft> {
+    if (!input.instructions.trim() || input.instructions.length > 4000)
+      throw new Error("Enter board instructions of at most 4,000 characters.");
+    abortSignal.throwIfAborted();
+    const { parseGeneratedBoardDraft } = await import("./kanban-generation");
+    abortSignal.throwIfAborted();
+    const result = await bgRequest<unknown>({
+      path: "/api/v1/chat/completions",
+      method: "POST",
+      timeoutMs: 180_000,
+      abortSignal,
+      body: {
+        model: input.model,
+        api_provider: input.provider,
+        stream: false,
+        temperature: input.temperature,
+        top_p: input.topP,
+        max_tokens: input.maxTokens ?? 4096,
+        messages: [
+          {
+            role: "system",
+            content:
+              'Create a Kanban board from the instructions. Return only one JSON object with exactly this structure: {"board":{"name":"Board name","description":"Description"},"lists":[{"name":"List name","cards":[{"title":"Card title","description":"Description"}]}]}. Use 1-20 lists and 1-500 cards total, at most 200 per list. Names must be nonblank, at most 255 characters; card titles at most 500 and descriptions at most 5000. Do not include IDs, owners, URLs, extra fields, reasoning or commentary.',
+          },
+          { role: "user", content: input.instructions },
+        ],
+      },
+    });
+    return parseGeneratedBoardDraft(result);
   }
 
   // =============================================================================
@@ -607,7 +662,7 @@ export function createKanbanClient(
     })
   }
 
-  return { listBoards, getBoard, createBoard, updateBoard, deleteBoard, importBoard, getLists, createList, updateList, deleteList, reorderLists, getCards, getCard, createCard, updateCard, deleteCard, moveCard, reorderCards, archiveBoard, unarchiveBoard, archiveList, unarchiveList, archiveCard, unarchiveCard, exportBoard, listLabels, createLabel, updateLabel, deleteLabel, assignLabelToCard, removeLabelFromCard, copyCard, searchCards, listChecklists, createChecklist, updateChecklist, deleteChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem, listComments, createComment }
+  return { generateBoardDraft, listBoards, getBoard, createBoard, updateBoard, deleteBoard, importBoard, getLists, createList, updateList, deleteList, reorderLists, getCards, getCard, createCard, updateCard, deleteCard, moveCard, reorderCards, archiveBoard, unarchiveBoard, archiveList, unarchiveList, archiveCard, unarchiveCard, exportBoard, listLabels, createLabel, updateLabel, deleteLabel, assignLabelToCard, removeLabelFromCard, copyCard, searchCards, listChecklists, createChecklist, updateChecklist, deleteChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem, listComments, createComment }
 }
 
 export const { listBoards, getBoard, createBoard, updateBoard, deleteBoard, importBoard, getLists, createList, updateList, deleteList, reorderLists, getCards, getCard, createCard, updateCard, deleteCard, moveCard, reorderCards, archiveBoard, unarchiveBoard, archiveList, unarchiveList, archiveCard, unarchiveCard, exportBoard, listLabels, createLabel, updateLabel, deleteLabel, assignLabelToCard, removeLabelFromCard, copyCard, searchCards, listChecklists, createChecklist, updateChecklist, deleteChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem, listComments, createComment } = createKanbanClient()

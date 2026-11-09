@@ -174,7 +174,7 @@ class CollectionsTags(_TagStore):
 
     def forget_schema(self) -> None:
         schema_once.reset("collections")
-        CollectionsDatabase._bootstrapped_backend_targets.discard(backend_target_key(self.backend))
+        CollectionsDatabase._bootstrapped_backend_targets.discard(CollectionsDatabase._backend_target_key(self.backend))
 
 
 class WatchlistsTags(_TagStore):

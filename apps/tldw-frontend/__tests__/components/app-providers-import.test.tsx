@@ -9,6 +9,7 @@ import type { SplashCard } from '@/components/Common/SplashScreen/engine/types';
 
 const mocks = vi.hoisted(() => ({
   loadVisual: vi.fn(),
+  i18n: { language: 'en', resolvedLanguage: 'en', dir: vi.fn(() => 'ltr') },
   waitForVisual: () => Promise.resolve(),
 }));
 
@@ -58,11 +59,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? _key,
-    i18n: {
-      resolvedLanguage: 'en',
-      language: 'en',
-      dir: () => 'ltr',
-    },
+    i18n: mocks.i18n,
   }),
 }));
 
@@ -100,6 +97,9 @@ vi.mock('@web/components/ui/ToastProvider', () => ({
 
 describe('AppProviders', () => {
   beforeEach(async () => {
+    mocks.i18n.language = 'en';
+    mocks.i18n.resolvedLanguage = 'en';
+    mocks.i18n.dir.mockReset().mockReturnValue('ltr');
     vi.resetModules();
     // Use Next's actual optional-chunk error path instead of the global React.lazy double.
     vi.doUnmock('next/dynamic');
@@ -116,6 +116,16 @@ describe('AppProviders', () => {
       await mocks.waitForVisual();
       return { default: SplashPreview };
     });
+  });
+
+  it.each([['es', 'ltr'], ['ar', 'rtl']])('declares selected %s despite an older English resource fallback', async (language, direction) => {
+    mocks.i18n.language = language;
+    mocks.i18n.dir.mockReturnValue(direction);
+    const { AppProviders } = await import('@web/components/AppProviders');
+    render(<AppProviders><div>child content</div></AppProviders>);
+    expect(document.documentElement.lang).toBe(language);
+    expect(mocks.i18n.dir).toHaveBeenCalledWith(language);
+    expect(document.documentElement.dir).toBe(direction);
   });
 
   it('renders children without an out-of-context notification bridge', async () => {

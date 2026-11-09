@@ -92,6 +92,8 @@ async def test_handle_import_dispatches_openwebui_json_without_archive_import(tm
                 status=ImportStatus.PENDING,
                 completed_at=None,
                 error_message=None,
+                warnings=[],
+                metadata={},
             )
             self.openwebui_called = False
             self.archive_called = False
@@ -172,6 +174,8 @@ async def test_handle_import_dispatches_openwebui_db_with_selected_user_without_
                 status=ImportStatus.PENDING,
                 completed_at=None,
                 error_message=None,
+                warnings=[],
+                metadata={},
             )
             self.openwebui_db_called = False
             self.archive_called = False
@@ -268,6 +272,8 @@ async def test_handle_import_requires_openwebui_db_selected_user(tmp_path):
                 status=ImportStatus.PENDING,
                 completed_at=None,
                 error_message=None,
+                warnings=[],
+                metadata={},
             )
 
         def _claim_import_job(self, _job_id: str) -> bool:
@@ -304,6 +310,8 @@ async def test_handle_import_cleans_openwebui_db_file_when_import_fails(tmp_path
                 status=ImportStatus.PENDING,
                 completed_at=None,
                 error_message=None,
+                warnings=[],
+                metadata={},
             )
 
         def _claim_import_job(self, _job_id: str) -> bool:
@@ -360,6 +368,8 @@ async def test_handle_import_marks_claimed_validation_failure_as_failed():
                 status=ImportStatus.PENDING,
                 completed_at=None,
                 error_message=None,
+                warnings=[],
+                metadata={},
             )
 
         def _claim_import_job(self, _job_id: str) -> bool:

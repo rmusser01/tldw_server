@@ -105,15 +105,18 @@ def test_existing_sdk_destruction_precedes_unlock_with_retained_exception(
             events.append("sdk_destroyed")
 
     def open_native(client):
-        return ObservedBindings(factory(client))
+        native = factory(client)
+        return ObservedBindings(native) if client.session is session else native
 
     def unlock(fd):
-        events.append("unlock")
+        if fd == session._fd:
+            events.append("unlock")
         release(fd)
 
     limits = ChromaPreflightLimits(returned_components=1 if failure == "budget" else 2_000_000)
     with ChromaDBManager("1", config, existing_only=True, preflight_limits=limits) as manager:
         collection = manager.get_existing_collection_strict("claims_for_1")
+        session = manager.storage_access()
         events.clear()
         monkeypatch.setattr(chroma_storage.ExistingClient, "_factory", open_native)
         monkeypatch.setattr(chroma_storage, "_release_platform_file_lock", unlock)
@@ -516,11 +519,12 @@ def test_malformed_schema_or_collection_fails_before_any_sdk(config, seeded, mon
     assert inventory(seeded) == before
 
 
-def test_unknown_sdk_profile_fails_without_provisioning(config, seeded, monkeypatch):
+@pytest.mark.parametrize("version", ["0.4.0", "1.5.8", "1.5.10"])
+def test_unknown_sdk_profile_fails_without_provisioning(config, seeded, monkeypatch, version):
     import chromadb
 
     before = inventory(seeded)
-    monkeypatch.setattr(chromadb, "__version__", "0.4.0")
+    monkeypatch.setattr(chromadb, "__version__", version)
     with pytest.raises(ClusterRebuildStorageError, match="claims_cluster_vector_unsupported_sdk"):
         with open_reader(config):
             pytest.fail("unknown SDK profile accepted")

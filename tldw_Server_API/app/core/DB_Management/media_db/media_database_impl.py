@@ -1464,6 +1464,7 @@ class MediaDatabase:
         workspace_tag TEXT,
         prompt TEXT NOT NULL,
         column_hints_json TEXT,
+        generation_job_json TEXT,
         status TEXT NOT NULL DEFAULT 'queued',
         row_count INTEGER NOT NULL DEFAULT 0,
         generation_model TEXT,
@@ -1502,7 +1503,7 @@ class MediaDatabase:
     );
     CREATE UNIQUE INDEX IF NOT EXISTS ux_data_table_columns_table_column ON data_table_columns(table_id, column_id);
     CREATE INDEX IF NOT EXISTS idx_data_table_columns_table_position ON data_table_columns(table_id, position);
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_data_table_columns_table_position_active ON data_table_columns(table_id, position, deleted);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_data_table_columns_table_position_live ON data_table_columns(table_id, position) WHERE deleted = 0;
 
     CREATE TABLE IF NOT EXISTS data_table_rows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1522,7 +1523,7 @@ class MediaDatabase:
     );
     CREATE UNIQUE INDEX IF NOT EXISTS ux_data_table_rows_table_row ON data_table_rows(table_id, row_id);
     CREATE INDEX IF NOT EXISTS idx_data_table_rows_table_index ON data_table_rows(table_id, row_index);
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_data_table_rows_table_index_active ON data_table_rows(table_id, row_index, deleted);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_data_table_rows_table_index_live ON data_table_rows(table_id, row_index) WHERE deleted = 0;
 
     CREATE TABLE IF NOT EXISTS data_table_sources (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

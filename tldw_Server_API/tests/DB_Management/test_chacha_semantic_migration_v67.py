@@ -43,7 +43,7 @@ def test_sqlite_v84_fresh_schema_has_model_revision_and_operation_receipts(
     _initialize(path)
 
     with sqlite3.connect(path) as conn:
-        assert _version(conn) == 84
+        assert _version(conn) == 85  # nosec B101 -- Current schema also retains Persona transcripts.
         assert "model_revision" in _columns(conn, "note_semantic_index_configs")
         assert "model_revision" in _columns(conn, "note_semantic_generations")
         assert {

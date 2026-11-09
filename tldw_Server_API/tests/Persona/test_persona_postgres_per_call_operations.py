@@ -41,7 +41,7 @@ def test_every_off_loop_persona_handle_call_runs_in_its_own_operation():
             else:
                 unwrapped.append(f"{rel}:{node.lineno} {callable_text}")
     assert unwrapped == [], f"wrap these in the file's chacha_operation(...)(callable): {unwrapped}"
-    assert wrapped == 21  # persona.py's 19 (TASK-13896 moved its 13 on-loop calls here) and the helpers' 2
+    assert wrapped == 24  # persona.py's 19 original calls + 3 admission/transcript calls, and the helpers' 2
 
 
 # Calls that receive the session's handle but own their ChaCha work themselves, or end the session.
@@ -78,7 +78,9 @@ def test_no_persona_handle_call_runs_on_the_event_loop():
         calls_handle = isinstance(callee, ast.Attribute) and ast.unparse(callee.value) == "persona_scope_db"
         if (passes_handle or calls_handle) and ast.unparse(callee) not in _SELF_OWNING:
             on_loop.append(f"persona.py:{node.lineno} {ast.unparse(target)}")
-    assert on_loop == [], f"run these as await asyncio.to_thread(chacha_operation(independent=True)(fn), ...): {on_loop}"
+    assert (
+        on_loop == []
+    ), f"run these as await asyncio.to_thread(chacha_operation(independent=True)(fn), ...): {on_loop}"
     assert unawaited == [], f"await these: {unawaited}"
 
 
@@ -199,33 +201,40 @@ def live_session_on_a_small_pool(pg_database_config, tmp_path, monkeypatch):
         return raw
 
     monkeypatch.setattr(pool, "get_connection", get_connection)
-    db = CharactersRAGDB(tmp_path / "persona.db", client_id="1", backend=backend)
-    persona_id = db.create_persona_profile(
-        {"id": "research_assistant", "user_id": "1", "name": "Research Assistant", "mode": "session_scoped",
-         "system_prompt": "Helper", "is_active": True}
-    )
-    db.create_persona_session(
-        {"id": "pg-live", "persona_id": persona_id, "user_id": "1", "mode": "session_scoped", "status": "active"}
-    )
-    db.close_connection()
-
-    async def heartbeat():
-        last = time.monotonic()
-        while not stop.is_set():
-            await asyncio.sleep(0.02)
-            now = time.monotonic()
-            gaps.append(now - last)
-            last = now
-
-    beats = []
-
-    async def authenticate(*_args, **_kwargs):
-        beats.append(asyncio.get_running_loop().create_task(heartbeat()))  # on the server's loop
-        return "1", True, True
-
-    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", authenticate)
-    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: db)
+    db = None
     try:
+        db = CharactersRAGDB(tmp_path / "persona.db", client_id="1", backend=backend)
+        persona_id = db.create_persona_profile(
+            {
+                "id": "research_assistant",
+                "user_id": "1",
+                "name": "Research Assistant",
+                "mode": "session_scoped",
+                "system_prompt": "Helper",
+                "is_active": True,
+            }
+        )
+        db.create_persona_session(
+            {"id": "pg-live", "persona_id": persona_id, "user_id": "1", "mode": "session_scoped", "status": "active"}
+        )
+        db.close_connection()
+
+        async def heartbeat():
+            last = time.monotonic()
+            while not stop.is_set():
+                await asyncio.sleep(0.02)
+                now = time.monotonic()
+                gaps.append(now - last)
+                last = now
+
+        beats = []
+
+        async def authenticate(*_args, **_kwargs):
+            beats.append(asyncio.get_running_loop().create_task(heartbeat()))  # on the server's loop
+            return "1", True, True
+
+        monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", authenticate)
+        monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: db)
         with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
             ws.receive_json()
             takes.clear()
@@ -234,8 +243,48 @@ def live_session_on_a_small_pool(pg_database_config, tmp_path, monkeypatch):
             stop.set()
     finally:
         stop.set()
-        db.close_connection()
-        pool.close_all()
+        try:
+            if db is not None:
+                db.close_connection()
+        finally:
+            pool.close_all()
+
+
+@pytest.mark.parametrize("target", ["live", "queued"])
+@pytest.mark.parametrize("failure_stage", ["constructor", "seed"])
+async def test_new_persona_fixtures_release_pool_after_setup_failure(monkeypatch, tmp_path, target, failure_stage):
+    """A failed handle or seed must not outlive its test-owned pool."""
+    import sys
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+
+    closed = []
+    failure = RuntimeError("persona fixture setup failed")
+    pool = SimpleNamespace(get_connection=lambda: None, close_all=lambda: closed.append("pool"))
+    backend = SimpleNamespace(get_pool=lambda: pool)
+
+    def construct(*_args, **_kwargs):
+        if failure_stage == "constructor":
+            raise failure
+
+        def seed(_data):
+            raise failure
+
+        return SimpleNamespace(create_persona_profile=seed, close_connection=lambda: closed.append("db"))
+
+    monkeypatch.setattr(DatabaseBackendFactory, "create_backend", lambda _config: backend)
+    monkeypatch.setattr(sys.modules[__name__], "CharactersRAGDB", construct)
+    config = DatabaseConfig(BackendType.POSTGRESQL)
+    with pytest.raises(RuntimeError, match="persona fixture setup failed") as caught:
+        if target == "live":
+            next(live_session_on_a_small_pool.__wrapped__(config, tmp_path, monkeypatch))
+        else:
+            await test_a_queued_preferences_write_survives_its_task_being_cancelled(config, tmp_path, True)
+    assert caught.value is failure  # nosec B101 - setup errors propagate unchanged after owned-resource cleanup.
+    assert closed == (
+        ["pool"] if failure_stage == "constructor" else ["db", "pool"]
+    )  # nosec B101 # Each newly acquired handle and pool must close on setup failure.
 
 
 def test_a_persona_call_waits_for_a_full_pool_without_stalling_the_event_loop(live_session_on_a_small_pool):
@@ -270,25 +319,36 @@ async def test_a_queued_preferences_write_survives_its_task_being_cancelled(pg_d
     from tldw_Server_API.app.core.Notes_Graph.semantic_publication import run_quiescent_operation
 
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    db = CharactersRAGDB(tmp_path / "persona.db", client_id="1", backend=backend)
-    persona_id = db.create_persona_profile(
-        {"id": "research_assistant", "user_id": "1", "name": "Research Assistant", "mode": "session_scoped",
-         "system_prompt": "Helper", "is_active": True}
-    )
-    db.create_persona_session(
-        {"id": "pg-live", "persona_id": persona_id, "user_id": "1", "mode": "session_scoped", "status": "active"}
-    )
-    db.close_connection()
-    loop = asyncio.get_running_loop()
-    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+    db = None
     release = threading.Event()
-    busy = loop.run_in_executor(None, release.wait, 5)  # the only worker is taken
-    write = asyncio.to_thread(
-        chacha_operation(independent=True)(persona_ep._persist_persona_session_preferences),
-        db, session_id="pg-live", user_id="1", base_preferences={}, patch_preferences={"use_memory_context": False},
-    )
-    task = asyncio.create_task(run_quiescent_operation(write) if shielded else write)
     try:
+        db = CharactersRAGDB(tmp_path / "persona.db", client_id="1", backend=backend)
+        persona_id = db.create_persona_profile(
+            {
+                "id": "research_assistant",
+                "user_id": "1",
+                "name": "Research Assistant",
+                "mode": "session_scoped",
+                "system_prompt": "Helper",
+                "is_active": True,
+            }
+        )
+        db.create_persona_session(
+            {"id": "pg-live", "persona_id": persona_id, "user_id": "1", "mode": "session_scoped", "status": "active"}
+        )
+        db.close_connection()
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+        busy = loop.run_in_executor(None, release.wait, 5)  # the only worker is taken
+        write = asyncio.to_thread(
+            chacha_operation(independent=True)(persona_ep._persist_persona_session_preferences),
+            db,
+            session_id="pg-live",
+            user_id="1",
+            base_preferences={},
+            patch_preferences={"use_memory_context": False},
+        )
+        task = asyncio.create_task(run_quiescent_operation(write) if shielded else write)
         await asyncio.sleep(0.1)  # the write's job is queued behind the busy worker
         task.cancel()
         await asyncio.sleep(0)  # the cancel reaches the queued job before the worker frees up
@@ -302,5 +362,8 @@ async def test_a_queued_preferences_write_survives_its_task_being_cancelled(pg_d
         assert saved.get("use_memory_context") is (False if shielded else None)
     finally:
         release.set()
-        db.close_connection()
-        backend.get_pool().close_all()
+        try:
+            if db is not None:
+                db.close_connection()
+        finally:
+            backend.get_pool().close_all()

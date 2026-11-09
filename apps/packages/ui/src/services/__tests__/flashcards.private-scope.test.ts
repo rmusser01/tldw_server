@@ -4,7 +4,7 @@ vi.mock("wxt/browser", () => ({ browser: { runtime: { id: null } } }))
 vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({ get: boundary.get, set: vi.fn(), remove: vi.fn() }) }))
 vi.mock("@/services/tldw/runtime-auth-override", () => ({ getRuntimeSingleUserApiKeyOverride: () => null, isCookieSessionConfigInvalidated: () => false }))
 import type { FlashcardsRequestOptions } from "../flashcards"
-import { createDeck, updateDeck, createFlashcard, generateFlashcards, listDecks, createFlashcardsBulk, getFlashcard, deleteFlashcard } from "../flashcards"
+import { createDeck, updateDeck, createFlashcard, generateFlashcards, listDecks, createFlashcardsBulk, getFlashcard, deleteFlashcard, getNextReviewCard, listFlashcardTemplates } from "../flashcards"
 import { uploadFlashcardAsset } from "../flashcard-assets"
 import { mediaMethods } from "../tldw/domains/media"
 import { isServicePromptRequestPath } from "../tldw/service-prompt-scope-error"
@@ -14,6 +14,8 @@ const requestScope = { config: { serverUrl: "https://source.test", authMode: "mu
 const cardUuid = "bb4da9d8-1d8c-4ac0-960b-7ef644b37865"
 const asset = { name: "diagram.png", type: "image/png", arrayBuffer: async () => new Uint8Array([1, 2]).buffer } as File
 const operations = [
+  ["next review", () => getNextReviewCard(7, { workspace_id: "workspace", include_workspace_items: true }, { requestScope })],
+  ["templates list", () => listFlashcardTemplates({ requestScope })],
   ["deck update", () => updateDeck(7, { name: "Private renamed deck", expected_version: 1 }, { requestScope })],
   ["decks list", () => listDecks({ workspace_id: "workspace", include_workspace_items: true }, { requestScope })],
   ["bulk", () => createFlashcardsBulk([{ front: "Occluded image", back: "Label", deck_id: 7 }], { requestScope })],
@@ -29,6 +31,8 @@ const operations = [
 ] as const
 
 const cancellationOperations = [
+  ["next review", (options: FlashcardsRequestOptions) => getNextReviewCard(7, {}, options)],
+  ["templates list", (options: FlashcardsRequestOptions) => listFlashcardTemplates(options)],
   ["decks list", (options: FlashcardsRequestOptions) => listDecks({}, options)],
   ["bulk create", (options: FlashcardsRequestOptions) => createFlashcardsBulk([{ front: "Q", back: "A" }], options)],
   ["card read", (options: FlashcardsRequestOptions) => getFlashcard(cardUuid, options)],
@@ -116,6 +120,15 @@ describe("private Flashcards real outbound scope", () => {
   it.each(["/api/v1/media/search", "/api/v1/media/42/versions/0", "/api/v1/media/42/versions/7/extra", "/api/v1/media/%34%32", "/api/v1/media/42/"])("does not expand source GET to %s", path => {
     expect(isServicePromptRequestPath(path, "GET")).toBe(false)
   })
+  it("preserves legacy review and template reads without a captured account", async () => {
+    await getNextReviewCard(7, { workspace_id: "workspace", include_workspace_items: true })
+    await listFlashcardTemplates()
+    expect(boundary.fetch).toHaveBeenCalledTimes(2)
+    const [url] = boundary.fetch.mock.calls[0]
+    expect(Object.fromEntries(new URL(url).searchParams)).toEqual({ deck_id: "7", workspace_id: "workspace", include_workspace_items: "true" })
+    for (const [, init] of boundary.fetch.mock.calls) expect(new Headers(init.headers).has("X-TLDW-Expected-User-ID")).toBe(false)
+  })
+
 })
 
 
@@ -131,4 +144,11 @@ it("retains A06 canonical Media version reads in the captured scope", () => {
   for (const path of ["/api/v1/media/42/versions", "/api/v1/media/42/versions/2"]) {
     expect(isServicePromptRequestPath(path, "GET")).toBe(true)
   }
+})
+
+
+it.each(["/api/v1/flashcards/review/next", "/api/v1/flashcards/templates"])("bounds the native catalog GET %s", path => {
+  expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) expect(isServicePromptRequestPath(path, method)).toBe(false)
+  for (const suffix of ["/", "/extra", "%2fextra"]) expect(isServicePromptRequestPath(path + suffix, "GET")).toBe(false)
 })

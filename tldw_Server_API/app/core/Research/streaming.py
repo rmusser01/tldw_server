@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchRunEventRow
-from tldw_Server_API.app.core.Research.research_runs_schemas import ResearchRunSnapshotResponse
+from tldw_Server_API.app.core.Research.research_runs_schemas import (
+    ResearchCheckpointSummary,
+    ResearchRunSnapshotResponse,
+)
 
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
@@ -145,10 +148,17 @@ def persisted_event_to_stream_event(
     event_row: ResearchRunEventRow,
     *,
     replayed: bool,
+    checkpoint: ResearchCheckpointSummary | None = None,
 ) -> ResearchStreamEvent:
     """Convert a persisted run-event row into an SSE-ready event."""
 
     payload = dict(event_row.event_payload)
+    if (
+        event_row.event_type == "checkpoint"
+        and checkpoint is not None
+        and payload.get("checkpoint_id") == checkpoint.checkpoint_id
+    ):
+        payload.update(checkpoint.model_dump(mode="json"))
     payload["event_id"] = int(event_row.id)
     payload["replayed"] = bool(replayed)
     return ResearchStreamEvent(

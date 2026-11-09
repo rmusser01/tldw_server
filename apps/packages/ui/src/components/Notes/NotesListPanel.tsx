@@ -797,7 +797,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                               </div>
                             )
                           })()}
-                        <div id={`${rowDomId}-date`} className="text-xs text-text-subtle mt-1">
+                        <div id={`${rowDomId}-date`} className="text-xs text-text-muted mt-1">
                           {item.updated_at
                             ? (() => {
                                 const d = new Date(item.updated_at)
@@ -823,7 +823,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       </div>
                     )}
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="text-xs text-text-subtle">
+                      <div className="text-xs text-text-muted">
                         {t('option:notesSearch.trashedAtLabel', {
                           defaultValue: 'Deleted'
                         })}

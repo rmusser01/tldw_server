@@ -199,6 +199,18 @@ class AuthnzRateLimitsRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
+                    from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                        POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+                    )
+
+                    if not await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL):
+                        for query in (
+                            "SELECT identifier, endpoint, request_count, window_start FROM public.rate_limits LIMIT 0",
+                            "SELECT identifier, attempt_type, attempt_count, window_start FROM public.failed_attempts LIMIT 0",
+                            "SELECT identifier, attempt_type, locked_until, reason FROM public.account_lockouts LIMIT 0",
+                        ):
+                            await conn.fetch(query)
+                        return
                     for sql in ddl_postgres[:-1]:
                         await conn.execute(sql)
                     await self._ensure_postgres_account_lockouts_schema(conn)

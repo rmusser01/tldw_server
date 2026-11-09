@@ -26,6 +26,7 @@ import {
   isWorkspaceChatSessionKeyForWorkspace
 } from '@/store/workspace-chat-session-key'
 import { applyWorkspaceSourceTransfer } from '../workspace-source-transfer'
+import { saveResearchWorkspaceChatReference } from '../workspace-migration'
 
 // TODO: These helpers need to be exported from workspace.ts
 import {
@@ -193,9 +194,13 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     return id
   },
 
-  restoreServerWorkspace: (snapshot) => {
+  restoreServerWorkspace: (snapshot, chatSession) => {
     set((state) => ({
       ...applyWorkspaceSnapshot(snapshot),
+      ...(chatSession ? { workspaceChatSessions: {
+        ...state.workspaceChatSessions,
+        [buildWorkspaceChatSessionKey(snapshot.workspaceId, snapshot.workspaceChatReferenceId)]: cloneWorkspaceChatSession(chatSession)
+      } } : {}),
       savedWorkspaces: upsertSavedWorkspace(state.savedWorkspaces, createSavedWorkspaceEntry(snapshot, new Date())),
       archivedWorkspaces: state.archivedWorkspaces.filter(workspace => workspace.id !== snapshot.workspaceId),
       workspaceSnapshots: { ...state.workspaceSnapshots, [snapshot.workspaceId]: snapshot }
@@ -1105,15 +1110,21 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     return sortByLastAccessedDesc(state.archivedWorkspaces)
   },
 
-  saveWorkspaceChatSession: (workspaceSessionKey, session) => {
+  saveWorkspaceChatSession: (workspaceSessionKey, session, owner) => {
     const normalizedSessionKey = workspaceSessionKey.trim()
     if (!normalizedSessionKey) return
+    const before = get()
+    if (owner && (!owner.isCurrent() || normalizedSessionKey !== buildWorkspaceChatSessionKey(before.workspaceId, before.workspaceChatReferenceId))) return
     set((state) => ({
       workspaceChatSessions: {
         ...state.workspaceChatSessions,
         [normalizedSessionKey]: cloneWorkspaceChatSession(session)
       }
     }))
+    const current = get()
+    if (owner && normalizedSessionKey === buildWorkspaceChatSessionKey(current.workspaceId, current.workspaceChatReferenceId)) {
+      saveResearchWorkspaceChatReference(current.workspaceId, current.workspaceChatReferenceId, session.serverChatId, owner)
+    }
   },
 
   getWorkspaceChatSession: (workspaceSessionKey) => {

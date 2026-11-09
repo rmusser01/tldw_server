@@ -116,6 +116,8 @@ class ConversationStore:
             return
 
         if self._db.backend_type == BackendType.POSTGRESQL:
+            if self._db.backend.table_exists("conversation_settings", connection=connection):
+                return
             self._db.backend.execute(
                 """
                 CREATE TABLE IF NOT EXISTS conversation_settings(

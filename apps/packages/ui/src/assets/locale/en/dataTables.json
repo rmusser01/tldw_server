@@ -4,6 +4,7 @@
   "betaNotice": "Beta Feature",
   "betaDescription": "Data Tables is currently in beta. Table generation requires backend support.",
   "offline": "Server is offline. Please connect to use Data Tables.",
+  "saveRequiresGeneratedTable": "Generate a table before saving to the library. You can still export this preview.",
   "tabs": {
     "tables": "My Tables",
     "create": "Create Table"
@@ -145,5 +146,7 @@
     "sources": "Sources",
     "created": "Created",
     "actions": "Actions"
-  }
+  },
+  "cancelGeneration": "Cancel generation",
+  "generationCancelled": "Generation cancelled. Your saved table is unchanged."
 }

@@ -860,12 +860,105 @@ class WorldBookService:
                 result[field] = value.replace(tzinfo=timezone.utc)
         return result
 
+    @staticmethod
+    def _validate_postgres_runtime_schema(conn: Any) -> None:
+        """Check the deployed World Book contract without publishing owner schema."""
+        for query in (
+            "SELECT id,client_id,name,description,scan_depth,token_budget,recursive_scanning,enabled,"
+            "created_at,last_modified,version,deleted FROM public.world_books LIMIT 0",
+            "SELECT id,world_book_id,keywords,content,priority,enabled,case_sensitive,regex_match,"
+            "whole_word_match,metadata,created_at,last_modified FROM public.world_book_entries LIMIT 0",
+            "SELECT id,character_id,world_book_id,enabled,priority,created_at FROM public.character_world_books LIMIT 0",
+        ):
+            conn.execute(query)
+        indexes = conn.execute("""
+            SELECT relation.relname AS table_name,index_relation.relname AS index_name,
+                   indexes.indisunique AS is_unique,indexes.indisprimary AS is_primary,
+                   indexes.indisvalid AND indexes.indisready AND indexes.indimmediate
+                     AND indexes.indexprs IS NULL AND indexes.indpred IS NULL AS ready,
+                   ARRAY(SELECT attribute.attname::text
+                         FROM unnest(indexes.indkey) WITH ORDINALITY AS key_part(number,position)
+                         LEFT JOIN pg_attribute AS attribute ON attribute.attrelid=indexes.indrelid
+                           AND attribute.attnum=key_part.number
+                         WHERE key_part.position<=indexes.indnkeyatts ORDER BY key_part.position) AS columns
+            FROM pg_index AS indexes
+            JOIN pg_class AS index_relation ON index_relation.oid=indexes.indexrelid
+            JOIN pg_class AS relation ON relation.oid=indexes.indrelid
+            JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+            WHERE namespace.nspname='public'
+              AND relation.relname IN ('world_books','world_book_entries','character_world_books')
+        """).fetchall()
+        if any(
+            row["table_name"] == "world_books" and row["is_unique"] is True and tuple(row["columns"]) == ("name",)
+            for row in indexes
+        ):
+            raise CharactersRAGDBError("World Book global-name uniqueness requires owner migration")
+        ready = [row for row in indexes if row["ready"] is True and row["is_unique"] is True]
+        for table in ("world_books", "world_book_entries", "character_world_books"):
+            if not any(
+                row["table_name"] == table and row["is_primary"] is True and tuple(row["columns"]) == ("id",)
+                for row in ready
+            ):
+                raise CharactersRAGDBError("World Book primary keys require owner migration")
+        if not any(
+            row["table_name"] == "world_books"
+            and row["index_name"] == "idx_world_books_owner_name"
+            and tuple(row["columns"]) == ("client_id", "name")
+            for row in ready
+        ):
+            raise CharactersRAGDBError("World Book owner-name uniqueness requires owner migration")
+        if not any(
+            row["table_name"] == "character_world_books" and tuple(row["columns"]) == ("character_id", "world_book_id")
+            for row in ready
+        ):
+            raise CharactersRAGDBError("World Book attachment uniqueness requires owner migration")
+        links = conn.execute("""
+            SELECT child.relname AS child_table,parent.relname AS parent_table,
+                   ARRAY(SELECT attname::text FROM unnest(link.conkey) WITH ORDINALITY AS part(number,position)
+                         JOIN pg_attribute ON attrelid=link.conrelid AND attnum=part.number
+                         ORDER BY part.position) AS child_columns,
+                   ARRAY(SELECT attname::text FROM unnest(link.confkey) WITH ORDINALITY AS part(number,position)
+                         JOIN pg_attribute ON attrelid=link.confrelid AND attnum=part.number
+                         ORDER BY part.position) AS parent_columns
+            FROM pg_constraint AS link
+            JOIN pg_class AS child ON child.oid=link.conrelid
+            JOIN pg_class AS parent ON parent.oid=link.confrelid
+            WHERE link.contype='f' AND link.convalidated AND NOT link.condeferrable
+              AND link.confdeltype='c' AND link.confupdtype='a'
+              AND child.relnamespace='public'::regnamespace AND parent.relnamespace='public'::regnamespace
+              AND child.relname IN ('world_book_entries','character_world_books')
+        """).fetchall()
+        for child, column, parent in (
+            ("world_book_entries", "world_book_id", "world_books"),
+            ("character_world_books", "character_id", "character_cards"),
+            ("character_world_books", "world_book_id", "world_books"),
+        ):
+            if not any(
+                row["child_table"] == child
+                and row["parent_table"] == parent
+                and tuple(row["child_columns"]) == (column,)
+                and tuple(row["parent_columns"]) == ("id",)
+                for row in links
+            ):
+                raise CharactersRAGDBError("World Book cascading links require owner migration")
+
     def _init_tables(self):
         """Initialize world book tables in the user's database if they don't exist."""
         backend_type = getattr(self.db, "backend_type", BackendType.SQLITE)
         try:
             with self.db.transaction() as conn:
                 if backend_type == BackendType.POSTGRESQL:
+                    authority = conn.execute(
+                        "SELECT CASE WHEN to_regclass('public.world_books') IS NULL "
+                        "THEN has_schema_privilege(current_user,'public','CREATE') "
+                        "ELSE pg_has_role(current_user,(SELECT relowner FROM pg_class "
+                        "WHERE oid=to_regclass('public.world_books')),'USAGE') END AS can_migrate"
+                    ).fetchone()
+                    if not authority or type(authority.get("can_migrate")) is not bool:
+                        raise CharactersRAGDBError("World Book schema authority is unavailable")
+                    if not authority["can_migrate"]:
+                        self._validate_postgres_runtime_schema(conn)
+                        return
                     conn.execute("""
                         CREATE TABLE IF NOT EXISTS world_books (
                             id SERIAL PRIMARY KEY,

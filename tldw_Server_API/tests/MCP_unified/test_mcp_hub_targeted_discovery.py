@@ -113,6 +113,8 @@ async def runtime(tmp_path, monkeypatch, fresh_services):
         app.dependency_overrides[get_auth_principal] = lambda: _principal()
         app.dependency_overrides[routes.get_mcp_hub_service] = lambda: service
         app.dependency_overrides[routes.get_mcp_hub_tool_registry_dep] = lambda: McpHubToolRegistryService(registry)
+        # Production prepares OpenAPI before it admits timed requests.
+        app.openapi()
         try:
             await registry.register_module("external_federation", ExternalFederationModule, config)
             async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
