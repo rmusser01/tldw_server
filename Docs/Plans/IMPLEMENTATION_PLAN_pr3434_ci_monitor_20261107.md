@@ -797,3 +797,39 @@ Require the new head's own ordinary shards 1/3/8 and notes/chat UX successes,
 inspect parity and fresh failures, then recheck feedback, rules, queue and
 dev freshness. All effective required contexts still gate actual merge.
 Stages 3/4 and TASK-15466 stay In Progress.
+
+### VN Storage Resolver Fixture
+
+Ordinary 5b904b00 CI run 42564927350, auth-integration-b-z job 129006619658,
+reached tests: 534 passed, six org/team/user SQLite/PostgreSQL variants
+failed before the storage assertions with child diagnostics withheld.
+Exact isolated head and dev 47652771 controls both reproduced 6 failed,
+6 passed using the official PostgreSQL fixture. A separate unchanged SQLite
+child run identified the required keyword-only org membership context
+TypeError without printing raw diagnostics; both membership methods require
+that context on head and dev. This is an inherited fixture failure.
+
+Supply the existing trusted BOOTSTRAP context to the two fixture membership
+writes only. Byte reconstruction preserves all other source, including
+all 25 assertions across the test module and its embedded storage script.
+No production authorization, quota precedence, transaction, test selection,
+workflow, dependency, scanner, retry or timeout change. No new ADR.
+
+Patched exact-source temporary snapshot: 12 focused cases passed and the
+complete VN module (73), membership integration (2) and runtime selection
+(15) passed together (90, no skips, 259.04s). Both official PostgreSQL and
+SQLite were exercised. Complete CI/Docs/Config: 1,622 passed, six inherited
+skips, zero failures/errors (218.65s). Selections overlap; neither is the
+full hosted shard or full root. Compile (including embedded script), Ruff
+and unfiltered Bandit passed comparison (25 identical inherited B101
+assertions, zero new findings/errors). Parfit independently approved the
+exact fixture diff, not independent execution or full-PR certification.
+Evidence: `/tmp/claims-pr3434-vn-control-20261109.dM8PzP` and
+`/tmp/claims-pr3434-vn-fixture-20261109*`; independent review:
+`/tmp/claims-pr3434-vn-fixture-review-20261109.md`.
+
+The 5b904b00 Jobs PostgreSQL job passed 1,557 with three skips within its
+unchanged limit. Its Bun install failures and GitHub Releases uv HTTP 504s
+are separate, not fixed by this patch. Auto-merge remains off; repeat exact
+ordinary hosted holds, parity and required-check verification on the
+published head. TASK-15466 and Stages 3/4 remain In Progress.
