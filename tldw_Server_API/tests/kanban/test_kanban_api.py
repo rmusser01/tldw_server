@@ -4,9 +4,9 @@ Integration tests for Kanban API endpoints using a real Kanban DB.
 No mocking of internal functions; only dependency override to inject a temp DB.
 """
 
-import importlib
 import sqlite3
 from datetime import datetime, timezone, timedelta
+from functools import cache
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,13 +19,24 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     NotFoundError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.tests.helpers.app_main_state import (
+    app_main_isolated,
+    reload_app_main,
+    set_app_main,
+)
 
 
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture(scope="module")
+def kanban_app_factory():
+    # Build the full app once, under the first case's normal fixture environment.
+    return cache(reload_app_main)
+
+
 @pytest.fixture()
-def client_with_kanban_db(tmp_path, monkeypatch):
+def client_with_kanban_db(tmp_path, monkeypatch, kanban_app_factory):
     """Create a test client with a temporary Kanban database."""
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
     auth_db_path = (tmp_path / "auth_users.db").resolve()
@@ -47,18 +58,14 @@ def client_with_kanban_db(tmp_path, monkeypatch):
     monkeypatch.setenv("MINIMAL_TEST_APP", "0")
     monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
 
-    from tldw_Server_API.app import main as app_main
+    # Keep real startup and shutdown for each case; reuse the assembled routes.
+    with app_main_isolated(), monkeypatch.context() as overrides:
+        fastapi_app = set_app_main(kanban_app_factory()).app
+        overrides.setitem(fastapi_app.dependency_overrides, get_request_user, override_user)
+        overrides.setitem(fastapi_app.dependency_overrides, get_kanban_db_for_user, override_db_dep)
 
-    importlib.reload(app_main)
-    fastapi_app = app_main.app
-
-    fastapi_app.dependency_overrides[get_request_user] = override_user
-    fastapi_app.dependency_overrides[get_kanban_db_for_user] = override_db_dep
-
-    with TestClient(fastapi_app) as client:
-        yield client, db
-
-    fastapi_app.dependency_overrides.clear()
+        with TestClient(fastapi_app) as client:
+            yield client, db
 
 
 # =============================================================================
