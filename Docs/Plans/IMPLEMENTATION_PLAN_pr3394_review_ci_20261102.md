@@ -2849,10 +2849,10 @@ Verified Kanban full-app reuse publication — 2026-11-09: Exact same-branch 745
 **Status**: Complete
 
 ### Auth Drop Stage 3: Review, commit and publish normally
-**Status**: In Progress
+**Status**: Complete
 
 ### Auth Drop Stage 4: Verify fresh hosted execution and actual landing
-**Status**: Not Started
+**Status**: In Progress
 
 Auth isolated PostgreSQL teardown — 2026-11-09: Exact cbe05c674f25b604293f5eeee01640903fcd8f3c, main 42670211083 pull_request attempt 1/.github/workflows/ci.yml, auth-integration-admin-auth job 129345907256/runner 1000807080. Run shard tests failed 18:32:29–18:42:00 UTC; 168 passed, one teardown error after test_api_key_scopes_org_and_team_membership. The existing separate pg_terminate_backend call was followed by ordinary DROP DATABASE and PostgreSQL still saw one other session. The bootstrap pool had already closed; the exact hosted session origin is unknown. Same-jobs binding plus two complete annotations SHA 73220a651b32491382da751dfd4b51082ac9c3b998e5a1ab18ec15032d6ec383, one metadata endpoint/zero retries. One consumed log 562829 bytes/4837 lines SHA 6b8e115f682122ef37b83aeaf774f23e01c95b4daa0f532694a69a751efa27a0, both readers closed normally, NEVER REFETCH.
 
@@ -2865,3 +2865,25 @@ Normal connected run collected 18 original API key/JWT/admin/session/blacklist c
 Admission history on cbe05c674f25b604293f5eeee01640903fcd8f3c: GitHub's scheduled November 9 16:00–18:00 UTC pull_request_target protection brownout blocked the original synchronize license audit 42662133703 before jobs (and second startup failure 42662244476). Exact original public run summary annotation and GitHub changelog independently agree. Repo Actions enabled; both workflows active; actual pull refs matched exact dev and head; no settings/branch/protection changes. After the end, exact head still lacked checks. User approved one close and immediate reopen; completed once with byte-identical body and exact head, open ready unarmed. Fresh main 42670211083 and trusted license status appeared afterward. No additional state toggle authorized.
 
 Notes UI 129344495636/run 42670210603/attempt 1 failed its actual Bun dependency install before Vitest; same 3582 packages installed and one unnamed failure. Exact binding 84e502341f490be6fdad75b1e252029a05bb8330210e3c526affa65eadafb192; one consumed log 17685 bytes/244 lines SHA d6f062283759fca69f7a15c00d06845aec8bb4d0352dc749127326550960310f, both readers closed, NEVER REFETCH. The user-approved one isolated Linux install used the exact Debian amd64 Bun 1.3.2 builder, committed Dockerfile inputs/private cache. One actual install succeeded, resolved 255 and installed all 3584, 77.452s outer, SHA 43526bc4fd7b64137c5b4527c02d6047ce7be71ec68493ae9494183425d66a62, reader/container/temporary workspace closed. Earlier Docker identity/launch guard failed before any install. The control does not identify the hosted failing package or establish a cause. User approved one rerun of exact cbe05c6 job; unused while publishing a causally required new head with fresh checks. Qodo issue 6747543338 is an unchanged billing-only notice, no findings or approval; no settings or credits changed. Native/cold/installer/release and actual landing remain open.
+
+Verified Auth isolated teardown publication — 2026-11-09: Exact same-branch cbe05c674f25b604293f5eeee01640903fcd8f3c lease push of 33c6ee9c9e347847d1665c95ff4c47fe46a34d79, parent cbe05c674f25b604293f5eeee01640903fcd8f3c, tree f5d80242f5f7591706ad0f1d074535f0e277f816, succeeded normally after ACTUAL and FINALSTAGED CLEAR and configured cached hooks PASS. Exact staged and committed 21206 bytes SHA a993abeac037bc2e5c6530d819e7e7148a072f56d16c0938f7d500b0a38ef44b; one source fixture 991 bytes SHA 9c6059367bf150ef65ab9292a58c02abd8632fc3a4b3402a5513b26f169f2755. One complete postpublication census at 19:01 UTC verified exact local/upstream/remote/REST/GraphQL head, open ready unarmed, and independently confirmed live dev and both reported bases 8a75f31448c9e331542afdbbbd0f91a680f6f2f6. Main 42679251787 pull_request attempt 1, 82 checks/one page, 10 successful metadata endpoints/zero retries. Authored PR text byte-exact; full body SHA f0703603b26839b3d7c0e3f6ec27fe1f30551f7df655443b9c536ba01935f251; CodeRabbit only generated run ID changed, Qodo billing notice unchanged. No new failure/actionable feedback at that read; fresh Notes run already in progress, old cbe Notes rerun approval unused and not transferable. Current hosted Auth, Kanban, Jobs and remaining scopes remain open, actual landing and native/cold/installer/release remain open. Foreground monitoring only.
+
+## World Books canonical ID timeout — 2026-11-09
+
+### World Books Stage 1: Bind the hosted timeout and reproduce the cumulative deadline
+**Status**: Complete
+
+### World Books Stage 2: Isolate the three actions and verify the original ID assertions
+**Status**: Complete
+
+### World Books Stage 3: Review, commit and publish normally
+**Status**: In Progress
+
+### World Books Stage 4: Verify fresh hosted execution and actual landing
+**Status**: Not Started
+
+World Books canonical ID timeout — 2026-11-09: Exact 33c6ee9c9e347847d1665c95ff4c47fe46a34d79, shared-ui-coverage (23/32) job 129369693453/run 42679251374/pull_request/attempt 1/.github/workflows/frontend-required.yml/runner 1000807377. Dependency install and blob upload succeeded. Actual Run shared UI coverage shard failed after the compound canonical API ID case hit its 15,000 ms test deadline; 87 files passed and one failed, 715 tests passed and one failed. Exact hosted subphase is unknown. Provenance and two complete annotations binding SHA 87ff652e689674821a44420635d3e9878df1443f0be53350623815c2cdd874a8; one consumed log 86,751 bytes/812 lines SHA ef4f5fd0c40827e2e0e5938424e3c0f8add94580c081c18cba4352b133c8978c, both readers closed, NEVER REFETCH.
+
+Split only the existing compound test into independent edit, delete and bulk cases using the same canonical id 91 without a legacy entry_id, the same query/mock fixture, five real user clicks and all 13 file assertions. Each case retains the original 15-second limit. Use the rendered row before triggering its action; mocked mutations do not persist a state that later cases depend on. Production, workflow, admission and deadlines are unchanged. Exact candidate SHA 093f41f536f76461d9ac6511188e2af24efc80be50b1c836b4a47d118c14d7cf; TypeScript transpile diagnostics zero on both sides, assertion/import AST and click checks verified, whitespace clean. Independent ACTUAL review CLEAR. No Python source or durable architecture decision changed.
+
+With the installed Vitest 4.0.18 and original file, 7 passed, including the ordinary combined case in 9.177s (28.419s outer). A scoped 1,100 ms real user-event delay makes that original case fail on the unchanged 15-second verdict in 15.041s, SHA 1bddff35fdb70b51f7683d91cb1dc67e23585b21feb0fd62887d5253f5b0b02f. With the same delay, all three split cases pass in 10.219/4.720/9.719s, SHA 5c1a76c7079bbd7c9cef0f05d47109cbd602f0200959d7026c9b3dd2313a514f. A wrong fixture ID 92 independently fails each original expected-91 API assertion, SHA 050245eca1e866b7655b63ec70ec6c390da40299a488135556772e804be6172d. The unmodified candidate file passed all 9 cases without skips in 26.948s outer, SHA a6f6d7746d6b85d1c888adfa23a46d6b7d70a7f2eeaa717d66f56842830a5053. Controls restored and candidate SHA exact. Controls demonstrate cumulative sensitivity, not the hosted timing breakdown. No browser, downloads, dependency installs or CI rerun. Current hosted qualification, final landing, and unrelated native/cold/installer/release criteria remain open.
