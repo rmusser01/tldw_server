@@ -15,7 +15,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media 
     ensure_postgres_media_owner_identity,
     ensure_postgres_sync_log_contract,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.postgres_rls import postgres_policy_sets
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.postgres_rls import (
+    POSTGRES_CLAIMS_PUBLICATION_TABLES,
+    postgres_policy_sets,
+)
 
 _REQUIRED_TABLES = set(_POSTGRES_REQUIRED_TABLES) | {
     "schema_version",
@@ -47,6 +50,7 @@ _REQUIRED_TABLES = set(_POSTGRES_REQUIRED_TABLES) | {
     "claim_clusters",
     "claim_cluster_membership",
     "claim_cluster_links",
+    *POSTGRES_CLAIMS_PUBLICATION_TABLES,
     "email_sources",
     "email_messages",
     "email_attachments",

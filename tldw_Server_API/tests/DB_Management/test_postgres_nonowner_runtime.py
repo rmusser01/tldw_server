@@ -331,6 +331,28 @@ def test_media_refuses_weakened_shared_conversation_policy(migrated_runtime, cla
         MediaDatabase(":memory:", client_id="101", backend=f.backend)
 
 
+@pytest.mark.parametrize("as_owner", [False, True], ids=["runtime", "owner"])
+def test_claim_publication_reopen_refuses_extra_policy(migrated_runtime, as_owner):
+    from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+
+    f = migrated_runtime
+    with f.admin.transaction() as conn:
+        conn.execute(
+            "CREATE POLICY publication_open ON claims_cluster_publication_heads "
+            "USING (true) WITH CHECK (true)"
+        )
+    backend = DatabaseBackendFactory.create_backend(f.owner.config) if as_owner else f.backend
+    db = None
+    try:
+        with pytest.raises(DatabaseError, match="RLS policy catalog drifted"):
+            db = MediaDatabase(":memory:", client_id="101", backend=backend)
+    finally:
+        if db is not None:
+            db.close_connection()
+        if as_owner:
+            backend.get_pool().close_all()
+
+
 def test_owner_upgrade_refreshes_legacy_sync_scope_predicates_for_runtime(migrated_runtime):
     """The v0.1.32 policy forms must migrate before a nonowner runtime reopens."""
     f = migrated_runtime
