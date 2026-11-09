@@ -718,3 +718,45 @@ After full staged hooks and normal fast-forward publication, keep auto-merge
 off until exact new-head ordinary coverage shards 1 and 8 and notes/chat UX
 all succeed; also verify the repaired shard 3 before rearming. All effective
 required contexts still gate actual merge. Prior df1 results do not transfer.
+
+### Notes Outline Prompt Ordering
+
+Exact c37428752c ordinary UX run 42540493637, job 128922316590, had 31
+passes, one failure and no skips/flaky attempts. Extension NE-03 failed
+before outline assertions at the 20s prompt visibility check. The trace
+confirms the same-path note address change, not the natural timing trigger.
+The global prompt's route cleanup can close a prompt already shown for
+that pathname; the seeded Notes marker only suppresses a separate tour.
+
+Controlled real-browser RED observed the real prompt before clicking the
+real seeded row. The address changed and the prompt was hidden within
+1.167s of click start, before nominal auto-dismiss. The original positive
+wait then failed with the same 20s not-found assertion. This establishes
+an ordering failure mode, not its frequency or the exact hosted trigger.
+Remove the probe and move only the NE-03 note click after the unchanged
+visible / Not now / hidden checks. A comment explains the ordering.
+All 55 assertions, five test declarations, fixtures, WebUI order and other
+bytes are preserved. SHA256:
+`b00353d68a3f68380904ef9a5d529b8176c341b9cd9922004f6acf8081798d0d`.
+
+Full unchanged local real Chromium/backend UX: 32 first-attempt passes,
+zero skips/failures/flaky; NE-03 WebUI 6.347s and extension 13.819s.
+Healthy before/after and stopped; all 13 temporary source hashes restored.
+Deferred43 retention was incomplete (fault 256), separately from test
+accounting. Both Print cases passed here; earlier local failures remain
+historical. Existing prompt/Notes contracts 22 pass. Complete CI/Docs/Config
+1,621 pass, six inherited skips, zero failures/errors (188.08s), not
+additive/full-root. Locked TypeScript syntax transpile only and configured
+ESLint pass. No production Python/security scope change; retain previous
+scoped runtime/PG/Bandit results with their original meaning.
+
+Independent Arendt APPROVE/no actionable P0-P3 findings:
+`/tmp/claims-pr3434-ne03-review-20261109.md`. Reviewer checked exact source
+and saved traces, not independent execution. Parent-owned verification
+and all declined scopes are dispositioned in TASK-15466. Evidence:
+`/tmp/claims-pr3434-ne03-*-20261109.*`. Before normal publication, verify
+all 15 selected tasks and applicable final 168-path pre-commit hooks.
+Auto stays off pending exact new-head ordinary shards 1/3/8 and notes/chat
+UX success, with parity and new failures inspected before fresh feedback,
+rules, queue and dev checks. Old outcomes never transfer; all eight
+effective required contexts still gate merge. Stages 3/4 remain open.
