@@ -161,9 +161,10 @@ jobs:
         with:
           bun-version: "1.3.2"
 
+      # Capture Bun install diagnostics on one shard.
       - name: Install frontend dependencies
         working-directory: apps
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile${{ matrix.shard == 1 && ' --verbose' || '' }}
 
       - name: Run package-owned frontend unit tests
         working-directory: apps

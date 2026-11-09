@@ -2606,14 +2606,93 @@ No furtherlocalbuildcontextattempt after stop/reassessment assertion failure; br
 **Goal**: Independently review the actual and staged patches and publish with an exact lease on this PR's branch.
 **Success Criteria**: Normal cached hooks and source/index/criteria/stash/backup and exact remote head guards pass.
 **Tests**: Configured hooks, exact staged/committed patch equality, and fresh same-PR publication census.
-**Status**: In Progress
+**Status**: Complete
 
 ### Stage 4: Verify the actual hosted execution and landing
 **Goal**: Verify the install and all three Playground gates ran successfully on the new head, then qualify the remaining scopes and verify actual merge.
 **Success Criteria**: Exact head/run/attempt plus actual dependency install and composer/device/accessibility step success; unrelated native criteria stay open.
 **Tests**: Fresh hosted actual steps and verified merge ancestry.
-**Status**: Not Started
+**Status**: In Progress
 
 2026-11-09 07:00 UTC — Exact bda Playground job 129011802684, run 42571857900, pull_request attempt 1, runner 1000803612, failed Install workspace dependencies before any test ran. Complete two annotations; binding SHA 8a54ebedcab6d7ea31b0ed937d4cc89ca75c97c9475f74207fd6a76fdf1f9734. One 17962-byte, 250-line log SHA d4e021ace81dd795e43c47986770ca9b03e3e98eb0c2e38042077f5ba80fd458 was consumed; readers closed normally; never refetch. Exact checkout bda and image ubuntu-26.04; Bun 1.3.2 reported one failed package with no package name or lower-level error. Six same-head jobs succeeded in the same frozen apps install with Ubuntu 24.04, explicit Node 20, and Bun 1.3.2: 129022633512, 129022633547, 129016508685, 129013751269, 129013751186, 129018345418. Some job environment variables differ; this is a working toolchain comparison, not a controlled reproduction of the old cause. GitHub's rollout is documented at https://github.com/actions/runner-images/issues/14748. Eight install inputs are byte-identical on bda, its parent, and the already-available dev commit; five workspace manifests and links match. No new ADR: this applies the existing frontend CI setup to one job without changing application or CI admission policy; ADR-059 governs task edits.
 
 2026-11-09 07:03 UTC — Playground candidate workflow SHA 305394cb497b46ed6eb2143acac802ead713167302294999be929bbf0efd8c5b; original toolchain contract fails on the runner, candidate passes and reverses byte-for-byte to bda. Only Ubuntu 24.04 and the exact repository pinned Node 20 setup change; frozen Bun install, original gates, timeout, checkout, permissions and license admission are intact. Existing license-first workflow/admission tests 179 passed / 6 warnings (5.79s); no Python source changed. ACTUAL review CLEAR. Current Playground runtime qualification remains open; original package/cause not identified.
+
+2026-11-09 07:05 UTC — Verified same-PR Playground toolchain publication 791b3f0ab54dfff40f49c4aadb6f49ecf931a684, parent bda16238cb14696d90393170c7f378a15d417ab1, tree 73ac0a73f18b607e29016ad17a3f4c3db585c66f. Reviewed full staged and committed patch 24532 bytes SHA 618f2c5eadbff6cc6cd5ce1d132ebfc9902812efd53b2ee8a786d806ad6997a6; source 954 bytes SHA f31f8af6894a473d442483c469a1e263d23c94014b24b348a90fd5e36bd6360a. ACTUAL and FINALSTAGED CLEAR; normal cached hooks passed (15 configured healthy, no installs), normal commit and exact-bda-lease fast-forward push passed. Fresh one complete census: 57 checks (27 queued, 1 running, 2 success, 26 skip, 1 neutral); main 42577064713, attempt 1, 2 queued/1 skip, zero current actual main or focused jobs. Current scope and final base integration remain open. The old Playground package and cause were not identified; the new gate must execute install and all three test steps. Older runs are historical. No native, installer, cold-start, or release acceptance closed.
+
+2026-11-09 07:15 UTC — Exact 791 Playground scope qualified: run 42577064569 / job 129028314784 / pull_request attempt 1 / runner 1000803902 (ubuntu-24.04) completed SUCCESS. Actual Node setup, Bun setup, frozen workspace install (07:10:24–07:10:42 UTC), composer, device matrix, and accessibility all completed SUCCESS. All admitted steps completed successfully or skipped under existing policy. Binding SHA 945ac92404d43ac7a61cfc452f7ec9704d4e5aaaaf95895cd3404b3ead556c0b; full job collection SHA 0c6790f79796e725aa502bcea2763d4f2eba37b188ae32830d7ccef221161280; two metadata endpoints once each, zero retries, no logs. This verifies the new hosted gate; the old unnamed package and exact cause remain unknown. Overall CI and final base/merge remain open; older head qualification and unrelated native acceptance are unchanged.
+
+
+## Shared frozen Bun install failure — 2026-11-09 07:45 UTC
+
+### Stage 1: Diagnose the shared install failure
+**Goal**: Identify the package or lower-level failure.
+**Success Criteria**: Keep exact job, annotation, and log provenance; attempt only separately authorized reproduction.
+**Tests**: Existing frozen install on exact committed inputs with Bun diagnostics.
+**Status**: In Progress
+
+### Stage 2: Correct the evidenced problem
+**Goal**: Preserve the frozen dependency set and all downstream checks.
+**Success Criteria**: Reproduce failure and verify the smallest supported correction.
+**Tests**: Original versus candidate install and affected CI contracts.
+**Status**: Not Started
+
+### Stage 3: Review and publish
+**Goal**: Publish normal, independently reviewed exact bytes to this PR.
+**Success Criteria**: Cached hooks and local/remote/lease guards pass.
+**Tests**: Actual and final staged review, and fresh publication census.
+**Status**: Not Started
+
+### Stage 4: Verify hosted execution and landing
+**Goal**: Verify install and downstream jobs, then actual merge ancestry.
+**Success Criteria**: Exact-head actual scopes pass; native acceptance stays open.
+**Tests**: Hosted step binding and independent landing verification.
+**Status**: Not Started
+
+Shared frozen Bun install failure — 2026-11-09 07:45 UTC: On exact 791, five frontend shards and the WebUI builder failed before tests at frozen Bun 1.3.2 install. Each reported 255 resolved/downloaded/extracted, 3,582 installed and one unnamed package failed; cause unknown. All six host images Ubuntu 26.04; five shards used Node 20.20.2, WebUI failed inside the Debian builder. One log each after complete provenance and annotations; never refetch. Missing coverage blobs are downstream. Plan captures exact evidence; diagnosis first. Existing ADR-059 applies, no new durable rule.
+
+- shared-ui-coverage (8/32): run 42577064719, job 129033721285, runner 1000804077, binding SHA 29db195f0d2e2ef30e8833992af60539ecfb0eae35b23879f77461257768c66d, 3 annotations, log 25475 bytes / 326 lines SHA c38a3f9bda5a115ec5660150a8ee7712272072e1d9ea73962366b82d33eb7959.
+- shared-ui-coverage (1/32): run 42577064719, job 129033721269, runner 1000804067, binding SHA 67d9aed81ecc929057af250e61c8d169f253aff497cc6b6a3ec76a4cb20e56cb, 3 annotations, log 24391 bytes / 309 lines SHA bbfdd07d6f1a7e07104cc96bc188fc735d2f231de9a6736b91a0d79d0d1e6dd1.
+- frontend-unit-tests (7/8): run 42577064719, job 129033720926, runner 1000804062, binding SHA e5a14c5f0157bc7b3f318386286c8f2c8c3aa798db0b97ad26c357c6c4edeabc, 2 annotations, log 47949 bytes / 489 lines SHA c67b07f184e0526080e4408dc2f417bf554ac29a4a872b2bf8f29e3894346744.
+- frontend-unit-tests (1/8): run 42577064719, job 129033720864, runner 1000804049, binding SHA c639509188905452cfe3a154eeec806bf03821378641bfe40ac843765dd46c30, 2 annotations, log 47539 bytes / 483 lines SHA 7761915d11e2701d2adf896b9323640a8de3b6b8dd65e9a477f6ebc157106596.
+- frontend-unit-tests (3/8): run 42577064719, job 129033720834, runner 1000804020, binding SHA 63ee86ef577f9314995810c95593ba28fe55505cc112496c69e9e04231d68651, 2 annotations, log 46984 bytes / 474 lines SHA ef54860763da69dadbe2c59c4bc56d829bb358e95e6b506c8f70d906e7b534c1.
+- build (webui): run 42577064578, job 129033629868, runner 1000804030, binding SHA 8e28698add0e6cd57cca2fedd42bd0a5b8d1958c7ae7e22ddd31c89023da2acf, 2 annotations, log 61442 bytes / 870 lines SHA e9f23bd71c25fed539309ba7c2cd9daa8d3b32ae90c02c069309dfff7070dce4.
+
+Bun same-run positive and negative control — 2026-11-09 08:15 UTC: Same run/head and same image build 20261101.186.1, Node v20.20.2, and Bun 1.3.2: two controls installed 3584, failed UI shard 20/32 installed 3582 and failed one; all three resolved 255. Rules out blanket OS, image build, or Node/Bun version incompatibility. Underlying package/condition unproven. Current required frontend failed at Require frontend unit shard success, and the container gate failed at Check matrix results; both are downstream. Additional bound failures match the install step and did not run shard tests. Await separate approval for the isolated local install; no speculative dependency or runner change.
+
+- frontend-unit-tests (8/8), job 129033720870: actual install and test succeeded, metadata job SHA 382eeb6eda5a8b96df745b167adf8c79280f2254e05e31fab225637684327e1f; one consumed log SHA 40d617e01df2ae3ed8cfc7b949d34ef2018d4c9435c371e05854e3e53fa59d75 (288048 bytes).
+- shared-ui-coverage (2/32), job 129033721519: actual install and test succeeded, metadata job SHA 6ebda34e0f9210ee45f86397140fc9bc0384bde18eb21676b50d64f80f59706e; one consumed log SHA 5c34b8f29a7c1b3f201db75e40cd9e97400bae3c0394f2e652169ad0bc25776d (230693 bytes).
+- Failed shared UI 20/32, job 129033723020: failed install and downstream missing blob; binding SHA 2cf77e7195c286786cee0a685709a1b0de7ded8b17cd18854efec12f5f625ae3; one consumed log SHA 9b81a27574c3cebcd2cfb9ae4079896c3fa7c26b8aac8921e5e6cf67e30ee3d0 (25480 bytes).
+
+
+## AuthNZ fixture database pool teardown — 2026-11-09
+
+### Stage 1: Establish fixture ownership and the teardown failure
+**Goal**: Bind the hosted failure and observe the original fixture's actual connections before cleanup.
+**Success Criteria**: Exact hosted step and official PostgreSQL lifecycle RED.
+**Tests**: Existing endpoint node plus read-only forwarding probe of its real fixture.
+**Status**: Complete
+
+### Stage 2: Close the fixture's AuthNZ pool before dropping its database
+**Goal**: Release the real bootstrap pool on its owning loop.
+**Success Criteria**: Original node and connected tests pass; same probe observes the original pool closed before the existing database cleanup.
+**Tests**: Exact original endpoint, lifecycle invariant, and connected fixture tests.
+**Status**: Complete
+
+### Stage 3: Review and publish normally
+**Goal**: Independently review actual and staged bytes and publish with exact lease.
+**Success Criteria**: Scoped checks and normal hooks pass, task criteria unchanged.
+**Tests**: Static/Bandit baseline, ACTUAL and FINALSTAGED review, and fresh publication census.
+**Status**: In Progress
+
+### Stage 4: Verify hosted execution and landing
+**Goal**: Qualify actual AuthNZ shard, other admitted checks, and final merge.
+**Success Criteria**: Exact current-head step and verified merge ancestry; native acceptance open.
+**Tests**: Strict hosted bindings and final merge verification.
+**Status**: Not Started
+
+AuthNZ fixture database pool teardown — 2026-11-09: Exact 791 auth-core-unit-m-z 129037447639/run 42577064713/attempt 1, actual Run shard tests failed. Same-census run/job plus complete two annotations; binding 7d95b2c0217b47d8649ea91dbc8caffa5b3d599ce8261da551b53cf5fd6a6bc2. One consumed log 273832 bytes/3306 lines SHA c3cca5cef1fee335b5563f7296c630956175ab5bc7362e024d0c6abec7f5ff47; never refetch. Hosted 1230 passed and one teardown error: test_update_user_profile's setup_test_database DROP saw one session. The original exact node passed locally using the official existing PG fixture, but a forwarding observer saw the same-loop, same-database bootstrap pool still attached with five open connections at cleanup entry (RED lifecycle invariant); SHA 6f61b59d302ee52a0c59539afe7b7ba6a34c179ba435cb9ed8569f346f7b57a2. Exact server-side reconnect timing/session is not proven. Close that pool through the existing reset before original cleanup. No production or SQL/budget/assertion changes; no new ADR (existing fixture ownership and ADR-059).
+
+One-shard Bun diagnostic — 2026-11-09: Keep the local container/install approval pending. Include one CI-only diagnostic in the necessary AuthNZ publication to avoid a separate publication: add Bun --verbose only to unit shard 1/8, which failed its frozen install on exact 791. Other seven shards, all coverage shards, Dockerfiles, dependency versions/lockfiles, paths, admission, timeouts, permissions and test commands stay unchanged. This records diagnostics for a future failure; no cause or repair claimed.
+
+AuthNZ teardown candidate verified — 2026-11-09: Exact original profile endpoint passed; the same actual PG observer now sees the captured bootstrap pool closed and no service pool attached before unchanged DROP. GREEN 1 pass/5 warnings, 7.70s pytest/11.468s outer, evidence SHA 7eae7db82024f6a356c92d2994cf8e5dfa8ea68457d81954f34f2985c250800a. Connected 19 passed/56 warnings, 20.68s pytest/24.53s outer, SHA 4497170334e459197b8912fb94cf2abd3cff6268be0c743420e6891713f5f4ab (includes original node). Python 3.12 syntax, Bandit 6→6/errors 0 and Ruff 19→19, no new findings or suppression. Auth fixture SHA 2ddb17600d8ceb8e8de996da1af833f9ba99b4b95222859a55aa55205dd49c8c. Bun one-shard diagnostic SHA afc54cd3dac79af74aa2220c8083fe29898949ef312f2118284e8f3eeaad30fe, exact inverse and all eight commands verified; 113 frontend/admission contract tests passed. Both ACTUAL reviews CLEAR. Hosted AuthNZ pass and Bun cause remain open.

@@ -23,7 +23,7 @@ from urllib.parse import quote, unquote
 import asyncpg
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
@@ -1725,6 +1725,9 @@ async def setup_test_database(monkeypatch):
         raise RuntimeError("AuthNZ Postgres schema bootstrap failed in setup_test_database") from exc
 
     yield
+
+    # Close the pool opened by schema bootstrap before dropping its database.
+    await reset_db_pool()
 
     # Cleanup: Drop test database after all tests
     cleanup_conn = await asyncpg.connect(
