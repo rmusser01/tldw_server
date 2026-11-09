@@ -293,6 +293,20 @@ jobs:
       )
     # A passing run took 28 minutes on 2026-11-03, and #3412 hit 30 twice at the non-UTC step.
     timeout-minutes: 45
+    services:
+      postgres:
+        image: ${{ needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' && 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}
+        env:
+          POSTGRES_USER: tldw_user
+          POSTGRES_PASSWORD: TestPassword123!
+          POSTGRES_DB: tldw_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U tldw_user -d tldw_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 8
     steps:
       - name: Require the license audit to have passed
         if: >-
@@ -357,6 +371,34 @@ jobs:
             pyproject.toml
             uv.lock
           extras: dev
+
+      - name: Test Auth PostgreSQL fixture teardown
+        if: needs.changes.outputs.backend_changed == 'true'
+        timeout-minutes: 3
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          TEST_MODE: 'true'
+          DISABLE_HEAVY_STARTUP: '1'
+          MINIMAL_TEST_APP: '1'
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+          TLDW_TEST_POSTGRES_REQUIRED: '1'
+          TLDW_TEST_NO_DOCKER: '1'
+          TEST_DATABASE_URL: "postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports[5432] }}/tldw_test"
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/auth-postgres-teardown.xml"
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout --timeout=90 --junitxml="$report" \
+            tldw_Server_API/tests/AuthNZ/integration/test_isolated_database_teardown.py::test_isolated_auth_database_drops_after_a_late_connection
+          python - "$report" <<'PY'
+          import sys
+          from defusedxml import ElementTree
+
+          cases = ElementTree.parse(sys.argv[1]).findall(".//testcase")
+          if len(cases) != 1 or any(cases[0].find(tag) is not None for tag in ("skipped", "failure", "error")):
+              sys.exit("Expected one passing Auth PostgreSQL teardown case")
+          PY
 
       - name: Compile backend modules
         if: needs.changes.outputs.backend_changed == 'true'
