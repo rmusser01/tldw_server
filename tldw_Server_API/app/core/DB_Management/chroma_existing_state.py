@@ -73,7 +73,8 @@ def preflight_existing_chroma(path: Path, *, limits: ChromaPreflightLimits) -> E
     """Validate at most the aggregate ceilings, without provisioning anything."""
     import chromadb
 
-    if chromadb.__version__ != "1.5.5":
+    # Both versions use the validated local Rust storage profile below.
+    if chromadb.__version__ not in ("1.5.5", "1.5.9"):
         raise ChromaStorageError("vector_unsupported_sdk", retryable=False)
     budget = ReadBudget(limits)
     try:
