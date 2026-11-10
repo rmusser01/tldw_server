@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from backlog_py.core.models import BacklogProject, ParsedTaskMarkdown
+from backlog_py.core.remote_ids import RemoteIdState, collect_remote_ids
 from backlog_py.markdown.task_parser import SECTION_HEADINGS, normalize_task_markdown, parse_task_markdown
 from backlog_py.search.simple import contains_query
 from backlog_py.security.paths import PathContainmentError, assert_path_within_base
@@ -88,6 +89,32 @@ class TaskMutationError(ValueError):
 
 
 class MutableRepository(ReadOnlyRepository):
+    def __init__(self, project: BacklogProject) -> None:
+        super().__init__(project)
+        self._remote_ids: RemoteIdState | None = None
+
+    def _reject_remote_id(self, task_id: str) -> None:
+        """Refuse a top-level id that origin/dev or an open PR already holds."""
+        numeric_match = re.fullmatch(r"TASK-(\d+)", task_id.upper())
+        if not numeric_match:
+            return  # child ids (TASK-N.m) are not checked remotely
+        remote_state = self._remote_id_state()
+        if not remote_state.any_source_reachable:
+            return
+        source = remote_state.source_of(int(numeric_match.group(1)))
+        if source is not None:
+            raise TaskMutationError(
+                f"Task id already exists on {source}: {task_id} "
+                "(concurrent-session collision guard; pick an id above the "
+                "max across origin/dev and open PRs)"
+            )
+
+    def _remote_id_state(self) -> RemoteIdState:
+        """Remote task ids (origin/dev + open PRs), collected once per run."""
+        if self._remote_ids is None:
+            self._remote_ids = collect_remote_ids(self.project.root)
+        return self._remote_ids
+
     @classmethod
     def from_path(cls, cwd: Path) -> MutableRepository:
         return cls(discover_project(Path.cwd(), explicit_cwd=cwd))
@@ -113,6 +140,7 @@ class MutableRepository(ReadOnlyRepository):
         tasks = self.list_tasks()
         if normalized_id in self._all_task_ids():
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
+        self._reject_remote_id(normalized_id)
         normalized_dependencies = [_normalize_task_id(dependency) for dependency in dependencies or ()]
         _reject_missing_dependencies(normalized_dependencies, self._all_task_ids())
         _reject_circular_dependencies(normalized_id, normalized_dependencies, tasks)
@@ -329,6 +357,10 @@ class MutableRepository(ReadOnlyRepository):
             match = re.fullmatch(r"TASK-(\d+)", task_id)
             if match is not None:
                 max_id = max(max_id, int(match.group(1)))
+        # Concurrent sessions allocate ids independently; the remote max
+        # (origin/dev + open PRs) keeps this checkout from reusing an id
+        # that already exists elsewhere (AGENTS.md collision recipe).
+        max_id = max(max_id, self._remote_id_state().max_id)
         return f"TASK-{max_id + 1}"
 
     def _task_path(self, task_id: str, title: str) -> Path:

@@ -41,6 +41,15 @@ base commit, so a PR is never failed for a file it did not touch. The
 
 ## Task ids
 
+`task create` also avoids ids held outside the checkout: without `--id` it takes the
+next id above the local tasks, `origin/dev` (fetched first, 30 s) and the `backlog/`
+files of every open PR (`gh`, 30 s; PRs past GitHub's 100-file listing are paged),
+and an explicit `--id` that one of them holds is refused, naming the source. Each
+source that cannot be read (no `gh`, not authenticated, timeout, fetch failure)
+prints a warning on stderr and allocation continues from the rest, so offline use
+still works; the AGENTS.md manual recipe is the fallback when a warning appears.
+Child ids (`P.n`) skip the remote check.
+
 A task id belongs to one file across `backlog/tasks`, `backlog/completed` and
 `backlog/archive/tasks`: `task create` refuses an id any of them holds and,
 without `--id`, takes the next id above all of them, and a dependency may name
