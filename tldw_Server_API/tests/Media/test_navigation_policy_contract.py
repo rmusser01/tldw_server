@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tldw_Server_API.app.api.v1.endpoints.media_navigation_policy import (
+from tldw_Server_API.app.api.v1.utils.media_navigation_policy import (
     MEDIA_NAVIGATION_RATE_LIMIT_RESOURCE,
     MEDIA_NAVIGATION_ROUTE_POLICY,
 )

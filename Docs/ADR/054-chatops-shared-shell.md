@@ -10,7 +10,8 @@
 ## Decision
 
 The transport-agnostic ChatOps shell lives in
-`tldw_Server_API/app/api/v1/endpoints/_chatops/`. Discord and Slack keep one module
+`tldw_Server_API/app/api/v1/utils/chatops/` (TASK-13950.20 moved the shell out of
+`endpoints/`, which now holds only route modules). Discord and Slack keep one module
 each, holding a `ChatOpsOAuthProvider` descriptor and thin wrappers; the flow itself
 is written once.
 
@@ -21,11 +22,11 @@ Extraction is staged, smallest and highest-identity first:
 
 | Stage | Pair | Identity at start | State |
 | --- | --- | --- | --- |
-| 1 | `*_oauth_admin.py` | 90.9% | **done** — flow extracted to `_chatops/oauth_admin.py` |
-| 2a | `*_support.py` policy schema + normaliser + envelope | 81.9% (pair) | **done** — `_chatops/policy.py` |
+| 1 | `*_oauth_admin.py` | 90.9% | **done** — flow extracted to `chatops/oauth_admin.py` |
+| 2a | `*_support.py` policy schema + normaliser + envelope | 81.9% (pair) | **done** — `chatops/policy.py` |
 | 2b | `*_support.py` policy store + evaluator + routes | — | **done** — pair now 78.2%, largest identical run 187 → 123 lines |
-| 2c | `*_support.py` env accessors, OAuth config getters, installation-record shape; per-tenant policy store and actor mapping | — | **done** — `_chatops/settings.py`, `PolicyStore`/`resolve_actor_id` in `_chatops/policy.py`; pair 78.2% → 74.4%, largest identical run 123 → 100 lines. The remaining run is HTTP/metric/crypto plumbing that tests patch per module (`_http_afetch`, `log_counter`, `loads_envelope`), kept local on purpose |
-| 3 | `discord.py` / `slack.py` | 61.3% | **done** — `_chatops/ingress.py`: rate-limit and duplicate responses, job submission, the `status` command's tenant/owner scoping, the job-status route and workspace org resolution; the endpoints' private copies of `_metric_labels` and the policy-error response are gone. Signature verification and command parsing stay per protocol. Pair 61.3% → 56.2%; the longest remaining run (95 lines) is the per-router OAuth/admin route declarations |
+| 2c | `*_support.py` env accessors, OAuth config getters, installation-record shape; per-tenant policy store and actor mapping | — | **done** — `chatops/settings.py`, `PolicyStore`/`resolve_actor_id` in `chatops/policy.py`; pair 78.2% → 74.4%, largest identical run 123 → 100 lines. The remaining run is HTTP/metric/crypto plumbing that tests patch per module (`_http_afetch`, `log_counter`, `loads_envelope`), kept local on purpose |
+| 3 | `discord.py` / `slack.py` | 61.3% | **done** — `chatops/ingress.py`: rate-limit and duplicate responses, job submission, the `status` command's tenant/owner scoping, the job-status route and workspace org resolution; the endpoints' private copies of `_metric_labels` and the policy-error response are gone. Signature verification and command parsing stay per protocol. Pair 61.3% → 56.2%; the longest remaining run (95 lines) is the per-router OAuth/admin route declarations |
 | 4 | the test clone pairs | one at 100% | **done** — 100% pair collapsed to one parametrised suite; the lifecycle pair's byte-identical fakes moved to `tests/_chatops_helpers/` |
 
 Stage 2a settles the policy vocabulary question (AC2 of TASK-13326): one schema and

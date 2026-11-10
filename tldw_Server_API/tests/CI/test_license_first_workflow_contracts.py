@@ -1444,6 +1444,7 @@ def test_backend_required_enforces_http_usage_guard() -> None:
         "tldw_Server_API/tests/lint/test_function_size_ratchet.py",
         "tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py",
         "tldw_Server_API/tests/lint/test_service_singleton_ratchet.py",
+        "tldw_Server_API/tests/lint/test_endpoint_monkeypatch_ratchet.py",
     ],
 )
 def test_backend_required_enforces_size_ratchets(ratchet: str) -> None:
@@ -1521,6 +1522,26 @@ def test_backend_required_enforces_llm_gateway_guards(guard: str) -> None:
     assert guard in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
     # A rename on either side would quietly drop the bump-with-reason check to its local fallback.
     assert "base_sha" in str(gate.get("env", {}).get(BASE_ENV, ""))  # nosec B101 - regression assertion
+
+
+@pytest.mark.parametrize(
+    "guard",
+    [
+        "tldw_Server_API/tests/lint/test_endpoint_auth_deps_import_boundary.py",
+        "tldw_Server_API/tests/lint/test_no_raw_sql_in_endpoints.py",
+        "tldw_Server_API/tests/AuthNZ/unit/test_require_admin_callsite_guardrail.py",
+        "tldw_Server_API/tests/AuthNZ/unit/test_get_current_user_callsite_guardrail.py",
+    ],
+)
+def test_backend_required_enforces_endpoint_scope_guards(guard: str) -> None:
+    """TASK-13950.20: the guards scoped to the endpoints tree, widened to moved code, run in a required step."""
+    import shlex
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    assert guard in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
 
 
 def test_backend_required_enforces_isolation_ratchets():

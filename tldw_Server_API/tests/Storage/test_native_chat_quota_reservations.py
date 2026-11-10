@@ -507,7 +507,7 @@ async def main():
             import time
             from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
             from tldw_Server_API.app.core.Billing.enforcement import BillingEnforcer, UsageSummary
-            from tldw_Server_API.app.api.v1.endpoints.storage_helpers import _to_quota_status
+            from tldw_Server_API.app.api.v1.utils.storage_helpers import _to_quota_status
             for member in members:
                 await service.set_user_quota(member, 100)
             await pool.execute('INSERT INTO organizations (id,name) VALUES (?, ?)', 51, 'native-quota-org')

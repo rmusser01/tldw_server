@@ -27,7 +27,7 @@ _PRIVATE = "private-profile-credential-content"
 
 def _transport():
     """Load the new contract at execution time so RED is not a collection failure."""
-    name = "tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport"
+    name = "tldw_Server_API.app.api.v1.utils.workspace_chat_startup_transport"
     assert importlib.util.find_spec(name) is not None, "Strict startup transport is not implemented"
     return importlib.import_module(name)
 

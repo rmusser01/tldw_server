@@ -476,6 +476,7 @@ jobs:
             tldw_Server_API/tests/lint/test_schemas_config_boundary.py \
             tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py \
             tldw_Server_API/tests/lint/test_service_singleton_ratchet.py \
+            tldw_Server_API/tests/lint/test_endpoint_monkeypatch_ratchet.py \
             tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py \
             tldw_Server_API/tests/lint/test_no_inline_sse_frames.py \
             tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
@@ -484,6 +485,10 @@ jobs:
             tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
             tldw_Server_API/tests/lint/test_test_mode_branch_ratchet.py \
             tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
+            tldw_Server_API/tests/lint/test_endpoint_auth_deps_import_boundary.py \
+            tldw_Server_API/tests/lint/test_no_raw_sql_in_endpoints.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_require_admin_callsite_guardrail.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_get_current_user_callsite_guardrail.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
             tldw_Server_API/tests/CI/test_check_backlog_task_ids.py \
             tldw_Server_API/tests/Helper_Scripts/test_renumber_duplicate_task_ids.py \

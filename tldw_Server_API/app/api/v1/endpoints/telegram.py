@@ -7,7 +7,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
 )
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     telegram_admin_get_bot_impl,
     telegram_admin_list_linked_actors_impl,
     telegram_admin_put_bot_impl,

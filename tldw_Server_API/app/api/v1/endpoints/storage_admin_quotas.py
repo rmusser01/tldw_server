@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.api.v1.endpoints.storage_helpers import (
+from tldw_Server_API.app.api.v1.utils.storage_helpers import (
     _principal_is_storage_admin,
     _to_quota_status,
 )

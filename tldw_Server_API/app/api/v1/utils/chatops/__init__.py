@@ -24,6 +24,6 @@ error envelope -- is one implementation here.
 See Docs/ADR/054-chatops-shared-shell.md.
 """
 
-from .oauth_admin import ChatOpsOAuthProvider
+from tldw_Server_API.app.api.v1.utils.chatops.oauth_admin import ChatOpsOAuthProvider
 
 __all__ = ["ChatOpsOAuthProvider"]

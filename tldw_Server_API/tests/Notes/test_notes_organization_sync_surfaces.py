@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.api.v1.endpoints import notes_tasks as notes_tasks_endpoint
-from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import notes_sync_http_error
+from tldw_Server_API.app.api.v1.utils.notes_sync_errors import notes_sync_http_error
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.Chat.conversation_enrichment import auto_tag_conversation
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (

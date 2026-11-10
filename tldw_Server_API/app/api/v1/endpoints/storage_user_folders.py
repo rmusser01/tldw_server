@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
-from tldw_Server_API.app.api.v1.endpoints.storage_helpers import _normalize_folder_tag
+from tldw_Server_API.app.api.v1.utils.storage_helpers import _normalize_folder_tag
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     FolderCreateRequest,
     FolderInfo,

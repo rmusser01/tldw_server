@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceEligibilityCheckRequest,
     WorkspaceEligibilityCheckResponse,

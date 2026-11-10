@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import integrations_control_plane, telegram
-from tldw_Server_API.app.api.v1.endpoints import telegram_support as support
+from tldw_Server_API.app.api.v1.utils.chatops import telegram_support as support
 from tldw_Server_API.app.api.v1.schemas.telegram_schemas import TelegramBotConfigUpdate
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
