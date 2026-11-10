@@ -1,13 +1,18 @@
 """The keeper rule, the open-PR cache and the open-PR duplicate list of the duplicate-id renumbering (TASK-13960)."""
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
+from backlog_py.core import repository as repository_module
+from backlog_py.core.remote_ids import RemoteIdState
 from Helper_Scripts import renumber_duplicate_task_ids as renumber
 from Helper_Scripts.renumber_duplicate_task_ids import Task, choose_keeper
 
 pytestmark = pytest.mark.unit
+
+BACKLOG_FIXTURE = Path(__file__).resolve().parents[3] / "tools/backlog-py/tests/fixtures/repos/basic"
 
 
 def _copy(directory: str, name: str, origin_index: int, **evidence: object) -> Task:
@@ -113,3 +118,17 @@ def test_a_dead_link_names_the_citing_task_file_by_its_path_after_the_renumber()
     assert dict(rewrites) == {"Docs/notes.md": ["task-7 - Old.md"]}
     assert dead == [("backlog/tasks/task-15000 - Citing.md", "task-7 - Old.md")]
     assert self_links == [("backlog/tasks/task-15001 - Old.md", "task-7 - Old.md")]
+
+
+def test_apply_takes_the_ids_its_own_open_pr_shows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A re-run while this PR is open: backlog-py's live check lists the PR's own block (TASK-13961).
+    shutil.copytree(BACKLOG_FIXTURE, tmp_path, dirs_exist_ok=True)
+    monkeypatch.setattr(
+        repository_module, "collect_remote_ids", lambda _root: RemoteIdState({"open pull requests": {15000}})
+    )
+    row = {"copy": _copy("tasks", "task-1 - Example-task.md", 0), "old": "TASK-1", "new": "TASK-15000",
+           "keeper": _copy("completed", "task-1 - Kept.md", 0)}
+
+    renumber.apply({"rows": [row], "tasks": [], "edits": {}, "rewrites": {}}, tmp_path, "TASK-13960", "2026-11-07")
+
+    assert [path.name for path in (tmp_path / "backlog/tasks").iterdir()] == ["task-15000 - Example-task.md"]
