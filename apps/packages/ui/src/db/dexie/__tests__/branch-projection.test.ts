@@ -50,6 +50,11 @@ const memory: Record<string, any> = vi.hoisted(() => {
         rows.set(k, { ...rows.get(k), ...structuredClone(patch) })
       },
       delete: async (id: any) => rows.delete(JSON.stringify(id)),
+      filter: (predicate: (row: any) => boolean) => ({
+        delete: async () => {
+          for (const [k, row] of rows) if (predicate(row)) rows.delete(k)
+        }
+      }),
       where: (field: string) => ({
         equals: (v: any) => ({
           delete: async () => {
@@ -1135,6 +1140,7 @@ it("clean deletion and same-owner undo retain the settled local baseline and row
   const snapshot = await getFullChatData("source")
   await deleteByHistoryId("source")
   expect(memory.messages.rows.size).toBe(0)
+  expect(memory.searchTokens.rows.size).toBe(0)
   await restoreChat(snapshot!)
   expect(
     (await memory.chatHistories.get("source")).local_settings_guard

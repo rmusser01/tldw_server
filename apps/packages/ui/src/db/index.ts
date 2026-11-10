@@ -15,7 +15,8 @@
  *    `hooks/useMigration.tsx`) imports `PageAssitDatabase` directly and
  *    uses `getUserID`, `getChatHistories`, `getChatHistory`,
  *    `getAllPrompts`, `getAllWebshares`, and
- *    `getSessionFilesInfo`.
+ *    `getSessionFilesInfo`; explicit Dexie history erasure also removes
+ *    retained legacy copies through `db/dexie/legacy-chat-storage.ts`.
  * 2. Firefox-private-mode fallback (Dexie throws DatabaseClosedError
  *    there):
  *    - `db/dexie/firefox-sync.ts` `firefoxSyncDataForPrivateMode`
@@ -78,6 +79,10 @@ type SessionFiles = {
   retrievalEnabled: boolean
   createdAt: number
 }
+
+const isLegacySessionFiles = (value: unknown, sessionId: string): value is SessionFiles =>
+  !!value && typeof value === "object" && "files" in value && Array.isArray(value.files) &&
+  (!("sessionId" in value) || value.sessionId === sessionId)
 
 type Message = {
   id: string
@@ -210,12 +215,26 @@ export class PageAssitDatabase {
     this.db = chrome.storage.local
   }
 
-  private readLegacyValue<T>(key: string): Promise<T | undefined> {
+  private readLegacyValues(key: string | null): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       this.db.get(key, (items) => {
         const error = chrome.runtime?.lastError
         if (error || !items) reject(new Error(error?.message || "Storage unavailable"))
-        else resolve(items[key] as T | undefined)
+        else resolve(items)
+      })
+    })
+  }
+
+  private async readLegacyValue<T>(key: string): Promise<T | undefined> {
+    return (await this.readLegacyValues(key))[key] as T | undefined
+  }
+
+  private writeLegacyValues(write: (done: () => void) => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      write(() => {
+        const error = chrome.runtime?.lastError
+        if (error) reject(new Error(error.message || "Storage unavailable"))
+        else resolve()
       })
     })
   }
@@ -232,7 +251,10 @@ export class PageAssitDatabase {
   }
 
   async getSessionFilesInfo(sessionId: string): Promise<SessionFiles | null> {
-    return await this.readLegacyValue<SessionFiles>(`session_files_${sessionId}`) ?? null
+    const stored = await this.readLegacyValue<unknown>(`session_files_${sessionId}`)
+    if (stored == null) return null
+    if (!isLegacySessionFiles(stored, sessionId)) throw new Error("Invalid legacy session files")
+    return stored
   }
 
   async addFileToSession(sessionId: string, file: UploadedFile) {
@@ -292,14 +314,23 @@ export class PageAssitDatabase {
     this.db.remove(`session_files_${sessionId}`)
   }
 
-  async getChatHistory(id: string): Promise<MessageHistory> {
+  async getStoredChatMessages(id: string) {
+    return this.readLegacyValue<MessageHistory>(id)
+  }
+
+  async getChatHistoryWithSource(id: string) {
     const modelNicknames = await getAllModelNicknames()
-    const messages = await this.readLegacyValue<MessageHistory>(id)
-    return (messages ?? []).map((message) => ({
+    const source = await this.getStoredChatMessages(id)
+    const messages = (source ?? []).map((message) => ({
       ...message,
       modelName: modelNicknames[message.name]?.model_name || message.name,
       modelImage: modelNicknames[message.name]?.model_avatar || undefined
     }))
+    return { messages, source }
+  }
+
+  async getChatHistory(id: string): Promise<MessageHistory> {
+    return (await this.getChatHistoryWithSource(id)).messages
   }
 
   async getChatHistories(): Promise<ChatHistory> {
@@ -368,24 +399,33 @@ export class PageAssitDatabase {
   }
 
   async clear() {
-    this.db.clear()
+    await this.writeLegacyValues((done) => this.db.clear(done))
   }
 
-  async deleteChatHistory(id: string) {
-    const chatHistories = await this.getChatHistories()
-    const newChatHistories = chatHistories.filter(
-      (history) => history.id !== id
-    )
-    this.db.set({ chatHistories: newChatHistories })
-    this.db.remove(id)
+  async deleteChatHistory(id: string, chatHistories: ChatHistory, hasMessages: boolean) {
+    const keys = [`session_files_${id}`]
+    if (hasMessages) keys.push(id)
+    await this.writeLegacyValues((done) => this.db.remove(keys, done))
+    await this.writeLegacyValues((done) => this.db.set({
+      chatHistories: chatHistories.filter((history) => history.id !== id)
+    }, done))
   }
 
   async deleteAllChatHistory() {
-    const chatHistories = await this.getChatHistories()
-    chatHistories.forEach((history) => {
-      this.db.remove(history.id)
+    const items = await this.readLegacyValues(null)
+    const histories = Array.isArray(items.chatHistories) ? items.chatHistories : []
+    const historyIds = new Set(histories.flatMap((history) =>
+      typeof history?.id === "string" ? [history.id] : []
+    ))
+    const keys = Object.keys(items).filter((key) => {
+      const value = items[key]
+      if (key.startsWith("session_files_") && isLegacySessionFiles(value, key.slice("session_files_".length))) return true
+      const catalogued = historyIds.has(key)
+      return Array.isArray(value) && value.length > 0 &&
+        value.every((row) => row && typeof row.history_id === "string" && typeof row.role === "string" &&
+          (catalogued || (row.history_id === key && typeof row.id === "string" && typeof row.content === "string")))
     })
-    this.db.set({ chatHistories: [] })
+    await this.writeLegacyValues((done) => this.db.remove(["chatHistories", ...keys], done))
   }
 
   async deleteMessage(history_id: string) {
