@@ -579,3 +579,75 @@ async def test_evaluate_custom_metric_lets_an_llm_quota_refusal_through(evaluati
                 scoring_criteria={"accuracy": "0-10"},
                 api_name="openai",
             )
+
+
+_MC_ITEM = {"question": "What is 2 + 2?", "choices": ["3", "4"], "correct_answer": 1}
+_QA_ITEM = {"question": "What is the capital of France?", "answer": "Paris"}
+_MC_ASKS = "Score 10 for a correct answer, 1 for an"
+_QA_ASKS = "GRADE: [correct/incorrect"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("benchmark", "item", "reply", "asked", "expected"),
+    [
+        ("simple_bench", _MC_ITEM, "SCORE: 10 EXPLANATION: B.", _MC_ASKS, 1.0),
+        ("simple_bench", _MC_ITEM, "SCORE: 1 EXPLANATION: A.", _MC_ASKS, 0.0),
+        ("simple_bench", _MC_ITEM, "I cannot judge this.", _MC_ASKS, 0.5),
+        ("mmlu_pro", _MC_ITEM, "SCORE: 8.2 EXPLANATION: B, thin.", "with N from 1 (worst) to 10 (best)", 0.8),
+        ("simpleqa_verified", _QA_ITEM, "GRADE: correct\nEXPLANATION: Paris.", _QA_ASKS, 1.0),
+        ("simpleqa_verified", _QA_ITEM, "GRADE: incorrect\nEXPLANATION: Lyon.", _QA_ASKS, 0.0),
+        ("simpleqa_verified", _QA_ITEM, "GRADE: correct\nEXPLANATION: Paris.\nScore: 7", _QA_ASKS, 1.0),
+        ("simpleqa_verified", _QA_ITEM, "GRADE: [incorrect]\nEXPLANATION: Lyon.", _QA_ASKS, 0.0),
+        # a failed judge call is a 0.0 with the error, not a silent 0.5 counted as a success
+        ("simple_bench", _MC_ITEM, RuntimeError("429 rate limited"), _MC_ASKS, 0.0),
+        # the judge restates the rubric before its own score line: the labelled line wins
+        ("simple_bench", _MC_ITEM,
+         "Per the rubric: Score 10 for a correct answer, 1 for an incorrect one. It chose A.\nSCORE: 1", _MC_ASKS, 0.0),
+        ("simple_bench", _MC_ITEM, "**SCORE:** 10\nEXPLANATION: B.", _MC_ASKS, 1.0),
+        ("simple_bench", _MC_ITEM, "Score: **10**", _MC_ASKS, 1.0),
+        # "Grade:" in a multiple-choice reply is prose; only a prompt that asks for a GRADE reads one
+        ("simple_bench", _MC_ITEM, "Grade: Correct answer is B; the model chose A.\nSCORE: 1", _MC_ASKS, 0.0),
+    ],
+    ids=["mc-correct", "mc-incorrect", "no-score", "mc-reasoning", "simpleqa-correct", "simpleqa-incorrect",
+         "simpleqa-grade-decides", "simpleqa-bracketed-grade", "judge-error", "rubric-echo", "markdown-label",
+         "markdown-value", "mc-grade-is-prose"],
+)
+async def test_a_benchmark_item_is_scored_from_the_judges_reply(
+    evaluation_manager, monkeypatch, benchmark, item, reply, asked, expected
+):
+    """A benchmark's own formatter, through the real analyze(): the model answers, the judge
+    scores that answer on the scale it was asked for, and the item's score is the judge's, not
+    the 0.5 default (TASK-15485)."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
+    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
+
+    prompts: list[str] = []
+
+    def chat(request, timeout=None):
+        prompts.append(request["messages"][-1]["content"])
+        if isinstance(reply, Exception) and len(prompts) > 1:
+            raise reply
+        return {"choices": [{"message": {"content": "B. 4" if len(prompts) == 1 else str(reply)}}]}
+
+    monkeypatch.setattr(
+        summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _p: SimpleNamespace(chat=chat))
+    )
+    data = get_registry().create_evaluator(benchmark).format_for_custom_metric(item)
+    result = await evaluation_manager.evaluate_custom_metric(
+        metric_name=data["name"],
+        description=data["description"],
+        evaluation_prompt=data["evaluation_prompt"],
+        input_data=data["input_data"],
+        scoring_criteria=data["scoring_criteria"],
+        api_name="openai",
+        api_key="sk-test",
+    )
+    assert len(prompts) == 2, prompts  # the model's answer, then the judge
+    assert "B. 4" in prompts[1] and asked in prompts[1]
+    assert result["score"] == pytest.approx(expected)
+    if isinstance(reply, Exception):
+        assert result["explanation"].startswith("Error:")

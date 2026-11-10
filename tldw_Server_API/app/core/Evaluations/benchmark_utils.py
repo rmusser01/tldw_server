@@ -493,11 +493,11 @@ Instructions:
    - Reasoning quality: 30% of score"""
         else:
             evaluation_prompt += """
-3. Score 1.0 for correct answer, 0.0 for incorrect"""
+3. Score 10 for a correct answer, 1 for an incorrect one"""
 
         evaluation_prompt += """
 
-Respond with: SCORE: X.X EXPLANATION: [explanation]"""
+Respond with: SCORE: N EXPLANATION: [explanation], with N from 1 (worst) to 10 (best)"""
 
         return {
             "name": f"{self.name}_accuracy",

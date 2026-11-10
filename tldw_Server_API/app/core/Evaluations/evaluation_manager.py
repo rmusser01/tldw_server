@@ -593,8 +593,15 @@ class EvaluationManager:
                 full_prompt,
                 api_key,
                 temp=0.3,
-                system_message="You are an expert evaluator. Provide scores and detailed explanations."
+                system_message="You are an expert evaluator. Provide scores and detailed explanations.",
+                input_is_literal_text=True,
             )
+
+            # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
+            # is a 0.0 with the error, as for the model's own answer above; not a silent 0.5.
+            if isinstance(response, str) and response.startswith("Error:"):
+                logger.error(f"Judge call failed for metric '{metric_name}': {response}")
+                return {"metric_name": metric_name, "score": 0.0, "explanation": response, "raw_output": None}
 
             # Parse response with strict validation
             import json as json_module
@@ -621,13 +628,15 @@ class EvaluationManager:
                 # Fallback to regex parsing with strict validation
                 # Only accept scores that are clearly delimited (e.g., "Score: 8")
                 score_patterns = [
+                    # the labelled "SCORE: 8" (also "**SCORE:** 8") wins over prose such as "Score 10 for a correct answer"
+                    r'score[*_\s]*:[*_\s]*(\d+(?:\.\d+)?)\s*(?:/\s*10)?',
                     r'[Ss]core[:\s]+(\d+(?:\.\d+)?)\s*(?:/\s*10)?',  # Score: 8 or Score: 8/10
                     r'(\d+(?:\.\d+)?)\s*(?:/\s*10)\s+points?',  # 8/10 points
                     r'^(\d+(?:\.\d+)?)\s*$'  # Just a number on its own line
                 ]
 
                 for pattern in score_patterns:
-                    match = re.search(pattern, response, re.MULTILINE)
+                    match = re.search(pattern, response, re.MULTILINE | re.IGNORECASE)  # benchmarks ask "SCORE:"
                     if match:
                         try:
                             raw_score = float(match.group(1))
@@ -637,6 +646,12 @@ class EvaluationManager:
                                 break
                         except (ValueError, IndexError):
                             continue
+
+                # SimpleQA's grader answers with a grade (simpleqa_eval.parse_grading_response); it decides.
+                # Only a prompt that asks for a GRADE reads one ("Grade: ..." elsewhere is prose).
+                grade = re.search(r'GRADE[*_\s]*:[*_\s\[]*(correct|incorrect|not_attempted)\b', response, re.IGNORECASE)
+                if grade and "GRADE:" in evaluation_prompt:
+                    score = 1.0 if grade.group(1).lower() == "correct" else 0.0
 
                 # Extract explanation (everything after first score mention or first newline)
                 if '\n' in response:
