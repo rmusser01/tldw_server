@@ -28,6 +28,7 @@ Follow-up of TASK-13956. These features call their provider with the server's ke
 AC #1 answered (owner, 2026-11-07): all four families use the user's stored key, built cheapest first: (a) the flashcards and quizzes study assistants; (b) benchmark runs and watchlist output summaries; (c) evaluation runs; (d) media analysis (the /media endpoints) and media ingest jobs. ADR-004 Change summary waived for every TASK-15426 PR (owner, 2026-11-07: "Yes, waive for all").
 Plan, PR A of 4 (study assistants): Docs/superpowers/plans/2026-11-07-own-key-study-assistants.md.
 PR A (https://github.com/rmusser01/tldw_server/pull/3444): the flashcards and quizzes study assistants run on the user's own key for the reply's provider (users_own_key_credentials + enforce_llm_quota_on_own_key in usage_quota_deps.py; study_assistant_own_key replaces require_llm_quota on both routes). Over a limit: own key admitted unmarked, server key and no usable provider refused with the same 402. Tests: focused 17 passed; wider set 1041 passed, 1 skipped, 0 failed (34 files; base 1026 passed, 1 skipped). Bandit: no issues. Docs: Usage_Quotas.md, BYOK guide (including last_used_at), ADR-083 amendment (mirrored). The prompt-improvement live-DNS test is left to the live-network-tests task (filed by the benchmark-judge PR).
+Plan, PR B of 4 (benchmark runs, watchlist output summaries): Docs/superpowers/plans/2026-11-07-own-key-benchmarks-watchlist-summaries.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
