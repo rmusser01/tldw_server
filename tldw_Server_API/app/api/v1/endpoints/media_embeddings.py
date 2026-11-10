@@ -15,7 +15,7 @@ from fastapi import status as http_status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
 
 # Local imports

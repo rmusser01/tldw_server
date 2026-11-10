@@ -45,7 +45,6 @@ EXCLUDED = (
 
 # Per-module counts; entries may only be lowered or removed.
 PRIVATE_COERCER_BASELINE: dict[str, int] = {
-    "tldw_Server_API/app/api/v1/endpoints/_pagination_utils.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py": 3,
     "tldw_Server_API/app/api/v1/endpoints/audit.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py": 1,
@@ -69,6 +68,7 @@ PRIVATE_COERCER_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/workflows.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/writing.py": 1,
+    "tldw_Server_API/app/api/v1/utils/pagination.py": 1,
     "tldw_Server_API/app/core/Agent_Client_Protocol/hardening.py": 1,
     "tldw_Server_API/app/core/Audio/tokenizer_service.py": 1,
     "tldw_Server_API/app/core/Audit/audit_shared_migration.py": 1,

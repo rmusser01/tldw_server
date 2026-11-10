@@ -3,6 +3,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+from tldw_Server_API.tests.lint import _moved_endpoint_code
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENDPOINTS_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "api" / "v1" / "endpoints"
@@ -69,10 +73,18 @@ def _auth_dependency_import_offenders(module: ast.Module, rel_path: str) -> list
     return offenders
 
 
+def _scan_files() -> list[Path]:
+    return _moved_endpoint_code.scan_files(ENDPOINTS_ROOT)
+
+
+def _display(path: Path) -> str:
+    return _moved_endpoint_code.display(path)
+
+
 def _direct_auth_dependency_imports() -> list[str]:
     offenders: list[str] = []
-    for py_file in sorted(ENDPOINTS_ROOT.rglob("*.py")):
-        rel_path = py_file.relative_to(REPO_ROOT).as_posix()
+    for py_file in _scan_files():
+        rel_path = _display(py_file)
         module = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         offenders.extend(_auth_dependency_import_offenders(module, rel_path))
     return offenders
@@ -126,3 +138,14 @@ def test_auth_deps_reexports_common_endpoint_auth_symbols():
         "auth_deps.py must re-export common endpoint auth dependency symbols: "
         + ", ".join(missing)
     )
+
+
+
+def test_auth_deps_boundary_flags_a_violation_in_code_moved_out_of_endpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seeded = tmp_path / "api" / "v1" / "utils" / "chatops" / "seeded.py"
+    seeded.parent.mkdir(parents=True)
+    seeded.write_text('from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User\n', encoding="utf-8")
+    monkeypatch.setattr(_moved_endpoint_code, "moved_files", lambda *_args: [seeded])
+    assert any(line.startswith(f"{seeded}:1:") for line in _direct_auth_dependency_imports())  # nosec B101
