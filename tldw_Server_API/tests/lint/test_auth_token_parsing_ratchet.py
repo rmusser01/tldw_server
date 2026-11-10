@@ -391,12 +391,6 @@ def test_configuration_comparisons_docstrings_and_comments_are_not_counted() -> 
     assert count_looks_like_jwt(tree) == 0
 
 
-if __name__ == "__main__":
-    for name, counts in (("LOOKS_LIKE_JWT_BASELINE", current_looks_like_jwt()), ("BEARER_PARSE_BASELINE", current_bearer_parses())):
-        print(f"{name} = {counts!r}  # {sum(counts.values())} in {len(counts)} modules")
-
-
-
 def test_bearer_ratchet_flags_a_violation_in_code_moved_out_of_endpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -405,3 +399,8 @@ def test_bearer_ratchet_flags_a_violation_in_code_moved_out_of_endpoints(
     seeded.write_text("def f(header):\n    return header.startswith('Bearer ')\n", encoding="utf-8")
     monkeypatch.setattr(_moved_endpoint_code, "moved_files", lambda *_args: [seeded])
     assert current_bearer_parses().get(str(seeded)) == 1  # nosec B101
+
+
+if __name__ == "__main__":
+    for name, counts in (("LOOKS_LIKE_JWT_BASELINE", current_looks_like_jwt()), ("BEARER_PARSE_BASELINE", current_bearer_parses())):
+        print(f"{name} = {counts!r}  # {sum(counts.values())} in {len(counts)} modules")

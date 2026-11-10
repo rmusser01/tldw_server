@@ -140,7 +140,6 @@ def test_auth_deps_reexports_common_endpoint_auth_symbols():
     )
 
 
-
 def test_auth_deps_boundary_flags_a_violation_in_code_moved_out_of_endpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

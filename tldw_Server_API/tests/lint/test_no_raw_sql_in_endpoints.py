@@ -215,7 +215,6 @@ def test_no_endpoint_reaches_database_internals() -> None:
     assert not offenders, offenders
 
 
-
 def test_raw_sql_ratchet_flags_a_violation_in_code_moved_out_of_endpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
