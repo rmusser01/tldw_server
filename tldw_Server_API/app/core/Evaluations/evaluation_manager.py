@@ -557,16 +557,23 @@ class EvaluationManager:
         """Evaluate using custom metric definition"""
         runtime_input_data = dict(input_data)
         if self._contains_model_response_placeholder(runtime_input_data):
-            model_response = await self._generate_model_response(
+            model_call = self._generate_model_response(
                 input_data=runtime_input_data,
                 api_name=api_name,
                 api_key=api_key,
             )
+            try:
+                model_response = await model_call
+            except LLMQuotaExceededError:
+                raise  # the user's limit is not an unscored item
+            except Exception as e:  # a model call that raised (provider error, timeout, rate limit) is unscored too
+                model_response = f"Error: {e}"
             if isinstance(model_response, str) and model_response.startswith("Error:"):
                 logger.error(f"Model response generation failed for metric '{metric_name}': {model_response}")
+                # score None is "no score": the callers count the item unscored, in no average (owner, 2026-11-10)
                 return {
                     "metric_name": metric_name,
-                    "score": 0.0,
+                    "score": None,
                     "explanation": model_response,
                     "raw_output": None,
                 }
@@ -598,10 +605,10 @@ class EvaluationManager:
             )
 
             # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
-            # is a 0.0 with the error, as for the model's own answer above; not a silent 0.5.
+            # is unscored with the error, as for the model's own answer above; not a silent 0.5.
             if isinstance(response, str) and response.startswith("Error:"):
                 logger.error(f"Judge call failed for metric '{metric_name}': {response}")
-                return {"metric_name": metric_name, "score": 0.0, "explanation": response, "raw_output": None}
+                return {"metric_name": metric_name, "score": None, "explanation": response, "raw_output": None}
 
             # Parse response with strict validation
             import json as json_module
@@ -660,10 +667,9 @@ class EvaluationManager:
                     explanation_lines = [l for l in lines if not re.match(r'^\s*\d+(?:\.\d+)?\s*(?:/\s*10)?\s*$', l)]
                     explanation = '\n'.join(explanation_lines).strip()
 
-            # Default to 0.5 if no valid score found
+            # No valid score found: the item is unscored (None), not a 0.5 placeholder
             if score is None:
                 logger.warning(f"Could not parse valid score from response: {response[:100]}...")
-                score = 0.5
 
             return {
                 "metric_name": metric_name,
@@ -678,7 +684,7 @@ class EvaluationManager:
             logger.error(f"Custom metric evaluation failed: {e}")
             return {
                 "metric_name": metric_name,
-                "score": 0.0,
+                "score": None,
                 "explanation": f"Evaluation failed: {str(e)}",
                 "raw_output": None
             }

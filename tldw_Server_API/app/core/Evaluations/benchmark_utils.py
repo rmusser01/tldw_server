@@ -1062,6 +1062,8 @@ def calculate_accuracy_by_category(results: list[dict[str, Any]],
     for result in results:
         category = result.get(category_field, "unknown")
         score = result.get("score", 0.0)
+        if score is None:
+            continue  # unscored: in no accuracy or average
 
         if category not in category_stats:
             category_stats[category] = {"total": 0, "correct": 0, "scores": []}
@@ -1116,10 +1118,11 @@ def format_benchmark_summary(results: list[dict[str, Any]], benchmark_name: str)
 
     total = len(results)
     scores = [r.get("score", 0.0) for r in results]
+    scores = [s for s in scores if s is not None]  # an unscored item is in no accuracy or average
     correct = sum(1 for s in scores if s >= 0.5)
 
-    accuracy = correct / total
-    avg_score = sum(scores) / len(scores)
+    accuracy = correct / len(scores) if scores else 0.0
+    avg_score = sum(scores) / len(scores) if scores else 0.0
 
     summary = f"""
 {benchmark_name} Benchmark Results
@@ -1127,6 +1130,7 @@ def format_benchmark_summary(results: list[dict[str, Any]], benchmark_name: str)
 
 Overall Performance:
   Total Questions: {total}
+  Unscored: {total - len(scores)}
   Correct Answers: {correct}
   Accuracy: {accuracy:.1%}
   Average Score: {avg_score:.3f}
