@@ -24,6 +24,7 @@ Follow-up of TASK-15485 (owner decision, 2026-11-07). After the judge fix, on a 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Corrections and additions (TASK-15485 final review, 2026-11-09): mmlu_pro and gpqa_diamond need the datasets package, which is in the data-tools extra, not the evaluation extra. TASK-15485 added a labelled reply format (SCORE: [0-10] / EXPLANATION:) to bullshit_benchmark's prompt; its 0-10 rubric still needs moving to the manager's 1-10 scale (AC #4). Also in scope when SimpleQA becomes runnable (AC #2): the GRADE read takes the first 'GRADE:' in the reply, so a judge that echoes the prompt's format line 'GRADE: [correct/incorrect/not_attempted]' scores 1.0 whatever it graded (fix: match (correct|incorrect|not_attempted)\b(?!/) and add a format-echo test); 'not attempted' with a space is not read (use not[_ ]attempted). The require_reasoning rubric (mmlu_pro, gpqa_diamond; benchmark_utils.py ~:490-493) still says '70% of score / 30% of score', so SCORE: 70% falls to 0.5.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

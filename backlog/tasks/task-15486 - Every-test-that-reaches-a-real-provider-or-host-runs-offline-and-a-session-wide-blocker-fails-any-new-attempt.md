@@ -25,6 +25,7 @@ Owner request (2026-11-07), filed by TASK-15485. A test that reaches a real prov
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Correction (TASK-15485 final review, 2026-11-09): AC #2's 'as tests/helpers/netblock_13956 does' names a plugin that lived outside the repo (a TASK-13956 session file). The in-repo precedent for ipaddress.ip_address(host).is_loopback is tldw_Server_API/tests/WebScraping/integration/test_phase3_preflight_browser_smoke.py:34; tests/helpers/offline_network.py is the blocker to extend.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
