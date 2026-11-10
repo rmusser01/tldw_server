@@ -2,7 +2,7 @@
 id: TASK-15482
 title: The streaming RAG search's retrieval step generates a full answer and discards
   it
-status: To Do
+status: In Progress
 labels:
 - rag
 - backend
@@ -26,6 +26,7 @@ User-facing: every Knowledge QA question (the WebUI streams) pays for two answer
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-07-rag-stream-one-answer.md. Fix: unified_rag_pipeline honours an explicit enable_generation=False over a resolved payload that says True (_resolve_effective_enable_generation, unified_pipeline.py:2390-2391), so the stream's retrieval step (streaming_executor.py:381, which already passes False) runs retrieval only on the shared request, which keeps the effective query; the step sets enable_pre_retrieval_clarification from the request's enable_generation when it is unset. Owner answer, Change summary: waived by the owner on 2026-11-07 ('Yes, both': the TASK-15482 PR and the benchmark judge PR); recorded as a full Change summary section. Owner approved the plan on 2026-11-07, accepting the failure-path event order change (Review Focus 6).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
