@@ -63,15 +63,6 @@ vi.mock('@/components/ui/accessible-icon-button', () => ({
   ),
 }));
 
-vi.mock('@/components/dashboard/DashboardHeader', () => ({
-  DashboardHeader: () => <section aria-label="Dashboard header">Header</section>,
-}));
-
-vi.mock('@/components/dashboard/AlertsBanner', () => ({
-  AlertsBanner: ({ alerts, onAcknowledgeAll }: { alerts: Array<{ id: string }>; onAcknowledgeAll: () => void }) =>
-    alerts.length ? <button onClick={onAcknowledgeAll}>Acknowledge {alerts.length}</button> : null,
-}));
-
 vi.mock('@/components/dashboard/StatsGrid', () => ({
   StatsGrid: () => <section aria-label="Dashboard stats">Stats</section>,
 }));
@@ -265,7 +256,8 @@ describe('Dashboard bulk acknowledgment', () => {
     else acknowledge.mockResolvedValueOnce(second);
 
     render(<DashboardPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge 2' }));
+    expect(await screen.findByText(/2 active alerts require attention/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge All' }));
     await waitFor(() => expect(toast[level]).toHaveBeenCalledOnce());
     expect(acknowledge.mock.calls).toEqual([['1'], ['2']]);
     expect(apiMock.getAlerts).toHaveBeenCalledTimes(2);
@@ -279,8 +271,71 @@ describe('Dashboard bulk acknowledgment', () => {
     apiMock.getAlerts.mockResolvedValue([{ id: 10 }]);
     vi.mocked(api.acknowledgeAlert).mockRejectedValue(new Error('Denied'));
     render(<DashboardPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge 1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge All' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledOnce());
     expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('only sends one acknowledgment when clicked twice before a render', async () => {
+    const pending = createDeferred<ReturnType<typeof receipt>>();
+    const acknowledge = vi.mocked(api.acknowledgeAlert).mockReturnValue(pending.promise);
+    apiMock.getAlerts.mockResolvedValueOnce([{ id: 1 }]);
+
+    render(<DashboardPage />);
+    const button = await screen.findByRole('button', { name: 'Acknowledge All' });
+    act(() => {
+      button.click();
+      button.click();
+    });
+    expect(acknowledge.mock.calls).toEqual([['1']]);
+    expect(button).toBeDisabled();
+
+    await act(async () => pending.resolve(receipt(1, stamp)));
+    expect(screen.queryByRole('button', { name: 'Acknowledge All' })).toBeNull();
+  });
+
+  it('keeps confirmed alerts off the banner when an older refresh completes', async () => {
+    const alert = { id: 1, message: 'Confirmed alert', is_read: true };
+    const pendingStats = createDeferred<Record<string, unknown>>();
+    apiMock.getDashboardStats.mockResolvedValueOnce({}).mockReturnValueOnce(pendingStats.promise);
+    apiMock.getAlerts.mockResolvedValueOnce([alert]).mockResolvedValueOnce([
+      alert, { ...alert, id: 2, message: 'Another alert' },
+    ]);
+    vi.mocked(api.acknowledgeAlert).mockResolvedValueOnce(receipt(1, stamp));
+
+    render(<DashboardPage />);
+    const button = await screen.findByRole('button', { name: 'Acknowledge All' });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    });
+    fireEvent.click(button);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledOnce());
+
+    await act(async () => pendingStats.resolve({}));
+    expect(screen.getByTestId('dashboard-alert-count-live').textContent).toBe('1 open alert on the dashboard.');
+    expect(screen.getByText(/Another alert/)).toBeInTheDocument();
+    expect(screen.queryByText(/Confirmed alert/)).toBeNull();
+  });
+
+  it('keeps only the unconfirmed alert actionable when the follow-up refresh fails', async () => {
+    apiMock.getAlerts.mockResolvedValueOnce([
+      { id: 1, message: 'Confirmed alert', is_read: true }, { id: 2, message: 'Denied alert' },
+    ]).mockRejectedValueOnce(new Error('Unavailable'));
+    const acknowledge = vi.mocked(api.acknowledgeAlert)
+      .mockResolvedValueOnce(receipt(1, stamp))
+      .mockRejectedValueOnce(new Error('Denied'));
+
+    render(<DashboardPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge All' }));
+    expect(await screen.findByText('Some dashboard data failed to load: alerts')).toBeInTheDocument();
+    expect(toast.warning).toHaveBeenCalledWith('Alerts partially acknowledged', '1 of 2 visible alerts confirmed acknowledged.');
+    expect(screen.getByTestId('dashboard-alert-count-live').textContent).toBe('1 open alert on the dashboard.');
+    expect(screen.getByText(/Denied alert/)).toBeInTheDocument();
+    expect(screen.queryByText(/Confirmed alert/)).toBeNull();
+
+    acknowledge.mockResolvedValueOnce(receipt(2, stamp));
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge All' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledOnce());
+    expect(acknowledge.mock.calls).toEqual([['1'], ['2'], ['2']]);
   });
 });

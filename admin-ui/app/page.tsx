@@ -151,6 +151,9 @@ export default function DashboardPage() {
   const previousJobsSnapshotRef = useRef<JobSnapshot | null>(null);
   const [recentActivity, setRecentActivity] = useState<AuditLog[]>([]);
   const [alerts, setAlerts] = useState<SystemAlert[]>([]);
+  const [acknowledgingAlerts, setAcknowledgingAlerts] = useState(false);
+  const acknowledgingAlertsRef = useRef(false);
+  const confirmedDuringLoadRef = useRef<Set<string> | null>(null);
   const [systemHealth, setSystemHealth] = useState<DashboardSystemHealth>(
     DEFAULT_DASHBOARD_SYSTEM_HEALTH
   );
@@ -205,8 +208,10 @@ export default function DashboardPage() {
       return;
     }
 
+    const confirmedDuringLoad = new Set<string>();
     try {
       loadingRef.current = true;
+      confirmedDuringLoadRef.current = confirmedDuringLoad;
       setLoading(true);
       setError(null);
       setSecurityHealthError('');
@@ -286,7 +291,9 @@ export default function DashboardPage() {
 
       if (alertsResult.status === 'fulfilled') {
         const rows = normalizeMonitoringAlertsPayload(alertsResult.value);
-        setAlerts(rows.filter((alert) => !alert.acknowledged && !alert.dismissed_at && !isAlertSnoozed(alert)));
+        setAlerts(rows.filter((alert) =>
+          !confirmedDuringLoad.has(alert.id) && !alert.acknowledged && !alert.dismissed_at && !isAlertSnoozed(alert)
+        ));
       }
 
       setActivityData(resolveDashboardActivityPoints(activityResult, activityRange));
@@ -464,6 +471,7 @@ export default function DashboardPage() {
       setUptimeSummary(DEFAULT_DASHBOARD_UPTIME_SUMMARY);
     } finally {
       loadingRef.current = false;
+      confirmedDuringLoadRef.current = null;
       setLoading(false);
       setLastRefreshed(new Date());
     }
@@ -613,20 +621,39 @@ export default function DashboardPage() {
   };
 
   const handleAcknowledgeAlerts = useCallback(async () => {
-    const results = await Promise.allSettled(alerts.map(async ({ id }) => {
-      if (!/^[1-9]\d*$/.test(id)) return false;
-      return confirmsAlertAcknowledgment(await api.acknowledgeAlert(id), id);
-    }));
-    const confirmed = results.filter((result) => result.status === 'fulfilled' && result.value).length;
-    const summary = `${confirmed} of ${alerts.length} visible alerts confirmed acknowledged.`;
-    if (confirmed > 0 && confirmed === alerts.length) {
-      success('Alerts acknowledged', summary);
-    } else if (confirmed > 0) {
-      warning('Alerts partially acknowledged', summary);
-    } else {
-      showError('Acknowledge failed', summary);
+    if (acknowledgingAlertsRef.current) return;
+
+    acknowledgingAlertsRef.current = true;
+    setAcknowledgingAlerts(true);
+    try {
+      const confirmedIds = new Set<string>();
+      await Promise.allSettled(alerts.map(async ({ id }) => {
+        if (/^[1-9]\d*$/.test(id) && confirmsAlertAcknowledgment(await api.acknowledgeAlert(id), id)) {
+          confirmedIds.add(id);
+        }
+      }));
+      const confirmed = confirmedIds.size;
+      if (confirmed > 0) {
+        // A dashboard refresh that started before these receipts may still return the old rows.
+        for (const id of confirmedIds) {
+          confirmedDuringLoadRef.current?.add(id);
+        }
+        setAlerts((current) => current.filter((alert) => !confirmedIds.has(alert.id)));
+      }
+
+      const summary = `${confirmed} of ${alerts.length} visible alerts confirmed acknowledged.`;
+      if (confirmed > 0 && confirmed === alerts.length) {
+        success('Alerts acknowledged', summary);
+      } else if (confirmed > 0) {
+        warning('Alerts partially acknowledged', summary);
+      } else {
+        showError('Acknowledge failed', summary);
+      }
+      await loadDashboardData();
+    } finally {
+      acknowledgingAlertsRef.current = false;
+      setAcknowledgingAlerts(false);
     }
-    await loadDashboardData();
   }, [alerts, loadDashboardData, success, warning, showError]);
 
   const activityChartData = useMemo(
@@ -685,7 +712,11 @@ export default function DashboardPage() {
             </Alert>
           )}
 
-          <AlertsBanner alerts={alerts} onAcknowledgeAll={handleAcknowledgeAlerts} />
+          <AlertsBanner
+            alerts={alerts}
+            acknowledging={acknowledgingAlerts}
+            onAcknowledgeAll={handleAcknowledgeAlerts}
+          />
 
           <StatsGrid
             loading={loading}
