@@ -70,9 +70,9 @@ def test_artifact_content_type_and_invalid_path(monkeypatch) -> None:
         run_id = r.json()["id"]
 
         # Seed artifact
-        from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+        from tldw_Server_API.app.core.Sandbox import default_service
         payload = b"hello world"
-        sb._service._orch.store_artifacts(run_id, {"out.txt": payload})  # type: ignore[attr-defined]
+        default_service.sandbox_service._orch.store_artifacts(run_id, {"out.txt": payload})  # type: ignore[attr-defined]
 
         # Full download: expect content-type text/plain
         r2 = client.get(f"/api/v1/sandbox/runs/{run_id}/artifacts/out.txt")

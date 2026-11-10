@@ -154,7 +154,7 @@ async def test_sandbox_admin_runs_forbidden_for_non_admin_principal(monkeypatch)
         is_admin=False,
     )
     fake_service = _FakeService()
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(principal)
 
@@ -172,7 +172,7 @@ async def test_sandbox_admin_runs_allowed_for_admin_principal(monkeypatch):
         is_admin=True,
     )
     fake_service = _FakeService()
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(principal)
 
@@ -194,7 +194,7 @@ async def test_sandbox_admin_idempotency_includes_pagination_aliases(monkeypatch
         is_admin=True,
     )
     fake_service = _FakeService()
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(principal)
 
@@ -216,7 +216,7 @@ async def test_sandbox_admin_usage_includes_pagination_aliases(monkeypatch):
         is_admin=True,
     )
     fake_service = _FakeService()
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(principal)
 
@@ -238,7 +238,7 @@ async def test_sandbox_admin_macos_diagnostics_allowed_for_admin_principal(monke
         is_admin=True,
     )
     fake_service = _FakeService()
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(principal)
 
@@ -256,7 +256,7 @@ def test_sandbox_run_owner_rejects_legacy_admin_flag_without_claims(monkeypatch)
             get_run_owner=lambda _run_id: "2",
         )
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     legacy_admin_user = SimpleNamespace(
         id=1,
@@ -277,7 +277,7 @@ def test_sandbox_run_owner_allows_admin_permission_claim(monkeypatch):
             get_run_owner=lambda _run_id: "2",
         )
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     permission_admin_user = SimpleNamespace(
         id=1,

@@ -99,7 +99,7 @@ def _seed_run(
     scope_snapshot_id: str | None = None,
     phase: str = "completed",
 ) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     st = RunStatus(
         id=run_id,
@@ -117,7 +117,7 @@ def _seed_run(
         workspace_group_id=workspace_group_id,
         scope_snapshot_id=scope_snapshot_id,
     )
-    sb._service._orch._store.put_run(user_id, st)  # type: ignore[attr-defined]
+    default_service.sandbox_service._orch._store.put_run(user_id, st)  # type: ignore[attr-defined]
 
 
 @pytest.mark.unit
@@ -151,10 +151,10 @@ def test_workspace_diagnostics_route_survives_disabled_sandbox_admin_policy(
 def test_workspace_diagnostics_filters_runs_to_authenticated_user_and_workspace(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(
-        sb._service,
+        default_service.sandbox_service,
         "runtime_diagnostics_summary",
         lambda: {
             "source": "feature_discovery",
@@ -207,9 +207,10 @@ def test_workspace_diagnostics_rejects_unknown_source_label(monkeypatch) -> None
 @pytest.mark.sandbox_no_auth
 def test_workspace_diagnostics_uses_thread_for_blocking_run_queries(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(
-        sb._service,
+        default_service.sandbox_service,
         "runtime_diagnostics_summary",
         lambda: {
             "source": "feature_discovery",
@@ -236,11 +237,12 @@ def test_workspace_diagnostics_uses_thread_for_blocking_run_queries(monkeypatch)
 @pytest.mark.unit
 def test_workspace_diagnostics_does_not_suppress_cancelled_error(monkeypatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     def raise_cancelled():
         raise sb.asyncio.CancelledError()
 
-    monkeypatch.setattr(sb._service, "runtime_diagnostics_summary", raise_cancelled)
+    monkeypatch.setattr(default_service.sandbox_service, "runtime_diagnostics_summary", raise_cancelled)
 
     with pytest.raises(sb.asyncio.CancelledError):
         sb._sandbox_workspace_runtime_state()
@@ -316,10 +318,10 @@ def test_workspace_diagnostics_includes_run_created_through_sandbox_api(
 @pytest.mark.unit
 @pytest.mark.sandbox_no_auth
 def test_workspace_diagnostics_reports_unavailable_runtime(monkeypatch) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(
-        sb._service,
+        default_service.sandbox_service,
         "runtime_diagnostics_summary",
         lambda: {
             "source": "feature_discovery",
@@ -357,10 +359,10 @@ def test_workspace_diagnostics_reports_unavailable_runtime(monkeypatch) -> None:
 def test_workspace_diagnostics_blocks_admission_when_sandbox_route_disabled(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(
-        sb._service,
+        default_service.sandbox_service,
         "runtime_diagnostics_summary",
         lambda: {
             "source": "feature_discovery",
@@ -403,11 +405,11 @@ def test_workspace_diagnostics_blocks_admission_when_sandbox_route_disabled(
 def test_workspace_diagnostics_blocks_admission_when_execution_disabled(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import sandbox_workspace_diagnostics as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
     monkeypatch.setattr(
-        sb._service,
+        default_service.sandbox_service,
         "runtime_diagnostics_summary",
         lambda: {
             "source": "feature_discovery",

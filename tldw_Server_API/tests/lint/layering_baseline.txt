@@ -49,7 +49,6 @@ api.v1.endpoints.writing -> api.v1.endpoints.llm_providers: 1
 api.v2.endpoints.user_profiles -> api.v1.endpoints.users: 1
 core.Admin_Webhooks -> api.v1.API_Deps: 1
 core.Admin_Webhooks -> services: 2
-core.Agent_Client_Protocol -> api.v1.endpoints.sandbox: 1
 core.Agent_Client_Protocol -> services: 4
 core.Audit -> api.v1.API_Deps: 1
 core.Audit -> core.AuthNZ: 1

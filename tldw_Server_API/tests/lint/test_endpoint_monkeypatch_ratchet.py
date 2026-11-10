@@ -36,7 +36,7 @@ Phase 2 of TASK-13950.20 drains it from SEED, the total on dev when this ratchet
 Known limits. These escape the count: the builtin ``setattr(ep, ...)``; ``patch.dict``,
 ``patch.multiple`` and ``monkeypatch.setitem(<endpoint>.X, ...)``; a module object supplied by a
 fixture, a helper's return value, tuple unpacking or a parameter; attribute chains through another
-module's import (``runner_client.sandbox_ep._service``); control-flow-dependent bindings (the rule is
+module's import (``runner_client.endpoint_alias.name``); control-flow-dependent bindings (the rule is
 lexical); targets built with ``getattr`` or an f-string; a renamed ``patch``
 (``from unittest.mock import patch as _patch``, as in tests/Chat/integration/test_chat_endpoint.py:636-638).
 Comprehension variables and ``global``/``nonlocal`` names bind as if in the enclosing function. A
@@ -499,6 +499,19 @@ def test_no_route_less_endpoint_modules() -> None:
     found = set(route_less_endpoint_modules())
     assert sorted(found - set(ROUTE_LESS_ALLOWED)) == []
     assert sorted(set(ROUTE_LESS_ALLOWED) - found) == []  # an allowed module that grew routes is stale
+
+
+def test_no_module_copies_the_default_sandbox_service() -> None:
+    """Callers read default_service.sandbox_service at call time, so one patch reaches routes and the ACP runner."""
+    copies = []
+    for path, tree in parse_tree(APP_ROOT).items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("Sandbox.default_service"):
+                copies += [f"{path.relative_to(APP_ROOT)}:{node.lineno}" for a in node.names if a.name == "sandbox_service"]
+        for node in tree.body:  # a module-level copy; a local read inside a function is a call-time lookup
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Attribute) and node.value.attr == "sandbox_service":
+                copies.append(f"{path.relative_to(APP_ROOT)}:{node.lineno}")
+    assert copies == []
 
 
 if __name__ == "__main__":

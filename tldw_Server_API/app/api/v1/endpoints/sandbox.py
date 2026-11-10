@@ -36,7 +36,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_request_user
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
-from tldw_Server_API.app.core.Sandbox.default_service import sandbox_service
+from tldw_Server_API.app.core.Sandbox import default_service as _sandbox_default
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     ArtifactListResponse,
     CancelResponse,
@@ -176,8 +176,6 @@ class SandboxArtifactGuardRoute(APIRoute):
 
 router = APIRouter(prefix="/sandbox", tags=["sandbox"], route_class=SandboxArtifactGuardRoute)
 
-_service = sandbox_service
-
 
 def _status_reason_code(
     *,
@@ -214,13 +212,13 @@ def _status_reason_details(
 @router.on_event("startup")
 async def _sandbox_startup() -> None:
     with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
-        _service.start_background_tasks()
+        _sandbox_default.sandbox_service.start_background_tasks()
 
 
 @router.on_event("shutdown")
 async def _sandbox_shutdown() -> None:
     with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
-        _service.shutdown()
+        _sandbox_default.sandbox_service.shutdown()
 
 _SANDBOX_WS_QUOTA_LOCK = threading.Lock()
 _SANDBOX_WS_ACTIVE_TOTAL = 0
@@ -337,7 +335,7 @@ def _is_admin_user(user: User) -> bool:
 
 
 def _require_run_owner(run_id: str, current_user: User) -> str:
-    owner = _service._orch.get_run_owner(run_id)  # type: ignore[attr-defined]
+    owner = _sandbox_default.sandbox_service._orch.get_run_owner(run_id)  # type: ignore[attr-defined]
     if owner is None:
         raise HTTPException(status_code=404, detail="run_not_found")
     if not _is_admin_user(current_user) and str(owner) != str(current_user.id):
@@ -346,7 +344,7 @@ def _require_run_owner(run_id: str, current_user: User) -> str:
 
 
 def _require_session_owner(session_id: str, current_user: User) -> str:
-    owner = _service._orch.get_session_owner(session_id)  # type: ignore[attr-defined]
+    owner = _sandbox_default.sandbox_service._orch.get_session_owner(session_id)  # type: ignore[attr-defined]
     if owner is None:
         raise HTTPException(status_code=404, detail="session_not_found")
     if not _is_admin_user(current_user) and str(owner) != str(current_user.id):
@@ -547,7 +545,7 @@ def _runtime_unavailable_suggestions(runtime_name: str) -> list[str]:
 
 @router.get("/runtimes", response_model=SandboxRuntimesResponse, summary="Discover available runtimes")
 async def get_runtimes(current_user: User = Depends(get_request_user)) -> SandboxRuntimesResponse:
-    info = _service.feature_discovery()
+    info = _sandbox_default.sandbox_service.feature_discovery()
     return SandboxRuntimesResponse(runtimes=info)  # type: ignore[arg-type]
 
 
@@ -672,7 +670,7 @@ async def create_session(
         scope_snapshot_id=payload.scope_snapshot_id,
     )
     try:
-        session = _service.create_session(
+        session = _sandbox_default.sandbox_service.create_session(
             user_id=current_user.id,
             spec=spec,
             spec_version=payload.spec_version,
@@ -801,7 +799,7 @@ async def create_session(
     # Compute canonical policy hash for reproducibility
     try:
         from tldw_Server_API.app.core.Sandbox.policy import compute_policy_hash
-        cfg = _service.policy.cfg  # type: ignore[attr-defined]
+        cfg = _sandbox_default.sandbox_service.policy.cfg  # type: ignore[attr-defined]
         ph = compute_policy_hash(cfg)
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         ph = None
@@ -832,7 +830,7 @@ async def delete_session(
 ) -> dict:
     _require_session_owner(session_id, current_user)
     try:
-        ok = _service.destroy_session(session_id)
+        ok = _sandbox_default.sandbox_service.destroy_session(session_id)
     except SessionActiveRunsConflict as e:
         err = str(e) or "session_has_active_runs"
         raise HTTPException(
@@ -867,7 +865,7 @@ async def create_snapshot(
     """
     _require_session_owner(session_id, current_user)
     try:
-        result = _service.create_snapshot(session_id)
+        result = _sandbox_default.sandbox_service.create_snapshot(session_id)
         return SnapshotCreateResponse(
             snapshot_id=result["snapshot_id"],
             created_at=result["created_at"],
@@ -905,7 +903,7 @@ async def restore_snapshot(
     """
     _require_session_owner(session_id, current_user)
     try:
-        restored = _service.restore_snapshot(session_id, payload.snapshot_id)
+        restored = _sandbox_default.sandbox_service.restore_snapshot(session_id, payload.snapshot_id)
         return SnapshotRestoreResponse(
             restored=restored,
             snapshot_id=payload.snapshot_id,
@@ -942,7 +940,7 @@ async def clone_session(
     """
     _require_session_owner(session_id, current_user)
     try:
-        new_session = _service.clone_session(
+        new_session = _sandbox_default.sandbox_service.clone_session(
             session_id,
             new_name=(payload.new_session_name if payload else None),
         )
@@ -978,7 +976,7 @@ async def list_snapshots(
 ) -> SnapshotListResponse:
     """List all available snapshots for a session, sorted by creation time (newest first)."""
     _require_session_owner(session_id, current_user)
-    snapshots = _service.list_snapshots(session_id)
+    snapshots = _sandbox_default.sandbox_service.list_snapshots(session_id)
     items = [
         SnapshotInfo(
             snapshot_id=s.get("snapshot_id", ""),
@@ -1002,7 +1000,7 @@ async def delete_snapshot(
 ) -> dict:
     """Delete a specific snapshot from a session."""
     _require_session_owner(session_id, current_user)
-    deleted = _service.delete_snapshot(session_id, snapshot_id)
+    deleted = _sandbox_default.sandbox_service.delete_snapshot(session_id, snapshot_id)
     return {"ok": deleted, "snapshot_id": snapshot_id}
 
 
@@ -1019,7 +1017,7 @@ async def upload_files(
     count = 0
 
     try:
-        async with _service.async_workspace_operation_lock(session_id) as ws_root:
+        async with _sandbox_default.sandbox_service.async_workspace_operation_lock(session_id) as ws_root:
             try:
                 cap_mb = int(os.getenv("SANDBOX_WORKSPACE_CAP_MB") or 256)
             except _SANDBOX_NONCRITICAL_EXCEPTIONS:
@@ -1211,7 +1209,7 @@ async def start_run(
     if payload.session_id:
         _require_session_owner(payload.session_id, current_user)
     try:
-        files_inline = _service.parse_inline_files([(f.model_dump() if hasattr(f, "model_dump") else f.dict()) for f in (payload.files or [])])
+        files_inline = _sandbox_default.sandbox_service.parse_inline_files([(f.model_dump() if hasattr(f, "model_dump") else f.dict()) for f in (payload.files or [])])
     except ValueError as e:
         raise HTTPException(
             status_code=422,
@@ -1276,7 +1274,7 @@ async def start_run(
     )
     # Scaffold: return immediate completed status without real execution
     try:
-        status = _service.start_run_scaffold(
+        status = _sandbox_default.sandbox_service.start_run_scaffold(
             user_id=current_user.id,
             spec=spec,
             spec_version=payload.spec_version,
@@ -1583,7 +1581,7 @@ async def get_run_status(
     current_user: User = Depends(get_request_user),
 ) -> SandboxRunStatus:
     _require_run_owner(run_id, current_user)
-    st = _service.get_run(run_id)
+    st = _sandbox_default.sandbox_service.get_run(run_id)
     if not st:
         raise HTTPException(status_code=404, detail="run_not_found")
     status_reason_code = _status_reason_code(
@@ -1665,7 +1663,7 @@ async def list_artifacts(
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         # If guard fails, continue with normal listing
         pass
-    sizes = _service._orch.list_artifacts(run_id)  # type: ignore[attr-defined]
+    sizes = _sandbox_default.sandbox_service._orch.list_artifacts(run_id)  # type: ignore[attr-defined]
     items = []
     for p, sz in sizes.items():
         items.append({
@@ -1746,7 +1744,7 @@ async def download_artifact(
     ):
         raise HTTPException(status_code=400, detail="invalid_path")
 
-    artifact_path = _service._orch.get_artifact_path(run_id, path)  # type: ignore[attr-defined]
+    artifact_path = _sandbox_default.sandbox_service._orch.get_artifact_path(run_id, path)  # type: ignore[attr-defined]
     data = None
     if artifact_path is not None:
         try:
@@ -1754,7 +1752,7 @@ async def download_artifact(
         except _SANDBOX_NONCRITICAL_EXCEPTIONS:
             raise HTTPException(status_code=404, detail="artifact_not_found") from None
     else:
-        data = _service._orch.get_artifact(run_id, path)  # type: ignore[attr-defined]
+        data = _sandbox_default.sandbox_service._orch.get_artifact(run_id, path)  # type: ignore[attr-defined]
         if data is None:
             raise HTTPException(status_code=404, detail="artifact_not_found")
         size = len(data)
@@ -1839,7 +1837,7 @@ async def cancel_run(
 ) -> CancelResponse:
     try:
         _require_run_owner(run_id, current_user)
-        ok = _service.cancel_run(run_id)
+        ok = _sandbox_default.sandbox_service.cancel_run(run_id)
         return CancelResponse(id=run_id, cancelled=bool(ok), message=("canceled_by_user" if ok else "not_running_or_not_found"))
     except _SANDBOX_NONCRITICAL_EXCEPTIONS as e:
         raise HTTPException(status_code=500, detail={
@@ -1880,7 +1878,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
             return  # noqa: B012
     # Ownership check before streaming
     try:
-        owner = _service._orch.get_run_owner(run_id)  # type: ignore[attr-defined]
+        owner = _sandbox_default.sandbox_service._orch.get_run_owner(run_id)  # type: ignore[attr-defined]
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         owner = None
     if owner is None:
@@ -1955,7 +1953,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
 
     run_status = None
     with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
-        run_status = _service.get_run(run_id)
+        run_status = _sandbox_default.sandbox_service.get_run(run_id)
     ws_quota_token, ws_quota_reason = _sandbox_ws_try_acquire_quota(
         user_id=int(user_id),
         run_id=run_id,
@@ -2008,7 +2006,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
         _synth_env = os.getenv("SANDBOX_WS_SYNTHETIC_FRAMES_FOR_TESTS")
         synth_enabled = is_truthy(_synth_env)
         if synth_enabled:
-            st = _service.get_run(run_id)
+            st = _sandbox_default.sandbox_service.get_run(run_id)
             try:
                 q_empty = q.empty()
             except _SANDBOX_NONCRITICAL_EXCEPTIONS:
@@ -2264,7 +2262,7 @@ async def admin_runtime_diagnostics(
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminRuntimeDiagnosticsResponse:
     """Return read-only operator diagnostics derived from runtime discovery."""
-    payload = dict(await asyncio.to_thread(_service.runtime_diagnostics_summary))
+    payload = dict(await asyncio.to_thread(_sandbox_default.sandbox_service.runtime_diagnostics_summary))
     payload["startup_warning_summary"] = _sandbox_startup_warning_summary(request)
     return SandboxAdminRuntimeDiagnosticsResponse.model_validate(payload)
 
@@ -2282,7 +2280,7 @@ async def admin_operator_status(
     """Return consolidated read-only sandbox operator status."""
     payload = dict(
         await asyncio.to_thread(
-            _service.operator_status,
+            _sandbox_default.sandbox_service.operator_status,
             startup_warning_summary=_sandbox_startup_warning_summary(request),
         )
     )
@@ -2300,7 +2298,7 @@ async def admin_macos_diagnostics(
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSDiagnosticsResponse:
     """Return detailed macOS sandbox diagnostics for admin troubleshooting."""
-    payload = dict(_service.macos_diagnostics())
+    payload = dict(_sandbox_default.sandbox_service.macos_diagnostics())
     payload["startup_warning_summary"] = _sandbox_startup_warning_summary(request)
 
     return SandboxAdminMacOSDiagnosticsResponse.model_validate(payload)
@@ -2317,7 +2315,7 @@ async def admin_repair_macos_reconciliation(
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSReconciliationRepairResponse:
     try:
-        payload = await asyncio.to_thread(_service.repair_macos_reconciliation, **request.model_dump())
+        payload = await asyncio.to_thread(_sandbox_default.sandbox_service.repair_macos_reconciliation, **request.model_dump())
     except SandboxReconciliationRepairError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     return SandboxAdminMacOSReconciliationRepairResponse.model_validate(payload)
@@ -2332,7 +2330,7 @@ async def admin_macos_image_store_cleanup_plan(
     _principal: AuthPrincipal = Depends(RequireRole("admin")),
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSImageStoreCleanupPlanResponse:
-    payload = await asyncio.to_thread(_service.plan_macos_image_store_cleanup)
+    payload = await asyncio.to_thread(_sandbox_default.sandbox_service.plan_macos_image_store_cleanup)
     return SandboxAdminMacOSImageStoreCleanupPlanResponse.model_validate(payload)
 
 
@@ -2347,7 +2345,7 @@ async def admin_macos_image_store_cleanup(
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSImageStoreCleanupResponse:
     try:
-        payload = await asyncio.to_thread(_service.cleanup_macos_image_store, **request.model_dump())
+        payload = await asyncio.to_thread(_sandbox_default.sandbox_service.cleanup_macos_image_store, **request.model_dump())
     except SandboxImageStoreCleanupError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     return SandboxAdminMacOSImageStoreCleanupResponse.model_validate(payload)
@@ -2373,7 +2371,7 @@ async def admin_list_runs(
     principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminRunListResponse:
-    items_raw = _service._orch.list_runs(  # type: ignore[attr-defined]
+    items_raw = _sandbox_default.sandbox_service._orch.list_runs(  # type: ignore[attr-defined]
         image_digest=image_digest,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -2386,7 +2384,7 @@ async def admin_list_runs(
         offset=offset,
         sort_desc=(str(sort).lower() != "asc"),
     )
-    total = _service._orch.count_runs(  # type: ignore[attr-defined]
+    total = _sandbox_default.sandbox_service._orch.count_runs(  # type: ignore[attr-defined]
         image_digest=image_digest,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -2455,11 +2453,11 @@ async def admin_get_run_details(
     principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminRunDetails:
-    st = _service.get_run(run_id)
+    st = _sandbox_default.sandbox_service.get_run(run_id)
     if not st:
         raise HTTPException(status_code=404, detail="run_not_found")
     try:
-        owner = _service._orch.get_run_owner(run_id)  # type: ignore[attr-defined]
+        owner = _sandbox_default.sandbox_service._orch.get_run_owner(run_id)  # type: ignore[attr-defined]
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         owner = None
     status_reason_code = _status_reason_code(
@@ -2563,7 +2561,7 @@ async def admin_list_idempotency(
     principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminIdempotencyListResponse:
-    items_raw = _service._orch._store.list_idempotency(  # type: ignore[attr-defined]
+    items_raw = _sandbox_default.sandbox_service._orch._store.list_idempotency(  # type: ignore[attr-defined]
         endpoint=endpoint,
         user_id=user_id,
         key=key,
@@ -2573,7 +2571,7 @@ async def admin_list_idempotency(
         offset=offset,
         sort_desc=(str(sort).lower() != "asc"),
     )
-    total = _service._orch._store.count_idempotency(  # type: ignore[attr-defined]
+    total = _sandbox_default.sandbox_service._orch._store.count_idempotency(  # type: ignore[attr-defined]
         endpoint=endpoint,
         user_id=user_id,
         key=key,
@@ -2622,13 +2620,13 @@ async def admin_usage(
     principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminUsageResponse:
-    items_raw = _service._orch._store.list_usage(  # type: ignore[attr-defined]
+    items_raw = _sandbox_default.sandbox_service._orch._store.list_usage(  # type: ignore[attr-defined]
         user_id=user_id,
         limit=limit,
         offset=offset,
         sort_desc=(str(sort).lower() != "asc"),
     )
-    total = _service._orch._store.count_usage(user_id=user_id)  # type: ignore[attr-defined]
+    total = _sandbox_default.sandbox_service._orch._store.count_usage(user_id=user_id)  # type: ignore[attr-defined]
     items: list[SandboxAdminUsageItem] = []
     for r in items_raw:
         items.append(

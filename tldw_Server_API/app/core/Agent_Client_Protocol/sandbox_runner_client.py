@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_ep
+from tldw_Server_API.app.core.Sandbox import default_service as _sandbox_default
 from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPSandboxConfig, load_acp_sandbox_config
 from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
     bounded_session_update_payload,
@@ -141,7 +141,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
 
     def _get_sandbox_store(self) -> Any | None:
         try:
-            sandbox_service = sandbox_ep._service  # type: ignore[attr-defined]
+            sandbox_service = _sandbox_default.sandbox_service  # type: ignore[attr-defined]
             orch = getattr(sandbox_service, "_orch", None)
             return getattr(orch, "_store", None)
         except _ACP_SANDBOX_NONCRITICAL_EXCEPTIONS:
@@ -513,7 +513,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
         runtime = self._configured_runtime()
         self._validate_runtime_requirements(runtime)
 
-        sandbox_service = sandbox_ep._service  # type: ignore[attr-defined]
+        sandbox_service = _sandbox_default.sandbox_service  # type: ignore[attr-defined]
 
         sandbox_session = None
         status = None
@@ -851,12 +851,12 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
             ssh_port = None
         try:
             if run_id:
-                sandbox_ep._service.cancel_run(run_id)  # type: ignore[attr-defined]
+                _sandbox_default.sandbox_service.cancel_run(run_id)  # type: ignore[attr-defined]
         except _ACP_SANDBOX_NONCRITICAL_EXCEPTIONS:
             pass
         try:
             if sandbox_session_id:
-                sandbox_ep._service.destroy_session(sandbox_session_id)  # type: ignore[attr-defined]
+                _sandbox_default.sandbox_service.destroy_session(sandbox_session_id)  # type: ignore[attr-defined]
         except _ACP_SANDBOX_NONCRITICAL_EXCEPTIONS:
             pass
         if ssh_port:

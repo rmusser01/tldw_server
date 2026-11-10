@@ -60,11 +60,11 @@ def test_artifact_download_range_support(monkeypatch) -> None:
         run_id = r.json()["id"]
 
         # Seed artifact via orchestrator (test helper)
-        from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+        from tldw_Server_API.app.core.Sandbox import default_service
 
         artifact_path = "range-out.txt"
         payload = b"0123456789"
-        sb._service._orch.store_artifacts(run_id, {artifact_path: payload})  # type: ignore[attr-defined]
+        default_service.sandbox_service._orch.store_artifacts(run_id, {artifact_path: payload})  # type: ignore[attr-defined]
 
         # Range: bytes=0-4
         r2 = client.get(f"/api/v1/sandbox/runs/{run_id}/artifacts/{artifact_path}", headers={"Range": "bytes=0-4"})
@@ -96,16 +96,16 @@ def test_artifact_download_range_avoids_full_artifact_read(monkeypatch) -> None:
         assert r.status_code == 200
         run_id = r.json()["id"]
 
-        from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+        from tldw_Server_API.app.core.Sandbox import default_service
 
         artifact_path = "range-out.txt"
         payload = b"0123456789"
-        sb._service._orch.store_artifacts(run_id, {artifact_path: payload})  # type: ignore[attr-defined]
+        default_service.sandbox_service._orch.store_artifacts(run_id, {artifact_path: payload})  # type: ignore[attr-defined]
 
         def _fail_get_artifact(*args, **kwargs):
             raise AssertionError("download path should stream from disk instead of loading full artifact")
 
-        monkeypatch.setattr(sb._service._orch, "get_artifact", _fail_get_artifact)
+        monkeypatch.setattr(default_service.sandbox_service._orch, "get_artifact", _fail_get_artifact)
 
         r2 = client.get(f"/api/v1/sandbox/runs/{run_id}/artifacts/{artifact_path}", headers={"Range": "bytes=0-4"})
         assert r2.status_code == 206

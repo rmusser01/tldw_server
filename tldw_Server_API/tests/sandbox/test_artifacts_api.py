@@ -62,13 +62,13 @@ def test_artifacts_list_and_download_roundtrip(monkeypatch) -> None:
         run_id = run["id"]
 
         # Inject artifacts via service orchestrator
-        from tldw_Server_API.app.api.v1.endpoints.sandbox import _service  # type: ignore
+        from tldw_Server_API.app.core.Sandbox import default_service
 
         payload = {
             "results.txt": b"hello world",
             "data.bin": bytes([0, 1, 2, 3, 4]),
         }
-        _service._orch.store_artifacts(run_id, payload)  # type: ignore[attr-defined]
+        default_service.sandbox_service._orch.store_artifacts(run_id, payload)  # type: ignore[attr-defined]
 
         # List artifacts
         lr = client.get(f"/api/v1/sandbox/runs/{run_id}/artifacts")

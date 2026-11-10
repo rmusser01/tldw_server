@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
-from tldw_Server_API.app.core.Sandbox.default_service import sandbox_service
+from tldw_Server_API.app.core.Sandbox import default_service as _sandbox_default
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxRunStatusReasonDetails,
     SandboxWorkspaceDiagnosticState,
@@ -33,8 +33,6 @@ from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
 router = APIRouter(prefix="/sandbox", tags=["sandbox"])
-
-_service = sandbox_service
 
 _SANDBOX_WORKSPACE_DIAGNOSTICS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -118,7 +116,7 @@ def _sandbox_execution_enabled() -> bool:
 
 def _sandbox_workspace_runtime_state() -> tuple[SandboxWorkspaceDiagnosticState, SandboxWorkspaceDiagnosticState]:
     try:
-        diagnostics = _service.runtime_diagnostics_summary()
+        diagnostics = _sandbox_default.sandbox_service.runtime_diagnostics_summary()
     except _SANDBOX_WORKSPACE_DIAGNOSTICS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Sandbox workspace diagnostics could not read runtime summary: {}", exc)
         runtime = SandboxWorkspaceDiagnosticState(
@@ -282,7 +280,7 @@ async def get_workspace_sandbox_diagnostics(
     user_id = str(current_user.id)
     rows, total = await asyncio.gather(
         asyncio.to_thread(
-            _service._orch.list_runs,  # type: ignore[attr-defined]
+            _sandbox_default.sandbox_service._orch.list_runs,  # type: ignore[attr-defined]
             user_id=user_id,
             workspace_id=workspace_id,
             limit=limit,
@@ -290,7 +288,7 @@ async def get_workspace_sandbox_diagnostics(
             sort_desc=True,
         ),
         asyncio.to_thread(
-            _service._orch.count_runs,  # type: ignore[attr-defined]
+            _sandbox_default.sandbox_service._orch.count_runs,  # type: ignore[attr-defined]
             user_id=user_id,
             workspace_id=workspace_id,
         ),

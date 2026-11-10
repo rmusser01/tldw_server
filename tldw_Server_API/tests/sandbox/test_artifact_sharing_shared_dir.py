@@ -64,8 +64,8 @@ def test_shared_artifacts_directory_persists_and_is_listed(tmp_path: Path, monke
         run_id = r.json()["id"]
 
         # Inject artifacts using orchestrator to simulate runner capture
-        from tldw_Server_API.app.api.v1.endpoints.sandbox import _service  # type: ignore
-        _service._orch.store_artifacts(run_id, {  # type: ignore[attr-defined]
+        from tldw_Server_API.app.core.Sandbox import default_service
+        default_service.sandbox_service._orch.store_artifacts(run_id, {  # type: ignore[attr-defined]
             "results/a.txt": b"hello",
             "b.bin": b"\x00\x01",
         })

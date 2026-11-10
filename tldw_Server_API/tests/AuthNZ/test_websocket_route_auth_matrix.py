@@ -966,11 +966,11 @@ def _track_sandbox_run(owner_id: int) -> str:
 
     Only a tracked run is owner-checked: in test mode an untracked one is streamed to anyone.
     """
-    from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_ep
+    from tldw_Server_API.app.core.Sandbox import default_service
     from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus
 
     run_id = f"ws-matrix-owned-by-{owner_id}"
-    sandbox_ep._service._orch._store.put_run(owner_id, RunStatus(id=run_id, phase=RunPhase.completed))
+    default_service.sandbox_service._orch._store.put_run(owner_id, RunStatus(id=run_id, phase=RunPhase.completed))
     return run_id
 
 

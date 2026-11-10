@@ -711,7 +711,7 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
         def delete_acp_session_control(self, _session_id: str) -> bool:
             return True
 
-    monkeypatch.setattr(src.sandbox_ep, "_service", _FakeSandboxService(), raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", _FakeSandboxService())
     monkeypatch.setattr(src, "get_hub", lambda: _FakeHub())
     monkeypatch.setattr(src, "ACPStreamClient", _FakeStreamClient)
     monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _Store())
@@ -843,7 +843,7 @@ async def test_create_session_persists_stream_backed_control_for_vz_linux(monkey
             return True
 
     fake_service = _FakeSandboxService()
-    monkeypatch.setattr(src.sandbox_ep, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
     monkeypatch.setattr(src, "get_hub", lambda: _FakeHub())
     monkeypatch.setattr(src, "ACPStreamClient", _FakeStreamClient)
     monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _Store())
@@ -976,7 +976,7 @@ async def test_create_session_propagates_non_root_read_only_and_internal_ssh_por
             return True
 
     fake_service = _FakeSandboxService()
-    monkeypatch.setattr(src.sandbox_ep, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
     monkeypatch.setattr(src, "get_hub", lambda: _FakeHub())
     monkeypatch.setattr(src, "ACPStreamClient", _FakeStreamClient)
     monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _Store())
@@ -1372,7 +1372,7 @@ async def test_create_session_rolls_back_when_control_record_persist_fails(monke
             raise RuntimeError("store_write_failed")
 
     fake_service = _FakeSandboxService()
-    monkeypatch.setattr(src.sandbox_ep, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
     monkeypatch.setattr(src, "get_hub", lambda: _FakeHub())
     monkeypatch.setattr(src, "ACPStreamClient", _FakeStreamClient)
     monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _BrokenStore())
@@ -1583,8 +1583,6 @@ async def test_close_session_falls_back_to_persisted_control(monkeypatch) -> Non
 
     monkeypatch.setattr(manager, "_release_ssh_port", _fake_release)
 
-    import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
-
     class _FakeSandboxService:
         def __init__(self) -> None:
             self.cancelled: list[str] = []
@@ -1597,7 +1595,7 @@ async def test_close_session_falls_back_to_persisted_control(monkeypatch) -> Non
             self.destroyed.append(session_id)
 
     fake_service = _FakeSandboxService()
-    monkeypatch.setattr(src.sandbox_ep, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     await manager.close_session("acp-session-3")
     assert fake_service.cancelled == ["run-3"]
