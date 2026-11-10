@@ -37,8 +37,11 @@ Known limits. These escape the count: the builtin ``setattr(ep, ...)``; ``patch.
 ``patch.multiple`` and ``monkeypatch.setitem(<endpoint>.X, ...)``; a module object supplied by a
 fixture, a helper's return value, tuple unpacking or a parameter; attribute chains through another
 module's import (``runner_client.sandbox_ep._service``); control-flow-dependent bindings (the rule is
-lexical); targets built with ``getattr`` or an f-string. Comprehension variables and
-``global``/``nonlocal`` names bind as if in the enclosing function.
+lexical); targets built with ``getattr`` or an f-string; a renamed ``patch``
+(``from unittest.mock import patch as _patch``, as in tests/Chat/integration/test_chat_endpoint.py:636-638).
+Comprehension variables and ``global``/``nonlocal`` names bind as if in the enclosing function. A
+class-body binding counts as a binding of the enclosing scope, so it shadows that name for later
+references there.
 
 Growth fails: patch the collaborator where the endpoint looks it up (PATCHES.fix). Each drain PR
 locks its gain in with ``--tighten`` and pastes ``--summary`` into its body:
@@ -353,10 +356,12 @@ SEED_TREE = {
         "    from tldw_Server_API.app.api.v1.endpoints import audio\n"
         "    monkeypatch.setattr(audio.tts, 'e', 1)\n"
         "    patch('tldw_Server_API.app.api.v1.endpoints.chat.f')\n"
+        "    patch('tldw_Server_API.app.api.v1.endpoints.chat.f2', None)\n"
         "    patch.object(chat_ep, 'g')\n"
         "    mock.patch('tldw_Server_API.app.api.v1.endpoints.chat.h')\n"
         "    mocker.patch.object(chat_ep, 'i')\n"
         "    chat_ep.j = 1\n"
+        "    chat_ep.j2 += 1\n"
         "    del chat_ep.k\n"
         "    monkeypatch.setattr(svc, 'x', 1)\n"
         "    monkeypatch.setattr('tldw_Server_API.app.core.Chat.svc.x', 1)\n"
@@ -385,9 +390,9 @@ SEED_TREE = {
 def test_the_counter_counts_each_patch_shape(tmp_path: Path) -> None:
     measured = measure_endpoint_patches(_seed(tmp_path, SEED_TREE))
     assert measured == {
-        # a, _b, Thing.y, a computed name, o (an in-app tests package); f, g, h, i, j, k.
+        # a, _b, Thing.y, a computed name, o (an in-app tests package); f, f2, g, h, i, j, j2, k.
         # Not p (a parameter shadows the import), not q (rebound locally), not n (not a test module).
-        "api/v1/endpoints/chat.py": {"monkeypatch": 5, "other": 6},
+        "api/v1/endpoints/chat.py": {"monkeypatch": 5, "other": 8},
         "api/v1/endpoints/audio/tts.py": {"monkeypatch": 3, "other": 0},  # c (import_module), e (package chain), r (a local alias)
         "api/v1/endpoints/audio/__init__.py": {"monkeypatch": 1, "other": 0},  # delattr through sys.modules
     }
@@ -404,7 +409,7 @@ def test_growth_a_new_module_and_a_stale_entry_fail_and_shrinking_passes(tmp_pat
         PATCHES,
         {**measured, "api/v1/endpoints/new.py": {"monkeypatch": 1, "other": 0}},
         {
-            key: {"monkeypatch": 4, "other": 6, "reason": None},
+            key: {"monkeypatch": 4, "other": 8, "reason": None},
             "api/v1/endpoints/audio/tts.py": {"monkeypatch": 3, "other": 0, "reason": None},
             "api/v1/endpoints/audio/__init__.py": {"monkeypatch": 1, "other": 0, "reason": None},
             "api/v1/endpoints/gone.py": {"monkeypatch": 1, "other": 0, "reason": None},
@@ -420,8 +425,14 @@ def test_growth_a_new_module_and_a_stale_entry_fail_and_shrinking_passes(tmp_pat
 # --- The ratchet --------------------------------------------------------------------------------
 
 
+@cache
+def _measured() -> dict[str, dict[str, int]]:
+    """The real tree's count, measured once for both tests (the tests tree is not AST-cached)."""
+    return measure_endpoint_patches()
+
+
 def test_endpoint_patches_do_not_grow() -> None:
-    measured, baseline = measure_endpoint_patches(), _ceilings.load(PATCHES.baseline)
+    measured, baseline = _measured(), _ceilings.load(PATCHES.baseline)
 
     problems = _ceilings.violations(PATCHES, measured, baseline)
 
@@ -430,7 +441,7 @@ def test_endpoint_patches_do_not_grow() -> None:
 
 
 def test_raised_endpoint_patch_ceilings_carry_a_new_reason() -> None:
-    problems = _ceilings.reasonless_bumps(PATCHES, measure_endpoint_patches())
+    problems = _ceilings.reasonless_bumps(PATCHES, _measured())
     assert problems == [], "\n".join(problems)
 
 

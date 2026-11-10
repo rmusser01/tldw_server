@@ -74,8 +74,8 @@ GLOBALS = _ratchet(
 GETTERS = _ratchet(
     "endpoint_getter_calls_baseline.json",
     "Take the service as a parameter: Depends(<provider>) in a route, an argument in a helper. "
-    "Bare zero-argument getters in endpoint modules only fall.",
-    "The endpoint module makes no bare getter call any more.",
+    "Zero-argument getters (bare, or on a first-party module) in endpoint and api utils modules only fall.",
+    "The module makes no getter call any more.",
 )
 STATE = _ratchet(
     "api_deps_module_state_baseline.json",
