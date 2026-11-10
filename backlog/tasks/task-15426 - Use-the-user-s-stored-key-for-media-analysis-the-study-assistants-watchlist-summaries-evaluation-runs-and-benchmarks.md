@@ -2,7 +2,7 @@
 id: TASK-15426
 title: Use the user's stored key for media analysis, the study assistants, watchlist
   summaries, evaluation runs and benchmarks
-status: To Do
+status: In Progress
 labels:
 - quotas
 - backend
@@ -17,7 +17,7 @@ Follow-up of TASK-13956. These features call their provider with the server's ke
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The owner decides whether each listed feature uses the user's stored key
+- [x] #1 The owner decides whether each listed feature uses the user's stored key
 - [ ] #2 Each feature the owner approves resolves the user's key through ProviderCredentialRuntime and passes the handle on every LLM call, with a test
 - [ ] #3 Its boundary names its provider to enforce_llm_quota, and the media ingest job's start check admits an over-limit user whose analysis provider runs on their own key without marking the job admitted, with a test
 <!-- AC:END -->
@@ -25,6 +25,8 @@ Follow-up of TASK-13956. These features call their provider with the server's ke
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+AC #1 answered (owner, 2026-11-07): all four families use the user's stored key, built cheapest first: (a) the flashcards and quizzes study assistants; (b) benchmark runs and watchlist output summaries; (c) evaluation runs; (d) media analysis (the /media endpoints) and media ingest jobs. ADR-004 Change summary waived for every TASK-15426 PR (owner, 2026-11-07: "Yes, waive for all").
+Plan, PR A of 4 (study assistants): Docs/superpowers/plans/2026-11-07-own-key-study-assistants.md.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
