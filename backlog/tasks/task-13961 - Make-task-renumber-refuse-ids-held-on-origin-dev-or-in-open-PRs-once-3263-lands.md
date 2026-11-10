@@ -2,7 +2,7 @@
 id: TASK-13961
 title: 'Make task renumber refuse ids held on origin/dev or in open PRs once #3263
   lands'
-status: To Do
+status: In Progress
 labels:
 - backlog
 dependencies:
@@ -25,6 +25,7 @@ TASK-13960 shipped backlog-py task renumber with a local id check only, so that 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-11-07-renumber-remote-id-check.md. #3263 (TASK-13854) is on dev; renumber_task calls its _reject_remote_id (no second copy). ADR-004 Change summary: waived by the owner on 2026-11-07 ('Yes, waive for all').
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
