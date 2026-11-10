@@ -157,7 +157,7 @@
   "api/v1/endpoints/quizzes.py": {"monkeypatch": 25, "other": 0, "reason": null},
   "api/v1/endpoints/quizzes_osce.py": {"monkeypatch": 1, "other": 0, "reason": null},
   "api/v1/endpoints/rag_health.py": {"monkeypatch": 17, "other": 0, "reason": null},
-  "api/v1/endpoints/rag_unified.py": {"monkeypatch": 163, "other": 0, "reason": null},
+  "api/v1/endpoints/rag_unified.py": {"monkeypatch": 164, "other": 0, "reason": null},
   "api/v1/endpoints/reading.py": {"monkeypatch": 58, "other": 0, "reason": null},
   "api/v1/endpoints/reading_highlights.py": {"monkeypatch": 1, "other": 0, "reason": null},
   "api/v1/endpoints/realtime_compat.py": {"monkeypatch": 2, "other": 0, "reason": null},

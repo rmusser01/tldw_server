@@ -30,8 +30,8 @@ first). Only module bindings give a path: ``import a.b`` (``a``), ``import a.b a
 tuple unpacking) is unresolved, and so is anything it shadows.
 
 Exit metric. Only ``monkeypatch`` counts toward the exit (``other`` is a ceiling too, but no target).
-Phase 2 of TASK-13950.20 drains it from SEED, the total on dev when this ratchet landed (5809 on
-343e7f304c), to EXIT_TARGET, 55% of it, or below.
+Phase 2 of TASK-13950.20 drains it from SEED, the total on dev when this ratchet landed (5810 on
+3c91d1a279), to EXIT_TARGET, 55% of it, or below.
 
 Known limits. These escape the count: the builtin ``setattr(ep, ...)``; ``patch.dict``,
 ``patch.multiple`` and ``monkeypatch.setitem(<endpoint>.X, ...)``; a module object supplied by a
@@ -77,7 +77,7 @@ PATCHES = _ceilings.Ratchet(
     ),
     stale="No test patches this endpoint module any more.",
 )
-SEED: dict[str, int] = {"monkeypatch": 5809, "other": 937}  # the dev tip 343e7f304c, after #3433
+SEED: dict[str, int] = {"monkeypatch": 5810, "other": 937}  # dev as merged into PR A (3c91d1a279)
 EXIT_TARGET = SEED["monkeypatch"] * 55 // 100
 
 
