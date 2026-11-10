@@ -3135,7 +3135,7 @@ async def verify_magic_link(
     except Exception:  # a failed or unconfirmed claim must never grant credentials
         logger.error("Could not persist magic-link consumption")
         raise HTTPException(status_code=503, detail="Magic link sign-in is temporarily unavailable") from None
-    if not claimed:
+    if not claimed or expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invalid magic link token")
 
     if not user:

@@ -2,7 +2,9 @@
 
 import asyncio
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -98,6 +100,40 @@ async def test_missing_redemption_claim_denies_sign_in(sign_in, monkeypatch, cla
 
 
 @pytest.mark.asyncio
+async def test_link_expiring_during_claim_cannot_grant_credentials(sign_in, monkeypatch):
+    expires_at = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    now = expires_at - timedelta(seconds=1)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+
+        @classmethod
+        def utcnow(cls):
+            return now.replace(tzinfo=None)
+
+    async def claim_at_expiry(*args, **kwargs):
+        nonlocal now
+        now = expires_at
+        return True
+
+    monkeypatch.setattr(auth, "datetime", Clock)
+    monkeypatch.setattr(auth, "consume_magic_link", claim_at_expiry)
+    monkeypatch.setattr(sign_in.jwt, "verify_token_async", AsyncMock(return_value={
+        "jti": "synthetic-expiring-link", "exp": expires_at.timestamp(), "user_id": sign_in.user_id,
+    }))
+
+    response = await sign_in.submit()
+
+    assert now == expires_at
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid magic link token"}
+    assert await sign_in.pool.fetchval("SELECT count(*) FROM sessions WHERE user_id = ?", sign_in.user_id) == 0
+    assert await sign_in.pool.fetchval("SELECT last_login FROM users WHERE id = ?", sign_in.user_id) is None
+
+
+@pytest.mark.asyncio
 async def test_downstream_failure_leaves_link_spent(sign_in, monkeypatch):
     async def unavailable(*args):
         raise RuntimeError("synthetic membership failure")
@@ -112,8 +148,6 @@ async def test_downstream_failure_leaves_link_spent(sign_in, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("driver", ["postgres", "sqlite"])
 async def test_unconfirmed_insert_result_is_unavailable(sign_in, monkeypatch, driver):
-    from unittest.mock import AsyncMock
-
     consume = auth.consume_magic_link
     result = "UNKNOWN" if driver == "postgres" else SimpleNamespace(rowcount=-1, close=AsyncMock())
 
