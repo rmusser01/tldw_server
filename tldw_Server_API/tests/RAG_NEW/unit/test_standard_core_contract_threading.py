@@ -140,10 +140,15 @@ async def test_unified_pipeline_builds_single_legacy_resolved_request(monkeypatc
     assert seen["retrieval_plan"].top_k == 5
 
 
+@pytest.mark.parametrize(
+    ("payload_generation", "explicit"),
+    [(False, {}), (True, {"enable_generation": False})],
+    ids=["payload-off", "explicit-off-beats-the-payload"],
+)
 @pytest.mark.asyncio
-async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
+async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch, payload_generation, explicit):
     resolved = _resolved_request()
-    resolved.payload["enable_generation"] = False
+    resolved.payload["enable_generation"] = payload_generation
     plan = _retrieval_plan()
     seen = {}
 
@@ -188,6 +193,7 @@ async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
         enable_reranking=False,
         resolved_request=resolved,
         retrieval_plan=plan,
+        **explicit,
     )
 
     assert result.query == resolved.query
