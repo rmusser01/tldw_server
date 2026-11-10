@@ -163,6 +163,12 @@ If your goal is a custom quality test today without backend benchmark registrati
 - Reduce `parallel` and retry.
 - Confirm provider credentials (`api_name`) are valid server-side.
 
+### Every item scored 0.5
+
+- Before the November 2026 fix (TASK-15485), the judge's call never reached the provider, so every item got the 0.5 default. The `average_score`, `min_score`, `max_score` and `by_category` of those runs, and the results they stored (`save_results`), carry no information.
+- Re-run `simple_bench` or `bullshit_benchmark`: their scores are now the judge's. Do not re-run the others expecting meaningful scores. `mmlu_pro` rows are not yet mapped to the benchmark's fields, so its judge is told the correct answer is "None", and its scores look real but carry no information. `simpleqa_verified` has no loader entry and `gpqa_diamond` most likely fails the same way (404), `mmlu_pro` and `gpqa_diamond` also need the `evaluation` extra (the `datasets` package), and six more benchmarks answer 501.
+- Each item's score is the judge's reply mapped to 0-1: a 1-10 score (10 is 1.0, 1 is 0.0). An item that scores 0.5 got a reply with no score; the server logs `Could not parse valid score`. An item whose explanation starts with `Error:` is a failed judge call (provider error, timeout, rate limit or an empty or truncated reply); it scores 0.0, and re-running it may succeed.
+
 ### Rate limiting
 
 - If requests are throttled, retry after the server rate-limit window resets.
