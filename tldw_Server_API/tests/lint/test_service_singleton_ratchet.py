@@ -5,10 +5,14 @@ Three counts, each frozen per module in its own baseline JSON as a ceiling
 
   * globals (global_statements_baseline.json): the ``ast.Global`` nodes in each module under
     tldw_Server_API/app. Modules in an in-app ``tests`` package directory are skipped.
-  * getters (endpoint_getter_calls_baseline.json): in modules under ``api/<version>/endpoints/``
-    (any depth), the distinct calls inside a function body (at any nesting) whose callee is a bare
-    name matching ``get_\\w+`` and that take no arguments. Module-level calls and the decorators and
-    defaults of nested defs do not count, but calls inside lambdas do; nor do attribute calls (``mod.get_x()``).
+  * getters (endpoint_getter_calls_baseline.json): in modules under ``api/<version>/endpoints/`` or
+    ``api/<version>/utils/`` (any depth), the distinct calls inside a function body (at any nesting)
+    whose callee is a bare name matching ``get_\\w+`` and that take no arguments. Module-level calls
+    and the decorators and defaults of nested defs do not count, but calls inside lambdas do;
+    attribute calls count when the receiver is a first-party module bound by an import at module
+    level (``_database.get_db_pool()``, since TASK-13950.20), so moving a call onto its home module
+    does not lower the count; method calls on objects (``svc.get_x()``) and receivers imported inside
+    a function do not.
   * state (api_deps_module_state_baseline.json): in the direct children of
     ``api/<version>/API_Deps/``, the module-level ``Assign``/``AnnAssign`` statements whose value is
     a call to a STATE_CONSTRUCTORS name (``Lock()`` or ``threading.Lock()``). Module-level means
@@ -41,7 +45,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.tests.lint import _ceilings
-from tldw_Server_API.tests.lint._ast_cache import APP_ROOT, parse_tree
+from tldw_Server_API.tests.lint._ast_cache import APP_ROOT, REPO_ROOT, parse_tree
 
 pytestmark = pytest.mark.unit
 
@@ -52,7 +56,7 @@ STATE_CONSTRUCTORS = frozenset({
 })
 _COMMAND = "python -m tldw_Server_API.tests.lint.test_service_singleton_ratchet"
 _GETTER = re.compile(r"get_\w+")
-_ENDPOINTS = re.compile(r"api/[^/]+/endpoints/")
+_GETTER_SCOPE = re.compile(r"api/[^/]+/(endpoints|utils)/")
 _API_DEPS = re.compile(r"api/[^/]+/API_Deps/[^/]+\.py")
 
 
@@ -102,13 +106,35 @@ def measure_globals(root: Path = APP_ROOT) -> dict[str, dict[str, int]]:
     return found
 
 
-def _is_bare_getter(node: ast.AST) -> bool:
+def _is_module_path(path: Path) -> bool:
+    return path.with_name(path.name + ".py").is_file() or (path / "__init__.py").is_file()
+
+
+def _first_party_modules(tree: ast.Module) -> frozenset[str]:
+    """Names bound at module level to a first-party module: ``import tldw_Server_API.<...> as n``,
+    or ``from tldw_Server_API.<p> import n [as m]`` where ``<p>.n`` is a module or package."""
+    names: set[str] = set()
+    for stmt in _module_level(tree.body):
+        if isinstance(stmt, ast.Import):
+            names.update(a.asname for a in stmt.names if a.asname and a.name.startswith("tldw_Server_API."))
+        elif isinstance(stmt, ast.ImportFrom) and not stmt.level and stmt.module and stmt.module.startswith("tldw_Server_API."):
+            package = REPO_ROOT.joinpath(*stmt.module.split("."))
+            names.update(a.asname or a.name for a in stmt.names if a.name != "*" and _is_module_path(package / a.name))
+    return frozenset(names)
+
+
+def _is_getter_call(node: ast.AST, modules: frozenset[str]) -> bool:
+    """A zero-argument call of a bare ``get_*`` name, or of ``<module>.get_*`` with ``<module>`` in ``modules``."""
+    if not isinstance(node, ast.Call) or node.args or node.keywords:
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return _GETTER.fullmatch(func.id) is not None
     return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and _GETTER.fullmatch(node.func.id) is not None
-        and not node.args
-        and not node.keywords
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id in modules
+        and _GETTER.fullmatch(func.attr) is not None
     )
 
 
@@ -124,16 +150,17 @@ def _body_nodes(node: ast.AST):
 
 
 def measure_getter_calls(root: Path = APP_ROOT) -> dict[str, dict[str, int]]:
-    """``{endpoint module: {"calls": n}}`` for modules with bare getter calls in function bodies."""
+    """``{endpoint or api utils module: {"calls": n}}`` for modules with getter calls in function bodies."""
     found = {}
     for key, tree in _modules(root):
-        if not _ENDPOINTS.match(key):
+        if not _GETTER_SCOPE.match(key):
             continue
+        modules = _first_party_modules(tree)
         calls: set[int] = set()  # a nested function's calls are reached once per enclosing function
         for func in ast.walk(tree):
             if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for stmt in func.body:
-                    calls.update(id(node) for node in _body_nodes(stmt) if _is_bare_getter(node))
+                    calls.update(id(node) for node in _body_nodes(stmt) if _is_getter_call(node, modules))
         if calls:
             found[key] = {"calls": len(calls)}
     return found
@@ -233,16 +260,20 @@ def test_each_counter_counts_its_shape(tmp_path: Path) -> None:
         "core/X/a.py": "_x = None\ndef f():\n    global _x\n    _x = 1\nclass C:\n    def g(self):\n        global _x, _y\n",
         "core/X/tests/test_a.py": "def f():\n    global _z\n",
         "api/v1/endpoints/e.py": (
+            "from tldw_Server_API.app.core.AuthNZ import database as _database\nimport tldw_Server_API.app.core.MCP_unified.server as _mcp\n"
             "X = get_y()\n"
             "async def route(dep=get_default()):\n"
             "    a = await get_db_pool()\n"
             "    b = get_settings(1)\n"
             "    c = mod.get_z()\n"
+            "    d = _database.get_db_pool()\n    e = svc.get_w()\n    f = _mcp.get_mcp_server()\n"
             "    def inner():\n        return get_w()\n"
             "    return get_q()\n"
         ),
         "api/v1/endpoints/sub/f.py": "def h():\n    return get_mcp_server()\n",
         "api/v1/endpoints/nest.py": "def h():\n    @get_deco()\n    def inner(x=get_dflt()):\n        return get_body()\n",
+        "api/v1/utils/u.py": "def h():\n    return get_settings()\n",
+        "api/v1/schemas/s.py": "def h():\n    return get_settings()\n",
         "api/v1/API_Deps/d.py": (
             "import threading\nfrom cachetools import LRUCache\n"
             "_lock = threading.Lock()\n"
@@ -255,9 +286,10 @@ def test_each_counter_counts_its_shape(tmp_path: Path) -> None:
     })
     assert measure_globals(root) == {"core/X/a.py": {"globals": 2}}
     assert measure_getter_calls(root) == {
-        "api/v1/endpoints/e.py": {"calls": 3},  # get_db_pool, get_w (nested), get_q
+        "api/v1/endpoints/e.py": {"calls": 5},  # get_db_pool, _database.get_db_pool, _mcp.get_mcp_server, get_w (nested), get_q
         "api/v1/endpoints/sub/f.py": {"calls": 1},
         "api/v1/endpoints/nest.py": {"calls": 1},  # get_body only; the decorator and default are not counted
+        "api/v1/utils/u.py": {"calls": 1},
     }
     assert measure_module_state(root) == {"api/v1/API_Deps/d.py": {"state": 3}}
 
