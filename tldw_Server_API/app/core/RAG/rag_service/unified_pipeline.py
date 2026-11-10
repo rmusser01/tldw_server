@@ -2418,8 +2418,8 @@ async def unified_rag_pipeline(
     if retrieval_plan is None:
         retrieval_plan = build_retrieval_plan(resolved_request)
 
-    def _resolve_effective_enable_generation() -> bool:
-        return bool((resolved_request.payload or {}).get("enable_generation", enable_generation))
+    def _resolve_effective_enable_generation() -> bool:  # an explicit False is retrieval only (TASK-15482)
+        return bool(enable_generation) and bool((resolved_request.payload or {}).get("enable_generation", True))
 
     effective_enable_generation = _resolve_effective_enable_generation()
 
