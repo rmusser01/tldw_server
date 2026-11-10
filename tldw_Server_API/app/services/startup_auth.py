@@ -4,6 +4,7 @@ Auth services initialization extracted from the application lifespan startup.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -118,7 +119,7 @@ async def refresh_provider_override_snapshot(db_pool: object) -> ModuleType | No
     return override_store
 
 
-async def _validate_pg_serving_schema(db_pool: object) -> bool:
+async def _validate_pg_serving_schema(db_pool: DatabasePool) -> bool:
     """Admit a nonowner only after required schema and backfill checks succeed."""
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
         ensure_authnz_lockout_tables_pg,
@@ -194,7 +195,7 @@ async def _ensure_pg_extras(db_pool: DatabasePool) -> None:
             ensure_virtual_key_counters_pg,
         )
 
-        pg_ensures = [
+        pg_ensures: list[tuple[str, Callable[[DatabasePool], Awaitable[bool]], str | None]] = [
             (
                 "users timestamp time zones",
                 ensure_user_timestamp_timezones_pg,
